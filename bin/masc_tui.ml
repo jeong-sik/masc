@@ -29549,6 +29549,12 @@ and is loaded on demand through keeper_skill.
   run_loop ()
 
 let run_with_eio_context f =
+  (* The server's minor heap, for the same reason: every frame allocates the
+     rows it draws, and at the runtime's default size a held key meets a
+     collection every few frames. Measured on a live chat with PageUp/PageDown
+     held, the median key-to-output time fell about a quarter. A larger
+     OCAMLRUNPARAM setting is left alone. *)
+  Domain_pool.tune_minor_heap ();
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->

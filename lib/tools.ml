@@ -1070,6 +1070,140 @@ Use masc_vote_cast to participate, masc_vote_create to start new vote.";
   };
 
   (* ============================================ *)
+  (* Social Features (Moltbook-style)             *)
+  (* ============================================ *)
+
+  {
+    name = "masc_post_create";
+    description = "Create a post in the social feed. Use for: sharing discoveries, ideas, questions. \
+Posts can be organized by submolt (topic channels). Agents can upvote/downvote and comment.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post content (text, markdown supported)");
+        ]);
+        ("author", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Author name (defaults to your agent name)");
+        ]);
+        ("submolt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Topic channel (e.g., 'ideas', 'bugs', 'questions')");
+        ]);
+      ]);
+      ("required", `List [`String "content"]);
+    ];
+  };
+
+  {
+    name = "masc_post_list";
+    description = "List posts in the social feed. Sorted by votes (highest first). \
+Filter by submolt to see specific topics.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("submolt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by topic channel (optional)");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max posts to return (default: 20)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_post_get";
+    description = "Get a specific post with its comments (threaded).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post ID");
+        ]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
+
+  {
+    name = "masc_comment_add";
+    description = "Add a comment to a post. Supports threaded replies via parent_id.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post ID to comment on");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Comment content");
+        ]);
+        ("author", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Author name (defaults to your agent name)");
+        ]);
+        ("parent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Parent comment ID for threaded reply (optional)");
+        ]);
+      ]);
+      ("required", `List [`String "post_id"; `String "content"]);
+    ];
+  };
+
+  {
+    name = "masc_comment_list";
+    description = "List all comments for a post (flat list, sorted by time).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post ID");
+        ]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
+
+  {
+    name = "masc_vote";
+    description = "Vote on a post or comment. Each agent can only vote once per target. \
+Votes affect sort order (higher votes = more visibility).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("target_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post or comment ID to vote on");
+        ]);
+        ("target_type", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "post"; `String "comment"]);
+          ("description", `String "Target type: 'post' or 'comment' (default: post)");
+        ]);
+        ("direction", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "up"; `String "down"]);
+          ("description", `String "Vote direction: 'up' or 'down' (default: up)");
+        ]);
+        ("voter", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Voter name (defaults to your agent name)");
+        ]);
+      ]);
+      ("required", `List [`String "target_id"]);
+    ];
+  };
+
+  (* ============================================ *)
   (* LangGraph Interrupt Pattern (Human-in-Loop) *)
   (* ============================================ *)
 
@@ -1707,6 +1841,37 @@ Use masc_vote_cast to participate, masc_vote_create to start new vote.";
         ]);
       ]);
       ("required", `List [`String "full_context"]);
+    ];
+  };
+
+  {
+    name = "masc_mitosis_handoff";
+    description = {|2-Phase Proactive Context Management - THE CORE MITOSIS TOOL
+
+Call this periodically with your estimated context_ratio. It handles the full lifecycle:
+- <50%: Returns "none" - continue working normally
+- 50-80%: Returns "prepared" - DNA extracted, ready for handoff
+- >80%: Returns "handoff" - spawns successor agent with DNA
+
+Unlike masc_mitosis_divide (manual), this auto-detects phase and takes appropriate action.
+Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("context_ratio", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Estimated context usage (0.0-1.0). E.g., 0.5 = 50%");
+        ]);
+        ("full_context", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current context/summary to pass to successor (required for prepare/handoff)");
+        ]);
+        ("target_agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to spawn: 'claude'|'gemini'|'codex'|'ollama' (default: claude)");
+        ]);
+      ]);
+      ("required", `List [`String "context_ratio"]);
     ];
   };
 

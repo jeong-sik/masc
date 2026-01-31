@@ -88,16 +88,51 @@ DNA 추출 및 핸드오프 준비
 }
 ```
 
-#### `masc_mitosis_handoff`
-새 에이전트로 핸드오프 실행
+#### `masc_mitosis_handoff` ⭐ (핵심 도구)
+2-Phase 자동 실행 - context_ratio만 주면 알아서 처리
 
 ```json
 {
   "name": "masc_mitosis_handoff",
   "arguments": {
-    "context_ratio": 0.8,
+    "context_ratio": 0.5,
+    "full_context": "현재까지의 작업 요약...",
     "target_agent": "claude"
   }
+}
+```
+
+**Response (< 50%):**
+```json
+{
+  "action": "none",
+  "context_ratio": 0.3,
+  "message": "Context ratio below prepare threshold. Continue working."
+}
+```
+
+**Response (50-80%):**
+```json
+{
+  "action": "prepared",
+  "context_ratio": 0.6,
+  "message": "DNA extracted and ready. Continue working until 80% threshold.",
+  "phase": "ready_for_handoff",
+  "dna_length": 1234
+}
+```
+
+**Response (> 80%):**
+```json
+{
+  "action": "handoff",
+  "success": true,
+  "context_ratio": 0.85,
+  "message": "Handoff complete! Successor agent spawned.",
+  "target_agent": "claude",
+  "previous_generation": 0,
+  "new_generation": 1,
+  "elapsed_ms": 2500
 }
 ```
 
@@ -198,7 +233,14 @@ test_mitosis.ml: 22 tests
 
 ## Future Work
 
-- [ ] Handoff 실행 구현 (`masc_mitosis_handoff`)
+- [x] Handoff 실행 구현 (`masc_mitosis_handoff`) - ✅ 2026-02-01
 - [ ] 멀티 에이전트 릴레이
 - [ ] DNA 압축 알고리즘 개선
 - [ ] 메트릭스 수집 (분열 횟수, 성공률)
+
+## Changelog
+
+### 2026-02-01
+- `masc_mitosis_handoff` MCP 도구 추가 (tool_mitosis.ml)
+- 2-phase 자동 실행: context_ratio 기반으로 prepare/handoff 자동 판단
+- target_agent 파라미터로 successor 에이전트 선택 가능 (claude/gemini/codex/ollama)

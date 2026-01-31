@@ -1,8 +1,12 @@
 (** Mitosis Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
-    7 tools: mitosis_status, mitosis_all, mitosis_pool, mitosis_divide,
-             mitosis_check, mitosis_record, mitosis_prepare
+    8 tools: mitosis_status, mitosis_all, mitosis_pool, mitosis_divide,
+             mitosis_check, mitosis_record, mitosis_prepare, mitosis_handoff
+    
+    Key tool: masc_mitosis_handoff - 2-phase proactive context management
+    - 50% threshold: DNA preparation (context summary extracted)
+    - 80% threshold: Handoff execution (spawn successor agent)
 *)
 
 (** Tool handler context *)
@@ -138,6 +142,89 @@ let handle_mitosis_prepare ctx args : result =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
+(** 2-Phase auto mitosis handoff - THE CORE TOOL
+    This is the main entry point for proactive context management.
+    
+    Usage:
+    - Call periodically with your estimated context_ratio
+    - At 50%: DNA is prepared (returns "prepared")
+    - At 80%: Handoff executes (spawns successor agent)
+    - Below 50%: No action needed
+    
+    Arguments:
+    - context_ratio: float (0.0-1.0) - estimated context usage
+    - full_context: string - current context/summary to pass to successor
+    - target_agent: string (optional) - "claude"|"gemini"|"codex"|"ollama" (default: "claude")
+*)
+let handle_mitosis_handoff ctx args : result =
+  let context_ratio = get_float args "context_ratio" 0.0 in
+  let full_context = get_string args "full_context" "" in
+  let target_agent = get_string args "target_agent" "claude" in
+  
+  let cell = !(Mcp_server.current_cell) in
+  let config_mitosis = Mitosis.default_config in
+  let pool = !(Mcp_server.stem_pool) in
+  
+  let spawn_fn ~prompt =
+    Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:600 ()
+  in
+  
+  let result = Mitosis.auto_mitosis_check_2phase
+    ~config:config_mitosis
+    ~pool
+    ~cell
+    ~context_ratio
+    ~full_context
+    ~spawn_fn
+  in
+  
+  match result with
+  | Mitosis.NoAction ->
+      let json = `Assoc [
+        ("action", `String "none");
+        ("context_ratio", `Float context_ratio);
+        ("message", `String "Context ratio below prepare threshold. Continue working.");
+        ("threshold_prepare", `Float config_mitosis.Mitosis.prepare_threshold);
+        ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+      
+  | Mitosis.Prepared prepared_cell ->
+      Mcp_server.current_cell := prepared_cell;
+      Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared_cell ~config:config_mitosis;
+      let dna_len = String.length (Option.value ~default:"" prepared_cell.Mitosis.prepared_dna) in
+      let json = `Assoc [
+        ("action", `String "prepared");
+        ("context_ratio", `Float context_ratio);
+        ("message", `String "DNA extracted and ready. Continue working until 80% threshold.");
+        ("phase", `String (Mitosis.phase_to_string prepared_cell.Mitosis.phase));
+        ("dna_length", `Int dna_len);
+        ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+      
+  | Mitosis.Handoff (spawn_result, new_cell, new_pool) ->
+      Mcp_server.current_cell := new_cell;
+      Mcp_server.stem_pool := new_pool;
+      Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
+      let output_preview = 
+        let len = String.length spawn_result.Spawn.output in
+        if len > 500 then String.sub spawn_result.Spawn.output 0 500 ^ "..."
+        else spawn_result.Spawn.output
+      in
+      let json = `Assoc [
+        ("action", `String "handoff");
+        ("success", `Bool spawn_result.Spawn.success);
+        ("context_ratio", `Float context_ratio);
+        ("message", `String "Handoff complete! Successor agent spawned.");
+        ("target_agent", `String target_agent);
+        ("previous_generation", `Int cell.Mitosis.generation);
+        ("new_generation", `Int new_cell.Mitosis.generation);
+        ("successor_output", `String output_preview);
+        ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
 (** {1 Dispatcher} *)
 
 let dispatch ctx ~name ~args : result option =
@@ -149,4 +236,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_mitosis_check" -> Some (handle_mitosis_check ctx args)
   | "masc_mitosis_record" -> Some (handle_mitosis_record ctx args)
   | "masc_mitosis_prepare" -> Some (handle_mitosis_prepare ctx args)
+  | "masc_mitosis_handoff" -> Some (handle_mitosis_handoff ctx args)
   | _ -> None

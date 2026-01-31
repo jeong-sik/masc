@@ -1876,6 +1876,71 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
   };
 
   {
+    name = "masc_metrics_compare";
+    description = {|Compare generational performance metrics.
+
+Evidence for "Are successors better than predecessors?"
+Compares two generations across:
+- Task completion rate
+- Error rate
+- Duration (speed)
+- Token efficiency
+
+Returns verdict: "improved" / "degraded" / "neutral"|};
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("gen_a", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "First generation to compare (older)");
+        ]);
+        ("gen_b", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Second generation to compare (newer)");
+        ]);
+      ]);
+      ("required", `List [`String "gen_a"; `String "gen_b"]);
+    ];
+  };
+
+  {
+    name = "masc_metrics_record";
+    description = {|Record a task completion for generational metrics.
+
+Call after completing a task to track performance across generations.|};
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Unique task identifier");
+        ]);
+        ("completed", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Whether task was completed successfully");
+        ]);
+        ("duration_ms", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Task duration in milliseconds");
+        ]);
+        ("error_count", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of errors encountered");
+        ]);
+        ("input_tokens", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Input tokens used");
+        ]);
+        ("output_tokens", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Output tokens generated");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"; `String "completed"]);
+    ];
+  };
+
+  {
     name = "masc_memento_mori";
     description = {|Memento Mori - Agent self-awareness of mortality.
 A convenience tool combining mitosis check + prepare + divide in one call.

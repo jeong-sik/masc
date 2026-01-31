@@ -299,6 +299,64 @@ let handle_mitosis_handoff ctx args : result =
         (true, Yojson.Safe.pretty_to_string json)
       end
 
+(** {1 Metrics Handlers} *)
+
+(** P1-4: Compare generational metrics *)
+let handle_metrics_compare _ctx args : result =
+  let gen_a = int_of_float (get_float args "gen_a" 0.0) in
+  let gen_b = int_of_float (get_float args "gen_b" 1.0) in
+  match Generational_metrics.compare_generations gen_a gen_b with
+  | None ->
+      let json = `Assoc [
+        ("error", `String "Not enough data for comparison");
+        ("gen_a", `Int gen_a);
+        ("gen_b", `Int gen_b);
+        ("hint", `String "Need task records for both generations");
+      ] in
+      (false, Yojson.Safe.pretty_to_string json)
+  | Some comp ->
+      let json = `Assoc [
+        ("gen_a", `Int comp.gen_a);
+        ("gen_b", `Int comp.gen_b);
+        ("completion_delta", `Float comp.completion_delta);
+        ("error_delta", `Float comp.error_delta);
+        ("duration_delta", `Float comp.duration_delta);
+        ("token_delta", `Float comp.token_delta);
+        ("retention_b", match comp.retention_b with Some r -> `Float r | None -> `Null);
+        ("verdict", `String comp.verdict);
+        ("formatted", `String (Generational_metrics.format_comparison comp));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+
+(** P1-4: Record task completion *)
+let handle_metrics_record _ctx args : result =
+  let task_id = get_string args "task_id" (Printf.sprintf "task-%d" (int_of_float (Unix.gettimeofday () *. 1000.0) mod 100000)) in
+  let completed = match args with
+    | `Assoc pairs -> (
+        match List.assoc_opt "completed" pairs with
+        | Some (`Bool b) -> b
+        | _ -> true
+      )
+    | _ -> true
+  in
+  let duration_ms = int_of_float (get_float args "duration_ms" 0.0) in
+  let error_count = int_of_float (get_float args "error_count" 0.0) in
+  let input_tokens = int_of_float (get_float args "input_tokens" 0.0) in
+  let output_tokens = int_of_float (get_float args "output_tokens" 0.0) in
+  let cell = !(Mcp_server.current_cell) in
+  let generation = cell.Mitosis.generation in
+  let record = Generational_metrics.record_task
+    ~generation ~task_id ~completed ~duration_ms ~error_count
+    ~input_tokens ~output_tokens
+  in
+  let json = `Assoc [
+    ("action", `String "task_recorded");
+    ("generation", `Int record.generation);
+    ("task_id", `String record.task_id);
+    ("completed", `Bool record.completed);
+  ] in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (** {1 Dispatcher} *)
 
 let dispatch ctx ~name ~args : result option =
@@ -311,4 +369,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_mitosis_record" -> Some (handle_mitosis_record ctx args)
   | "masc_mitosis_prepare" -> Some (handle_mitosis_prepare ctx args)
   | "masc_mitosis_handoff" -> Some (handle_mitosis_handoff ctx args)
+  | "masc_metrics_compare" -> Some (handle_metrics_compare ctx args)
+  | "masc_metrics_record" -> Some (handle_metrics_record ctx args)
   | _ -> None

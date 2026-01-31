@@ -254,6 +254,14 @@ let handle_mitosis_handoff ctx args : result =
       (true, Yojson.Safe.pretty_to_string json)
       
   | Mitosis.Handoff (spawn_result, new_cell, new_pool) ->
+      (* P0-5: Record handoff in generational metrics *)
+      let dna_size = String.length (Option.value ~default:"" cell.Mitosis.prepared_dna) in
+      ignore (Generational_metrics.record_handoff
+        ~from_generation:cell.Mitosis.generation
+        ~to_generation:new_cell.Mitosis.generation
+        ~dna_size
+        ~context_ratio);
+      
       (* Check spawn success - BALTHASAR feedback: handle failures gracefully *)
       if not spawn_result.Spawn.success then begin
         (* Spawn failed! Suggest fallback to compaction instead of losing context *)

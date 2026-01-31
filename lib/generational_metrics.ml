@@ -107,7 +107,7 @@ let record_retention_test ~generation ~question ~expected ~actual ~confidence =
 
 (** Summarize a generation's performance *)
 let summarize_generation generation =
-  let tasks = List.filter (fun t -> t.generation = generation) !task_records in
+  let tasks = List.filter (fun (t : task_record) -> t.generation = generation) !task_records in
   let total = List.length tasks in
   if total = 0 then None
   else
@@ -117,7 +117,7 @@ let summarize_generation generation =
     let input_sum = List.fold_left (fun acc t -> acc + t.input_tokens) 0 tasks in
     let output_sum = List.fold_left (fun acc t -> acc + t.output_tokens) 0 tasks in
     
-    let retention_tests_gen = List.filter (fun r -> r.generation = generation) !retention_tests in
+    let retention_tests_gen = List.filter (fun (r : retention_test) -> r.generation = generation) !retention_tests in
     let retention = 
       if List.length retention_tests_gen = 0 then None
       else
@@ -203,7 +203,7 @@ let reset () =
 
 (** Export metrics to JSON *)
 let to_json () =
-  let tasks_json = `List (List.map (fun t ->
+  let tasks_json = `List (List.map (fun (t : task_record) ->
     `Assoc [
       ("generation", `Int t.generation);
       ("task_id", `String t.task_id);
@@ -216,7 +216,7 @@ let to_json () =
     ]
   ) !task_records) in
   
-  let handoffs_json = `List (List.map (fun h ->
+  let handoffs_json = `List (List.map (fun (h : handoff_record) ->
     `Assoc [
       ("from_generation", `Int h.from_generation);
       ("to_generation", `Int h.to_generation);

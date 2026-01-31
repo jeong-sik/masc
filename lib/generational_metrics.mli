@@ -21,6 +21,15 @@ type handoff_record = {
   timestamp: float;
 }
 
+type retention_test = {
+  generation: int;
+  question: string;
+  expected: string;
+  actual: string;
+  correct: bool;
+  confidence: float;
+}
+
 type generation_summary = {
   generation: int;
   total_tasks: int;
@@ -68,7 +77,7 @@ val record_retention_test :
   expected:string ->
   actual:string ->
   confidence:float ->
-  unit
+  retention_test
 
 (** {1 Analysis} *)
 

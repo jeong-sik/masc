@@ -142,8 +142,34 @@ let handle_mitosis_prepare ctx args : result =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
-(** 2-Phase auto mitosis handoff - THE CORE TOOL
-    This is the main entry point for proactive context management.
+(** DNA quality validation - BALTHASAR feedback
+    Ensures extracted DNA contains meaningful content *)
+let validate_dna dna =
+  let min_length = 50 in
+  let len = String.length dna in
+  if len < min_length then
+    Error (Printf.sprintf "DNA too short: %d chars (min: %d)" len min_length)
+  else
+    Ok dna
+
+(** Clamp context_ratio to valid range with warning - BALTHASAR feedback *)
+let validate_context_ratio ratio =
+  if ratio < 0.0 then begin
+    Printf.eprintf "[MITOSIS/WARN] context_ratio < 0 (%.2f), clamping to 0.0\n%!" ratio;
+    0.0
+  end else if ratio > 1.0 then begin
+    Printf.eprintf "[MITOSIS/WARN] context_ratio > 1 (%.2f), clamping to 1.0\n%!" ratio;
+    1.0
+  end else
+    ratio
+
+(** 2-Phase auto mitosis handoff - THE CORE TOOL (v2 with BALTHASAR feedback)
+
+    IMPROVEMENTS from v1:
+    - context_ratio validation with clamping
+    - DNA quality check before handoff
+    - Fallback to compaction if spawn fails
+    - Better error messages
     
     Usage:
     - Call periodically with your estimated context_ratio
@@ -155,11 +181,18 @@ let handle_mitosis_prepare ctx args : result =
     - context_ratio: float (0.0-1.0) - estimated context usage
     - full_context: string - current context/summary to pass to successor
     - target_agent: string (optional) - "claude"|"gemini"|"codex"|"ollama" (default: "claude")
+    
+    On spawn failure: Returns "fallback" with compaction suggestion instead of silent failure
 *)
 let handle_mitosis_handoff ctx args : result =
-  let context_ratio = get_float args "context_ratio" 0.0 in
+  let raw_ratio = get_float args "context_ratio" 0.0 in
+  let context_ratio = validate_context_ratio raw_ratio in
   let full_context = get_string args "full_context" "" in
   let target_agent = get_string args "target_agent" "claude" in
+  
+  (* Warn if context_ratio is default 0.0 - likely caller forgot to provide it *)
+  if raw_ratio = 0.0 then
+    Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
   
   let cell = !(Mcp_server.current_cell) in
   let config_mitosis = Mitosis.default_config in
@@ -190,40 +223,62 @@ let handle_mitosis_handoff ctx args : result =
       (true, Yojson.Safe.pretty_to_string json)
       
   | Mitosis.Prepared prepared_cell ->
+      let dna = Option.value ~default:"" prepared_cell.Mitosis.prepared_dna in
+      (* Validate DNA quality *)
+      let dna_status = match validate_dna dna with
+        | Ok _ -> "valid"
+        | Error msg -> Printf.sprintf "warning: %s" msg
+      in
       Mcp_server.current_cell := prepared_cell;
       Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared_cell ~config:config_mitosis;
-      let dna_len = String.length (Option.value ~default:"" prepared_cell.Mitosis.prepared_dna) in
       let json = `Assoc [
         ("action", `String "prepared");
         ("context_ratio", `Float context_ratio);
         ("message", `String "DNA extracted and ready. Continue working until 80% threshold.");
         ("phase", `String (Mitosis.phase_to_string prepared_cell.Mitosis.phase));
-        ("dna_length", `Int dna_len);
+        ("dna_length", `Int (String.length dna));
+        ("dna_quality", `String dna_status);
         ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
       ] in
       (true, Yojson.Safe.pretty_to_string json)
       
   | Mitosis.Handoff (spawn_result, new_cell, new_pool) ->
-      Mcp_server.current_cell := new_cell;
-      Mcp_server.stem_pool := new_pool;
-      Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
-      let output_preview = 
-        let len = String.length spawn_result.Spawn.output in
-        if len > 500 then String.sub spawn_result.Spawn.output 0 500 ^ "..."
-        else spawn_result.Spawn.output
-      in
-      let json = `Assoc [
-        ("action", `String "handoff");
-        ("success", `Bool spawn_result.Spawn.success);
-        ("context_ratio", `Float context_ratio);
-        ("message", `String "Handoff complete! Successor agent spawned.");
-        ("target_agent", `String target_agent);
-        ("previous_generation", `Int cell.Mitosis.generation);
-        ("new_generation", `Int new_cell.Mitosis.generation);
-        ("successor_output", `String output_preview);
-        ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
-      ] in
-      (true, Yojson.Safe.pretty_to_string json)
+      (* Check spawn success - BALTHASAR feedback: handle failures gracefully *)
+      if not spawn_result.Spawn.success then begin
+        (* Spawn failed! Suggest fallback to compaction instead of losing context *)
+        Printf.eprintf "[MITOSIS/ERROR] Spawn failed for %s, suggesting fallback\n%!" target_agent;
+        let json = `Assoc [
+          ("action", `String "fallback");
+          ("success", `Bool false);
+          ("context_ratio", `Float context_ratio);
+          ("message", `String "Spawn failed! Consider using compaction instead. Context preserved.");
+          ("target_agent", `String target_agent);
+          ("spawn_error", `String spawn_result.Spawn.output);
+          ("suggestion", `String "Use /compact or masc_mitosis_divide with summary for graceful degradation");
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+      end else begin
+        Mcp_server.current_cell := new_cell;
+        Mcp_server.stem_pool := new_pool;
+        Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
+        let output_preview = 
+          let len = String.length spawn_result.Spawn.output in
+          if len > 500 then String.sub spawn_result.Spawn.output 0 500 ^ "..."
+          else spawn_result.Spawn.output
+        in
+        let json = `Assoc [
+          ("action", `String "handoff");
+          ("success", `Bool true);
+          ("context_ratio", `Float context_ratio);
+          ("message", `String "Handoff complete! Successor agent spawned.");
+          ("target_agent", `String target_agent);
+          ("previous_generation", `Int cell.Mitosis.generation);
+          ("new_generation", `Int new_cell.Mitosis.generation);
+          ("successor_output", `String output_preview);
+          ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+      end
 
 (** {1 Dispatcher} *)
 

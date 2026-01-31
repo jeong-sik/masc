@@ -181,6 +181,9 @@ let validate_context_ratio ratio =
     - context_ratio: float (0.0-1.0) - estimated context usage
     - full_context: string - current context/summary to pass to successor
     - target_agent: string (optional) - "claude"|"gemini"|"codex"|"ollama" (default: "claude")
+    - prepare_threshold: float (optional) - when to prepare DNA (default: 0.5)
+    - handoff_threshold: float (optional) - when to handoff (default: 0.8)
+    - spawn_timeout: int (optional) - spawn timeout in seconds (default: 600)
     
     On spawn failure: Returns "fallback" with compaction suggestion instead of silent failure
 *)
@@ -189,17 +192,25 @@ let handle_mitosis_handoff ctx args : result =
   let context_ratio = validate_context_ratio raw_ratio in
   let full_context = get_string args "full_context" "" in
   let target_agent = get_string args "target_agent" "claude" in
+  (* P0-1: Configurable thresholds instead of hardcoded 0.5/0.8 *)
+  let prepare_threshold = get_float args "prepare_threshold" 0.5 in
+  let handoff_threshold = get_float args "handoff_threshold" 0.8 in
+  let spawn_timeout = int_of_float (get_float args "spawn_timeout" 600.0) in
   
   (* Warn if context_ratio is default 0.0 - likely caller forgot to provide it *)
   if raw_ratio = 0.0 then
     Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
   
   let cell = !(Mcp_server.current_cell) in
-  let config_mitosis = Mitosis.default_config in
+  (* Override config with custom thresholds if provided *)
+  let config_mitosis = { Mitosis.default_config with
+    prepare_threshold;
+    handoff_threshold;
+  } in
   let pool = !(Mcp_server.stem_pool) in
   
   let spawn_fn ~prompt =
-    Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:600 ()
+    Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:spawn_timeout ()
   in
   
   let result = Mitosis.auto_mitosis_check_2phase

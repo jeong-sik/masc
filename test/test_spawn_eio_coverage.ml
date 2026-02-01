@@ -267,24 +267,26 @@ let test_get_config_unknown () =
   | Some _ -> fail "expected None"
 
 (* ============================================================
-   build_mcp_flags Tests
+   build_mcp_args Tests
    ============================================================ *)
 
-let test_build_mcp_flags_empty () =
-  let flags = Spawn_eio.build_mcp_flags "claude" [] in
-  check string "empty flags" "" flags
+let test_build_mcp_args_empty () =
+  let flags = Spawn_eio.build_mcp_args "claude" [] in
+  check (list string) "empty flags" [] flags
 
-let test_build_mcp_flags_claude () =
-  let flags = Spawn_eio.build_mcp_flags "claude" ["tool1"; "tool2"] in
-  check bool "has allowedTools" true (Str.string_match (Str.regexp ".*allowedTools.*") flags 0)
+let test_build_mcp_args_claude () =
+  let flags = Spawn_eio.build_mcp_args "claude" ["tool1"; "tool2"] in
+  let flags_str = String.concat " " flags in
+  check bool "has allowedTools" true (Str.string_match (Str.regexp ".*allowedTools.*") flags_str 0)
 
-let test_build_mcp_flags_gemini () =
-  let flags = Spawn_eio.build_mcp_flags "gemini" ["tool1"; "tool2"] in
-  check bool "has allowed-tools" true (Str.string_match (Str.regexp ".*allowed-tools.*") flags 0)
+let test_build_mcp_args_gemini () =
+  let flags = Spawn_eio.build_mcp_args "gemini" ["tool1"; "tool2"] in
+  let flags_str = String.concat " " flags in
+  check bool "has allowed-tools" true (Str.string_match (Str.regexp ".*allowed-tools.*") flags_str 0)
 
-let test_build_mcp_flags_other () =
-  let flags = Spawn_eio.build_mcp_flags "codex" ["tool1"] in
-  check string "empty for other" "" flags
+let test_build_mcp_args_other () =
+  let flags = Spawn_eio.build_mcp_args "codex" ["tool1"] in
+  check (list string) "empty for other" [] flags
 
 (* ============================================================
    Test Runners
@@ -344,10 +346,10 @@ let () =
       test_case "claude" `Quick test_get_config_claude;
       test_case "unknown" `Quick test_get_config_unknown;
     ];
-    "build_mcp_flags", [
-      test_case "empty" `Quick test_build_mcp_flags_empty;
-      test_case "claude" `Quick test_build_mcp_flags_claude;
-      test_case "gemini" `Quick test_build_mcp_flags_gemini;
-      test_case "other" `Quick test_build_mcp_flags_other;
+    "build_mcp_args", [
+      test_case "empty" `Quick test_build_mcp_args_empty;
+      test_case "claude" `Quick test_build_mcp_args_claude;
+      test_case "gemini" `Quick test_build_mcp_args_gemini;
+      test_case "other" `Quick test_build_mcp_args_other;
     ];
   ]

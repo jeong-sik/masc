@@ -249,42 +249,45 @@ let test_get_config_unknown () =
   | Some _ -> fail "expected None"
 
 (* ============================================================
-   build_mcp_flags Tests
+   build_mcp_args Tests
    ============================================================ *)
 
-let test_build_mcp_flags_empty () =
-  let flags = Spawn.build_mcp_flags "claude" [] in
-  check string "empty flags" "" flags
+let test_build_mcp_args_empty () =
+  let flags = Spawn.build_mcp_args "claude" [] in
+  check (list string) "empty flags" [] flags
 
-let test_build_mcp_flags_claude () =
-  let flags = Spawn.build_mcp_flags "claude" ["tool1"; "tool2"] in
+let test_build_mcp_args_claude () =
+  let flags = Spawn.build_mcp_args "claude" ["tool1"; "tool2"] in
+  let flags_str = String.concat " " flags in
   check bool "has allowedTools" true
-    (try let _ = Str.search_forward (Str.regexp "allowedTools") flags 0 in true
+    (try let _ = Str.search_forward (Str.regexp "allowedTools") flags_str 0 in true
      with Not_found -> false)
 
-let test_build_mcp_flags_gemini () =
-  let flags = Spawn.build_mcp_flags "gemini" ["tool1"] in
+let test_build_mcp_args_gemini () =
+  let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
+  let flags_str = String.concat " " flags in
   check bool "has allowed-mcp-server-names" true
-    (try let _ = Str.search_forward (Str.regexp "allowed-mcp-server-names") flags 0 in true
+    (try let _ = Str.search_forward (Str.regexp "allowed-mcp-server-names") flags_str 0 in true
      with Not_found -> false)
 
-let test_build_mcp_flags_gemini_allowed_tools () =
-  let flags = Spawn.build_mcp_flags "gemini" ["tool1"] in
+let test_build_mcp_args_gemini_allowed_tools () =
+  let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
+  let flags_str = String.concat " " flags in
   check bool "has allowed-tools" true
-    (try let _ = Str.search_forward (Str.regexp "allowed-tools") flags 0 in true
+    (try let _ = Str.search_forward (Str.regexp "allowed-tools") flags_str 0 in true
      with Not_found -> false)
 
-let test_build_mcp_flags_codex () =
-  let flags = Spawn.build_mcp_flags "codex" ["tool1"; "tool2"] in
-  check string "codex empty" "" flags
+let test_build_mcp_args_codex () =
+  let flags = Spawn.build_mcp_args "codex" ["tool1"; "tool2"] in
+  check (list string) "codex empty" [] flags
 
-let test_build_mcp_flags_ollama () =
-  let flags = Spawn.build_mcp_flags "ollama" ["tool1"] in
-  check string "ollama empty" "" flags
+let test_build_mcp_args_ollama () =
+  let flags = Spawn.build_mcp_args "ollama" ["tool1"] in
+  check (list string) "ollama empty" [] flags
 
-let test_build_mcp_flags_unknown () =
-  let flags = Spawn.build_mcp_flags "unknown" ["tool1"] in
-  check string "unknown empty" "" flags
+let test_build_mcp_args_unknown () =
+  let flags = Spawn.build_mcp_args "unknown" ["tool1"] in
+  check (list string) "unknown empty" [] flags
 
 (* ============================================================
    parse_claude_json Tests
@@ -598,14 +601,14 @@ let () =
       test_case "ollama" `Quick test_get_config_ollama;
       test_case "unknown" `Quick test_get_config_unknown;
     ];
-    "build_mcp_flags", [
-      test_case "empty" `Quick test_build_mcp_flags_empty;
-      test_case "claude" `Quick test_build_mcp_flags_claude;
-      test_case "gemini" `Quick test_build_mcp_flags_gemini;
-      test_case "gemini allowed tools" `Quick test_build_mcp_flags_gemini_allowed_tools;
-      test_case "codex" `Quick test_build_mcp_flags_codex;
-      test_case "ollama" `Quick test_build_mcp_flags_ollama;
-      test_case "unknown" `Quick test_build_mcp_flags_unknown;
+    "build_mcp_args", [
+      test_case "empty" `Quick test_build_mcp_args_empty;
+      test_case "claude" `Quick test_build_mcp_args_claude;
+      test_case "gemini" `Quick test_build_mcp_args_gemini;
+      test_case "gemini allowed tools" `Quick test_build_mcp_args_gemini_allowed_tools;
+      test_case "codex" `Quick test_build_mcp_args_codex;
+      test_case "ollama" `Quick test_build_mcp_args_ollama;
+      test_case "unknown" `Quick test_build_mcp_args_unknown;
     ];
     "parse_claude_json", [
       test_case "valid" `Quick test_parse_claude_json_valid;

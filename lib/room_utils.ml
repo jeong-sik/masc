@@ -240,7 +240,7 @@ let default_config base_path =
              (* Final fallback: in-memory to keep server alive *)
              (match Backend.MemoryBackend.create fallback_cfg with
               | Ok mem -> Memory mem
-              | Error _ -> failwith "Failed to initialize any MASC backend"))
+              | Error e -> invalid_arg (Printf.sprintf "Failed to initialize any MASC backend: %s" (Backend.show_error e))))
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
@@ -276,7 +276,7 @@ let default_config_eio ~sw ~env base_path =
          | Error _ ->
              (match Backend.MemoryBackend.create fallback_cfg with
               | Ok mem -> Memory mem
-              | Error _ -> failwith "Failed to initialize any MASC backend"))
+              | Error e -> invalid_arg (Printf.sprintf "Failed to initialize any MASC backend: %s" (Backend.show_error e))))
   in
   {
     base_path = resolved_path;
@@ -650,7 +650,7 @@ let validate_file_path_r path : (string, masc_error) result =
 
 let ensure_initialized config =
   if not (is_initialized config) then
-    failwith "MASC not initialized. Use masc_init first."
+    invalid_arg "MASC not initialized. Use masc_init first."
 
 let ensure_initialized_r config : (unit, masc_error) result =
   if is_initialized config then Ok ()
@@ -790,7 +790,7 @@ let with_file_lock config path f =
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           f
       else
-        failwith "Failed to acquire distributed lock"
+        invalid_arg (Printf.sprintf "Failed to acquire distributed lock for key: %s (20 attempts exhausted)" key)
 
 let with_file_lock_r config path f : ('a, masc_error) result =
   match key_of_path config path with

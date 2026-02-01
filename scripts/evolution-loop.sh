@@ -53,14 +53,14 @@ run_iteration() {
     local skeptic_output=$(claude --print "Review social.ml for issues. Be brief." 2>&1 || true)
     check_token "$skeptic_output" || skeptic_output=$(claude --print "Review social.ml for issues. Be brief." 2>&1 || true)
 
-    # 2. Count issues (ensure numeric values with tr to strip whitespace)
+    # 2. Count issues (ensure numeric values - use head -1 and validate)
     local critical_count
-    critical_count=$(echo "$skeptic_output" | grep -ci "critical\|P0\|race\|corrupt" 2>/dev/null | tr -d '[:space:]')
-    [[ -z "$critical_count" ]] && critical_count=0
+    critical_count=$(echo "$skeptic_output" | grep -ci "critical\|P0\|race\|corrupt" 2>/dev/null | head -1 | tr -d '[:space:]')
+    [[ ! "$critical_count" =~ ^[0-9]+$ ]] && critical_count=0
 
     local moderate_count
-    moderate_count=$(echo "$skeptic_output" | grep -ci "moderate\|P1\|should fix" 2>/dev/null | tr -d '[:space:]')
-    [[ -z "$moderate_count" ]] && moderate_count=0
+    moderate_count=$(echo "$skeptic_output" | grep -ci "moderate\|P1\|should fix" 2>/dev/null | head -1 | tr -d '[:space:]')
+    [[ ! "$moderate_count" =~ ^[0-9]+$ ]] && moderate_count=0
 
     # 3. Calculate scores (simplified)
     local code_score=$((100 - ${critical_count:-0} * 10 - ${moderate_count:-0} * 5))

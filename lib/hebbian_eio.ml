@@ -250,11 +250,13 @@ let weaken config ?params ~from_agent ~to_agent () : unit =
 let get_preferred_partner config ~agent_id : string option =
   let graph = load_graph config in
   let outgoing = List.filter (fun s -> s.from_agent = agent_id) graph.synapses in
-  if List.length outgoing = 0 then
-    None
-  else
+  match outgoing with
+  | [] -> None
+  | _ ->
     let sorted = List.sort (fun a b -> compare b.weight a.weight) outgoing in
-    Some (List.hd sorted).to_agent
+    match sorted with
+    | best :: _ -> Some best.to_agent
+    | [] -> None (* unreachable but type-safe *)
 
 (** Consolidate - apply decay to old connections - synchronous *)
 let consolidate config ?params ~decay_after_days () : int =

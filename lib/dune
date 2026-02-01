@@ -7,6 +7,7 @@
    auto_recall
    auto_responder
    auth
+   board
    error
    backend
    backend_eio
@@ -77,6 +78,7 @@
    session
    spawn
    spawn_eio
+   spawn_registry
    sse
    sse_client
    subscriptions

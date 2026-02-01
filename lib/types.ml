@@ -635,7 +635,7 @@ let rate_limit_config_of_yojson json =
       match json |> member "priority_agents" with
       | `Null -> default_rate_limit.priority_agents
       | `List items -> List.map to_string items
-      | _ -> failwith "priority_agents must be a list"
+      | _ -> raise (Type_error ("priority_agents must be a list", json))
     in
     let reader_multiplier = json |> member "reader_multiplier" |> to_float_option |> Option.value ~default:0.5 in
     let worker_multiplier = json |> member "worker_multiplier" |> to_float_option |> Option.value ~default:1.0 in

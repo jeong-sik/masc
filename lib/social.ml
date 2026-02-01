@@ -156,7 +156,9 @@ let rec ensure_dir path =
     let parent = Filename.dirname path in
     if parent <> path && not (Sys.file_exists parent) then
       ensure_dir parent;
-    Unix.mkdir path 0o755
+    (* Handle race condition: directory might be created by another process *)
+    try Unix.mkdir path 0o755
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
 let ensure_dirs config =
@@ -171,12 +173,9 @@ let post_path config post_id =
 let comment_path config comment_id =
   Filename.concat (comments_dir config) (comment_id ^ ".json")
 
-let votes_path config ~target_type ~target_id =
-  let prefix = match target_type with
-    | `Post -> "post"
-    | `Comment -> "cmt"
-  in
-  Filename.concat (votes_dir config) (Printf.sprintf "%s-%s.json" prefix target_id)
+let votes_path config ~target_type:_ ~target_id =
+  (* target_id already includes type prefix (post-xxx or cmt-xxx) *)
+  Filename.concat (votes_dir config) (target_id ^ ".json")
 
 (** Write JSON to file atomically (temp file + rename) *)
 let write_json path json =

@@ -8,12 +8,9 @@ open Types
 
 (** Generate a cryptographically random token (hex string) *)
 let generate_token () =
-  let bytes = Bytes.create 32 in
-  for i = 0 to 31 do
-    Bytes.set bytes i (Char.chr (Random.int 256))
-  done;
+  let random_bytes = Mirage_crypto_rng.generate 32 in
   let hex = Buffer.create 64 in
-  Bytes.iter (fun c -> Buffer.add_string hex (Printf.sprintf "%02x" (Char.code c))) bytes;
+  String.iter (fun c -> Buffer.add_string hex (Printf.sprintf "%02x" (Char.code c))) random_bytes;
   Buffer.contents hex
 
 (** SHA256 hash of a string using Digestif *)

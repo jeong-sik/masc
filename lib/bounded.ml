@@ -382,18 +382,18 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
                   history = List.rev !history;
                   warning;
                 }
-              else if Option.is_some warning then
-                (* Exceeded but return partial result *)
-                {
-                  status = `Constraint_exceeded;
-                  reason = Option.get warning;
-                  final_output = Some spawn_result.output;
-                  stats = state;
-                  history = List.rev !history;
-                  warning;
-                }
-              else
-                loop ()
+              else match warning with
+                | Some warn_msg ->
+                  (* Exceeded but return partial result *)
+                  {
+                    status = `Constraint_exceeded;
+                    reason = warn_msg;
+                    final_output = Some spawn_result.output;
+                    stats = state;
+                    history = List.rev !history;
+                    warning;
+                  }
+                | None -> loop ()
     in
     loop ()
 

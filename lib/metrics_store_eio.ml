@@ -120,8 +120,8 @@ let read_metrics_file file : task_metric list =
     []
   else
     let ic = open_in file in
-    let content = really_input_string ic (in_channel_length ic) in
-    close_in ic;
+    let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      really_input_string ic (in_channel_length ic)) in
     let lines = String.split_on_char '\n' content
       |> List.filter (fun s -> String.trim s <> "") in
     List.filter_map (fun line ->

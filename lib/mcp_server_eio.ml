@@ -21,17 +21,32 @@ type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
 
 (** Global Eio network reference for Walph chain execution.
     Set by main_eio.ml during server initialization.
-    Used by walph_loop to call llm-mcp chain.orchestrate. *)
+    Used by walph_loop to call llm-mcp chain.orchestrate.
+
+    Initialization order is enforced:
+    - set_net MUST be called before any get_net usage
+    - Callers should use get_net_opt for graceful degradation *)
 let current_net : eio_net option ref = ref None
+let net_initialized : bool ref = ref false
 
 (** Set the Eio network reference. Called from main_eio.ml. *)
-let set_net net = current_net := Some (net :> eio_net)
+let set_net net =
+  current_net := Some (net :> eio_net);
+  net_initialized := true
 
-(** Get the Eio network reference. Raises if not set. *)
+(** Get the Eio network reference optionally - for graceful handling *)
+let get_net_opt () : eio_net option = !current_net
+
+(** Get the Eio network reference. Raises if not set.
+    @raise Failure if set_net was not called *)
 let get_net () : eio_net =
   match !current_net with
   | Some net -> net
-  | None -> failwith "Eio net not initialized - call set_net first"
+  | None ->
+    if !net_initialized then
+      invalid_arg "Eio net was set but is now None (unexpected state)"
+    else
+      invalid_arg "Eio net not initialized - ensure set_net is called during server startup"
 
 (** Re-export pure functions from Mcp_server *)
 let create_state ?test_mode:_ ~base_path () =
@@ -403,8 +418,8 @@ let append_audit_event (config : Room.config) (e : audit_event) =
     let line = Yojson.Safe.to_string (audit_event_to_json e) ^ "\n" in
     Room_utils.with_file_lock config path (fun () ->
       let oc = open_out_gen [Open_creat; Open_append; Open_wronly] 0o600 path in
-      output_string oc line;
-      close_out oc
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        output_string oc line)
     )
   end
 
@@ -566,8 +581,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
         try
           let ic = open_in file in
-          let name = input_line ic in
-          close_in ic;
+          let name = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+            input_line ic) in
           if name = "" then None else Some name
         with Sys_error _ | End_of_file -> None
   in
@@ -580,8 +595,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
         try
           let oc = open_out file in
-          output_string oc agent_name;
-          close_out oc
+          Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+            output_string oc agent_name)
         with Sys_error msg ->
           Printf.eprintf "[WARN] write_mcp_session_agent: %s\n%!" msg
   in
@@ -631,8 +646,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
           (try
             let ic = open_in term_file in
-            let name = input_line ic in
-            close_in ic;
+            let name = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+              input_line ic) in
             if name <> "" then begin
               Printf.eprintf "[DEBUG] agent_name from TERM session: %s\n%!" name;
               name
@@ -908,8 +923,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
       (try
         let oc = open_out agent_file in
-        output_string oc nickname;
-        close_out oc
+        Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+          output_string oc nickname)
       with e ->
         Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
       (true, result)

@@ -140,27 +140,31 @@ let default_configs = [
 let get_config agent_name =
   List.assoc_opt agent_name default_configs
 
-(** Build MCP flags for each agent type *)
-let build_mcp_flags agent_name tools =
-  if tools = [] then ""
+(** Build MCP flags as argument list (no shell escaping needed) *)
+let build_mcp_args agent_name tools =
+  if tools = [] then []
   else match agent_name with
   | "claude" ->
     (* Claude: --allowedTools "tool1,tool2,..." *)
     let tools_str = String.concat "," tools in
-    Printf.sprintf " --allowedTools %s" (Filename.quote tools_str)
+    ["--allowedTools"; tools_str]
   | "gemini" ->
     (* Gemini: --allowed-mcp-server-names masc --allowed-tools tool1 tool2 *)
-    let tools_args = String.concat " " (List.map Filename.quote tools) in
-    Printf.sprintf " --allowed-mcp-server-names masc --allowed-tools %s" tools_args
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
   | "codex" ->
     (* Codex: Uses config.toml MCP servers automatically, no extra flags needed *)
-    ""
+    []
   | "ollama" ->
     (* Ollama: Uses llm-mcp CLI agent mode, no extra flags needed *)
-    ""
-  | _ -> ""
+    []
+  | _ -> []
 
-(** Spawn an agent with a prompt/task *)
+(** Parse command string into executable and arguments *)
+let parse_command cmd =
+  let parts = String.split_on_char ' ' cmd in
+  List.filter (fun s -> String.length s > 0) parts
+
+(** Spawn an agent with a prompt/task (direct execution, no shell) *)
 let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let start_time = Unix.gettimeofday () in
 
@@ -177,12 +181,14 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   in
 
   let timeout = Option.value timeout_seconds ~default:config.timeout_seconds in
-  let mcp_flags = build_mcp_flags agent_name config.mcp_tools in
+  let mcp_args = build_mcp_args agent_name config.mcp_tools in
   (* Auto-append MASC lifecycle protocol to prompt *)
   let augmented_prompt = prompt ^ masc_lifecycle_suffix in
-  (* Use stdin for prompt to avoid argument parsing issues with -p flag *)
-  let full_command = Printf.sprintf "echo %s | timeout %d %s%s"
-    (Filename.quote augmented_prompt) timeout config.command mcp_flags in
+
+  (* Build command args - direct execution without shell *)
+  let base_args = parse_command config.command in
+  let cmd_args = ["timeout"; string_of_int timeout] @ base_args @ mcp_args in
+  let cmd_array = Array.of_list cmd_args in
 
   (* Change to working dir if specified *)
   let original_dir = Sys.getcwd () in
@@ -194,9 +200,30 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   in
 
   try
-    let ic = Unix.open_process_in full_command in
+    (* Create pipes for stdin and stdout *)
+    let (stdout_read, stdout_write) = Unix.pipe () in
+    let (stdin_read, stdin_write) = Unix.pipe () in
+    
+    (* Spawn process directly without shell *)
+    let pid = Unix.create_process 
+      (List.hd cmd_args) cmd_array
+      stdin_read stdout_write Unix.stderr in
+    
+    (* Close unused ends *)
+    Unix.close stdout_write;
+    Unix.close stdin_read;
+    
+    (* Write prompt to stdin and close *)
+    let _ = Unix.write_substring stdin_write augmented_prompt 0 (String.length augmented_prompt) in
+    Unix.close stdin_write;
+    
+    (* Read output *)
+    let ic = Unix.in_channel_of_descr stdout_read in
     let raw_output = In_channel.input_all ic in
-    let status = Unix.close_process_in ic in
+    In_channel.close ic;
+    
+    (* Wait for process *)
+    let (_, status) = Unix.waitpid [] pid in
 
     (* Restore directory *)
     Sys.chdir original_dir;

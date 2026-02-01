@@ -322,20 +322,49 @@
     }
 
     async function loadAgentMessages(agentName) {
+      let info = '';
+
+      // 1. Get agent's broadcasts
       try {
-        const result = await mcpCall('masc_messages', { limit: 10 });
-        if (result.result?.content?.[0]?.text) {
-          const text = result.result.content[0].text;
-          // Filter messages from/to this agent
+        const msgResult = await mcpCall('masc_messages', { limit: 30 });
+        if (msgResult.result?.content?.[0]?.text) {
+          const text = msgResult.result.content[0].text;
           const lines = text.split('\n').filter(l =>
-            l.includes(agentName) || l.includes('@' + agentName)
+            l.includes(agentName) && !l.includes('joined') && !l.includes('left')
           );
-          document.getElementById('modalBody').textContent =
-            lines.length > 0 ? lines.join('\n') : 'No recent messages from this agent';
+          if (lines.length > 0) {
+            info += '💬 Recent Activity:\n' + lines.slice(0, 5).join('\n') + '\n\n';
+          }
         }
-      } catch (e) {
-        document.getElementById('modalBody').textContent = 'Error loading messages: ' + e.message;
-      }
+      } catch (e) { /* ignore */ }
+
+      // 2. Get tasks this agent is working on
+      try {
+        const statusResult = await mcpCall('masc_status', {});
+        if (statusResult.result?.content?.[0]?.text) {
+          const text = statusResult.result.content[0].text;
+          const taskLines = text.split('\n').filter(l =>
+            l.includes(agentName) && l.match(/task-\d+/)
+          );
+          if (taskLines.length > 0) {
+            info += '📋 Tasks:\n' + taskLines.join('\n') + '\n\n';
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      // 3. Get task history if available
+      try {
+        const histResult = await mcpCall('masc_task_history', { agent_name: agentName });
+        if (histResult.result?.content?.[0]?.text) {
+          const text = histResult.result.content[0].text;
+          if (!text.includes('No history')) {
+            info += '📜 History:\n' + text.split('\n').slice(0, 10).join('\n');
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      document.getElementById('modalBody').textContent =
+        info || `No activity found for ${agentName}\n\nThis agent hasn't broadcast any messages or claimed tasks yet.`;
     }
 
     async function sendToAgent() {

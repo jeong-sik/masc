@@ -185,13 +185,13 @@ let resources : mcp_resource list = [
   {
     uri = "masc://tasks";
     name = "Quest Board";
-    description = "Task board snapshot (same as masc_tasks)";
+    description = "Task board snapshot (defaults to active tasks; same as masc_tasks)";
     mime_type = "text/markdown";
   };
   {
     uri = "masc://tasks.json";
     name = "Quest Board (JSON)";
-    description = "Task board snapshot as JSON (backlog.json)";
+    description = "Task board snapshot as JSON (backlog.json; all statuses)";
     mime_type = "application/json";
   };
   {

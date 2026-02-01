@@ -24,6 +24,11 @@ let get_int args key default =
   | `Int i -> i
   | _ -> default
 
+let get_bool args key default =
+  match args |> member key with
+  | `Bool b -> b
+  | _ -> default
+
 let get_int_opt args key =
   match args |> member key with
   | `Int i -> Some i
@@ -229,8 +234,15 @@ let handle_update_priority ctx args =
   let priority = get_int args "priority" 3 in
   (true, Room.update_priority ctx.config ~task_id ~priority)
 
-let handle_tasks ctx _args =
-  (true, Room.list_tasks ctx.config)
+let handle_tasks ctx args =
+  let include_done = get_bool args "include_done" false in
+  let include_cancelled = get_bool args "include_cancelled" false in
+  let status =
+    match args |> member "status" with
+    | `String s when s <> "" -> Some s
+    | _ -> None
+  in
+  (true, Room.list_tasks ctx.config ~include_done ~include_cancelled ?status)
 
 let handle_task_history ctx args =
   let task_id = get_string args "task_id" "" in

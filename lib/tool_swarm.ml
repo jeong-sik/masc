@@ -25,8 +25,10 @@ type result = bool * string
 (** Handle masc_swarm_init *)
 let handle_init ctx args : result =
   let behavior = get_string args "behavior" "flocking" |> Swarm_eio.behavior_of_string in
-  let selection_pressure = get_float args "selection_pressure" 0.3 in
-  let mutation_rate = get_float args "mutation_rate" 0.1 in
+  let selection_pressure = get_float args "selection_pressure" 0.3
+    |> Level4_config.Normalized.of_float_clamped in
+  let mutation_rate = get_float args "mutation_rate" 0.1
+    |> Level4_config.Normalized.of_float_clamped in
   let swarm_cfg = {
     (Swarm_eio.default_config ()) with
     behavior;
@@ -70,7 +72,7 @@ let handle_status ctx _args : result =
 let handle_evolve ctx _args : result =
   match ctx.fs with
   | Some fs ->
-      (match Swarm_eio.evolve ~fs ctx.config with
+      (match Swarm_eio.evolve ~fs ctx.config () with
        | Some s -> (true, Printf.sprintf "✅ Swarm evolved to generation %d" s.generation)
        | None -> (false, "❌ Evolution failed"))
   | None -> (false, "❌ Filesystem not available")

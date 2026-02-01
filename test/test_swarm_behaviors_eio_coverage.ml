@@ -13,6 +13,7 @@
 open Alcotest
 
 module Swarm_behaviors_eio = Masc_mcp.Swarm_behaviors_eio
+module Level4_config = Masc_mcp.Level4_config
 
 (* ============================================================
    vector2d Type Tests
@@ -264,17 +265,19 @@ let test_init_foraging_custom () =
   check (float 0.01) "custom exploration rate" 0.5 state.exploration_rate
 
 let test_select_solution_empty () =
+  let rng = Level4_config.make_rng ~seed:42 () in
   let state = Swarm_behaviors_eio.init_foraging ~exploration_rate:0.0 () in
-  let selected = Swarm_behaviors_eio.select_solution ~foraging_state:state in
+  let selected = Swarm_behaviors_eio.select_solution ~rng ~foraging_state:state in
   check bool "none for empty" true (selected = None)
 
 let test_select_solution_with_solutions () =
+  let rng = Level4_config.make_rng ~seed:42 () in
   let state : Swarm_behaviors_eio.foraging_state = {
     exploration_rate = 0.0; (* Never explore, always exploit *)
     discovered_solutions = [("sol1", 0.5); ("sol2", 0.9); ("sol3", 0.3)];
     current_target = None;
   } in
-  let selected = Swarm_behaviors_eio.select_solution ~foraging_state:state in
+  let selected = Swarm_behaviors_eio.select_solution ~rng ~foraging_state:state in
   match selected with
   | Some "sol2" -> check bool "best solution" true true
   | _ -> fail "expected sol2"

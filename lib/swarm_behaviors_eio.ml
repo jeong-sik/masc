@@ -125,8 +125,8 @@ let init_foraging ?(exploration_rate = 0.3) () = {
   current_target = None;
 }
 
-let select_solution ~foraging_state =
-  if Level4_config.random_float 1.0 < foraging_state.exploration_rate then None
+let select_solution ~rng ~foraging_state =
+  if Random.State.float rng 1.0 < foraging_state.exploration_rate then None
   else
     match List.sort (fun (_, q1) (_, q2) -> compare q2 q1) foraging_state.discovered_solutions with
     | (id, _) :: _ -> Some id
@@ -147,14 +147,15 @@ let share_discovery ~fs config ~agent_id ~solution_id ~quality =
 
 (** {1 Stigmergy Behavior} *)
 
-let follow_pheromone ~fs config ?(stigmergy = default_stigmergy_config) () =
+let follow_pheromone ~fs config ?(stigmergy = default_stigmergy_config)
+    ?(rng = Level4_config.make_rng ()) () =
   let trails = Swarm_eio.get_strongest_trails ~fs config ~limit:5 in
   let viable = List.filter (fun p -> p.Swarm_eio.strength >= stigmergy.following_threshold) trails in
   match viable with
   | [] -> None
   | trails ->
       let total = List.fold_left (fun acc t -> acc +. t.Swarm_eio.strength) 0.0 trails in
-      let r = Level4_config.random_float total in
+      let r = Random.State.float rng total in
       let rec select acc = function
         | [] -> None
         | t :: rest ->
@@ -170,8 +171,8 @@ let mark_success ~fs config ~agent_id ~path_id ?(stigmergy = default_stigmergy_c
 
 let check_quorum ~fs config ~proposal_id =
   match Swarm_eio.load_swarm ~fs config with
-  | None -> `No_swarm
-  | Some swarm ->
+  | Error _ -> `No_swarm
+  | Ok swarm ->
       match List.find_opt (fun p -> p.Swarm_eio.proposal_id = proposal_id) swarm.proposals with
       | None -> `Not_found
       | Some proposal ->
@@ -191,8 +192,8 @@ let vote_on_proposal ~fs config ~agent_id ~proposal_id ~support =
 
 let execute_behavior ~fs config ~agent_id =
   match Swarm_eio.load_swarm ~fs config with
-  | None -> `Error "No swarm exists"
-  | Some swarm ->
+  | Error _ -> `Error "No swarm exists"
+  | Ok swarm ->
       match swarm.swarm_cfg.behavior with
       | Swarm_eio.Flocking -> `Guidance "Cluster around high-fitness agents"
       | Swarm_eio.Foraging ->
@@ -213,8 +214,8 @@ let execute_behavior ~fs config ~agent_id =
 
 let recommend_behavior ~fs config =
   match Swarm_eio.load_swarm ~fs config with
-  | None -> Swarm_eio.Flocking
-  | Some swarm ->
+  | Error _ -> Swarm_eio.Flocking
+  | Ok swarm ->
       let agent_count = List.length swarm.agents in
       let pheromone_count = List.length swarm.pheromones in
       let pending_proposals = List.length (List.filter (fun (p : Swarm_eio.quorum_proposal) -> p.status = `Pending) swarm.proposals) in

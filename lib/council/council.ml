@@ -213,7 +213,7 @@ let status ~config =
   let debates = DebateApi.list_all ~config () in
   let active_votes = ConsensusApi.list_active () in
   `Assoc [
-    ("version", `String "2.6.0");
+    ("version", `String "2.7.0");
     ("modules", `List [
       `String "debate";
       `String "consensus";
@@ -226,4 +226,4 @@ let status ~config =
   ]
 
 (** Version info *)
-let version = "2.6.0"
+let version = "2.7.0"

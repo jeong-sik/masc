@@ -129,7 +129,8 @@ let json_to_float = function
   | `Float f -> f
   | `Int i -> Float.of_int i
   | `Intlit s -> Float.of_string s
-  | json -> Yojson.Safe.Util.to_float json
+  | `Null -> 0.0
+  | _ -> 0.0
 
 let rec episode_to_json (e : episode) : Yojson.Safe.t =
   `Assoc [

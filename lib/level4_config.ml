@@ -45,6 +45,19 @@ let random_int max =
   ensure_rng_init ();
   Random.int max
 
+(** {2 Parameterized RNG}
+
+    Pure functions accept [~rng:Random.State.t] for deterministic testing.
+    Use [make_rng ~seed:42 ()] in tests, [make_rng ()] in production.
+*)
+
+let make_rng ?seed () =
+  let s = match seed with
+    | Some s -> s
+    | None -> get_env_int "MASC_SWARM_SEED" (int_of_float (Unix.gettimeofday () *. 1000.0))
+  in
+  Random.State.make [|s|]
+
 (** {1 Swarm Configuration} *)
 
 module Swarm = struct
@@ -117,39 +130,22 @@ let is_finite f =
   | FP_normal | FP_subnormal | FP_zero -> true
   | FP_infinite | FP_nan -> false
 
-(** {1 Abstract Fitness Type}
+(** {1 Normalized Type — Parse Don't Validate}
 
-    Parse Don't Validate: Invalid fitness values cannot exist.
+    Abstract type guaranteed to be in [0.0, 1.0].
+    Used for fitness, strength, threshold, selection_pressure, mutation_rate, etc.
+
     - Bartosz Milewski: "Make invalid states unrepresentable"
     - Alexis King: "Parse don't validate"
 *)
 
-module Fitness : sig
-  (** Abstract type - guaranteed to be in [0.0, 1.0] *)
+module Normalized : sig
   type t
 
-  (** Create fitness from float. Returns None if invalid. *)
   val of_float : float -> t option
-
-  (** Create fitness from float, clamping to valid range. *)
   val of_float_clamped : float -> t
-
-  (** Extract the underlying float value. *)
   val to_float : t -> float
-
-  (** Initial fitness for new agents *)
-  val initial : unit -> t
-
-  (** Combine two fitness values (average) *)
-  val combine : t -> t -> t
-
-  (** Adjust fitness by delta, clamping result *)
-  val adjust : t -> delta:float -> t
-
-  (** Compare fitness values *)
   val compare : t -> t -> int
-
-  (** JSON serialization *)
   val to_json : t -> Yojson.Safe.t
   val of_json : Yojson.Safe.t -> t option
 end = struct
@@ -160,21 +156,11 @@ end = struct
     else Some f
 
   let of_float_clamped f =
-    if not (is_finite f) then 0.5  (* Default on invalid *)
+    if not (is_finite f) then 0.5
     else max 0.0 (min 1.0 f)
 
   let to_float t = t
-
-  let initial () =
-    Swarm.initial_fitness ()
-
-  let combine a b = (a +. b) /. 2.0
-
-  let adjust t ~delta =
-    of_float_clamped (t +. delta)
-
   let compare = Float.compare
-
   let to_json t = `Float t
 
   let of_json = function
@@ -183,18 +169,42 @@ end = struct
     | _ -> None
 end
 
-(** Clamp float to valid range *)
-let clamp_float ~min ~max f =
-  if f < min then min
-  else if f > max then max
-  else f
+(** Fitness: Normalized + domain-specific helpers for agent fitness *)
+module Fitness : sig
+  type t = Normalized.t
 
-(** Validate fitness value (0.0-1.0) *)
-let validate_fitness f =
-  if not (is_finite f) then None
-  else Some (clamp_float ~min:0.0 ~max:1.0 f)
+  val of_float : float -> t option
+  val of_float_clamped : float -> t
+  val to_float : t -> float
+  val initial : unit -> t
+  val combine : t -> t -> t
+  val adjust : t -> delta:float -> t
+  val compare : t -> t -> int
+  val to_json : t -> Yojson.Safe.t
+  val of_json : Yojson.Safe.t -> t option
+end = struct
+  type t = Normalized.t
 
-(** Validate non-negative float *)
-let validate_positive f =
-  if not (is_finite f) || f < 0.0 then None
-  else Some f
+  let of_float = Normalized.of_float
+  let of_float_clamped = Normalized.of_float_clamped
+  let to_float = Normalized.to_float
+  let compare = Normalized.compare
+  let to_json = Normalized.to_json
+  let of_json = Normalized.of_json
+
+  let initial () =
+    of_float_clamped (Swarm.initial_fitness ())
+
+  let combine a b =
+    of_float_clamped ((to_float a +. to_float b) /. 2.0)
+
+  let adjust t ~delta =
+    of_float_clamped (to_float t +. delta)
+end
+
+(** Strength: Normalized alias for pheromone strength *)
+module Strength = Normalized
+
+(** Threshold: Normalized alias for quorum thresholds *)
+module Threshold = Normalized
+

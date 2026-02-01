@@ -2,7 +2,11 @@
 
 open Masc_mcp
 
-let () = Random.init 42
+module Swarm = Swarm_eio
+
+let _test_rng = Level4_config.make_rng ~seed:42 ()
+let n = Level4_config.Normalized.of_float_clamped
+let nf = Level4_config.Normalized.to_float
 
 (** Helper: Create a fresh swarm for testing *)
 let make_test_swarm ?(behavior = Swarm.Flocking) () : Swarm.swarm =
@@ -10,10 +14,10 @@ let make_test_swarm ?(behavior = Swarm.Flocking) () : Swarm.swarm =
   let swarm_cfg : Swarm.swarm_config = {
     id = "test-swarm";
     name = "Test Swarm";
-    selection_pressure = 0.5;
-    mutation_rate = 0.1;
-    evaporation_rate = 0.05;
-    quorum_threshold = 0.6;
+    selection_pressure = Level4_config.Normalized.of_float_clamped 0.5;
+    mutation_rate = Level4_config.Normalized.of_float_clamped 0.1;
+    evaporation_rate = Level4_config.Normalized.of_float_clamped 0.05;
+    quorum_threshold = Level4_config.Normalized.of_float_clamped 0.6;
     max_agents = 10;
     behavior;
   } in
@@ -28,7 +32,7 @@ let make_test_swarm ?(behavior = Swarm.Flocking) () : Swarm.swarm =
   }
 
 (** Helper: Create a test agent *)
-let make_test_agent ~id ~name ~fitness ~generation : Swarm.swarm_agent =
+let make_test_agent ~id ~name ~(fitness : Level4_config.Fitness.t) ~generation : Swarm.swarm_agent =
   let now = Unix.gettimeofday () in
   {
     id;
@@ -53,7 +57,7 @@ let test_join_agent_empty_swarm () =
     let agent = List.hd new_swarm.agents in
     assert (agent.id = "claude");
     assert (agent.name = "Claude");
-    assert (agent.fitness = 0.5);  (* default fitness *)
+    assert (Level4_config.Normalized.to_float agent.fitness = 0.5);  (* default fitness *)
     Printf.printf "✓ test_join_agent_empty_swarm\n%!"
   | _ -> failwith "Expected Joined result"
 
@@ -76,8 +80,8 @@ let test_join_agent_swarm_full () =
   let swarm = { base with
     swarm_cfg = { base.swarm_cfg with max_agents = 2 };
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.5 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.5 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.5) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.5) ~generation:0;
     ]
   } in
   let now = Unix.gettimeofday () in
@@ -122,7 +126,7 @@ let test_update_fitness () =
   match Swarm.Pure.update_agent_fitness swarm ~agent_id:"claude" ~fitness:0.85 ~now with
   | Some updated ->
     let agent = List.find (fun (a : Swarm.swarm_agent) -> a.id = "claude") updated.agents in
-    assert (agent.fitness = 0.85);
+    assert (Level4_config.Normalized.to_float agent.fitness = 0.85);
     Printf.printf "✓ test_update_fitness\n%!"
   | None -> failwith "Update should succeed"
 
@@ -140,9 +144,9 @@ let test_update_fitness_not_found () =
 let test_fitness_rankings () =
   let swarm = { (make_test_swarm ()) with
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.3 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.9 ~generation:0;
-      make_test_agent ~id:"a3" ~name:"A3" ~fitness:0.6 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.3) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.9) ~generation:0;
+      make_test_agent ~id:"a3" ~name:"A3" ~fitness:(n 0.6) ~generation:0;
     ]
   } in
   let rankings = Swarm.Pure.fitness_rankings swarm in
@@ -163,10 +167,10 @@ let test_fitness_rankings () =
 let test_select_elite () =
   let swarm = { (make_test_swarm ()) with
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.3 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.9 ~generation:0;
-      make_test_agent ~id:"a3" ~name:"A3" ~fitness:0.6 ~generation:0;
-      make_test_agent ~id:"a4" ~name:"A4" ~fitness:0.8 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.3) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.9) ~generation:0;
+      make_test_agent ~id:"a3" ~name:"A3" ~fitness:(n 0.6) ~generation:0;
+      make_test_agent ~id:"a4" ~name:"A4" ~fitness:(n 0.8) ~generation:0;
     ]
   } in
   let elite = Swarm.Pure.select_elite_agents swarm in
@@ -185,11 +189,11 @@ let test_deposit_pheromone () =
   let swarm = make_test_swarm ~behavior:Swarm.Stigmergy () in
   let now = Unix.gettimeofday () in
   let swarm = Swarm.Pure.deposit_pheromone swarm
-    ~path_id:"path-a" ~agent_id:"claude" ~strength:0.8 ~now in
+    ~path_id:"path-a" ~agent_id:"claude" ~strength:(n 0.8) ~now in
   assert (List.length swarm.pheromones = 1);
   let p = List.hd swarm.pheromones in
   assert (p.path_id = "path-a");
-  assert (p.strength = 0.8);
+  assert (nf p.strength = 0.8);
   assert (p.deposited_by = "claude");
   Printf.printf "✓ test_deposit_pheromone\n%!"
 
@@ -197,13 +201,13 @@ let test_deposit_pheromone_accumulate () =
   let swarm = make_test_swarm ~behavior:Swarm.Stigmergy () in
   let now = Unix.gettimeofday () in
   let swarm = Swarm.Pure.deposit_pheromone swarm
-    ~path_id:"path-a" ~agent_id:"claude" ~strength:0.5 ~now in
+    ~path_id:"path-a" ~agent_id:"claude" ~strength:(n 0.5) ~now in
   let swarm = Swarm.Pure.deposit_pheromone swarm
-    ~path_id:"path-a" ~agent_id:"gemini" ~strength:0.3 ~now in
+    ~path_id:"path-a" ~agent_id:"gemini" ~strength:(n 0.3) ~now in
   assert (List.length swarm.pheromones = 1);
   let p = List.hd swarm.pheromones in
   (* Strength should accumulate with cap at 1.0 *)
-  assert (p.strength >= 0.8 && p.strength <= 1.0);
+  assert (nf p.strength >= 0.8 && nf p.strength <= 1.0);
   Printf.printf "✓ test_deposit_pheromone_accumulate\n%!"
 
 let test_evaporate_pheromones () =
@@ -212,10 +216,10 @@ let test_evaporate_pheromones () =
   let swarm = { swarm with
     pheromones = [{
       path_id = "path-a";
-      strength = 0.8;
+      strength = n 0.8;
       deposited_by = "claude";
       deposited_at = past;
-      evaporation_rate = 0.05;
+      evaporation_rate = n 0.05;
     }]
   } in
   let now = Unix.gettimeofday () in
@@ -223,15 +227,15 @@ let test_evaporate_pheromones () =
   (* After 100 seconds with rate 0.05, should decay significantly *)
   assert (List.length evaporated.pheromones = 1);
   let p = List.hd evaporated.pheromones in
-  assert (p.strength < 0.8);  (* Should have decayed *)
+  assert (nf p.strength < 0.8);  (* Should have decayed *)
   Printf.printf "✓ test_evaporate_pheromones\n%!"
 
 let test_strongest_trails () =
   let swarm = { (make_test_swarm ()) with
     pheromones = [
-      { path_id = "p1"; strength = 0.3; deposited_by = "a"; deposited_at = 0.0; evaporation_rate = 0.05 };
-      { path_id = "p2"; strength = 0.9; deposited_by = "b"; deposited_at = 0.0; evaporation_rate = 0.05 };
-      { path_id = "p3"; strength = 0.6; deposited_by = "c"; deposited_at = 0.0; evaporation_rate = 0.05 };
+      { path_id = "p1"; strength = n 0.3; deposited_by = "a"; deposited_at = 0.0; evaporation_rate = n 0.05 };
+      { path_id = "p2"; strength = n 0.9; deposited_by = "b"; deposited_at = 0.0; evaporation_rate = n 0.05 };
+      { path_id = "p3"; strength = n 0.6; deposited_by = "c"; deposited_at = 0.0; evaporation_rate = n 0.05 };
     ]
   } in
   let top2 = Swarm.Pure.strongest_trails swarm ~limit:2 in
@@ -254,7 +258,7 @@ let test_add_proposal () =
     proposed_at = now;
     votes_for = ["claude"];
     votes_against = [];
-    threshold = 0.6;
+    threshold = n 0.6;
     deadline = None;
     status = `Pending;
   } in
@@ -274,7 +278,7 @@ let test_vote_for () =
     proposed_at = now;
     votes_for = [];
     votes_against = [];
-    threshold = 0.6;
+    threshold = n 0.6;
     deadline = None;
     status = `Pending;
   } in
@@ -295,7 +299,7 @@ let test_vote_against () =
     proposed_at = now;
     votes_for = [];
     votes_against = [];
-    threshold = 0.6;
+    threshold = n 0.6;
     deadline = None;
     status = `Pending;
   } in
@@ -313,12 +317,13 @@ let test_vote_against () =
 let test_evolve_increments_generation () =
   let swarm = { (make_test_swarm ()) with
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.8 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.6 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.8) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.6) ~generation:0;
     ]
   } in
   let now = Unix.gettimeofday () in
-  let evolved = Swarm.Pure.evolve_agents swarm ~now in
+  let rng = Level4_config.make_rng ~seed:42 () in
+  let evolved = Swarm.Pure.evolve_agents swarm ~rng ~now in
   assert (evolved.generation = 1);
   Printf.printf "✓ test_evolve_increments_generation\n%!"
 

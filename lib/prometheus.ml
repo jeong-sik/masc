@@ -36,7 +36,7 @@ let metrics_mutex = Mutex.create ()
 
 let with_lock f =
   Mutex.lock metrics_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock metrics_mutex) f
+  Common.protect ~module_name:"prometheus" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock metrics_mutex) f
 
 (** {1 Metric Registration} *)
 

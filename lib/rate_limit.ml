@@ -55,7 +55,7 @@ let create_from_env () =
 
 let with_lock limiter f =
   Mutex.lock limiter.mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock limiter.mutex) f
+  Common.protect ~module_name:"rate_limit" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock limiter.mutex) f
 
 let check limiter ~key =
   with_lock limiter (fun () ->

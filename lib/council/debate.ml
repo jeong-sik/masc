@@ -15,6 +15,7 @@ type argument = {
   evidence: string list;
   reply_to: int option;  (** Index of argument this is replying to *)
   mentions: string list; (** Agents mentioned/addressed *)
+  archetype: string option; (** MAGI archetype: melchior/balthasar/casper/athena *)
 }
 
 type debate_status = Open | Closed | Pending
@@ -90,7 +91,11 @@ let argument_to_yojson (a : argument) : Yojson.Safe.t =
     | None -> base
     | Some idx -> ("reply_to", `Int idx) :: base
   in
-  `Assoc with_reply
+  let with_archetype = match a.archetype with
+    | None -> with_reply
+    | Some arch -> ("archetype", `String arch) :: with_reply
+  in
+  `Assoc with_archetype
 
 let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
   let open Yojson.Safe.Util in
@@ -110,7 +115,11 @@ let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
           | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
           | _ -> []
         in
-        Ok { agent; position; content; evidence; reply_to; mentions }
+        let archetype = match json |> member "archetype" with
+          | `String s -> Some s
+          | _ -> None
+        in
+        Ok { agent; position; content; evidence; reply_to; mentions; archetype }
   with e ->
     Error (Printf.sprintf "Failed to parse argument: %s" (Printexc.to_string e))
 
@@ -239,7 +248,7 @@ let save_debate config (debate : debate) : unit =
 
 (** Add an argument to a debate *)
 let add_argument config ~debate_id ~agent ~position ~content 
-    ?(evidence=[]) ?(reply_to=None) ?(mentions=[]) ?(notify_fn=None) () 
+    ?(evidence=[]) ?(reply_to=None) ?(mentions=[]) ?(archetype=None) ?(notify_fn=None) () 
     : (debate, string) result =
   match get_debate config ~debate_id with
   | Error e -> Error e
@@ -247,7 +256,7 @@ let add_argument config ~debate_id ~agent ~position ~content
       if debate.status <> Open then
         Error (Printf.sprintf "Cannot add argument: debate %s is not open" debate_id)
       else begin
-        let arg : argument = { agent; position; content; evidence; reply_to; mentions } in
+        let arg : argument = { agent; position; content; evidence; reply_to; mentions; archetype } in
         let arg_idx = List.length debate.arguments in
         let updated = { debate with arguments = debate.arguments @ [arg] } in
         try

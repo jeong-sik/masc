@@ -73,8 +73,8 @@ module ConsensusApi = struct
     Consensus.start_voting ~topic ~initiator ~quorum ~threshold ()
 
   (** Cast a vote *)
-  let cast ~session_id ~agent ~decision ~reason =
-    Consensus.cast_vote ~session_id ~agent ~decision ~reason
+  let cast ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () =
+    Consensus.cast_vote ~session_id ~agent ~decision ~reason ~archetype ~weight ()
 
   (** Close voting and get result *)
   let close ~session_id =
@@ -217,7 +217,7 @@ let quick_vote ~topic ~initiator ~votes =
     let rec cast_all = function
       | [] -> Ok ()
       | (agent, decision, reason) :: rest ->
-        match ConsensusApi.cast ~session_id ~agent ~decision ~reason with
+        match ConsensusApi.cast ~session_id ~agent ~decision ~reason () with
         | Error _ as e -> e
         | Ok _ -> cast_all rest
     in

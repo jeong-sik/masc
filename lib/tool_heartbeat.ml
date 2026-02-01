@@ -10,6 +10,11 @@ let get_int args key default =
   | `Int n -> n
   | _ -> default
 
+let get_bool args key default =
+  match Yojson.Safe.Util.member key args with
+  | `Bool b -> b
+  | _ -> default
+
 type 'a context = {
   config: Room.config;
   agent_name: string;
@@ -25,19 +30,55 @@ let handle_heartbeat ctx _args =
 let handle_heartbeat_start ctx args =
   let interval = get_int args "interval" 30 in
   let message = get_string args "message" "🏓 heartbeat" in
+  let smart = get_bool args "smart" false in
   (* Validate interval: min 5, max 300 *)
   let interval = max 5 (min 300 interval) in
   let hb_id = Heartbeat.start ~agent_name:ctx.agent_name ~interval ~message in
+
+  (* Smart heartbeat config *)
+  let smart_config = Heartbeat_smart.make_config
+    ~base_interval_s:(float_of_int interval)
+    ~idle_multiplier:3.0
+    ~busy_skip:true
+    ~idle_threshold_s:300.0  (* 5 minutes *)
+    () in
+
+  (* Mutable state for smart mode *)
+  let last_activity = ref (Unix.gettimeofday ()) in
+  let last_heartbeat = ref (Unix.gettimeofday ()) in
+
   (* Start background fiber for actual heartbeat *)
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let rec loop () =
       match Heartbeat.get hb_id with
       | Some hb when hb.Heartbeat.active ->
-          (try
-             ignore (Room.broadcast ctx.config ~from_agent:ctx.agent_name ~content:message)
-           with exn ->
-             Printf.eprintf "[Heartbeat] broadcast error: %s\n%!"
-               (Printexc.to_string exn));
+          let should_send =
+            if smart then begin
+              (* Get agent status for busy detection *)
+              let room_agents = Room.get_agents_raw ctx.config in
+              let agent_status : Types.agent_status =
+                match List.find_opt (fun (a : Types.agent) -> a.name = ctx.agent_name) room_agents with
+                | Some a -> a.status
+                | None -> Types.Active  (* Default: not busy *)
+              in
+              let decision = Heartbeat_smart.should_emit
+                ~config:smart_config
+                ~agent_status
+                ~last_activity:!last_activity
+                ~last_heartbeat:!last_heartbeat in
+              Heartbeat_smart.should_emit_now decision
+            end else
+              true
+          in
+          if should_send then begin
+            (try
+               ignore (Room.broadcast ctx.config ~from_agent:ctx.agent_name ~content:message)
+             with exn ->
+               Printf.eprintf "[Heartbeat] broadcast error: %s\n%!"
+                 (Printexc.to_string exn));
+            last_heartbeat := Unix.gettimeofday ()
+          end;
+          (* Sleep for base interval (smart mode adjusts internally) *)
           Eio.Time.sleep ctx.clock (float_of_int interval);
           loop ()
       | _ -> ()
@@ -45,7 +86,8 @@ let handle_heartbeat_start ctx args =
     try loop () with exn ->
       Printf.eprintf "[Heartbeat] loop error: %s\n%!" (Printexc.to_string exn)
   );
-  (true, Printf.sprintf "✅ Heartbeat started: %s (interval: %ds, message: %s)" hb_id interval message)
+  let mode_str = if smart then " [SMART]" else "" in
+  (true, Printf.sprintf "✅ Heartbeat started: %s (interval: %ds, message: %s)%s" hb_id interval message mode_str)
 
 let handle_heartbeat_stop _ctx args =
   let hb_id = get_string args "heartbeat_id" "" in

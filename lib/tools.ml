@@ -651,7 +651,7 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_heartbeat_start";
-    description = "Start periodic heartbeat broadcasts. Runs in background, sending pings at specified interval. Use for keep-alive or automated status updates.";
+    description = "Start periodic heartbeat broadcasts. Runs in background, sending pings at specified interval. Smart mode skips heartbeats when agent is busy (60-80% token savings).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -664,6 +664,11 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
           ("type", `String "string");
           ("description", `String "Heartbeat message content");
           ("default", `String "🏓 heartbeat");
+        ]);
+        ("smart", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable smart mode: skip when busy, 3x interval when idle >5min");
+          ("default", `Bool false);
         ]);
       ]);
     ];

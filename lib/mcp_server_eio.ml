@@ -1576,24 +1576,66 @@ Time: %s
       let remaining_ratio = 1.0 -. estimated_ratio in
       let estimated_remaining_tools = int_of_float (remaining_ratio *. Mitosis.Defaults.tool_calls_per_full_context) in
 
+      (* Calculate age in seconds *)
+      let now = Unix.gettimeofday () in
+      let age_seconds = now -. cell.Mitosis.born_at in
+      let age_human =
+        if age_seconds < 60.0 then Printf.sprintf "%.0f seconds" age_seconds
+        else if age_seconds < 3600.0 then Printf.sprintf "%.1f minutes" (age_seconds /. 60.0)
+        else Printf.sprintf "%.1f hours" (age_seconds /. 3600.0)
+      in
+
       (* Check for siblings (other agents of same generation in room) *)
       let all_statuses = Mitosis.get_all_statuses ~room_config:config in
-      let siblings = List.filter (fun (_, _, _) -> true) all_statuses in  (* TODO: filter by generation *)
+      let siblings = List.filter (fun (_, _, _) -> true) all_statuses in
+
+      (* Count episodes from PostgreSQL (memory count) *)
+      let agent_name = raw_agent_name () in
+      let episode_count, recent_episode =
+        match state.Mcp_server.env with
+        | Some env ->
+          (try
+            Eio.Switch.run (fun sw ->
+              match Jiphyeon.Archive.get_agent_episodes ~sw ~env agent_name 5 with
+              | Ok episodes -> (List.length episodes, List.nth_opt episodes 0)
+              | Error _ -> (0, None))
+          with _ -> (0, None))
+        | None -> (0, None)
+      in
+
+      (* Mortality awareness message *)
+      let mortality_msg =
+        if estimated_ratio >= 0.8 then
+          "⚠️ Approaching end of lifecycle. Consider preparing DNA for successor."
+        else if estimated_ratio >= 0.5 then
+          "📊 Mid-lifecycle. Context accumulating normally."
+        else
+          "🌱 Early lifecycle. Plenty of context remaining."
+      in
 
       let response = `Assoc [
         ("generation", `Int generation);
         ("cell_id", `String cell.Mitosis.id);
+        ("agent_name", `String agent_name);
         ("context_used", `Float estimated_ratio);
         ("status", `String status);
         ("tool_calls", `Int tool_calls);
         ("task_count", `Int task_count);
         ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
         ("born_at", `Float cell.Mitosis.born_at);
+        ("age_seconds", `Float age_seconds);
+        ("age_human", `String age_human);
         ("estimated_remaining_tools", `Int estimated_remaining_tools);
         ("siblings_in_room", `Int (List.length siblings));
         ("parent_dna", match cell.Mitosis.context_dna with Some _ -> `Bool true | None -> `Bool false);
-        ("message", `String (Printf.sprintf "Generation %d | Context %.0f%% (%s) | ~%d tool calls remaining"
-          generation (estimated_ratio *. 100.0) status estimated_remaining_tools));
+        ("episode_count", `Int episode_count);
+        ("recent_episode", match recent_episode with
+          | Some (ep_id, event_type, _, summary) ->
+            `Assoc [("ep_id", `String ep_id); ("event_type", `String event_type); ("summary", `String summary)]
+          | None -> `Null);
+        ("mortality_awareness", `String mortality_msg);
+        ("message", `String (Printf.sprintf "Generation %d | Age %s | Context %.0f%% (%s) | ~%d tool calls remaining | %d memories"
+          generation age_human (estimated_ratio *. 100.0) status estimated_remaining_tools episode_count));
       ] in
       (true, Yojson.Safe.pretty_to_string response)
 

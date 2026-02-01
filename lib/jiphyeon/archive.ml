@@ -607,3 +607,15 @@ let get_agent_lineage ~sw ~env (ep_id : string) : ((string * string * int * stri
     match Caqti_eio.Pool.use use_conn pool with
     | Ok lineage -> Ok lineage
     | Error e -> Error (Caqti_error.show e)
+
+(** 에이전트의 최근 에피소드 조회 - Agent Being Protocol Phase 2 *)
+let get_agent_episodes ~sw ~env (agent_name : string) (limit : int) : ((string * string * int * string) list, string) result =
+  match get_pg_pool ~sw ~env with
+  | Error e -> Error e
+  | Ok pool ->
+    let use_conn (module C : Caqti_eio.CONNECTION) =
+      C.collect_list EpisodeQ.get_recent_by_agent (agent_name, limit)
+    in
+    match Caqti_eio.Pool.use use_conn pool with
+    | Ok episodes -> Ok episodes
+    | Error e -> Error (Caqti_error.show e)

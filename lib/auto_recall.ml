@@ -10,6 +10,26 @@
     - File_context: Recently modified files in working directory
 *)
 
+(** {1 String Helpers} *)
+
+(** Check if haystack contains needle *)
+let string_contains ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len > haystack_len then false
+  else
+    let rec check i =
+      if i > haystack_len - needle_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else check (i + 1)
+    in
+    check 0
+
+(** Check if str starts with prefix *)
+let string_starts_with ~prefix str =
+  let prefix_len = String.length prefix in
+  String.length str >= prefix_len && String.sub str 0 prefix_len = prefix
+
 (** {1 Types} *)
 
 (** Source types for context retrieval *)
@@ -121,6 +141,7 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
 
 (** Fetch recently modified files from working directory *)
 let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_config) ~query =
+  let _ = config in  (* suppress unused warning *)
   let masc_dir = Room_utils.masc_dir room_config in
   let work_dir = Filename.dirname masc_dir in (* Parent of .masc *)
   
@@ -166,8 +187,8 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
     let name_lower = String.lowercase_ascii (Filename.basename path) in
     let content_lower = String.lowercase_ascii content in
     let name_match = if query <> "" && String.length query > 2 && 
-                        (String.is_substring ~sub:query_lower name_lower ||
-                         String.is_substring ~sub:query_lower content_lower) 
+                        (string_contains ~needle:query_lower name_lower ||
+                         string_contains ~needle:query_lower content_lower) 
                      then 0.3 else 0.0 in
     let recency = 1.0 -. (float_of_int i /. float_of_int (max 1 (List.length files))) in
     min 1.0 (0.4 +. (recency *. 0.3) +. name_match)
@@ -183,7 +204,7 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
   |> List.mapi (fun i path ->
     let preview = read_preview path in
     let rel_path = 
-      if String.is_prefix ~prefix:work_dir path 
+      if string_starts_with ~prefix:work_dir path 
       then String.sub path (String.length work_dir + 1) (String.length path - String.length work_dir - 1)
       else path
     in

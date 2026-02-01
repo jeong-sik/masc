@@ -266,6 +266,19 @@ let resources : mcp_resource list = [
     description = "Task state machine rules as JSON";
     mime_type = "application/json";
   };
+  (* Agent Being Protocol - Institution Memory *)
+  {
+    uri = "masc://institution";
+    name = "Institution Memory";
+    description = "Institutional knowledge: mission, values, procedural memory, succession policy";
+    mime_type = "text/markdown";
+  };
+  {
+    uri = "masc://institution.json";
+    name = "Institution Memory (JSON)";
+    description = "Institutional knowledge as JSON for agent onboarding";
+    mime_type = "application/json";
+  };
 ]
 
 let resource_templates : mcp_resource_template list = [

@@ -544,19 +544,16 @@ let format_for_welcome (inst : institution) : string =
     Returns empty string if no institution exists.
 *)
 let load_and_format_for_welcome ~fs:_ (config : config) : string =
-  (* Use stdlib file I/O instead of Eio to avoid cwd/path issues *)
+  (* Use stdlib file I/O - Eio fs has cwd path issues with absolute paths *)
   let file = institution_file config in
-  Printf.eprintf "[DEBUG] institution file: %s exists=%b\n%!" file (Sys.file_exists file);
   if Sys.file_exists file then
     try
       let content = In_channel.with_open_text file In_channel.input_all in
-      Printf.eprintf "[DEBUG] institution content len=%d\n%!" (String.length content);
       let json = Yojson.Safe.from_string content in
       let inst = institution_of_json json in
-      let result = format_for_welcome inst in
-      Printf.eprintf "[DEBUG] institution welcome len=%d\n%!" (String.length result);
-      result
-    with exn ->
-      Printf.eprintf "[DEBUG] institution parse error: %s\n%!" (Printexc.to_string exn);
-      ""
+      format_for_welcome inst
+    with
+    | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+    | exn ->
+        Printf.eprintf "[WARN] Unexpected institution load error: %s\n%!" (Printexc.to_string exn); ""
   else ""

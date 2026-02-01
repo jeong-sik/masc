@@ -964,20 +964,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (* Cultural Inheritance: append institution welcome to join response *)
       let institution_welcome = match state.Mcp_server.fs with
         | Some fs ->
-            Eio.traceln "[DEBUG] Cultural Inheritance: fs=Some, loading institution...";
-            (try
-               let w = Institution_eio.load_and_format_for_welcome ~fs config in
-               Eio.traceln "[DEBUG] Cultural Inheritance: loaded, len=%d" (String.length w);
-               w
+            (try Institution_eio.load_and_format_for_welcome ~fs config
              with
-             | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ as e ->
-                 Eio.traceln "[WARN] Institution parse error: %s" (Printexc.to_string e); ""
+             | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
              | exn ->
-                 Eio.traceln "[WARN] Unexpected error loading institution: %s" (Printexc.to_string exn);
-                 "")
-        | None ->
-            Eio.traceln "[DEBUG] Cultural Inheritance: fs=None, skipping";
-            ""
+                 Eio.traceln "[WARN] Unexpected institution error: %s" (Printexc.to_string exn); "")
+        | None -> ""
       in
       let final_result = if institution_welcome = "" then result
         else result ^ institution_welcome in

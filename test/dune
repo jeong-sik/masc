@@ -26,6 +26,12 @@
  (libraries masc_mcp mcp_protocol alcotest str yojson mirage-crypto
             mirage-crypto-rng cohttp cstruct))
 
+; Message Schema tests (Phase 1: structured message validation)
+(test
+ (name test_message_schema)
+ (modules test_message_schema)
+ (libraries masc_mcp alcotest yojson))
+
 ; ============================================================
 ; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
 ; ============================================================

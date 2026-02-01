@@ -29,6 +29,7 @@ let get_string_list args key =
 type context = {
   base_path: string;
   agent_name: string;
+  room_config: Room.config option;  (* For broadcasting notifications *)
 }
 
 type result = bool * string
@@ -71,9 +72,17 @@ let handle_debate_argue ctx args =
       | "oppose" -> Debate.Oppose
       | _ -> Debate.Neutral
     in
-    (* TODO: Wire up actual notify_fn to MASC broadcast *)
+    (* Broadcast notifications via MASC Room *)
     let notify_fn = Some (fun ~agent ~message -> 
-      Printf.eprintf "[Council] Notify %s: %s\n%!" agent message
+      Printf.eprintf "[Council] Notify %s: %s\n%!" agent message;
+      match ctx.room_config with
+      | None -> ()
+      | Some room_cfg ->
+        (* Send targeted message to the mentioned agent *)
+        let _ = Room.broadcast room_cfg 
+          ~from_agent:ctx.agent_name 
+          ~content:(Printf.sprintf "@%s %s" agent message) in
+        ()
     ) in
     match DebateApi.add_argument ~config ~debate_id ~agent:ctx.agent_name 
             ~position ~content ~evidence ~reply_to ~mentions ~notify_fn () with
@@ -275,6 +284,70 @@ let handle_council_status ctx _args =
   let json = Council.status ~config in
   (true, Yojson.Safe.pretty_to_string json)
 
+(** Archive a record (requires Eio context - placeholder) *)
+let handle_archive_save _ctx args =
+  let type_str = get_string args "type" "decision" in
+  let content = get_string args "content" "" in
+  let agents = get_string_list args "agents" in
+  if content = "" then
+    (false, "Error: content is required")
+  else
+    let record_type = match String.lowercase_ascii type_str with
+      | "debate" -> Archive.Debate
+      | "vote" -> Archive.Vote
+      | "post" -> Archive.Post
+      | _ -> Archive.Decision
+    in
+    let record = Archive.create_record ~type_:record_type ~content ~agents () in
+    (* Note: Actual save requires Eio context, done via server-side *)
+    let json = `Assoc [
+      ("id", `String record.Archive.id);
+      ("type", `String (Archive.record_type_to_string record.type_));
+      ("content", `String record.content);
+      ("agents", `List (List.map (fun a -> `String a) record.agents));
+      ("timestamp", `String record.timestamp);
+      ("note", `String "Record created. Neo4j save requires server context.");
+    ] in
+    (true, Yojson.Safe.pretty_to_string json)
+
+(** Execute decision after voting *)
+let handle_execute _ctx args =
+  let topic = get_string args "topic" "" in
+  let result_str = get_string args "result" "majority" in
+  if topic = "" then
+    (false, "Error: topic is required")
+  else
+    (* Parse result string to Consensus.voting_result *)
+    let result = match String.lowercase_ascii result_str with
+      | "unanimous" -> Consensus.Unanimous Consensus.Approve
+      | "deadlock" -> Consensus.Deadlock
+      | _ -> Consensus.Majority 2  (* Default to majority *)
+    in
+    match Council.ExecutorApi.execute ~topic ~result with
+    | None -> (false, "No action matched or threshold not met")
+    | Some exec_result ->
+      let json = `Assoc [
+        ("success", `Bool exec_result.Executor.success);
+        ("output", `String exec_result.output);
+        ("timestamp", `Float exec_result.timestamp);
+      ] in
+      (exec_result.success, Yojson.Safe.pretty_to_string json)
+
+(** Dry run - show what would happen *)
+let handle_execute_dry_run _ctx args =
+  let topic = get_string args "topic" "" in
+  let result_str = get_string args "result" "majority" in
+  if topic = "" then
+    (false, "Error: topic is required")
+  else
+    let result = match String.lowercase_ascii result_str with
+      | "unanimous" -> Consensus.Unanimous Consensus.Approve
+      | "deadlock" -> Consensus.Deadlock
+      | _ -> Consensus.Majority 2
+    in
+    let output = Council.ExecutorApi.dry_run ~topic ~result in
+    (true, output)
+
 (** {1 Dispatch} *)
 
 let dispatch ctx ~name ~args : result option =
@@ -295,6 +368,11 @@ let dispatch ctx ~name ~args : result option =
   | "masc_route" -> Some (handle_route ctx args)
   (* Status *)
   | "masc_council_status" -> Some (handle_council_status ctx args)
+  (* Executor *)
+  | "masc_execute" -> Some (handle_execute ctx args)
+  | "masc_execute_dry_run" -> Some (handle_execute_dry_run ctx args)
+  (* Archive *)
+  | "masc_archive_save" -> Some (handle_archive_save ctx args)
   | _ -> None
 
 (** {1 Tool Definitions} *)

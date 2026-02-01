@@ -773,7 +773,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_worktree : Tool_worktree.context = { config; agent_name } in
   let simple_ctx_vote : Tool_vote.context = { config; agent_name } in
   let simple_ctx_social : Tool_social.context = { config; agent_name } in
-  let simple_ctx_council : Tool_council.context = { base_path = config.base_path; agent_name } in
+  let simple_ctx_council : Tool_council.context = { 
+    base_path = config.base_path; 
+    agent_name;
+    room_config = Some config;
+  } in
   let simple_ctx_a2a : Tool_a2a.context = { config; agent_name } in
   let handover_ctx : Tool_handover.context = {
     config; agent_name;
@@ -1590,15 +1594,16 @@ Time: %s
       let siblings = List.filter (fun (_, _, _) -> true) all_statuses in
 
       (* Count episodes from PostgreSQL (memory count) *)
-      let agent_name = raw_agent_name () in
+      (* Use cell.id as agent identifier for episode lookup *)
+      let cell_id = cell.Mitosis.id in
       let episode_count, recent_episode =
         match state.Mcp_server.env with
         | Some env ->
           (try
-            Eio.Switch.run (fun sw ->
-              match Jiphyeon.Archive.get_agent_episodes ~sw ~env agent_name 5 with
-              | Ok episodes -> (List.length episodes, List.nth_opt episodes 0)
-              | Error _ -> (0, None))
+            (* Use existing sw from execute_tool_eio *)
+            (match Jiphyeon.Archive.get_agent_episodes ~sw ~env cell_id 5 with
+             | Ok episodes -> (List.length episodes, List.nth_opt episodes 0)
+             | Error _ -> (0, None))
           with _ -> (0, None))
         | None -> (0, None)
       in
@@ -1615,8 +1620,7 @@ Time: %s
 
       let response = `Assoc [
         ("generation", `Int generation);
-        ("cell_id", `String cell.Mitosis.id);
-        ("agent_name", `String agent_name);
+        ("cell_id", `String cell_id);
         ("context_used", `Float estimated_ratio);
         ("status", `String status);
         ("tool_calls", `Int tool_calls);

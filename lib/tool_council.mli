@@ -3,6 +3,7 @@
 type context = {
   base_path: string;
   agent_name: string;
+  room_config: Room.config option;
 }
 
 type result = bool * string

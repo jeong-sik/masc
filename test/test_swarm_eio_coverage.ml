@@ -210,29 +210,24 @@ let test_behavior_to_string_quorum () =
   check string "quorum_sensing" "quorum_sensing" (Swarm_eio.behavior_to_string Swarm_eio.Quorum_sensing)
 
 let test_behavior_of_string_flocking () =
-  match Swarm_eio.behavior_of_string "flocking" with
-  | Swarm_eio.Flocking -> check bool "flocking" true true
-  | _ -> fail "expected Flocking"
+  let b = Swarm_eio.behavior_of_string "flocking" in
+  check string "flocking roundtrip" "flocking" (Swarm_eio.behavior_to_string b)
 
 let test_behavior_of_string_foraging () =
-  match Swarm_eio.behavior_of_string "foraging" with
-  | Swarm_eio.Foraging -> check bool "foraging" true true
-  | _ -> fail "expected Foraging"
+  let b = Swarm_eio.behavior_of_string "foraging" in
+  check string "foraging roundtrip" "foraging" (Swarm_eio.behavior_to_string b)
 
 let test_behavior_of_string_stigmergy () =
-  match Swarm_eio.behavior_of_string "stigmergy" with
-  | Swarm_eio.Stigmergy -> check bool "stigmergy" true true
-  | _ -> fail "expected Stigmergy"
+  let b = Swarm_eio.behavior_of_string "stigmergy" in
+  check string "stigmergy roundtrip" "stigmergy" (Swarm_eio.behavior_to_string b)
 
 let test_behavior_of_string_quorum () =
-  match Swarm_eio.behavior_of_string "quorum_sensing" with
-  | Swarm_eio.Quorum_sensing -> check bool "quorum_sensing" true true
-  | _ -> fail "expected Quorum_sensing"
+  let b = Swarm_eio.behavior_of_string "quorum_sensing" in
+  check string "quorum roundtrip" "quorum_sensing" (Swarm_eio.behavior_to_string b)
 
 let test_behavior_of_string_unknown () =
-  match Swarm_eio.behavior_of_string "unknown" with
-  | Swarm_eio.Flocking -> check bool "default flocking" true true
-  | _ -> fail "expected default Flocking"
+  let b = Swarm_eio.behavior_of_string "unknown" in
+  check string "unknown defaults to flocking" "flocking" (Swarm_eio.behavior_to_string b)
 
 let test_status_to_string () =
   check string "pending" "pending" (Swarm_eio.status_to_string `Pending);
@@ -241,11 +236,11 @@ let test_status_to_string () =
   check string "expired" "expired" (Swarm_eio.status_to_string `Expired)
 
 let test_status_of_string () =
-  check bool "pending" true (Swarm_eio.status_of_string "pending" = `Pending);
-  check bool "passed" true (Swarm_eio.status_of_string "passed" = `Passed);
-  check bool "rejected" true (Swarm_eio.status_of_string "rejected" = `Rejected);
-  check bool "expired" true (Swarm_eio.status_of_string "expired" = `Expired);
-  check bool "unknown" true (Swarm_eio.status_of_string "unknown" = `Pending)
+  check string "pending" "pending" (Swarm_eio.status_to_string (Swarm_eio.status_of_string "pending"));
+  check string "passed" "passed" (Swarm_eio.status_to_string (Swarm_eio.status_of_string "passed"));
+  check string "rejected" "rejected" (Swarm_eio.status_to_string (Swarm_eio.status_of_string "rejected"));
+  check string "expired" "expired" (Swarm_eio.status_to_string (Swarm_eio.status_of_string "expired"));
+  check string "unknown defaults to pending" "pending" (Swarm_eio.status_to_string (Swarm_eio.status_of_string "unknown"))
 
 (* ============================================================
    JSON Roundtrip Tests
@@ -470,15 +465,15 @@ let test_pure_evolve_agents () =
 let test_pure_deposit_pheromone () =
   let swarm = make_test_swarm () in
   let updated = Swarm_eio.Pure.deposit_pheromone swarm
-    ~path_id:"path1" ~agent_id:"a1" ~strength:0.5 ~now:2000.0 in
+    ~path_id:"path1" ~agent_id:"a1" ~strength:(n 0.5) ~now:2000.0 in
   check int "one pheromone" 1 (List.length updated.pheromones)
 
 let test_pure_deposit_pheromone_update () =
   let swarm = make_test_swarm () in
   let s1 = Swarm_eio.Pure.deposit_pheromone swarm
-    ~path_id:"path1" ~agent_id:"a1" ~strength:0.5 ~now:2000.0 in
+    ~path_id:"path1" ~agent_id:"a1" ~strength:(n 0.5) ~now:2000.0 in
   let s2 = Swarm_eio.Pure.deposit_pheromone s1
-    ~path_id:"path1" ~agent_id:"a2" ~strength:0.3 ~now:2001.0 in
+    ~path_id:"path1" ~agent_id:"a2" ~strength:(n 0.3) ~now:2001.0 in
   check int "still one pheromone" 1 (List.length s2.pheromones);
   let p = List.hd s2.pheromones in
   check bool "strength increased" true (nf p.strength > 0.5)
@@ -486,7 +481,7 @@ let test_pure_deposit_pheromone_update () =
 let test_pure_evaporate_pheromones () =
   let swarm = make_test_swarm () in
   let s1 = Swarm_eio.Pure.deposit_pheromone swarm
-    ~path_id:"path1" ~agent_id:"a1" ~strength:0.1 ~now:1000.0 in
+    ~path_id:"path1" ~agent_id:"a1" ~strength:(n 0.1) ~now:1000.0 in
   (* After many hours, pheromone should evaporate *)
   let s2 = Swarm_eio.Pure.evaporate_pheromones s1 ~now:100000.0 in
   check int "pheromone evaporated" 0 (List.length s2.pheromones)
@@ -494,9 +489,9 @@ let test_pure_evaporate_pheromones () =
 let test_pure_strongest_trails () =
   let swarm = make_test_swarm () in
   let s1 = Swarm_eio.Pure.deposit_pheromone swarm
-    ~path_id:"path1" ~agent_id:"a1" ~strength:0.9 ~now:2000.0 in
+    ~path_id:"path1" ~agent_id:"a1" ~strength:(n 0.9) ~now:2000.0 in
   let s2 = Swarm_eio.Pure.deposit_pheromone s1
-    ~path_id:"path2" ~agent_id:"a1" ~strength:0.3 ~now:2001.0 in
+    ~path_id:"path2" ~agent_id:"a1" ~strength:(n 0.3) ~now:2001.0 in
   let trails = Swarm_eio.Pure.strongest_trails s2 ~limit:1 in
   check int "one trail" 1 (List.length trails);
   check string "strongest path" "path1" (List.hd trails).path_id
@@ -631,23 +626,23 @@ let test_eio_join () =
   with_eio_env @@ fun ~fs config ->
   let _ = Swarm_eio.create ~fs config () in
   match Swarm_eio.join ~fs config ~agent_id:"a1" ~agent_name:"claude" with
-  | Some swarm -> check int "one agent" 1 (List.length swarm.agents)
-  | None -> fail "expected join success"
+  | Ok swarm -> check int "one agent" 1 (List.length swarm.agents)
+  | Error e -> fail ("expected join success: " ^ e)
 
 let test_eio_join_no_swarm () =
   with_eio_env @@ fun ~fs config ->
   (* Don't create swarm first *)
   match Swarm_eio.join ~fs config ~agent_id:"a1" ~agent_name:"claude" with
-  | None -> check bool "no swarm" true true
-  | Some _ -> fail "expected None"
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for missing swarm"
 
 let test_eio_leave () =
   with_eio_env @@ fun ~fs config ->
   let _ = Swarm_eio.create ~fs config () in
   let _ = Swarm_eio.join ~fs config ~agent_id:"a1" ~agent_name:"claude" in
   match Swarm_eio.leave ~fs config ~agent_id:"a1" with
-  | Some swarm -> check int "no agents" 0 (List.length swarm.agents)
-  | None -> fail "expected leave success"
+  | Ok swarm -> check int "no agents" 0 (List.length swarm.agents)
+  | Error e -> fail ("expected leave success: " ^ e)
 
 let test_eio_dissolve () =
   with_eio_env @@ fun ~fs config ->
@@ -655,8 +650,8 @@ let test_eio_dissolve () =
   Swarm_eio.dissolve ~fs config;
   (* join should fail after dissolve *)
   match Swarm_eio.join ~fs config ~agent_id:"a1" ~agent_name:"claude" with
-  | None -> check bool "dissolved" true true
-  | Some _ -> fail "expected dissolved"
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error after dissolve"
 
 let test_eio_get_fitness_rankings () =
   with_eio_env @@ fun ~fs config ->
@@ -678,8 +673,8 @@ let test_eio_evolve () =
   let _ = Swarm_eio.create ~fs config () in
   let _ = Swarm_eio.join ~fs config ~agent_id:"a1" ~agent_name:"claude" in
   match Swarm_eio.evolve ~fs config () with
-  | Some swarm -> check int "generation 1" 1 swarm.generation
-  | None -> fail "expected evolve success"
+  | Ok swarm -> check int "generation 1" 1 swarm.generation
+  | Error e -> fail ("expected evolve success: " ^ e)
 
 (* ============================================================
    P0 #4: Integration Tests (JSON errors, RNG determinism)

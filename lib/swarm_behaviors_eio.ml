@@ -14,7 +14,6 @@ type flocking_params = {
 type foraging_state = {
   exploration_rate: float;
   discovered_solutions: (string * float) list;
-  current_target: string option;
 }
 
 type stigmergy_config = {
@@ -122,7 +121,6 @@ let flock_towards_fitness ~positions ~self ?(params = default_flocking_params) (
 let init_foraging ?(exploration_rate = 0.3) () = {
   exploration_rate;
   discovered_solutions = [];
-  current_target = None;
 }
 
 let select_solution ~rng ~foraging_state =
@@ -143,7 +141,8 @@ let record_discovery ~foraging_state ~solution_id ~quality =
   { foraging_state with discovered_solutions = solutions }
 
 let share_discovery ~fs config ~agent_id ~solution_id ~quality =
-  Swarm_eio.deposit_pheromone ~fs config ~path_id:solution_id ~agent_id ~strength:quality
+  let strength = Level4_config.Strength.of_float_clamped quality in
+  Swarm_eio.deposit_pheromone ~fs config ~path_id:solution_id ~agent_id ~strength
 
 (** {1 Stigmergy Behavior} *)
 
@@ -166,7 +165,8 @@ let follow_pheromone ~fs config ?(stigmergy = default_stigmergy_config)
       select 0.0 trails
 
 let mark_success ~fs config ~agent_id ~path_id ?(stigmergy = default_stigmergy_config) () =
-  Swarm_eio.deposit_pheromone ~fs config ~path_id ~agent_id ~strength:stigmergy.deposit_rate
+  let strength = Level4_config.Strength.of_float_clamped stigmergy.deposit_rate in
+  Swarm_eio.deposit_pheromone ~fs config ~path_id ~agent_id ~strength
 
 (** {1 Quorum Sensing Behavior} *)
 

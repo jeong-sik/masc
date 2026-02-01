@@ -48,8 +48,8 @@ let handle_join ctx args : result =
   match ctx.fs with
   | Some fs ->
       (match Swarm_eio.join ~fs ctx.config ~agent_id:join_agent_name ~agent_name:join_agent_name with
-       | Some _ -> (true, Printf.sprintf "✅ Agent %s joined the swarm" join_agent_name)
-       | None -> (false, "❌ Failed to join swarm (full or nonexistent)"))
+       | Ok _ -> (true, Printf.sprintf "✅ Agent %s joined the swarm" join_agent_name)
+       | Error e -> (false, "❌ " ^ e))
   | None -> (false, "❌ Filesystem not available")
 
 (** Handle masc_swarm_leave *)
@@ -58,8 +58,8 @@ let handle_leave ctx args : result =
   match ctx.fs with
   | Some fs ->
       (match Swarm_eio.leave ~fs ctx.config ~agent_id:leave_agent_name with
-       | Some _ -> (true, Printf.sprintf "✅ Agent %s left the swarm" leave_agent_name)
-       | None -> (false, "❌ Failed to leave swarm"))
+       | Ok _ -> (true, Printf.sprintf "✅ Agent %s left the swarm" leave_agent_name)
+       | Error e -> (false, "❌ " ^ e))
   | None -> (false, "❌ Filesystem not available")
 
 (** Handle masc_swarm_status *)
@@ -73,8 +73,8 @@ let handle_evolve ctx _args : result =
   match ctx.fs with
   | Some fs ->
       (match Swarm_eio.evolve ~fs ctx.config () with
-       | Some s -> (true, Printf.sprintf "✅ Swarm evolved to generation %d" s.generation)
-       | None -> (false, "❌ Evolution failed"))
+       | Ok s -> (true, Printf.sprintf "✅ Swarm evolved to generation %d" s.generation)
+       | Error e -> (false, "❌ " ^ e))
   | None -> (false, "❌ Filesystem not available")
 
 (** Handle masc_swarm_propose *)
@@ -84,8 +84,8 @@ let handle_propose ctx args : result =
   match ctx.fs with
   | Some fs ->
       (match Swarm_eio.propose ~fs ctx.config ~description ~proposed_by:ctx.agent_name ?threshold () with
-       | Some p -> (true, Printf.sprintf "✅ Proposal %s created" p.proposal_id)
-       | None -> (false, "❌ Failed to create proposal"))
+       | Ok p -> (true, Printf.sprintf "✅ Proposal %s created" p.proposal_id)
+       | Error e -> (false, "❌ " ^ e))
   | None -> (false, "❌ Filesystem not available")
 
 (** Handle masc_swarm_vote *)
@@ -95,19 +95,19 @@ let handle_vote ctx args : result =
   match ctx.fs with
   | Some fs ->
       (match Swarm_eio.vote ~fs ctx.config ~proposal_id ~agent_id:ctx.agent_name ~vote_for with
-       | Some p -> (true, Printf.sprintf "✅ Vote recorded. Status: %s" (Swarm_eio.status_to_string p.status))
-       | None -> (false, "❌ Failed to record vote"))
+       | Ok p -> (true, Printf.sprintf "✅ Vote recorded. Status: %s" (Swarm_eio.status_to_string p.status))
+       | Error e -> (false, "❌ " ^ e))
   | None -> (false, "❌ Filesystem not available")
 
 (** Handle masc_swarm_deposit *)
 let handle_deposit ctx args : result =
   let path_id = get_string args "path_id" "" in
-  let strength = get_float args "strength" 0.2 in
+  let strength = Level4_config.Strength.of_float_clamped (get_float args "strength" 0.2) in
   match ctx.fs with
   | Some fs ->
       (match Swarm_eio.deposit_pheromone ~fs ctx.config ~path_id ~agent_id:ctx.agent_name ~strength with
-       | Some _ -> (true, Printf.sprintf "✅ Pheromone deposited on path: %s" path_id)
-       | None -> (false, "❌ Failed to deposit pheromone"))
+       | Ok _ -> (true, Printf.sprintf "✅ Pheromone deposited on path: %s" path_id)
+       | Error e -> (false, "❌ " ^ e))
   | None -> (false, "❌ Filesystem not available")
 
 (** Handle masc_swarm_trails *)

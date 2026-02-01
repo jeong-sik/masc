@@ -208,18 +208,3 @@ module Strength = Normalized
 (** Threshold: Normalized alias for quorum thresholds *)
 module Threshold = Normalized
 
-(** Clamp float to valid range *)
-let clamp_float ~min ~max f =
-  if f < min then min
-  else if f > max then max
-  else f
-
-(** Validate fitness value (0.0-1.0) *)
-let validate_fitness f =
-  if not (is_finite f) then None
-  else Some (clamp_float ~min:0.0 ~max:1.0 f)
-
-(** Validate non-negative float *)
-let validate_positive f =
-  if not (is_finite f) || f < 0.0 then None
-  else Some f

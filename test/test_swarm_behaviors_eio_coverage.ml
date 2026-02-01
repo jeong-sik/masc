@@ -115,20 +115,17 @@ let test_foraging_state_type () =
   let s : Swarm_behaviors_eio.foraging_state = {
     exploration_rate = 0.3;
     discovered_solutions = [("solution_a", 0.9); ("solution_b", 0.7)];
-    current_target = Some "solution_a";
   } in
   check (float 0.01) "exploration_rate" 0.3 s.exploration_rate;
   check int "solutions count" 2 (List.length s.discovered_solutions)
 
-let test_foraging_state_no_target () =
+let test_foraging_state_empty () =
   let s : Swarm_behaviors_eio.foraging_state = {
     exploration_rate = 0.5;
     discovered_solutions = [];
-    current_target = None;
   } in
-  match s.current_target with
-  | None -> check bool "no target" true true
-  | Some _ -> fail "expected None"
+  check (float 0.01) "exploration_rate" 0.5 s.exploration_rate;
+  check int "no solutions" 0 (List.length s.discovered_solutions)
 
 (* ============================================================
    stigmergy_config Type Tests
@@ -257,8 +254,7 @@ let test_flock_towards_fitness_with_high () =
 let test_init_foraging_default () =
   let state = Swarm_behaviors_eio.init_foraging () in
   check (float 0.01) "default exploration rate" 0.3 state.exploration_rate;
-  check int "no solutions" 0 (List.length state.discovered_solutions);
-  check bool "no target" true (state.current_target = None)
+  check int "no solutions" 0 (List.length state.discovered_solutions)
 
 let test_init_foraging_custom () =
   let state = Swarm_behaviors_eio.init_foraging ~exploration_rate:0.5 () in
@@ -275,7 +271,7 @@ let test_select_solution_with_solutions () =
   let state : Swarm_behaviors_eio.foraging_state = {
     exploration_rate = 0.0; (* Never explore, always exploit *)
     discovered_solutions = [("sol1", 0.5); ("sol2", 0.9); ("sol3", 0.3)];
-    current_target = None;
+
   } in
   let selected = Swarm_behaviors_eio.select_solution ~rng ~foraging_state:state in
   match selected with
@@ -291,7 +287,7 @@ let test_record_discovery_better () =
   let state : Swarm_behaviors_eio.foraging_state = {
     exploration_rate = 0.3;
     discovered_solutions = [("sol1", 0.5)];
-    current_target = None;
+
   } in
   let updated = Swarm_behaviors_eio.record_discovery ~foraging_state:state ~solution_id:"sol1" ~quality:0.9 in
   check int "still one solution" 1 (List.length updated.discovered_solutions);
@@ -302,7 +298,7 @@ let test_record_discovery_worse () =
   let state : Swarm_behaviors_eio.foraging_state = {
     exploration_rate = 0.3;
     discovered_solutions = [("sol1", 0.9)];
-    current_target = None;
+
   } in
   let updated = Swarm_behaviors_eio.record_discovery ~foraging_state:state ~solution_id:"sol1" ~quality:0.3 in
   let q = List.assoc "sol1" updated.discovered_solutions in
@@ -350,8 +346,8 @@ let test_share_discovery () =
   (* Create swarm first *)
   let _ = Swarm_eio.create ~fs config () in
   match Swarm_behaviors_eio.share_discovery ~fs config ~agent_id:"a1" ~solution_id:"sol1" ~quality:0.8 with
-  | Some swarm -> check int "one pheromone" 1 (List.length swarm.pheromones)
-  | None -> fail "expected share success"
+  | Ok swarm -> check int "one pheromone" 1 (List.length swarm.pheromones)
+  | Error e -> fail ("expected share success: " ^ e)
 
 let test_follow_pheromone_empty () =
   with_eio_env @@ fun ~fs config ->
@@ -365,7 +361,7 @@ let test_follow_pheromone_with_trail () =
   with_eio_env @@ fun ~fs config ->
   let _ = Swarm_eio.create ~fs config () in
   (* Deposit a strong pheromone *)
-  let _ = Swarm_eio.deposit_pheromone ~fs config ~path_id:"path1" ~agent_id:"a1" ~strength:0.9 in
+  let _ = Swarm_eio.deposit_pheromone ~fs config ~path_id:"path1" ~agent_id:"a1" ~strength:(Level4_config.Strength.of_float_clamped 0.9) in
   match Swarm_behaviors_eio.follow_pheromone ~fs config () with
   | Some "path1" -> check bool "found trail" true true
   | _ -> check bool "found or random" true true (* Could be random selection *)
@@ -374,9 +370,9 @@ let test_mark_success () =
   with_eio_env @@ fun ~fs config ->
   let _ = Swarm_eio.create ~fs config () in
   match Swarm_behaviors_eio.mark_success ~fs config ~agent_id:"a1" ~path_id:"success-path" () with
-  | Some swarm ->
+  | Ok swarm ->
       check bool "has pheromone" true (List.length swarm.pheromones > 0)
-  | None -> fail "expected mark success"
+  | Error e -> fail ("expected mark success: " ^ e)
 
 let test_check_quorum_no_swarm () =
   with_eio_env @@ fun ~fs config ->
@@ -419,7 +415,7 @@ let () =
     ];
     "foraging_state", [
       test_case "type" `Quick test_foraging_state_type;
-      test_case "no target" `Quick test_foraging_state_no_target;
+      test_case "empty" `Quick test_foraging_state_empty;
     ];
     "stigmergy_config", [
       test_case "type" `Quick test_stigmergy_config_type;

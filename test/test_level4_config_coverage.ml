@@ -165,82 +165,6 @@ let test_is_finite_neg_infinity () =
 let test_is_finite_nan () =
   check bool "nan" false (Level4_config.is_finite nan)
 
-(* ============================================================
-   clamp_float Tests
-   ============================================================ *)
-
-let test_clamp_float_in_range () =
-  let result = Level4_config.clamp_float ~min:0.0 ~max:1.0 0.5 in
-  check (float 0.001) "in range" 0.5 result
-
-let test_clamp_float_below_min () =
-  let result = Level4_config.clamp_float ~min:0.0 ~max:1.0 (-0.5) in
-  check (float 0.001) "clamped to min" 0.0 result
-
-let test_clamp_float_above_max () =
-  let result = Level4_config.clamp_float ~min:0.0 ~max:1.0 1.5 in
-  check (float 0.001) "clamped to max" 1.0 result
-
-let test_clamp_float_at_min () =
-  let result = Level4_config.clamp_float ~min:0.0 ~max:1.0 0.0 in
-  check (float 0.001) "at min" 0.0 result
-
-let test_clamp_float_at_max () =
-  let result = Level4_config.clamp_float ~min:0.0 ~max:1.0 1.0 in
-  check (float 0.001) "at max" 1.0 result
-
-(* ============================================================
-   validate_fitness Tests
-   ============================================================ *)
-
-let test_validate_fitness_valid () =
-  match Level4_config.validate_fitness 0.5 with
-  | Some f -> check (float 0.001) "valid" 0.5 f
-  | None -> fail "expected Some"
-
-let test_validate_fitness_below_zero () =
-  match Level4_config.validate_fitness (-0.5) with
-  | Some f -> check (float 0.001) "clamped to 0" 0.0 f
-  | None -> fail "expected Some"
-
-let test_validate_fitness_above_one () =
-  match Level4_config.validate_fitness 1.5 with
-  | Some f -> check (float 0.001) "clamped to 1" 1.0 f
-  | None -> fail "expected Some"
-
-let test_validate_fitness_nan () =
-  match Level4_config.validate_fitness nan with
-  | None -> check bool "nan invalid" true true
-  | Some _ -> fail "expected None"
-
-let test_validate_fitness_infinity () =
-  match Level4_config.validate_fitness infinity with
-  | None -> check bool "infinity invalid" true true
-  | Some _ -> fail "expected None"
-
-(* ============================================================
-   validate_positive Tests
-   ============================================================ *)
-
-let test_validate_positive_valid () =
-  match Level4_config.validate_positive 1.0 with
-  | Some f -> check (float 0.001) "valid" 1.0 f
-  | None -> fail "expected Some"
-
-let test_validate_positive_zero () =
-  match Level4_config.validate_positive 0.0 with
-  | Some f -> check (float 0.001) "zero" 0.0 f
-  | None -> fail "expected Some"
-
-let test_validate_positive_negative () =
-  match Level4_config.validate_positive (-1.0) with
-  | None -> check bool "negative invalid" true true
-  | Some _ -> fail "expected None"
-
-let test_validate_positive_nan () =
-  match Level4_config.validate_positive nan with
-  | None -> check bool "nan invalid" true true
-  | Some _ -> fail "expected None"
 
 (* ============================================================
    Fitness Module Tests
@@ -441,26 +365,6 @@ let () =
       test_case "infinity" `Quick test_is_finite_infinity;
       test_case "neg_infinity" `Quick test_is_finite_neg_infinity;
       test_case "nan" `Quick test_is_finite_nan;
-    ];
-    "clamp_float", [
-      test_case "in_range" `Quick test_clamp_float_in_range;
-      test_case "below_min" `Quick test_clamp_float_below_min;
-      test_case "above_max" `Quick test_clamp_float_above_max;
-      test_case "at_min" `Quick test_clamp_float_at_min;
-      test_case "at_max" `Quick test_clamp_float_at_max;
-    ];
-    "validate_fitness", [
-      test_case "valid" `Quick test_validate_fitness_valid;
-      test_case "below_zero" `Quick test_validate_fitness_below_zero;
-      test_case "above_one" `Quick test_validate_fitness_above_one;
-      test_case "nan" `Quick test_validate_fitness_nan;
-      test_case "infinity" `Quick test_validate_fitness_infinity;
-    ];
-    "validate_positive", [
-      test_case "valid" `Quick test_validate_positive_valid;
-      test_case "zero" `Quick test_validate_positive_zero;
-      test_case "negative" `Quick test_validate_positive_negative;
-      test_case "nan" `Quick test_validate_positive_nan;
     ];
     "fitness", [
       test_case "of_float valid" `Quick test_fitness_of_float_valid;

@@ -183,6 +183,57 @@ let html () = {|<!DOCTYPE html>
     .tempo-badge.fast { background: rgba(34,211,238,0.2); color: #22d3ee; }
     .tempo-badge.paused { background: rgba(248,113,113,0.2); color: #f87171; }
 
+    /* Board */
+    .board-list { display: flex; flex-direction: column; gap: 12px; max-height: 500px; overflow-y: auto; }
+    .board-post {
+      padding: 14px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 8px;
+      border-left: 3px solid #22d3ee;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .board-post:hover { background: rgba(255,255,255,0.08); }
+    .board-post-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .board-post-author { color: #22d3ee; font-weight: 600; font-size: 13px; }
+    .board-post-time { color: #666; font-size: 11px; }
+    .board-post-content { color: #ccc; font-size: 13px; line-height: 1.5; margin-bottom: 8px;
+      overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+    .board-post-footer { display: flex; gap: 12px; font-size: 11px; color: #666; }
+    .board-post-footer span { display: flex; align-items: center; gap: 4px; }
+    .board-comment {
+      padding: 10px 14px;
+      margin-left: 20px;
+      background: rgba(255,255,255,0.02);
+      border-left: 2px solid #4ade80;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #aaa;
+    }
+    .board-comment-author { color: #4ade80; font-weight: 500; }
+    .board-detail { display: none; }
+    .board-detail.active { display: block; }
+    .board-back { color: #22d3ee; cursor: pointer; font-size: 12px; margin-bottom: 10px; }
+    .board-back:hover { text-decoration: underline; }
+
+    /* Tabs */
+    .tab-bar { display: flex; gap: 4px; margin-bottom: 15px; }
+    .tab-btn {
+      padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
+      background: rgba(255,255,255,0.05); color: #888; border: none; transition: all 0.2s;
+    }
+    .tab-btn.active { background: rgba(74,222,128,0.2); color: #4ade80; }
+
+    /* Journal */
+    .journal-list { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+    .journal-entry {
+      display: flex; gap: 10px; padding: 8px 12px;
+      background: rgba(255,255,255,0.02); border-radius: 6px; font-size: 12px;
+    }
+    .journal-time { color: #666; white-space: nowrap; min-width: 60px; }
+    .journal-agent { color: #22d3ee; min-width: 80px; font-weight: 500; }
+    .journal-action { color: #ccc; flex: 1; }
+
     /* Empty state */
     .empty { color: #666; font-style: italic; padding: 20px; text-align: center; }
   </style>
@@ -225,6 +276,28 @@ let html () = {|<!DOCTYPE html>
         <h2>Recent Broadcasts</h2>
         <div class="message-list" id="message-list">
           <div class="empty">No recent messages</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Board + Journal tabs -->
+    <div class="section" style="margin-bottom: 20px;">
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('board')">📋 Board</button>
+        <button class="tab-btn" onclick="switchTab('journal')">📓 Journal</button>
+      </div>
+      <div id="tab-board">
+        <div id="board-list-view" class="board-list">
+          <div class="empty">Loading board...</div>
+        </div>
+        <div id="board-detail-view" class="board-detail">
+          <div class="board-back" onclick="showBoardList()">← Back to posts</div>
+          <div id="board-detail-content"></div>
+        </div>
+      </div>
+      <div id="tab-journal" style="display:none;">
+        <div class="journal-list" id="journal-list">
+          <div class="empty">Loading journal...</div>
         </div>
       </div>
     </div>
@@ -405,14 +478,133 @@ let html () = {|<!DOCTYPE html>
     function handleEvent(event) {
       const type = event.type || event.event;
       if (type) {
-        fetchData(); // Refresh on any known event
+        fetchData();
+        // Journal logging
+        const agent = event.agent || event.from || event.from_agent || '';
+        if (type === 'agent_joined') addJournalEntry(agent, '🟢 Joined');
+        else if (type === 'agent_left') addJournalEntry(agent, '🔴 Left');
+        else if (type === 'broadcast') addJournalEntry(agent, '📢 ' + (event.message || event.content || '').slice(0,80));
+        else if (type === 'task_update') addJournalEntry(agent, '📋 Task: ' + (event.task_id || '') + ' → ' + (event.status || ''));
+        else if (type === 'board_post') { addJournalEntry(agent, '📝 New post'); fetchBoard(); }
+        else if (type === 'board_comment') { addJournalEntry(agent, '💬 New comment'); fetchBoard(); }
+        else addJournalEntry(agent, type);
+        if (document.getElementById('tab-journal').style.display !== 'none') fetchJournal();
       }
+    }
+
+    // === Tab switching ===
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-board').style.display = tab === 'board' ? 'block' : 'none';
+      document.getElementById('tab-journal').style.display = tab === 'journal' ? 'block' : 'none';
+      event.target.classList.add('active');
+      if (tab === 'journal') fetchJournal();
+    }
+
+    // === Board ===
+    function timeAgo(ts) {
+      const s = Math.floor((Date.now()/1000) - ts);
+      if (s < 60) return s + 's ago';
+      if (s < 3600) return Math.floor(s/60) + 'm ago';
+      if (s < 86400) return Math.floor(s/3600) + 'h ago';
+      return Math.floor(s/86400) + 'd ago';
+    }
+
+    async function fetchBoard() {
+      try {
+        const res = await fetch('/api/v1/board');
+        const data = await res.json();
+        renderBoardList(data.posts || []);
+      } catch(e) { console.error('Board fetch error:', e); }
+    }
+
+    function renderBoardList(posts) {
+      const el = document.getElementById('board-list-view');
+      if (!posts.length) { el.innerHTML = '<div class="empty">No posts yet</div>'; return; }
+      el.innerHTML = posts.map(p => `
+        <div class="board-post" onclick="showPost('${p.id}')">
+          <div class="board-post-header">
+            <span class="board-post-author">${p.author}</span>
+            <span class="board-post-time">${timeAgo(p.created_at)}</span>
+          </div>
+          <div class="board-post-content">${escapeHtml(p.content)}</div>
+          <div class="board-post-footer">
+            <span>↑${p.votes_up} ↓${p.votes_down}</span>
+            <span>💬 ${p.reply_count}</span>
+            <span>${p.visibility}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function showPost(postId) {
+      try {
+        const res = await fetch('/api/v1/board/' + postId);
+        const data = await res.json();
+        const p = data.post;
+        const comments = data.comments || [];
+        const el = document.getElementById('board-detail-content');
+        el.innerHTML = `
+          <div class="board-post" style="cursor:default;">
+            <div class="board-post-header">
+              <span class="board-post-author">${p.author}</span>
+              <span class="board-post-time">${timeAgo(p.created_at)}</span>
+            </div>
+            <div class="board-post-content" style="-webkit-line-clamp:unset;">${escapeHtml(p.content)}</div>
+            <div class="board-post-footer">
+              <span>↑${p.votes_up} ↓${p.votes_down}</span>
+              <span>💬 ${comments.length}</span>
+            </div>
+          </div>
+          ${comments.map(c => `
+            <div class="board-comment">
+              <span class="board-comment-author">${c.author}</span>
+              <span style="color:#666;"> · ${timeAgo(c.created_at)}</span>
+              <div style="margin-top:4px;color:#ccc;">${escapeHtml(c.content)}</div>
+            </div>
+          `).join('')}
+        `;
+        document.getElementById('board-list-view').style.display = 'none';
+        document.getElementById('board-detail-view').classList.add('active');
+      } catch(e) { console.error('Post fetch error:', e); }
+    }
+
+    function showBoardList() {
+      document.getElementById('board-detail-view').classList.remove('active');
+      document.getElementById('board-list-view').style.display = 'flex';
+    }
+
+    // === Journal (SSE event log) ===
+    const journalEntries = [];
+
+    function addJournalEntry(agent, action) {
+      const now = new Date().toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+      journalEntries.unshift({time: now, agent: agent || '?', action: action});
+      if (journalEntries.length > 100) journalEntries.pop();
+    }
+
+    function fetchJournal() {
+      const el = document.getElementById('journal-list');
+      if (!journalEntries.length) { el.innerHTML = '<div class="empty">No activity yet — events appear as they happen</div>'; return; }
+      el.innerHTML = journalEntries.map(e => `
+        <div class="journal-entry">
+          <span class="journal-time">${e.time}</span>
+          <span class="journal-agent">${e.agent}</span>
+          <span class="journal-action">${e.action}</span>
+        </div>
+      `).join('');
     }
 
     // Initial load + polling fallback
     fetchData();
+    fetchBoard();
     connectSSE();
     setInterval(fetchData, 5000); // Fallback polling
+    setInterval(fetchBoard, 10000); // Board refresh
   </script>
 </body>
 </html>|}

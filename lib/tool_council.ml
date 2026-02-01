@@ -177,7 +177,7 @@ let handle_consensus_vote ctx args =
       | "reject" | "no" | "disagree" -> Consensus.Reject
       | _ -> Consensus.Abstain
     in
-    match ConsensusApi.cast ~session_id ~agent:ctx.agent_name ~decision ~reason with
+    match ConsensusApi.cast ~session_id ~agent:ctx.agent_name ~decision ~reason () with
     | Ok session ->
       (true, Printf.sprintf "Vote cast. Total votes: %d/%d" 
         (List.length session.Consensus.votes) session.quorum)

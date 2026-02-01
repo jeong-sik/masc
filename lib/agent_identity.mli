@@ -66,3 +66,23 @@ val channel_to_yojson : channel -> Yojson.Safe.t
 val channel_of_yojson : Yojson.Safe.t -> (channel, string) result
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
+
+(** {1 MAGI Archetype System} *)
+
+(** MAGI archetypes for agent specialization *)
+type archetype =
+  | Melchior   (** 🔬 Scientist *)
+  | Balthasar  (** 🪞 Mirror/Ethics *)
+  | Casper     (** ♟️ Strategist *)
+  | Athena     (** 🧠 Reasoner *)
+  | Generalist (** 🌐 No specialization *)
+
+val archetype_to_string : archetype -> string
+val archetype_of_string : string -> archetype
+val archetype_emoji : archetype -> string
+
+val get_archetype : t -> archetype
+val set_archetype : t -> archetype -> t
+
+val suggest_debate_position : archetype -> string -> [> `Support | `Oppose | `Neutral ]
+val archetype_weight : archetype -> string -> float

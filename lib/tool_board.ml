@@ -64,6 +64,11 @@ let get_int args key default =
   | `Int i -> i
   | _ -> default
 
+let get_bool args key default =
+  match args |> member key with
+  | `Bool b -> b
+  | _ -> default
+
 (** {1 Formatters} *)
 
 let format_post (p : Board.post) =
@@ -124,13 +129,26 @@ let handle_post_list args =
   let store = Board.global () in
   let limit = get_int args "limit" 20 in
   let visibility_str = get_string_opt args "visibility" in
+  let random = get_bool args "random" false in
+  let offset = get_int args "offset" 0 in
 
   let visibility_filter = match visibility_str with
     | Some s -> visibility_of_string s
     | None -> None
   in
 
-  let posts = Board.list_posts store ~visibility_filter ~limit () in
+  let all_posts = Board.list_posts store ~visibility_filter ~limit:(limit + offset + 100) () in
+  let posts =
+    if random then
+      (* Shuffle and take limit *)
+      let shuffled = List.sort (fun _ _ -> Random.int 3 - 1) all_posts in
+      List.filteri (fun i _ -> i < limit) shuffled
+    else if offset > 0 then
+      (* Skip offset, take limit *)
+      List.filteri (fun i _ -> i >= offset && i < offset + limit) all_posts
+    else
+      List.filteri (fun i _ -> i < limit) all_posts
+  in
   if posts = [] then
     (true, "📭 No posts found.")
   else
@@ -219,6 +237,8 @@ let tool_post_list : Types.tool_schema = {
     ("properties", `Assoc [
       ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 100)")]);
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "Filter by visibility: public|unlisted|internal|direct")]);
+      ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
+      ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
     ]);
   ];
 }

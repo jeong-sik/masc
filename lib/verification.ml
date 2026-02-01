@@ -1,0 +1,379 @@
+(** Verification - Cross-agent task output verification for MASC
+
+    Based on MAST taxonomy (ICLR 2025) - task verification failures account
+    for 13.48% of multi-agent system failures. Independent verification
+    ensures Worker Agent ≠ Verifier Agent.
+
+    Design:
+    - File-based storage under .masc/verifications/
+    - Criteria-based checking (schema, contains, custom)
+    - Cross-agent enforcement (worker cannot verify own output)
+    - Integration with existing task lifecycle
+*)
+
+(** Verification criteria *)
+type criterion =
+  | Schema_match of Yojson.Safe.t   (** Output matches JSON schema *)
+  | Contains of string              (** Output must contain string *)
+  | Not_contains of string          (** Output must not contain string *)
+  | Custom of string                (** Natural language criterion for verifier *)
+[@@deriving show, eq]
+
+let criterion_to_yojson = function
+  | Schema_match schema ->
+      `Assoc [("type", `String "schema_match"); ("schema", schema)]
+  | Contains s ->
+      `Assoc [("type", `String "contains"); ("value", `String s)]
+  | Not_contains s ->
+      `Assoc [("type", `String "not_contains"); ("value", `String s)]
+  | Custom s ->
+      `Assoc [("type", `String "custom"); ("description", `String s)]
+
+let criterion_of_yojson = function
+  | `Assoc fields ->
+      (match List.assoc_opt "type" fields with
+       | Some (`String "schema_match") ->
+           (match List.assoc_opt "schema" fields with
+            | Some schema -> Ok (Schema_match schema)
+            | None -> Error "schema_match requires 'schema' field")
+       | Some (`String "contains") ->
+           (match List.assoc_opt "value" fields with
+            | Some (`String s) -> Ok (Contains s)
+            | _ -> Error "contains requires 'value' string field")
+       | Some (`String "not_contains") ->
+           (match List.assoc_opt "value" fields with
+            | Some (`String s) -> Ok (Not_contains s)
+            | _ -> Error "not_contains requires 'value' string field")
+       | Some (`String "custom") ->
+           (match List.assoc_opt "description" fields with
+            | Some (`String s) -> Ok (Custom s)
+            | _ -> Error "custom requires 'description' string field")
+       | Some (`String t) -> Error (Printf.sprintf "unknown criterion type: %s" t)
+       | _ -> Error "criterion requires 'type' field")
+  | _ -> Error "criterion must be a JSON object"
+
+(** Verification verdict *)
+type verdict =
+  | Pass
+  | Fail of string
+  | Partial of float * string  (** score (0.0-1.0), reason *)
+[@@deriving show, eq]
+
+let verdict_to_yojson = function
+  | Pass -> `Assoc [("verdict", `String "pass")]
+  | Fail reason -> `Assoc [("verdict", `String "fail"); ("reason", `String reason)]
+  | Partial (score, reason) ->
+      `Assoc [
+        ("verdict", `String "partial");
+        ("score", `Float score);
+        ("reason", `String reason);
+      ]
+
+let verdict_of_yojson = function
+  | `Assoc fields ->
+      (match List.assoc_opt "verdict" fields with
+       | Some (`String "pass") -> Ok Pass
+       | Some (`String "fail") ->
+           let reason = match List.assoc_opt "reason" fields with
+             | Some (`String s) -> s
+             | _ -> "no reason given"
+           in
+           Ok (Fail reason)
+       | Some (`String "partial") ->
+           let score = match List.assoc_opt "score" fields with
+             | Some (`Float f) -> f
+             | Some (`Int n) -> Float.of_int n
+             | _ -> 0.0
+           in
+           let reason = match List.assoc_opt "reason" fields with
+             | Some (`String s) -> s
+             | _ -> "no reason given"
+           in
+           Ok (Partial (score, reason))
+       | _ -> Error "unknown or missing verdict")
+  | _ -> Error "verdict must be a JSON object"
+
+(** Verification request *)
+type verification_request = {
+  id: string;
+  task_id: string;
+  output: Yojson.Safe.t;
+  criteria: criterion list;
+  worker: string;           (** Agent who produced the output *)
+  verifier: string option;  (** Specific verifier, or None for any *)
+  created_at: float;
+  status: request_status;
+}
+
+and request_status =
+  | Pending
+  | Assigned of string    (** Verifier agent name *)
+  | Completed of verdict
+[@@deriving show]
+
+(** Serialization *)
+
+let request_status_to_yojson = function
+  | Pending -> `Assoc [("status", `String "pending")]
+  | Assigned agent ->
+      `Assoc [("status", `String "assigned"); ("verifier", `String agent)]
+  | Completed v ->
+      let base = verdict_to_yojson v in
+      (match base with
+       | `Assoc fields -> `Assoc (("status", `String "completed") :: fields)
+       | _ -> `Assoc [("status", `String "completed")])
+
+let request_status_of_yojson = function
+  | `Assoc fields ->
+      (match List.assoc_opt "status" fields with
+       | Some (`String "pending") -> Ok Pending
+       | Some (`String "assigned") ->
+           (match List.assoc_opt "verifier" fields with
+            | Some (`String a) -> Ok (Assigned a)
+            | _ -> Error "assigned requires 'verifier' field")
+       | Some (`String "completed") ->
+           (match verdict_of_yojson (`Assoc fields) with
+            | Ok v -> Ok (Completed v)
+            | Error e -> Error e)
+       | _ -> Error "unknown request status")
+  | _ -> Error "request status must be a JSON object"
+
+let request_to_yojson req =
+  `Assoc [
+    ("id", `String req.id);
+    ("task_id", `String req.task_id);
+    ("output", req.output);
+    ("criteria", `List (List.map criterion_to_yojson req.criteria));
+    ("worker", `String req.worker);
+    ("verifier", match req.verifier with Some v -> `String v | None -> `Null);
+    ("created_at", `Float req.created_at);
+    ("status", request_status_to_yojson req.status);
+  ]
+
+let request_of_yojson = function
+  | `Assoc fields ->
+      let get_string key =
+        match List.assoc_opt key fields with
+        | Some (`String s) -> Some s
+        | _ -> None
+      in
+      let get_float key =
+        match List.assoc_opt key fields with
+        | Some (`Float f) -> Some f
+        | Some (`Int n) -> Some (Float.of_int n)
+        | _ -> None
+      in
+      (match get_string "id", get_string "task_id", get_string "worker" with
+       | Some id, Some task_id, Some worker ->
+           let output = match List.assoc_opt "output" fields with
+             | Some j -> j
+             | None -> `Null
+           in
+           let criteria = match List.assoc_opt "criteria" fields with
+             | Some (`List l) ->
+                 List.filter_map (fun j ->
+                   match criterion_of_yojson j with
+                   | Ok c -> Some c
+                   | Error _ -> None
+                 ) l
+             | _ -> []
+           in
+           let verifier = match List.assoc_opt "verifier" fields with
+             | Some (`String s) -> Some s
+             | _ -> None
+           in
+           let created_at = match get_float "created_at" with
+             | Some f -> f
+             | None -> Unix.gettimeofday ()
+           in
+           let status = match List.assoc_opt "status" fields with
+             | Some json -> (match request_status_of_yojson json with
+                 | Ok s -> s
+                 | Error _ -> Pending)
+             | None -> Pending
+           in
+           Ok { id; task_id; output; criteria; worker; verifier; created_at; status }
+       | _ -> Error "verification request requires 'id', 'task_id', 'worker' fields")
+  | _ -> Error "verification request must be a JSON object"
+
+(** ID generation *)
+let () = Random.self_init ()
+
+let generate_id () =
+  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let rand = Random.int 1_000_000 in
+  Printf.sprintf "vrf-%d-%06d" ts rand
+
+(** Automated criterion evaluation *)
+let evaluate_criterion output criterion =
+  let output_str = Yojson.Safe.to_string output in
+  match criterion with
+  | Schema_match _schema ->
+      (* Schema matching: check if output is valid JSON matching expected structure *)
+      (match output with
+       | `Null -> Fail "output is null"
+       | _ -> Pass)  (* Basic check; full JSON schema validation could be added *)
+  | Contains needle ->
+      if String.length needle > 0 && (
+        try ignore (Str.search_forward (Str.regexp_string needle) output_str 0); true
+        with Not_found -> false
+      ) then Pass
+      else Fail (Printf.sprintf "output does not contain '%s'" needle)
+  | Not_contains needle ->
+      if String.length needle > 0 && (
+        try ignore (Str.search_forward (Str.regexp_string needle) output_str 0); true
+        with Not_found -> false
+      ) then Fail (Printf.sprintf "output contains forbidden '%s'" needle)
+      else Pass
+  | Custom _ ->
+      (* Custom criteria require human/LLM verifier judgment *)
+      Partial (0.5, "custom criterion requires verifier judgment")
+
+(** Evaluate all criteria, return aggregate verdict *)
+let evaluate_all output criteria =
+  match criteria with
+  | [] -> Pass  (* No criteria = auto-pass *)
+  | _ ->
+      let results = List.map (evaluate_criterion output) criteria in
+      let fails = List.filter (function Fail _ -> true | _ -> false) results in
+      let partials = List.filter (function Partial _ -> true | _ -> false) results in
+      if fails <> [] then
+        let reasons = List.filter_map (function
+          | Fail r -> Some r
+          | _ -> None
+        ) fails in
+        Fail (String.concat "; " reasons)
+      else if partials <> [] then
+        let scores = List.filter_map (function
+          | Partial (s, _) -> Some s
+          | _ -> None
+        ) partials in
+        let avg = List.fold_left (+.) 0.0 scores /. Float.of_int (List.length scores) in
+        let reasons = List.filter_map (function
+          | Partial (_, r) -> Some r
+          | _ -> None
+        ) partials in
+        Partial (avg, String.concat "; " reasons)
+      else
+        Pass
+
+(** Cross-agent enforcement: verifier must differ from worker *)
+let validate_cross_agent ~worker ~verifier =
+  if String.equal worker verifier then
+    Error "Cross-agent violation: worker cannot verify own output"
+  else
+    Ok ()
+
+(** File-based storage *)
+
+let verifications_dir base_path =
+  Filename.concat base_path "verifications"
+
+let ensure_dir path =
+  if not (Sys.file_exists path) then
+    Sys.mkdir path 0o755
+
+let request_path base_path req_id =
+  Filename.concat (verifications_dir base_path) (req_id ^ ".json")
+
+let save_request base_path req =
+  let dir = verifications_dir base_path in
+  ensure_dir dir;
+  let json = request_to_yojson req in
+  let path = request_path base_path req.id in
+  let oc = open_out path in
+  output_string oc (Yojson.Safe.pretty_to_string json);
+  close_out oc;
+  Ok req.id
+
+let load_request base_path req_id =
+  let path = request_path base_path req_id in
+  if Sys.file_exists path then
+    try
+      let json = Yojson.Safe.from_file path in
+      request_of_yojson json
+    with exn ->
+      Error (Printf.sprintf "Failed to load verification %s: %s" req_id (Printexc.to_string exn))
+  else
+    Error (Printf.sprintf "Verification %s not found" req_id)
+
+let list_requests base_path =
+  let dir = verifications_dir base_path in
+  if Sys.file_exists dir then
+    let files = Sys.readdir dir in
+    Array.to_list files
+    |> List.filter (fun f -> Filename.check_suffix f ".json")
+    |> List.filter_map (fun f ->
+        let id = Filename.chop_suffix f ".json" in
+        match load_request base_path id with
+        | Ok req -> Some req
+        | Error _ -> None)
+  else
+    []
+
+(** High-level API *)
+
+let create_request ~base_path ~task_id ~output ~criteria ~worker ?verifier () =
+  let id = generate_id () in
+  let req = {
+    id;
+    task_id;
+    output;
+    criteria;
+    worker;
+    verifier;
+    created_at = Unix.gettimeofday ();
+    status = Pending;
+  } in
+  match save_request base_path req with
+  | Ok _ -> Ok req
+  | Error e -> Error e
+
+let assign_verifier ~base_path ~req_id ~verifier =
+  match load_request base_path req_id with
+  | Error e -> Error e
+  | Ok req ->
+      match validate_cross_agent ~worker:req.worker ~verifier with
+      | Error e -> Error e
+      | Ok () ->
+          let updated = { req with status = Assigned verifier; verifier = Some verifier } in
+          match save_request base_path updated with
+          | Ok _ -> Ok updated
+          | Error e -> Error e
+
+let submit_verdict ~base_path ~req_id ~verifier ~verdict =
+  match load_request base_path req_id with
+  | Error e -> Error e
+  | Ok req ->
+      match validate_cross_agent ~worker:req.worker ~verifier with
+      | Error e -> Error e
+      | Ok () ->
+          let updated = { req with status = Completed verdict } in
+          match save_request base_path updated with
+          | Ok _ -> Ok updated
+          | Error e -> Error e
+
+let auto_verify ~base_path ~req_id =
+  match load_request base_path req_id with
+  | Error e -> Error e
+  | Ok req ->
+      let has_custom = List.exists (function Custom _ -> true | _ -> false) req.criteria in
+      if has_custom then
+        Error "Cannot auto-verify: custom criteria require agent judgment"
+      else
+        let verdict = evaluate_all req.output req.criteria in
+        let updated = { req with status = Completed verdict } in
+        match save_request base_path updated with
+        | Ok _ -> Ok updated
+        | Error e -> Error e
+
+let pending_for_agent ~base_path ~agent =
+  list_requests base_path
+  |> List.filter (fun req ->
+      match req.status with
+      | Pending ->
+          (match req.verifier with
+           | Some v -> String.equal v agent
+           | None -> not (String.equal req.worker agent))
+      | Assigned v -> String.equal v agent
+      | Completed _ -> false)

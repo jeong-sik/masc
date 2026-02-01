@@ -1,0 +1,256 @@
+(** Tests for Verification module *)
+
+module V = Masc_mcp.Verification
+
+(** Use a temporary directory for each test *)
+let with_temp_dir f =
+  let dir = Filename.temp_dir "masc_verify_test" "" in
+  Fun.protect ~finally:(fun () ->
+    (* Clean up *)
+    let vdir = Filename.concat dir "verifications" in
+    (try
+       Array.iter (fun file ->
+         Sys.remove (Filename.concat vdir file)
+       ) (Sys.readdir vdir);
+       Sys.rmdir vdir
+     with _ -> ());
+    (try Sys.rmdir dir with _ -> ())
+  ) (fun () -> f dir)
+
+(* --- Criterion tests --- *)
+
+let test_criterion_roundtrip () =
+  let criteria = [
+    V.Schema_match (`Assoc [("type", `String "string")]);
+    V.Contains "hello";
+    V.Not_contains "error";
+    V.Custom "output should be helpful";
+  ] in
+  List.iter (fun c ->
+    let json = V.criterion_to_yojson c in
+    match V.criterion_of_yojson json with
+    | Ok result ->
+        Alcotest.(check bool) "criterion roundtrip" true
+          (V.equal_criterion c result)
+    | Error e -> Alcotest.fail e
+  ) criteria
+
+let test_criterion_of_yojson_errors () =
+  let bad_cases = [
+    (`String "not an object", "not object");
+    (`Assoc [], "missing type");
+    (`Assoc [("type", `String "banana")], "unknown type");
+    (`Assoc [("type", `String "contains")], "contains missing value");
+  ] in
+  List.iter (fun (json, label) ->
+    match V.criterion_of_yojson json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (Printf.sprintf "%s should fail" label)
+  ) bad_cases
+
+(* --- Verdict tests --- *)
+
+let test_verdict_roundtrip () =
+  let verdicts = [V.Pass; V.Fail "bad output"; V.Partial (0.75, "mostly ok")] in
+  List.iter (fun v ->
+    let json = V.verdict_to_yojson v in
+    match V.verdict_of_yojson json with
+    | Ok result ->
+        Alcotest.(check bool) "verdict roundtrip" true
+          (V.equal_verdict v result)
+    | Error e -> Alcotest.fail e
+  ) verdicts
+
+(* --- Evaluation tests --- *)
+
+let test_evaluate_contains () =
+  let output = `String "hello world" in
+  Alcotest.(check bool) "contains match" true
+    (V.evaluate_criterion output (V.Contains "hello") = V.Pass);
+  Alcotest.(check bool) "contains no match" true
+    (match V.evaluate_criterion output (V.Contains "xyz") with
+     | V.Fail _ -> true | _ -> false)
+
+let test_evaluate_not_contains () =
+  let output = `String "hello world" in
+  Alcotest.(check bool) "not_contains pass" true
+    (V.evaluate_criterion output (V.Not_contains "xyz") = V.Pass);
+  Alcotest.(check bool) "not_contains fail" true
+    (match V.evaluate_criterion output (V.Not_contains "hello") with
+     | V.Fail _ -> true | _ -> false)
+
+let test_evaluate_schema_match () =
+  let output = `Assoc [("key", `String "value")] in
+  Alcotest.(check bool) "schema non-null pass" true
+    (V.evaluate_criterion output (V.Schema_match (`Assoc [])) = V.Pass);
+  Alcotest.(check bool) "schema null fail" true
+    (match V.evaluate_criterion `Null (V.Schema_match (`Assoc [])) with
+     | V.Fail _ -> true | _ -> false)
+
+let test_evaluate_custom () =
+  let output = `String "test" in
+  Alcotest.(check bool) "custom returns partial" true
+    (match V.evaluate_criterion output (V.Custom "check quality") with
+     | V.Partial _ -> true | _ -> false)
+
+let test_evaluate_all_pass () =
+  let output = `String "hello world foo" in
+  let criteria = [V.Contains "hello"; V.Not_contains "error"] in
+  Alcotest.(check bool) "all pass" true
+    (V.evaluate_all output criteria = V.Pass)
+
+let test_evaluate_all_fail () =
+  let output = `String "hello world" in
+  let criteria = [V.Contains "hello"; V.Contains "missing"] in
+  Alcotest.(check bool) "one fail = overall fail" true
+    (match V.evaluate_all output criteria with
+     | V.Fail _ -> true | _ -> false)
+
+let test_evaluate_empty_criteria () =
+  Alcotest.(check bool) "empty criteria = pass" true
+    (V.evaluate_all `Null [] = V.Pass)
+
+(* --- Cross-agent enforcement --- *)
+
+let test_cross_agent_same () =
+  match V.validate_cross_agent ~worker:"claude" ~verifier:"claude" with
+  | Error _ -> ()
+  | Ok () -> Alcotest.fail "same agent should be rejected"
+
+let test_cross_agent_different () =
+  match V.validate_cross_agent ~worker:"claude" ~verifier:"codex" with
+  | Ok () -> ()
+  | Error e -> Alcotest.fail e
+
+(* --- Storage tests --- *)
+
+let test_create_and_load () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"task-1"
+        ~output:(`String "result") ~criteria:[V.Contains "result"]
+        ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        match V.load_request base_path req.id with
+        | Error e -> Alcotest.fail e
+        | Ok loaded ->
+            Alcotest.(check string) "id matches" req.id loaded.id;
+            Alcotest.(check string) "task_id" "task-1" loaded.task_id;
+            Alcotest.(check string) "worker" "claude" loaded.worker)
+
+let test_list_requests () =
+  with_temp_dir (fun base_path ->
+    let _ = V.create_request ~base_path ~task_id:"t1"
+        ~output:`Null ~criteria:[] ~worker:"a" () in
+    let _ = V.create_request ~base_path ~task_id:"t2"
+        ~output:`Null ~criteria:[] ~worker:"b" () in
+    let reqs = V.list_requests base_path in
+    Alcotest.(check int) "two requests" 2 (List.length reqs))
+
+let test_assign_verifier () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1"
+        ~output:`Null ~criteria:[] ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        match V.assign_verifier ~base_path ~req_id:req.id ~verifier:"codex" with
+        | Error e -> Alcotest.fail e
+        | Ok updated ->
+            Alcotest.(check bool) "assigned" true
+              (match updated.status with V.Assigned "codex" -> true | _ -> false))
+
+let test_assign_verifier_cross_agent_fail () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1"
+        ~output:`Null ~criteria:[] ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        match V.assign_verifier ~base_path ~req_id:req.id ~verifier:"claude" with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "cross-agent violation should fail")
+
+let test_submit_verdict () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1"
+        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        match V.submit_verdict ~base_path ~req_id:req.id ~verifier:"codex"
+            ~verdict:V.Pass with
+        | Error e -> Alcotest.fail e
+        | Ok updated ->
+            Alcotest.(check bool) "completed" true
+              (match updated.status with V.Completed V.Pass -> true | _ -> false))
+
+let test_auto_verify () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1"
+        ~output:(`String "hello world")
+        ~criteria:[V.Contains "hello"; V.Not_contains "error"]
+        ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        match V.auto_verify ~base_path ~req_id:req.id with
+        | Error e -> Alcotest.fail e
+        | Ok updated ->
+            Alcotest.(check bool) "auto-verified pass" true
+              (match updated.status with V.Completed V.Pass -> true | _ -> false))
+
+let test_auto_verify_with_custom_fails () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1"
+        ~output:(`String "test")
+        ~criteria:[V.Custom "check quality"]
+        ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        match V.auto_verify ~base_path ~req_id:req.id with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "auto-verify with custom should fail")
+
+let test_pending_for_agent () =
+  with_temp_dir (fun base_path ->
+    let _ = V.create_request ~base_path ~task_id:"t1"
+        ~output:`Null ~criteria:[] ~worker:"claude" () in
+    let _ = V.create_request ~base_path ~task_id:"t2"
+        ~output:`Null ~criteria:[] ~worker:"codex" ~verifier:"gemini" () in
+    (* codex should see t1 (not own work), not t2 (assigned to gemini) *)
+    let pending = V.pending_for_agent ~base_path ~agent:"codex" in
+    Alcotest.(check int) "codex sees 1 pending" 1 (List.length pending);
+    (* claude should not see t1 (own work) *)
+    let pending_claude = V.pending_for_agent ~base_path ~agent:"claude" in
+    Alcotest.(check int) "claude sees 0 (own work filtered)" 0 (List.length pending_claude))
+
+let () =
+  Alcotest.run "Verification" [
+    "criterion", [
+      Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;
+      Alcotest.test_case "of_yojson errors" `Quick test_criterion_of_yojson_errors;
+    ];
+    "verdict", [
+      Alcotest.test_case "roundtrip" `Quick test_verdict_roundtrip;
+    ];
+    "evaluation", [
+      Alcotest.test_case "contains" `Quick test_evaluate_contains;
+      Alcotest.test_case "not_contains" `Quick test_evaluate_not_contains;
+      Alcotest.test_case "schema_match" `Quick test_evaluate_schema_match;
+      Alcotest.test_case "custom" `Quick test_evaluate_custom;
+      Alcotest.test_case "all pass" `Quick test_evaluate_all_pass;
+      Alcotest.test_case "all fail" `Quick test_evaluate_all_fail;
+      Alcotest.test_case "empty criteria" `Quick test_evaluate_empty_criteria;
+    ];
+    "cross_agent", [
+      Alcotest.test_case "same agent rejected" `Quick test_cross_agent_same;
+      Alcotest.test_case "different agents ok" `Quick test_cross_agent_different;
+    ];
+    "storage", [
+      Alcotest.test_case "create and load" `Quick test_create_and_load;
+      Alcotest.test_case "list requests" `Quick test_list_requests;
+      Alcotest.test_case "assign verifier" `Quick test_assign_verifier;
+      Alcotest.test_case "cross-agent assign fail" `Quick test_assign_verifier_cross_agent_fail;
+      Alcotest.test_case "submit verdict" `Quick test_submit_verdict;
+      Alcotest.test_case "auto verify" `Quick test_auto_verify;
+      Alcotest.test_case "auto verify custom fails" `Quick test_auto_verify_with_custom_fails;
+      Alcotest.test_case "pending for agent" `Quick test_pending_for_agent;
+    ];
+  ]

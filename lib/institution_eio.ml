@@ -124,6 +124,13 @@ let outcome_of_string = function "success" -> `Success | "failure" -> `Failure |
 let mentor_to_string = function `Random -> "random" | `Best_fit -> "best_fit" | `Round_robin -> "round_robin"
 let mentor_of_string = function "random" -> `Random | "best_fit" -> `Best_fit | "round_robin" -> `Round_robin | _ -> `Best_fit
 
+(** JSON number → float (handles both JSON Int and Float) *)
+let json_to_float = function
+  | `Float f -> f
+  | `Int i -> Float.of_int i
+  | `Intlit s -> Float.of_string s
+  | json -> Yojson.Safe.Util.to_float json
+
 let rec episode_to_json (e : episode) : Yojson.Safe.t =
   `Assoc [
     ("id", `String e.id);
@@ -140,7 +147,7 @@ and episode_of_json json =
   let open Yojson.Safe.Util in
   {
     id = json |> member "id" |> to_string;
-    timestamp = json |> member "timestamp" |> to_float;
+    timestamp = json |> member "timestamp" |> json_to_float;
     participants = json |> member "participants" |> to_list |> List.map to_string;
     event_type = json |> member "event_type" |> to_string;
     summary = json |> member "summary" |> to_string;
@@ -167,10 +174,10 @@ and knowledge_of_json json =
     id = json |> member "id" |> to_string;
     topic = json |> member "topic" |> to_string;
     content = json |> member "content" |> to_string;
-    confidence = json |> member "confidence" |> to_float;
+    confidence = json |> member "confidence" |> json_to_float;
     source = json |> member "source" |> to_string;
-    created_at = json |> member "created_at" |> to_float;
-    last_verified = json |> member "last_verified" |> to_float;
+    created_at = json |> member "created_at" |> json_to_float;
+    last_verified = json |> member "last_verified" |> json_to_float;
     references = json |> member "references" |> to_list |> List.map to_string;
   }
 
@@ -195,9 +202,9 @@ and pattern_of_json json =
     description = json |> member "description" |> to_string;
     trigger = json |> member "trigger" |> to_string;
     steps = json |> member "steps" |> to_list |> List.map to_string;
-    success_rate = json |> member "success_rate" |> to_float;
+    success_rate = json |> member "success_rate" |> json_to_float;
     usage_count = json |> member "usage_count" |> to_int;
-    last_used = json |> member "last_used" |> to_float;
+    last_used = json |> member "last_used" |> json_to_float;
     evolved_from = json |> member "evolved_from" |> to_string_option;
   }
 
@@ -218,10 +225,10 @@ and cultural_value_of_json json =
     id = json |> member "id" |> to_string;
     name = json |> member "name" |> to_string;
     description = json |> member "description" |> to_string;
-    weight = json |> member "weight" |> to_float;
+    weight = json |> member "weight" |> json_to_float;
     examples = json |> member "examples" |> to_list |> List.map to_string;
     anti_patterns = json |> member "anti_patterns" |> to_list |> List.map to_string;
-    adopted_at = json |> member "adopted_at" |> to_float;
+    adopted_at = json |> member "adopted_at" |> json_to_float;
   }
 
 and succession_to_json (s : succession_policy) : Yojson.Safe.t =
@@ -239,7 +246,7 @@ and succession_of_json json =
     onboarding_steps = json |> member "onboarding_steps" |> to_list |> List.map to_string;
     required_knowledge = json |> member "required_knowledge" |> to_list |> List.map to_string;
     mentor_assignment = json |> member "mentor_assignment" |> to_string |> mentor_of_string;
-    probation_period = json |> member "probation_period" |> to_float;
+    probation_period = json |> member "probation_period" |> json_to_float;
     graduation_criteria = json |> member "graduation_criteria" |> to_list |> List.map to_string;
   }
 
@@ -258,7 +265,7 @@ and identity_of_json json =
     id = json |> member "id" |> to_string;
     name = json |> member "name" |> to_string;
     mission = json |> member "mission" |> to_string;
-    founded_at = json |> member "founded_at" |> to_float;
+    founded_at = json |> member "founded_at" |> json_to_float;
     generation = json |> member "generation" |> to_int;
   }
 
@@ -503,13 +510,14 @@ let format_for_welcome (inst : institution) : string =
   Buffer.add_string buf "\n📜 **Cultural Inheritance** (from your predecessors)\n";
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
-  (* Mission - one line *)
+  (* Mission - one line, validated *)
+  let mission = String.trim inst.identity.mission in
   let mission_short =
-    if String.length inst.identity.mission > 80 then
-      String.sub inst.identity.mission 0 77 ^ "..."
-    else inst.identity.mission
+    if mission = "" then "(not defined)"
+    else if String.length mission > 80 then String.sub mission 0 77 ^ "..."
+    else mission
   in
-  Buffer.add_string buf (Printf.sprintf "🏛️ Mission: %s\n" mission_short);
+  Buffer.add_string buf ("🏛️ Mission: " ^ mission_short ^ "\n");
 
   (* Top 3 values - compact *)
   if inst.culture <> [] then begin
@@ -518,18 +526,14 @@ let format_for_welcome (inst : institution) : string =
       |> List.filteri (fun i _ -> i < 3)
     in
     let value_names = List.map (fun (v : cultural_value) -> v.name) top_values in
-    Buffer.add_string buf (Printf.sprintf "💎 Values: %s\n" (String.concat ", " value_names))
+    Buffer.add_string buf ("💎 Values: " ^ String.concat ", " value_names ^ "\n")
   end;
 
-  (* One procedural tip *)
-  if inst.memory.procedural <> [] then begin
-    let best_pattern =
-      List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural
-      |> List.hd
-    in
-    Buffer.add_string buf (Printf.sprintf "💡 Tip: %s → %s\n"
-      best_pattern.name best_pattern.trigger)
-  end;
+  (* One procedural tip - pattern match for safety *)
+  (match List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural with
+   | best :: _ ->
+       Buffer.add_string buf ("💡 Tip: " ^ best.name ^ " → " ^ best.trigger ^ "\n")
+   | [] -> ());
 
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
   Buffer.add_string buf "📚 Full: resources/read → masc://institution\n";
@@ -539,7 +543,20 @@ let format_for_welcome (inst : institution) : string =
 (** Load institution and format for join welcome.
     Returns empty string if no institution exists.
 *)
-let load_and_format_for_welcome ~fs (config : config) : string =
-  match load_institution ~fs config with
-  | Some inst -> format_for_welcome inst
-  | None -> ""
+let load_and_format_for_welcome ~fs:_ (config : config) : string =
+  (* Use stdlib file I/O instead of Eio to avoid cwd/path issues *)
+  let file = institution_file config in
+  Printf.eprintf "[DEBUG] institution file: %s exists=%b\n%!" file (Sys.file_exists file);
+  if Sys.file_exists file then
+    try
+      let content = In_channel.with_open_text file In_channel.input_all in
+      Printf.eprintf "[DEBUG] institution content len=%d\n%!" (String.length content);
+      let json = Yojson.Safe.from_string content in
+      let inst = institution_of_json json in
+      let result = format_for_welcome inst in
+      Printf.eprintf "[DEBUG] institution welcome len=%d\n%!" (String.length result);
+      result
+    with exn ->
+      Printf.eprintf "[DEBUG] institution parse error: %s\n%!" (Printexc.to_string exn);
+      ""
+  else ""

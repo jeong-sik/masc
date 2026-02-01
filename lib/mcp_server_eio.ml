@@ -954,9 +954,22 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       with e ->
         Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
       (* Cultural Inheritance: append institution welcome to join response *)
-      let institution_welcome = match state.fs with
-        | Some fs -> (try Institution_eio.load_and_format_for_welcome ~fs config with _ -> "")
-        | None -> ""
+      let institution_welcome = match state.Mcp_server.fs with
+        | Some fs ->
+            Eio.traceln "[DEBUG] Cultural Inheritance: fs=Some, loading institution...";
+            (try
+               let w = Institution_eio.load_and_format_for_welcome ~fs config in
+               Eio.traceln "[DEBUG] Cultural Inheritance: loaded, len=%d" (String.length w);
+               w
+             with
+             | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ as e ->
+                 Eio.traceln "[WARN] Institution parse error: %s" (Printexc.to_string e); ""
+             | exn ->
+                 Eio.traceln "[WARN] Unexpected error loading institution: %s" (Printexc.to_string exn);
+                 "")
+        | None ->
+            Eio.traceln "[DEBUG] Cultural Inheritance: fs=None, skipping";
+            ""
       in
       let final_result = if institution_welcome = "" then result
         else result ^ institution_welcome in

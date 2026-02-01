@@ -185,6 +185,43 @@ let worktrees_section (config : Room_utils.config) : section =
   ) worktrees in
   { title = "Worktrees"; content; empty_msg = "(no worktrees)" }
 
+(** Count lock files under the locks directory (filesystem backend).
+    Ignores ".flock" metadata files. *)
+let rec count_lock_files path =
+  try
+    if Sys.file_exists path then
+      if Sys.is_directory path then
+        let entries = Sys.readdir path |> Array.to_list in
+        List.fold_left (fun acc name ->
+          let full = Filename.concat path name in
+          if Sys.is_directory full then
+            acc + count_lock_files full
+          else if Filename.check_suffix name ".flock" then
+            acc
+          else
+            acc + 1
+        ) 0 entries
+      else
+        0
+    else
+      0
+  with _ -> 0
+
+(** Count active locks across backends *)
+let count_locks (config : Room_utils.config) : int =
+  match config.backend with
+  | Room_utils.FileSystem _ ->
+      let locks_dir = Filename.concat (Room_utils.masc_dir config) "locks" in
+      count_lock_files locks_dir
+  | Room_utils.Memory _ ->
+      (match Room_utils.backend_list_keys config ~prefix:"locks:" with
+       | Ok keys -> List.length keys
+       | Error _ -> 0)
+  | Room_utils.PostgresNative _ ->
+      (match Room_utils.backend_list_keys config ~prefix:"lock:" with
+       | Ok keys -> List.length keys
+       | Error _ -> 0)
+
 (** Generate full dashboard *)
 let generate (config : Room_utils.config) : string =
   let now = Unix.gettimeofday () in
@@ -209,6 +246,7 @@ let generate (config : Room_utils.config) : string =
 let generate_compact (config : Room_utils.config) : string =
   let agents = Room.get_agents_raw config in
   let tasks = Room.get_tasks_raw config in
+  let locks = count_locks config in
   let tempo = Tempo.get_tempo config in
   let pending = List.filter (fun t -> t.Types.task_status = Types.Todo) tasks in
   let active = List.filter (fun t ->
@@ -217,8 +255,9 @@ let generate_compact (config : Room_utils.config) : string =
     | Types.Claimed _ -> true
     | _ -> false
   ) tasks in
-  Printf.sprintf "Agents: %d | Tasks: %d active, %d pending | Tempo: %.0fs"
+  Printf.sprintf "Agents: %d | Tasks: %d active, %d pending | Locks: %d | Tempo: %.0fs"
     (List.length agents)
     (List.length active)
     (List.length pending)
+    locks
     tempo.Tempo.current_interval_s

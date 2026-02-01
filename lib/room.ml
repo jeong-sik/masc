@@ -1574,18 +1574,41 @@ let get_messages_raw config ~since_seq ~limit =
     |> (fun msgs -> List.filteri (fun i _ -> i < limit) msgs)
 
 (** List tasks *)
-let list_tasks config =
+let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status config =
   ensure_initialized config;
 
   let backlog = read_backlog config in
-  if backlog.tasks = [] then
-    "📋 No tasks yet."
+  let tasks =
+    match status with
+    | Some status_filter ->
+        List.filter (fun (task : task) ->
+          String.equal status_filter (string_of_task_status task.task_status)
+        ) backlog.tasks
+    | None ->
+        List.filter (fun (task : task) ->
+          let is_done = match task.task_status with
+            | Done _ -> true
+            | _ -> false
+          in
+          let is_cancelled = match task.task_status with
+            | Cancelled _ -> true
+            | _ -> false
+          in
+          (include_done || not is_done) &&
+          (include_cancelled || not is_cancelled)
+        ) backlog.tasks
+  in
+  if tasks = [] then
+    if backlog.tasks = [] then
+      "📋 No tasks yet."
+    else
+      "📋 No active tasks. (use include_done=true or include_cancelled=true)"
   else begin
     let buf = Buffer.create 256 in
     Buffer.add_string buf "📋 Quest Board\n";
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
-    let sorted = List.sort (fun a b -> compare a.priority b.priority) backlog.tasks in
+    let sorted = List.sort (fun a b -> compare a.priority b.priority) tasks in
     List.iter (fun task ->
       let status_icon = match task.task_status with
         | Done _ -> "✅"

@@ -745,6 +745,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_vote_create"; "masc_vote_cast"; "masc_interrupt"; "masc_approve"; "masc_reject";
     "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
     "masc_deliver"; "masc_note_add"; "masc_error_add"; "masc_error_resolve";
+    "masc_lock"; "masc_unlock";
   ] in
 
   (* Check if agent must join first *)
@@ -909,6 +910,79 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | None ->
 
   match name with
+  | "masc_lock" ->
+      let file = get_string "file" "" in
+      if file = "" then
+        (false, "❌ file is required")
+      else begin
+        let expanded =
+          if String.length file > 0 && file.[0] = '~' then
+            match Sys.getenv_opt "HOME" with
+            | Some home -> Filename.concat home (String.sub file 1 (String.length file - 1))
+            | None -> file
+          else if Filename.is_relative file then
+            Filename.concat config.base_path file
+          else
+            file
+        in
+        match Room_utils.key_of_path_from_root config ~root:config.base_path expanded with
+        | None ->
+            (false, Printf.sprintf "❌ file must be under base_path: %s" config.base_path)
+        | Some key ->
+            let ttl_seconds = config.lock_expiry_minutes * 60 in
+            let now = Unix.gettimeofday () in
+            let expires_at = now +. float_of_int ttl_seconds in
+            (match Room_utils.backend_acquire_lock config ~key ~ttl_seconds ~owner:agent_name with
+             | Ok true ->
+                 let payload = `Assoc [
+                   ("status", `String "acquired");
+                   ("resource", `String expanded);
+                   ("key", `String key);
+                   ("owner", `String agent_name);
+                   ("acquired_at", `Float now);
+                   ("expires_at", `Float expires_at);
+                 ] in
+                 (true, Yojson.Safe.pretty_to_string payload)
+             | Ok false ->
+                 (false, Printf.sprintf "❌ Lock busy: %s" expanded)
+             | Error e ->
+                 (false, Printf.sprintf "❌ Lock error: %s" (Backend.show_error e)))
+      end
+
+  | "masc_unlock" ->
+      let file = get_string "file" "" in
+      if file = "" then
+        (false, "❌ file is required")
+      else begin
+        let expanded =
+          if String.length file > 0 && file.[0] = '~' then
+            match Sys.getenv_opt "HOME" with
+            | Some home -> Filename.concat home (String.sub file 1 (String.length file - 1))
+            | None -> file
+          else if Filename.is_relative file then
+            Filename.concat config.base_path file
+          else
+            file
+        in
+        match Room_utils.key_of_path_from_root config ~root:config.base_path expanded with
+        | None ->
+            (false, Printf.sprintf "❌ file must be under base_path: %s" config.base_path)
+        | Some key ->
+            (match Room_utils.backend_release_lock config ~key ~owner:agent_name with
+             | Ok true ->
+                 let payload = `Assoc [
+                   ("status", `String "released");
+                   ("resource", `String expanded);
+                   ("key", `String key);
+                   ("owner", `String agent_name);
+                 ] in
+                 (true, Yojson.Safe.pretty_to_string payload)
+             | Ok false ->
+                 (false, Printf.sprintf "❌ Lock not held by %s: %s" agent_name expanded)
+             | Error e ->
+                 (false, Printf.sprintf "❌ Lock release error: %s" (Backend.show_error e)))
+      end
+
   | "masc_set_room" ->
       let path = get_string "path" "" in
       let expanded =

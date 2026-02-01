@@ -324,14 +324,65 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
   };
   {
     name = "masc_tasks";
-    description = "List all tasks in backlog with their status and assignee. \
-Shows: todo (available), claimed (in progress), done, cancelled. \
-Use before masc_claim to find available tasks. \
+    description = "List tasks in backlog with their status and assignee. \
+Defaults to active tasks (todo/claimed/in_progress). \
+Use include_done/include_cancelled or status to filter. \
 Output includes task ID, title, priority, assignee, timestamps. \
 Tip: Look for status='todo' tasks to claim.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc []);
+      ("properties", `Assoc [
+        ("status", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional status filter: todo|claimed|in_progress|done|cancelled");
+        ]);
+        ("include_done", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include done tasks (default: false)");
+          ("default", `Bool false);
+        ]);
+        ("include_cancelled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include cancelled tasks (default: false)");
+          ("default", `Bool false);
+        ]);
+      ]);
+    ];
+  };
+  {
+    name = "masc_lock";
+    description = "Acquire a lock for a file path (relative to project root). Use masc_unlock to release.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("file", `Assoc [
+          ("type", `String "string");
+          ("description", `String "File path to lock (relative to project root)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "file"]);
+    ];
+  };
+  {
+    name = "masc_unlock";
+    description = "Release a lock for a file path (relative to project root).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("file", `Assoc [
+          ("type", `String "string");
+          ("description", `String "File path to unlock (relative to project root)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "file"]);
     ];
   };
 

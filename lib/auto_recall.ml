@@ -166,7 +166,7 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
           List.rev acc
       in
       read_lines []
-    with _ -> []
+    with Unix.Unix_error _ | Sys_error _ -> []
   in
   
   (* Read preview of each file *)
@@ -178,7 +178,7 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
       close_in ic;
       let truncated = in_channel_length ic > max_preview_bytes in
       if truncated then content ^ "\n... [truncated]" else content
-    with _ -> ""
+    with Sys_error _ -> ""
   in
   
   (* Calculate relevance based on query match and recency *)

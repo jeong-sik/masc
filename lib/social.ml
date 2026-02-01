@@ -187,10 +187,10 @@ let write_json path json =
   let closed = ref false in
   Common.protect ~module_name:"social" ~finally_label:"finalizer" ~finally:(fun () ->
     (* Only close if not already closed in protected block *)
-    if not !closed then (try close_out oc with _ -> ());
+    if not !closed then (try close_out oc with Sys_error _ -> ());
     (* Clean up temp file on error (won't exist after successful rename) *)
     if Sys.file_exists tmp_path then
-      try Sys.remove tmp_path with _ -> ()
+      try Sys.remove tmp_path with Sys_error _ -> ()
   ) (fun () ->
     output_string oc content;
     flush oc;
@@ -341,7 +341,7 @@ let with_file_lock path f =
   let lock_path = path ^ ".lock" in
   let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
   Common.protect ~module_name:"social" ~finally_label:"finalizer" ~finally:(fun () ->
-    (try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ());
+    (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
     Unix.close fd
   ) (fun () ->
     Unix.lockf fd Unix.F_LOCK 0;

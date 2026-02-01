@@ -57,6 +57,11 @@ let handle_debate_argue ctx args =
   let position_str = get_string args "position" "neutral" in
   let content = get_string args "content" "" in
   let evidence = get_string_list args "evidence" in
+  let reply_to = match Yojson.Safe.Util.member "reply_to" args with
+    | `Int i -> Some i
+    | _ -> None
+  in
+  let mentions = get_string_list args "mentions" in
   if debate_id = "" || content = "" then
     (false, "Error: debate_id and content are required")
   else
@@ -66,11 +71,19 @@ let handle_debate_argue ctx args =
       | "oppose" -> Debate.Oppose
       | _ -> Debate.Neutral
     in
+    (* TODO: Wire up actual notify_fn to MASC broadcast *)
+    let notify_fn = Some (fun ~agent ~message -> 
+      Printf.eprintf "[Council] Notify %s: %s\n%!" agent message
+    ) in
     match DebateApi.add_argument ~config ~debate_id ~agent:ctx.agent_name 
-            ~position ~content ~evidence () with
+            ~position ~content ~evidence ~reply_to ~mentions ~notify_fn () with
     | Ok debate ->
       let count = List.length debate.Debate.arguments in
-      (true, Printf.sprintf "Argument added. Total arguments: %d" count)
+      let reply_info = match reply_to with
+        | Some i -> Printf.sprintf " (reply to #%d)" i
+        | None -> ""
+      in
+      (true, Printf.sprintf "Argument #%d added%s. Total: %d" (count - 1) reply_info count)
     | Error e -> (false, Printf.sprintf "Error: %s" e)
 
 let handle_debate_close ctx args =

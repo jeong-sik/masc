@@ -3,10 +3,14 @@
     Extracted from mcp_server_eio.ml for testability.
     8 tools: mitosis_status, mitosis_all, mitosis_pool, mitosis_divide,
              mitosis_check, mitosis_record, mitosis_prepare, mitosis_handoff
-    
+
     Key tool: masc_mitosis_handoff - 2-phase proactive context management
     - 50% threshold: DNA preparation (context summary extracted)
     - 80% threshold: Handoff execution (spawn successor agent)
+
+    Agent Being Protocol Integration:
+    - Episode storage on successful handoff (file-based queue)
+    - Episodes are flushed to Neo4j/PostgreSQL via masc_episode_flush
 *)
 
 (** Tool handler context - extensible for future features *)
@@ -29,6 +33,66 @@ let log ctx msg =
 
 (** Tool result type *)
 type result = bool * string
+
+(** {1 Episode Queue - Agent Being Protocol}
+
+    File-based queue for Episode persistence.
+    Episodes are queued here (sync) and flushed to DB later (async via Eio).
+    This decouples mitosis execution from DB availability.
+*)
+
+let pending_episodes_dir base_path =
+  Filename.concat base_path ".masc/pending_episodes"
+
+let generate_episode_id () =
+  let ts = Unix.gettimeofday () in
+  let rand = Random.int 100000 in
+  Printf.sprintf "ep-%d-%05d" (int_of_float (ts *. 1000.0)) rand
+
+let now_iso () =
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+    tm.tm_hour tm.tm_min tm.tm_sec
+
+(** Queue an Episode for later DB persistence *)
+let queue_episode ~base_path ~session_id ~agent_name ~generation
+    ?parent_episode ~event_type ~summary ?dna () =
+  let dir = pending_episodes_dir base_path in
+  (* Create directory if not exists *)
+  let () = try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> () in
+  let ep_id = generate_episode_id () in
+  let json = `Assoc [
+    ("ep_id", `String ep_id);
+    ("session_id", `String session_id);
+    ("agent_name", `String agent_name);
+    ("generation", `Int generation);
+    ("parent_episode", match parent_episode with Some p -> `String p | None -> `Null);
+    ("event_type", `String event_type);
+    ("summary", `String summary);
+    ("dna", match dna with Some d -> `String d | None -> `Null);
+    ("timestamp", `String (now_iso ()));
+  ] in
+  let file = Filename.concat dir (ep_id ^ ".json") in
+  try
+    let oc = open_out file in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.pretty_to_string json));
+    Printf.printf "[EPISODE/QUEUE] Queued episode %s (gen %d) → %s\n%!" ep_id generation file;
+    Some ep_id
+  with exn ->
+    Printf.eprintf "[EPISODE/ERROR] Failed to queue episode: %s\n%!" (Printexc.to_string exn);
+    None
+
+(** Get current session ID from environment or generate *)
+let get_session_id () =
+  match Sys.getenv_opt "TERM_SESSION_ID" with
+  | Some sid when sid <> "" -> sid
+  | _ ->
+    match Sys.getenv_opt "MCP_SESSION_ID" with
+    | Some sid when sid <> "" -> sid
+    | _ -> Printf.sprintf "session-%d" (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000)
 
 (** {1 Argument Helpers} *)
 
@@ -109,12 +173,28 @@ let handle_mitosis_divide ctx args : result =
     Mcp_server.current_cell := new_cell;
     Mcp_server.stem_pool := new_pool;
     Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
+
+    (* Agent Being Protocol: Queue Episode for persistence *)
+    let base_path = ctx.config.Room_utils.base_path in
+    let session_id = get_session_id () in
+    let ep_id = queue_episode
+      ~base_path
+      ~session_id
+      ~agent_name:"claude"
+      ~generation:new_cell.Mitosis.generation
+      ~event_type:"mitosis_divide"
+      ~summary:(Printf.sprintf "Manual mitosis divide: gen %d → gen %d"
+        cell.Mitosis.generation new_cell.Mitosis.generation)
+      ~dna:full_context
+      () in
+
     let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
     let json = `Assoc [
       ("success", `Bool true);
       ("previous_generation", `Int cell.Mitosis.generation);
       ("new_generation", `Int new_cell.Mitosis.generation);
       ("successor_output", `String output_preview);
+      ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
     ] in
     (true, Yojson.Safe.pretty_to_string json)
   end else begin
@@ -310,6 +390,23 @@ let handle_mitosis_handoff ctx args : result =
         Mcp_server.current_cell := new_cell;
         Mcp_server.stem_pool := new_pool;
         Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
+
+        (* Agent Being Protocol: Queue Episode for persistence *)
+        let base_path = ctx.config.Room_utils.base_path in
+        let session_id = get_session_id () in
+        let dna = Option.value ~default:"" cell.Mitosis.prepared_dna in
+        let summary = Printf.sprintf "Mitosis handoff: gen %d → gen %d (target: %s, context: %.0f%%)"
+          cell.Mitosis.generation new_cell.Mitosis.generation target_agent (context_ratio *. 100.0) in
+        let ep_id = queue_episode
+          ~base_path
+          ~session_id
+          ~agent_name:target_agent
+          ~generation:new_cell.Mitosis.generation
+          ~event_type:"mitosis_handoff"
+          ~summary
+          ~dna
+          () in
+
         let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
         let json = `Assoc [
           ("action", `String "handoff");
@@ -321,6 +418,7 @@ let handle_mitosis_handoff ctx args : result =
           ("new_generation", `Int new_cell.Mitosis.generation);
           ("successor_output", `String output_preview);
           ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
+          ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
         ] in
         (true, Yojson.Safe.pretty_to_string json)
       end

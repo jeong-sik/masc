@@ -98,6 +98,36 @@ let test_debate_close () =
       check bool "status closed" (closed.Debate.status = Debate.Closed) true;
       teardown ()
 
+let test_debate_pingpong () =
+  setup ();
+  let notifications = ref [] in
+  let notify_fn = Some (fun ~agent ~message -> 
+    notifications := (agent, message) :: !notifications
+  ) in
+  match Debate.start_debate test_base_path ~topic:"Ping pong test" 
+          ~notify_fn:(fun ~agent:_ ~message:_ -> ()) () with
+  | Error e -> teardown (); fail e
+  | Ok debate ->
+    let debate_id = debate.Debate.id in
+    (* Agent A makes argument #0 *)
+    let _ = Debate.add_argument test_base_path ~debate_id 
+              ~agent:"agent_a" ~position:Debate.Support 
+              ~content:"I support this" ~evidence:[] ~notify_fn:None () in
+    (* Agent B replies to #0, mentions agent_a *)
+    match Debate.add_argument test_base_path ~debate_id 
+            ~agent:"agent_b" ~position:Debate.Oppose 
+            ~content:"I disagree with agent_a" ~evidence:[]
+            ~reply_to:(Some 0) ~mentions:["agent_a"] ~notify_fn () with
+    | Error e -> teardown (); fail e
+    | Ok updated ->
+      check int "2 arguments" (List.length updated.Debate.arguments) 2;
+      let arg1 = List.nth updated.arguments 1 in
+      check bool "has reply_to" (arg1.Debate.reply_to = Some 0) true;
+      check bool "has mentions" (List.mem "agent_a" arg1.mentions) true;
+      (* Check notifications were sent *)
+      check bool "notifications sent" (List.length !notifications >= 1) true;
+      teardown ()
+
 (* ============================================================
    Consensus Tests
    ============================================================ *)
@@ -250,6 +280,7 @@ let debate_tests = [
   "add argument", `Quick, test_debate_add_argument;
   "multiple positions", `Quick, test_debate_multiple_positions;
   "close debate", `Quick, test_debate_close;
+  "ping-pong reply", `Quick, test_debate_pingpong;
 ]
 
 let consensus_tests = [

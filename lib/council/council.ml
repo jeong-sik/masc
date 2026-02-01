@@ -42,8 +42,10 @@ module DebateApi = struct
     Debate.start_debate config.base_path ~topic ~notify_fn ()
 
   (** Add an argument to an ongoing debate *)
-  let add_argument ~config ~debate_id ~agent ~position ~content ?(evidence=[]) () =
-    Debate.add_argument config.base_path ~debate_id ~agent ~position ~content ~evidence ()
+  let add_argument ~config ~debate_id ~agent ~position ~content 
+      ?(evidence=[]) ?(reply_to=None) ?(mentions=[]) ?(notify_fn=None) () =
+    Debate.add_argument config.base_path ~debate_id ~agent ~position ~content 
+      ~evidence ~reply_to ~mentions ~notify_fn ()
 
   (** Close a debate and get summary *)
   let close ~config ~debate_id =

@@ -6,6 +6,7 @@
     - Router: MoE 스타일 에이전트 라우팅
     - Archive: 실록 저장 (Neo4j + PostgreSQL)
     - Balance: 공정성 정책
+    - Conversation: 영속적 대화 (파일 + Neo4j)
 
     @since MASC v2.6.0
 *)
@@ -18,6 +19,9 @@ module Router = Router
 module Archive = Archive
 module Balance = Balance
 module Executor = Executor
+module Conversation = Conversation
+module Loop_guard = Loop_guard
+module Thread_persist = Thread_persist
 
 (** {1 Types} *)
 
@@ -173,6 +177,70 @@ module ExecutorApi = struct
     Executor.find_action topic
 end
 
+(** {1 Conversation API} *)
+
+module ConversationApi = struct
+  (** Start a new conversation thread *)
+  let start ~config ~topic ~initiator ?max_turns ?initial_content () =
+    let convo_config : Conversation.config = {
+      base_path = config.base_path;
+      room = "default";  (* Can be parameterized *)
+    } in
+    Conversation.start ~config:convo_config ~topic ~initiator ?max_turns ?initial_content ()
+
+  (** Reply to a thread *)
+  let reply ~config ~thread_id ~speaker ~content ?confidence ?reply_to ?mentions () =
+    let convo_config : Conversation.config = {
+      base_path = config.base_path;
+      room = "default";
+    } in
+    (* Check loop guard *)
+    match Conversation.get ~config:convo_config ~thread_id with
+    | None -> Error (Printf.sprintf "Thread not found: %s" thread_id)
+    | Some thread ->
+        let loop_check = Loop_guard.check
+          ~thread ~speaker ~content
+          ~config:Loop_guard.default_config
+        in
+        match Loop_guard.to_error_message loop_check with
+        | Some err -> Error err
+        | None ->
+            Conversation.reply ~config:convo_config ~thread_id ~speaker ~content
+              ?confidence ?reply_to ?mentions ()
+
+  (** Conclude a thread *)
+  let conclude ~config ~thread_id ~concluder ~conclusion () =
+    let convo_config : Conversation.config = {
+      base_path = config.base_path;
+      room = "default";
+    } in
+    Conversation.conclude ~config:convo_config ~thread_id ~concluder ~conclusion ()
+
+  (** Get a thread by ID *)
+  let get ~config ~thread_id =
+    let convo_config : Conversation.config = {
+      base_path = config.base_path;
+      room = "default";
+    } in
+    Conversation.get ~config:convo_config ~thread_id
+
+  (** List active threads *)
+  let list_active ~config =
+    let convo_config : Conversation.config = {
+      base_path = config.base_path;
+      room = "default";
+    } in
+    Conversation.list_active ~config:convo_config
+
+  (** Sync all threads to Neo4j *)
+  let sync_neo4j ~config =
+    let convo_config : Conversation.config = {
+      base_path = config.base_path;
+      room = "default";
+    } in
+    Thread_persist.sync_all ~config:convo_config
+end
+
 (** {1 High-level Orchestration} *)
 
 (** Run a full debate-to-vote cycle *)
@@ -231,18 +299,21 @@ let quick_vote ~topic ~initiator ~votes =
 let status ~config =
   let debates = DebateApi.list_all ~config () in
   let active_votes = ConsensusApi.list_active () in
+  let active_threads = ConversationApi.list_active ~config in
   `Assoc [
-    ("version", `String "2.10.0");
+    ("version", `String "2.11.0");
     ("modules", `List [
       `String "debate";
       `String "consensus";
       `String "router";
       `String "archive";
       `String "balance";
+      `String "conversation";
     ]);
     ("active_debates", `Int (List.length debates));
     ("active_votes", `Int (List.length active_votes));
+    ("active_threads", `Int (List.length active_threads));
   ]
 
 (** Version info *)
-let version = "2.10.0"
+let version = "2.11.0"

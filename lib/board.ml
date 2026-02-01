@@ -414,6 +414,17 @@ let get_comments store ~post_id : (comment list, board_error) result =
         Ok (List.sort (fun (a : comment) (b : comment) -> compare a.created_at b.created_at) comments)
       )
 
+(** List all comments (for profile aggregation) *)
+let list_comments store ?(limit=1000) () : comment list =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    let all = Hashtbl.fold (fun _ c acc -> c :: acc) store.comments [] in
+    let sorted = List.sort (fun (a : comment) (b : comment) ->
+      compare b.created_at a.created_at
+    ) all in
+    List.filteri (fun i _ -> i < limit) sorted
+  )
+
 (** {1 Voting - Idempotent} *)
 
 type vote_direction = Up | Down
@@ -459,6 +470,26 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
               close_out oc;
               Sys.rename tmp_path vpath
             with _ -> ());
+            Ok (updated.votes_up - updated.votes_down)
+      )
+
+(** Vote on a comment *)
+let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result =
+  match Agent_id.of_string voter with
+  | Error e -> Error e
+  | Ok _ ->
+  match Comment_id.of_string comment_id with
+  | Error e -> Error e
+  | Ok cid ->
+      with_lock store (fun () ->
+        match Hashtbl.find_opt store.comments (Comment_id.to_string cid) with
+        | None -> Error (Comment_not_found comment_id)
+        | Some cmt ->
+            let updated = match direction with
+              | Up -> { cmt with votes_up = cmt.votes_up + 1 }
+              | Down -> { cmt with votes_down = cmt.votes_down + 1 }
+            in
+            Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
             Ok (updated.votes_up - updated.votes_down)
       )
 

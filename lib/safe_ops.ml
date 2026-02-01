@@ -161,3 +161,12 @@ let json_int_opt key json =
     | `Null -> None
     | j -> Some (to_int j)
   with Type_error _ -> None
+
+let json_float_opt key json =
+  let open Yojson.Safe.Util in
+  try
+    match json |> member key with
+    | `Null -> None
+    | `Int i -> Some (float_of_int i)
+    | j -> Some (to_float j)
+  with Type_error _ -> None

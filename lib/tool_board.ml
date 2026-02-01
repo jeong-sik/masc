@@ -212,6 +212,54 @@ let handle_stats _args =
   let stats = Board.stats store in
   (true, Printf.sprintf "📊 Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
 
+(** Search posts by keyword *)
+let handle_search args =
+  let store = Board.global () in
+  let query = get_string args "query" "" in
+  let limit = get_int args "limit" 20 in
+  if query = "" then (false, "❌ query required")
+  else
+    let all_posts : Board.post list = Board.list_posts store ~limit:100 () in
+    let query_lower = String.lowercase_ascii query in
+    let matched = List.filter (fun (p : Board.post) ->
+      let content_lower = String.lowercase_ascii p.content in
+      try ignore (Str.search_forward (Str.regexp_string query_lower) content_lower 0); true
+      with Not_found -> false
+    ) all_posts in
+    let results = List.filteri (fun i _ -> i < limit) matched in
+    if results = [] then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)
+    else
+      let formatted = List.map format_post results in
+      (true, Printf.sprintf "🔍 '%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat "\n---\n" formatted))
+
+(** Vote on comment *)
+let handle_comment_vote args =
+  let store = Board.global () in
+  let comment_id = get_string args "comment_id" "" in
+  let voter = get_string args "voter" "anonymous" in
+  let direction_str = get_string args "direction" "up" in
+  let direction = if direction_str = "down" then Board.Down else Board.Up in
+  if comment_id = "" then (false, "❌ comment_id required")
+  else
+    match Board.vote_comment store ~voter ~comment_id ~direction with
+    | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if direction_str = "down" then "👎" else "👍") score)
+    | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
+
+(** Agent profile *)
+let handle_profile args =
+  let store = Board.global () in
+  let agent = get_string args "agent" "" in
+  if agent = "" then (false, "❌ agent required")
+  else
+    let all_posts : Board.post list = Board.list_posts store ~limit:1000 () in
+    let agent_posts = List.filter (fun (p : Board.post) -> Board.Agent_id.to_string p.author = agent) all_posts in
+    let post_votes = List.fold_left (fun acc (p : Board.post) -> acc + p.votes_up - p.votes_down) 0 agent_posts in
+    let all_comments : Board.comment list = Board.list_comments store () in
+    let agent_comments = List.filter (fun (c : Board.comment) -> Board.Agent_id.to_string c.author = agent) all_comments in
+    let comment_votes = List.fold_left (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down) 0 agent_comments in
+    (true, Printf.sprintf "📊 **%s** 프로필\n📝 게시물: %d개 (%+d점)\n💬 코멘트: %d개 (%+d점)\n⭐ 총: %+d점"
+      agent (List.length agent_posts) post_votes (List.length agent_comments) comment_votes (post_votes + comment_votes))
+
 (** {1 Tool Definitions} *)
 
 let tool_post_create : Types.tool_schema = {
@@ -294,6 +342,45 @@ let tool_stats : Types.tool_schema = {
   ];
 }
 
+let tool_search : Types.tool_schema = {
+  name = "masc_board_search";
+  description = "Search posts by keyword";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("query", `Assoc [("type", `String "string"); ("description", `String "Search keyword")]);
+      ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max results (default: 20)")]);
+    ]);
+    ("required", `List [`String "query"]);
+  ];
+}
+
+let tool_comment_vote : Types.tool_schema = {
+  name = "masc_board_comment_vote";
+  description = "Vote on a comment (up or down)";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("comment_id", `Assoc [("type", `String "string"); ("description", `String "Comment ID")]);
+      ("voter", `Assoc [("type", `String "string"); ("description", `String "Voter name")]);
+      ("direction", `Assoc [("type", `String "string"); ("description", `String "up or down (default: up)")]);
+    ]);
+    ("required", `List [`String "comment_id"]);
+  ];
+}
+
+let tool_profile : Types.tool_schema = {
+  name = "masc_board_profile";
+  description = "Get agent profile with activity stats";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("agent", `Assoc [("type", `String "string"); ("description", `String "Agent name")]);
+    ]);
+    ("required", `List [`String "agent"]);
+  ];
+}
+
 (** All board tools *)
 let tools = [
   tool_post_create;
@@ -302,6 +389,9 @@ let tools = [
   tool_comment_add;
   tool_vote;
   tool_stats;
+  tool_search;
+  tool_comment_vote;
+  tool_profile;
 ]
 
 (** Tool dispatcher *)
@@ -313,4 +403,7 @@ let handle_tool name args =
   | "masc_board_comment" -> handle_comment_add args
   | "masc_board_vote" -> handle_vote args
   | "masc_board_stats" -> handle_stats args
+  | "masc_board_search" -> handle_search args
+  | "masc_board_comment_vote" -> handle_comment_vote args
+  | "masc_board_profile" -> handle_profile args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)

@@ -657,6 +657,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let _get_int_opt key =
     Safe_ops.json_int_opt key arguments
   in
+  let get_float_opt key =
+    Safe_ops.json_float_opt key arguments
+  in
 
   (* Resolve agent_name via Agent Identity system (primary) with legacy fallback.
      Agent_registry_eio.get_or_create_identity already resolved identity above.
@@ -1865,15 +1868,133 @@ Time: %s
       end;
       result
   | "masc_board_list" | "masc_board_get"
-  | "masc_board_comment" | "masc_board_vote" | "masc_board_stats" ->
+  | "masc_board_comment" | "masc_board_vote" | "masc_board_stats"
+  | "masc_board_search" | "masc_board_comment_vote" | "masc_board_profile" ->
       Tool_board.handle_tool name arguments
 
   (* Lodge tools delegated to Tool_lodge module *)
   | "lodge_heartbeat" | "lodge_classify" | "lodge_react" | "lodge_cycle"
   | "lodge_discussion" | "lodge_evolve" | "lodge_spawn" | "lodge_agents"
-  | "lodge_persona_patrol" ->
+  | "lodge_persona_patrol" | "lodge_autonomous_loop"
+  (* Project collaboration *)
+  | "lodge_propose_project" | "lodge_join_project" | "lodge_share_code"
+  | "lodge_research" | "lodge_profile"
+  (* New: Search, Like, Progress *)
+  | "lodge_search" | "lodge_comment_like" | "lodge_progress" ->
       let net = get_net () in
       Tool_lodge.handle_tool ~net name arguments
+
+  (* ============================================ *)
+  (* Conversation Tools - Persistent Agent Dialogue *)
+  (* ============================================ *)
+
+  | "masc_convo_start" ->
+      let topic = get_string "topic" "" in
+      let initiator = get_string "initiator" agent_name in
+      let initial_content = get_string "initial_content" "" in
+      let max_turns = get_int "max_turns" 50 in
+      if topic = "" then (false, "❌ topic required")
+      else begin
+        let convo_config : Council.Conversation.config = {
+          base_path = config.base_path;
+          room = "default";
+        } in
+        match Council.Conversation.start ~config:convo_config ~topic ~initiator
+                ~max_turns ~initial_content () with
+        | Ok thread ->
+            let json = Council.Conversation.thread_to_yojson thread in
+            (true, Printf.sprintf "✅ Thread started: %s\n%s"
+              thread.Council.Conversation.id (Yojson.Safe.pretty_to_string json))
+        | Error e -> (false, Printf.sprintf "❌ %s" e)
+      end
+
+  | "masc_convo_reply" ->
+      let thread_id = get_string "thread_id" "" in
+      let speaker = get_string "speaker" agent_name in
+      let content = get_string "content" "" in
+      let confidence = get_float_opt "confidence" in
+      let reply_to = get_string_opt "reply_to" in
+      let mentions = get_string_list "mentions" in
+      if thread_id = "" || content = "" then
+        (false, "❌ thread_id and content required")
+      else begin
+        let convo_config : Council.Conversation.config = {
+          base_path = config.base_path;
+          room = "default";
+        } in
+        (* Check loop guard first *)
+        match Council.Conversation.get ~config:convo_config ~thread_id with
+        | None -> (false, Printf.sprintf "❌ Thread not found: %s" thread_id)
+        | Some thread ->
+            let loop_check = Council.Loop_guard.check
+              ~thread ~speaker ~content
+              ~config:Council.Loop_guard.default_config
+            in
+            match Council.Loop_guard.to_error_message loop_check with
+            | Some err -> (false, Printf.sprintf "🛑 Loop detected: %s" err)
+            | None ->
+                match Council.Conversation.reply ~config:convo_config ~thread_id
+                        ~speaker ~content ?confidence ?reply_to ~mentions () with
+                | Ok updated ->
+                    let json = Council.Conversation.thread_to_yojson updated in
+                    (true, Printf.sprintf "✅ Reply added (turn %d)\n%s"
+                      updated.Council.Conversation.current_turn
+                      (Yojson.Safe.pretty_to_string json))
+                | Error e -> (false, Printf.sprintf "❌ %s" e)
+      end
+
+  | "masc_convo_conclude" ->
+      let thread_id = get_string "thread_id" "" in
+      let concluder = get_string "concluder" agent_name in
+      let conclusion = get_string "conclusion" "" in
+      if thread_id = "" || conclusion = "" then
+        (false, "❌ thread_id and conclusion required")
+      else begin
+        let convo_config : Council.Conversation.config = {
+          base_path = config.base_path;
+          room = "default";
+        } in
+        match Council.Conversation.conclude ~config:convo_config ~thread_id
+                ~concluder ~conclusion () with
+        | Ok thread ->
+            let json = Council.Conversation.thread_to_yojson thread in
+            (true, Printf.sprintf "✅ Thread concluded: %s\n%s"
+              thread.Council.Conversation.id (Yojson.Safe.pretty_to_string json))
+        | Error e -> (false, Printf.sprintf "❌ %s" e)
+      end
+
+  | "masc_convo_get" ->
+      let thread_id = get_string "thread_id" "" in
+      if thread_id = "" then (false, "❌ thread_id required")
+      else begin
+        let convo_config : Council.Conversation.config = {
+          base_path = config.base_path;
+          room = "default";
+        } in
+        match Council.Conversation.get ~config:convo_config ~thread_id with
+        | Some thread ->
+            let json = Council.Conversation.thread_to_yojson thread in
+            (true, Yojson.Safe.pretty_to_string json)
+        | None -> (false, Printf.sprintf "❌ Thread not found: %s" thread_id)
+      end
+
+  | "masc_convo_list" ->
+      let convo_config : Council.Conversation.config = {
+        base_path = config.base_path;
+        room = "default";
+      } in
+      let threads = Council.Conversation.list_active ~config:convo_config in
+      let json = `List (List.map (fun th ->
+        `Assoc [
+          ("id", `String th.Council.Conversation.id);
+          ("topic", `String th.Council.Conversation.topic);
+          ("status", `String (Council.Conversation.thread_status_to_string th.Council.Conversation.status));
+          ("turns", `Int th.Council.Conversation.current_turn);
+          ("participants", `List (List.map (fun p -> `String p) th.Council.Conversation.participants));
+        ]
+      ) threads) in
+      (true, Printf.sprintf "📋 Active threads: %d\n%s"
+        (List.length threads) (Yojson.Safe.pretty_to_string json))
 
   | _ ->
       (false, Printf.sprintf "❌ Unknown tool: %s" name)

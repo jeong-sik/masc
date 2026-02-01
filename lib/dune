@@ -4,7 +4,9 @@
  (modules
    a2a_tools
    agent_card
+   agent_ecosystem
    agent_identity
+   agent_neo4j
    agent_registry_eio
    auto_recall
    auto_responder

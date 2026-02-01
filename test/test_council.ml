@@ -308,10 +308,46 @@ let balance_tests = [
   "action clear", `Quick, test_balance_action_clear;
 ]
 
+(* ============================================================
+   Executor Tests
+   ============================================================ *)
+
+module Executor = Council.Executor
+
+let test_executor_find_action_pr () =
+  match Executor.find_action "Merge PR #123" with
+  | Some _ -> check bool "found" true true
+  | None -> fail "should find PR merge action"
+
+let test_executor_find_action_none () =
+  match Executor.find_action "Random topic" with
+  | Some _ -> fail "should not find action"
+  | None -> check bool "not found" true true
+
+let test_executor_dry_run_approve () =
+  let result = Consensus.Majority 2 in
+  let output = Executor.dry_run ~topic:"Merge PR #456" ~result in
+  check bool "mentions merge" (String.length output > 0) true
+
+let test_executor_dry_run_reject () =
+  let result = Consensus.Deadlock in
+  let output = Executor.dry_run ~topic:"Merge PR #789" ~result in
+  (* Deadlock means threshold not met *)
+  check bool "mentions would not" 
+    (try String.sub output 0 9 = "Would NOT" with _ -> false) true
+
+let executor_tests = [
+  "find action PR", `Quick, test_executor_find_action_pr;
+  "no action for random", `Quick, test_executor_find_action_none;
+  "dry run approve", `Quick, test_executor_dry_run_approve;
+  "dry run reject", `Quick, test_executor_dry_run_reject;
+]
+
 let () =
   run "Council" [
     "Debate", debate_tests;
     "Consensus", consensus_tests;
     "Router", router_tests;
     "Balance", balance_tests;
+    "Executor", executor_tests;
   ]

@@ -17,6 +17,7 @@ module Consensus = Consensus
 module Router = Router
 module Archive = Archive
 module Balance = Balance
+module Executor = Executor
 
 (** {1 Types} *)
 
@@ -154,6 +155,22 @@ module BalanceApi = struct
   (** Create empty stats *)
   let empty_stats () =
     Balance.empty_stats ()
+end
+
+(** {1 Executor API} *)
+
+module ExecutorApi = struct
+  (** Execute a decision based on voting result *)
+  let execute ~topic ~result =
+    Executor.execute_decision ~topic ~result
+
+  (** Dry run - show what would happen *)
+  let dry_run ~topic ~result =
+    Executor.dry_run ~topic ~result
+
+  (** Find matching action for a topic *)
+  let find_action topic =
+    Executor.find_action topic
 end
 
 (** {1 High-level Orchestration} *)

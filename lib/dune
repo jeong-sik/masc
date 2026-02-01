@@ -54,6 +54,10 @@
    metrics_store_eio
    generational_metrics
    mention
+   message_schema
+   verification
+   lamport
+   trace
    mind_eio
    mitosis
    mode
@@ -115,6 +119,7 @@
    tool_task
    tool_room
    tool_control
+   tool_verification
    tool_misc
    tool_board
    tool_council

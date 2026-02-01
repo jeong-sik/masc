@@ -7,8 +7,8 @@ type level =
   | Warn
   | Error
 
-(** Current log level (mutable, can be set at runtime) *)
-let current_level = Atomic.make 1 (* Info=1 *)
+(** Current log level (Atomic for thread safety in OCaml 5) *)
+let current_level = Atomic.make 1 (* Info = 1 *)
 
 (** Level to string *)
 let level_to_string = function

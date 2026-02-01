@@ -144,7 +144,7 @@ let write_json path json =
   let tmp_path = Filename.concat dir (Printf.sprintf ".%s.tmp.%d" base (Unix.getpid ())) in
   let oc = open_out tmp_path in
   let closed = ref false in
-  Fun.protect ~finally:(fun () ->
+  Common.protect ~module_name:"debate" ~finally_label:"finalizer" ~finally:(fun () ->
     if not !closed then (try close_out oc with _ -> ());
     if Sys.file_exists tmp_path then
       try Sys.remove tmp_path with _ -> ()

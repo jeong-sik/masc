@@ -764,7 +764,7 @@ let with_file_lock config path f =
       let lock_path = path ^ ".lock" in
       mkdir_p (Filename.dirname lock_path);
       let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
-      Fun.protect
+      Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
         ~finally:(fun () ->
           (try Unix.lockf fd Unix.F_ULOCK 0
            with Unix.Unix_error (err, _, _) ->
@@ -786,7 +786,7 @@ let with_file_lock config path f =
               acquire (attempts - 1)
       in
       if acquire 20 then
-        Fun.protect
+        Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           f
       else
@@ -798,7 +798,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
       let lock_path = path ^ ".lock" in
       mkdir_p (Filename.dirname lock_path);
       let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
-      Fun.protect
+      Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
         ~finally:(fun () ->
           (try Unix.lockf fd Unix.F_ULOCK 0
            with Unix.Unix_error (err, _, _) ->
@@ -818,7 +818,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
           | _ -> Unix.sleepf 0.05; acquire (attempts - 1)
       in
       if acquire 20 then
-        Fun.protect
+        Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           (fun () -> Ok (f ()))
       else

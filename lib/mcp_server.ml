@@ -345,7 +345,7 @@ let read_event_lines config ~limit =
     let remaining = ref limit in
     let read_lines path =
       let ic = open_in path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      Common.protect ~module_name:"mcp_server" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
         let rec loop acc =
           match input_line ic with
           | line -> loop (line :: acc)

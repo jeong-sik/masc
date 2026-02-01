@@ -61,6 +61,12 @@
  (modules test_safe_ops)
  (libraries masc_mcp alcotest str yojson))
 
+; Common module tests (finalizer guard)
+(test
+ (name test_common)
+ (modules test_common)
+ (libraries masc_mcp alcotest))
+
 ; Dispatch chain evidence test
 (test
  (name test_dispatch_chain_evidence)

@@ -79,7 +79,7 @@ let save_state (config : Room_utils.config) (state : tempo_state) : unit =
   let json = state_to_json state in
   let content = Yojson.Safe.pretty_to_string json in
   let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+  Common.protect ~module_name:"tempo" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
     output_string oc content)
 
 (** Set tempo manually *)

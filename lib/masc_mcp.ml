@@ -1,6 +1,7 @@
 (** MASC MCP - Main Library Entry Point (Eio-only) *)
 
 module Version = Version
+module Common = Common
 module Log = Log
 module Types = Types
 module Nickname = Nickname

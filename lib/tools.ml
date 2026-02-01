@@ -1287,6 +1287,71 @@ Returns: selected agents, estimated cost, complexity score.";
     ];
   };
 
+  {
+    name = "masc_execute";
+    description = "Execute an action based on council decision. \
+Matches topic pattern (e.g., 'Merge PR #123') and runs corresponding action.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The decision topic (e.g., 'Merge PR #456')");
+        ]);
+        ("result", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "unanimous"; `String "majority"; `String "deadlock"]);
+          ("description", `String "Voting result (default: majority)");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  {
+    name = "masc_execute_dry_run";
+    description = "Dry run - show what action would be taken without executing.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The decision topic");
+        ]);
+        ("result", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Voting result");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  {
+    name = "masc_archive_save";
+    description = "Save a record to the archive (실록). Records debates, votes, and decisions.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("type", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "debate"; `String "vote"; `String "decision"; `String "post"]);
+          ("description", `String "Record type");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Record content");
+        ]);
+        ("agents", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Participating agents");
+        ]);
+      ]);
+      ("required", `List [`String "content"]);
+    ];
+  };
+
   (* ============================================ *)
   (* Social Features (Moltbook-style)             *)
   (* ============================================ *)

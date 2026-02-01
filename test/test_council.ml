@@ -147,7 +147,7 @@ let test_consensus_vote () =
   | Error _ -> fail "start failed"
   | Ok session ->
     let sid = session.Consensus.id in
-    match Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"yes" with
+    match Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"yes" () with
     | Error _ -> Consensus.clear_sessions (); fail "vote failed"
     | Ok updated ->
       check int "1 vote" (List.length updated.Consensus.votes) 1;
@@ -158,8 +158,8 @@ let test_consensus_duplicate_vote () =
   | Error _ -> fail "start failed"
   | Ok session ->
     let sid = session.Consensus.id in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"1" in
-    match Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Reject ~reason:"2" with
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"1" () in
+    match Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Reject ~reason:"2" () with
     | Ok _ -> Consensus.clear_sessions (); fail "should reject duplicate"
     | Error (Consensus.Already_voted _) -> Consensus.clear_sessions ()
     | Error _ -> Consensus.clear_sessions (); fail "wrong error type"
@@ -169,9 +169,9 @@ let test_consensus_majority () =
   | Error _ -> fail "start failed"
   | Ok session ->
     let sid = session.Consensus.id in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"" in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a2" ~decision:Consensus.Approve ~reason:"" in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a3" ~decision:Consensus.Reject ~reason:"" in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"" () in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a2" ~decision:Consensus.Approve ~reason:"" () in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a3" ~decision:Consensus.Reject ~reason:"" () in
     match Consensus.get_result ~session_id:sid with
     | Error _ -> Consensus.clear_sessions (); fail "get result failed"
     | Ok result ->
@@ -185,9 +185,9 @@ let test_consensus_unanimous () =
   | Error _ -> fail "start failed"
   | Ok session ->
     let sid = session.Consensus.id in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"" in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a2" ~decision:Consensus.Approve ~reason:"" in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a3" ~decision:Consensus.Approve ~reason:"" in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"" () in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a2" ~decision:Consensus.Approve ~reason:"" () in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a3" ~decision:Consensus.Approve ~reason:"" () in
     match Consensus.get_result ~session_id:sid with
     | Error _ -> Consensus.clear_sessions (); fail "get result failed"
     | Ok result ->
@@ -201,8 +201,8 @@ let test_consensus_deadlock () =
   | Error _ -> fail "start failed"
   | Ok session ->
     let sid = session.Consensus.id in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"" in
-    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a2" ~decision:Consensus.Reject ~reason:"" in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a1" ~decision:Consensus.Approve ~reason:"" () in
+    let _ = Consensus.cast_vote ~session_id:sid ~agent:"a2" ~decision:Consensus.Reject ~reason:"" () in
     match Consensus.get_result ~session_id:sid with
     | Error _ -> Consensus.clear_sessions (); fail "get result failed"
     | Ok result ->
@@ -397,6 +397,101 @@ let archive_tests = [
   "neo4j url check", `Quick, test_archive_neo4j_url_check;
 ]
 
+(* ============================================================
+   Integration Tests - Full Council Flow
+   ============================================================ *)
+
+let test_full_council_flow () =
+  setup ();
+  let notify_fn = fun ~agent:_ ~message:_ -> () in
+  
+  (* 1. Start debate *)
+  let debate = match Debate.start_debate test_base_path ~topic:"Full flow test" ~notify_fn () with
+    | Ok d -> d
+    | Error e -> failwith (Printf.sprintf "debate failed: %s" e)
+  in
+  check bool "debate created" (String.length debate.Debate.id > 0) true;
+  
+  (* 2. Add arguments *)
+  (match Debate.add_argument test_base_path ~debate_id:debate.id 
+           ~agent:"agent1" ~content:"Pro argument" ~position:Debate.Support () with
+   | Ok _ -> ()
+   | Error e -> failwith (Printf.sprintf "arg1 failed: %s" e));
+  
+  (match Debate.add_argument test_base_path ~debate_id:debate.id
+           ~agent:"agent2" ~content:"Con argument" ~position:Debate.Oppose () with
+   | Ok _ -> ()
+   | Error e -> failwith (Printf.sprintf "arg2 failed: %s" e));
+  
+  (* 3. Close debate *)
+  (match Debate.close_debate test_base_path ~debate_id:debate.id with
+   | Ok _ -> ()
+   | Error e -> failwith (Printf.sprintf "close failed: %s" e));
+  
+  (* 4. Start consensus *)
+  let session = match Consensus.start_voting ~topic:"Decision on debate" ~initiator:"test" ~quorum:2 ~threshold:0.5 () with
+    | Ok s -> s
+    | Error _ -> failwith "start voting failed"
+  in
+  check bool "session created" (String.length session.Consensus.id > 0) true;
+  
+  (* 5. Cast votes *)
+  (match Consensus.cast_vote ~session_id:session.id ~agent:"agent1" 
+           ~decision:Consensus.Approve ~reason:"Agreed" () with
+   | Ok _ -> ()
+   | Error _ -> failwith "vote1 failed");
+  
+  (match Consensus.cast_vote ~session_id:session.id ~agent:"agent2"
+           ~decision:Consensus.Approve ~reason:"Also agreed" () with
+   | Ok _ -> ()
+   | Error _ -> failwith "vote2 failed");
+  
+  (* 6. Check result *)
+  (match Consensus.get_result ~session_id:session.id with
+   | Ok result ->
+     let result_str = Consensus.voting_result_to_string result in
+     check bool "unanimous approve" (result_str = "✅ Unanimous: Approved") true
+   | Error _ -> failwith "get result failed");
+  
+  teardown ()
+
+let test_debate_to_consensus_handoff () =
+  setup ();
+  let notify_fn = fun ~agent:_ ~message:_ -> () in
+  
+  (* Debate with mixed positions *)
+  let debate = match Debate.start_debate test_base_path ~topic:"Handoff test" ~notify_fn () with
+    | Ok d -> d
+    | Error e -> failwith e
+  in
+  
+  ignore (Debate.add_argument test_base_path ~debate_id:debate.id
+            ~agent:"a" ~content:"Yes" ~position:Debate.Support ());
+  ignore (Debate.add_argument test_base_path ~debate_id:debate.id
+            ~agent:"b" ~content:"No" ~position:Debate.Oppose ());
+  ignore (Debate.add_argument test_base_path ~debate_id:debate.id
+            ~agent:"c" ~content:"Maybe" ~position:Debate.Neutral ());
+  
+  (* Close debate *)
+  (match Debate.close_debate test_base_path ~debate_id:debate.id with
+   | Ok _ -> ()
+   | Error e -> failwith e);
+  
+  (* Verify counts via status *)
+  (match Debate.get_debate_status test_base_path ~debate_id:debate.id with
+   | Ok summary ->
+     check int "support" summary.Debate.support_count 1;
+     check int "oppose" summary.oppose_count 1;
+     check int "neutral" summary.neutral_count 1
+   | Error e -> failwith e);
+  
+  teardown ()
+
+let integration_tests = [
+  "full council flow", `Quick, test_full_council_flow;
+  "debate to consensus handoff", `Quick, test_debate_to_consensus_handoff;
+]
+
 let () =
   run "Council" [
     "Debate", debate_tests;
@@ -405,4 +500,5 @@ let () =
     "Balance", balance_tests;
     "Executor", executor_tests;
     "Archive", archive_tests;
+    "Integration", integration_tests;
   ]

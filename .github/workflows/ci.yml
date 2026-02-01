@@ -37,7 +37,10 @@ jobs:
           opam exec -- dune build
 
       - name: Run tests
+        env:
+          ME_ROOT: /tmp/me
         run: |
+          mkdir -p /tmp/me
           opam exec -- dune test
 
       - name: Check formatting

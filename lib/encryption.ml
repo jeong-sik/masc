@@ -68,7 +68,7 @@ let load_key config : (GCM.key, encryption_error) result =
     | `File path ->
         if Sys.file_exists path then
           let ic = open_in path in
-          let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+          let content = Common.protect ~module_name:"encryption" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
             really_input_string ic 64) in (* hex-encoded 32 bytes *)
           (* Decode hex to bytes *)
           let bytes = ref "" in

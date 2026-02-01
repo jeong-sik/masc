@@ -100,7 +100,7 @@ let with_graph_lock config f =
   let warn_threshold = Level2_config.Lock.warn_threshold_ms () in
   if wait_ms > warn_threshold then
     Printf.eprintf "[hebbian_eio] WARN: Lock contention detected: %.1fms wait (threshold: %.0fms)\n" wait_ms warn_threshold;
-  Fun.protect
+  Common.protect ~module_name:"hebbian_eio" ~finally_label:"finalizer"
     ~finally:(fun () ->
       Unix.lockf fd Unix.F_ULOCK 0;
       Unix.close fd)

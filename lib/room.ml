@@ -1232,7 +1232,7 @@ let remove_walph_state config =
 (** Run with Walph state mutex locked *)
 let with_walph_lock state f =
   Mutex.lock state.mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock state.mutex) f
+  Common.protect ~module_name:"room" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock state.mutex) f
 
 (** Parse @walph command from broadcast message
     Returns: (command, args) or None if not a walph command *)
@@ -1375,7 +1375,7 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
       (* Use Fun.protect to ensure running <- false even on exceptions (zombie prevention) *)
       let stop_reason = ref "" in
 
-      Fun.protect
+      Common.protect ~module_name:"room" ~finally_label:"finalizer"
         ~finally:(fun () ->
           (* Always reset running state, even on exception *)
           with_walph_lock walph_state (fun () ->

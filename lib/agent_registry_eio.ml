@@ -21,7 +21,7 @@ let initialized = ref false
 (** Initialize the global registry. Must be called within Eio context. *)
 let init () =
   Mutex.lock registry_lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_lock) (fun () ->
+  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock registry_lock) (fun () ->
     if not !initialized then begin
       global_registry := Some (Agent_identity.Registry.create ());
       initialized := true
@@ -42,7 +42,7 @@ let get_registry () =
 (** Reset registry for testing *)
 let reset_for_testing () =
   Mutex.lock registry_lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_lock) (fun () ->
+  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock registry_lock) (fun () ->
     global_registry := Some (Agent_identity.Registry.create ());
     initialized := true
   )
@@ -73,7 +73,7 @@ let get_or_create_identity ?mcp_session_id params =
     | None -> None
     | Some sid ->
         Mutex.lock session_map_lock;
-        let result = Fun.protect ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+        let result = Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
           match Hashtbl.find_opt session_identity_map sid with
           | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
           | None -> None
@@ -102,7 +102,7 @@ let get_or_create_identity ?mcp_session_id params =
       (match mcp_session_id with
        | Some sid ->
            Mutex.lock session_map_lock;
-           Fun.protect ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+           Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
              Hashtbl.replace session_identity_map sid registered.session_key
            )
        | None -> ());
@@ -147,7 +147,7 @@ let list_active ?(within_seconds = 300.0) () =
 let cleanup_stale_sessions () =
   let reg = get_registry () in
   Mutex.lock session_map_lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
     let to_remove = ref [] in
     Hashtbl.iter (fun sid session_key ->
       match Agent_identity.Registry.find_by_session reg session_key with
@@ -164,7 +164,7 @@ let unregister session_key =
   Agent_identity.Registry.unregister reg session_key;
   (* Also clean up session map *)
   Mutex.lock session_map_lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
     let to_remove = ref [] in
     Hashtbl.iter (fun sid sk ->
       if sk = session_key then to_remove := sid :: !to_remove

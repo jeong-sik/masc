@@ -185,7 +185,7 @@ let write_json path json =
   let tmp_path = Filename.concat dir (Printf.sprintf ".%s.tmp.%d" base (Unix.getpid ())) in
   let oc = open_out tmp_path in
   let closed = ref false in
-  Fun.protect ~finally:(fun () ->
+  Common.protect ~module_name:"social" ~finally_label:"finalizer" ~finally:(fun () ->
     (* Only close if not already closed in protected block *)
     if not !closed then (try close_out oc with _ -> ());
     (* Clean up temp file on error (won't exist after successful rename) *)
@@ -340,7 +340,7 @@ let get_comments_threaded config ~post_id : (comment * comment list) list =
 let with_file_lock path f =
   let lock_path = path ^ ".lock" in
   let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
-  Fun.protect ~finally:(fun () ->
+  Common.protect ~module_name:"social" ~finally_label:"finalizer" ~finally:(fun () ->
     (try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ());
     Unix.close fd
   ) (fun () ->

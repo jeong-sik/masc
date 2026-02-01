@@ -273,7 +273,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
       if Sys.file_exists inst_file then
         try
           let ic = open_in inst_file in
-          let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
+          let content = Common.protect ~module_name:"spawn_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic)
             (fun () -> really_input_string ic (in_channel_length ic)) in
           let json = Yojson.Safe.from_string content in
           let inst = Institution_eio.institution_of_json json in

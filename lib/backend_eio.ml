@@ -477,7 +477,7 @@ module FileSystem = struct
 
           (* Open file for read+write, create if needed *)
           let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
-          Fun.protect ~finally:(fun () -> Unix.close fd) @@ fun () ->
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
 
           (* Acquire exclusive lock with non-blocking retry *)
           let max_retries = 100 in
@@ -495,7 +495,7 @@ module FileSystem = struct
                 try_lock (retries - 1)
           in
           let _ = try_lock max_retries in
-          Fun.protect ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
 
           (* Read current value *)
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
@@ -528,10 +528,10 @@ module FileSystem = struct
           if not (Sys.file_exists path_str) then Ok 0
           else
             let fd = Unix.openfile path_str [Unix.O_RDONLY] 0o644 in
-            Fun.protect ~finally:(fun () -> Unix.close fd) @@ fun () ->
+            Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
             (* Shared lock for reading *)
             Unix.lockf fd Unix.F_RLOCK 0;
-            Fun.protect ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+            Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
             let buf = Bytes.create 32 in
             let n = Unix.read fd buf 0 32 in
             if n = 0 then Ok 0
@@ -562,7 +562,7 @@ module FileSystem = struct
 
           (* Open file for read+write, create if needed *)
           let fd = Unix.openfile path_str [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
-          Fun.protect ~finally:(fun () -> Unix.close fd) @@ fun () ->
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
 
           (* Acquire exclusive lock with non-blocking retry *)
           let max_retries = 100 in
@@ -579,7 +579,7 @@ module FileSystem = struct
                 try_lock (retries - 1)
           in
           let _ = try_lock max_retries in
-          Fun.protect ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
+          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
 
           (* Read current content *)
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in

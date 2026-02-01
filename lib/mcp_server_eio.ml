@@ -753,10 +753,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_run = { Tool_run.config } in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
-  let simple_ctx_mitosis = { Tool_mitosis.config } in
+  let simple_ctx_mitosis = Tool_mitosis.make_context config in
   let simple_ctx_portal : Tool_portal.context = { config; agent_name } in
   let simple_ctx_worktree : Tool_worktree.context = { config; agent_name } in
   let simple_ctx_vote : Tool_vote.context = { config; agent_name } in
+  let simple_ctx_social : Tool_social.context = { config; agent_name } in
   let simple_ctx_a2a : Tool_a2a.context = { config; agent_name } in
   let handover_ctx : Tool_handover.context = {
     config; agent_name;
@@ -805,6 +806,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_vote.dispatch simple_ctx_vote ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_social.dispatch simple_ctx_social ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_a2a.dispatch simple_ctx_a2a ~name ~args:arguments with
@@ -953,7 +957,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
        | Some pm ->
            (* Create spawn function that uses proc_mgr *)
            let spawn_fn agent_name prompt =
-             Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt ~timeout_seconds:300 ()
+             Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
            in
            let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
            let json = Bounded.result_to_json result in
@@ -1334,7 +1338,7 @@ Time: %s
         else begin
           (* Create spawn function *)
           let spawn_fn ~prompt =
-            Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:600 ()
+            Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
           in
 
           (* Execute full mitosis *)

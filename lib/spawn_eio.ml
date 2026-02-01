@@ -177,28 +177,28 @@ let default_configs = [
   ("claude", {
     agent_name = "claude";
     command = "claude --output-format json -p";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
   ("gemini", {
     agent_name = "gemini";
     command = "gemini --yolo";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
   ("codex", {
     agent_name = "codex";
     command = "codex exec --json";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
   ("ollama", {
     agent_name = "ollama";
     command = "ollama run devstral";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];
   });
@@ -206,7 +206,7 @@ let default_configs = [
   ("glm", {
     agent_name = "glm";
     command = "curl -s -X POST http://localhost:8932/mcp -H 'Content-Type: application/json' -d";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];  (* MCP tools not applicable for API call *)
   });
@@ -235,7 +235,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     | None -> {
         agent_name;
         command = agent_name;
-        timeout_seconds = Option.value timeout_seconds ~default:300;
+        timeout_seconds = Option.value timeout_seconds ~default:Env_config.Spawn.timeout_seconds;
         working_dir;
         mcp_tools = [];
       }

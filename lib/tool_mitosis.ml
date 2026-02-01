@@ -9,10 +9,23 @@
     - 80% threshold: Handoff execution (spawn successor agent)
 *)
 
-(** Tool handler context *)
+(** Tool handler context - extensible for future features *)
 type context = {
   config: Room.config;
+  logger: (string -> unit) option;  (** Optional logging callback *)
 }
+
+(** Create context with just config (backward compatible) *)
+let make_context config : context = { config; logger = None }
+
+(** Create context with config and logger *)
+let make_context_with_logger config logger : context = { config; logger = Some logger }
+
+(** Internal logging helper *)
+let log ctx msg =
+  match ctx.logger with
+  | Some f -> f msg
+  | None -> ()
 
 (** Tool result type *)
 type result = bool * string
@@ -24,7 +37,8 @@ let get_string args key default =
   | `Assoc fields ->
       (match List.assoc_opt key fields with
        | Some (`String s) -> s
-       | _ -> default)
+       | Some _ -> Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key; default
+       | None -> default)
   | _ -> default
 
 let get_float args key default =
@@ -33,7 +47,8 @@ let get_float args key default =
       (match List.assoc_opt key fields with
        | Some (`Float f) -> f
        | Some (`Int i) -> Float.of_int i
-       | _ -> default)
+       | Some _ -> Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key; default
+       | None -> default)
   | _ -> default
 
 let get_bool args key default =
@@ -41,7 +56,8 @@ let get_bool args key default =
   | `Assoc fields ->
       (match List.assoc_opt key fields with
        | Some (`Bool b) -> b
-       | _ -> default)
+       | Some _ -> Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key; default
+       | None -> default)
   | _ -> default
 
 (** {1 Individual Handlers} *)
@@ -82,22 +98,36 @@ let handle_mitosis_divide ctx args : result =
   let cell = !(Mcp_server.current_cell) in
   let config_mitosis = Mitosis.default_config in
   let spawn_fn ~prompt =
-    Spawn.spawn ~agent_name:"claude" ~prompt ~timeout_seconds:600 ()
+    Spawn.spawn ~agent_name:"claude" ~prompt ~timeout_seconds:Mitosis.Defaults.spawn_timeout_seconds ()
   in
   let (spawn_result, new_cell, new_pool) =
     Mitosis.execute_mitosis ~config:config_mitosis ~pool:!(Mcp_server.stem_pool)
       ~parent:cell ~full_context ~spawn_fn
   in
-  Mcp_server.current_cell := new_cell;
-  Mcp_server.stem_pool := new_pool;
-  Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
-  let json = `Assoc [
-    ("success", `Bool spawn_result.Spawn.success);
-    ("previous_generation", `Int cell.Mitosis.generation);
-    ("new_generation", `Int new_cell.Mitosis.generation);
-    ("successor_output", `String (String.sub spawn_result.Spawn.output 0 (min 500 (String.length spawn_result.Spawn.output))));
-  ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (* P0 fix: Only update state on successful spawn - no rollback needed on failure *)
+  if spawn_result.Spawn.success then begin
+    Mcp_server.current_cell := new_cell;
+    Mcp_server.stem_pool := new_pool;
+    Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
+    let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
+    let json = `Assoc [
+      ("success", `Bool true);
+      ("previous_generation", `Int cell.Mitosis.generation);
+      ("new_generation", `Int new_cell.Mitosis.generation);
+      ("successor_output", `String output_preview);
+    ] in
+    (true, Yojson.Safe.pretty_to_string json)
+  end else begin
+    (* Spawn failed - return error without updating state *)
+    Printf.eprintf "[MITOSIS/ERROR] mitosis_divide spawn failed, state unchanged\n%!";
+    let json = `Assoc [
+      ("success", `Bool false);
+      ("error", `String "Spawn failed");
+      ("spawn_output", `String spawn_result.Spawn.output);
+      ("suggestion", `String "Check agent availability and try again, or use masc_mitosis_handoff for graceful fallback");
+    ] in
+    (false, Yojson.Safe.pretty_to_string json)
+  end
 
 let handle_mitosis_check _ctx args : result =
   let context_ratio = get_float args "context_ratio" 0.0 in
@@ -115,9 +145,9 @@ let handle_mitosis_check _ctx args : result =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
-let handle_mitosis_record ctx _args : result =
-  let task_done = get_bool _args "task_done" false in
-  let tool_called = get_bool _args "tool_called" false in
+let handle_mitosis_record ctx args : result =
+  let task_done = get_bool args "task_done" false in
+  let tool_called = get_bool args "tool_called" false in
   let cell = !(Mcp_server.current_cell) in
   let updated = Mitosis.record_activity ~cell ~task_done ~tool_called in
   Mcp_server.current_cell := updated;
@@ -195,7 +225,7 @@ let handle_mitosis_handoff ctx args : result =
   (* P0-1: Configurable thresholds instead of hardcoded 0.5/0.8 *)
   let prepare_threshold = get_float args "prepare_threshold" 0.5 in
   let handoff_threshold = get_float args "handoff_threshold" 0.8 in
-  let spawn_timeout = int_of_float (get_float args "spawn_timeout" 600.0) in
+  let spawn_timeout = int_of_float (get_float args "spawn_timeout" (Float.of_int Mitosis.Defaults.spawn_timeout_seconds)) in
   
   (* Warn if context_ratio is default 0.0 - likely caller forgot to provide it *)
   if raw_ratio = 0.0 then
@@ -280,11 +310,7 @@ let handle_mitosis_handoff ctx args : result =
         Mcp_server.current_cell := new_cell;
         Mcp_server.stem_pool := new_pool;
         Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
-        let output_preview = 
-          let len = String.length spawn_result.Spawn.output in
-          if len > 500 then String.sub spawn_result.Spawn.output 0 500 ^ "..."
-          else spawn_result.Spawn.output
-        in
+        let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
         let json = `Assoc [
           ("action", `String "handoff");
           ("success", `Bool true);

@@ -197,7 +197,20 @@ let test_default_configs_claude_command () =
   | Some cfg -> check bool "has claude command" true
       (try let _ = Str.search_forward (Str.regexp "claude") cfg.command 0 in true
        with Not_found -> false)
-  | None -> fail "no claude config"
+  | None -> fail "claude config missing"
+
+(* P2 #19: Test that default_configs use Env_config.Spawn.timeout_seconds *)
+let test_default_configs_timeout_from_env_config () =
+  let expected = Masc_mcp.Env_config.Spawn.timeout_seconds in
+  List.iter (fun (name, cfg) ->
+    check int (Printf.sprintf "%s timeout uses Env_config" name) expected cfg.Spawn.timeout_seconds
+  ) Spawn.default_configs
+
+let test_default_configs_timeout_is_600 () =
+  (* All agents should use 600s (10 min) default timeout *)
+  List.iter (fun (name, cfg) ->
+    check int (Printf.sprintf "%s timeout is 600" name) 600 cfg.Spawn.timeout_seconds
+  ) Spawn.default_configs
 
 let test_default_configs_gemini_command () =
   match List.assoc_opt "gemini" Spawn.default_configs with
@@ -575,6 +588,8 @@ let () =
       test_case "has ollama" `Quick test_default_configs_has_ollama;
       test_case "claude command" `Quick test_default_configs_claude_command;
       test_case "gemini command" `Quick test_default_configs_gemini_command;
+      test_case "timeout from env_config" `Quick test_default_configs_timeout_from_env_config;
+      test_case "timeout is 600" `Quick test_default_configs_timeout_is_600;
     ];
     "get_config", [
       test_case "claude" `Quick test_get_config_claude;

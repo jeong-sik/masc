@@ -109,28 +109,28 @@ let default_configs = [
   ("claude", {
     agent_name = "claude";
     command = "claude --output-format json -p";  (* -p must be last before prompt *)
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;  (* Claude: --allowedTools flag *)
   });
   ("gemini", {
     agent_name = "gemini";
     command = "gemini --yolo";  (* Auto-approve tools for non-interactive *)
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;  (* Gemini: --allowed-mcp-server-names flag *)
   });
   ("codex", {
     agent_name = "codex";
     command = "codex exec";  (* Non-interactive mode *)
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;  (* Codex: uses config.toml MCP servers *)
   });
   ("ollama", {
     agent_name = "ollama";
     command = "llm-mcp --agent ollama --prompt";  (* Use llm-mcp CLI agent mode *)
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];  (* No MCP flags needed - llm-mcp handles everything *)
   });
@@ -170,7 +170,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     | None -> {
         agent_name;
         command = agent_name;  (* fallback: use agent_name as command *)
-        timeout_seconds = Option.value timeout_seconds ~default:300;
+        timeout_seconds = Option.value timeout_seconds ~default:Env_config.Spawn.timeout_seconds;
         working_dir;
         mcp_tools = [];
       }

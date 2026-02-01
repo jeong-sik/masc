@@ -380,8 +380,7 @@ let vote config ~voter ~target_type ~target_id ~direction : (int, string) result
   ensure_dirs config;
   let votes_file = votes_path config ~target_type ~target_id in
   (* Use file lock to prevent race conditions in read-modify-write *)
-  try
-    with_file_lock votes_file (fun () ->
+  with_file_lock votes_file (fun () ->
     let votes = load_votes config ~target_type ~target_id in
     (* Remove any existing vote from this voter *)
     let votes_without_current = List.filter (fun (v : vote_record) -> v.voter <> voter) votes in
@@ -415,8 +414,6 @@ let vote config ~voter ~target_type ~target_id ~direction : (int, string) result
               ) (List.filter (fun f -> Filename.check_suffix f ".json") files)));
     Ok new_score
   )
-  with e ->
-    Error (Printf.sprintf "Vote failed: %s" (Printexc.to_string e))
 
 let get_votes config ~target_type ~target_id : int =
   let votes = load_votes config ~target_type ~target_id in

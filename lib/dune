@@ -4,7 +4,6 @@
  (modules
    a2a_tools
    agent_card
-   debate
    auto_recall
    auto_responder
    auth
@@ -29,12 +28,10 @@
    encryption
    federation
    gcm_compat
-   gateway
    graphql_api
    handover_eio
    hat
    heartbeat
-   heartbeat_smart
    hebbian_eio
    http_server_eio
    institution_eio
@@ -116,7 +113,6 @@
    tool_control
    tool_misc
    social
-   tool_board
    tool_social
    transport
    transport_grpc_next

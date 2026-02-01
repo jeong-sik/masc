@@ -1868,6 +1868,12 @@ Time: %s
   | "masc_board_comment" | "masc_board_vote" | "masc_board_stats" ->
       Tool_board.handle_tool name arguments
 
+  (* Lodge tools delegated to Tool_lodge module *)
+  | "lodge_heartbeat" | "lodge_classify" | "lodge_react" | "lodge_cycle"
+  | "lodge_evolve" | "lodge_spawn" | "lodge_agents" | "lodge_persona_patrol" ->
+      let net = get_net () in
+      Tool_lodge.handle_tool ~net name arguments
+
   | _ ->
       (false, Printf.sprintf "❌ Unknown tool: %s" name)
 
@@ -1966,7 +1972,7 @@ let handle_list_tools_eio state id =
   let room_path = Room.masc_dir state.Mcp_server.room_config in
   let config = Config.load room_path in
   let enabled_categories = config.enabled_categories in
-  let all_tools = Tools.all_schemas @ Tool_board.tools in
+  let all_tools = Tools.all_schemas @ Tool_board.tools @ Tool_lodge.tools in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
     Mode.is_tool_enabled enabled_categories schema.name
   ) all_tools in

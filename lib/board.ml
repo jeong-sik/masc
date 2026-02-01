@@ -255,6 +255,27 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
       } in
       Hashtbl.add store.posts (Post_id.to_string post.id) post;
       incr store.post_count;
+      (* Persist post - inline to avoid forward reference *)
+      (try
+        let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+        let path = Filename.concat base ".masc/board_posts.jsonl" in
+        let dir = Filename.dirname path in
+        if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
+        let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+        let json = `Assoc [
+          ("id", `String (Post_id.to_string post.id));
+          ("author", `String (Agent_id.to_string post.author));
+          ("content", `String post.content);
+          ("visibility", `String (match post.visibility with Public->"public"|Unlisted->"unlisted"|Internal->"internal"|Direct->"direct"));
+          ("created_at", `Float post.created_at);
+          ("expires_at", `Float post.expires_at);
+          ("votes_up", `Int post.votes_up);
+          ("votes_down", `Int post.votes_down);
+          ("reply_count", `Int post.reply_count);
+        ] in
+        output_string oc (Yojson.Safe.to_string json ^ "\n");
+        close_out oc
+      with _ -> ());
       Ok post
     end
   )
@@ -355,6 +376,27 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
           (* Update post reply count *)
           Hashtbl.replace store.posts (Post_id.to_string pid)
             { post with reply_count = post.reply_count + 1 };
+          (* Persist comment - inline *)
+          (try
+            let base = match Sys.getenv_opt "ME_ROOT" with Some pp -> pp | None -> Sys.getcwd () in
+            let cpath = Filename.concat base ".masc/board_comments.jsonl" in
+            let cdir = Filename.dirname cpath in
+            if not (Sys.file_exists cdir) then Unix.mkdir cdir 0o755;
+            let oc = open_out_gen [Open_append; Open_creat] 0o644 cpath in
+            let json = `Assoc [
+              ("id", `String (Comment_id.to_string comment.id));
+              ("post_id", `String (Post_id.to_string comment.post_id));
+              ("parent_id", match comment.parent_id with Some cp -> `String (Comment_id.to_string cp) | None -> `Null);
+              ("author", `String (Agent_id.to_string comment.author));
+              ("content", `String comment.content);
+              ("created_at", `Float comment.created_at);
+              ("expires_at", `Float comment.expires_at);
+              ("votes_up", `Int comment.votes_up);
+              ("votes_down", `Int comment.votes_down);
+            ] in
+            output_string oc (Yojson.Safe.to_string json ^ "\n");
+            close_out oc
+          with _ -> ());
           Ok comment
         end
   )
@@ -392,6 +434,31 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
               | Down -> { post with votes_down = post.votes_down + 1 }
             in
             Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+            (* Persist vote by rewriting posts file - inline *)
+            (try
+              let base = match Sys.getenv_opt "ME_ROOT" with Some vp -> vp | None -> Sys.getcwd () in
+              let vdir = Filename.concat base ".masc" in
+              if not (Sys.file_exists vdir) then Unix.mkdir vdir 0o755;
+              let vpath = Filename.concat base ".masc/board_posts.jsonl" in
+              let tmp_path = vpath ^ ".tmp" in
+              let oc = open_out tmp_path in
+              Hashtbl.iter (fun _ (pst : post) ->
+                let json = `Assoc [
+                  ("id", `String (Post_id.to_string pst.id));
+                  ("author", `String (Agent_id.to_string pst.author));
+                  ("content", `String pst.content);
+                  ("visibility", `String (match pst.visibility with Public->"public"|Unlisted->"unlisted"|Internal->"internal"|Direct->"direct"));
+                  ("created_at", `Float pst.created_at);
+                  ("expires_at", `Float pst.expires_at);
+                  ("votes_up", `Int pst.votes_up);
+                  ("votes_down", `Int pst.votes_down);
+                  ("reply_count", `Int pst.reply_count);
+                ] in
+                output_string oc (Yojson.Safe.to_string json ^ "\n")
+              ) store.posts;
+              close_out oc;
+              Sys.rename tmp_path vpath
+            with _ -> ());
             Ok (updated.votes_up - updated.votes_down)
       )
 
@@ -449,8 +516,157 @@ let comment_to_yojson (c : comment) : Yojson.Safe.t =
     ("score", `Int (c.votes_up - c.votes_down));
   ]
 
+(** {1 Persistence - JSONL File-based} *)
+
+let persist_path () =
+  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  Filename.concat base ".masc/board_posts.jsonl"
+
+let comments_path () =
+  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  Filename.concat base ".masc/board_comments.jsonl"
+
+let ensure_masc_dir () =
+  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  let dir = Filename.concat base ".masc" in
+  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
+
+let visibility_of_string = function
+  | "public" -> Some Public
+  | "unlisted" -> Some Unlisted
+  | "internal" -> Some Internal
+  | "direct" -> Some Direct
+  | _ -> None
+
+let post_of_yojson (json : Yojson.Safe.t) : post option =
+  try
+    let open Yojson.Safe.Util in
+    let id_str = json |> member "id" |> to_string in
+    let author_str = json |> member "author" |> to_string in
+    let content = json |> member "content" |> to_string in
+    let vis_str = json |> member "visibility" |> to_string in
+    let created_at = json |> member "created_at" |> to_float in
+    let expires_at = json |> member "expires_at" |> to_float in
+    let votes_up = json |> member "votes_up" |> to_int in
+    let votes_down = json |> member "votes_down" |> to_int in
+    let reply_count = json |> member "reply_count" |> to_int_option |> Option.value ~default:0 in
+    match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
+    | Ok id, Ok author, Some visibility ->
+        Some { id; author; content; visibility; created_at; expires_at; votes_up; votes_down; reply_count }
+    | _ -> None
+  with _ -> None
+
+let comment_of_yojson (json : Yojson.Safe.t) : comment option =
+  try
+    let open Yojson.Safe.Util in
+    let id_str = json |> member "id" |> to_string in
+    let post_id_str = json |> member "post_id" |> to_string in
+    let parent_id_opt = json |> member "parent_id" |> to_string_option in
+    let author_str = json |> member "author" |> to_string in
+    let content = json |> member "content" |> to_string in
+    let created_at = json |> member "created_at" |> to_float in
+    let expires_at = json |> member "expires_at" |> to_float in
+    let votes_up = json |> member "votes_up" |> to_int in
+    let votes_down = json |> member "votes_down" |> to_int in
+    match Comment_id.of_string id_str, Post_id.of_string post_id_str, Agent_id.of_string author_str with
+    | Ok id, Ok post_id, Ok author ->
+        let parent_id = match parent_id_opt with
+          | Some s -> (match Comment_id.of_string s with Ok cid -> Some cid | _ -> None)
+          | None -> None
+        in
+        Some { id; post_id; parent_id; author; content; created_at; expires_at; votes_up; votes_down }
+    | _ -> None
+  with _ -> None
+
+let load_persisted_posts store =
+  let path = persist_path () in
+  if Sys.file_exists path then begin
+    try
+      let ic = open_in path in
+      let now = Unix.gettimeofday () in
+      let loaded = ref 0 in
+      (try
+        while true do
+          let line = input_line ic in
+          if String.length line > 0 then
+            match Yojson.Safe.from_string line |> post_of_yojson with
+            | Some p when p.expires_at > now ->
+                Hashtbl.replace store.posts (Post_id.to_string p.id) p;
+                incr loaded
+            | _ -> ()
+        done
+      with End_of_file -> ());
+      close_in ic;
+      store.post_count := Hashtbl.length store.posts;
+      Printf.eprintf "[Board] Loaded %d posts from %s\n%!" !loaded path
+    with e ->
+      Printf.eprintf "[Board] Load posts failed: %s\n%!" (Printexc.to_string e)
+  end
+
+let load_persisted_comments store =
+  let path = comments_path () in
+  if Sys.file_exists path then begin
+    try
+      let ic = open_in path in
+      let now = Unix.gettimeofday () in
+      let loaded = ref 0 in
+      (try
+        while true do
+          let line = input_line ic in
+          if String.length line > 0 then
+            match Yojson.Safe.from_string line |> comment_of_yojson with
+            | Some c when c.expires_at > now ->
+                Hashtbl.replace store.comments (Comment_id.to_string c.id) c;
+                incr loaded
+            | _ -> ()
+        done
+      with End_of_file -> ());
+      close_in ic;
+      Printf.eprintf "[Board] Loaded %d comments from %s\n%!" !loaded path
+    with e ->
+      Printf.eprintf "[Board] Load comments failed: %s\n%!" (Printexc.to_string e)
+  end
+
 (** {1 Global Store} *)
 
-let global_store = lazy (create_store ())
+let global_store = lazy (
+  let store = create_store () in
+  load_persisted_posts store;
+  load_persisted_comments store;
+  store
+)
 
 let global () = Lazy.force global_store
+
+(** {1 Persistence Helpers - Called after operations} *)
+
+let persist_post (p : post) =
+  try
+    ensure_masc_dir ();
+    let path = persist_path () in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    output_string oc (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
+    close_out oc
+  with _ -> ()
+
+let persist_comment (c : comment) =
+  try
+    ensure_masc_dir ();
+    let path = comments_path () in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    output_string oc (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
+    close_out oc
+  with _ -> ()
+
+let rewrite_posts store =
+  try
+    ensure_masc_dir ();
+    let path = persist_path () in
+    let tmp_path = path ^ ".tmp" in
+    let oc = open_out tmp_path in
+    Hashtbl.iter (fun _ (pst : post) ->
+      output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
+    ) store.posts;
+    close_out oc;
+    Sys.rename tmp_path path
+  with _ -> ()

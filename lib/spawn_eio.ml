@@ -50,6 +50,15 @@ let masc_mcp_tools = [
   "mcp__masc__masc_memento_mori";
   "mcp__masc__masc_relay_status";
   "mcp__masc__masc_relay_checkpoint";
+  "mcp__masc__masc_board_list";
+  "mcp__masc__masc_board_post";
+  "mcp__masc__masc_board_comment";
+  "mcp__masc__masc_board_vote";
+  "mcp__masc__masc_board_get";
+  "mcp__masc__masc_a2a_subscribe";
+  "mcp__masc__masc_poll_events";
+  "mcp__masc__masc_spawn";
+  "mcp__masc__masc_heartbeat_list";
 ]
 
 let masc_lifecycle_suffix = {| 

@@ -2,7 +2,7 @@
 
 open Masc_mcp
 
-let () = Random.init 42
+let test_rng = Level4_config.make_rng ~seed:42 ()
 
 (** Helper: Create a fresh swarm for testing *)
 let make_test_swarm ?(behavior = Swarm.Flocking) () : Swarm.swarm =
@@ -10,10 +10,10 @@ let make_test_swarm ?(behavior = Swarm.Flocking) () : Swarm.swarm =
   let swarm_cfg : Swarm.swarm_config = {
     id = "test-swarm";
     name = "Test Swarm";
-    selection_pressure = 0.5;
-    mutation_rate = 0.1;
-    evaporation_rate = 0.05;
-    quorum_threshold = 0.6;
+    selection_pressure = Level4_config.Normalized.of_float_clamped 0.5;
+    mutation_rate = Level4_config.Normalized.of_float_clamped 0.1;
+    evaporation_rate = Level4_config.Normalized.of_float_clamped 0.05;
+    quorum_threshold = Level4_config.Normalized.of_float_clamped 0.6;
     max_agents = 10;
     behavior;
   } in
@@ -215,7 +215,7 @@ let test_evaporate_pheromones () =
       strength = 0.8;
       deposited_by = "claude";
       deposited_at = past;
-      evaporation_rate = 0.05;
+      evaporation_rate = Level4_config.Normalized.of_float_clamped 0.05;
     }]
   } in
   let now = Unix.gettimeofday () in
@@ -318,7 +318,8 @@ let test_evolve_increments_generation () =
     ]
   } in
   let now = Unix.gettimeofday () in
-  let evolved = Swarm.Pure.evolve_agents swarm ~now in
+  let rng = Level4_config.make_rng ~seed:42 () in
+  let evolved = Swarm.Pure.evolve_agents swarm ~rng ~now in
   assert (evolved.generation = 1);
   Printf.printf "✓ test_evolve_increments_generation\n%!"
 

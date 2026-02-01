@@ -12,7 +12,7 @@ type swarm_behavior =
 type swarm_agent = {
   id: string;
   name: string;
-  fitness: float;
+  fitness: Level4_config.Fitness.t;
   generation: int;
   mutations: string list;
   joined_at: float;
@@ -21,10 +21,10 @@ type swarm_agent = {
 
 type pheromone = {
   path_id: string;
-  strength: float;
+  strength: Level4_config.Strength.t;
   deposited_by: string;
   deposited_at: float;
-  evaporation_rate: float;
+  evaporation_rate: Level4_config.Normalized.t;
 }
 
 type quorum_proposal = {
@@ -34,7 +34,7 @@ type quorum_proposal = {
   proposed_at: float;
   votes_for: string list;
   votes_against: string list;
-  threshold: float;
+  threshold: Level4_config.Threshold.t;
   deadline: float option;
   status: [`Pending | `Passed | `Rejected | `Expired];
 }
@@ -107,7 +107,7 @@ let agent_to_json (a : swarm_agent) : Yojson.Safe.t =
   `Assoc [
     ("id", `String a.id);
     ("name", `String a.name);
-    ("fitness", `Float a.fitness);
+    ("fitness", Level4_config.Fitness.to_json a.fitness);
     ("generation", `Int a.generation);
     ("mutations", `List (List.map (fun m -> `String m) a.mutations));
     ("joined_at", `Float a.joined_at);
@@ -120,7 +120,7 @@ let agent_of_json json : (swarm_agent, string) result =
     Ok {
       id = json |> member "id" |> to_string;
       name = json |> member "name" |> to_string;
-      fitness = json |> member "fitness" |> to_float;
+      fitness = json |> member "fitness" |> to_float |> Level4_config.Fitness.of_float_clamped;
       generation = json |> member "generation" |> to_int;
       mutations = json |> member "mutations" |> to_list |> List.map to_string;
       joined_at = json |> member "joined_at" |> to_float;
@@ -133,21 +133,22 @@ let agent_of_json json : (swarm_agent, string) result =
 let pheromone_to_json (p : pheromone) : Yojson.Safe.t =
   `Assoc [
     ("path_id", `String p.path_id);
-    ("strength", `Float p.strength);
+    ("strength", Level4_config.Strength.to_json p.strength);
     ("deposited_by", `String p.deposited_by);
     ("deposited_at", `Float p.deposited_at);
-    ("evaporation_rate", `Float p.evaporation_rate);
+    ("evaporation_rate", Level4_config.Normalized.to_json p.evaporation_rate);
   ]
 
 let pheromone_of_json json : (pheromone, string) result =
   try
     let open Yojson.Safe.Util in
+    let nc = Level4_config.Normalized.of_float_clamped in
     Ok {
       path_id = json |> member "path_id" |> to_string;
-      strength = json |> member "strength" |> to_float;
+      strength = json |> member "strength" |> to_float |> nc;
       deposited_by = json |> member "deposited_by" |> to_string;
       deposited_at = json |> member "deposited_at" |> to_float;
-      evaporation_rate = json |> member "evaporation_rate" |> to_float;
+      evaporation_rate = json |> member "evaporation_rate" |> to_float |> nc;
     }
   with
   | Yojson.Safe.Util.Type_error (msg, _) -> Error ("pheromone_of_json: " ^ msg)
@@ -161,7 +162,7 @@ let proposal_to_json (p : quorum_proposal) : Yojson.Safe.t =
     ("proposed_at", `Float p.proposed_at);
     ("votes_for", `List (List.map (fun v -> `String v) p.votes_for));
     ("votes_against", `List (List.map (fun v -> `String v) p.votes_against));
-    ("threshold", `Float p.threshold);
+    ("threshold", Level4_config.Threshold.to_json p.threshold);
     ("deadline", match p.deadline with Some d -> `Float d | None -> `Null);
     ("status", `String (status_to_string p.status));
   ]
@@ -176,7 +177,7 @@ let proposal_of_json json : (quorum_proposal, string) result =
       proposed_at = json |> member "proposed_at" |> to_float;
       votes_for = json |> member "votes_for" |> to_list |> List.map to_string;
       votes_against = json |> member "votes_against" |> to_list |> List.map to_string;
-      threshold = json |> member "threshold" |> to_float;
+      threshold = json |> member "threshold" |> to_float |> Level4_config.Threshold.of_float_clamped;
       deadline = json |> member "deadline" |> to_float_option;
       status = json |> member "status" |> to_string |> status_of_string;
     }
@@ -285,6 +286,10 @@ let save_swarm ~fs (config : config) (swarm : swarm) : unit =
 (** {1 Pure Transformations} *)
 
 module Pure = struct
+  (** Shorthand for unwrapping Normalized to float for arithmetic *)
+  let nf = Level4_config.Normalized.to_float
+  let nc = Level4_config.Normalized.of_float_clamped
+
   type join_result =
     | Joined of swarm
     | Already_member of swarm
@@ -296,11 +301,10 @@ module Pure = struct
     else if List.exists (fun (a : swarm_agent) -> a.id = agent_id) swarm.agents then
       Already_member swarm
     else
-      let initial_fitness = Level4_config.Swarm.initial_fitness () in
       let agent = {
         id = agent_id;
         name = agent_name;
-        fitness = initial_fitness;
+        fitness = Level4_config.Fitness.initial ();
         generation = swarm.generation;
         mutations = [];
         joined_at = now;
@@ -319,28 +323,27 @@ module Pure = struct
       match Level4_config.Fitness.of_float fitness with
       | None -> None
       | Some validated_fitness ->
-        let fitness_float = Level4_config.Fitness.to_float validated_fitness in
         let agents = List.map (fun (a : swarm_agent) ->
           if a.id = agent_id then
-            { a with fitness = fitness_float; last_active = now }
+            { a with fitness = validated_fitness; last_active = now }
           else a
         ) swarm.agents in
         Some { swarm with agents }
 
   let fitness_rankings swarm =
-    let rankings = List.map (fun (a : swarm_agent) -> (a.id, a.fitness)) swarm.agents in
+    let rankings = List.map (fun (a : swarm_agent) -> (a.id, nf a.fitness)) swarm.agents in
     List.sort (fun (_, f1) (_, f2) -> compare f2 f1) rankings
 
   let select_elite_agents swarm =
-    let sorted = List.sort (fun a b -> compare b.fitness a.fitness) swarm.agents in
+    let sorted = List.sort (fun a b -> compare (nf b.fitness) (nf a.fitness)) swarm.agents in
     let elite_count = max 1 (int_of_float (
-      float_of_int (List.length sorted) *. Level4_config.Normalized.to_float swarm.swarm_cfg.selection_pressure
+      float_of_int (List.length sorted) *. nf swarm.swarm_cfg.selection_pressure
     )) in
     List.filteri (fun i _ -> i < elite_count) sorted
 
   let evolve_agents swarm ~rng ~now =
     let agents = List.map (fun (a : swarm_agent) ->
-      if Random.State.float rng 1.0 < Level4_config.Normalized.to_float swarm.swarm_cfg.mutation_rate then
+      if Random.State.float rng 1.0 < nf swarm.swarm_cfg.mutation_rate then
         let mutation = Printf.sprintf "gen%d-mut%d" (swarm.generation + 1) (Random.State.int rng 1000) in
         { a with
           mutations = mutation :: a.mutations;
@@ -356,12 +359,12 @@ module Pure = struct
     }
 
   let deposit_pheromone swarm ~path_id ~agent_id ~strength ~now =
-    let evap_rate = Level4_config.Normalized.to_float swarm.swarm_cfg.evaporation_rate in
+    let evap_rate = swarm.swarm_cfg.evaporation_rate in
     let existing = List.find_opt (fun p -> p.path_id = path_id) swarm.pheromones in
     let pheromones = match existing with
       | Some p ->
         let updated = { p with
-          strength = min 1.0 (p.strength +. strength);
+          strength = nc (nf p.strength +. strength);
           deposited_by = agent_id;
           deposited_at = now;
         } in
@@ -369,7 +372,7 @@ module Pure = struct
       | None ->
         let new_pheromone = {
           path_id;
-          strength = min 1.0 strength;
+          strength = nc strength;
           deposited_by = agent_id;
           deposited_at = now;
           evaporation_rate = evap_rate;
@@ -381,15 +384,17 @@ module Pure = struct
   let evaporate_pheromones swarm ~now =
     let pheromones = List.filter_map (fun p ->
       let elapsed_hours = (now -. p.deposited_at) /. 3600.0 in
-      let decay = p.evaporation_rate *. elapsed_hours in
-      let new_strength = p.strength -. decay in
+      let decay = nf p.evaporation_rate *. elapsed_hours in
+      let new_strength = nf p.strength -. decay in
       if new_strength <= 0.0 then None
-      else Some { p with strength = new_strength }
+      else Some { p with strength = nc new_strength }
     ) swarm.pheromones in
     { swarm with pheromones }
 
   let strongest_trails swarm ~limit =
-    let sorted = List.sort (fun a b -> compare b.strength a.strength) swarm.pheromones in
+    let sorted = List.sort (fun a b ->
+      compare (nf b.strength) (nf a.strength)
+    ) swarm.pheromones in
     List.filteri (fun i _ -> i < limit) sorted
 
   let add_proposal swarm ~proposal =
@@ -416,13 +421,14 @@ module Pure = struct
         if p.proposal_id = proposal_id && p.status = `Pending then
           let for_ratio = float_of_int (List.length p.votes_for) /. float_of_int total_agents in
           let against_ratio = float_of_int (List.length p.votes_against) /. float_of_int total_agents in
+          let threshold_f = nf p.threshold in
           let expired = match p.deadline with
             | Some d -> now > d
             | None -> false
           in
           let status =
-            if for_ratio >= p.threshold then `Passed
-            else if against_ratio > (1.0 -. p.threshold) then `Rejected
+            if for_ratio >= threshold_f then `Passed
+            else if against_ratio > (1.0 -. threshold_f) then `Rejected
             else if expired then `Expired
             else `Pending
           in
@@ -508,7 +514,6 @@ let deposit_pheromone ~fs (config : config) ~path_id ~agent_id ~strength : swarm
   | Error _ -> None
   | Ok swarm ->
     let now = Unix.gettimeofday () in
-    let strength = max 0.0 (min 1.0 strength) in
     let updated = Pure.deposit_pheromone swarm ~path_id ~agent_id ~strength ~now in
     save_swarm ~fs config updated;
     Some updated
@@ -521,8 +526,9 @@ let read_pheromone ~fs (config : config) ~path_id : float =
     match List.find_opt (fun p -> p.path_id = path_id) swarm.pheromones with
     | None -> 0.0
     | Some p ->
+      let nf = Level4_config.Normalized.to_float in
       let hours_elapsed = (now -. p.deposited_at) /. 3600.0 in
-      let decayed = p.strength *. exp (-. p.evaporation_rate *. hours_elapsed) in
+      let decayed = nf p.strength *. exp (-. nf p.evaporation_rate *. hours_elapsed) in
       max 0.0 decayed
 
 let evaporate_pheromones ~fs (config : config) : swarm option =
@@ -553,7 +559,9 @@ let propose ~fs (config : config) ~description ~proposed_by ?threshold ?deadline
       proposed_at = now;
       votes_for = [proposed_by];
       votes_against = [];
-      threshold = Option.value threshold ~default:(Level4_config.Normalized.to_float swarm.swarm_cfg.quorum_threshold);
+      threshold = (match threshold with
+        | Some t -> Level4_config.Threshold.of_float_clamped t
+        | None -> swarm.swarm_cfg.quorum_threshold);
       deadline;
       status = `Pending;
     } in

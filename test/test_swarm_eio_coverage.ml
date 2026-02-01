@@ -15,8 +15,14 @@ open Alcotest
 module Swarm_eio = Masc_mcp.Swarm_eio
 module Level4_config = Masc_mcp.Level4_config
 
-(** Convenience: create Normalized.t from float literal *)
+(** Convenience: create/unwrap Normalized.t *)
 let n = Level4_config.Normalized.of_float_clamped
+let nf = Level4_config.Normalized.to_float
+
+(** Unwrap Result or fail with context *)
+let expect_ok label = function
+  | Ok v -> v
+  | Error msg -> Alcotest.fail (Printf.sprintf "%s: %s" label msg)
 
 (* ============================================================
    swarm_behavior Type Tests
@@ -54,7 +60,7 @@ let test_swarm_agent_type () =
   let a : Swarm_eio.swarm_agent = {
     id = "agent-001";
     name = "claude";
-    fitness = 0.85;
+    fitness = n 0.85;
     generation = 5;
     mutations = ["mutation_a"; "mutation_b"];
     joined_at = 1704067200.0;
@@ -62,7 +68,7 @@ let test_swarm_agent_type () =
   } in
   check string "id" "agent-001" a.id;
   check string "name" "claude" a.name;
-  check (float 0.01) "fitness" 0.85 a.fitness;
+  check (float 0.01) "fitness" 0.85 (nf a.fitness);
   check int "generation" 5 a.generation;
   check int "mutations count" 2 (List.length a.mutations)
 
@@ -73,14 +79,14 @@ let test_swarm_agent_type () =
 let test_pheromone_type () =
   let p : Swarm_eio.pheromone = {
     path_id = "path-001";
-    strength = 0.9;
+    strength = n 0.9;
     deposited_by = "agent-001";
     deposited_at = 1704067200.0;
-    evaporation_rate = 0.1;
+    evaporation_rate = n 0.1;
   } in
   check string "path_id" "path-001" p.path_id;
-  check (float 0.01) "strength" 0.9 p.strength;
-  check (float 0.01) "evaporation_rate" 0.1 p.evaporation_rate
+  check (float 0.01) "strength" 0.9 (nf p.strength);
+  check (float 0.01) "evaporation_rate" 0.1 (nf p.evaporation_rate)
 
 (* ============================================================
    quorum_proposal Type Tests
@@ -94,7 +100,7 @@ let test_quorum_proposal_pending () =
     proposed_at = 1704067200.0;
     votes_for = ["agent-002"; "agent-003"];
     votes_against = ["agent-004"];
-    threshold = 0.6;
+    threshold = n 0.6;
     deadline = Some 1704153600.0;
     status = `Pending;
   } in
@@ -113,7 +119,7 @@ let test_quorum_proposal_passed () =
     proposed_at = 0.0;
     votes_for = [];
     votes_against = [];
-    threshold = 0.5;
+    threshold = n 0.5;
     deadline = None;
     status = `Passed;
   } in
@@ -249,32 +255,32 @@ let test_agent_json_roundtrip () =
   let a : Swarm_eio.swarm_agent = {
     id = "agent-rt-001";
     name = "test-agent";
-    fitness = 0.75;
+    fitness = n 0.75;
     generation = 3;
     mutations = ["mut1"; "mut2"];
     joined_at = 1704067200.0;
     last_active = 1704070800.0;
   } in
   let json = Swarm_eio.agent_to_json a in
-  let decoded = Result.get_ok (Swarm_eio.agent_of_json json) in
+  let decoded = expect_ok "agent_of_json" (Swarm_eio.agent_of_json json) in
   check string "id" a.id decoded.id;
   check string "name" a.name decoded.name;
-  check (float 0.001) "fitness" a.fitness decoded.fitness;
+  check (float 0.001) "fitness" (nf a.fitness) (nf decoded.fitness);
   check int "generation" a.generation decoded.generation;
   check int "mutations count" (List.length a.mutations) (List.length decoded.mutations)
 
 let test_pheromone_json_roundtrip () =
   let p : Swarm_eio.pheromone = {
     path_id = "path-rt-001";
-    strength = 0.65;
+    strength = n 0.65;
     deposited_by = "agent-001";
     deposited_at = 1704067200.0;
-    evaporation_rate = 0.15;
+    evaporation_rate = n 0.15;
   } in
   let json = Swarm_eio.pheromone_to_json p in
-  let decoded = Result.get_ok (Swarm_eio.pheromone_of_json json) in
+  let decoded = expect_ok "pheromone_of_json" (Swarm_eio.pheromone_of_json json) in
   check string "path_id" p.path_id decoded.path_id;
-  check (float 0.001) "strength" p.strength decoded.strength;
+  check (float 0.001) "strength" (nf p.strength) (nf decoded.strength);
   check string "deposited_by" p.deposited_by decoded.deposited_by
 
 let test_proposal_json_roundtrip () =
@@ -285,12 +291,12 @@ let test_proposal_json_roundtrip () =
     proposed_at = 1704067200.0;
     votes_for = ["a1"; "a2"];
     votes_against = ["a3"];
-    threshold = 0.6;
+    threshold = n 0.6;
     deadline = Some 1704153600.0;
     status = `Pending;
   } in
   let json = Swarm_eio.proposal_to_json p in
-  let decoded = Result.get_ok (Swarm_eio.proposal_of_json json) in
+  let decoded = expect_ok "proposal_of_json" (Swarm_eio.proposal_of_json json) in
   check string "proposal_id" p.proposal_id decoded.proposal_id;
   check string "description" p.description decoded.description;
   check int "votes_for" (List.length p.votes_for) (List.length decoded.votes_for);
@@ -304,12 +310,12 @@ let test_proposal_json_no_deadline () =
     proposed_at = 0.0;
     votes_for = [];
     votes_against = [];
-    threshold = 0.5;
+    threshold = n 0.5;
     deadline = None;
     status = `Passed;
   } in
   let json = Swarm_eio.proposal_to_json p in
-  let decoded = Result.get_ok (Swarm_eio.proposal_of_json json) in
+  let decoded = expect_ok "proposal_of_json(no_deadline)" (Swarm_eio.proposal_of_json json) in
   check bool "no deadline" true (decoded.deadline = None);
   check bool "passed status" true (decoded.status = `Passed)
 
@@ -325,7 +331,7 @@ let test_config_json_roundtrip () =
     behavior = Swarm_eio.Stigmergy;
   } in
   let json = Swarm_eio.config_to_json c in
-  let decoded = Result.get_ok (Swarm_eio.config_of_json json) in
+  let decoded = expect_ok "config_of_json" (Swarm_eio.config_of_json json) in
   check string "id" c.id decoded.id;
   check string "name" c.name decoded.name;
   check (float 0.001) "selection_pressure"
@@ -346,7 +352,7 @@ let test_swarm_json_roundtrip () =
     behavior = Swarm_eio.Flocking;
   } in
   let agent : Swarm_eio.swarm_agent = {
-    id = "a1"; name = "agent1"; fitness = 0.8;
+    id = "a1"; name = "agent1"; fitness = n 0.8;
     generation = 1; mutations = [];
     joined_at = 1000.0; last_active = 1000.0;
   } in
@@ -360,7 +366,7 @@ let test_swarm_json_roundtrip () =
     last_evolution = 900.0;
   } in
   let json = Swarm_eio.swarm_to_json s in
-  let decoded = Result.get_ok (Swarm_eio.swarm_of_json json) in
+  let decoded = expect_ok "swarm_of_json" (Swarm_eio.swarm_of_json json) in
   check string "config id" s.swarm_cfg.id decoded.swarm_cfg.id;
   check int "agents count" 1 (List.length decoded.agents);
   check int "generation" s.generation decoded.generation
@@ -475,7 +481,7 @@ let test_pure_deposit_pheromone_update () =
     ~path_id:"path1" ~agent_id:"a2" ~strength:0.3 ~now:2001.0 in
   check int "still one pheromone" 1 (List.length s2.pheromones);
   let p = List.hd s2.pheromones in
-  check bool "strength increased" true (p.strength > 0.5)
+  check bool "strength increased" true (nf p.strength > 0.5)
 
 let test_pure_evaporate_pheromones () =
   let swarm = make_test_swarm () in
@@ -501,7 +507,7 @@ let test_pure_add_proposal () =
     proposal_id = "p1"; description = "Test";
     proposed_by = "a1"; proposed_at = 2000.0;
     votes_for = []; votes_against = [];
-    threshold = 0.6; deadline = None;
+    threshold = n 0.6; deadline = None;
     status = `Pending;
   } in
   let updated = Swarm_eio.Pure.add_proposal swarm ~proposal in
@@ -513,7 +519,7 @@ let test_pure_record_vote_for () =
     proposal_id = "p1"; description = "Test";
     proposed_by = "a1"; proposed_at = 2000.0;
     votes_for = []; votes_against = [];
-    threshold = 0.6; deadline = None;
+    threshold = n 0.6; deadline = None;
     status = `Pending;
   } in
   let s1 = Swarm_eio.Pure.add_proposal swarm ~proposal in
@@ -527,7 +533,7 @@ let test_pure_record_vote_against () =
     proposal_id = "p1"; description = "Test";
     proposed_by = "a1"; proposed_at = 2000.0;
     votes_for = []; votes_against = [];
-    threshold = 0.6; deadline = None;
+    threshold = n 0.6; deadline = None;
     status = `Pending;
   } in
   let s1 = Swarm_eio.Pure.add_proposal swarm ~proposal in
@@ -546,7 +552,7 @@ let test_pure_update_proposal_status_passed () =
              proposal_id = "p1"; description = "Test";
              proposed_by = "a1"; proposed_at = 2000.0;
              votes_for = ["a1"; "a2"]; votes_against = [];
-             threshold = 0.6; deadline = None;
+             threshold = n 0.6; deadline = None;
              status = `Pending;
            } in
            let s3 = Swarm_eio.Pure.add_proposal s2 ~proposal in
@@ -564,7 +570,7 @@ let test_pure_update_proposal_status_expired () =
         proposal_id = "p1"; description = "Test";
         proposed_by = "a1"; proposed_at = 2000.0;
         votes_for = []; votes_against = [];
-        threshold = 0.6; deadline = Some 2500.0;
+        threshold = n 0.6; deadline = Some 2500.0;
         status = `Pending;
       } in
       let s2 = Swarm_eio.Pure.add_proposal s1 ~proposal in
@@ -709,7 +715,7 @@ let make_populated_swarm () : Swarm_eio.swarm =
   let agents = List.init 3 (fun i ->
     { Swarm_eio.id = Printf.sprintf "a%d" i;
       name = Printf.sprintf "agent-%d" i;
-      fitness = 0.5 +. (float_of_int i *. 0.1);
+      fitness = n (0.5 +. (float_of_int i *. 0.1));
       generation = 0; mutations = [];
       joined_at = 1000.0; last_active = 1000.0; }
   ) in

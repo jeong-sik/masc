@@ -149,17 +149,18 @@ let share_discovery ~fs config ~agent_id ~solution_id ~quality =
 
 let follow_pheromone ~fs config ?(stigmergy = default_stigmergy_config)
     ?(rng = Level4_config.make_rng ()) () =
+  let nf = Level4_config.Normalized.to_float in
   let trails = Swarm_eio.get_strongest_trails ~fs config ~limit:5 in
-  let viable = List.filter (fun p -> p.Swarm_eio.strength >= stigmergy.following_threshold) trails in
+  let viable = List.filter (fun p -> nf p.Swarm_eio.strength >= stigmergy.following_threshold) trails in
   match viable with
   | [] -> None
   | trails ->
-      let total = List.fold_left (fun acc t -> acc +. t.Swarm_eio.strength) 0.0 trails in
+      let total = List.fold_left (fun acc t -> acc +. nf t.Swarm_eio.strength) 0.0 trails in
       let r = Random.State.float rng total in
       let rec select acc = function
         | [] -> None
         | t :: rest ->
-            let acc' = acc +. t.Swarm_eio.strength in
+            let acc' = acc +. nf t.Swarm_eio.strength in
             if r < acc' then Some t.Swarm_eio.path_id else select acc' rest
       in
       select 0.0 trails
@@ -176,11 +177,12 @@ let check_quorum ~fs config ~proposal_id =
       match List.find_opt (fun p -> p.Swarm_eio.proposal_id = proposal_id) swarm.proposals with
       | None -> `Not_found
       | Some proposal ->
+          let nf = Level4_config.Normalized.to_float in
           let total = List.length swarm.agents in
           let votes = List.length proposal.votes_for in
           let ratio = if total > 0 then float_of_int votes /. float_of_int total else 0.0 in
-          if ratio >= proposal.threshold then `Quorum_reached
-          else `Progress (votes, total, proposal.threshold)
+          if ratio >= nf proposal.threshold then `Quorum_reached
+          else `Progress (votes, total, nf proposal.threshold)
 
 let propose_action ~fs config ~agent_id ~description =
   Swarm_eio.propose ~fs config ~description ~proposed_by:agent_id ()

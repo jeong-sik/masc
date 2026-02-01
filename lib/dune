@@ -28,6 +28,7 @@
    encryption
    federation
    gcm_compat
+   gateway
    graphql_api
    handover_eio
    hat

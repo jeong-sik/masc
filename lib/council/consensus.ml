@@ -18,6 +18,8 @@ type vote = {
   decision: decision;
   reason: string;
   timestamp: float;
+  archetype: string option;  (** MAGI archetype for weighted voting *)
+  weight: float;             (** Vote weight (default 1.0) *)
 }
 [@@deriving show, eq]
 
@@ -91,7 +93,7 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5) () : (sessio
     Ok session
 
 (** Cast a vote in a session *)
-let cast_vote ~session_id ~agent ~decision ~reason : (session, error) Result.t =
+let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () : (session, error) Result.t =
   match Hashtbl.find_opt sessions session_id with
   | None -> Error (Session_not_found session_id)
   | Some session ->
@@ -105,6 +107,8 @@ let cast_vote ~session_id ~agent ~decision ~reason : (session, error) Result.t =
         decision;
         reason;
         timestamp = Unix.gettimeofday ();
+        archetype;
+        weight;
       } in
       let updated = { session with votes = vote :: session.votes } in
       Hashtbl.replace sessions session_id updated;
@@ -114,11 +118,24 @@ let cast_vote ~session_id ~agent ~decision ~reason : (session, error) Result.t =
 let count_by_decision votes decision =
   List.length (List.filter (fun v -> v.decision = decision) votes)
 
+(** Sum weighted votes by decision type *)
+let sum_weighted_by_decision votes decision =
+  List.fold_left (fun acc v -> 
+    if v.decision = decision then acc +. v.weight else acc
+  ) 0.0 votes
+
 (** Tally votes and compute statistics *)
 let tally_votes session : (int * int * int) =
   let approves = count_by_decision session.votes Approve in
   let rejects = count_by_decision session.votes Reject in
   let abstains = count_by_decision session.votes Abstain in
+  (approves, rejects, abstains)
+
+(** Tally weighted votes *)
+let tally_votes_weighted session : (float * float * float) =
+  let approves = sum_weighted_by_decision session.votes Approve in
+  let rejects = sum_weighted_by_decision session.votes Reject in
+  let abstains = sum_weighted_by_decision session.votes Abstain in
   (approves, rejects, abstains)
 
 (** Check if quorum is met *)

@@ -241,3 +241,68 @@ let to_display_string identity =
 (** Check if two identities refer to the same agent *)
 let same_agent a b =
   a.session_key = b.session_key || a.agent_name = b.agent_name
+
+(** {1 MAGI Archetype System} *)
+
+(** MAGI archetypes for agent specialization *)
+type archetype =
+  | Melchior   (** 🔬 Scientist - technical analysis, implementation *)
+  | Balthasar  (** 🪞 Mirror - ethics, value alignment, review *)
+  | Casper     (** ♟️ Strategist - planning, coordination *)
+  | Athena     (** 🧠 Reasoner - logic, math, deep thinking *)
+  | Generalist (** 🌐 No specialization *)
+
+let archetype_to_string = function
+  | Melchior -> "melchior"
+  | Balthasar -> "balthasar"
+  | Casper -> "casper"
+  | Athena -> "athena"
+  | Generalist -> "generalist"
+
+let archetype_of_string = function
+  | "melchior" | "scientist" | "tech" -> Melchior
+  | "balthasar" | "mirror" | "ethics" -> Balthasar
+  | "casper" | "strategist" | "planner" -> Casper
+  | "athena" | "reasoner" | "logic" -> Athena
+  | _ -> Generalist
+
+let archetype_emoji = function
+  | Melchior -> "🔬"
+  | Balthasar -> "🪞"
+  | Casper -> "♟️"
+  | Athena -> "🧠"
+  | Generalist -> "🌐"
+
+(** Get archetype from identity metadata *)
+let get_archetype identity =
+  match List.assoc_opt "archetype" identity.metadata with
+  | Some s -> archetype_of_string s
+  | None -> Generalist
+
+(** Set archetype in identity metadata *)
+let set_archetype identity archetype =
+  let filtered = List.filter (fun (k, _) -> k <> "archetype") identity.metadata in
+  { identity with metadata = ("archetype", archetype_to_string archetype) :: filtered }
+
+(** Suggest position for debate based on archetype *)
+let suggest_debate_position archetype topic =
+  let _ = topic in (* Could use topic keywords for smarter suggestions *)
+  match archetype with
+  | Melchior -> `Support     (* Scientists tend to support technical solutions *)
+  | Balthasar -> `Neutral    (* Ethics reviewers stay neutral initially *)
+  | Casper -> `Oppose        (* Strategists challenge to find weaknesses *)
+  | Athena -> `Neutral       (* Reasoners analyze before committing *)
+  | Generalist -> `Neutral
+
+(** Voting weight modifier based on archetype and topic *)
+let archetype_weight archetype topic_category =
+  match archetype, topic_category with
+  | Melchior, "technical" -> 1.5
+  | Melchior, "implementation" -> 1.5
+  | Balthasar, "ethics" -> 1.5
+  | Balthasar, "review" -> 1.5
+  | Casper, "strategy" -> 1.5
+  | Casper, "planning" -> 1.5
+  | Athena, "reasoning" -> 1.5
+  | Athena, "math" -> 1.5
+  | _, _ -> 1.0

@@ -519,14 +519,6 @@ let load_and_format_for_spawn ~fs (config : config) : string =
   | Some inst -> format_for_injection inst
   | None -> ""
 
-(** Load institution and format as welcome message for join.
-    Returns empty string if no institution exists.
-*)
-let load_and_format_for_welcome ~fs (config : config) : string =
-  match load_institution ~fs config with
-  | Some inst -> format_for_welcome inst
-  | None -> ""
-
 (** Short welcome format for masc_join response.
     Concise cultural inheritance - mission + values + one tip.
     @param inst The institution to format

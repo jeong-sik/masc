@@ -1,6 +1,6 @@
 (library
  (name council)
  (public_name masc_mcp.council)
- (modules router debate consensus balance archive council)
+ (modules router debate consensus balance archive executor council)
  (libraries str yojson unix eio caqti caqti-eio caqti-eio.unix caqti-driver-postgresql cohttp cohttp-eio uuidm)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

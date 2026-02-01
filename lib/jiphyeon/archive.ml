@@ -93,7 +93,12 @@ let get_neo4j_url () =
   Sys.getenv_opt "RAILWAY_NEO4J_URL"
 
 let get_postgres_url () =
-  Sys.getenv_opt "DATABASE_URL"
+  (* Try multiple env vars: DATABASE_URL, RAILWAY_PG_URL, RAILWAY_POSTGRES_URL *)
+  match Sys.getenv_opt "DATABASE_URL" with
+  | Some url -> Some url
+  | None -> match Sys.getenv_opt "RAILWAY_PG_URL" with
+    | Some url -> Some url
+    | None -> Sys.getenv_opt "RAILWAY_POSTGRES_URL"
 
 (** {1 Neo4j Operations} *)
 
@@ -104,22 +109,33 @@ type neo4j_response = {
 }
 
 (** Neo4j HTTP 트랜잭션 엔드포인트 URL 변환
-    bolt://host:port -> http://host:7474/db/neo4j/tx/commit *)
+    bolt://host:port -> http://host:port/db/neo4j/tx/commit
+    Railway Neo4j: same port for HTTP API via proxy *)
 let neo4j_http_url bolt_url =
-  (* bolt://user:pass@host:port -> http://host:7474 *)
-  let uri = Uri.of_string bolt_url in
+  (* Parse: bolt://user:pass@host:port OR host:port *)
+  let url = if String.sub bolt_url 0 4 = "bolt" then bolt_url else "bolt://" ^ bolt_url in
+  let uri = Uri.of_string url in
   let host = Uri.host uri |> Option.value ~default:"localhost" in
-  let http_port = 7474 in  (* Neo4j HTTP default *)
-  Printf.sprintf "http://%s:%d/db/neo4j/tx/commit" host http_port
+  let port = Uri.port uri |> Option.value ~default:7687 in
+  (* Railway uses HTTP on same port via proxy *)
+  Printf.sprintf "http://%s:%d/db/neo4j/tx/commit" host port
 
-(** Neo4j 인증 헤더 추출 *)
+(** Neo4j 인증 헤더 추출 - fallback to env vars *)
 let neo4j_auth_header bolt_url =
-  let uri = Uri.of_string bolt_url in
-  match Uri.user uri, Uri.password uri with
-  | Some user, Some pass ->
+  let url = if String.sub bolt_url 0 4 = "bolt" then bolt_url else "bolt://" ^ bolt_url in
+  let uri = Uri.of_string url in
+  (* Try URL credentials first, then env vars *)
+  let user, pass = match Uri.user uri, Uri.password uri with
+    | Some u, Some p -> (u, p)
+    | _ ->
+      let env_user = Sys.getenv_opt "NEO4J_USER" |> Option.value ~default:"neo4j" in
+      let env_pass = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
+      (env_user, env_pass)
+  in
+  if pass = "" then None
+  else
     let creds = Base64.encode_exn (user ^ ":" ^ pass) in
     Some ("Authorization", "Basic " ^ creds)
-  | _ -> None
 
 (** Cypher 쿼리 실행 (HTTP API) *)
 let execute_cypher ~sw ~env bolt_url query params =

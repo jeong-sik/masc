@@ -1,0 +1,204 @@
+(** Decision Executor - Turn council decisions into real actions
+
+    토론/투표 결과를 실제 시스템 변경으로 연결.
+    
+    Example:
+    - "Approve PR #123" → gh pr merge 123
+    - "Use OCaml" → update config
+    - "Deploy v2.0" → run deploy script
+    
+    @since MASC v2.7.0
+*)
+
+(** {1 Types} *)
+
+(** Action types that can be executed *)
+type action_kind =
+  | ShellCommand of string           (** Run a shell command *)
+  | ConfigChange of string * string  (** key, value *)
+  | Notification of string * string  (** target, message *)
+  | GitHubAction of github_action    (** GitHub CLI action *)
+  | Custom of string                 (** Custom action identifier *)
+
+and github_action =
+  | MergePR of int                   (** PR number *)
+  | ClosePR of int
+  | ApproveReview of int
+  | CreateIssue of string * string   (** title, body *)
+
+(** Execution result *)
+type exec_result = {
+  success: bool;
+  output: string;
+  timestamp: float;
+}
+
+(** Decision to action mapping *)
+type action_mapping = {
+  pattern: string;                   (** Regex pattern to match topic *)
+  action: action_kind;
+  requires_unanimous: bool;          (** Only execute if unanimous *)
+  min_threshold: float;              (** Minimum approval threshold *)
+}
+
+(** {1 Built-in Patterns} *)
+
+let default_mappings : action_mapping list = [
+  (* PR merge pattern - OCaml Str uses \( \) for groups *)
+  {
+    pattern = "merge pr #?\\([0-9]+\\)";
+    action = GitHubAction (MergePR 0);  (* 0 = placeholder, extracted from match *)
+    requires_unanimous = false;
+    min_threshold = 0.6;
+  };
+  (* PR close pattern *)
+  {
+    pattern = "close pr #?\\([0-9]+\\)";
+    action = GitHubAction (ClosePR 0);
+    requires_unanimous = false;
+    min_threshold = 0.5;
+  };
+  (* Deploy pattern *)
+  {
+    pattern = "deploy \\(v?[0-9.]+\\)";
+    action = ShellCommand "echo 'Deploy placeholder'";
+    requires_unanimous = true;
+    min_threshold = 1.0;
+  };
+]
+
+(** {1 Pattern Matching} *)
+
+let match_pattern pattern text =
+  try
+    let re = Str.regexp_case_fold pattern in
+    let text_lower = String.lowercase_ascii text in
+    if Str.string_match re text_lower 0 then
+      Some (Str.matched_string text_lower)
+    else
+      None
+  with _ -> None
+
+let extract_number text =
+  try
+    let re = Str.regexp "[0-9]+" in
+    if Str.search_forward re text 0 >= 0 then
+      Some (int_of_string (Str.matched_string text))
+    else
+      None
+  with _ -> None
+
+(** {1 Action Execution} *)
+
+let execute_shell cmd =
+  try
+    let ic = Unix.open_process_in cmd in
+    let output = In_channel.input_all ic in
+    let status = Unix.close_process_in ic in
+    match status with
+    | Unix.WEXITED 0 -> 
+      { success = true; output; timestamp = Unix.gettimeofday () }
+    | _ -> 
+      { success = false; output; timestamp = Unix.gettimeofday () }
+  with e ->
+    { success = false; 
+      output = Printexc.to_string e; 
+      timestamp = Unix.gettimeofday () }
+
+let execute_github action =
+  match action with
+  | MergePR pr_num ->
+    execute_shell (Printf.sprintf "gh pr merge %d --auto --merge" pr_num)
+  | ClosePR pr_num ->
+    execute_shell (Printf.sprintf "gh pr close %d" pr_num)
+  | ApproveReview pr_num ->
+    execute_shell (Printf.sprintf "gh pr review %d --approve" pr_num)
+  | CreateIssue (title, body) ->
+    execute_shell (Printf.sprintf "gh issue create --title '%s' --body '%s'" 
+      (String.escaped title) (String.escaped body))
+
+let execute_action action =
+  match action with
+  | ShellCommand cmd -> execute_shell cmd
+  | ConfigChange (key, value) ->
+    (* TODO: Implement config changes *)
+    { success = true; 
+      output = Printf.sprintf "Config %s = %s (simulated)" key value;
+      timestamp = Unix.gettimeofday () }
+  | Notification (target, message) ->
+    (* TODO: Implement notifications *)
+    { success = true;
+      output = Printf.sprintf "Notify %s: %s (simulated)" target message;
+      timestamp = Unix.gettimeofday () }
+  | GitHubAction gh -> execute_github gh
+  | Custom id ->
+    { success = false;
+      output = Printf.sprintf "Unknown custom action: %s" id;
+      timestamp = Unix.gettimeofday () }
+
+(** {1 Decision Processing} *)
+
+(** Check if voting result meets threshold *)
+let check_threshold result mapping =
+  match result with
+  | Consensus.Unanimous Consensus.Approve -> true
+  | Consensus.Majority n -> 
+    not mapping.requires_unanimous && 
+    (float_of_int n >= mapping.min_threshold *. 100.0)
+  | _ -> false
+
+(** Find matching action for a topic *)
+let find_action topic =
+  List.find_opt (fun m -> 
+    match_pattern m.pattern topic <> None
+  ) default_mappings
+
+(** Execute decision based on voting result *)
+let execute_decision ~topic ~result : exec_result option =
+  match find_action topic with
+  | None -> 
+    Printf.eprintf "[Executor] No action mapping for topic: %s\n%!" topic;
+    None
+  | Some mapping ->
+    if check_threshold result mapping then begin
+      Printf.eprintf "[Executor] Executing action for: %s\n%!" topic;
+      (* Extract parameters from topic if needed *)
+      let action = match mapping.action with
+        | GitHubAction (MergePR _) ->
+          (match extract_number topic with
+           | Some n -> GitHubAction (MergePR n)
+           | None -> mapping.action)
+        | GitHubAction (ClosePR _) ->
+          (match extract_number topic with
+           | Some n -> GitHubAction (ClosePR n)
+           | None -> mapping.action)
+        | other -> other
+      in
+      Some (execute_action action)
+    end else begin
+      Printf.eprintf "[Executor] Threshold not met for: %s\n%!" topic;
+      None
+    end
+
+(** {1 Dry Run} *)
+
+let dry_run ~topic ~result : string =
+  match find_action topic with
+  | None -> "No action would be taken (no matching pattern)"
+  | Some mapping ->
+    if check_threshold result mapping then
+      Printf.sprintf "Would execute: %s" 
+        (match mapping.action with
+         | ShellCommand cmd -> Printf.sprintf "shell(%s)" cmd
+         | ConfigChange (k, v) -> Printf.sprintf "config(%s=%s)" k v
+         | Notification (t, m) -> Printf.sprintf "notify(%s: %s)" t m
+         | GitHubAction (MergePR _) -> Printf.sprintf "gh pr merge %s" 
+             (match extract_number topic with Some n -> string_of_int n | None -> "?")
+         | GitHubAction (ClosePR _) -> Printf.sprintf "gh pr close %s"
+             (match extract_number topic with Some n -> string_of_int n | None -> "?")
+         | GitHubAction (ApproveReview n) -> Printf.sprintf "gh pr review %d --approve" n
+         | GitHubAction (CreateIssue (t, _)) -> Printf.sprintf "gh issue create '%s'" t
+         | Custom id -> Printf.sprintf "custom(%s)" id)
+    else
+      Printf.sprintf "Would NOT execute (threshold: %.0f%%, requires_unanimous: %b)"
+        (mapping.min_threshold *. 100.0) mapping.requires_unanimous

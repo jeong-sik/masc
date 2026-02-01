@@ -1478,13 +1478,12 @@ Time: %s
             (* Save to PostgreSQL + Neo4j using Jiphyeon.Archive *)
             (match state.Mcp_server.env with
              | Some env ->
-               Eio.Switch.run (fun sw ->
-                 match Jiphyeon.Archive.save_episode ~sw ~env episode with
-                 | Ok () ->
-                   Printf.printf "[EPISODE/SAVED] Episode %s saved to PostgreSQL + Neo4j\n%!" ep_id
-                 | Error e ->
-                   Printf.eprintf "[EPISODE/WARN] DB save failed (file kept): %s\n%!" e
-               )
+               (* Use the existing sw from execute_tool_eio *)
+               (match Jiphyeon.Archive.save_episode ~sw ~env episode with
+                | Ok () ->
+                  Printf.printf "[EPISODE/SAVED] Episode %s saved to PostgreSQL + Neo4j\n%!" ep_id
+                | Error e ->
+                  Printf.eprintf "[EPISODE/WARN] DB save failed (file kept): %s\n%!" e)
              | None ->
                Printf.eprintf "[EPISODE/WARN] No env available, skipping DB save\n%!"
             );

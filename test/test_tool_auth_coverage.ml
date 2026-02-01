@@ -3,6 +3,7 @@
 open Masc_mcp
 
 let () = Random.self_init ()
+let () = Mirage_crypto_rng_unix.initialize ()
 
 let () = Printf.printf "\n=== Tool_auth Coverage Tests ===\n"
 

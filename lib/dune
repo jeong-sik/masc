@@ -113,6 +113,7 @@
    tool_control
    tool_misc
    social
+   tool_board
    tool_social
    transport
    transport_grpc_next

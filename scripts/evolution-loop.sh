@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-MAX_ITERATIONS=200
+MAX_ITERATIONS=${1:-200}  # Accept argument, default 200
 LOG_DIR="$ME_ROOT/workspace/yousleepwhen/masc-mcp/benchmark/logs"
 SCORE_FILE="$ME_ROOT/workspace/yousleepwhen/masc-mcp/benchmark/evolution_scores.jsonl"
 

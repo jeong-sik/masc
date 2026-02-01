@@ -37,12 +37,14 @@ module Post_id : sig
 end = struct
   type t = string
 
-  (* Only alphanumeric, dash, underscore. Max 64 chars *)
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9_-]\\{1,64\\}$"
+  (* Only alphanumeric, dash, underscore. Max 64 chars.
+     Note: OCaml Str does not support \{n,m\} quantifiers, so we use + with length check *)
+  let valid_pattern = Str.regexp "^[a-zA-Z0-9_-]+$"
 
   let of_string s =
     let s = String.trim s in
-    if Str.string_match valid_pattern s 0 then Ok s
+    let len = String.length s in
+    if len >= 1 && len <= 64 && Str.string_match valid_pattern s 0 then Ok s
     else Error (Invalid_id (Printf.sprintf "Invalid post_id: %s" s))
 
   let to_string t = t
@@ -66,11 +68,12 @@ module Comment_id : sig
 end = struct
   type t = string
 
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9_-]\\{1,64\\}$"
+  let valid_pattern = Str.regexp "^[a-zA-Z0-9_-]+$"
 
   let of_string s =
     let s = String.trim s in
-    if Str.string_match valid_pattern s 0 then Ok s
+    let len = String.length s in
+    if len >= 1 && len <= 64 && Str.string_match valid_pattern s 0 then Ok s
     else Error (Invalid_id (Printf.sprintf "Invalid comment_id: %s" s))
 
   let to_string t = t

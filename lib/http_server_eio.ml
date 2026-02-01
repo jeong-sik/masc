@@ -382,53 +382,51 @@ let metrics_handler _request reqd =
 (** MCP Streamable HTTP handler (POST /mcp)
     Implements MCP spec 2025-03-26 Streamable HTTP transport *)
 let mcp_post_handler request reqd =
-  (* For now, use empty body - full body reading requires async handling *)
-  (* TODO: Implement proper async body reading with Eio *)
-  let body = "{}" in
-  let session_id = Streamable_http.get_session_id request in
+  (* Read request body using sync wrapper *)
+  match Request.read_body_sync reqd with
+  | Error msg ->
+      Response.text ~status:`Bad_request (Printf.sprintf "Body read error: %s" msg) reqd
+  | Ok body ->
+      let session_id = Streamable_http.get_session_id request in
+      let (response_mode, session_opt) = Streamable_http.handle_post ?session_id ~body () in
+      match response_mode with
+      | Streamable_http.Json_response json ->
+          let json_str = Yojson.Safe.to_string json in
+          let extra_headers = match session_opt with
+            | Some s -> Streamable_http.with_session_header s []
+            | None -> []
+          in
+          let headers = Httpun.Headers.of_list ([
+            ("content-type", "application/json");
+            ("content-length", string_of_int (String.length json_str));
+          ] @ extra_headers) in
+          let response = Httpun.Response.create ~headers `OK in
+          Httpun.Reqd.respond_with_string reqd response json_str
 
-  (* Handle the request *)
-  let (response_mode, session_opt) = Streamable_http.handle_post ?session_id ~body () in
+      | Streamable_http.Json_batch jsons ->
+          let json_str = Yojson.Safe.to_string (`List jsons) in
+          let extra_headers = match session_opt with
+            | Some s -> Streamable_http.with_session_header s []
+            | None -> []
+          in
+          let headers = Httpun.Headers.of_list ([
+            ("content-type", "application/json");
+            ("content-length", string_of_int (String.length json_str));
+          ] @ extra_headers) in
+          let response = Httpun.Response.create ~headers `OK in
+          Httpun.Reqd.respond_with_string reqd response json_str
 
-  match response_mode with
-  | Streamable_http.Json_response json ->
-      let json_str = Yojson.Safe.to_string json in
-      let extra_headers = match session_opt with
-        | Some s -> Streamable_http.with_session_header s []
-        | None -> []
-      in
-      let headers = Httpun.Headers.of_list ([
-        ("content-type", "application/json");
-        ("content-length", string_of_int (String.length json_str));
-      ] @ extra_headers) in
-      let response = Httpun.Response.create ~headers `OK in
-      Httpun.Reqd.respond_with_string reqd response json_str
+      | Streamable_http.Sse_upgrade ->
+          Response.text "SSE upgrade not yet implemented" reqd
 
-  | Streamable_http.Json_batch jsons ->
-      let json_str = Yojson.Safe.to_string (`List jsons) in
-      let extra_headers = match session_opt with
-        | Some s -> Streamable_http.with_session_header s []
-        | None -> []
-      in
-      let headers = Httpun.Headers.of_list ([
-        ("content-type", "application/json");
-        ("content-length", string_of_int (String.length json_str));
-      ] @ extra_headers) in
-      let response = Httpun.Response.create ~headers `OK in
-      Httpun.Reqd.respond_with_string reqd response json_str
-
-  | Streamable_http.Sse_upgrade ->
-      (* Upgrade to SSE - delegate to existing SSE handler *)
-      Response.text "SSE upgrade not yet implemented" reqd
-
-  | Streamable_http.Error_response (code, message) ->
-      let status = match code with
-        | 400 -> `Bad_request
-        | 404 -> `Not_found
-        | 500 -> `Internal_server_error
-        | _ -> `Bad_request
-      in
-      Response.text ~status message reqd
+      | Streamable_http.Error_response (code, message) ->
+          let status = match code with
+            | 400 -> `Bad_request
+            | 404 -> `Not_found
+            | 500 -> `Internal_server_error
+            | _ -> `Bad_request
+          in
+          Response.text ~status message reqd
 
 (** MCP Streamable HTTP handler (GET /mcp) - SSE stream *)
 let mcp_get_handler request reqd =

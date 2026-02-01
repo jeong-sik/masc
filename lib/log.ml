@@ -8,7 +8,7 @@ type level =
   | Error
 
 (** Current log level (mutable, can be set at runtime) *)
-let current_level = ref Info
+let current_level = Atomic.make 1 (* Info=1 *)
 
 (** Level to string *)
 let level_to_string = function
@@ -35,15 +35,15 @@ let level_of_string s =
 
 (** Check if level should be logged *)
 let should_log level =
-  level_to_int level >= level_to_int !current_level
+  level_to_int level >= Atomic.get current_level
 
 (** Set log level *)
 let set_level level =
-  current_level := level
+  Atomic.set current_level (level_to_int level)
 
 (** Set log level from string (e.g., from env var) *)
 let set_level_from_string s =
-  current_level := level_of_string s
+  Atomic.set current_level (level_to_int (level_of_string s))
 
 (** Initialize from MASC_LOG_LEVEL env var *)
 let init_from_env () =

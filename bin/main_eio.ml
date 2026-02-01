@@ -19,6 +19,7 @@ module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
 module Tempo = Masc_mcp.Tempo
 module Auth = Masc_mcp.Auth
+module Board = Masc_mcp.Board
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
@@ -1140,6 +1141,17 @@ let make_routes ~port ~host =
          )
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/board" (fun request reqd ->
+       with_read_auth (fun _state _req reqd ->
+         let store = Board.global () in
+         let posts = Board.list_posts store () in
+         let json = `Assoc [
+           ("posts", `List (List.map Board.post_to_yojson posts));
+           ("count", `Int (List.length posts));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
   fun _client_addr gluten_reqd ->
@@ -1178,6 +1190,21 @@ let make_extended_handler routes =
         match request.meth, path with
         | `OPTIONS, _ -> options_handler request reqd
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
+        | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
+            let post_id = String.sub p 14 (String.length p - 14) in
+            let store = Board.global () in
+            (match Board.get_post store ~post_id with
+            | Error _ ->
+                Http.Response.json {|{"error":"Post not found"}|} reqd
+            | Ok post ->
+                let comments = match Board.get_comments store ~post_id with
+                  | Ok cs -> cs | Error _ -> []
+                in
+                let json = `Assoc [
+                  ("post", Board.post_to_yojson post);
+                  ("comments", `List (List.map Board.comment_to_yojson comments));
+                ] in
+                Http.Response.json (Yojson.Safe.to_string json) reqd)
         | _ -> Http.Router.dispatch routes request reqd
     with exn ->
       let msg = Printexc.to_string exn in

@@ -979,6 +979,45 @@ let run_http ~port ~base_path =
             let* rsp = Server.respond_string ~status:`Not_found ~body:"Not Found" () in
             Lwt.return (`Response rsp))
 
+    (* ===== Board REST API ===== *)
+    | `GET, "/api/v1/board" ->
+        let store = Masc_mcp.Board.global () in
+        let posts = Masc_mcp.Board.list_posts store () in
+        let json = `Assoc [
+          ("posts", `List (List.map Masc_mcp.Board.post_to_yojson posts));
+          ("count", `Int (List.length posts));
+        ] in
+        let headers = Cohttp.Header.of_list [
+          ("Content-Type", "application/json");
+          ("Access-Control-Allow-Origin", "*");
+        ] in
+        let* rsp = Server.respond_string ~status:`OK ~headers
+          ~body:(Yojson.Safe.to_string json) () in
+        Lwt.return (`Response rsp)
+
+    | `GET, path when String.length path > 14 && String.sub path 0 14 = "/api/v1/board/" ->
+        let post_id = String.sub path 14 (String.length path - 14) in
+        let store = Masc_mcp.Board.global () in
+        (match Masc_mcp.Board.get_post store ~post_id with
+        | Error _ ->
+            let* rsp = Server.respond_string ~status:`Not_found ~body:{|{"error":"Post not found"}|} () in
+            Lwt.return (`Response rsp)
+        | Ok post ->
+            let comments = match Masc_mcp.Board.get_comments store ~post_id with
+              | Ok cs -> cs | Error _ -> []
+            in
+            let json = `Assoc [
+              ("post", Masc_mcp.Board.post_to_yojson post);
+              ("comments", `List (List.map Masc_mcp.Board.comment_to_yojson comments));
+            ] in
+            let headers = Cohttp.Header.of_list [
+              ("Content-Type", "application/json");
+              ("Access-Control-Allow-Origin", "*");
+            ] in
+            let* rsp = Server.respond_string ~status:`OK ~headers
+              ~body:(Yojson.Safe.to_string json) () in
+            Lwt.return (`Response rsp))
+
     | _ ->
         let* rsp = Server.respond_string ~status:`Not_found ~body:"Not Found" () in
         Lwt.return (`Response rsp)

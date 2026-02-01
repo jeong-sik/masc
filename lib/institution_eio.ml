@@ -484,12 +484,47 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
   Buffer.add_string buf "---\n";
   Buffer.contents buf
 
+(** Format institution as a compact welcome message for masc_join.
+    Much shorter than format_for_injection - just mission, top values, and key tips.
+*)
+let format_for_welcome (inst : institution) : string =
+  let buf = Buffer.create 512 in
+  Buffer.add_string buf "\n📜 **Cultural Inheritance**\n";
+  Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+  Buffer.add_string buf (Printf.sprintf "  🏛️ Mission: %s\n" inst.identity.mission);
+  (* Top 3 cultural values *)
+  if inst.culture <> [] then begin
+    let top_values = List.sort (fun a b -> compare b.weight a.weight) inst.culture
+      |> List.filteri (fun i _ -> i < 3) in
+    List.iter (fun (v : cultural_value) ->
+      Buffer.add_string buf (Printf.sprintf "  • %s: %s\n" v.name v.description)
+    ) top_values
+  end;
+  (* Top 2 procedural patterns *)
+  if inst.memory.procedural <> [] then begin
+    let top_patterns = List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural
+      |> List.filteri (fun i _ -> i < 2) in
+    List.iter (fun (p : pattern) ->
+      Buffer.add_string buf (Printf.sprintf "  📋 %s (%.0f%% success)\n" p.name (p.success_rate *. 100.0))
+    ) top_patterns
+  end;
+  Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+  Buffer.contents buf
+
 (** Load institution and format for spawn injection.
     Returns empty string if no institution exists.
 *)
 let load_and_format_for_spawn ~fs (config : config) : string =
   match load_institution ~fs config with
   | Some inst -> format_for_injection inst
+  | None -> ""
+
+(** Load institution and format as welcome message for join.
+    Returns empty string if no institution exists.
+*)
+let load_and_format_for_welcome ~fs (config : config) : string =
+  match load_institution ~fs config with
+  | Some inst -> format_for_welcome inst
   | None -> ""
 
 (** Short welcome format for masc_join response.

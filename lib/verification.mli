@@ -1,7 +1,7 @@
 (** Verification - Cross-agent task output verification for MASC
 
-    Based on MAST taxonomy (ICLR 2025) - 13.48% of multi-agent failures
-    are due to incorrect output verification. *)
+    Based on MAST taxonomy (Cemri et al., 2025, arXiv:2503.13657).
+    Task verification is one of the three failure categories. *)
 
 (** {1 Types} *)
 

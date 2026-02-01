@@ -1,8 +1,9 @@
 (** Message Schema: Structured message validation for MASC
 
-    Based on MAST taxonomy (ICLR 2025) - specification problems account for 41.77%
-    of multi-agent system failures. Structured message schemas prevent silent failures
-    from format mismatches between agents.
+    Based on MAST taxonomy (Cemri et al., 2025, arXiv:2503.13657).
+    Specification problems are the largest category of multi-agent system failures.
+    Structured message schemas prevent silent failures from format mismatches
+    between agents.
 
     Design:
     - Variant types for compile-time message type checking

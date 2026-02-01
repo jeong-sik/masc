@@ -1,8 +1,8 @@
 (** Verification - Cross-agent task output verification for MASC
 
-    Based on MAST taxonomy (ICLR 2025) - task verification failures account
-    for 13.48% of multi-agent system failures. Independent verification
-    ensures Worker Agent ≠ Verifier Agent.
+    Based on MAST taxonomy (Cemri et al., 2025, arXiv:2503.13657).
+    Task verification is one of the three failure categories in multi-agent
+    systems. Independent verification ensures Worker Agent ≠ Verifier Agent.
 
     Design:
     - File-based storage under .masc/verifications/

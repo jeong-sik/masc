@@ -38,6 +38,7 @@ module Http_server_eio = Http_server_eio
 module Graphql_api = Graphql_api
 module Safe_ops = Safe_ops
 module Sse = Sse
+module Streamable_http = Streamable_http
 module Board = Board
 module Web_dashboard = Web_dashboard
 module Credits_dashboard = Credits_dashboard

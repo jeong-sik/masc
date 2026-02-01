@@ -89,6 +89,7 @@
    spawn_registry
    sse
    sse_client
+   streamable_http
    subscriptions
    swarm_behaviors_eio
    swarm_eio
@@ -122,6 +123,7 @@
    tool_verification
    tool_misc
    tool_board
+   tool_lodge
    tool_council
    debate
    social

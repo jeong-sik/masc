@@ -379,12 +379,76 @@ let metrics_handler _request reqd =
   let response = Httpun.Response.create ~headers `OK in
   Httpun.Reqd.respond_with_string reqd response body
 
+(** MCP Streamable HTTP handler (POST /mcp)
+    Implements MCP spec 2025-03-26 Streamable HTTP transport *)
+let mcp_post_handler request reqd =
+  (* For now, use empty body - full body reading requires async handling *)
+  (* TODO: Implement proper async body reading with Eio *)
+  let body = "{}" in
+  let session_id = Streamable_http.get_session_id request in
+
+  (* Handle the request *)
+  let (response_mode, session_opt) = Streamable_http.handle_post ?session_id ~body () in
+
+  match response_mode with
+  | Streamable_http.Json_response json ->
+      let json_str = Yojson.Safe.to_string json in
+      let extra_headers = match session_opt with
+        | Some s -> Streamable_http.with_session_header s []
+        | None -> []
+      in
+      let headers = Httpun.Headers.of_list ([
+        ("content-type", "application/json");
+        ("content-length", string_of_int (String.length json_str));
+      ] @ extra_headers) in
+      let response = Httpun.Response.create ~headers `OK in
+      Httpun.Reqd.respond_with_string reqd response json_str
+
+  | Streamable_http.Json_batch jsons ->
+      let json_str = Yojson.Safe.to_string (`List jsons) in
+      let extra_headers = match session_opt with
+        | Some s -> Streamable_http.with_session_header s []
+        | None -> []
+      in
+      let headers = Httpun.Headers.of_list ([
+        ("content-type", "application/json");
+        ("content-length", string_of_int (String.length json_str));
+      ] @ extra_headers) in
+      let response = Httpun.Response.create ~headers `OK in
+      Httpun.Reqd.respond_with_string reqd response json_str
+
+  | Streamable_http.Sse_upgrade ->
+      (* Upgrade to SSE - delegate to existing SSE handler *)
+      Response.text "SSE upgrade not yet implemented" reqd
+
+  | Streamable_http.Error_response (code, message) ->
+      let status = match code with
+        | 400 -> `Bad_request
+        | 404 -> `Not_found
+        | 500 -> `Internal_server_error
+        | _ -> `Bad_request
+      in
+      Response.text ~status message reqd
+
+(** MCP Streamable HTTP handler (GET /mcp) - SSE stream *)
+let mcp_get_handler request reqd =
+  let session_id = Streamable_http.get_session_id request in
+  match Streamable_http.handle_get ?session_id () with
+  | Ok session ->
+      (* Return session info, actual SSE handled elsewhere *)
+      let json = Printf.sprintf {|{"session_id":"%s","transport":"streamable_http"}|} session.id in
+      Response.json json reqd
+  | Error msg ->
+      Response.text ~status:`Bad_request msg reqd
+
 (** Default routes for MCP server *)
 let default_routes =
   Router.empty
   |> Router.get "/health" health_handler
   |> Router.get "/ready" ready_handler
   |> Router.get "/metrics" metrics_handler
+  |> Router.post "/mcp" mcp_post_handler
+  |> Router.get "/mcp" mcp_get_handler
   |> Router.get "/" (fun _req reqd ->
       Response.text "MASC MCP Server" reqd)
 

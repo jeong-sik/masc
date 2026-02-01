@@ -112,6 +112,7 @@
    tool_room
    tool_control
    tool_misc
+   tool_board
    social
    tool_social
    transport

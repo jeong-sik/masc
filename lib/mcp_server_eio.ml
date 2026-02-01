@@ -1386,6 +1386,11 @@ Time: %s
 
   (* Swarm tools delegated to Tool_swarm module *)
 
+  (* Board tools delegated to Tool_board module *)
+  | "masc_board_post" | "masc_board_list" | "masc_board_get"
+  | "masc_board_comment" | "masc_board_vote" | "masc_board_stats" ->
+      Tool_board.handle_tool name arguments
+
   | _ ->
       (false, Printf.sprintf "❌ Unknown tool: %s" name)
 
@@ -1484,9 +1489,10 @@ let handle_list_tools_eio state id =
   let room_path = Room.masc_dir state.Mcp_server.room_config in
   let config = Config.load room_path in
   let enabled_categories = config.enabled_categories in
+  let all_tools = Tools.all_schemas @ Tool_board.tools in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
     Mode.is_tool_enabled enabled_categories schema.name
-  ) Tools.all_schemas in
+  ) all_tools in
   let tools = List.map (fun (schema : Types.tool_schema) ->
     `Assoc [
       ("name", `String schema.name);

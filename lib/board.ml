@@ -93,11 +93,12 @@ end = struct
   type t = string
 
   (* Agent names: alphanumeric, dash, underscore, dot. Max 32 chars *)
-  let valid_pattern = Str.regexp "^[a-zA-Z0-9._-]\\{1,32\\}$"
+  let valid_pattern = Str.regexp "^[a-zA-Z0-9._-]+$"
 
   let of_string s =
     let s = String.trim s in
-    if Str.string_match valid_pattern s 0 then Ok s
+    let len = String.length s in
+    if len >= 1 && len <= 32 && Str.string_match valid_pattern s 0 then Ok s
     else Error (Validation_error (Printf.sprintf "Invalid agent_id: %s" s))
 
   let to_string t = t

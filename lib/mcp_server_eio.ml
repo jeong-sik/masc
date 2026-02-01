@@ -954,9 +954,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       with e ->
         Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
       (* Cultural Inheritance: append institution welcome to join response *)
-      let institution_welcome =
-        try Institution_eio.load_and_format_for_welcome ~fs config
-        with _ -> ""
+      let institution_welcome = match state.fs with
+        | Some fs -> (try Institution_eio.load_and_format_for_welcome ~fs config with _ -> "")
+        | None -> ""
       in
       let final_result = if institution_welcome = "" then result
         else result ^ institution_welcome in

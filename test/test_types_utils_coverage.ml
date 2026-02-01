@@ -1,5 +1,8 @@
 (** Comprehensive coverage tests for Types, Room_utils, and Room_eio modules *)
 
+(* Initialize RNG for crypto operations *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
 open Alcotest
 open Masc_mcp
 

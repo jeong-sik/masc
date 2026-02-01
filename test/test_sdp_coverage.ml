@@ -3,6 +3,12 @@
     Tests for lib/sdp.ml covering:
     - ICE candidate parsing/serialization
     - Fingerprint parsing/serialization
+*)
+
+(* Initialize RNG for crypto operations *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
+(**
     - Full session parsing/serialization
     - WebRTC helpers
     - Roundtrip tests

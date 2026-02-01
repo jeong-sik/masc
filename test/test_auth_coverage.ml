@@ -6,6 +6,9 @@
     - auth_dir, agents_dir, room_secret_file, auth_config_file: path helpers
 *)
 
+(* Initialize RNG for crypto operations *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
 open Alcotest
 
 module Auth = Masc_mcp.Auth

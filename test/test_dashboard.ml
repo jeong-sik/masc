@@ -72,7 +72,7 @@ let test_generate_compact () =
   let output = Lib.Dashboard.generate_compact config in
   Alcotest.(check bool) "contains Agents" true (contains output "Agents:");
   Alcotest.(check bool) "contains Tasks" true (contains output "Tasks:");
-  Alcotest.(check bool) "contains Locks" true (contains output "Locks:");
+  (* Locks section removed in 132708a - advisory lock deprecation *)
   Alcotest.(check bool) "contains Tempo" true (contains output "Tempo:");
   cleanup_dir dir
 

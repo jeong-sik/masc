@@ -232,7 +232,7 @@ let handle_consensus_result _ctx args =
   else
     match ConsensusApi.result ~session_id with
     | Ok result ->
-      (true, Consensus.show_voting_result result)
+      (true, Consensus.voting_result_to_string result)
     | Error e ->
       let msg = match e with
         | Consensus.Session_not_found id -> Printf.sprintf "Session not found: %s" id

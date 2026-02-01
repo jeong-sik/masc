@@ -1388,6 +1388,216 @@ Time: %s
         end
       end
 
+  (* ============================================ *)
+  (* Agent Being Protocol - Episode Tools        *)
+  (* ============================================ *)
+
+  | "masc_episode_flush" ->
+      let limit = get_int "limit" 10 in
+      let dry_run = get_bool "dry_run" false in
+      let base_path = config.Room_utils.base_path in
+      let pending_dir = Filename.concat base_path ".masc/pending_episodes" in
+
+      (* List pending episodes *)
+      let pending_files =
+        try
+          Sys.readdir pending_dir
+          |> Array.to_list
+          |> List.filter (fun f -> Filename.check_suffix f ".json")
+          |> List.sort String.compare
+          |> (fun l -> if List.length l > limit then List.filteri (fun i _ -> i < limit) l else l)
+        with Sys_error _ -> []
+      in
+
+      if dry_run then begin
+        let response = `Assoc [
+          ("dry_run", `Bool true);
+          ("pending", `Int (List.length pending_files));
+          ("would_flush", `List (List.map (fun f -> `String f) pending_files));
+        ] in
+        (true, Yojson.Safe.pretty_to_string response)
+      end else begin
+        (* Flush episodes to DB (requires Eio env - use jiphyeon module) *)
+        let flushed = ref 0 in
+        let failed = ref 0 in
+
+        (* Helper to parse outcome *)
+        let parse_outcome s = match s with
+          | "success" -> `Success
+          | "failure" -> `Failure
+          | _ -> `Partial
+        in
+
+        (* Helper to parse string list *)
+        let parse_string_list = function
+          | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
+          | _ -> []
+        in
+
+        (* Helper to parse context key-value pairs *)
+        let parse_context = function
+          | `Assoc l -> List.filter_map (fun (k, v) ->
+              match v with `String s -> Some (k, s) | _ -> None) l
+          | _ -> []
+        in
+
+        List.iter (fun file ->
+          let file_path = Filename.concat pending_dir file in
+          try
+            let ic = open_in file_path in
+            let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+              let buf = Buffer.create 4096 in
+              (try
+                while true do
+                  Buffer.add_channel buf ic 1024
+                done
+              with End_of_file -> ());
+              Buffer.contents buf
+            ) in
+            (* Parse and validate *)
+            let json = Yojson.Safe.from_string content in
+            let open Yojson.Safe.Util in
+            let ep_id = json |> member "ep_id" |> to_string in
+
+            (* Build Episode record from JSON *)
+            let episode : Jiphyeon.Archive.episode = {
+              ep_id;
+              session_id = json |> member "session_id" |> to_string;
+              agent_name = json |> member "agent_name" |> to_string;
+              generation = json |> member "generation" |> to_int;
+              parent_episode = json |> member "parent_episode" |> to_string_option;
+              event_type = json |> member "event_type" |> to_string;
+              summary = json |> member "summary" |> to_string;
+              dna = json |> member "dna" |> to_string_option;
+              outcome = json |> member "outcome" |> to_string |> parse_outcome;
+              learnings = json |> member "learnings" |> parse_string_list;
+              context = json |> member "context" |> parse_context;
+              timestamp = json |> member "timestamp" |> to_string;
+            } in
+
+            (* Save to PostgreSQL + Neo4j using Jiphyeon.Archive *)
+            (match state.Mcp_server.env with
+             | Some env ->
+               Eio.Switch.run (fun sw ->
+                 match Jiphyeon.Archive.save_episode ~sw ~env episode with
+                 | Ok () ->
+                   Printf.printf "[EPISODE/SAVED] Episode %s saved to PostgreSQL + Neo4j\n%!" ep_id
+                 | Error e ->
+                   Printf.eprintf "[EPISODE/WARN] DB save failed (file kept): %s\n%!" e
+               )
+             | None ->
+               Printf.eprintf "[EPISODE/WARN] No env available, skipping DB save\n%!"
+            );
+
+            (* Move to processed/ *)
+            let processed_dir = Filename.concat base_path ".masc/processed_episodes" in
+            (try Unix.mkdir processed_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+            let new_path = Filename.concat processed_dir file in
+            Sys.rename file_path new_path;
+            Printf.printf "[EPISODE/FLUSH] Processed episode %s → %s\n%!" ep_id new_path;
+            incr flushed
+          with exn ->
+            Printf.eprintf "[EPISODE/ERROR] Failed to flush %s: %s\n%!" file (Printexc.to_string exn);
+            incr failed
+        ) pending_files;
+
+        let remaining =
+          try Array.length (Sys.readdir pending_dir) with Sys_error _ -> 0
+        in
+        let response = `Assoc [
+          ("flushed", `Int !flushed);
+          ("failed", `Int !failed);
+          ("remaining", `Int remaining);
+          ("message", `String (Printf.sprintf "Flushed %d episodes (%d failed, %d remaining)" !flushed !failed remaining));
+        ] in
+        (true, Yojson.Safe.pretty_to_string response)
+      end
+
+  | "masc_episode_list" ->
+      let agent_filter = get_string_opt "agent_name" in
+      let gen_filter = match arguments with
+        | `Assoc fields -> (match List.assoc_opt "generation" fields with
+            | Some (`Int n) -> Some n
+            | _ -> None)
+        | _ -> None
+      in
+      let limit = get_int "limit" 20 in
+      let base_path = config.Room_utils.base_path in
+
+      (* Collect from processed_episodes (already flushed) *)
+      let processed_dir = Filename.concat base_path ".masc/processed_episodes" in
+      let episodes =
+        try
+          Sys.readdir processed_dir
+          |> Array.to_list
+          |> List.filter (fun f -> Filename.check_suffix f ".json")
+          |> List.sort (fun a b -> String.compare b a)  (* Newest first *)
+          |> (fun l -> if List.length l > limit then List.filteri (fun i _ -> i < limit) l else l)
+          |> List.filter_map (fun file ->
+              try
+                let path = Filename.concat processed_dir file in
+                let ic = open_in path in
+                let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+                  let buf = Buffer.create 4096 in
+                  (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
+                  Buffer.contents buf
+                ) in
+                let json = Yojson.Safe.from_string content in
+                let ep_agent = Yojson.Safe.Util.(json |> member "agent_name" |> to_string) in
+                let ep_gen = Yojson.Safe.Util.(json |> member "generation" |> to_int) in
+                (* Apply filters *)
+                let agent_ok = match agent_filter with None -> true | Some a -> ep_agent = a in
+                let gen_ok = match gen_filter with None -> true | Some g -> ep_gen = g in
+                if agent_ok && gen_ok then Some json else None
+              with _ -> None
+            )
+        with Sys_error _ -> []
+      in
+
+      let response = `Assoc [
+        ("count", `Int (List.length episodes));
+        ("episodes", `List episodes);
+      ] in
+      (true, Yojson.Safe.pretty_to_string response)
+
+  | "masc_self_introspect" ->
+      let cell = !(Mcp_server.current_cell) in
+      let generation = cell.Mitosis.generation in
+      let tool_calls = cell.Mitosis.tool_call_count in
+      let task_count = cell.Mitosis.task_count in
+
+      (* Estimate context usage from tool calls *)
+      let estimated_ratio = Float.min 1.0 (Float.of_int tool_calls /. Mitosis.Defaults.tool_calls_per_full_context) in
+      let status =
+        if estimated_ratio >= Mitosis.default_config.handoff_threshold then "critical"
+        else if estimated_ratio >= Mitosis.default_config.prepare_threshold then "warning"
+        else "healthy" in
+
+      (* Estimate remaining lifespan *)
+      let remaining_ratio = 1.0 -. estimated_ratio in
+      let estimated_remaining_tools = int_of_float (remaining_ratio *. Mitosis.Defaults.tool_calls_per_full_context) in
+
+      (* Check for siblings (other agents of same generation in room) *)
+      let all_statuses = Mitosis.get_all_statuses ~room_config:config in
+      let siblings = List.filter (fun (_, _, _) -> true) all_statuses in  (* TODO: filter by generation *)
+
+      let response = `Assoc [
+        ("generation", `Int generation);
+        ("cell_id", `String cell.Mitosis.id);
+        ("context_used", `Float estimated_ratio);
+        ("status", `String status);
+        ("tool_calls", `Int tool_calls);
+        ("task_count", `Int task_count);
+        ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
+        ("born_at", `Float cell.Mitosis.born_at);
+        ("estimated_remaining_tools", `Int estimated_remaining_tools);
+        ("siblings_in_room", `Int (List.length siblings));
+        ("parent_dna", match cell.Mitosis.context_dna with Some _ -> `Bool true | None -> `Bool false);
+        ("message", `String (Printf.sprintf "Generation %d | Context %.0f%% (%s) | ~%d tool calls remaining"
+          generation (estimated_ratio *. 100.0) status estimated_remaining_tools));
+      ] in
+      (true, Yojson.Safe.pretty_to_string response)
+
   (* Swarm tools delegated to Tool_swarm module *)
 
   (* Board tools delegated to Tool_board module *)

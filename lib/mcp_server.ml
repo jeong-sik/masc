@@ -422,6 +422,7 @@ type server_state = {
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
   clock: float Eio.Time.clock_ty Eio.Resource.t option; (* For timestamps/sleep *)
+  env: Caqti_eio.stdenv option; (* For DB/HTTP access - Agent Being Protocol *)
 }
 
 let create_state ~base_path =
@@ -438,6 +439,7 @@ let create_state ~base_path =
     proc_mgr = None;
     fs = None;
     clock = None;
+    env = None;
   }
 
 (** Create state with Eio context - required for PostgresNative backend *)
@@ -454,6 +456,7 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
     proc_mgr = Some proc_mgr;
     fs = Some fs;
     clock = Some clock;
+    env = Some env;
   }
 
 (** Register SSE broadcast callback *)

@@ -13,6 +13,8 @@ type argument = {
   position: position;
   content: string;
   evidence: string list;
+  reply_to: int option;  (** Index of argument this is replying to *)
+  mentions: string list; (** Agents mentioned/addressed *)
 }
 
 type debate_status = Open | Closed | Pending
@@ -77,12 +79,18 @@ let status_of_string = function
   | s -> Error (Printf.sprintf "Unknown status: %s" s)
 
 let argument_to_yojson (a : argument) : Yojson.Safe.t =
-  `Assoc [
+  let base = [
     ("agent", `String a.agent);
     ("position", `String (position_to_string a.position));
     ("content", `String a.content);
     ("evidence", `List (List.map (fun e -> `String e) a.evidence));
-  ]
+    ("mentions", `List (List.map (fun m -> `String m) a.mentions));
+  ] in
+  let with_reply = match a.reply_to with
+    | None -> base
+    | Some idx -> ("reply_to", `Int idx) :: base
+  in
+  `Assoc with_reply
 
 let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
   let open Yojson.Safe.Util in
@@ -94,7 +102,15 @@ let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
     | Ok position ->
         let content = json |> member "content" |> to_string in
         let evidence = json |> member "evidence" |> to_list |> List.map to_string in
-        Ok { agent; position; content; evidence }
+        let reply_to = match json |> member "reply_to" with
+          | `Int i -> Some i
+          | _ -> None
+        in
+        let mentions = match json |> member "mentions" with
+          | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
+          | _ -> []
+        in
+        Ok { agent; position; content; evidence; reply_to; mentions }
   with e ->
     Error (Printf.sprintf "Failed to parse argument: %s" (Printexc.to_string e))
 
@@ -222,17 +238,41 @@ let save_debate config (debate : debate) : unit =
   write_json path (debate_to_yojson debate)
 
 (** Add an argument to a debate *)
-let add_argument config ~debate_id ~agent ~position ~content ?(evidence=[]) () : (debate, string) result =
+let add_argument config ~debate_id ~agent ~position ~content 
+    ?(evidence=[]) ?(reply_to=None) ?(mentions=[]) ?(notify_fn=None) () 
+    : (debate, string) result =
   match get_debate config ~debate_id with
   | Error e -> Error e
   | Ok debate ->
       if debate.status <> Open then
         Error (Printf.sprintf "Cannot add argument: debate %s is not open" debate_id)
       else begin
-        let arg : argument = { agent; position; content; evidence } in
+        let arg : argument = { agent; position; content; evidence; reply_to; mentions } in
+        let arg_idx = List.length debate.arguments in
         let updated = { debate with arguments = debate.arguments @ [arg] } in
         try
           save_debate config updated;
+          (* Notify mentioned agents and reply target *)
+          (match notify_fn with
+           | None -> ()
+           | Some fn ->
+             (* Notify agents mentioned *)
+             List.iter (fun mentioned ->
+               let msg = Printf.sprintf "@%s mentioned you in debate [%s]: %s" 
+                 agent debate_id (String.sub content 0 (min 50 (String.length content))) in
+               fn ~agent:mentioned ~message:msg
+             ) mentions;
+             (* Notify agent being replied to *)
+             (match reply_to with
+              | None -> ()
+              | Some idx when idx < List.length debate.arguments ->
+                let target_arg = List.nth debate.arguments idx in
+                let msg = Printf.sprintf "@%s replied to your argument (#%d) in debate [%s]" 
+                  agent idx debate_id in
+                fn ~agent:target_arg.agent ~message:msg
+              | Some _ -> ()));
+          (* Return with arg index for reference *)
+          Printf.eprintf "[Debate] Argument #%d added by %s\n%!" arg_idx agent;
           Ok updated
         with e ->
           Error (Printf.sprintf "Failed to add argument: %s" (Printexc.to_string e))

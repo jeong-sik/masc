@@ -1096,7 +1096,8 @@ and provide arguments with evidence. Use for: complex decisions, design discussi
 
   {
     name = "masc_debate_argue";
-    description = "Add an argument to an ongoing debate. Take a position and provide your reasoning.";
+    description = "Add an argument to an ongoing debate. Take a position and provide your reasoning. \
+Use reply_to to respond to a specific argument (ping-pong style).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -1117,6 +1118,15 @@ and provide arguments with evidence. Use for: complex decisions, design discussi
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Supporting evidence (optional)");
+        ]);
+        ("reply_to", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Index of argument to reply to (for ping-pong debate)");
+        ]);
+        ("mentions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Agent names to mention/notify");
         ]);
       ]);
       ("required", `List [`String "debate_id"; `String "content"]);
@@ -2184,6 +2194,83 @@ of their context limits and gracefully hand over work to successors.|};
         ]);
       ]);
       ("required", `List [`String "context_ratio"]);
+    ];
+  };
+
+  (* ============================================ *)
+  (* Agent Being Protocol - Episode Storage      *)
+  (* ============================================ *)
+
+  {
+    name = "masc_episode_flush";
+    description = {|Flush pending episodes to Neo4j and PostgreSQL.
+
+Episodes are queued locally during mitosis handoff (file-based queue for reliability).
+This tool flushes them to persistent storage (Neo4j for graph relationships, PostgreSQL for queries).
+
+Part of the Agent Being Protocol - agents are "beings" with memory continuity across generations.
+
+Returns:
+- flushed: Number of episodes successfully saved to DB
+- failed: Number of episodes that failed (kept in queue for retry)
+- pending: Remaining episodes in queue|};
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max episodes to flush per call (default: 10)");
+        ]);
+        ("dry_run", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Preview without saving to DB (default: false)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_episode_list";
+    description = {|List recent episodes from PostgreSQL.
+
+Query agent episodes with optional filters. Returns episode metadata for debugging
+and understanding agent lineage.
+
+Part of the Agent Being Protocol - agents can reflect on their history.|};
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by agent name (optional)");
+        ]);
+        ("generation", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Filter by generation number (optional)");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max results (default: 20)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_self_introspect";
+    description = {|Agent self-awareness introspection.
+
+Returns the agent's current lifecycle state:
+- generation: Current generation number (how many mitosis events in lineage)
+- context_used: Estimated context usage percentage
+- siblings: Other agents of the same generation in the room
+- parent_episode: Episode ID of the parent (if known)
+- estimated_lifespan: Tokens/turns remaining before mitosis needed
+
+Part of the Agent Being Protocol - agents should know their place in the lifecycle.|};
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
     ];
   };
 

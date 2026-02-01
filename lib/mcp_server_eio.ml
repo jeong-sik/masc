@@ -773,6 +773,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_worktree : Tool_worktree.context = { config; agent_name } in
   let simple_ctx_vote : Tool_vote.context = { config; agent_name } in
   let simple_ctx_social : Tool_social.context = { config; agent_name } in
+  let simple_ctx_council : Tool_council.context = { base_path = config.base_path; agent_name } in
   let simple_ctx_a2a : Tool_a2a.context = { config; agent_name } in
   let handover_ctx : Tool_handover.context = {
     config; agent_name;
@@ -824,6 +825,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_social.dispatch simple_ctx_social ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_council.dispatch simple_ctx_council ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_a2a.dispatch simple_ctx_a2a ~name ~args:arguments with

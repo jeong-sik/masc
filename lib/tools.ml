@@ -1075,6 +1075,209 @@ Use masc_vote_cast to participate, masc_vote_create to start new vote.";
   };
 
   (* ============================================ *)
+  (* Council - Multi-agent Debate & Consensus     *)
+  (* ============================================ *)
+
+  {
+    name = "masc_debate_start";
+    description = "Start a structured debate on a topic. Agents can take positions (support/oppose/neutral) \
+and provide arguments with evidence. Use for: complex decisions, design discussions, technical debates.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The topic to debate");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  {
+    name = "masc_debate_argue";
+    description = "Add an argument to an ongoing debate. Take a position and provide your reasoning.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("debate_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The debate ID");
+        ]);
+        ("position", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "support"; `String "oppose"; `String "neutral"]);
+          ("description", `String "Your position on the topic");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your argument");
+        ]);
+        ("evidence", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Supporting evidence (optional)");
+        ]);
+      ]);
+      ("required", `List [`String "debate_id"; `String "content"]);
+    ];
+  };
+
+  {
+    name = "masc_debate_close";
+    description = "Close a debate. No more arguments can be added.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("debate_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The debate ID to close");
+        ]);
+      ]);
+      ("required", `List [`String "debate_id"]);
+    ];
+  };
+
+  {
+    name = "masc_debate_status";
+    description = "Get status and summary of a debate.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("debate_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The debate ID");
+        ]);
+      ]);
+      ("required", `List [`String "debate_id"]);
+    ];
+  };
+
+  {
+    name = "masc_debates";
+    description = "List all debates (open and closed).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
+    name = "masc_consensus_start";
+    description = "Start a voting session for consensus. Agents vote approve/reject/abstain with reasons.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The topic to vote on");
+        ]);
+        ("quorum", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Minimum votes required (default: 2)");
+        ]);
+        ("threshold", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Majority threshold 0.0-1.0 (default: 0.5)");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  {
+    name = "masc_consensus_vote";
+    description = "Cast a vote in a consensus session.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("session_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The voting session ID");
+        ]);
+        ("decision", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "approve"; `String "reject"; `String "abstain"]);
+          ("description", `String "Your vote");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for your vote");
+        ]);
+      ]);
+      ("required", `List [`String "session_id"; `String "decision"]);
+    ];
+  };
+
+  {
+    name = "masc_consensus_close";
+    description = "Close a voting session and get the result.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("session_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The voting session ID");
+        ]);
+      ]);
+      ("required", `List [`String "session_id"]);
+    ];
+  };
+
+  {
+    name = "masc_consensus_result";
+    description = "Get the result of a voting session (Unanimous/Majority/Deadlock/Escalate).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("session_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The voting session ID");
+        ]);
+      ]);
+      ("required", `List [`String "session_id"]);
+    ];
+  };
+
+  {
+    name = "masc_sessions";
+    description = "List active voting sessions.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
+    name = "masc_route";
+    description = "Route a query to appropriate agents using MoE-style selection. \
+Returns: selected agents, estimated cost, complexity score.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The query to route");
+        ]);
+        ("max_agents", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max agents to select (default: 3)");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+
+  {
+    name = "masc_council_status";
+    description = "Get council system status (active debates, voting sessions).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* ============================================ *)
   (* Social Features (Moltbook-style)             *)
   (* ============================================ *)
 

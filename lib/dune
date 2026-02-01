@@ -114,6 +114,8 @@
    tool_control
    tool_misc
    tool_board
+   tool_council
+   debate
    social
    tool_social
    transport
@@ -177,6 +179,8 @@
    zstd
    ;; Version auto-sync from dune-project
    dune-build-info
+   ;; Council - multi-agent governance
+   council
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

@@ -301,7 +301,7 @@ let select_koan_safe (reader : reader_context) : (koan, void_error) result =
 
 (** Safe contemplation with resource cleanup callback *)
 let contemplate_with_cleanup ~(cleanup: unit -> unit) (x : 'a) : 'a =
-  Fun.protect ~finally:cleanup (fun () -> x)
+  Common.protect ~module_name:"void" ~finally_label:"finalizer" ~finally:cleanup (fun () -> x)
 
 (** {1 Phantom Types for Level Safety}
 

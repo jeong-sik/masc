@@ -440,7 +440,7 @@ let append_audit_event (config : Room.config) (e : audit_event) =
     let line = Yojson.Safe.to_string (audit_event_to_json e) ^ "\n" in
     Room_utils.with_file_lock config path (fun () ->
       let oc = open_out_gen [Open_creat; Open_append; Open_wronly] 0o600 path in
-      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
         output_string oc line)
     )
   end
@@ -608,8 +608,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
         try
           let ic = open_in file in
-          let name = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-            input_line ic) in
+          let name =
+            Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+              ~finally:(fun () -> close_in_noerr ic)
+              (fun () -> input_line ic)
+          in
           if name = "" then None else Some name
         with Sys_error _ | End_of_file -> None
   in
@@ -622,8 +625,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
         try
           let oc = open_out file in
-          Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-            output_string oc agent_name)
+          Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+            ~finally:(fun () -> close_out_noerr oc)
+            (fun () -> output_string oc agent_name)
         with Sys_error msg ->
           Printf.eprintf "[WARN] write_mcp_session_agent: %s\n%!" msg
   in
@@ -672,8 +676,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
           (try
             let ic = open_in term_file in
-            let name = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-              input_line ic) in
+            let name =
+              Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+                ~finally:(fun () -> close_in_noerr ic)
+                (fun () -> input_line ic)
+            in
             if name <> "" then name else raise Not_found
           with Sys_error _ | End_of_file | Not_found ->
             Printf.sprintf "agent-%s" (String.sub identity.session_key 0 8))
@@ -949,8 +956,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
       (try
         let oc = open_out agent_file in
-        Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-          output_string oc nickname)
+        Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+          ~finally:(fun () -> close_out_noerr oc)
+          (fun () -> output_string oc nickname)
       with e ->
         Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
       (* Cultural Inheritance: append institution welcome to join response *)
@@ -1508,15 +1516,18 @@ Time: %s
           let file_path = Filename.concat pending_dir file in
           try
             let ic = open_in file_path in
-            let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-              let buf = Buffer.create 4096 in
-              (try
-                while true do
-                  Buffer.add_channel buf ic 1024
-                done
-              with End_of_file -> ());
-              Buffer.contents buf
-            ) in
+            let content =
+              Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+                ~finally:(fun () -> close_in_noerr ic)
+                (fun () ->
+                  let buf = Buffer.create 4096 in
+                  (try
+                    while true do
+                      Buffer.add_channel buf ic 1024
+                    done
+                  with End_of_file -> ());
+                  Buffer.contents buf)
+            in
             (* Parse and validate *)
             let json = Yojson.Safe.from_string content in
             let open Yojson.Safe.Util in
@@ -1599,11 +1610,14 @@ Time: %s
               try
                 let path = Filename.concat processed_dir file in
                 let ic = open_in path in
-                let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-                  let buf = Buffer.create 4096 in
-                  (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
-                  Buffer.contents buf
-                ) in
+                let content =
+                  Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+                    ~finally:(fun () -> close_in_noerr ic)
+                    (fun () ->
+                      let buf = Buffer.create 4096 in
+                      (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
+                      Buffer.contents buf)
+                in
                 let json = Yojson.Safe.from_string content in
                 let ep_agent = Yojson.Safe.Util.(json |> member "agent_name" |> to_string) in
                 let ep_gen = Yojson.Safe.Util.(json |> member "generation" |> to_int) in

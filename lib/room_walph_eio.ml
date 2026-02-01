@@ -258,7 +258,7 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
       (* Use Fun.protect to ensure running <- false even on exceptions (zombie prevention) *)
       let stop_reason = ref "" in
 
-      Fun.protect
+      Common.protect ~module_name:"room_walph_eio" ~finally_label:"finalizer"
         ~finally:(fun () ->
           (* Always reset running state, even on exception *)
           with_walph_lock walph_state (fun () ->

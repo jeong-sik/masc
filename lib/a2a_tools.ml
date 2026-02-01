@@ -118,7 +118,7 @@ let save_subscriptions () =
     let content = Yojson.Safe.pretty_to_string json in
     try
       let oc = open_out !subscriptions_file in
-      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      Common.protect ~module_name:"a2a_tools" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
         output_string oc content)
     with e ->
       Printf.eprintf "[WARN] save_subscriptions failed: %s\n%!" (Printexc.to_string e)

@@ -98,7 +98,7 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
   let content = Yojson.Safe.pretty_to_string json in
   try
     let oc = open_out path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc content);
     Ok entry
   with e ->
@@ -112,7 +112,7 @@ let get config ~key : (cache_entry option, string) result =
   else
     try
       let ic = open_in path in
-      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let content = Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
         really_input_string ic (in_channel_length ic)) in
       let json = Yojson.Safe.from_string content in
       match entry_of_json json with

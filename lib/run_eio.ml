@@ -168,7 +168,7 @@ let append_log config ~task_id ~note : (log_entry, string) result =
     let line = Yojson.Safe.to_string (log_entry_to_json entry) ^ "\n" in
     with_file_lock config file (fun () ->
       let oc = open_out_gen [Open_creat; Open_append; Open_wronly] 0o600 file in
-      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      Common.protect ~module_name:"run_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
         output_string oc line)
     );
     Ok entry

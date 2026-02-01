@@ -30,14 +30,14 @@ let activity_log_file () =
 (** Debug logging to file *)
 let debug_log msg =
   let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 "/tmp/auto_debug.log" in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
     Printf.fprintf oc "[%f] %s\n%!" (Unix.gettimeofday ()) msg)
 
 (** Activity logging - human readable format *)
 let activity_log ~mode ~from_agent ~mention ~status ~detail =
   let log_file = activity_log_file () in
   let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 log_file in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
     let time = Unix.localtime (Unix.gettimeofday ()) in
     let timestamp = Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
       (time.Unix.tm_year + 1900) (time.Unix.tm_mon + 1) time.Unix.tm_mday
@@ -132,12 +132,12 @@ let spawn_in_background ~agent_type ~prompt ~working_dir =
   (* Write command to file for debugging *)
   let debug_file = "/tmp/auto_spawn_cmd.txt" in
   (let oc = open_out debug_file in
-   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
      Printf.fprintf oc "CMD: %s\nLOG: %s\n" cmd log_file));
   (* Run in background with nohup - use script file to avoid quoting issues *)
   let script_file = "/tmp/auto_spawn_script.sh" in
   (let sc = open_out script_file in
-   Fun.protect ~finally:(fun () -> close_out_noerr sc) (fun () ->
+   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr sc) (fun () ->
      Printf.fprintf sc "#!/bin/bash\n%s\n" cmd));
   ignore (Unix.chmod script_file 0o755);
   let bg_cmd = Printf.sprintf "nohup %s > %s 2>&1 &" script_file log_file in
@@ -169,7 +169,7 @@ let call_llm_mcp_sync ~agent_type ~prompt =
   let tmp_file = Printf.sprintf "/tmp/llm_call_%d_%d.json"
     (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.) mod 1000000) in
   (let oc = open_out tmp_file in
-   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
      output_string oc json_body));
   let cmd = Printf.sprintf
     "curl -s '%s' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d @%s 2>/dev/null | jq -r '.result.content[0].text // .error.message // \"no response\"' 2>/dev/null | head -c 500"
@@ -194,7 +194,7 @@ let masc_call ~tool_name ~args =
   let tmp_file = Printf.sprintf "/tmp/masc_call_%d_%d.json"
     (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.) mod 1000000) in
   (let oc = open_out tmp_file in
-   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
      output_string oc body));
   let cmd = Printf.sprintf
     "curl -s '%s' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d @%s 2>/dev/null"
@@ -320,7 +320,7 @@ echo "[MASC] Left room" >> /tmp/auto_debug.log
   let log_file = Printf.sprintf "/tmp/llm_bg_%s_%d.log"
     agent_type (int_of_float (Unix.gettimeofday () *. 1000.) mod 10000) in
   (let oc = open_out script_file in
-   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
      output_string oc script));
   ignore (Unix.chmod script_file 0o755);
   let bg_cmd = Printf.sprintf "nohup %s > %s 2>&1 &" script_file log_file in

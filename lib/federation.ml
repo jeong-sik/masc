@@ -260,7 +260,7 @@ let safe_write_file (path : string) (content : string) : (unit, string) result =
       Unix.mkdir dir 0o700;
     let tmp_path = path ^ ".tmp" in
     let oc = open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o600 tmp_path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    Common.protect ~module_name:"federation" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc content);
     (* Atomic rename for consistency *)
     Sys.rename tmp_path path;
@@ -276,7 +276,7 @@ let safe_read_file (path : string) : (string, string) result =
       Error (Printf.sprintf "File not found: %s" path)
     else
       let ic = open_in path in
-      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let content = Common.protect ~module_name:"federation" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
         really_input_string ic (in_channel_length ic)) in
       Ok content
   with
@@ -289,7 +289,7 @@ let safe_append_file (path : string) (content : string) : (unit, string) result 
     if not (Sys.file_exists dir) then
       Unix.mkdir dir 0o700;
     let oc = open_out_gen [Open_append; Open_creat] 0o600 path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    Common.protect ~module_name:"federation" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc content);
     Ok ()
   with

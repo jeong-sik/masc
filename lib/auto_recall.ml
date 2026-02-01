@@ -7,7 +7,7 @@
     - Masc_cache: Shared context store (API responses, embeddings, summaries)
     - Recent_broadcasts: Last N messages in the room
     - Qdrant_semantic: Vector similarity search for episodic memories
-    - File_context: Recently touched files (TODO)
+    - File_context: Recently modified files in working directory
 *)
 
 (** {1 Types} *)
@@ -17,7 +17,7 @@ type recall_source =
   | Masc_cache        (** Use existing masc_cache_get *)
   | Recent_broadcasts (** Last N broadcasts in room *)
   | Qdrant_semantic   (** Vector similarity search - Agent Being Protocol *)
-  | File_context      (** Recently touched files - TODO *)
+  | File_context      (** Recently modified source files *)
 
 (** Configuration for auto-recall *)
 type recall_config = {
@@ -118,6 +118,87 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
       ];
     }
   ) messages
+
+(** Fetch recently modified files from working directory *)
+let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_config) ~query =
+  let masc_dir = Room_utils.masc_dir room_config in
+  let work_dir = Filename.dirname masc_dir in (* Parent of .masc *)
+  
+  (* Get recently modified files using find *)
+  let max_files = 10 in
+  let max_preview_bytes = 500 in
+  
+  let cmd = Printf.sprintf 
+    "find %s -maxdepth 3 -type f -name '*.ml' -o -name '*.mli' -o -name '*.py' -o -name '*.ts' -o -name '*.js' -o -name '*.md' 2>/dev/null | head -50 | xargs ls -t 2>/dev/null | head -%d"
+    (Filename.quote work_dir) max_files
+  in
+  
+  let files = 
+    try
+      let ic = Unix.open_process_in cmd in
+      let rec read_lines acc =
+        try
+          let line = input_line ic in
+          read_lines (String.trim line :: acc)
+        with End_of_file -> 
+          ignore (Unix.close_process_in ic);
+          List.rev acc
+      in
+      read_lines []
+    with _ -> []
+  in
+  
+  (* Read preview of each file *)
+  let read_preview path =
+    try
+      let ic = open_in path in
+      let len = min max_preview_bytes (in_channel_length ic) in
+      let content = really_input_string ic len in
+      close_in ic;
+      let truncated = in_channel_length ic > max_preview_bytes in
+      if truncated then content ^ "\n... [truncated]" else content
+    with _ -> ""
+  in
+  
+  (* Calculate relevance based on query match and recency *)
+  let query_lower = String.lowercase_ascii query in
+  let calc_relevance path content i =
+    let name_lower = String.lowercase_ascii (Filename.basename path) in
+    let content_lower = String.lowercase_ascii content in
+    let name_match = if query <> "" && String.length query > 2 && 
+                        (String.is_substring ~sub:query_lower name_lower ||
+                         String.is_substring ~sub:query_lower content_lower) 
+                     then 0.3 else 0.0 in
+    let recency = 1.0 -. (float_of_int i /. float_of_int (max 1 (List.length files))) in
+    min 1.0 (0.4 +. (recency *. 0.3) +. name_match)
+  in
+  
+  List.filter_map (fun path ->
+    if String.length path = 0 then None
+    else
+      let preview = read_preview path in
+      if String.length preview = 0 then None
+      else Some path
+  ) files
+  |> List.mapi (fun i path ->
+    let preview = read_preview path in
+    let rel_path = 
+      if String.is_prefix ~prefix:work_dir path 
+      then String.sub path (String.length work_dir + 1) (String.length path - String.length work_dir - 1)
+      else path
+    in
+    {
+      source = File_context;
+      content = Printf.sprintf "=== %s ===\n%s" rel_path preview;
+      relevance = calc_relevance path preview i;
+      metadata = `Assoc [
+        ("path", `String rel_path);
+        ("full_path", `String path);
+        ("preview_bytes", `Int (String.length preview));
+      ];
+    }
+  )
+  |> List.filter (fun item -> String.length item.content > 10)
 
 (** {1 Qdrant Semantic Search - Agent Being Protocol} *)
 
@@ -244,7 +325,7 @@ let fetch_source room_config ~config ~query = function
   | Masc_cache -> fetch_from_cache room_config ~config ~query
   | Recent_broadcasts -> fetch_from_broadcasts room_config ~config ~query
   | Qdrant_semantic -> []  (* Requires Eio - use fetch_from_qdrant_eio separately *)
-  | File_context -> []  (* TODO *)
+  | File_context -> fetch_from_file_context room_config ~config ~query
 
 (** {1 Main API} *)
 

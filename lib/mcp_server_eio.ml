@@ -253,7 +253,8 @@ let handle_read_resource_eio state id params =
                   let json = Room.read_json config file in
                   let inst = Institution_eio.institution_of_json json in
                   ("text/markdown", Some (Institution_eio.format_for_injection inst))
-                with _ ->
+                with
+                | Yojson.Json_error _ | Sys_error _ ->
                   (* Fallback: return raw JSON if parsing fails *)
                   let content = In_channel.with_open_text file In_channel.input_all in
                   ("application/json", Some content)
@@ -1691,7 +1692,8 @@ Time: %s
                 let agent_ok = match agent_filter with None -> true | Some a -> ep_agent = a in
                 let gen_ok = match gen_filter with None -> true | Some g -> ep_gen = g in
                 if agent_ok && gen_ok then Some json else None
-              with _ -> None
+              with
+              | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
             )
         with Sys_error _ -> []
       in
@@ -1846,7 +1848,9 @@ Time: %s
               let json = Yojson.Safe.from_string
                 (String.sub message idx (String.length message - idx)) in
               Yojson.Safe.Util.(json |> member "id" |> to_string)
-            with _ -> "unknown"
+            with
+            | Not_found | Invalid_argument _
+            | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> "unknown"
           ));
           ("timestamp", `String (Types.now_iso ()));
         ] in

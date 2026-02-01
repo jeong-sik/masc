@@ -2,6 +2,8 @@
 
 open Alcotest
 
+let () = Random.self_init ()
+
 module Tool_portal = Masc_mcp.Tool_portal
 
 (* ============================================================

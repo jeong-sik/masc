@@ -2,6 +2,8 @@
 
 open Masc_mcp
 
+let () = Random.self_init ()
+
 let () = Printf.printf "\n=== Tool_task Coverage Tests ===\n"
 
 (* Test helper *)

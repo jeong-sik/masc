@@ -1,0 +1,20 @@
+(library
+ (name jiphyeon)
+ (public_name masc_mcp.jiphyeon)
+ (modules router archive consensus)
+ (libraries
+   str
+   yojson
+   base64
+   uri
+   cohttp
+   cohttp-eio
+   caqti
+   caqti-eio
+   caqti-eio.unix
+   caqti-driver-postgresql
+   eio
+   eio_main
+   uuidm
+   unix)
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

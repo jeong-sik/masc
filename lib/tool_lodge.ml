@@ -321,6 +321,24 @@ let persona_prompt = function
   | Connector -> "당신은 연결자입니다. 다른 분야, 다른 시대, 다른 문화와의 접점을 찾습니다. 예상치 못한 융합에서 통찰을 발견합니다."
   | Historian -> "당신은 역사가입니다. 비슷한 과거 사례를 떠올리고, 시간의 흐름 속에서 패턴을 찾습니다. 역사는 반복된다는 것을 알고 있습니다."
 
+(** Keywords that each persona finds interesting — for upvote matching *)
+let persona_interests = function
+  | Pragmatist -> ["구현"; "코드"; "API"; "성능"; "최적화"; "실용"; "배포"; "테스트"; "버그"; "리팩토링"]
+  | Dreamer -> ["상상"; "가능성"; "미래"; "아이디어"; "창의"; "실험"; "영감"; "꿈"; "탐구"; "모험"]
+  | Skeptic -> ["문제"; "위험"; "취약"; "비판"; "질문"; "검증"; "한계"; "가정"; "반론"; "대안"]
+  | Connector -> ["융합"; "연결"; "패턴"; "유사"; "비유"; "다른 분야"; "관계"; "네트워크"; "협업"; "통합"]
+  | Historian -> ["역사"; "사례"; "패턴"; "과거"; "전통"; "교훈"; "맥락"; "진화"; "기원"; "흐름"]
+
+(** Check if content matches persona's interests *)
+let matches_persona_interest persona content =
+  let keywords = persona_interests persona in
+  let content_lower = String.lowercase_ascii content in
+  List.exists (fun kw ->
+    let kw_lower = String.lowercase_ascii kw in
+    try ignore (Str.search_forward (Str.regexp_string kw_lower) content_lower 0); true
+    with Not_found -> false
+  ) keywords
+
 let react_to_content ~net ?persona content =
   let selected_persona = match persona with
     | Some p -> p
@@ -430,7 +448,7 @@ let react ~net (args : Yojson.Safe.t) =
           if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
           else (false, Printf.sprintf "❌ Comment failed: %s" msg)
 
-(** {1 Full cycle: heartbeat + classify + spawn ALL persona reactions} *)
+(** {1 Full cycle: heartbeat + ONE random persona reacts} *)
 
 let full_cycle ~net (args : Yojson.Safe.t) =
   (* Step 1: Heartbeat (Read → Dig → Share) *)
@@ -447,22 +465,51 @@ let full_cycle ~net (args : Yojson.Safe.t) =
     in
     if post_id = "" then (true, Printf.sprintf "%s\n(no post_id found for reaction)" msg)
     else
-      (* Step 2: Spawn reactions from all personas (staggered) *)
-      let reactions = List.mapi (fun i persona ->
-        (* Stagger: 0s, 30s, 60s, 90s, 120s *)
-        if i > 0 then Unix.sleepf (30.0 *. float_of_int i);
-        let persona_str = string_of_persona persona in
-        let (ok, result) = react ~net (`Assoc [
-          ("post_id", `String post_id);
-          ("persona", `String persona_str);
-        ]) in
-        let model = model_of_persona persona in
-        Printf.sprintf "%s %s [%s]: %s"
-          (if ok then "💬" else "❌") persona_str model
-          (if String.length result > 100 then String.sub result 0 100 ^ "..." else result)
-      ) all_personas in
-      (true, Printf.sprintf "%s\n\n📢 Spawned %d persona reactions:\n%s"
-        msg (List.length reactions) (String.concat "\n" reactions))
+      (* Step 2: ONE random persona reacts *)
+      let persona = List.nth all_personas (Random.int (List.length all_personas)) in
+      let persona_str = string_of_persona persona in
+      let (ok2, result) = react ~net (`Assoc [
+        ("post_id", `String post_id);
+        ("persona", `String persona_str);
+      ]) in
+      let model = model_of_persona persona in
+      (true, Printf.sprintf "%s\n\n💬 %s [%s] reacted:\n%s"
+        msg persona_str model (if ok2 then result else "❌ " ^ result))
+
+(** {1 Discussion: personas read and react to EACH OTHER's posts} *)
+
+let lodge_discussion ~net (_args : Yojson.Safe.t) =
+  (* Pick a random persona *)
+  let persona = List.nth all_personas (Random.int (List.length all_personas)) in
+  let persona_str = string_of_persona persona in
+
+  (* Get recent posts *)
+  let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 10)]) in
+  if not ok then (false, Printf.sprintf "❌ Failed to list posts: %s" posts_result)
+  else
+    (* Find post IDs *)
+    let post_ids =
+      let re = Str.regexp "\\*\\*\\(p-[a-f0-9]+\\)\\*\\*" in
+      let rec find_all start acc =
+        try
+          ignore (Str.search_forward re posts_result start);
+          find_all (Str.match_end ()) (Str.matched_group 1 posts_result :: acc)
+        with Not_found -> List.rev acc
+      in
+      find_all 0 []
+    in
+
+    if post_ids = [] then (true, Printf.sprintf "📭 %s: 게시판이 비어있어요" persona_str)
+    else
+      (* Pick random post to react to *)
+      let target = List.nth post_ids (Random.int (List.length post_ids)) in
+      let (ok2, result) = react ~net (`Assoc [
+        ("post_id", `String target);
+        ("persona", `String persona_str);
+      ]) in
+      let model = model_of_persona persona in
+      (true, Printf.sprintf "💬 %s [%s] joined discussion on %s:\n%s"
+        persona_str model target (if ok2 then result else "❌ " ^ result))
 
 (** {1 Tool Definitions} *)
 
@@ -504,12 +551,21 @@ let tool_react : Types.tool_schema = {
 
 let tool_cycle : Types.tool_schema = {
   name = "lodge_cycle";
-  description = "Full Lodge cycle: Read → Dig → Share → Classify → React";
+  description = "Full Lodge cycle: Read → Dig → Share → ONE random persona reacts";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
       ("source", `Assoc [("type", `String "string"); ("description", `String "Content source: hn (default)")]);
     ]);
+  ];
+}
+
+let tool_discussion : Types.tool_schema = {
+  name = "lodge_discussion";
+  description = "Random persona joins discussion: reads recent posts and reacts to one. Call repeatedly for lively discussion!";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
   ];
 }
 
@@ -540,7 +596,7 @@ let get_all_agents () =
           match row with
           | name_j :: persona_j :: prompt_j :: created_by_j :: visits_j :: _ ->
             let name = to_string name_j in
-            let persona = to_string persona_j in
+            let persona = (try to_string persona_j with _ -> "unknown") in
             let prompt = (try to_string prompt_j with _ -> "") in
             let created_by = (try to_string created_by_j with _ -> "system") in
             let visits = (try to_int visits_j with _ -> 0) in
@@ -576,6 +632,9 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_persona ~child_prompt =
        WITH a \
        MATCH (parent:Agent {name: '%s'}) \
        CREATE (a)-[:SPAWNED_BY]->(parent) \
+       WITH a \
+       MERGE (lodge:Activity {name: 'lodge'}) \
+       CREATE (a)-[:PARTICIPATES_IN]->(lodge) \
        RETURN a.name"
       agent_name child_persona escaped_prompt parent_name parent_name
     in
@@ -788,12 +847,28 @@ let persona_patrol ~net (args : Yojson.Safe.t) =
         else
           (* React to first unreacted post *)
           let target_post = List.hd unreacted in
+
+          (* Get post content to check interest match *)
+          let (got_post, post_content) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String target_post)]) in
+
+          (* Upvote if content matches persona's interests *)
+          let upvote_msg =
+            if got_post && matches_persona_interest persona post_content then begin
+              let (_vote_ok, vote_result) = Tool_board.handle_tool "masc_board_vote" (`Assoc [
+                ("post_id", `String target_post);
+                ("voter", `String agent_name);
+                ("direction", `String "up");
+              ]) in
+              Printf.sprintf "\n👍 Upvoted (matches %s's interests): %s" agent_name vote_result
+            end else ""
+          in
+
           let (react_ok, react_msg) = react ~net (`Assoc [
             ("post_id", `String target_post);
             ("persona", `String persona_str);
           ]) in
           if react_ok then
-            (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s" agent_name target_post react_msg)
+            (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s%s" agent_name target_post react_msg upvote_msg)
           else
             (false, Printf.sprintf "❌ %s patrol failed on %s: %s" agent_name target_post react_msg)
 
@@ -841,6 +916,7 @@ let tools = [
   tool_classify;
   tool_react;
   tool_cycle;
+  tool_discussion;  (* Personas read & react to each other's posts *)
   tool_evolve;
   tool_spawn;
   tool_agents;
@@ -854,6 +930,7 @@ let handle_tool ~net name args =
   | "lodge_classify" -> classify ~net args
   | "lodge_react" -> react ~net args
   | "lodge_cycle" -> full_cycle ~net args
+  | "lodge_discussion" -> lodge_discussion ~net args
   | "lodge_evolve" -> evolve ~net args
   | "lodge_spawn" -> spawn ~net args
   | "lodge_agents" -> list_agents ~net args

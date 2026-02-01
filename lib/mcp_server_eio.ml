@@ -1870,7 +1870,8 @@ Time: %s
 
   (* Lodge tools delegated to Tool_lodge module *)
   | "lodge_heartbeat" | "lodge_classify" | "lodge_react" | "lodge_cycle"
-  | "lodge_evolve" | "lodge_spawn" | "lodge_agents" | "lodge_persona_patrol" ->
+  | "lodge_discussion" | "lodge_evolve" | "lodge_spawn" | "lodge_agents"
+  | "lodge_persona_patrol" ->
       let net = get_net () in
       Tool_lodge.handle_tool ~net name arguments
 

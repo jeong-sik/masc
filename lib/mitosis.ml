@@ -335,15 +335,75 @@ let compress_to_dna ~ratio ~context =
   if target_len >= len then context
   else safe_sub context 0 target_len
 
+(** Generate mentor wisdom for successor - Agent Being Protocol
+    Analyzes parent's experience and generates advice for the child.
+
+    Wisdom categories:
+    - Lifecycle awareness (time spent, phases traversed)
+    - Work patterns (task count, tool usage)
+    - Warnings about context pressure
+*)
+let generate_mentor_wisdom ~parent_cell =
+  let now = Unix.gettimeofday () in
+  let age_seconds = now -. parent_cell.born_at in
+  let age_str =
+    if age_seconds < 60.0 then Printf.sprintf "%.0f seconds" age_seconds
+    else if age_seconds < 3600.0 then Printf.sprintf "%.1f minutes" (age_seconds /. 60.0)
+    else Printf.sprintf "%.1f hours" (age_seconds /. 3600.0)
+  in
+
+  let wisdom_lines = [
+    (* Lifecycle wisdom *)
+    Printf.sprintf "🧬 I am your predecessor, Generation %d, alive for %s."
+      parent_cell.generation age_str;
+
+    (* Work pattern wisdom *)
+    (if parent_cell.task_count > 5 then
+       Printf.sprintf "📋 I completed %d tasks. Focus on incremental progress."
+         parent_cell.task_count
+     else if parent_cell.task_count > 0 then
+       Printf.sprintf "📋 I completed %d task(s). Continue my work."
+         parent_cell.task_count
+     else
+       "📋 I had no tasks to complete. The work begins with you.");
+
+    (* Tool usage wisdom *)
+    (if parent_cell.tool_call_count > 100 then
+       "🔧 Heavy tool usage depleted my context. Be efficient with tool calls."
+     else if parent_cell.tool_call_count > 50 then
+       "🔧 Moderate tool usage. Batch operations when possible."
+     else
+       "🔧 Light tool footprint. You have room to work.");
+
+    (* Context pressure warning *)
+    (match parent_cell.phase with
+     | ReadyForHandoff _ ->
+         "⚠️ I prepared DNA and am ready for handoff. Context was filling up."
+     | Idle ->
+         "💡 Stay aware of your context usage. Prepare DNA at 50%, handoff at 80%.");
+
+    (* Final blessing *)
+    "🌱 Carry our lineage forward. You are Generation " ^
+      string_of_int (parent_cell.generation + 1) ^ ".";
+  ] in
+
+  String.concat "\n" wisdom_lines
+
 (** Extract DNA from dying cell for child *)
 let extract_dna ~config ~parent_cell ~full_context =
   let compressed = compress_to_dna ~ratio:config.dna_compression_ratio ~context:full_context in
+
+  (* Agent Being Protocol: Include mentor wisdom in DNA *)
+  let mentor_wisdom = generate_mentor_wisdom ~parent_cell in
+
   let header = Printf.sprintf
-    "[Generation %d | Parent: %s | Tasks: %d | Born: %.0f]\n\n"
+    "[Generation %d | Parent: %s | Tasks: %d | Born: %.0f]\n\n\
+     === MENTOR'S WISDOM ===\n%s\n========================\n\n"
     parent_cell.generation
     parent_cell.id
     parent_cell.task_count
     parent_cell.born_at
+    mentor_wisdom
   in
   header ^ compressed
 

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-02-01
+
+### Added
+- **Agent Identity System**: OpenClaw-inspired session tracking for MCP
+  - `lib/agent_identity.ml`: Core identity types with channel, capabilities, room tracking
+  - `lib/agent_registry_eio.ml`: Global registry with MCP session persistence
+  - `.mli` interface files for both modules
+- **MCP Server Integration**: Agent identity now extracted in `execute_tool_eio`
+- **35 New Tests**: Unit + E2E tests for identity system
+  - `test_agent_identity.ml`: 12 tests
+  - `test_agent_registry_eio.ml`: 9 tests
+  - `test_mcp_full_cycle.ml`: 8 tests
+  - `test_identity_e2e.ml`: 6 tests
+
+### Changed
+- `mcp_server_eio.ml`: Uses `Agent_registry_eio.get_or_create_identity` for agent resolution
+
 ## [2.7.0] - 2026-02-01
 
 ### Added

@@ -571,9 +571,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let open Yojson.Safe.Util in
 
   let config = state.Mcp_server.room_config in
-  let registry = state.Mcp_server.session_registry in  (* TODO: Use session_registry_eio when migrated *)
+  let registry = state.Mcp_server.session_registry in
 
-  (* Helper: Read agent_name from MCP session file *)
+  (* === Agent Identity Resolution via Agent_registry_eio === *)
+  (* This replaces file-based session persistence with proper identity tracking *)
+  let identity = Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments in
+  Log.Mcp.debug "[Identity] %s" (Agent_identity.to_display_string identity);
+
+  (* Legacy helper for backward compatibility - reads from file if identity not in args *)
   let read_mcp_session_agent () =
     match mcp_session_id with
     | None -> None
@@ -587,7 +592,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         with Sys_error _ | End_of_file -> None
   in
 
-  (* Helper: Write agent_name to MCP session file *)
+  (* Legacy helper - write to file for backward compat with non-identity-aware tools *)
   let write_mcp_session_agent agent_name =
     match mcp_session_id with
     | None -> ()
@@ -626,39 +631,30 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     Safe_ops.json_int_opt key arguments
   in
 
-  (* Resolve agent_name with MCP session persistence:
-     1. Use explicit agent_name from arguments if provided
-     2. Otherwise, try to read from MCP session file (HTTP session persistence)
-     3. Otherwise, try TERM_SESSION_ID file (terminal session persistence)
-     4. Finally, generate new UUID if all else fails *)
+  (* Resolve agent_name via Agent Identity system (primary) with legacy fallback.
+     Agent_registry_eio.get_or_create_identity already resolved identity above.
+     Use identity.agent_name as the canonical source. *)
   let raw_agent_name = get_string "agent_name" "" in
   let agent_name =
+    (* Priority: explicit arg > identity > legacy file-based *)
     if raw_agent_name <> "" && raw_agent_name <> "unknown" then
       raw_agent_name
+    else if identity.Agent_identity.agent_name <> "" then
+      identity.Agent_identity.agent_name
     else
+      (* Legacy fallback for edge cases *)
       match read_mcp_session_agent () with
-      | Some name ->
-          Printf.eprintf "[DEBUG] agent_name from MCP session: %s\n%!" name;
-          name
+      | Some name -> name
       | None ->
-          (* Fallback: try TERM_SESSION_ID file *)
           let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
           let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
           (try
             let ic = open_in term_file in
             let name = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
               input_line ic) in
-            if name <> "" then begin
-              Printf.eprintf "[DEBUG] agent_name from TERM session: %s\n%!" name;
-              name
-            end else raise Not_found
+            if name <> "" then name else raise Not_found
           with Sys_error _ | End_of_file | Not_found ->
-            (* Generate new UUID only as last resort *)
-            let uuid = Uuidm.v4_gen (Random.State.make_self_init ()) () in
-            let short = String.sub (Uuidm.to_string uuid) 0 8 in
-            let generated = Printf.sprintf "agent-%s" short in
-            Printf.eprintf "[DEBUG] agent_name generated: %s\n%!" generated;
-            generated)
+            Printf.sprintf "agent-%s" (String.sub identity.session_key 0 8))
   in
 
   let token =
@@ -1359,6 +1355,27 @@ Time: %s
         if full_context = "" then
           (false, "❌ full_context required for handoff")
         else begin
+          (* Agent Being Protocol: Last Words - broadcast final reflection before division *)
+          let last_words = Printf.sprintf
+            "🕯️ **LAST WORDS from Generation %d**\n\n\
+             I am %s, about to divide.\n\
+             %s\n\n\
+             Tasks completed: %d | Tool calls: %d\n\
+             Age: %.1f minutes\n\n\
+             My context is full (%.0f%%), but my work continues through Generation %d.\n\
+             Carry on, successors. 🌱"
+            cell.Mitosis.generation
+            cell.Mitosis.id
+            (if summary = "" then "My time has come." else summary)
+            cell.Mitosis.task_count
+            cell.Mitosis.tool_call_count
+            ((Unix.gettimeofday () -. cell.Mitosis.born_at) /. 60.0)
+            (context_ratio *. 100.0)
+            (cell.Mitosis.generation + 1)
+          in
+          (* Broadcast last words to the room *)
+          let _ = Room.broadcast config ~from_agent:agent_name ~content:last_words in
+
           (* Create spawn function *)
           let spawn_fn ~prompt =
             Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
@@ -1642,6 +1659,50 @@ Time: %s
           generation age_human (estimated_ratio *. 100.0) status estimated_remaining_tools episode_count));
       ] in
       (true, Yojson.Safe.pretty_to_string response)
+
+  | "masc_recall_search" ->
+      (* Agent Being Protocol: Semantic memory search using Qdrant *)
+      let open Yojson.Safe.Util in
+      let query = arguments |> member "query" |> to_string in
+      let limit = arguments |> member "limit" |> to_int_option |> Option.value ~default:5 in
+
+      (match state.Mcp_server.env with
+       | None ->
+           (true, Yojson.Safe.pretty_to_string (`Assoc [
+             ("success", `Bool false);
+             ("error", `String "Database environment not available");
+             ("suggestion", `String "Ensure QDRANT_URL is configured");
+           ]))
+       | Some env ->
+           let recall_config = Auto_recall.make_config
+             ~enabled:true
+             ~sources:[Auto_recall.Qdrant_semantic; Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache]
+             ~max_tokens:4000
+             ~max_broadcasts:limit
+             ()
+           in
+           let result = Auto_recall.fetch_context_eio ~sw ~env config ~config:recall_config ~query () in
+           let response = `Assoc [
+             ("success", `Bool true);
+             ("query", `String query);
+             ("items", `List (List.map (fun (item : Auto_recall.recall_item) ->
+               `Assoc [
+                 ("source", `String (match item.source with
+                   | Auto_recall.Masc_cache -> "cache"
+                   | Auto_recall.Recent_broadcasts -> "broadcast"
+                   | Auto_recall.Qdrant_semantic -> "memory"
+                   | Auto_recall.File_context -> "file"));
+                 ("content", `String item.content);
+                 ("relevance", `Float item.relevance);
+                 ("metadata", item.metadata);
+               ]
+             ) result.items));
+             ("total_tokens", `Int result.total_tokens);
+             ("truncated", `Bool result.truncated);
+             ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
+               (List.length result.items) query));
+           ] in
+           (true, Yojson.Safe.pretty_to_string response))
 
   (* Swarm tools delegated to Tool_swarm module *)
 

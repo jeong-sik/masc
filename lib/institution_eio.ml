@@ -413,3 +413,81 @@ let leave ~fs config inst ~agent_id =
   let inst' = Pure.agent_leave inst ~agent_id in
   save_institution ~fs config inst';
   inst'
+
+(** {1 Cultural Inheritance - Agent Being Protocol} *)
+
+(** Format institution memory for injection into agent prompts.
+    This is the core of Cultural Inheritance - passing collective wisdom to new agents.
+
+    Inspired by:
+    - Stanford Generative Agents: Memory stream → Reflection → Behavior
+    - Institutional Theory: Values, norms, and procedures shape behavior
+
+    @param inst The institution to format
+    @param include_patterns Whether to include procedural patterns (default: true)
+    @param max_patterns Maximum patterns to include (default: 5)
+    @return Formatted string for prompt injection
+*)
+let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : institution) : string =
+  let buf = Buffer.create 1024 in
+
+  (* Mission Statement *)
+  Buffer.add_string buf "---\n[INSTITUTIONAL MEMORY - Cultural Inheritance]\n\n";
+  Buffer.add_string buf (Printf.sprintf "🏛️ **Mission**: %s\n" inst.identity.mission);
+  Buffer.add_string buf (Printf.sprintf "📅 Generation: %d | Founded: %s\n\n"
+    inst.identity.generation
+    (let t = Unix.gmtime inst.identity.founded_at in
+     Printf.sprintf "%04d-%02d-%02d" (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday));
+
+  (* Cultural Values *)
+  if inst.culture <> [] then begin
+    Buffer.add_string buf "**Core Values** (inherited from predecessors):\n";
+    List.iter (fun (v : cultural_value) ->
+      Buffer.add_string buf (Printf.sprintf "  • %s (%.0f%% weight): %s\n"
+        v.name (v.weight *. 100.0) v.description);
+      if v.anti_patterns <> [] then
+        Buffer.add_string buf (Printf.sprintf "    ⚠️ Avoid: %s\n" (String.concat ", " v.anti_patterns))
+    ) (List.sort (fun a b -> compare b.weight a.weight) inst.culture |> List.filteri (fun i _ -> i < 3))
+  end;
+
+  (* Procedural Patterns - Top N by success rate *)
+  if include_patterns && inst.memory.procedural <> [] then begin
+    Buffer.add_string buf "\n**Learned Patterns** (collective wisdom):\n";
+    let sorted_patterns =
+      List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural
+      |> List.filteri (fun i _ -> i < max_patterns)
+    in
+    List.iter (fun (p : pattern) ->
+      Buffer.add_string buf (Printf.sprintf "  📋 %s (%.0f%% success, %d uses)\n"
+        p.name (p.success_rate *. 100.0) p.usage_count);
+      Buffer.add_string buf (Printf.sprintf "     Trigger: %s\n" p.trigger);
+      if List.length p.steps <= 3 then
+        List.iter (fun step ->
+          Buffer.add_string buf (Printf.sprintf "     → %s\n" step)
+        ) p.steps
+    ) sorted_patterns
+  end;
+
+  (* Onboarding Steps *)
+  Buffer.add_string buf "\n**Onboarding** (your first steps):\n";
+  List.iteri (fun i step ->
+    Buffer.add_string buf (Printf.sprintf "  %d. %s\n" (i + 1) step)
+  ) inst.succession.onboarding_steps;
+
+  (* Alumni Network *)
+  if List.length inst.alumni > 0 then begin
+    let recent_alumni = List.filteri (fun i _ -> i < 3) inst.alumni in
+    Buffer.add_string buf (Printf.sprintf "\n👥 Recent predecessors: %s\n"
+      (String.concat ", " recent_alumni))
+  end;
+
+  Buffer.add_string buf "---\n";
+  Buffer.contents buf
+
+(** Load institution and format for spawn injection.
+    Returns empty string if no institution exists.
+*)
+let load_and_format_for_spawn ~fs (config : config) : string =
+  match load_institution ~fs config with
+  | Some inst -> format_for_injection inst
+  | None -> ""

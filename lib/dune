@@ -32,6 +32,7 @@
    handover_eio
    hat
    heartbeat
+   heartbeat_smart
    hebbian_eio
    http_server_eio
    institution_eio

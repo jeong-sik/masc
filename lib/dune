@@ -48,7 +48,6 @@
    masc_pb
    mcp_protocol
    mcp_server
-   message_schema
    mcp_server_eio
    mcp_session
    metrics_store_eio

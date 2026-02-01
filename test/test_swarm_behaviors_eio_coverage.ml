@@ -345,7 +345,7 @@ let test_share_discovery () =
   with_eio_env @@ fun ~fs config ->
   (* Create swarm first *)
   let _ = Swarm_eio.create ~fs config () in
-  match Swarm_behaviors_eio.share_discovery ~fs config ~agent_id:"a1" ~solution_id:"sol1" ~quality:0.8 with
+  match Swarm_behaviors_eio.share_discovery ~fs config ~agent_id:"a1" ~solution_id:"sol1" ~quality:(Level4_config.Strength.of_float_clamped 0.8) with
   | Ok swarm -> check int "one pheromone" 1 (List.length swarm.pheromones)
   | Error e -> fail ("expected share success: " ^ e)
 

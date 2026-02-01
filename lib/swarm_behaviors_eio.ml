@@ -140,9 +140,8 @@ let record_discovery ~foraging_state ~solution_id ~quality =
   in
   { foraging_state with discovered_solutions = solutions }
 
-let share_discovery ~fs config ~agent_id ~solution_id ~quality =
-  let strength = Level4_config.Strength.of_float_clamped quality in
-  Swarm_eio.deposit_pheromone ~fs config ~path_id:solution_id ~agent_id ~strength
+let share_discovery ~fs config ~agent_id ~solution_id ~(quality : Level4_config.Strength.t) =
+  Swarm_eio.deposit_pheromone ~fs config ~path_id:solution_id ~agent_id ~strength:quality
 
 (** {1 Stigmergy Behavior} *)
 

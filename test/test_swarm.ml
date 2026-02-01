@@ -2,7 +2,9 @@
 
 open Masc_mcp
 
-let test_rng = Level4_config.make_rng ~seed:42 ()
+module Swarm = Swarm_eio
+
+let _test_rng = Level4_config.make_rng ~seed:42 ()
 let n = Level4_config.Normalized.of_float_clamped
 let nf = Level4_config.Normalized.to_float
 
@@ -30,7 +32,7 @@ let make_test_swarm ?(behavior = Swarm.Flocking) () : Swarm.swarm =
   }
 
 (** Helper: Create a test agent *)
-let make_test_agent ~id ~name ~fitness ~generation : Swarm.swarm_agent =
+let make_test_agent ~id ~name ~(fitness : Level4_config.Fitness.t) ~generation : Swarm.swarm_agent =
   let now = Unix.gettimeofday () in
   {
     id;
@@ -78,8 +80,8 @@ let test_join_agent_swarm_full () =
   let swarm = { base with
     swarm_cfg = { base.swarm_cfg with max_agents = 2 };
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.5 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.5 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.5) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.5) ~generation:0;
     ]
   } in
   let now = Unix.gettimeofday () in
@@ -142,9 +144,9 @@ let test_update_fitness_not_found () =
 let test_fitness_rankings () =
   let swarm = { (make_test_swarm ()) with
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.3 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.9 ~generation:0;
-      make_test_agent ~id:"a3" ~name:"A3" ~fitness:0.6 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.3) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.9) ~generation:0;
+      make_test_agent ~id:"a3" ~name:"A3" ~fitness:(n 0.6) ~generation:0;
     ]
   } in
   let rankings = Swarm.Pure.fitness_rankings swarm in
@@ -165,10 +167,10 @@ let test_fitness_rankings () =
 let test_select_elite () =
   let swarm = { (make_test_swarm ()) with
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.3 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.9 ~generation:0;
-      make_test_agent ~id:"a3" ~name:"A3" ~fitness:0.6 ~generation:0;
-      make_test_agent ~id:"a4" ~name:"A4" ~fitness:0.8 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.3) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.9) ~generation:0;
+      make_test_agent ~id:"a3" ~name:"A3" ~fitness:(n 0.6) ~generation:0;
+      make_test_agent ~id:"a4" ~name:"A4" ~fitness:(n 0.8) ~generation:0;
     ]
   } in
   let elite = Swarm.Pure.select_elite_agents swarm in
@@ -315,8 +317,8 @@ let test_vote_against () =
 let test_evolve_increments_generation () =
   let swarm = { (make_test_swarm ()) with
     agents = [
-      make_test_agent ~id:"a1" ~name:"A1" ~fitness:0.8 ~generation:0;
-      make_test_agent ~id:"a2" ~name:"A2" ~fitness:0.6 ~generation:0;
+      make_test_agent ~id:"a1" ~name:"A1" ~fitness:(n 0.8) ~generation:0;
+      make_test_agent ~id:"a2" ~name:"A2" ~fitness:(n 0.6) ~generation:0;
     ]
   } in
   let now = Unix.gettimeofday () in

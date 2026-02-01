@@ -1,0 +1,229 @@
+(** Council - Unified API for MASC multi-agent governance
+
+    통합 인터페이스:
+    - Debate: 구조화된 토론 (파일 기반)
+    - Consensus: 투표/합의 (메모리 기반)
+    - Router: MoE 스타일 에이전트 라우팅
+    - Archive: 실록 저장 (Neo4j + PostgreSQL)
+    - Balance: 공정성 정책
+
+    @since MASC v2.6.0
+*)
+
+(** {1 Re-exports} *)
+
+module Debate = Debate
+module Consensus = Consensus
+module Router = Router
+module Archive = Archive
+module Balance = Balance
+
+(** {1 Types} *)
+
+type agent_id = string
+
+type council_config = {
+  base_path: string;
+}
+
+type council_result = {
+  success: bool;
+  message: string;
+  data: Yojson.Safe.t option;
+}
+
+let make_config ~base_path = { base_path }
+
+(** {1 Debate API} *)
+
+module DebateApi = struct
+  (** Start a new debate on a topic *)
+  let start ~config ~topic ~notify_fn =
+    Debate.start_debate config.base_path ~topic ~notify_fn ()
+
+  (** Add an argument to an ongoing debate *)
+  let add_argument ~config ~debate_id ~agent ~position ~content ?(evidence=[]) () =
+    Debate.add_argument config.base_path ~debate_id ~agent ~position ~content ~evidence ()
+
+  (** Close a debate and get summary *)
+  let close ~config ~debate_id =
+    Debate.close_debate config.base_path ~debate_id
+
+  (** List all debates *)
+  let list_all ~config ?(status_filter=None) ?(limit=50) () =
+    Debate.list_debates config.base_path ~status_filter ~limit ()
+
+  (** Get a specific debate *)
+  let get ~config ~debate_id =
+    Debate.get_debate config.base_path ~debate_id
+
+  (** Get debate status summary *)
+  let status ~config ~debate_id =
+    Debate.get_debate_status config.base_path ~debate_id
+end
+
+(** {1 Consensus API} *)
+
+module ConsensusApi = struct
+  (** Start a new voting session *)
+  let start_vote ~topic ~initiator ?(quorum=2) ?(threshold=0.5) () =
+    Consensus.start_voting ~topic ~initiator ~quorum ~threshold ()
+
+  (** Cast a vote *)
+  let cast ~session_id ~agent ~decision ~reason =
+    Consensus.cast_vote ~session_id ~agent ~decision ~reason
+
+  (** Close voting and get result *)
+  let close ~session_id =
+    Consensus.close_session ~session_id
+
+  (** Get voting result *)
+  let result ~session_id =
+    Consensus.get_result ~session_id
+
+  (** Get session by ID *)
+  let get ~session_id =
+    Consensus.get_session ~session_id
+
+  (** List active sessions *)
+  let list_active () =
+    Consensus.list_active_sessions ()
+
+  (** Cancel a session *)
+  let cancel ~session_id =
+    Consensus.cancel_session ~session_id
+end
+
+(** {1 Router API} *)
+
+module RouterApi = struct
+  (** Route a query to appropriate agents *)
+  let route ?(max_agents=3) ?(input_tokens=1000) ?(output_tokens=500) query =
+    Router.route ~max_agents ~input_tokens ~output_tokens query
+
+  (** Classify a query into categories with confidence *)
+  let classify query =
+    Router.classify_query query
+
+  (** Calculate query complexity score *)
+  let complexity query =
+    Router.calculate_complexity query
+
+  (** Get default agent specs *)
+  let default_agents () =
+    Router.default_agents
+end
+
+(** {1 Archive API (requires Eio context)} *)
+
+module ArchiveApi = struct
+  (** Create a new record *)
+  let create ~type_ ~content ~agents ?(metadata=[]) () =
+    Archive.create_record ~type_ ~content ~agents ~metadata ()
+
+  (** Save a record to both Neo4j and PostgreSQL *)
+  let save ~sw ~env record =
+    Archive.save ~sw ~env record
+
+  (** Search records with filter *)
+  let search ~sw ~env filter =
+    Archive.search_records ~sw ~env filter
+
+  (** Get agent history *)
+  let agent_history ~sw ~env agent_name =
+    Archive.get_agent_history ~sw ~env agent_name
+end
+
+(** {1 Balance API} *)
+
+module BalanceApi = struct
+  (** Check if an agent is dominating *)
+  let check_dominance ~agent_stats ~total_rounds =
+    Balance.check_dominance ~agent_stats ~total_rounds
+
+  (** Determine balance action needed *)
+  let determine_action ~agent_stats ~total_rounds ~is_winner =
+    Balance.determine_action ~agent_stats ~total_rounds ~is_winner
+
+  (** Get participation rate *)
+  let participation_rate ~agent_stats ~total_rounds =
+    Balance.get_participation_rate ~agent_stats ~total_rounds
+
+  (** Create empty stats *)
+  let empty_stats () =
+    Balance.empty_stats ()
+end
+
+(** {1 High-level Orchestration} *)
+
+(** Run a full debate-to-vote cycle *)
+let run_cycle ~config ~topic ~initiator ~quorum ~threshold ~notify_fn =
+  (* 1. Start debate *)
+  match DebateApi.start ~config ~topic ~notify_fn with
+  | Error e -> Error (Printf.sprintf "Failed to start debate: %s" e)
+  | Ok debate ->
+    let debate_id = debate.Debate.id in
+    (* 2. Start voting session *)
+    (match ConsensusApi.start_vote ~topic ~initiator ~quorum ~threshold () with
+    | Error e -> 
+      let msg = match e with
+        | Consensus.Session_not_found id -> Printf.sprintf "Session not found: %s" id
+        | Consensus.Session_closed id -> Printf.sprintf "Session closed: %s" id
+        | Consensus.Already_voted agent -> Printf.sprintf "Already voted: %s" agent
+        | Consensus.Quorum_not_met { required; current } -> 
+          Printf.sprintf "Quorum not met: %d/%d" current required
+        | Consensus.Invalid_threshold t -> Printf.sprintf "Invalid threshold: %f" t
+      in
+      Error (Printf.sprintf "Failed to start vote: %s" msg)
+    | Ok session ->
+      Ok {
+        success = true;
+        message = Printf.sprintf "Cycle started: debate=%s, vote=%s" debate_id session.Consensus.id;
+        data = Some (`Assoc [
+          ("debate_id", `String debate_id);
+          ("vote_session_id", `String session.Consensus.id);
+          ("topic", `String topic);
+        ]);
+      })
+
+(** Quick vote without debate *)
+let quick_vote ~topic ~initiator ~votes =
+  let quorum = List.length votes in
+  let threshold = 0.5 in
+  match ConsensusApi.start_vote ~topic ~initiator ~quorum ~threshold () with
+  | Error _ as e -> e
+  | Ok session ->
+    let session_id = session.Consensus.id in
+    (* Cast all votes *)
+    let rec cast_all = function
+      | [] -> Ok ()
+      | (agent, decision, reason) :: rest ->
+        match ConsensusApi.cast ~session_id ~agent ~decision ~reason with
+        | Error _ as e -> e
+        | Ok _ -> cast_all rest
+    in
+    match cast_all votes with
+    | Error _ as e -> e
+    | Ok () ->
+      ConsensusApi.close ~session_id
+
+(** {1 Status & Health} *)
+
+let status ~config =
+  let debates = DebateApi.list_all ~config () in
+  let active_votes = ConsensusApi.list_active () in
+  `Assoc [
+    ("version", `String "2.6.0");
+    ("modules", `List [
+      `String "debate";
+      `String "consensus";
+      `String "router";
+      `String "archive";
+      `String "balance";
+    ]);
+    ("active_debates", `Int (List.length debates));
+    ("active_votes", `Int (List.length active_votes));
+  ]
+
+(** Version info *)
+let version = "2.6.0"

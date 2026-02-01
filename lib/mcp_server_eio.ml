@@ -1755,7 +1755,38 @@ Time: %s
   (* Swarm tools delegated to Tool_swarm module *)
 
   (* Board tools delegated to Tool_board module *)
-  | "masc_board_post" | "masc_board_list" | "masc_board_get"
+  | "masc_board_post" ->
+      let (success, message) as result = Tool_board.handle_tool name arguments in
+      if success then begin
+        let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
+        let content = Safe_ops.json_string ~default:"" "content" arguments in
+        (* Push board_post event to SSE for event-spawner *)
+        let notification = `Assoc [
+          ("type", `String "masc/board_post");
+          ("author", `String author);
+          ("content", `String (String.sub content 0 (min 200 (String.length content))));
+          ("post_id", `String (
+            (* Extract post_id from response message *)
+            try
+              let idx = String.index message '{' in
+              let json = Yojson.Safe.from_string
+                (String.sub message idx (String.length message - idx)) in
+              Yojson.Safe.Util.(json |> member "id" |> to_string)
+            with _ -> "unknown"
+          ));
+          ("timestamp", `String (Types.now_iso ()));
+        ] in
+        Mcp_server.sse_broadcast state notification;
+        A2a_tools.notify_event
+          ~event_type:A2a_tools.Broadcast
+          ~agent:author
+          ~data:(`Assoc [
+            ("event", `String "board_post");
+            ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
+          ])
+      end;
+      result
+  | "masc_board_list" | "masc_board_get"
   | "masc_board_comment" | "masc_board_vote" | "masc_board_stats" ->
       Tool_board.handle_tool name arguments
 

@@ -246,3 +246,18 @@
  (name test_identity_edge_cases)
  (modules test_identity_edge_cases)
  (libraries masc_mcp alcotest eio eio_main yojson))
+
+(test
+ (name test_verification)
+ (modules test_verification)
+ (libraries masc_mcp alcotest yojson))
+
+(test
+ (name test_lamport)
+ (modules test_lamport)
+ (libraries masc_mcp alcotest))
+
+(test
+ (name test_trace)
+ (modules test_trace)
+ (libraries masc_mcp alcotest yojson))

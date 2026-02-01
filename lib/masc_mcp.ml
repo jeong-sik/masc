@@ -14,6 +14,10 @@ module Resilience = Resilience
 module Mode = Mode
 module Notify = Notify
 
+module Message_schema = Message_schema
+module Verification = Verification
+module Lamport = Lamport
+module Trace = Trace
 module Room_utils = Room_utils
 module Room = Room
 module Room_walph_eio = Room_walph_eio
@@ -128,4 +132,5 @@ module Tool_agent = Tool_agent
 module Tool_task = Tool_task
 module Tool_room = Tool_room
 module Tool_control = Tool_control
+module Tool_verification = Tool_verification
 module Tool_misc = Tool_misc

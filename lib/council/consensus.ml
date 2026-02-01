@@ -7,6 +7,11 @@ type decision =
   | Abstain
 [@@deriving show, eq]
 
+let decision_to_yojson = function
+  | Approve -> `String "approve"
+  | Reject -> `String "reject"
+  | Abstain -> `String "abstain"
+
 (** Individual vote record *)
 type vote = {
   agent: string;
@@ -30,6 +35,11 @@ type voting_state =
   | Closed
   | Cancelled
 [@@deriving show, eq]
+
+let voting_state_to_yojson = function
+  | Open -> `String "open"
+  | Closed -> `String "closed"
+  | Cancelled -> `String "cancelled"
 
 (** Voting session *)
 type session = {

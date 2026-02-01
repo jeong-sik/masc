@@ -4,6 +4,7 @@
  (modules
    a2a_tools
    agent_card
+   debate
    auto_recall
    auto_responder
    auth

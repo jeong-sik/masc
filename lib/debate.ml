@@ -25,24 +25,6 @@ type debate = {
   created_at: float;
 }
 
-(** {1 Helper Functions} *)
-
-let read_file_safe path =
-  try
-    let ic = open_in path in
-    let content = really_input_string ic (in_channel_length ic) in
-    close_in ic;
-    Ok content
-  with e -> Error (Printexc.to_string e)
-
-let parse_json_safe ~context:_ content =
-  try Ok (Yojson.Safe.from_string content)
-  with e -> Error (Printexc.to_string e)
-
-let list_dir_safe dir =
-  try Ok (Array.to_list (Sys.readdir dir))
-  with e -> Error (Printexc.to_string e)
-
 (** {1 ID Generation} *)
 
 let () = Random.self_init ()
@@ -133,8 +115,8 @@ let debate_of_yojson (json : Yojson.Safe.t) : (debate, string) result =
 
 (** {1 Storage Operations} *)
 
-let masc_dir _config =
-  Sys.getcwd () ^ "/.masc"
+let masc_dir config =
+  Room_utils.masc_dir config
 
 let debates_dir config =
   Filename.concat (masc_dir config) "debates"
@@ -176,9 +158,9 @@ let write_json path json =
 
 (** Read JSON from file *)
 let read_json path =
-  match read_file_safe path with
+  match Safe_ops.read_file_safe path with
   | Ok content ->
-      (match parse_json_safe ~context:path content with
+      (match Safe_ops.parse_json_safe ~context:path content with
        | Ok json -> Some json
        | Error _ -> None)
   | Error _ -> None
@@ -282,7 +264,7 @@ let close_debate config ~debate_id : (debate, string) result =
 let list_debates config ?(status_filter=None) ?(limit=50) () : debate list =
   ensure_dirs config;
   let dir = debates_dir config in
-  match list_dir_safe dir with
+  match Safe_ops.list_dir_safe dir with
   | Error _ -> []
   | Ok files ->
       let json_files = List.filter (fun f -> Filename.check_suffix f ".json") files in

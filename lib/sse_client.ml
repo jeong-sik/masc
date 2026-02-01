@@ -7,7 +7,7 @@
     {[
       let client = Sse_client.create ~sw ~env "http://127.0.0.1:8935/sse?room=me" in
       Sse_client.connect client ~on_event:(fun ev ->
-        Printf.printf "Event: %s\n" ev.data
+        Eio.traceln "Event: %s\n" ev.data
       )
     ]}
 *)

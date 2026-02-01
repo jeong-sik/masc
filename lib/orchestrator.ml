@@ -51,7 +51,7 @@ let load_config () =
 let should_orchestrate room_config =
   (* Check if room is paused first *)
   if Room.is_paused room_config then begin
-    Printf.printf "⏸️ Orchestrator: Room is paused, skipping\n%!";
+    Eio.traceln "⏸️ Orchestrator: Room is paused, skipping\n%!";
     false
   end else begin
   (* Get unclaimed tasks with priority <= min_priority *)
@@ -72,7 +72,7 @@ let should_orchestrate room_config =
   in
 
   if needs_orchestration then
-    Printf.printf "🎯 Orchestrator: %d unclaimed tasks, %d active agents → spawning\n%!"
+    Eio.traceln "🎯 Orchestrator: %d unclaimed tasks, %d active agents → spawning\n%!"
       (List.length unclaimed_important) (List.length active_agents);
 
   needs_orchestration
@@ -115,12 +115,12 @@ Start by calling mcp__masc__masc_status to see the current room state.|}
 let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   (* TOCTOU defense: re-check pause before spawn *)
   if Room.is_paused room_config then begin
-    Printf.printf "⏸️ Orchestrator: Room paused before spawn, aborting\n%!";
+    Eio.traceln "⏸️ Orchestrator: Room paused before spawn, aborting\n%!";
     { Spawn_eio.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
       cache_read_tokens = None; cost_usd = None }
   end else begin
-  Printf.printf "🚀 Spawning orchestrator agent: %s (with MCP tools)\n%!" config.orchestrator_agent;
+  Eio.traceln "🚀 Spawning orchestrator agent: %s (with MCP tools)\n%!" config.orchestrator_agent;
 
   (* Broadcast that orchestrator is starting *)
   let _ = Room.broadcast room_config ~from_agent:"system"
@@ -143,9 +143,9 @@ let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   in
 
   if result.success then
-    Printf.printf "✅ Orchestrator completed in %dms\n%!" result.elapsed_ms
+    Eio.traceln "✅ Orchestrator completed in %dms\n%!" result.elapsed_ms
   else
-    Printf.printf "❌ Orchestrator failed (exit %d) in %dms\n%!"
+    Eio.traceln "❌ Orchestrator failed (exit %d) in %dms\n%!"
       result.exit_code result.elapsed_ms;
 
   result
@@ -179,7 +179,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
 
   (* Start Zero-Zombie background cleanup loop *)
   Eio.Fiber.fork ~sw (fun () ->
-    Printf.printf "🧟 Zero-Zombie Protocol: Automatic cleanup enabled (interval: 60s)\n%!";
+    Eio.traceln "🧟 Zero-Zombie Protocol: Automatic cleanup enabled (interval: 60s)\n%!";
     Resilience.ZeroZombie.run_loop ~interval:60.0 ~clock
       ~cleanup_fn:(fun () ->
         let status = Room.cleanup_zombies room_config in
@@ -192,12 +192,12 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
       ) ());
 
   if config.enabled then (
-    Printf.printf "🎮 Orchestrator loop enabled (interval: %.0fs, agent: %s)\n%!"
+    Eio.traceln "🎮 Orchestrator loop enabled (interval: %.0fs, agent: %s)\n%!"
       config.check_interval_s config.orchestrator_agent;
     Eio.Fiber.fork ~sw (fun () ->
       try run_loop ~sw ~proc_mgr ~clock ?domain_mgr config room_config ()
       with exn ->
         Printf.eprintf "[Orchestrator] loop crashed: %s\n%!" (Printexc.to_string exn))
   ) else (
-    Printf.printf "💤 Orchestrator loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)\n%!"
+    Eio.traceln "💤 Orchestrator loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)\n%!"
   )

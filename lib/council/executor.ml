@@ -117,19 +117,55 @@ let execute_github action =
     execute_shell (Printf.sprintf "gh issue create --title '%s' --body '%s'" 
       (String.escaped title) (String.escaped body))
 
+(** Write config to JSON file in .masc/config/ *)
+let execute_config_change key value =
+  let config_dir = ".masc/config" in
+  let config_file = Filename.concat config_dir (key ^ ".json") in
+  try
+    (* Ensure directory exists *)
+    if not (Sys.file_exists config_dir) then
+      ignore (Sys.command (Printf.sprintf "mkdir -p %s" config_dir));
+    (* Write JSON config *)
+    let json = `Assoc [("key", `String key); ("value", `String value); 
+                       ("updated_at", `Float (Unix.gettimeofday ()))] in
+    let oc = open_out config_file in
+    output_string oc (Yojson.Safe.pretty_to_string json);
+    close_out oc;
+    { success = true;
+      output = Printf.sprintf "Config written: %s = %s → %s" key value config_file;
+      timestamp = Unix.gettimeofday () }
+  with exn ->
+    { success = false;
+      output = Printf.sprintf "Config error: %s" (Printexc.to_string exn);
+      timestamp = Unix.gettimeofday () }
+
+(** Send notification to target (file-based for now) *)
+let execute_notification target message =
+  let notify_file = ".masc/notifications.jsonl" in
+  try
+    let json = `Assoc [
+      ("target", `String target);
+      ("message", `String message);
+      ("timestamp", `Float (Unix.gettimeofday ()))
+    ] in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 notify_file in
+    output_string oc (Yojson.Safe.to_string json ^ "\n");
+    close_out oc;
+    (* Also log to stderr for visibility *)
+    Printf.eprintf "[Council] 📢 %s: %s\n%!" target message;
+    { success = true;
+      output = Printf.sprintf "Notified %s: %s" target message;
+      timestamp = Unix.gettimeofday () }
+  with exn ->
+    { success = false;
+      output = Printf.sprintf "Notification error: %s" (Printexc.to_string exn);
+      timestamp = Unix.gettimeofday () }
+
 let execute_action action =
   match action with
   | ShellCommand cmd -> execute_shell cmd
-  | ConfigChange (key, value) ->
-    (* TODO: Implement config changes *)
-    { success = true; 
-      output = Printf.sprintf "Config %s = %s (simulated)" key value;
-      timestamp = Unix.gettimeofday () }
-  | Notification (target, message) ->
-    (* TODO: Implement notifications *)
-    { success = true;
-      output = Printf.sprintf "Notify %s: %s (simulated)" target message;
-      timestamp = Unix.gettimeofday () }
+  | ConfigChange (key, value) -> execute_config_change key value
+  | Notification (target, message) -> execute_notification target message
   | GitHubAction gh -> execute_github gh
   | Custom id ->
     { success = false;

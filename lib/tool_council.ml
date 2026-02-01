@@ -167,7 +167,11 @@ let handle_consensus_start ctx args =
 
 let handle_consensus_vote ctx args =
   let session_id = get_string args "session_id" "" in
-  let decision_str = get_string args "decision" "abstain" in
+  (* Accept both "decision" and "choice" for user convenience *)
+  let decision_str = 
+    let d = get_string args "decision" "" in
+    if d = "" then get_string args "choice" "abstain" else d
+  in
   let reason = get_string args "reason" "" in
   if session_id = "" then
     (false, "Error: session_id is required")

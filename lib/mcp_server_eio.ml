@@ -245,6 +245,28 @@ let handle_read_resource_eio state id params =
               ("text/markdown", Some Mcp_server.schema_markdown)
           | "schema.json" ->
               ("application/json", Some (Yojson.Safe.pretty_to_string Mcp_server.schema_json))
+          (* Agent Being Protocol - Institution Memory *)
+          | "institution" ->
+              let file = Filename.concat config.base_path ".masc/institution.json" in
+              if Sys.file_exists file then
+                try
+                  let json = Room.read_json config file in
+                  let inst = Institution_eio.institution_of_json json in
+                  ("text/markdown", Some (Institution_eio.format_for_injection inst))
+                with _ ->
+                  (* Fallback: return raw JSON if parsing fails *)
+                  let content = In_channel.with_open_text file In_channel.input_all in
+                  ("application/json", Some content)
+              else
+                ("text/markdown", Some "No institution memory found. Create one with masc_init.")
+          | "institution.json" ->
+              let file = Filename.concat config.base_path ".masc/institution.json" in
+              if Sys.file_exists file then
+                (* Read raw file to avoid parsing issues with int/float *)
+                let content = In_channel.with_open_text file In_channel.input_all in
+                ("application/json", Some content)
+              else
+                ("application/json", Some "{\"error\": \"No institution memory found\"}")
           | _ -> ("text/plain", None)
         in
 

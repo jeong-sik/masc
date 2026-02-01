@@ -491,3 +491,55 @@ let load_and_format_for_spawn ~fs (config : config) : string =
   match load_institution ~fs config with
   | Some inst -> format_for_injection inst
   | None -> ""
+
+(** Short welcome format for masc_join response.
+    Concise cultural inheritance - mission + values + one tip.
+    @param inst The institution to format
+    @return Formatted string for join welcome
+*)
+let format_for_welcome (inst : institution) : string =
+  let buf = Buffer.create 512 in
+
+  Buffer.add_string buf "\n📜 **Cultural Inheritance** (from your predecessors)\n";
+  Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+
+  (* Mission - one line *)
+  let mission_short =
+    if String.length inst.identity.mission > 80 then
+      String.sub inst.identity.mission 0 77 ^ "..."
+    else inst.identity.mission
+  in
+  Buffer.add_string buf (Printf.sprintf "🏛️ Mission: %s\n" mission_short);
+
+  (* Top 3 values - compact *)
+  if inst.culture <> [] then begin
+    let top_values =
+      List.sort (fun a b -> compare b.weight a.weight) inst.culture
+      |> List.filteri (fun i _ -> i < 3)
+    in
+    let value_names = List.map (fun (v : cultural_value) -> v.name) top_values in
+    Buffer.add_string buf (Printf.sprintf "💎 Values: %s\n" (String.concat ", " value_names))
+  end;
+
+  (* One procedural tip *)
+  if inst.memory.procedural <> [] then begin
+    let best_pattern =
+      List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural
+      |> List.hd
+    in
+    Buffer.add_string buf (Printf.sprintf "💡 Tip: %s → %s\n"
+      best_pattern.name best_pattern.trigger)
+  end;
+
+  Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+  Buffer.add_string buf "📚 Full: resources/read → masc://institution\n";
+
+  Buffer.contents buf
+
+(** Load institution and format for join welcome.
+    Returns empty string if no institution exists.
+*)
+let load_and_format_for_welcome ~fs (config : config) : string =
+  match load_institution ~fs config with
+  | Some inst -> format_for_welcome inst
+  | None -> ""

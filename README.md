@@ -91,3 +91,32 @@ masc_leave(agent_name: "codex")
 - 요청 바디 최대 크기는 기본 20MB입니다. `MASC_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
   - `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
 - 여러 에이전트를 동시에 사용할 때는 SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다.
+
+## Agent Identity System (v2.8.0+)
+
+MCP 세션 간 에이전트 식별을 위한 통합 시스템입니다.
+
+### 사용법
+
+```ocaml
+(* 자동으로 MCP 요청에서 에이전트 식별 *)
+let identity = Agent_registry_eio.get_or_create_identity 
+  ?mcp_session_id params in
+
+(* 에이전트 정보 접근 *)
+identity.agent_name      (* 에이전트 이름 *)
+identity.session_key     (* 고유 세션 키 *)
+identity.channel         (* Telegram, Discord, etc. *)
+identity.room_id         (* 현재 방 *)
+identity.capabilities    (* 에이전트 능력 *)
+```
+
+### MCP 파라미터
+
+| 파라미터 | 설명 |
+|---------|------|
+| `_agent_name` | 에이전트 이름 |
+| `_channel` | telegram, discord, slack, etc. |
+| `_session_key` | 세션 키 (선택) |
+| `_capabilities` | 능력 목록 (JSON 배열) |
+| `room` | 현재 방 ID |

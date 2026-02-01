@@ -4,6 +4,8 @@
  (modules
    a2a_tools
    agent_card
+   agent_identity
+   agent_registry_eio
    auto_recall
    auto_responder
    auth

@@ -1,15 +1,13 @@
-(** Auto-Recall Memory - OpenClaw memU Pattern Implementation
+(** Auto-Recall Memory - Agent Being Protocol Memory System
 
     Automatic memory injection for MASC agents.
     Fetches relevant context from multiple sources and injects into prompts.
 
-    Sources (Phase 1):
+    Sources:
     - Masc_cache: Shared context store (API responses, embeddings, summaries)
     - Recent_broadcasts: Last N messages in the room
-
-    Future sources (Phase 2):
-    - File_context: Recently touched files
-    - Neo4j/Qdrant: Graph/vector retrieval
+    - Qdrant_semantic: Vector similarity search for episodic memories
+    - File_context: Recently touched files (TODO)
 *)
 
 (** {1 Types} *)
@@ -18,7 +16,8 @@
 type recall_source =
   | Masc_cache        (** Use existing masc_cache_get *)
   | Recent_broadcasts (** Last N broadcasts in room *)
-  | File_context      (** Recently touched files - TODO: Phase 2 *)
+  | Qdrant_semantic   (** Vector similarity search - Agent Being Protocol *)
+  | File_context      (** Recently touched files - TODO *)
 
 (** Configuration for auto-recall *)
 type recall_config = {
@@ -120,13 +119,132 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
     }
   ) messages
 
-(** Fetch from a single source *)
+(** {1 Qdrant Semantic Search - Agent Being Protocol} *)
+
+(** Get Qdrant URL from environment *)
+let get_qdrant_url () =
+  Sys.getenv_opt "QDRANT_URL"
+
+(** Qdrant search request body *)
+let qdrant_search_body ~collection:_ ~vector ~limit =
+  Yojson.Safe.to_string (`Assoc [
+    ("vector", `List (List.map (fun f -> `Float f) vector));
+    ("limit", `Int limit);
+    ("with_payload", `Bool true);
+  ])
+
+(** Get RunPod BGE-M3 embedding endpoint *)
+let get_runpod_config () =
+  match Sys.getenv_opt "RUNPOD_ENDPOINT_ID", Sys.getenv_opt "RUNPOD_API_TOKEN" with
+  | Some endpoint_id, Some token ->
+    Some (Printf.sprintf "https://api.runpod.ai/v2/%s/runsync" endpoint_id, token)
+  | _ -> None
+
+(** Fallback: hash-based pseudo-embedding when RunPod unavailable *)
+let fallback_embedding (text : string) : float list =
+  let hash = Hashtbl.hash text in
+  let dim = 1024 in  (* BGE-M3 dimension *)
+  List.init dim (fun i ->
+    let v = float_of_int ((hash lxor (i * 31)) mod 1000) /. 1000.0 in
+    v -. 0.5
+  )
+
+(** Get embedding from BGE-M3 via RunPod Serverless (Eio) *)
+let get_embedding_eio ~sw ~env (text : string) : float list =
+  match get_runpod_config () with
+  | None ->
+    Printf.eprintf "[EMBED] RunPod not configured, using fallback\n%!";
+    fallback_embedding text
+  | Some (url, token) ->
+    let body = Yojson.Safe.to_string (`Assoc [
+      ("input", `Assoc [
+        ("texts", `List [`String text])
+      ])
+    ]) in
+    try
+      let client = Cohttp_eio.Client.make ~https:None env#net in
+      let uri = Uri.of_string url in
+      let headers = Cohttp.Header.of_list [
+        ("Content-Type", "application/json");
+        ("Authorization", Printf.sprintf "Bearer %s" token)
+      ] in
+      let body_content = Eio.Flow.string_source body in
+      let resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
+      let status = Cohttp.Response.status resp in
+      if not (Cohttp.Code.is_success (Cohttp.Code.code_of_status status)) then (
+        Printf.eprintf "[EMBED] RunPod error: %s, using fallback\n%!"
+          (Cohttp.Code.string_of_status status);
+        fallback_embedding text
+      ) else
+        let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int in
+        let json = Yojson.Safe.from_string body_str in
+        let open Yojson.Safe.Util in
+        (* RunPod response: { "output": { "embeddings": [[...]] } } *)
+        let embeddings = json |> member "output" |> member "embeddings" |> to_list in
+        match embeddings with
+        | first :: _ ->
+          first |> to_list |> List.map to_float
+        | [] ->
+          Printf.eprintf "[EMBED] Empty embeddings, using fallback\n%!";
+          fallback_embedding text
+    with exn ->
+      Printf.eprintf "[EMBED] Exception: %s, using fallback\n%!" (Printexc.to_string exn);
+      fallback_embedding text
+
+(** Synchronous embedding (fallback only, for non-Eio contexts) *)
+let _simple_text_embedding (text : string) : float list =
+  fallback_embedding text
+
+(** Fetch from Qdrant (Eio-aware) - Agent Being Protocol *)
+let fetch_from_qdrant_eio ~sw ~env ~config:(_ : recall_config) ~query =
+  match get_qdrant_url () with
+  | None -> []  (* Silently skip if Qdrant not configured *)
+  | Some qdrant_url ->
+    if query = "" then []  (* Need query for semantic search *)
+    else
+      let collection = "retrospectives" in  (* Default collection for episodes *)
+      let vector = get_embedding_eio ~sw ~env query in
+      let limit = 5 in
+      let url = Printf.sprintf "%s/collections/%s/points/search" qdrant_url collection in
+      let body = qdrant_search_body ~collection ~vector ~limit in
+      try
+        let client = Cohttp_eio.Client.make ~https:None env#net in
+        let uri = Uri.of_string url in
+        let body_content = Eio.Flow.string_source body in
+        let headers = Cohttp.Header.of_list [("Content-Type", "application/json")] in
+        let resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
+        let status = Cohttp.Response.status resp in
+        if not (Cohttp.Code.is_success (Cohttp.Code.code_of_status status)) then []
+        else
+          let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int in
+          let json = Yojson.Safe.from_string body_str in
+          let open Yojson.Safe.Util in
+          let results = json |> member "result" |> to_list in
+          List.mapi (fun i result ->
+            let score = result |> member "score" |> to_float in
+            let payload = result |> member "payload" in
+            let content = payload |> member "content" |> to_string_option |> Option.value ~default:"" in
+            let title = payload |> member "title" |> to_string_option |> Option.value ~default:"" in
+            let display = if title <> "" then Printf.sprintf "[%s] %s" title content else content in
+            {
+              source = Qdrant_semantic;
+              content = display;
+              relevance = score *. 0.9;  (* Scale Qdrant score *)
+              metadata = `Assoc [
+                ("rank", `Int i);
+                ("score", `Float score);
+                ("payload", payload);
+              ];
+            }
+          ) results
+      with _ -> []  (* Silently fail if Qdrant unavailable *)
+
+(** Fetch from a single source (sync, no Eio) *)
 let fetch_source room_config ~config ~query = function
   | Masc_cache -> fetch_from_cache room_config ~config ~query
   | Recent_broadcasts -> fetch_from_broadcasts room_config ~config ~query
-  | File_context ->
-      (* TODO: Phase 2 - integrate with room locks/recent file access *)
-      []
+  | Qdrant_semantic -> []  (* Requires Eio - use fetch_from_qdrant_eio separately *)
+  | File_context -> []  (* TODO *)
 
 (** {1 Main API} *)
 
@@ -167,6 +285,55 @@ let fetch_context
 
     { items; total_tokens; truncated }
 
+(** Fetch context with Eio support for Qdrant semantic search
+
+    @param sw Eio switch
+    @param env Eio environment with network access
+    @param room_config MASC room configuration
+    @param config Recall configuration
+    @param query Query string for semantic search
+
+    @return Recall result including Qdrant results
+*)
+let fetch_context_eio
+    ~sw ~env
+    (room_config : Room_utils.config)
+    ~(config : recall_config)
+    ?(query : string = "")
+    ()
+    : recall_result =
+  if not config.enabled then
+    { items = []; total_tokens = 0; truncated = false }
+  else
+    (* Fetch from sync sources *)
+    let sync_items = List.concat_map (fetch_source room_config ~config ~query) config.sources in
+
+    (* Fetch from Qdrant if configured *)
+    let qdrant_items =
+      if List.mem Qdrant_semantic config.sources && query <> "" then
+        fetch_from_qdrant_eio ~sw ~env ~config ~query
+      else []
+    in
+
+    let all_items = sync_items @ qdrant_items in
+
+    (* Sort by relevance (highest first) *)
+    let sorted = List.sort (fun a b -> compare b.relevance a.relevance) all_items in
+
+    (* Truncate to token budget *)
+    let rec take_within_budget acc tokens = function
+      | [] -> (List.rev acc, tokens, false)
+      | item :: rest ->
+          let item_tokens = estimate_tokens item.content in
+          if tokens + item_tokens > config.max_tokens then
+            (List.rev acc, tokens, true)
+          else
+            take_within_budget (item :: acc) (tokens + item_tokens) rest
+    in
+    let (items, total_tokens, truncated) = take_within_budget [] 0 sorted in
+
+    { items; total_tokens; truncated }
+
 (** {1 Formatting} *)
 
 (** Format recall result as injection-ready text *)
@@ -178,6 +345,7 @@ let format_for_injection (result : recall_result) : string =
       let source_name = match item.source with
         | Masc_cache -> "cache"
         | Recent_broadcasts -> "broadcast"
+        | Qdrant_semantic -> "memory"
         | File_context -> "file"
       in
       Printf.sprintf "[%s] %s" source_name item.content
@@ -195,6 +363,7 @@ let to_json (result : recall_result) : Yojson.Safe.t =
   let source_to_string = function
     | Masc_cache -> "masc_cache"
     | Recent_broadcasts -> "recent_broadcasts"
+    | Qdrant_semantic -> "qdrant_semantic"
     | File_context -> "file_context"
   in
   `Assoc [

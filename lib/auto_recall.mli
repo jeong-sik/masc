@@ -1,17 +1,18 @@
-(** Auto-Recall Memory - OpenClaw memU Pattern
+(** Auto-Recall Memory - Agent Being Protocol Memory System
 
     Automatic memory injection for MASC agents.
-    Fetches relevant context from cache and broadcasts.
+    Fetches relevant context from cache, broadcasts, and vector search.
 
     {2 Example Usage}
 
     {[
       let config = Auto_recall.make_config
         ~max_tokens:1000
-        ~sources:[Recent_broadcasts; Masc_cache]
+        ~sources:[Recent_broadcasts; Masc_cache; Qdrant_semantic]
         () in
 
-      let result = Auto_recall.fetch_context room_config ~config () in
+      (* With Eio for Qdrant semantic search *)
+      let result = Auto_recall.fetch_context_eio ~sw ~env room_config ~config ~query:"error handling" () in
       let injection = Auto_recall.format_for_injection result in
       (* Use injection as system prompt prefix *)
     ]}
@@ -23,7 +24,8 @@
 type recall_source =
   | Masc_cache        (** Shared context store *)
   | Recent_broadcasts (** Last N broadcasts in room *)
-  | File_context      (** Recently touched files (Phase 2) *)
+  | Qdrant_semantic   (** Vector similarity search - Agent Being Protocol *)
+  | File_context      (** Recently touched files (TODO) *)
 
 (** Configuration for auto-recall *)
 type recall_config = {
@@ -80,6 +82,25 @@ val estimate_tokens : string -> int
     @return Recall result with items and metadata
 *)
 val fetch_context :
+  Room_utils.config ->
+  config:recall_config ->
+  ?query:string ->
+  unit ->
+  recall_result
+
+(** Fetch context with Eio support for Qdrant semantic search.
+    Includes vector similarity search from Qdrant when configured.
+
+    @param sw Eio switch
+    @param env Eio environment with network access
+    @param room_config MASC room configuration
+    @param config Recall configuration
+    @param query Query string for semantic search
+    @return Recall result including Qdrant matches
+*)
+val fetch_context_eio :
+  sw:Eio.Switch.t ->
+  env:< net : _ Eio.Net.t; .. > ->
   Room_utils.config ->
   config:recall_config ->
   ?query:string ->

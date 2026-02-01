@@ -167,6 +167,51 @@
       font-family: inherit;
     }
     .control-panel button:hover { opacity: 0.9; }
+
+    /* Council Panel */
+    .council-panel { grid-column: span 2; }
+    .council-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .council-tabs .tab {
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .council-tabs .tab.active {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .debate-list, .vote-list { max-height: 200px; overflow-y: auto; }
+    .debate-item, .vote-item {
+      padding: 0.75rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .debate-item:hover, .vote-item:hover { background: rgba(255,255,255,0.05); }
+    .debate-topic { flex: 1; }
+    .debate-status { 
+      font-size: 0.75rem; 
+      padding: 0.25rem 0.5rem; 
+      border-radius: 3px;
+      background: var(--accent);
+    }
+    .debate-status.closed { background: #666; }
+    .vote-status { font-size: 0.85rem; color: #888; }
+    .council-btn {
+      margin-top: 0.5rem;
+      padding: 0.5rem 1rem;
+      border: 1px dashed var(--border);
+      background: transparent;
+      color: var(--text);
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+    }
+    .council-btn:hover { border-style: solid; background: rgba(255,255,255,0.05); }
   </style>
 </head>
 <body>
@@ -207,6 +252,26 @@
            sse-connect="http://127.0.0.1:8935/sse?room=me"
            sse-swap="task_update">
         <div class="task">○ Loading...</div>
+      </div>
+    </div>
+
+    <!-- Council Section -->
+    <div class="panel council-panel">
+      <h2>🏛️ Council</h2>
+      <div class="council-tabs">
+        <button class="tab active" onclick="showCouncilTab('debates')">Debates</button>
+        <button class="tab" onclick="showCouncilTab('votes')">Votes</button>
+      </div>
+      <div class="council-content" id="debates-tab">
+        <div class="debate-list" id="debates">
+          <div class="debate-item">Loading...</div>
+        </div>
+        <button class="council-btn" onclick="startDebate()">+ New Debate</button>
+      </div>
+      <div class="council-content" id="votes-tab" style="display:none">
+        <div class="vote-list" id="votes">
+          <div class="vote-item">No active votes</div>
+        </div>
       </div>
     </div>
 
@@ -522,8 +587,81 @@
       }));
     });
 
+    // Council functions
+    function showCouncilTab(tab) {
+      document.querySelectorAll('.council-tabs .tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.council-content').forEach(c => c.style.display = 'none');
+      event.target.classList.add('active');
+      document.getElementById(tab + '-tab').style.display = 'block';
+    }
+
+    async function loadDebates() {
+      try {
+        const res = await mcp('masc_debates', {});
+        const debates = JSON.parse(res);
+        const list = document.getElementById('debates');
+        if (debates.length === 0) {
+          list.innerHTML = '<div class="debate-item">No debates yet</div>';
+        } else {
+          list.innerHTML = debates.map(d => `
+            <div class="debate-item" onclick="viewDebate('${d.id}')">
+              <span class="debate-topic">${d.topic}</span>
+              <span class="debate-status ${d.status}">${d.status} (${d.argument_count})</span>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error('Failed to load debates:', e);
+      }
+    }
+
+    async function loadVotes() {
+      try {
+        const res = await mcp('masc_sessions', {});
+        const sessions = JSON.parse(res);
+        const list = document.getElementById('votes');
+        if (sessions.length === 0) {
+          list.innerHTML = '<div class="vote-item">No active votes</div>';
+        } else {
+          list.innerHTML = sessions.map(s => `
+            <div class="vote-item">
+              <span>${s.topic}</span>
+              <span class="vote-status">${s.votes}/${s.quorum} votes</span>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error('Failed to load votes:', e);
+      }
+    }
+
+    async function startDebate() {
+      const topic = prompt('Enter debate topic:');
+      if (!topic) return;
+      try {
+        const res = await mcp('masc_debate_start', { topic });
+        addLocalEvent('🏛️ Debate started: ' + topic);
+        loadDebates();
+      } catch (e) {
+        addLocalEvent('❌ Failed to start debate: ' + e.message);
+      }
+    }
+
+    async function viewDebate(id) {
+      try {
+        const res = await mcp('masc_debate_status', { debate_id: id });
+        alert(res);  // TODO: Better modal
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
     // Initial load
-    joinRoom().then(() => loadStatus());
+    joinRoom().then(() => {
+      loadStatus();
+      loadDebates();
+      loadVotes();
+    });
     addLocalEvent('🏛️ Lobby connecting...');
   </script>
 </body>

@@ -113,3 +113,5 @@ let () = test "get_bool_missing" (fun () ->
 )
 
 let () = Printf.printf "\n✅ All Tool_misc tests passed!\n"
+
+let () = exit 0

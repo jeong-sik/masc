@@ -208,3 +208,35 @@
  (name test_council)
  (modules test_council)
  (libraries council alcotest))
+
+; ============================================================
+; Agent Identity tests (OpenClaw-inspired session tracking)
+; ============================================================
+(test
+ (name test_agent_identity)
+ (modules test_agent_identity)
+ (libraries masc_mcp alcotest eio eio_main fmt yojson uuidm))
+
+; MCP Full Cycle Integration tests
+(test
+ (name test_mcp_full_cycle)
+ (modules test_mcp_full_cycle)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; Agent Registry Eio tests
+(test
+ (name test_agent_registry_eio)
+ (modules test_agent_registry_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; Identity E2E Integration tests
+(test
+ (name test_identity_e2e)
+ (modules test_identity_e2e)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
+; Identity Edge Cases
+(test
+ (name test_identity_edge_cases)
+ (modules test_identity_edge_cases)
+ (libraries masc_mcp alcotest eio eio_main yojson))

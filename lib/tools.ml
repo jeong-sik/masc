@@ -2339,6 +2339,30 @@ Part of the Agent Being Protocol - agents should know their place in the lifecyc
     ];
   };
 
+  {
+    name = "masc_recall_search";
+    description = {|Semantic memory search using Qdrant vector database.
+
+Searches the agent's episodic memories using semantic similarity.
+Part of the Agent Being Protocol - agents can recall relevant past experiences.
+
+Returns matched memories with relevance scores, sorted by similarity.|};
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Natural language query for semantic search");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max results to return (default: 5)");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+
   (* ============================================ *)
   (* A2A MCP Tools (A2A Protocol via MCP)        *)
   (* ============================================ *)

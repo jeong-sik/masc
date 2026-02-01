@@ -231,8 +231,14 @@ let parse_command cmd =
   let parts = String.split_on_char ' ' cmd in
   List.filter (fun s -> String.length s > 0) parts
 
-(** Spawn an agent using Eio.Process (direct execution, no shell) *)
-let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
+(** Spawn an agent using Eio.Process (direct execution, no shell)
+
+    Agent Being Protocol: Cultural Inheritance
+    - When room_config is provided, loads institution memory and injects it
+    - New agents inherit: mission, values, patterns, onboarding steps
+    - This enables multi-generational knowledge transfer
+*)
+let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_config () =
   let start_time = Unix.gettimeofday () in
 
   let config = match get_config agent_name with
@@ -248,7 +254,33 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
 
   let timeout = Option.value timeout_seconds ~default:config.timeout_seconds in
   let mcp_args = build_mcp_args agent_name config.mcp_tools in
-  let augmented_prompt = prompt ^ masc_lifecycle_suffix in
+
+  (* Agent Being Protocol: Inject institution memory for cultural inheritance
+     Note: We use synchronous file loading here since spawn is already in Eio context
+     Institution file is small (<10KB) so sync read is acceptable *)
+  let institution_memory =
+    let load_institution_sync base_path =
+      let inst_file = Filename.concat (Filename.concat base_path ".masc") "institution.json" in
+      if Sys.file_exists inst_file then
+        try
+          let ic = open_in inst_file in
+          let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
+            (fun () -> really_input_string ic (in_channel_length ic)) in
+          let json = Yojson.Safe.from_string content in
+          let inst = Institution_eio.institution_of_json json in
+          Institution_eio.format_for_injection inst
+        with _ -> ""
+      else ""
+    in
+    match room_config with
+    | Some rc -> load_institution_sync rc.Room_utils.base_path
+    | None ->
+        match working_dir with
+        | Some wd -> load_institution_sync wd
+        | None -> ""
+  in
+
+  let augmented_prompt = prompt ^ institution_memory ^ masc_lifecycle_suffix in
 
   let original_dir = Sys.getcwd () in
   (match working_dir with Some d -> Sys.chdir d | None -> ());

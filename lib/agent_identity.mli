@@ -1,0 +1,68 @@
+(** Agent Identity - Unified agent identification for MCP sessions
+
+    @since 0.5.0
+*)
+
+(** Channel/surface type *)
+type channel =
+  | Telegram
+  | Discord
+  | Slack
+  | Signal
+  | Webchat
+  | Api
+  | Internal
+  | Unknown of string
+
+(** Agent identity record *)
+type t = {
+  session_key : string;
+  agent_name : string;
+  channel : channel option;
+  user_id : string option;
+  room_id : string option;
+  capabilities : string list;
+  registered_at : float;
+  mutable last_seen : float;
+  metadata : (string * string) list;
+}
+
+(** {1 Channel Utilities} *)
+
+val channel_of_string : string -> channel
+val string_of_channel : channel -> string
+
+(** {1 Identity Creation} *)
+
+val generate_session_key : unit -> string
+val from_mcp_params : Yojson.Safe.t -> t
+val from_agent_name : string -> t
+val anonymous : unit -> t
+
+(** {1 Identity Registry} *)
+
+module Registry : sig
+  type registry
+
+  val create : unit -> registry
+  val register : registry -> t -> t
+  val find_by_session : registry -> string -> t option
+  val find_by_name : registry -> string -> t option
+  val touch : registry -> string -> ?room_id:string -> unit -> unit
+  val unregister : registry -> string -> unit
+  val list_active : registry -> within_seconds:float -> t list
+  val count : registry -> int
+end
+
+(** {1 Utilities} *)
+
+val has_capability : t -> string -> bool
+val to_display_string : t -> string
+val same_agent : t -> t -> bool
+
+(** {1 JSON Serialization} *)
+
+val channel_to_yojson : channel -> Yojson.Safe.t
+val channel_of_yojson : Yojson.Safe.t -> (channel, string) result
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result

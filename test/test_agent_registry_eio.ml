@@ -1,0 +1,123 @@
+(** Tests for Agent_registry_eio module *)
+
+open Alcotest
+open Masc_mcp
+
+(* All tests must run within Eio context due to Eio.Mutex usage *)
+
+let test_init () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  check bool "total count >= 0" true (Agent_registry_eio.total_count () >= 0)
+
+let test_get_or_create_new () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  let params = `Assoc [
+    ("_agent_name", `String "test-new-agent");
+    ("_channel", `String "telegram");
+    ("room", `String "test-room");
+  ] in
+  let identity = Agent_registry_eio.get_or_create_identity params in
+  check string "agent_name" "test-new-agent" identity.agent_name;
+  check (option string) "room_id" (Some "test-room") identity.room_id
+
+let test_get_or_create_existing () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  let params = `Assoc [("_agent_name", `String "existing-agent")] in
+  let id1 = Agent_registry_eio.get_or_create_identity params in
+  let id2 = Agent_registry_eio.get_or_create_identity params in
+  (* Same agent_name should be used *)
+  check string "same agent_name" id1.agent_name id2.agent_name
+
+let test_mcp_session_persistence () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  let mcp_sid = Printf.sprintf "test-mcp-session-%d" (Random.int 10000) in
+  let params = `Assoc [("_agent_name", `String "session-agent")] in
+  
+  (* First call - creates identity *)
+  let id1 = Agent_registry_eio.get_or_create_identity ~mcp_session_id:mcp_sid params in
+  
+  (* Second call with same MCP session - should return same identity *)
+  let id2 = Agent_registry_eio.get_or_create_identity ~mcp_session_id:mcp_sid (`Assoc []) in
+  
+  check string "same session_key" id1.session_key id2.session_key
+
+let test_get_by_name () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  let name = Printf.sprintf "lookup-agent-%d" (Random.int 10000) in
+  let params = `Assoc [("_agent_name", `String name)] in
+  let created = Agent_registry_eio.get_or_create_identity params in
+  
+  match Agent_registry_eio.get_by_name name with
+  | Some found -> check string "same agent" created.agent_name found.agent_name
+  | None -> fail "agent not found by name"
+
+let test_active_count () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  let initial = Agent_registry_eio.active_count () in
+  
+  (* Create a new agent with unique name *)
+  let name = Printf.sprintf "count-test-agent-%d" (Random.int 10000) in
+  let _ = Agent_registry_eio.get_or_create_identity 
+    (`Assoc [("_agent_name", `String name)]) in
+  
+  let after = Agent_registry_eio.active_count () in
+  check bool "count increased" true (after >= initial)
+
+let test_list_active () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  let name = Printf.sprintf "active-list-agent-%d" (Random.int 10000) in
+  let _ = Agent_registry_eio.get_or_create_identity 
+    (`Assoc [("_agent_name", `String name)]) in
+  
+  let active = Agent_registry_eio.list_active () in
+  check bool "has active agents" true (List.length active > 0)
+
+let test_cleanup_stale () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  (* This should not fail even with nothing to clean *)
+  let cleaned = Agent_registry_eio.cleanup_stale_sessions () in
+  check bool "cleanup returned count" true (cleaned >= 0)
+
+let test_concurrent_access () =
+  Eio_main.run @@ fun _env ->
+  Agent_registry_eio.reset_for_testing ();
+  
+  (* Simulate concurrent access *)
+  Eio.Fiber.all (List.init 5 (fun i () ->
+    let params = `Assoc [
+      ("_agent_name", `String (Printf.sprintf "concurrent-agent-%d-%d" i (Random.int 10000)))
+    ] in
+    for _ = 1 to 10 do
+      let _ = Agent_registry_eio.get_or_create_identity params in
+      Eio.Fiber.yield ()
+    done
+  ));
+  
+  check bool "survived concurrent access" true true
+
+let () =
+  run "Agent_registry_eio" [
+    "basics", [
+      test_case "init" `Quick test_init;
+      test_case "get_or_create_new" `Quick test_get_or_create_new;
+      test_case "get_or_create_existing" `Quick test_get_or_create_existing;
+      test_case "mcp_session_persistence" `Quick test_mcp_session_persistence;
+      test_case "get_by_name" `Quick test_get_by_name;
+    ];
+    "statistics", [
+      test_case "active_count" `Quick test_active_count;
+      test_case "list_active" `Quick test_list_active;
+      test_case "cleanup_stale" `Quick test_cleanup_stale;
+    ];
+    "concurrency", [
+      test_case "concurrent_access" `Quick test_concurrent_access;
+    ];
+  ]

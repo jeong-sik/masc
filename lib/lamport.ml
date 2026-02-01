@@ -20,10 +20,9 @@ let create () =
   { counter = Atomic.make 0 }
 
 (** Tick: increment clock for local events
-    Returns the new timestamp *)
+    Returns the new timestamp (atomic fetch-and-add) *)
 let tick t =
-  Atomic.incr t.counter;
-  Atomic.get t.counter
+  Atomic.fetch_and_add t.counter 1 + 1
 
 (** Receive: update clock based on remote timestamp
     Lamport rule: clock = max(local, remote) + 1

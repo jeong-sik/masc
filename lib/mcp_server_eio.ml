@@ -1768,9 +1768,9 @@ Time: %s
           ("post_id", `String (
             (* Extract post_id from response message *)
             try
+              let idx = String.index message '{' in
               let json = Yojson.Safe.from_string
-                (String.sub message (String.index message '{')
-                  (String.length message - String.index message '{')) in
+                (String.sub message idx (String.length message - idx)) in
               Yojson.Safe.Util.(json |> member "id" |> to_string)
             with _ -> "unknown"
           ));

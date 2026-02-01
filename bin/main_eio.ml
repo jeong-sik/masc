@@ -111,6 +111,15 @@ let int_query_param request key ~default =
   | None -> default
   | Some s -> (try int_of_string s with _ -> default)
 
+let bool_query_param request key ~default =
+  match query_param request key with
+  | None -> default
+  | Some s ->
+      let v = String.lowercase_ascii (String.trim s) in
+      if v = "1" || v = "true" || v = "yes" || v = "y" then true
+      else if v = "0" || v = "false" || v = "no" || v = "n" then false
+      else default
+
 let bearer_token_from_header value =
   let prefix = "Bearer " in
   let prefix_lower = "bearer " in
@@ -1003,6 +1012,8 @@ let make_routes ~port ~host =
        with_read_auth (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let status_filter = query_param req "status" in
+         let include_done = bool_query_param req "include_done" ~default:false in
+         let include_cancelled = bool_query_param req "include_cancelled" ~default:false in
          let limit = int_query_param req "limit" ~default:50 in
          let offset = int_query_param req "offset" ~default:0 in
          let tasks = Masc_mcp.Room.get_tasks_raw config in
@@ -1013,6 +1024,23 @@ let make_routes ~port ~host =
                List.filter (fun (t : Masc_mcp.Types.task) ->
                  String.equal status (Masc_mcp.Types.string_of_task_status t.task_status)
                ) tasks
+         in
+         let filtered =
+           match status_filter with
+           | Some _ -> filtered
+           | None ->
+               List.filter (fun (t : Masc_mcp.Types.task) ->
+                 let is_done = match t.task_status with
+                   | Types.Done _ -> true
+                   | _ -> false
+                 in
+                 let is_cancelled = match t.task_status with
+                   | Types.Cancelled _ -> true
+                   | _ -> false
+                 in
+                 (include_done || not is_done) &&
+                 (include_cancelled || not is_cancelled)
+               ) filtered
          in
          let total = List.length filtered in
          let page =

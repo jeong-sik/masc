@@ -61,6 +61,9 @@ let handle_heartbeat_start ctx args =
                 | Some a -> a.status
                 | None -> Types.Active  (* Default: not busy *)
               in
+              (* Update last_activity when agent is actively working *)
+              if agent_status = Types.Busy then
+                last_activity := Unix.gettimeofday ();
               let decision = Heartbeat_smart.should_emit
                 ~config:smart_config
                 ~agent_status

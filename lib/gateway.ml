@@ -67,8 +67,8 @@ let default_capabilities = [
   ("ollama", ["coding"; "review"]);
 ]
 
-(** Get capabilities for agent type *)
-let capabilities_for_type agent_type =
+(** Get capabilities for agent type (reserved for future spawn integration) *)
+let _capabilities_for_type agent_type =
   match List.assoc_opt agent_type default_capabilities with
   | Some caps -> caps
   | None -> ["general"]

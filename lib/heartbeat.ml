@@ -13,11 +13,11 @@ type t = {
 }
 
 let heartbeats : (string, t) Hashtbl.t = Hashtbl.create 16
-let heartbeat_counter = ref 0
+let heartbeat_counter = Atomic.make 0
 
 let generate_id () =
-  incr heartbeat_counter;
-  Printf.sprintf "hb-%d-%d" (int_of_float (Unix.gettimeofday ())) !heartbeat_counter
+  Atomic.incr heartbeat_counter;
+  Printf.sprintf "hb-%d-%d" (int_of_float (Unix.gettimeofday ())) (Atomic.get heartbeat_counter)
 
 let start ~agent_name ~interval ~message =
   let id = generate_id () in

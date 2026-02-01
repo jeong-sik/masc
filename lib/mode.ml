@@ -130,7 +130,7 @@ let tool_category tool_name =
   | "masc_relay_now" | "masc_relay_smart_check"
   | "masc_mitosis_status" | "masc_mitosis_all" | "masc_mitosis_pool"
   | "masc_mitosis_divide" | "masc_mitosis_check" | "masc_mitosis_record"
-  | "masc_mitosis_prepare" | "masc_memento_mori"
+  | "masc_mitosis_prepare" | "masc_mitosis_handoff" | "masc_memento_mori"
   | "masc_verify_handoff" -> Health
 
   (* Agent discovery tools *)

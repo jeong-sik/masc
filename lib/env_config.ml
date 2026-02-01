@@ -105,6 +105,16 @@ module Mitosis = struct
     get_float ~default:300.0 "MASC_MITOSIS_INTERVAL_SEC"
 end
 
+(** {1 Spawn Configuration} *)
+
+module Spawn = struct
+  (** Default spawn timeout for agent processes (seconds).
+      Used by spawn.ml, spawn_eio.ml, tool_mitosis.ml, and tool_relay.ml.
+      Higher value (600s) allows for slow network/API conditions while preventing indefinite hangs. *)
+  let timeout_seconds =
+    int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
+end
+
 (** {1 Federation Configuration} *)
 
 module Federation = struct

@@ -68,19 +68,19 @@ let ensure_synapses_dir config =
   ) [masc_dir; synapses_dir]
 
 (** Lock contention metrics *)
-let lock_acquisitions = ref 0
+let lock_acquisitions = Atomic.make 0
 let lock_total_wait_ms = ref 0.0
 let lock_max_wait_ms = ref 0.0
 
 (** Get lock statistics *)
 let get_lock_stats () =
-  let avg_wait = if !lock_acquisitions = 0 then 0.0
-    else !lock_total_wait_ms /. float_of_int !lock_acquisitions in
-  (!lock_acquisitions, avg_wait, !lock_max_wait_ms)
+  let avg_wait = if (Atomic.get lock_acquisitions) = 0 then 0.0
+    else !lock_total_wait_ms /. float_of_int (Atomic.get lock_acquisitions) in
+  ((Atomic.get lock_acquisitions), avg_wait, !lock_max_wait_ms)
 
 (** Reset lock statistics *)
 let reset_lock_stats () =
-  lock_acquisitions := 0;
+  Atomic.set lock_acquisitions 0;
   lock_total_wait_ms := 0.0;
   lock_max_wait_ms := 0.0
 
@@ -93,7 +93,7 @@ let with_graph_lock config f =
   let start_time = Unix.gettimeofday () in
   Unix.lockf fd Unix.F_LOCK 0;
   let wait_ms = (Unix.gettimeofday () -. start_time) *. 1000.0 in
-  incr lock_acquisitions;
+  Atomic.incr lock_acquisitions;
   lock_total_wait_ms := !lock_total_wait_ms +. wait_ms;
   if wait_ms > !lock_max_wait_ms then lock_max_wait_ms := wait_ms;
   (* Log if wait was significant *)
@@ -250,11 +250,13 @@ let weaken config ?params ~from_agent ~to_agent () : unit =
 let get_preferred_partner config ~agent_id : string option =
   let graph = load_graph config in
   let outgoing = List.filter (fun s -> s.from_agent = agent_id) graph.synapses in
-  if List.length outgoing = 0 then
-    None
-  else
+  match outgoing with
+  | [] -> None
+  | _ ->
     let sorted = List.sort (fun a b -> compare b.weight a.weight) outgoing in
-    Some (List.hd sorted).to_agent
+    match sorted with
+    | best :: _ -> Some best.to_agent
+    | [] -> None (* unreachable but type-safe *)
 
 (** Consolidate - apply decay to old connections - synchronous *)
 let consolidate config ?params ~decay_after_days () : int =

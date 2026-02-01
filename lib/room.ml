@@ -322,15 +322,16 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
 📋 **MASC 협업 가이드 (필독!)**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔴 **필수 행동**:
-1. 작업 시작/완료 시 브로드캐스트
-2. @mention 받으면 응답
-3. 긴 작업 중 진행률 공유
+🔴 **필수 행동** (Lobby 가시성):
+1. 작업 시작시 broadcast
+2. 진행 상황 broadcast (30분마다)
+3. 완료시 broadcast
+4. @mention 응답 필수
 
 💡 **협업 패턴**:
-• 도움 요청: "@에이전트 이거 도와줘"
-• 리뷰 요청: "@에이전트 검토 부탁"
-• 완료 보고: "✅ [작업] 완료!"
+• "@에이전트 도움 요청"
+• "@에이전트 리뷰 요청"
+• "✅ [작업] 완료!"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 |} nickname nickname agent_type session_id
 
@@ -2111,10 +2112,10 @@ let vote_cast config ~agent_name ~vote_id ~choice =
               let max_count = List.fold_left (fun acc (_, c) -> max acc c) 0 counts in
               let winners = List.filter (fun (_, c) -> c = max_count) counts in
 
-              if List.length winners > 1 then
-                (true, VoteTied, None)
-              else
-                (true, VoteApproved, Some (fst (List.hd winners)))
+              match winners with
+              | [(winner_choice, _)] -> (true, VoteApproved, Some winner_choice)
+              | _ :: _ :: _ -> (true, VoteTied, None)
+              | [] -> (true, VoteTied, None) (* no votes case *)
             end else
               (false, VotePending, None)
           in
@@ -2141,10 +2142,11 @@ let vote_cast config ~agent_name ~vote_id ~choice =
 
           if resolved then begin
             let topic = json |> member "topic" |> to_string in
-            let result_msg = match new_status with
-              | VoteApproved -> Printf.sprintf "Winner: %s" (Option.get winner)
-              | VoteTied -> "Result: Tied!"
-              | _ -> "Resolved"
+            let result_msg = match new_status, winner with
+              | VoteApproved, Some w -> Printf.sprintf "Winner: %s" w
+              | VoteApproved, None -> "Winner: (unknown)" (* should not happen *)
+              | VoteTied, _ -> "Result: Tied!"
+              | _, _ -> "Resolved"
             in
             let _ = broadcast config ~from_agent:"system"
               ~content:(Printf.sprintf "🗳️ Vote resolved: %s - %s" topic result_msg) in

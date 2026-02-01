@@ -4,8 +4,10 @@
  (modules
    a2a_tools
    agent_card
+   auto_recall
    auto_responder
    auth
+   board
    error
    backend
    backend_eio
@@ -46,6 +48,7 @@
    mcp_server_eio
    mcp_session
    metrics_store_eio
+   generational_metrics
    mention
    mind_eio
    mitosis
@@ -75,7 +78,9 @@
    session
    spawn
    spawn_eio
+   spawn_registry
    sse
+   sse_client
    subscriptions
    swarm_behaviors_eio
    swarm_eio
@@ -107,6 +112,8 @@
    tool_room
    tool_control
    tool_misc
+   social
+   tool_social
    transport
    transport_grpc_next
    udp_socket_eio

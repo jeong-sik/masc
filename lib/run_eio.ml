@@ -168,8 +168,8 @@ let append_log config ~task_id ~note : (log_entry, string) result =
     let line = Yojson.Safe.to_string (log_entry_to_json entry) ^ "\n" in
     with_file_lock config file (fun () ->
       let oc = open_out_gen [Open_creat; Open_append; Open_wronly] 0o600 file in
-      output_string oc line;
-      close_out oc
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        output_string oc line)
     );
     Ok entry
   with e -> Error (Printexc.to_string e)

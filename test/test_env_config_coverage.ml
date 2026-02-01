@@ -165,6 +165,23 @@ let test_cancellation_token_max_age_positive () =
   check bool "max age positive" true (Env_config.Cancellation.token_max_age_seconds > 0.0)
 
 (* ============================================================
+   Spawn Module Tests (P2 #19: Centralized timeout config)
+   ============================================================ *)
+
+let test_spawn_timeout_positive () =
+  check bool "timeout positive" true (Env_config.Spawn.timeout_seconds > 0)
+
+let test_spawn_timeout_default_600 () =
+  (* Default is 600 seconds = 10 minutes for agent spawn operations *)
+  check int "default timeout" 600 Env_config.Spawn.timeout_seconds
+
+let test_spawn_timeout_reasonable_range () =
+  (* Spawn timeout should be between 60s (1 min) and 3600s (1 hour) *)
+  let t = Env_config.Spawn.timeout_seconds in
+  check bool "timeout >= 60" true (t >= 60);
+  check bool "timeout <= 3600" true (t <= 3600)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -224,5 +241,10 @@ let () =
     ];
     "cancellation", [
       test_case "max age positive" `Quick test_cancellation_token_max_age_positive;
+    ];
+    "spawn", [
+      test_case "timeout positive" `Quick test_spawn_timeout_positive;
+      test_case "timeout default 600" `Quick test_spawn_timeout_default_600;
+      test_case "timeout reasonable range" `Quick test_spawn_timeout_reasonable_range;
     ];
   ]

@@ -208,20 +208,22 @@ let handle_select_agent ctx args =
           else
             let target = Random.float total in
             let rec pick acc = function
-              | [] -> List.hd scored
+              | [] -> (match scored with x :: _ -> x | [] -> pick_random scored)
               | (id, s, comp) :: rest ->
                   let acc' = acc +. max 0.0 s in
                   if acc' >= target then (id, s, comp) else pick acc' rest
             in
             pick 0.0 scored
       | "elite_1" | "capability_first" | _ ->
-          List.fold_left (fun best candidate ->
+          match List.fold_left (fun best candidate ->
             match best with
             | None -> Some candidate
             | Some (_, best_score, _) ->
                 let (_, score, _) = candidate in
                 if score > best_score then Some candidate else best
-          ) None scored |> Option.get
+          ) None scored with
+          | Some result -> result
+          | None -> pick_random scored
     in
     let (agent_id, score, components) = selected in
     let scores_json =

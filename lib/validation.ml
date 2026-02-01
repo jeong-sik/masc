@@ -14,21 +14,21 @@
 *)
 
 (** MAGI: Validation rejection counters for observability *)
-let rejection_count = ref 0
+let rejection_count = Atomic.make 0
 let last_rejection_time = ref 0.0
 
 (** Get validation statistics *)
 let get_rejection_stats () =
-  (!rejection_count, !last_rejection_time)
+  (Atomic.get rejection_count, !last_rejection_time)
 
 (** Reset validation statistics *)
 let reset_rejection_stats () =
-  rejection_count := 0;
+  Atomic.set rejection_count 0;
   last_rejection_time := 0.0
 
 (** Internal: Log validation rejection at WARN level *)
 let log_rejection ~validator ~input ~reason =
-  incr rejection_count;
+  Atomic.incr rejection_count;
   last_rejection_time := Unix.gettimeofday ();
   (* Truncate input for log safety *)
   let safe_input = if String.length input > 32

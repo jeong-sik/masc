@@ -68,8 +68,8 @@ let load_key config : (GCM.key, encryption_error) result =
     | `File path ->
         if Sys.file_exists path then
           let ic = open_in path in
-          let content = really_input_string ic 64 in (* hex-encoded 32 bytes *)
-          close_in ic;
+          let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+            really_input_string ic 64) in (* hex-encoded 32 bytes *)
           (* Decode hex to bytes *)
           let bytes = ref "" in
           for i = 0 to 31 do

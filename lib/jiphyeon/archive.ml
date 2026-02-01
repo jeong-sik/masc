@@ -344,3 +344,250 @@ let save ~sw ~env (r : record) : (unit, string) result =
       (* Neo4j 실패해도 PostgreSQL 성공이면 경고만 *)
       Printf.eprintf "[WARN] Neo4j save failed: %s\n%!" e;
       Ok ()
+
+(** {1 Episode Storage - Agent Being Protocol}
+
+    에이전트를 "도구"가 아닌 "생명체"로 다루기 위한 Episode 저장.
+    Stanford Generative Agents (2023)의 Memory Stream 패턴 구현.
+
+    Episode는 에이전트의 경험 단위로, 세대 간 기억 계승의 핵심입니다.
+*)
+
+(** Episode 타입 - 에이전트 경험 단위 *)
+type episode = {
+  ep_id: string;                (** UUID *)
+  session_id: string;           (** 세션 ID *)
+  agent_name: string;           (** 에이전트 이름 *)
+  generation: int;              (** 세대 번호 *)
+  parent_episode: string option;(** 부모 에피소드 (계보) *)
+  event_type: string;           (** 이벤트 타입: handoff, mitosis, task, reflection *)
+  summary: string;              (** 경험 요약 *)
+  dna: string option;           (** 압축된 컨텍스트 DNA *)
+  outcome: [`Success | `Failure | `Partial];
+  learnings: string list;       (** 학습 내용 *)
+  context: (string * string) list; (** 추가 컨텍스트 *)
+  timestamp: string;            (** ISO8601 *)
+}
+
+let outcome_to_str = function
+  | `Success -> "success"
+  | `Failure -> "failure"
+  | `Partial -> "partial"
+
+let outcome_of_str = function
+  | "success" -> `Success
+  | "failure" -> `Failure
+  | _ -> `Partial
+
+let episode_to_yojson e =
+  `Assoc [
+    ("ep_id", `String e.ep_id);
+    ("session_id", `String e.session_id);
+    ("agent_name", `String e.agent_name);
+    ("generation", `Int e.generation);
+    ("parent_episode", match e.parent_episode with Some p -> `String p | None -> `Null);
+    ("event_type", `String e.event_type);
+    ("summary", `String e.summary);
+    ("dna", match e.dna with Some d -> `String d | None -> `Null);
+    ("outcome", `String (outcome_to_str e.outcome));
+    ("learnings", `List (List.map (fun l -> `String l) e.learnings));
+    ("context", `Assoc (List.map (fun (k, v) -> (k, `String v)) e.context));
+    ("timestamp", `String e.timestamp);
+  ]
+
+(** {2 PostgreSQL Episode Storage} *)
+
+module EpisodeQ = struct
+  open Caqti_request.Infix
+  open Caqti_type
+
+  let create_table =
+    (unit ->. unit) {|
+      CREATE TABLE IF NOT EXISTS masc_episodes (
+        ep_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        generation INT NOT NULL DEFAULT 0,
+        parent_episode TEXT,
+        event_type TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        dna TEXT,
+        outcome TEXT NOT NULL DEFAULT 'partial',
+        learnings TEXT[] NOT NULL DEFAULT '{}',
+        context JSONB NOT NULL DEFAULT '{}'::jsonb,
+        timestamp TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT fk_parent FOREIGN KEY (parent_episode) REFERENCES masc_episodes(ep_id) ON DELETE SET NULL
+      )
+    |}
+
+  let create_indexes =
+    (unit ->. unit) {|
+      CREATE INDEX IF NOT EXISTS idx_episodes_agent ON masc_episodes(agent_name);
+      CREATE INDEX IF NOT EXISTS idx_episodes_session ON masc_episodes(session_id);
+      CREATE INDEX IF NOT EXISTS idx_episodes_generation ON masc_episodes(generation);
+      CREATE INDEX IF NOT EXISTS idx_episodes_timestamp ON masc_episodes(timestamp DESC);
+    |}
+
+  let upsert_episode =
+    (t2
+      (t4 string string string int)      (* ep_id, session_id, agent_name, generation *)
+      (t4 string string string string)   (* parent_episode, event_type, summary, dna *)
+    ->. unit) {|
+      INSERT INTO masc_episodes
+        (ep_id, session_id, agent_name, generation, parent_episode, event_type, summary, dna, outcome, learnings, context, timestamp)
+      VALUES
+        ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, NULLIF($8, ''), 'partial', '{}', '{}'::jsonb, NOW())
+      ON CONFLICT (ep_id) DO UPDATE SET
+        summary = EXCLUDED.summary,
+        dna = EXCLUDED.dna
+    |}
+
+  let get_lineage =
+    (string ->* t4 string string int string)
+    {|
+      WITH RECURSIVE lineage AS (
+        SELECT ep_id, agent_name, generation, summary, parent_episode
+        FROM masc_episodes WHERE ep_id = $1
+        UNION ALL
+        SELECT e.ep_id, e.agent_name, e.generation, e.summary, e.parent_episode
+        FROM masc_episodes e
+        INNER JOIN lineage l ON e.ep_id = l.parent_episode
+      )
+      SELECT ep_id, agent_name, generation, summary FROM lineage ORDER BY generation ASC
+    |}
+
+  let get_recent_by_agent =
+    (t2 string int ->* t4 string string int string)
+    "SELECT ep_id, event_type, generation, summary FROM masc_episodes \
+     WHERE agent_name = $1 ORDER BY timestamp DESC LIMIT $2"
+end
+
+(** Episode PostgreSQL 저장 *)
+let save_episode_to_postgres ~sw ~env (ep : episode) : (unit, string) result =
+  match get_pg_pool ~sw ~env with
+  | Error e -> Error e
+  | Ok pool ->
+    let use_conn (module C : Caqti_eio.CONNECTION) =
+      let parent = Option.value ep.parent_episode ~default:"" in
+      let dna = Option.value ep.dna ~default:"" in
+      C.exec EpisodeQ.upsert_episode
+        ((ep.ep_id, ep.session_id, ep.agent_name, ep.generation),
+         (parent, ep.event_type, ep.summary, dna))
+    in
+    match Caqti_eio.Pool.use use_conn pool with
+    | Ok () -> Ok ()
+    | Error e -> Error (Caqti_error.show e)
+
+(** {2 Neo4j Episode Storage} *)
+
+(** Neo4j Episode 노드 생성 - 그래프 관계 포함 *)
+let save_episode_to_neo4j ~sw ~env (ep : episode) : (unit, string) result =
+  match get_neo4j_url () with
+  | None -> Error "RAILWAY_NEO4J_URL not set"
+  | Some bolt_url ->
+    (* Episode 노드 생성 + Agent 관계 + 부모-자식 관계 *)
+    let query = {|
+      // 1. Episode 노드 생성
+      MERGE (e:Episode {id: $ep_id})
+      SET e.session_id = $session_id,
+          e.agent_name = $agent_name,
+          e.generation = $generation,
+          e.event_type = $event_type,
+          e.summary = $summary,
+          e.outcome = $outcome,
+          e.timestamp = $timestamp,
+          e.dna_size = $dna_size
+
+      // 2. Agent 노드 연결
+      MERGE (a:Agent {name: $agent_name})
+      MERGE (a)-[:EXPERIENCED]->(e)
+
+      // 3. 부모 Episode 관계 (있는 경우)
+      WITH e
+      OPTIONAL MATCH (parent:Episode {id: $parent_episode})
+      FOREACH (_ IN CASE WHEN parent IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (e)-[:BORN_FROM]->(parent)
+      )
+
+      RETURN e.id
+    |} in
+    let dna_size = match ep.dna with Some d -> String.length d | None -> 0 in
+    let params = `Assoc [
+      ("ep_id", `String ep.ep_id);
+      ("session_id", `String ep.session_id);
+      ("agent_name", `String ep.agent_name);
+      ("generation", `Int ep.generation);
+      ("parent_episode", match ep.parent_episode with Some p -> `String p | None -> `Null);
+      ("event_type", `String ep.event_type);
+      ("summary", `String ep.summary);
+      ("outcome", `String (outcome_to_str ep.outcome));
+      ("timestamp", `String ep.timestamp);
+      ("dna_size", `Int dna_size);
+    ] in
+    match execute_cypher ~sw ~env bolt_url query params with
+    | Ok _ -> Ok ()
+    | Error e -> Error e
+
+(** {2 Episode Dual Storage} *)
+
+(** Episode 이중 저장 (PostgreSQL 주, Neo4j 부) *)
+let save_episode ~sw ~env (ep : episode) : (unit, string) result =
+  (* PostgreSQL 먼저 (주 저장소, 실패 시 전체 실패) *)
+  match save_episode_to_postgres ~sw ~env ep with
+  | Error e -> Error (Printf.sprintf "PostgreSQL episode save failed: %s" e)
+  | Ok () ->
+    (* Neo4j는 best-effort (실패해도 경고만) *)
+    match save_episode_to_neo4j ~sw ~env ep with
+    | Ok () ->
+      Printf.printf "[EPISODE] Saved episode %s (gen %d) to PG+Neo4j\n%!" ep.ep_id ep.generation;
+      Ok ()
+    | Error e ->
+      Printf.eprintf "[WARN] Neo4j episode save failed (PG succeeded): %s\n%!" e;
+      Ok ()
+
+(** Episode 생성 헬퍼 *)
+let create_episode
+    ~session_id ~agent_name ~generation
+    ?parent_episode ~event_type ~summary ?dna
+    ?(outcome=`Partial) ?(learnings=[]) ?(context=[]) () =
+  {
+    ep_id = generate_id ();
+    session_id;
+    agent_name;
+    generation;
+    parent_episode;
+    event_type;
+    summary;
+    dna;
+    outcome;
+    learnings;
+    context;
+    timestamp = now_iso ();
+  }
+
+(** Episode 테이블 초기화 *)
+let init_episode_table ~sw ~env : (unit, string) result =
+  match get_pg_pool ~sw ~env with
+  | Error e -> Error e
+  | Ok pool ->
+    let use_conn (module C : Caqti_eio.CONNECTION) =
+      match C.exec EpisodeQ.create_table () with
+      | Error e -> Error e
+      | Ok () -> C.exec EpisodeQ.create_indexes ()
+    in
+    match Caqti_eio.Pool.use use_conn pool with
+    | Ok () -> Ok ()
+    | Error e -> Error (Caqti_error.show e)
+
+(** 에이전트 계보 조회 *)
+let get_agent_lineage ~sw ~env (ep_id : string) : ((string * string * int * string) list, string) result =
+  match get_pg_pool ~sw ~env with
+  | Error e -> Error e
+  | Ok pool ->
+    let use_conn (module C : Caqti_eio.CONNECTION) =
+      C.collect_list EpisodeQ.get_lineage ep_id
+    in
+    match Caqti_eio.Pool.use use_conn pool with
+    | Ok lineage -> Ok lineage
+    | Error e -> Error (Caqti_error.show e)

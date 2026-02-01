@@ -181,6 +181,8 @@
    dune-build-info
    ;; Council - multi-agent governance
    council
+   ;; Jiphyeon - Episode storage for Agent Being Protocol
+   jiphyeon
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

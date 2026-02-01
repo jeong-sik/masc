@@ -3772,6 +3772,121 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
       ("required", `List [`String "agents"; `String "prompt"; `String "goal"]);
     ];
   };
+
+  (* ============================================ *)
+  (* Conversation Tools - Persistent Agent Dialogue *)
+  (* ============================================ *)
+
+  {
+    name = "masc_convo_start";
+    description = "Start a new conversation thread on a topic. Returns thread_id for subsequent replies. Conversations persist to file and Neo4j for queryability. Loop prevention: max 50 turns by default.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Conversation topic or question");
+        ]);
+        ("initiator", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name starting the conversation");
+        ]);
+        ("initial_content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional opening message");
+        ]);
+        ("max_turns", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum turns allowed (default: 50)");
+          ("default", `Int 50);
+        ]);
+      ]);
+      ("required", `List [`String "topic"; `String "initiator"]);
+    ];
+  };
+
+  {
+    name = "masc_convo_reply";
+    description = "Add a reply to an existing conversation thread. Includes loop prevention: blocks identical consecutive messages (3x) and cooldown violations (2s between same speaker). Returns updated thread.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("thread_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Thread ID from masc_convo_start");
+        ]);
+        ("speaker", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name adding the reply");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reply message content");
+        ]);
+        ("confidence", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Speaker's confidence level (0.0-1.0)");
+        ]);
+        ("reply_to", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional turn ID being replied to");
+        ]);
+        ("mentions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Agents @mentioned in this reply");
+        ]);
+      ]);
+      ("required", `List [`String "thread_id"; `String "speaker"; `String "content"]);
+    ];
+  };
+
+  {
+    name = "masc_convo_conclude";
+    description = "Conclude a conversation with a summary/decision. Marks thread as Concluded and adds final turn. No more replies allowed after this.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("thread_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Thread ID to conclude");
+        ]);
+        ("concluder", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent writing the conclusion");
+        ]);
+        ("conclusion", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Final summary or decision text");
+        ]);
+      ]);
+      ("required", `List [`String "thread_id"; `String "concluder"; `String "conclusion"]);
+    ];
+  };
+
+  {
+    name = "masc_convo_get";
+    description = "Get a conversation thread by ID. Returns full thread with all turns, participants, and status.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("thread_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Thread ID to retrieve");
+        ]);
+      ]);
+      ("required", `List [`String "thread_id"]);
+    ];
+  };
+
+  {
+    name = "masc_convo_list";
+    description = "List all active conversation threads in the current room.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 ]
 
 (** Get tool by name *)

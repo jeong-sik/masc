@@ -197,7 +197,20 @@ let test_default_configs_claude_command () =
   | Some cfg -> check bool "has claude command" true
       (try let _ = Str.search_forward (Str.regexp "claude") cfg.command 0 in true
        with Not_found -> false)
-  | None -> fail "no claude config"
+  | None -> fail "claude config missing"
+
+(* P2 #19: Test that default_configs use Env_config.Spawn.timeout_seconds *)
+let test_default_configs_timeout_from_env_config () =
+  let expected = Masc_mcp.Env_config.Spawn.timeout_seconds in
+  List.iter (fun (name, cfg) ->
+    check int (Printf.sprintf "%s timeout uses Env_config" name) expected cfg.Spawn.timeout_seconds
+  ) Spawn.default_configs
+
+let test_default_configs_timeout_is_600 () =
+  (* All agents should use 600s (10 min) default timeout *)
+  List.iter (fun (name, cfg) ->
+    check int (Printf.sprintf "%s timeout is 600" name) 600 cfg.Spawn.timeout_seconds
+  ) Spawn.default_configs
 
 let test_default_configs_gemini_command () =
   match List.assoc_opt "gemini" Spawn.default_configs with
@@ -236,42 +249,45 @@ let test_get_config_unknown () =
   | Some _ -> fail "expected None"
 
 (* ============================================================
-   build_mcp_flags Tests
+   build_mcp_args Tests
    ============================================================ *)
 
-let test_build_mcp_flags_empty () =
-  let flags = Spawn.build_mcp_flags "claude" [] in
-  check string "empty flags" "" flags
+let test_build_mcp_args_empty () =
+  let flags = Spawn.build_mcp_args "claude" [] in
+  check (list string) "empty flags" [] flags
 
-let test_build_mcp_flags_claude () =
-  let flags = Spawn.build_mcp_flags "claude" ["tool1"; "tool2"] in
+let test_build_mcp_args_claude () =
+  let flags = Spawn.build_mcp_args "claude" ["tool1"; "tool2"] in
+  let flags_str = String.concat " " flags in
   check bool "has allowedTools" true
-    (try let _ = Str.search_forward (Str.regexp "allowedTools") flags 0 in true
+    (try let _ = Str.search_forward (Str.regexp "allowedTools") flags_str 0 in true
      with Not_found -> false)
 
-let test_build_mcp_flags_gemini () =
-  let flags = Spawn.build_mcp_flags "gemini" ["tool1"] in
+let test_build_mcp_args_gemini () =
+  let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
+  let flags_str = String.concat " " flags in
   check bool "has allowed-mcp-server-names" true
-    (try let _ = Str.search_forward (Str.regexp "allowed-mcp-server-names") flags 0 in true
+    (try let _ = Str.search_forward (Str.regexp "allowed-mcp-server-names") flags_str 0 in true
      with Not_found -> false)
 
-let test_build_mcp_flags_gemini_allowed_tools () =
-  let flags = Spawn.build_mcp_flags "gemini" ["tool1"] in
+let test_build_mcp_args_gemini_allowed_tools () =
+  let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
+  let flags_str = String.concat " " flags in
   check bool "has allowed-tools" true
-    (try let _ = Str.search_forward (Str.regexp "allowed-tools") flags 0 in true
+    (try let _ = Str.search_forward (Str.regexp "allowed-tools") flags_str 0 in true
      with Not_found -> false)
 
-let test_build_mcp_flags_codex () =
-  let flags = Spawn.build_mcp_flags "codex" ["tool1"; "tool2"] in
-  check string "codex empty" "" flags
+let test_build_mcp_args_codex () =
+  let flags = Spawn.build_mcp_args "codex" ["tool1"; "tool2"] in
+  check (list string) "codex empty" [] flags
 
-let test_build_mcp_flags_ollama () =
-  let flags = Spawn.build_mcp_flags "ollama" ["tool1"] in
-  check string "ollama empty" "" flags
+let test_build_mcp_args_ollama () =
+  let flags = Spawn.build_mcp_args "ollama" ["tool1"] in
+  check (list string) "ollama empty" [] flags
 
-let test_build_mcp_flags_unknown () =
-  let flags = Spawn.build_mcp_flags "unknown" ["tool1"] in
-  check string "unknown empty" "" flags
+let test_build_mcp_args_unknown () =
+  let flags = Spawn.build_mcp_args "unknown" ["tool1"] in
+  check (list string) "unknown empty" [] flags
 
 (* ============================================================
    parse_claude_json Tests
@@ -575,6 +591,8 @@ let () =
       test_case "has ollama" `Quick test_default_configs_has_ollama;
       test_case "claude command" `Quick test_default_configs_claude_command;
       test_case "gemini command" `Quick test_default_configs_gemini_command;
+      test_case "timeout from env_config" `Quick test_default_configs_timeout_from_env_config;
+      test_case "timeout is 600" `Quick test_default_configs_timeout_is_600;
     ];
     "get_config", [
       test_case "claude" `Quick test_get_config_claude;
@@ -583,14 +601,14 @@ let () =
       test_case "ollama" `Quick test_get_config_ollama;
       test_case "unknown" `Quick test_get_config_unknown;
     ];
-    "build_mcp_flags", [
-      test_case "empty" `Quick test_build_mcp_flags_empty;
-      test_case "claude" `Quick test_build_mcp_flags_claude;
-      test_case "gemini" `Quick test_build_mcp_flags_gemini;
-      test_case "gemini allowed tools" `Quick test_build_mcp_flags_gemini_allowed_tools;
-      test_case "codex" `Quick test_build_mcp_flags_codex;
-      test_case "ollama" `Quick test_build_mcp_flags_ollama;
-      test_case "unknown" `Quick test_build_mcp_flags_unknown;
+    "build_mcp_args", [
+      test_case "empty" `Quick test_build_mcp_args_empty;
+      test_case "claude" `Quick test_build_mcp_args_claude;
+      test_case "gemini" `Quick test_build_mcp_args_gemini;
+      test_case "gemini allowed tools" `Quick test_build_mcp_args_gemini_allowed_tools;
+      test_case "codex" `Quick test_build_mcp_args_codex;
+      test_case "ollama" `Quick test_build_mcp_args_ollama;
+      test_case "unknown" `Quick test_build_mcp_args_unknown;
     ];
     "parse_claude_json", [
       test_case "valid" `Quick test_parse_claude_json_valid;

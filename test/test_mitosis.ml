@@ -116,6 +116,82 @@ let test_should_not_handoff_at_60 () =
   let result = Mitosis.should_handoff ~config ~cell ~context_ratio:0.6 in
   check bool "should not handoff at 60%" false result
 
+(* ===== auto_mitosis_check_2phase tests ===== *)
+
+(** Mock spawn_fn for testing *)
+let mock_spawn_fn ~prompt:_ =
+  Spawn.{
+    success = true;
+    output = "mock spawn success";
+    exit_code = 0;
+    elapsed_ms = 100;
+    input_tokens = None;
+    output_tokens = None;
+    cache_creation_tokens = None;
+    cache_read_tokens = None;
+    cost_usd = None;
+  }
+
+let test_auto_mitosis_noaction_low_ratio () =
+  let config = Mitosis.default_config in
+  let pool = Mitosis.init_pool ~config in
+  let cell = Mitosis.create_stem_cell ~generation:0 in
+  let cell = { cell with state = Mitosis.Active; phase = Mitosis.Idle } in
+  let full_context = "short context" in
+  let result = Mitosis.auto_mitosis_check_2phase
+    ~config ~pool ~cell ~context_ratio:0.3 ~full_context ~spawn_fn:mock_spawn_fn in
+  match result with
+  | Mitosis.NoAction -> ()
+  | _ -> Alcotest.fail "expected NoAction at 30% context"
+
+let test_auto_mitosis_prepared_at_threshold () =
+  let config = Mitosis.default_config in
+  let pool = Mitosis.init_pool ~config in
+  let cell = Mitosis.create_stem_cell ~generation:0 in
+  let cell = { cell with state = Mitosis.Active; phase = Mitosis.Idle } in
+  let full_context = String.make 2000 'a' in
+  let result = Mitosis.auto_mitosis_check_2phase
+    ~config ~pool ~cell ~context_ratio:0.55 ~full_context ~spawn_fn:mock_spawn_fn in
+  match result with
+  | Mitosis.Prepared prepared_cell ->
+      check Alcotest.string "prepared cell state" "prepared"
+        (Mitosis.state_to_string prepared_cell.state);
+      check Alcotest.string "prepared cell phase" "ready_for_handoff"
+        (Mitosis.phase_to_string prepared_cell.phase)
+  | _ -> Alcotest.fail "expected Prepared at 55% context"
+
+let test_auto_mitosis_handoff_at_threshold () =
+  let config = Mitosis.default_config in
+  let pool = Mitosis.init_pool ~config in
+  let cell = Mitosis.create_stem_cell ~generation:0 in
+  let cell = { cell with
+    state = Mitosis.Prepared;
+    phase = Mitosis.ReadyForHandoff "existing dna"
+  } in
+  let full_context = String.make 2000 'a' in
+  let result = Mitosis.auto_mitosis_check_2phase
+    ~config ~pool ~cell ~context_ratio:0.85 ~full_context ~spawn_fn:mock_spawn_fn in
+  match result with
+  | Mitosis.Handoff (spawn_result, child_cell, _new_pool) ->
+      check Alcotest.bool "spawn success" true spawn_result.success;
+      check Alcotest.int "child generation" 1 child_cell.generation
+  | _ -> Alcotest.fail "expected Handoff at 85% context"
+
+let test_auto_mitosis_handoff_from_idle () =
+  (* Emergency case: hit handoff threshold without prepare phase *)
+  let config = Mitosis.default_config in
+  let pool = Mitosis.init_pool ~config in
+  let cell = Mitosis.create_stem_cell ~generation:0 in
+  let cell = { cell with state = Mitosis.Active; phase = Mitosis.Idle } in
+  let full_context = String.make 2000 'a' in
+  let result = Mitosis.auto_mitosis_check_2phase
+    ~config ~pool ~cell ~context_ratio:0.9 ~full_context ~spawn_fn:mock_spawn_fn in
+  match result with
+  | Mitosis.Handoff (spawn_result, child_cell, _new_pool) ->
+      check Alcotest.bool "spawn success" true spawn_result.success;
+      check Alcotest.int "child generation" 1 child_cell.generation
+  | _ -> Alcotest.fail "expected emergency Handoff at 90% from Idle"
+
 (* ===== extract_delta tests ===== *)
 
 let test_extract_delta_short_session () =
@@ -164,11 +240,86 @@ let safe_sub_tests = [
   "empty string", `Quick, test_safe_sub_empty_string;
 ]
 
+(* ===== deduplicate_lines performance tests ===== *)
+
+let test_dedup_large_input () =
+  (* Generate large input: 10k base lines, 1k delta lines *)
+  let make_lines n prefix =
+    List.init n (fun i -> Printf.sprintf "%s line number %d with meaningful content" prefix i)
+    |> String.concat "\n"
+  in
+  let base = make_lines 10000 "base" in
+  let delta = make_lines 1000 "delta" in
+
+  let start = Unix.gettimeofday () in
+  let result = Mitosis.deduplicate_lines ~base ~delta in
+  let elapsed = Unix.gettimeofday () -. start in
+
+  (* All delta lines should be kept (no overlap with base) *)
+  let result_lines = String.split_on_char '\n' result in
+  check int "all delta lines kept" 1000 (List.length result_lines);
+
+  (* Performance: should complete well under 1 second *)
+  check bool "dedup 10k+1k lines under 0.5s" true (elapsed < 0.5);
+  Printf.printf "[PERF] deduplicate_lines (10k+1k): %.4fs\n%!" elapsed
+
+let test_dedup_with_overlap () =
+  (* 50% overlap scenario *)
+  let make_lines n prefix =
+    List.init n (fun i -> Printf.sprintf "%s line number %d with content" prefix i)
+    |> String.concat "\n"
+  in
+  let base = make_lines 1000 "shared" in
+  let delta_unique = make_lines 500 "unique" in
+  let delta_dup = make_lines 500 "shared" in  (* Same as base *)
+  let delta = delta_dup ^ "\n" ^ delta_unique in
+
+  let start = Unix.gettimeofday () in
+  let result = Mitosis.deduplicate_lines ~base ~delta in
+  let elapsed = Unix.gettimeofday () -. start in
+
+  (* Only unique lines should remain (500) *)
+  let result_lines = String.split_on_char '\n' result in
+  check int "only unique lines kept" 500 (List.length result_lines);
+  Printf.printf "[PERF] deduplicate_lines (1k+1k, 50%% overlap): %.4fs\n%!" elapsed
+
+let test_dedup_empty_inputs () =
+  let result1 = Mitosis.deduplicate_lines ~base:"" ~delta:"" in
+  check string "empty both" "" result1;
+
+  let result2 = Mitosis.deduplicate_lines ~base:"some base content here" ~delta:"" in
+  check string "empty delta" "" result2;
+
+  let result3 = Mitosis.deduplicate_lines ~base:"" ~delta:"some delta content" in
+  check string "empty base" "some delta content" result3
+
+let test_dedup_trailing_newlines () =
+  let base = "line one here\nline two here\n" in
+  let delta = "new line here\n" in
+  let result = Mitosis.deduplicate_lines ~base ~delta in
+  (* Should handle trailing newlines gracefully *)
+  check bool "handles trailing newline" true (String.length result > 0)
+
+let test_dedup_whitespace_only () =
+  let base = "meaningful content here\n   \n\t\t\n" in
+  let delta = "   \n\t\t\nnew content here" in
+  let result = Mitosis.deduplicate_lines ~base ~delta in
+  (* Whitespace-only lines (<=10 chars when trimmed) should be kept *)
+  check bool "whitespace lines kept" true (String.length result > 0)
+
 let dedup_tests = [
   "no overlap", `Quick, test_dedup_no_overlap;
   "full overlap", `Quick, test_dedup_full_overlap;
   "partial overlap", `Quick, test_dedup_partial_overlap;
   "short lines kept", `Quick, test_dedup_short_lines_kept;
+]
+
+let dedup_perf_tests = [
+  "large input (10k+1k)", `Quick, test_dedup_large_input;
+  "overlap scenario", `Quick, test_dedup_with_overlap;
+  "empty inputs", `Quick, test_dedup_empty_inputs;
+  "trailing newlines", `Quick, test_dedup_trailing_newlines;
+  "whitespace only", `Quick, test_dedup_whitespace_only;
 ]
 
 let compress_tests = [
@@ -182,6 +333,13 @@ let two_phase_tests = [
   "no re-prepare", `Quick, test_should_not_prepare_when_already_prepared;
   "handoff at 80%", `Quick, test_should_handoff_at_80;
   "no handoff at 60%", `Quick, test_should_not_handoff_at_60;
+]
+
+let auto_mitosis_tests = [
+  "noaction at 30%", `Quick, test_auto_mitosis_noaction_low_ratio;
+  "prepared at 55%", `Quick, test_auto_mitosis_prepared_at_threshold;
+  "handoff at 85%", `Quick, test_auto_mitosis_handoff_at_threshold;
+  "emergency handoff from idle", `Quick, test_auto_mitosis_handoff_from_idle;
 ]
 
 let delta_tests = [
@@ -199,8 +357,10 @@ let () =
   run "Mitosis" [
     "safe_sub", safe_sub_tests;
     "deduplicate", dedup_tests;
+    "deduplicate_perf", dedup_perf_tests;
     "compress", compress_tests;
     "2-phase", two_phase_tests;
+    "auto_mitosis", auto_mitosis_tests;
     "delta", delta_tests;
     "state", state_tests;
   ]

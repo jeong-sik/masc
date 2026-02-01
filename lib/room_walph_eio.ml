@@ -51,46 +51,54 @@ let escape_agent_name name =
     Uses || separator to avoid collision with : in paths *)
 let make_walph_key config ~agent_name =
   if agent_name = "" then
-    failwith "Walph: agent_name cannot be empty"
+    Error "Walph: agent_name cannot be empty"
   else
-    Printf.sprintf "%s||%s" config.Room_utils.base_path (escape_agent_name agent_name)
+    Ok (Printf.sprintf "%s||%s" config.Room_utils.base_path (escape_agent_name agent_name))
 
 (** Get or create Walph state for a specific agent (thread-safe)
     Each agent has independent Walph state, enabling parallel loops *)
 let get_walph_state config ~agent_name =
-  let key = make_walph_key config ~agent_name in
-  Eio.Mutex.use_rw ~protect:true walph_states_mutex (fun () ->
-    match Hashtbl.find_opt walph_states key with
-    | Some s -> s
-    | None ->
-        let s = {
-          running = false; paused = false; stop_requested = false;
-          current_preset = ""; iterations = 0; completed = 0;
-          mutex = Eio.Mutex.create ();
-          cond = Eio.Condition.create ();
-        } in
-        Hashtbl.replace walph_states key s;
-        s
-  )
+  match make_walph_key config ~agent_name with
+  | Error msg -> Error msg
+  | Ok key ->
+      Ok (Eio.Mutex.use_rw ~protect:true walph_states_mutex (fun () ->
+        match Hashtbl.find_opt walph_states key with
+        | Some s -> s
+        | None ->
+            let s = {
+              running = false; paused = false; stop_requested = false;
+              current_preset = ""; iterations = 0; completed = 0;
+              mutex = Eio.Mutex.create ();
+              cond = Eio.Condition.create ();
+            } in
+            Hashtbl.replace walph_states key s;
+            s
+      ))
+
+(** Get or create Walph state, raising on error. For test convenience.
+    @raise Invalid_argument if agent_name is empty *)
+let get_walph_state_exn config ~agent_name =
+  match get_walph_state config ~agent_name with
+  | Ok s -> s
+  | Error msg -> invalid_arg msg
 
 (** Remove Walph state for an agent (cleanup to prevent memory leak)
     @return Error if Walph is still running (zombie prevention), Ok () otherwise *)
 let remove_walph_state config ~agent_name =
-  let key = make_walph_key config ~agent_name in
-  let result = Eio.Mutex.use_rw ~protect:true walph_states_mutex (fun () ->
-    match Hashtbl.find_opt walph_states key with
-    | None -> Ok ()  (* Already removed, no-op *)
-    | Some state ->
-        if state.running then
-          Error (Printf.sprintf "Walph: cannot remove state for %s while running. Call STOP first." agent_name)
-        else begin
-          Hashtbl.remove walph_states key;
-          Ok ()
-        end
-  ) in
-  match result with
-  | Ok () -> ()
-  | Error msg -> failwith msg  (* Raise outside mutex to avoid poisoning *)
+  match make_walph_key config ~agent_name with
+  | Error msg -> Error msg
+  | Ok key ->
+      Eio.Mutex.use_rw ~protect:true walph_states_mutex (fun () ->
+        match Hashtbl.find_opt walph_states key with
+        | None -> Ok ()  (* Already removed, no-op *)
+        | Some state ->
+            if state.running then
+              Error (Printf.sprintf "Walph: cannot remove state for %s while running. Call STOP first." agent_name)
+            else begin
+              Hashtbl.remove walph_states key;
+              Ok ()
+            end
+      )
 
 (** List all active Walph states in a room (for swarm coordination)
     Uses || as separator to match make_walph_key *)
@@ -123,7 +131,9 @@ let with_walph_lock state f =
     @return Response message *)
 let walph_control config ~from_agent ~command ~args ?(target_agent=None) () =
   let agent_name = match target_agent with Some a -> a | None -> from_agent in
-  let state = get_walph_state config ~agent_name in
+  match get_walph_state config ~agent_name with
+  | Error msg -> msg
+  | Ok state ->
   let response = with_walph_lock state (fun () ->
     match command with
     | "STOP" ->
@@ -172,9 +182,11 @@ let walph_control config ~from_agent ~command ~args ?(target_agent=None) () =
 (** Check if Walph should continue looping (Eio-native, no busy-wait)
     Uses Eio.Condition for proper fiber scheduling.
     @param agent_name The agent whose Walph state to check
-    @return true if should continue, false if should stop *)
+    @return true if should continue, false if should stop or state error *)
 let walph_should_continue config ~agent_name =
-  let state = get_walph_state config ~agent_name in
+  match get_walph_state config ~agent_name with
+  | Error _ -> false  (* Cannot continue if state is invalid *)
+  | Ok state ->
   (* Note: Eio.Condition.await requires mutex to be held, and atomically
      releases it while waiting, then reacquires before returning *)
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
@@ -218,7 +230,9 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
   Room.ensure_initialized config;
 
   (* Get Walph state for this specific agent *)
-  let walph_state = get_walph_state config ~agent_name in
+  match get_walph_state config ~agent_name with
+  | Error msg -> msg  (* Return error message directly *)
+  | Ok walph_state ->
 
   (* Atomic check-and-set to prevent double-start race condition *)
   let start_result = with_walph_lock walph_state (fun () ->

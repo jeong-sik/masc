@@ -371,10 +371,16 @@ let mind_of_json_opt json : mind option =
     | None -> None)
   | _ -> None
 
-let mind_of_json json : mind =
+let mind_of_json json : (mind, string) result =
+  match mind_of_json_opt json with
+  | Some m -> Ok m
+  | None -> Error "Invalid mind JSON"
+
+(** Parse mind from JSON, raises on invalid input. Prefer mind_of_json for safe parsing. *)
+let mind_of_json_exn json : mind =
   match mind_of_json_opt json with
   | Some m -> m
-  | None -> failwith "Invalid mind JSON"
+  | None -> invalid_arg "Invalid mind JSON"
 
 (** {1 Persistence (Eio Native)} *)
 
@@ -386,7 +392,9 @@ let load_mind ~fs (config : config) : mind option =
   let path = Eio.Path.(fs / file) in
   try
     let content = Eio.Path.load path in
-    Some (mind_of_json (Yojson.Safe.from_string content))
+    match mind_of_json (Yojson.Safe.from_string content) with
+    | Ok m -> Some m
+    | Error _ -> None
   with Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let save_mind ~fs (config : config) (m : mind) : unit =

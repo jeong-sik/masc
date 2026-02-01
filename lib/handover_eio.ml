@@ -200,9 +200,10 @@ let claim_handover ~fs config ~handover_id ~agent_name : (handover_record, strin
   match load_handover ~fs config handover_id with
   | Error e -> Error e
   | Ok h ->
-    if Option.is_some h.to_agent then
-      Error (Printf.sprintf "Handover already claimed by %s" (Option.get h.to_agent))
-    else
+    match h.to_agent with
+    | Some claimed_by ->
+      Error (Printf.sprintf "Handover already claimed by %s" claimed_by)
+    | None ->
       let h' = { h with to_agent = Some agent_name } in
       match save_handover ~fs config h' with
       | Error e -> Error e

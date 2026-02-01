@@ -193,9 +193,11 @@ let select_koan_by_resonance (reader : reader_context) : koan =
   (* Use session entropy to select (deterministic, not random) *)
   let threshold = (mod_float reader.session_entropy 1.0) *. total in
 
+  (* Default koan for edge cases *)
+  let default_koan = { level = 9; theme = "void"; text = "What is this?" } in
   (* Walk through until we pass threshold - koan "emerges" *)
   let rec find acc = function
-    | [] -> fst (List.hd scored)  (* fallback *)
+    | [] -> (match scored with (k, _) :: _ -> k | [] -> default_koan)
     | (k, r) :: rest ->
       let acc' = acc +. r in
       if acc' >= threshold then k else find acc' rest

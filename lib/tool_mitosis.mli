@@ -1,14 +1,28 @@
 (** Mitosis Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
-    7 tools: mitosis_status, mitosis_all, mitosis_pool, mitosis_divide,
-             mitosis_check, mitosis_record, mitosis_prepare
+    8 tools: mitosis_status, mitosis_all, mitosis_pool, mitosis_divide,
+             mitosis_check, mitosis_record, mitosis_prepare, mitosis_handoff
+
+    Key tool: masc_mitosis_handoff - 2-phase proactive context management
+    - 50% threshold: DNA preparation (context summary extracted)
+    - 80% threshold: Handoff execution (spawn successor agent)
 *)
 
-(** Tool handler context *)
+(** Tool handler context - extensible for future features *)
 type context = {
-  config: Room.config;
+  config: Room_utils.config;
+  logger: (string -> unit) option;  (** Optional logging callback *)
 }
+
+(** Create context with just config (backward compatible) *)
+val make_context : Room_utils.config -> context
+
+(** Create context with config and logger *)
+val make_context_with_logger : Room_utils.config -> (string -> unit) -> context
+
+(** Internal logging helper (for testing) *)
+val log : context -> string -> unit
 
 (** Tool result type *)
 type result = bool * string
@@ -28,6 +42,7 @@ val handle_mitosis_divide : context -> Yojson.Safe.t -> result
 val handle_mitosis_check : context -> Yojson.Safe.t -> result
 val handle_mitosis_record : context -> Yojson.Safe.t -> result
 val handle_mitosis_prepare : context -> Yojson.Safe.t -> result
+val handle_mitosis_handoff : context -> Yojson.Safe.t -> result
 
 (** {1 Dispatcher} *)
 

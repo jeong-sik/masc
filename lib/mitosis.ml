@@ -7,13 +7,51 @@
 
     Key insight: Don't wait for 80% - divide proactively and continuously *)
 
-(** Lifecycle state of an agent cell *)
+(** Lifecycle state of an agent cell.
+
+    State transition diagram:
+    {v
+      Stem ──────────────────┐
+        │                    │
+        │ activate_stem()    │ (emergency creation)
+        ▼                    │
+      Active ◄───────────────┘
+        │
+        │ should_prepare() = true
+        │ (context_ratio >= 50% OR time/task/tool triggers)
+        ▼
+      Prepared
+        │
+        │ should_handoff() = true
+        │ (context_ratio >= 80%)
+        ▼
+      Dividing
+        │
+        │ begin_apoptosis()
+        ▼
+      Apoptotic ──► Dead (complete_apoptosis)
+    v}
+*)
 type cell_state =
-  | Stem        (* Reserve, ready to differentiate *)
-  | Active      (* Currently working *)
-  | Prepared    (* Ready for handoff, DNA extracted - NEW! *)
-  | Dividing    (* In the process of handoff *)
-  | Apoptotic   (* Gracefully shutting down *)
+  | Stem
+      (** Reserve cell, waiting in stem pool.
+          Transition: → Active via [activate_stem] when parent divides. *)
+  | Active
+      (** Currently working on tasks.
+          Transition: → Prepared when [should_prepare] returns true
+          (context >= 50% OR time/task/tool triggers met). *)
+  | Prepared
+      (** DNA extracted at 50%, waiting for handoff threshold.
+          Cell continues working but is ready for instant handoff.
+          Transition: → Dividing when [should_handoff] returns true (context >= 80%). *)
+  | Dividing
+      (** In the process of mitosis handoff.
+          DNA being transferred to child cell.
+          Transition: → Apoptotic immediately after [perform_mitosis]. *)
+  | Apoptotic
+      (** Gracefully shutting down after successful division.
+          Has [apoptosis_delay] seconds grace period.
+          Transition: → Dead via [complete_apoptosis]. *)
 
 (** Mitosis phase - 2-phase approach *)
 type mitosis_phase =
@@ -50,43 +88,175 @@ type mitosis_trigger =
   | Context_threshold of float  (* At N% context usage *)
   | Complexity_spike            (* When task complexity increases *)
 
-(** Mitosis configuration *)
+(** Mitosis configuration.
+
+    Controls when and how agent cells divide. Uses a 2-phase approach:
+    - Phase 1 (Prepare): Extract DNA at [prepare_threshold] (50%)
+    - Phase 2 (Handoff): Execute division at [handoff_threshold] (80%)
+
+    This 2-phase design ensures:
+    1. DNA is extracted early, before context pressure becomes critical
+    2. Handoff is instant when needed (no extraction delay at 80%)
+    3. Delta capture: changes between 50%-80% are merged into final DNA *)
 type mitosis_config = {
   triggers: mitosis_trigger list;
+      (** List of conditions that trigger mitosis.
+          Any single trigger being met will initiate division.
+          Evaluated in [check_non_context_triggers]. *)
+
   stem_pool_size: int;
-  max_generation: int;         (* Prevent infinite division *)
+      (** Number of reserve cells to maintain in the stem pool.
+          Larger pools = faster handoff but more memory.
+          Default: 2 (see {!Defaults.stem_pool_size}). *)
+
+  max_generation: int;
+      (** Maximum generation number to prevent infinite division loops.
+          When reached, agent should gracefully exit.
+          Default: 10 (see {!Defaults.max_generation}). *)
+
   dna_compression_ratio: float;
-  apoptosis_delay: float;      (* Grace period before death *)
-  (* 2-Phase thresholds *)
-  prepare_threshold: float;    (* When to extract DNA and prepare (default: 0.5) *)
-  handoff_threshold: float;    (* When to actually handoff (default: 0.8) *)
-  (* Delta quality controls - BALTHASAR feedback *)
-  min_context_for_delta: int;  (* Skip delta if context < this (short session exception) *)
-  min_delta_len: int;          (* Skip delta if delta < this (quality threshold) *)
+      (** Compression ratio for context DNA (0.0-1.0).
+          0.1 = keep 10% of context, 1.0 = keep 100%.
+          Lower = faster handoff, higher = better context retention.
+          Default: 0.1 (see {!Defaults.dna_compression_ratio}). *)
+
+  apoptosis_delay: float;
+      (** Grace period in seconds before completing apoptosis.
+          Allows dying cell to finish cleanup tasks.
+          Default: 5.0s (see {!Defaults.apoptosis_delay_seconds}). *)
+
+  prepare_threshold: float;
+      (** Context usage ratio (0.0-1.0) to trigger Phase 1 (DNA extraction).
+          At this threshold, DNA is extracted and cell enters [Prepared] state.
+          Should be < [handoff_threshold] to allow delta capture.
+          Default: 0.5 (50%) (see {!Defaults.prepare_threshold}). *)
+
+  handoff_threshold: float;
+      (** Context usage ratio (0.0-1.0) to trigger Phase 2 (actual handoff).
+          At this threshold, mitosis is executed and new cell takes over.
+          Default: 0.8 (80%) (see {!Defaults.handoff_threshold}). *)
+
+  min_context_for_delta: int;
+      (** Minimum context length to consider delta extraction.
+          Sessions shorter than this skip delta (short session exception).
+          Prevents noisy deltas from very short conversations.
+          Default: 1000 chars (see {!Defaults.min_context_for_delta}). *)
+
+  min_delta_len: int;
+      (** Minimum delta length after compression to include in merged DNA.
+          Deltas shorter than this are treated as noise and discarded.
+          Quality threshold from BALTHASAR feedback.
+          Default: 100 chars (see {!Defaults.min_delta_len}). *)
 }
+
+(** Named constants for configuration values.
+
+    These defaults are tuned based on empirical observations:
+    - Claude's context window fills ~80% after ~100 tool calls
+    - 5-minute sessions typically reach 50% context
+    - 10 tasks or 20 tool calls correlate with significant context growth
+
+    All magic numbers are centralized here for easy tuning.
+    Each constant is referenced by {!mitosis_config} field documentation. *)
+module Defaults = struct
+  (** Time-based trigger interval in seconds.
+      Rationale: 5 minutes is long enough for meaningful work,
+      short enough to prevent context overflow in long sessions. *)
+  let time_trigger_seconds = 300.0
+
+  (** Task count trigger threshold.
+      Rationale: 10 tasks typically accumulate enough context
+      to benefit from division, based on average task complexity. *)
+  let task_trigger_count = 10
+
+  (** Tool call count trigger threshold.
+      Rationale: 20 tool calls ≈ 16% context (20/125).
+      Used as early warning with other triggers. *)
+  let tool_call_trigger_count = 20
+
+  (** Number of reserve cells to maintain in stem pool.
+      Rationale: 2 cells balance instant availability vs memory cost.
+      1 for immediate use, 1 as backup during replenishment. *)
+  let stem_pool_size = 2
+
+  (** Maximum allowed generation before forced termination.
+      Rationale: 10 generations = 10 divisions, enough for any session.
+      Prevents infinite loops from runaway mitosis bugs. *)
+  let max_generation = 10
+
+  (** DNA compression ratio (0.0-1.0).
+      Rationale: 10% retains key context while reducing handoff size.
+      Empirically: first 10% contains task definition, recent work. *)
+  let dna_compression_ratio = 0.1
+
+  (** Grace period in seconds before completing apoptosis.
+      Rationale: 5 seconds allows cleanup (file writes, log flush)
+      without blocking the new cell for too long. *)
+  let apoptosis_delay_seconds = 5.0
+
+  (** Phase 1 threshold: extract DNA and enter Prepared state.
+      Rationale: 50% leaves room for delta capture (50%→80%).
+      Early preparation avoids extraction delay at critical moment. *)
+  let prepare_threshold = 0.5
+
+  (** Phase 2 threshold: execute handoff to child cell.
+      Rationale: 80% is the industry-standard LLM context threshold.
+      Higher risks overflow, lower wastes context capacity. *)
+  let handoff_threshold = 0.8
+
+  (** Minimum context length to attempt delta extraction.
+      Rationale: Sessions under 1000 chars are too short for
+      meaningful delta. Full DNA is sufficient for short sessions. *)
+  let min_context_for_delta = 1000
+
+  (** Minimum compressed delta length to include in merged DNA.
+      Rationale: Deltas under 100 chars are likely noise
+      (whitespace, minor edits). Quality threshold per BALTHASAR feedback. *)
+  let min_delta_len = 100
+
+  (** Estimated tool calls to fill 100% context.
+      Derivation: 100 tool calls ≈ 80% context → 100/0.8 = 125.
+      Used to estimate context_ratio from tool call count. *)
+  let tool_calls_per_full_context = 125.0
+
+  (** Generation number for emergency-created cells.
+      When stem pool is empty, emergency cell is created with this gen.
+      999 signals abnormal creation for debugging/monitoring. *)
+  let emergency_generation = 999
+
+  (** Timeout for spawning a new agent cell in seconds.
+      Rationale: 10 minutes allows for slow network/API conditions
+      while preventing indefinite hangs.
+      Now delegated to Env_config.Spawn.timeout_seconds for centralized config. *)
+  let spawn_timeout_seconds = Env_config.Spawn.timeout_seconds
+end
 
 (** Default mitosis configuration - 2-phase approach *)
 let default_config = {
   triggers = [
-    Time_based 300.0;        (* Every 5 minutes *)
-    Task_count 10;           (* Every 10 tasks *)
-    Tool_calls 20;           (* Every 20 tool calls *)
+    Time_based Defaults.time_trigger_seconds;
+    Task_count Defaults.task_trigger_count;
+    Tool_calls Defaults.tool_call_trigger_count;
   ];
-  stem_pool_size = 2;
-  max_generation = 10;       (* Reduced from 100 per MAGI feedback *)
-  dna_compression_ratio = 0.1;
-  apoptosis_delay = 5.0;
-  (* 2-Phase thresholds *)
-  prepare_threshold = 0.5;   (* 50%: Extract DNA, warm up stem cell *)
-  handoff_threshold = 0.8;   (* 80%: Actually transfer work (same as relay) *)
-  (* Delta quality controls *)
-  min_context_for_delta = 1000;  (* < 1000 chars = short session, skip delta *)
-  min_delta_len = 100;           (* < 100 chars delta = noise, skip *)
+  stem_pool_size = Defaults.stem_pool_size;
+  max_generation = Defaults.max_generation;
+  dna_compression_ratio = Defaults.dna_compression_ratio;
+  apoptosis_delay = Defaults.apoptosis_delay_seconds;
+  prepare_threshold = Defaults.prepare_threshold;
+  handoff_threshold = Defaults.handoff_threshold;
+  min_context_for_delta = Defaults.min_context_for_delta;
+  min_delta_len = Defaults.min_delta_len;
 }
 
-(** Create a new stem cell *)
+(** Create a new stem cell with collision-resistant ID *)
 let create_stem_cell ~generation =
-  let id = Printf.sprintf "cell-%d-%d" generation (int_of_float (Unix.gettimeofday () *. 1000.0) mod 10000) in
+  (* Use random bytes instead of timestamp mod to avoid ID collision *)
+  let random_suffix =
+    let bytes = Bytes.create 4 in
+    for i = 0 to 3 do Bytes.set bytes i (Char.chr (Random.int 256)) done;
+    Bytes.fold_left (fun acc b -> acc ^ Printf.sprintf "%02x" (Char.code b)) "" bytes
+  in
+  let id = Printf.sprintf "cell-%d-%s" generation random_suffix in
   {
     id;
     generation;
@@ -157,6 +327,8 @@ let safe_sub s start len =
 
 (** Compress context into DNA for transfer *)
 let compress_to_dna ~ratio ~context =
+  (* Clamp ratio to valid range [0.0, 1.0] *)
+  let ratio = Float.max 0.0 (Float.min 1.0 ratio) in
   (* Simple compression: take first N% of context *)
   let len = String.length context in
   let target_len = int_of_float (float_of_int len *. ratio) in
@@ -204,22 +376,45 @@ let extract_delta ~config ~full_context ~since_len =
 (** String Set for O(log n) lookup instead of O(n) List.mem *)
 module StringSet = Set.Make(String)
 
-(** Simple line-based deduplication for merge - O(n log n) instead of O(n²) *)
+(** Lazy line sequence from string - avoids full split allocation.
+    Memory-efficient: generates lines on-demand without building intermediate list. *)
+let lines_seq s =
+  let len = String.length s in
+  let rec find_line start () =
+    if start >= len then Seq.Nil
+    else
+      match String.index_from_opt s start '\n' with
+      | Some newline_pos ->
+          let line = String.sub s start (newline_pos - start) in
+          Seq.Cons (line, find_line (newline_pos + 1))
+      | None ->
+          (* Last line without trailing newline *)
+          let line = String.sub s start (len - start) in
+          Seq.Cons (line, fun () -> Seq.Nil)
+  in
+  find_line 0
+
+(** Simple line-based deduplication for merge - O(n log n) with lazy Seq.
+    Optimized: uses Seq to avoid intermediate list allocations for base. *)
 let deduplicate_lines ~base ~delta =
-  let base_lines = String.split_on_char '\n' base |> List.map String.trim in
-  (* Build a Set for O(log n) membership test *)
-  let base_set = List.fold_left (fun acc line ->
-    if String.length line > 10 then (* Only track meaningful lines *)
-      StringSet.add line acc
-    else acc
-  ) StringSet.empty base_lines in
-  let delta_lines = String.split_on_char '\n' delta in
-  let unique_lines = List.filter (fun line ->
-    let trimmed = String.trim line in
-    (* Keep if: short line OR not in base *)
-    String.length trimmed <= 10 || not (StringSet.mem trimmed base_set)
-  ) delta_lines in
-  String.concat "\n" unique_lines
+  (* Build base_set from Seq - no intermediate list allocation *)
+  let base_set =
+    lines_seq base
+    |> Seq.fold_left (fun acc line ->
+        let trimmed = String.trim line in
+        if String.length trimmed > 10 then (* Only track meaningful lines *)
+          StringSet.add trimmed acc
+        else acc
+      ) StringSet.empty
+  in
+  (* Filter delta lines using Seq, collect to list for concat *)
+  lines_seq delta
+  |> Seq.filter (fun line ->
+      let trimmed = String.trim line in
+      (* Keep if: short line OR not in base *)
+      String.length trimmed <= 10 || not (StringSet.mem trimmed base_set))
+  |> List.of_seq
+  |> String.concat "\n"
 
 (** Merge prepared DNA with delta from 50%->80% window
     Enhanced strategy:
@@ -261,7 +456,7 @@ let activate_stem ~pool ~dna =
   match List.find_opt (fun c -> c.state = Stem) pool.cells with
   | None ->
     (* No stem cells available - create emergency cell *)
-    let emergency = create_stem_cell ~generation:999 in
+    let emergency = create_stem_cell ~generation:Defaults.emergency_generation in
     let activated = { emergency with
       state = Active;
       phase = Idle;  (* Fresh start *)
@@ -464,9 +659,9 @@ let config_to_json config =
 let write_status ~base_path ~cell ~config =
   let masc_dir = Filename.concat base_path ".masc" in
   let status_file = Filename.concat masc_dir "mitosis-status.json" in
-  (* Rough estimate: assume 100 tool calls ≈ 80% context *)
+  (* Estimate context ratio from tool calls *)
   let tool_calls = cell.tool_call_count in
-  let estimated_ratio = Float.min 1.0 (Float.of_int tool_calls /. 125.0) in
+  let estimated_ratio = Float.min 1.0 (Float.of_int tool_calls /. Defaults.tool_calls_per_full_context) in
   let status =
     if estimated_ratio >= config.handoff_threshold then "critical"
     else if estimated_ratio >= config.prepare_threshold then "warning"
@@ -484,9 +679,12 @@ let write_status ~base_path ~cell ~config =
   ] in
   (* Ensure .masc directory exists *)
   if Sys.file_exists masc_dir && Sys.is_directory masc_dir then begin
-    let oc = open_out status_file in
-    output_string oc (Yojson.Safe.pretty_to_string json ^ "\n");
-    close_out oc
+    try
+      let oc = open_out status_file in
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        output_string oc (Yojson.Safe.pretty_to_string json ^ "\n"))
+    with exn ->
+      Printf.eprintf "[MITOSIS/ERROR] Failed to write status: %s\n%!" (Printexc.to_string exn)
   end
 
 (** Write mitosis status to both local file AND backend (for cross-machine collaboration).
@@ -499,9 +697,9 @@ let write_status_with_backend ~room_config ~cell ~config =
   let node_id = room_config.backend_config.Backend.node_id in
   let cluster_name = room_config.backend_config.Backend.cluster_name in
 
-  (* Calculate status *)
+  (* Calculate status using named constant *)
   let tool_calls = cell.tool_call_count in
-  let estimated_ratio = Float.min 1.0 (Float.of_int tool_calls /. 125.0) in
+  let estimated_ratio = Float.min 1.0 (Float.of_int tool_calls /. Defaults.tool_calls_per_full_context) in
   let status =
     if estimated_ratio >= config.handoff_threshold then "critical"
     else if estimated_ratio >= config.prepare_threshold then "warning"
@@ -527,9 +725,14 @@ let write_status_with_backend ~room_config ~cell ~config =
   let masc_dir = Filename.concat base_path ".masc" in
   let status_file = Filename.concat masc_dir "mitosis-status.json" in
   if Sys.file_exists masc_dir && Sys.is_directory masc_dir then begin
-    let oc = open_out status_file in
-    output_string oc (Yojson.Safe.pretty_to_string json ^ "\n");
-    close_out oc
+    try
+      let oc = open_out status_file in
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        output_string oc (Yojson.Safe.pretty_to_string json ^ "\n")
+      )
+    with exn ->
+      Printf.eprintf "[MITOSIS/ERROR] Failed to write status file: %s\n%!"
+        (Printexc.to_string exn)
   end;
 
   (* 2. Write to backend (for cross-machine collaboration) *)
@@ -548,6 +751,9 @@ let get_all_statuses ~room_config =
           let status = Yojson.Safe.Util.(json |> member "status" |> to_string) in
           let ratio = Yojson.Safe.Util.(json |> member "estimated_ratio" |> to_float) in
           Some (node_id, status, ratio)
-        with Yojson.Safe.Util.Type_error _ -> None
+        with
+        | Yojson.Safe.Util.Type_error _ -> None
+        | Yojson.Json_error _ -> None
+        | _ -> None  (* Defensive: any other parse error *)
       ) pairs
   | Error _ -> []

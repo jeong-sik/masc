@@ -177,28 +177,28 @@ let default_configs = [
   ("claude", {
     agent_name = "claude";
     command = "claude --output-format json -p";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
   ("gemini", {
     agent_name = "gemini";
     command = "gemini --yolo";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
   ("codex", {
     agent_name = "codex";
     command = "codex exec --json";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
   });
   ("ollama", {
     agent_name = "ollama";
     command = "ollama run devstral";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];
   });
@@ -206,7 +206,7 @@ let default_configs = [
   ("glm", {
     agent_name = "glm";
     command = "curl -s -X POST http://localhost:8932/mcp -H 'Content-Type: application/json' -d";
-    timeout_seconds = 300;
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];  (* MCP tools not applicable for API call *)
   });
@@ -215,18 +215,23 @@ let default_configs = [
 let get_config agent_name = 
   List.assoc_opt agent_name default_configs
 
-let build_mcp_flags agent_name tools = 
-  if tools = [] then ""
+(** Build MCP flags as argument list (no shell escaping needed) *)
+let build_mcp_args agent_name tools = 
+  if tools = [] then []
   else match agent_name with 
   | "claude" -> 
     let tools_str = String.concat "," tools in 
-    Printf.sprintf " --allowedTools %s" (Filename.quote tools_str)
+    ["--allowedTools"; tools_str]
   | "gemini" -> 
-    let tools_args = String.concat " " (List.map Filename.quote tools) in 
-    Printf.sprintf " --allowed-mcp-server-names masc --allowed-tools %s" tools_args
-  | _ -> ""
+    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
+  | _ -> []
 
-(** Spawn an agent using Eio.Process *)
+(** Parse command string into executable and arguments *)
+let parse_command cmd =
+  let parts = String.split_on_char ' ' cmd in
+  List.filter (fun s -> String.length s > 0) parts
+
+(** Spawn an agent using Eio.Process (direct execution, no shell) *)
 let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let start_time = Unix.gettimeofday () in
 
@@ -235,31 +240,15 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     | None -> {
         agent_name;
         command = agent_name;
-        timeout_seconds = Option.value timeout_seconds ~default:300;
+        timeout_seconds = Option.value timeout_seconds ~default:Env_config.Spawn.timeout_seconds;
         working_dir;
         mcp_tools = [];
       }
   in
 
   let timeout = Option.value timeout_seconds ~default:config.timeout_seconds in
-  let mcp_flags = build_mcp_flags agent_name config.mcp_tools in
+  let mcp_args = build_mcp_args agent_name config.mcp_tools in
   let augmented_prompt = prompt ^ masc_lifecycle_suffix in
-
-  (* Prepare arguments for shell execution - GLM uses special llm-mcp HTTP call *)
-  let full_cmd_str =
-    if agent_name = "glm" then
-      (* Build JSON-RPC request for llm-mcp glm tool *)
-      let escaped_prompt = String.concat "\\\"" (String.split_on_char '"' augmented_prompt) in
-      let escaped_prompt = String.concat "\\n" (String.split_on_char '\n' escaped_prompt) in
-      let json_body = Printf.sprintf
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"glm\",\"arguments\":{\"prompt\":\"%s\",\"stream\":false}}}"
-        escaped_prompt in
-      Printf.sprintf "timeout %d curl -s -X POST http://localhost:8932/mcp -H 'Content-Type: application/json' -d '%s'"
-        timeout json_body
-    else
-      Printf.sprintf "echo %s | timeout %d %s%s"
-        (Filename.quote augmented_prompt) timeout config.command mcp_flags
-  in
 
   let original_dir = Sys.getcwd () in
   (match working_dir with Some d -> Sys.chdir d | None -> ());
@@ -267,10 +256,47 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let result =
     try
       let output_buf = Buffer.create 4096 in
-      let process = Eio.Process.spawn ~sw proc_mgr
-        ~stdout:(Eio.Flow.buffer_sink output_buf)
-        ["bash"; "-c"; full_cmd_str]
+      
+      (* Build command arguments - direct execution without shell *)
+      let (cmd_args, stdin_data) =
+        if agent_name = "glm" then
+          (* GLM: use curl with JSON-RPC body *)
+          let json_body = Yojson.Safe.to_string (`Assoc [
+            ("jsonrpc", `String "2.0");
+            ("id", `Int 1);
+            ("method", `String "tools/call");
+            ("params", `Assoc [
+              ("name", `String "glm");
+              ("arguments", `Assoc [
+                ("prompt", `String augmented_prompt);
+                ("stream", `Bool false)
+              ])
+            ])
+          ]) in
+          (["curl"; "-s"; "-X"; "POST"; "http://localhost:8932/mcp";
+            "-H"; "Content-Type: application/json"; "-d"; json_body], None)
+        else
+          (* Other agents: parse command and pass prompt via stdin *)
+          let base_args = parse_command config.command in
+          (base_args @ mcp_args, Some augmented_prompt)
       in
+      
+      (* Wrap with timeout command for process-level timeout (no shell injection) *)
+      let full_args = ["timeout"; string_of_int timeout] @ cmd_args in
+      
+      (* Spawn process with optional stdin - direct execution, no shell *)
+      let process = match stdin_data with
+        | Some data ->
+            Eio.Process.spawn ~sw proc_mgr
+              ~stdin:(Eio.Flow.string_source data)
+              ~stdout:(Eio.Flow.buffer_sink output_buf)
+              full_args
+        | None ->
+            Eio.Process.spawn ~sw proc_mgr
+              ~stdout:(Eio.Flow.buffer_sink output_buf)
+              full_args
+      in
+      
       let status = Eio.Process.await process in
       let raw_output = Buffer.contents output_buf in
       let exit_code = match status with 

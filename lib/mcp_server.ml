@@ -332,14 +332,13 @@ let read_event_lines config ~limit =
     let remaining = ref limit in
     let read_lines path =
       let ic = open_in path in
-      let rec loop acc =
-        match input_line ic with
-        | line -> loop (line :: acc)
-        | exception End_of_file ->
-            close_in ic;
-            List.rev acc
-      in
-      loop []
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let rec loop acc =
+          match input_line ic with
+          | line -> loop (line :: acc)
+          | exception End_of_file -> List.rev acc
+        in
+        loop [])
     in
     let add_lines path =
       if !remaining <= 0 then ()

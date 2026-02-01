@@ -129,17 +129,20 @@ let delegation_request_to_yojson r =
 let delegation_request_of_yojson json =
   let open Yojson.Safe.Util in
   try
-    Ok {
-      id = json |> member "id" |> to_string;
-      from_org = json |> member "from_org" |> to_string;
-      to_org = json |> member "to_org" |> to_string;
-      task = (match json |> member "task" |> task_of_yojson with Ok t -> t | Error e -> failwith e);
-      priority = json |> member "priority" |> to_int;
-      timeout_seconds = json |> member "timeout_seconds" |> to_int_option;
-      created_at = json |> member "created_at" |> to_string;
-      status = json |> member "status" |> to_string;
-      result = json |> member "result" |> to_string_option;
-    }
+    match json |> member "task" |> task_of_yojson with
+    | Error e -> Error (Printf.sprintf "task parsing failed: %s" e)
+    | Ok task ->
+        Ok {
+          id = json |> member "id" |> to_string;
+          from_org = json |> member "from_org" |> to_string;
+          to_org = json |> member "to_org" |> to_string;
+          task;
+          priority = json |> member "priority" |> to_int;
+          timeout_seconds = json |> member "timeout_seconds" |> to_int_option;
+          created_at = json |> member "created_at" |> to_string;
+          status = json |> member "status" |> to_string;
+          result = json |> member "result" |> to_string_option;
+        }
   with e -> Error (Printexc.to_string e)
 
 (** Federation event - variant type with inline records *)
@@ -257,8 +260,8 @@ let safe_write_file (path : string) (content : string) : (unit, string) result =
       Unix.mkdir dir 0o700;
     let tmp_path = path ^ ".tmp" in
     let oc = open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o600 tmp_path in
-    output_string oc content;
-    close_out oc;
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc content);
     (* Atomic rename for consistency *)
     Sys.rename tmp_path path;
     Ok ()
@@ -273,8 +276,8 @@ let safe_read_file (path : string) : (string, string) result =
       Error (Printf.sprintf "File not found: %s" path)
     else
       let ic = open_in path in
-      let content = really_input_string ic (in_channel_length ic) in
-      close_in ic;
+      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        really_input_string ic (in_channel_length ic)) in
       Ok content
   with
   | Sys_error msg -> Error (Printf.sprintf "File read error: %s" msg)
@@ -286,8 +289,8 @@ let safe_append_file (path : string) (content : string) : (unit, string) result 
     if not (Sys.file_exists dir) then
       Unix.mkdir dir 0o700;
     let oc = open_out_gen [Open_append; Open_creat] 0o600 path in
-    output_string oc content;
-    close_out oc;
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc content);
     Ok ()
   with
   | Sys_error msg -> Error (Printf.sprintf "File append error: %s" msg)

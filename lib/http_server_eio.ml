@@ -303,13 +303,15 @@ module Request = struct
       done);
 
     match !result with
-    | Some (Ok s) -> s
-    | Some (Error msg) -> failwith msg
-    | None -> failwith "read_body_sync: impossible state"
+    | Some (Ok s) -> Ok s
+    | Some (Error msg) -> Error msg
+    | None -> Error "read_body_sync: impossible state"
 
   (** Get path from request target *)
   let path (request : Httpun.Request.t) =
-    request.target |> String.split_on_char '?' |> List.hd
+    match String.split_on_char '?' request.target with
+    | p :: _ -> p
+    | [] -> request.target (* split always returns non-empty, but type-safe *)
 
   (** Get HTTP method *)
   let method_ (request : Httpun.Request.t) =

@@ -19,6 +19,8 @@ type token = {
 module TokenStore = struct
   let tokens : (string, token) Hashtbl.t = Hashtbl.create 64
   let lock : Eio.Mutex.t option ref = ref None
+  let last_cleanup : float ref = ref 0.0
+  let cleanup_interval = 300.0  (* 5 minutes *)
 
   (** Initialize the token store with Eio mutex. Call once at server startup. *)
   let init () : unit =
@@ -29,6 +31,26 @@ module TokenStore = struct
     match !lock with
     | Some mutex -> Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
     | None -> f ()  (* Fallback for non-Eio contexts or before init *)
+
+  (** Internal cleanup - removes tokens older than max_age *)
+  let cleanup_internal ~(max_age : float) : int =
+    let now = Unix.gettimeofday () in
+    let old_tokens = Hashtbl.fold (fun id t acc ->
+      if now -. t.created_at > max_age then id :: acc else acc
+    ) tokens [] in
+    List.iter (Hashtbl.remove tokens) old_tokens;
+    List.length old_tokens
+
+  (** Auto-cleanup on access if interval elapsed *)
+  let maybe_auto_cleanup () =
+    let now = Unix.gettimeofday () in
+    if now -. !last_cleanup > cleanup_interval then begin
+      last_cleanup := now;
+      let max_age = Env_config.Cancellation.token_max_age_seconds in
+      let removed = cleanup_internal ~max_age in
+      if removed > 0 then
+        Log.Cancel.info "Auto-cleanup removed %d expired tokens" removed
+    end
 
   (** Generate token ID *)
   let generate_id () : string =
@@ -42,6 +64,7 @@ module TokenStore = struct
   (** Create new cancellation token *)
   let create () : token =
     with_lock (fun () ->
+      maybe_auto_cleanup ();
       let token = {
         id = generate_id ();
         cancelled = false;
@@ -68,12 +91,8 @@ module TokenStore = struct
   (** Cleanup old tokens (older than max_age seconds) *)
   let cleanup ~(max_age : float) : int =
     with_lock (fun () ->
-      let now = Unix.gettimeofday () in
-      let old_tokens = Hashtbl.fold (fun id t acc ->
-        if now -. t.created_at > max_age then id :: acc else acc
-      ) tokens [] in
-      List.iter (Hashtbl.remove tokens) old_tokens;
-      List.length old_tokens
+      last_cleanup := Unix.gettimeofday ();
+      cleanup_internal ~max_age
     )
 
   (** {2 ID-based convenience functions for testing} *)

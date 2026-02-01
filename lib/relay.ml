@@ -191,7 +191,7 @@ let execute_relay ~config ~payload =
   let result = Spawn.spawn
     ~agent_name:config.target_agent
     ~prompt
-    ~timeout_seconds:600  (* Longer timeout for complex continuations *)
+    ~timeout_seconds:Env_config.Spawn.timeout_seconds  (* Centralized timeout config *)
     ()
   in
 

@@ -101,15 +101,15 @@ let save_session t session =
   let content = Yojson.Safe.pretty_to_string json in
   let filepath = session_file t session.agent_id in
   let oc = open_out filepath in
-  output_string oc content;
-  close_out oc
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc content)
 
 let load_session t agent_id =
   let filepath = session_file t agent_id in
   if Sys.file_exists filepath then begin
     let ic = open_in filepath in
-    let content = really_input_string ic (in_channel_length ic) in
-    close_in ic;
+    let content = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      really_input_string ic (in_channel_length ic)) in
     try
       let json = Yojson.Safe.from_string content in
       Some (session_of_json json)

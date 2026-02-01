@@ -76,7 +76,7 @@ let handle_relay_now _ctx args =
     relay_generation = generation;
   } in
   let prompt = Relay.build_handoff_prompt ~payload ~generation:(generation + 1) in
-  let result = Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:600 () in
+  let result = Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
   let output_preview =
     if String.length result.Spawn.output > 500 then
       String.sub result.Spawn.output 0 500

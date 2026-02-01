@@ -12,10 +12,10 @@ type client = {
 let clients : (string, client) Hashtbl.t = Hashtbl.create 16
 
 (** Monotonic client id for safe replacement/unregister *)
-let client_id_counter = ref 0
+let client_id_counter = Atomic.make 0
 
 (** Global event counter for resumability *)
-let event_counter = ref 0
+let event_counter = Atomic.make 0
 
 (** Event buffer for resumability - stores (event_id, event_string) pairs *)
 let max_buffer_size = 100
@@ -36,9 +36,9 @@ let get_events_after last_id =
 
 (** Format SSE event with optional ID and event type *)
 let format_event ?id ?event_type data =
-  incr event_counter;
+  Atomic.incr event_counter;
   let id_line = Printf.sprintf "id: %d\n"
-    (match id with Some i -> i | None -> !event_counter) in
+    (match id with Some i -> i | None -> Atomic.get event_counter) in
   let event_line = match event_type with
     | Some e -> Printf.sprintf "event: %s\n" e
     | None -> ""
@@ -46,17 +46,17 @@ let format_event ?id ?event_type data =
   Printf.sprintf "%s%sdata: %s\n\n" id_line event_line data
 
 (** Get current event ID *)
-let current_id () = !event_counter
+let current_id () = Atomic.get event_counter
 
 (** Allocate next event ID without emitting data. *)
 let next_id () =
-  incr event_counter;
-  !event_counter
+  Atomic.incr event_counter;
+  Atomic.get event_counter
 
 (** Register a new SSE client *)
 let register session_id ~push ~last_event_id =
-  incr client_id_counter;
-  let client = { id = !client_id_counter; push; last_event_id } in
+  Atomic.incr client_id_counter;
+  let client = { id = Atomic.get client_id_counter; push; last_event_id } in
   Hashtbl.replace clients session_id client;
   client.id
 
@@ -85,7 +85,7 @@ let update_last_event_id session_id event_id =
 (** Broadcast event to all connected clients *)
 let broadcast json =
   let data = Yojson.Safe.to_string json in
-  let current_event_id = !event_counter + 1 in
+  let current_event_id = Atomic.get event_counter + 1 in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
   Hashtbl.iter (fun session_id client ->
@@ -100,7 +100,7 @@ let broadcast json =
 (** Send a JSON-RPC message to a specific session (legacy SSE transport) *)
 let send_to session_id json =
   let data = Yojson.Safe.to_string json in
-  let current_event_id = !event_counter + 1 in
+  let current_event_id = Atomic.get event_counter + 1 in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
   match Hashtbl.find_opt clients session_id with

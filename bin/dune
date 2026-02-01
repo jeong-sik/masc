@@ -45,3 +45,11 @@
 ;;  (name parse_test)
 ;;  (modules parse_test)
 ;;  (libraries masc_mcp))
+
+;; TUI Dashboard - Terminal interface for multi-agent coordination
+(executable
+ (name masc_tui)
+ (modules masc_tui)
+ (public_name masc-tui)
+ (package masc_mcp)
+ (libraries unix yojson))

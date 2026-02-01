@@ -250,3 +250,12 @@ let voting_result_to_json = function
     `Assoc [("type", `String "deadlock")]
   | Escalate ->
     `Assoc [("type", `String "escalate")]
+
+(** Human-friendly result string *)
+let voting_result_to_string = function
+  | Unanimous Approve -> "✅ Unanimous: Approved"
+  | Unanimous Reject -> "❌ Unanimous: Rejected"
+  | Unanimous Abstain -> "⚪ Unanimous: Abstained"
+  | Majority count -> Printf.sprintf "📊 Majority: %d votes" count
+  | Deadlock -> "🔒 Deadlock: No consensus reached"
+  | Escalate -> "⬆️ Escalate: Requires higher authority"

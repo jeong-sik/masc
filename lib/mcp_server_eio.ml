@@ -953,7 +953,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           output_string oc nickname)
       with e ->
         Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
-      (true, result)
+      (* Cultural Inheritance: append institution welcome to join response *)
+      let institution_welcome =
+        try Institution_eio.load_and_format_for_welcome ~fs config
+        with _ -> ""
+      in
+      let final_result = if institution_welcome = "" then result
+        else result ^ institution_welcome in
+      (true, final_result)
 
   | "masc_leave" ->
       let result = Room.leave config ~agent_name in

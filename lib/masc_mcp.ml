@@ -39,6 +39,7 @@ module Mcp_server = Mcp_server
 module Mcp_server_eio = Mcp_server_eio
 module Mcp_session = Mcp_session
 module Http_server_eio = Http_server_eio
+module Http_server_h2 = Http_server_h2
 module Graphql_api = Graphql_api
 module Safe_ops = Safe_ops
 module Sse = Sse

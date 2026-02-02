@@ -1,7 +1,8 @@
 (** MASC MCP Server - Eio Native Entry Point
     MCP Streamable HTTP Transport with Eio concurrency (OCaml 5.x)
 
-    Uses httpun-eio with httpun-ws-eio for WebSocket upgrades.
+    Uses h2-eio for HTTP/2 with unlimited SSE streams per connection.
+    HTTP/2 multiplexing eliminates browser's 6-connection-per-domain limit.
 *)
 
 [@@@warning "-32-69"]  (* Suppress unused values/fields during migration *)
@@ -10,6 +11,7 @@ open Cmdliner
 
 (** Module aliases *)
 module Http = Masc_mcp.Http_server_eio
+module Http_h2 = Masc_mcp.Http_server_h2
 module Mcp_session = Masc_mcp.Mcp_session
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
@@ -1354,6 +1356,97 @@ let run_server ~sw ~env ~port ~base_path =
     | Eio.Cancel.Cancelled _ -> true
     | _ -> false
   in
+  (* HTTP/2 error handler *)
+  let h2_error_handler _client_addr ?request:_ error respond =
+    let message = match error with
+      | `Exn exn -> Printexc.to_string exn
+      | `Bad_request -> "Bad request"
+      | `Internal_server_error -> "Internal server error"
+    in
+    Printf.eprintf "[H2] Error: %s\n%!" message;
+    let headers = H2.Headers.of_list [("content-type", "text/plain")] in
+    let body = respond headers in
+    H2.Body.Writer.write_string body message;
+    H2.Body.Writer.close body
+  in
+
+  (* HTTP/2 request handler - adapts H2.Reqd.t to existing handler logic *)
+  let h2_request_handler _client_addr h2_reqd =
+    let h2_req = H2.Reqd.request h2_reqd in
+    (* Convert H2.Request to Httpun.Request for compatibility *)
+    let httpun_headers = Httpun.Headers.of_list (H2.Headers.to_list h2_req.headers) in
+    let httpun_meth = match h2_req.meth with
+      | `GET -> `GET | `POST -> `POST | `DELETE -> `DELETE
+      | `OPTIONS -> `OPTIONS | `PUT -> `PUT | `HEAD -> `HEAD
+      | `CONNECT -> `CONNECT | `TRACE -> `TRACE | `Other s -> `Other s
+    in
+    let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h2_req.target in
+    (* Create a Gluten-style wrapper for the H2.Reqd.t
+       This is a minimal adapter - we'll call handlers directly with H2 *)
+    let path = Http.Request.path httpun_request in
+    (* Will be used after full migration for validation *)
+    let _is_mcp_like =
+      String.equal path "/mcp"
+      || String.equal path "/sse"
+      || String.equal path "/messages"
+    in
+    let origin = match H2.Headers.get h2_req.headers "origin" with
+      | Some o -> o
+      | None -> "*"
+    in
+
+    (* Fast path: handle common cases directly with H2 API *)
+    try
+      match httpun_meth, path with
+      | `GET, "/health" ->
+          let body = Printf.sprintf
+            {|{"status":"ok","server":"masc-mcp","version":"%s","protocol":"h2"}|}
+            Masc_mcp.Version.version
+          in
+          let headers = H2.Headers.of_list [
+            ("content-type", "application/json");
+            ("content-length", string_of_int (String.length body));
+          ] in
+          let response = H2.Response.create ~headers `OK in
+          let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+          H2.Body.Writer.write_string writer body;
+          H2.Body.Writer.close writer
+
+      | `OPTIONS, _ ->
+          let headers = H2.Headers.of_list (
+            ("content-length", "0") ::
+            cors_preflight_headers origin
+          ) in
+          let response = H2.Response.create ~headers `No_content in
+          let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+          H2.Body.Writer.close writer
+
+      | _ ->
+          (* For now, return 501 Not Implemented for other routes during migration *)
+          let body = Printf.sprintf "H2 migration in progress: %s %s" (Httpun.Method.to_string httpun_meth) path in
+          let headers = H2.Headers.of_list [
+            ("content-type", "text/plain");
+            ("content-length", string_of_int (String.length body));
+          ] in
+          let response = H2.Response.create ~headers `Not_implemented in
+          let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+          H2.Body.Writer.write_string writer body;
+          H2.Body.Writer.close writer
+    with exn ->
+      let msg = Printexc.to_string exn in
+      Printf.eprintf "[H2] Handler error: %s\n%!" msg;
+      let body = "500 Internal Server Error: " ^ msg in
+      let headers = H2.Headers.of_list [
+        ("content-type", "text/plain");
+        ("content-length", string_of_int (String.length body));
+      ] in
+      let response = H2.Response.create ~headers `Internal_server_error in
+      let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+      H2.Body.Writer.write_string writer body;
+      H2.Body.Writer.close writer
+  in
+  let _ = request_handler in (* suppress warning - will be used after full migration *)
+
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -1365,14 +1458,15 @@ let run_server ~sw ~env ~port ~base_path =
             try Eio.Flow.close flow with _ -> ()
           );
           try
-            Httpun_eio.Server.create_connection_handler
+            (* HTTP/2 with h2-eio - unlimited SSE streams per connection *)
+            H2_eio.Server.create_connection_handler
               ~sw:conn_sw
-              ~request_handler
-              ~error_handler:Http.error_handler
+              ~request_handler:h2_request_handler
+              ~error_handler:h2_error_handler
               client_addr
               flow
           with exn ->
-            Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn)
+            Printf.eprintf "[H2] Connection error: %s\n%!" (Printexc.to_string exn)
         )
       );
       accept_loop 0.05

@@ -198,8 +198,50 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
   end else
     Error "prefer_fast=false not implemented yet"
 
-(** Call local ollama API via curl subprocess — more reliable than raw TCP *)
-let ollama_generate ~net:_ ?(model = "qwen3-coder:30b") ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
+(** Call llm-mcp's glm tool — Z.ai cloud API, 200K context, no VRAM *)
+let llm_mcp_glm ~net:_ ?(temperature = 0.7) ?(max_tokens = 500) ~system prompt =
+  try
+    let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
+    let body = Yojson.Safe.to_string (`Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 1);
+      ("method", `String "tools/call");
+      ("params", `Assoc [
+        ("name", `String "glm");
+        ("arguments", `Assoc [
+          ("prompt", `String full_prompt);
+          ("max_tokens", `Int max_tokens);
+          ("temperature", `Float temperature);
+          ("stream", `Bool false);
+        ]);
+      ]);
+    ]) in
+    let escaped_body = Str.global_replace (Str.regexp "'") "'\\''" body in
+    let cmd = Printf.sprintf "curl -sf --max-time 120 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d '%s'" escaped_body in
+    let ic = Unix.open_process_in cmd in
+    let buf = Buffer.create 4096 in
+    (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
+    let status = Unix.close_process_in ic in
+    match status with
+    | Unix.WEXITED 0 ->
+        let json = Yojson.Safe.from_string (Buffer.contents buf) in
+        let text = json |> member "result" |> member "content" |> to_list |> List.hd |> member "text" |> to_string in
+        (* Strip [Extra] metadata if present *)
+        let text = try
+          let idx = String.rindex text '\n' in
+          if String.length text > idx + 7 && String.sub text (idx + 1) 7 = "[Extra]" then
+            String.sub text 0 idx
+          else text
+        with Not_found -> text in
+        Ok (String.trim text)
+    | Unix.WEXITED n -> Error (Printf.sprintf "llm-mcp curl exit %d" n)
+    | _ -> Error "llm-mcp curl signaled"
+  with
+  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse: %s" msg)
+  | exn -> Error (Printf.sprintf "llm-mcp exception: %s" (Printexc.to_string exn))
+
+(** Call local ollama API — DEPRECATED, use llm_mcp_glm instead *)
+let ollama_generate ~net:_ ?(model = "glm-4.7-flash:latest") ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
   try
     let body = Yojson.Safe.to_string (`Assoc [
       ("model", `String model);
@@ -253,9 +295,9 @@ let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt
           Ok response
       | Error e2 ->
           Printf.eprintf "[LLM] ❌ %s failed: %s\n%!" (string_of_provider cli2) e2;
-          (* 3. Fallback to ollama with SMALL model *)
-          Printf.eprintf "[LLM] Falling back to ollama qwen3:1.7b...\n%!";
-          ollama_generate ~net ~model:"qwen3:1.7b" ~temperature ~num_predict ~system prompt
+          (* 3. Fallback to cloud GLM via llm-mcp — 200K context, no VRAM *)
+          Printf.eprintf "[LLM] Falling back to cloud GLM (llm-mcp)...\n%!";
+          llm_mcp_glm ~net ~temperature ~max_tokens:num_predict ~system prompt
 
 (** {1 READ: Content Fetching} *)
 

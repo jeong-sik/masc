@@ -16,6 +16,7 @@ type channel =
 
 (** Agent identity record *)
 type t = {
+  uuid : string;              (** Permanent unique identifier *)
   session_key : string;
   agent_name : string;
   channel : channel option;
@@ -34,6 +35,7 @@ val string_of_channel : channel -> string
 
 (** {1 Identity Creation} *)
 
+val generate_uuid : agent_name:string -> string
 val generate_session_key : unit -> string
 val from_mcp_params : Yojson.Safe.t -> t
 val from_agent_name : string -> t

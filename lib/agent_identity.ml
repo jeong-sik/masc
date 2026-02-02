@@ -26,6 +26,7 @@ type channel =
 
 (** Agent identity - extracted from session/request context *)
 type t = {
+  uuid : string;                  (** Permanent unique identifier (UUIDv4 or hash) *)
   session_key : string;           (** Unique session identifier *)
   agent_name : string;            (** Display name (e.g., "claude-agent-001") *)
   channel : channel option;       (** Source channel if known *)
@@ -37,6 +38,15 @@ type t = {
   metadata : (string * string) list;  (** Additional metadata *)
 }
 [@@deriving yojson]
+
+(** Generate a unique agent UUID from name + timestamp hash *)
+let generate_uuid ~agent_name =
+  let timestamp = Unix.gettimeofday () in
+  let random_part = Random.int 0xFFFFFF in
+  let input = Printf.sprintf "%s-%f-%d" agent_name timestamp random_part in
+  (* Simple hash-based UUID: first 8 chars of hex digest *)
+  let hash = Digest.string input |> Digest.to_hex in
+  Printf.sprintf "agent-%s" (String.sub hash 0 12)
 
 (** {1 Channel Parsing} *)
 
@@ -94,6 +104,7 @@ let from_mcp_params params =
   in
   let now = Unix.gettimeofday () in
   {
+    uuid = generate_uuid ~agent_name;
     session_key;
     agent_name;
     channel;
@@ -109,6 +120,7 @@ let from_mcp_params params =
 let from_agent_name agent_name =
   let now = Unix.gettimeofday () in
   {
+    uuid = generate_uuid ~agent_name;
     session_key = generate_session_key ();
     agent_name;
     channel = None;
@@ -124,9 +136,11 @@ let from_agent_name agent_name =
 let anonymous () =
   let now = Unix.gettimeofday () in
   let key = generate_session_key () in
+  let name = Printf.sprintf "anon-%s" (String.sub key 0 8) in
   {
+    uuid = generate_uuid ~agent_name:name;
     session_key = key;
-    agent_name = Printf.sprintf "anon-%s" (String.sub key 0 8);
+    agent_name = name;
     channel = None;
     user_id = None;
     room_id = None;

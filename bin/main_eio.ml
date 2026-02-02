@@ -27,6 +27,49 @@ module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
 
 (** MCP Protocol Versions *)
+(* ============================================ *)
+(* HTTP Bearer Token Authentication             *)
+(* ============================================ *)
+
+(** Extract Bearer token from Authorization header *)
+let extract_bearer_token request =
+  match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
+  | Some auth_header ->
+    if String.length auth_header > 7 &&
+       String.lowercase_ascii (String.sub auth_header 0 7) = "bearer " then
+      Some (String.sub auth_header 7 (String.length auth_header - 7))
+    else
+      None
+  | None -> None
+
+(** Verify Bearer token for MCP endpoints *)
+let verify_mcp_auth ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  if not auth_config.Types.enabled then
+    Ok None  (* Auth disabled - allow all *)
+  else
+    match extract_bearer_token request with
+    | None when not auth_config.require_token ->
+      Ok None  (* Token not required *)
+    | None ->
+      Error "Authentication required. Use 'Authorization: Bearer <token>' header."
+    | Some token ->
+      (* Try to find agent by token hash *)
+      let token_hash = Auth.sha256_hash token in
+      let creds = Auth.list_credentials base_path in
+      match List.find_opt (fun c -> c.Types.token = token_hash) creds with
+      | None -> Error "Invalid token"
+      | Some cred ->
+        (* Check expiry *)
+        match cred.expires_at with
+        | None -> Ok (Some cred)
+        | Some exp_str ->
+          let now = Types.now_iso () in
+          if now > exp_str then
+            Error ("Token expired for " ^ cred.agent_name)
+          else
+            Ok (Some cred)
+
 let mcp_protocol_versions = [
   "2024-11-05";
   "2025-03-26";
@@ -220,12 +263,14 @@ let starts_with ~prefix s =
   let plen = String.length prefix in
   String.length s >= plen && String.sub s 0 plen = prefix
 
-(** Allowed localhost origins for DNS rebinding protection *)
+(** Allowed origins for DNS rebinding protection *)
 let allowed_origins = [
   "http://localhost";
   "https://localhost";
   "http://127.0.0.1";
   "https://127.0.0.1";
+  (* Cloudflare tunnel *)
+  "https://masc.crying.pictures";
 ]
 
 (** Validate Origin header for DNS rebinding protection *)
@@ -1324,11 +1369,12 @@ let run_server ~sw ~env ~port ~base_path =
   (* Start MCP session cleanup loop *)
   Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
 
-  let config = { Http.default_config with port; host = "127.0.0.1" } in
+  let config = { Http.default_config with port; host = "0.0.0.0" } in
   let routes = make_routes ~port:config.port ~host:config.host in
   let request_handler = make_extended_handler routes in
 
-  let ip = Eio.Net.Ipaddr.V4.loopback in
+  (* Listen on all interfaces for Cloudflare tunnel access *)
+  let ip = Eio.Net.Ipaddr.V4.any in
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
 
@@ -1416,7 +1462,7 @@ let run_server ~sw ~env ~port ~base_path =
   in
 
   (* HTTP/2 error handler *)
-  let h2_error_handler _client_addr ?request:_ error respond =
+  let _h2_error_handler _client_addr ?request:_ error respond =
     let message = match error with
       | `Exn exn -> Printexc.to_string exn
       | `Bad_request -> "Bad request"
@@ -1432,7 +1478,7 @@ let run_server ~sw ~env ~port ~base_path =
   (* ═══════════════════════════════════════════════════════════════════════
      HTTP/2 Request Handler - Full implementation
      ═══════════════════════════════════════════════════════════════════════ *)
-  let h2_request_handler _client_addr h2_reqd =
+  let _h2_request_handler _client_addr h2_reqd =
     let h2_req = H2.Reqd.request h2_reqd in
     let h2_headers = h2_req.headers in
     (* Convert H2.Request to Httpun.Request for compatibility with existing code *)
@@ -1497,6 +1543,16 @@ let run_server ~sw ~env ~port ~base_path =
             | None -> Mcp_session.generate ()
           in
           let auth_token = auth_token_from_request httpun_request in
+          (* HTTP-level auth check for MCP endpoints *)
+          let base_path = match !server_state with
+            | Some s -> s.Mcp_server.room_config.base_path
+            | None -> default_base_path ()
+          in
+          (match verify_mcp_auth ~base_path httpun_request with
+          | Error msg ->
+              let body = Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg in
+              h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+          | Ok _cred_opt ->
           h2_read_body h2_reqd (fun body_str ->
             let state = match !server_state with
               | Some s -> s
@@ -1519,7 +1575,7 @@ let run_server ~sw ~env ~port ~base_path =
             | json ->
                 let body = Yojson.Safe.to_string json in
                 h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs
-          )
+          ))  (* Close auth match + h2_read_body *)
 
       | `DELETE, "/mcp" ->
           (match session_id_opt with
@@ -1655,26 +1711,34 @@ let run_server ~sw ~env ~port ~base_path =
   in
   let _ = request_handler in (* suppress warning - legacy httpun handler *)
 
+  (* HTTP/1.1 accept loop - browser compatible *)
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
       Eio.Fiber.fork ~sw (fun () ->
-        (* Eio-idiomatic: use sub-switch for connection lifecycle management *)
         Eio.Switch.run (fun conn_sw ->
-          (* Register flow cleanup when connection switch exits *)
           Eio.Switch.on_release conn_sw (fun () ->
             try Eio.Flow.close flow with _ -> ()
           );
           try
-            (* HTTP/2 with h2-eio - unlimited SSE streams per connection *)
-            H2_eio.Server.create_connection_handler
+            (* HTTP/1.1 with httpun-eio - browser compatible *)
+            let conn_handler = Httpun_eio.Server.create_connection_handler
               ~sw:conn_sw
-              ~request_handler:h2_request_handler
-              ~error_handler:h2_error_handler
-              client_addr
-              flow
+              ~request_handler:(fun client_addr -> request_handler client_addr)
+              ~error_handler:(fun _client_addr ?request:_ error respond ->
+                let msg = match error with
+                  | `Exn exn -> Printexc.to_string exn
+                  | `Bad_request -> "Bad request"
+                  | `Bad_gateway -> "Bad gateway"
+                  | `Internal_server_error -> "Internal server error"
+                in
+                let body = respond (Httpun.Headers.of_list [("content-type", "text/plain")]) in
+                Httpun.Body.Writer.write_string body msg;
+                Httpun.Body.Writer.close body)
+            in
+            conn_handler client_addr flow
           with exn ->
-            Printf.eprintf "[H2] Connection error: %s\n%!" (Printexc.to_string exn)
+            Printf.eprintf "[HTTP] Connection error: %s\n%!" (Printexc.to_string exn)
         )
       );
       accept_loop 0.05
@@ -1683,8 +1747,7 @@ let run_server ~sw ~env ~port ~base_path =
       else begin
         Printf.eprintf "Accept error: %s\n%!" (Printexc.to_string exn);
         (try Eio.Time.sleep clock backoff_s with _ -> ());
-        let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
-        accept_loop next_backoff
+        accept_loop (Float.min 2.0 (backoff_s *. 1.5))
       end
   in
   accept_loop 0.05

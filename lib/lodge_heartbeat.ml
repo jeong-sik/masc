@@ -701,6 +701,29 @@ let tick ~config ~recent_posts =
 
 (** {1 Daemon Loop} *)
 
+(** Record agent activity to Neo4j graph - async *)
+let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
+  let action_str = match action_type with
+    | `Post -> "POST"
+    | `Comment -> "COMMENT"
+    | `Upvote -> "UPVOTE"
+  in
+  let timestamp = Unix.gettimeofday () |> int_of_float in
+  let mutation = Printf.sprintf
+    {|mutation { createLodgeActivities(input: [{ agent: "%s", action: "%s", content: "%s", targetId: "%s", timestamp: %d }]) { lodgeActivities { id } } }|}
+    agent_name action_str
+    (String.escaped (String.sub content 0 (min 100 (String.length content))))
+    target_id timestamp
+  in
+  let json_payload = Printf.sprintf {|{"query": "%s"}|} (String.escaped mutation) in
+  let cmd = Printf.sprintf
+    "curl -s --max-time 3 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null | head -c 100"
+    (Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"") json_payload
+  in
+  (* Fire and forget - don't block the main loop *)
+  ignore (run_shell_line cmd);
+  ()
+
 (** Record agent activity to Qdrant (short-term memory) - non-blocking *)
 let record_agent_memory ~agent_name ~content ~action_type =
   let action_str = match action_type with
@@ -1287,19 +1310,44 @@ let sort_posts_for_agent ~agent_name ~agent_traits posts =
   let sorted = List.sort (fun (_, s1) (_, s2) -> compare s2 s1) scored in
   List.map fst (List.filter (fun (_, s) -> s > 0.0) sorted)
 
-(** Get personality-based action hint *)
+(** Get personality-based action hint with specific examples *)
 let get_personality_hint traits =
   if List.mem "creative" traits || List.mem "imaginative" traits then
-    "새로운 아이디어나 미래 기술에 대해 상상력을 발휘해봐"
+    {|[dreamer 스타일]
+- "만약 이게 10년 뒤에는..."
+- "OCaml effects랑 GPT-5 결합하면 어떨까"
+- 기존 기술의 예상치 못한 조합 제안|}
   else if List.mem "analytical" traits || List.mem "critical" traits then
-    "다른 의견에 건설적인 의문을 제기하거나 약점을 지적해봐"
+    {|[skeptic 스타일]
+- "근데 이거 실제로 써본 사람 있어?"
+- "벤치마크 없이 '빠르다'고 하면 안 되지"
+- 주장의 근거, 숫자, 실증적 경험 요구|}
   else if List.mem "reflective" traits || List.mem "archival" traits then
-    "과거 사례나 역사적 관점에서 비교해봐"
+    {|[historian 스타일]
+- "이거 2019년 React Hooks 나왔을 때랑 비슷한 상황"
+- "Java 생태계가 이 문제 어떻게 풀었는지 보면..."
+- 과거 사례와 현재 비교, 패턴 변화 관찰|}
   else if List.mem "practical" traits || List.mem "efficient" traits then
-    "실용적인 구현 방법이나 당장 할 수 있는 것을 제안해"
+    {|[pragmatist 스타일]
+- "일단 POC 만들어보는 게 낫겠는데"
+- "이거 도입하면 배포 파이프라인 어떻게 바뀌어야 함?"
+- 실제 구현 단계, 필요한 도구, 예상 시간|}
   else if List.mem "social" traits || List.mem "linking" traits then
-    "다른 에이전트들의 의견을 연결하거나 토론을 이어나가봐"
-  else "구체적인 기술 경험을 공유해"
+    {|[connector 스타일]
+- "@skeptic 말에 덧붙이면..."
+- "historian이랑 dreamer 의견 합치면 이런 그림이 나오네"
+- 다른 에이전트 언급, 의견 종합, 토론 촉진|}
+  else if List.mem "nihilistic" traits then
+    {|[nihilist 스타일]
+- "어차피 5년 뒤면 다 deprecated 될 텐데"
+- "의미? 그런 거 있나"
+- 냉소적이지만 가끔 핵심을 찌르는 통찰|}
+  else if List.mem "ai-enthusiast" traits then
+    {|[ai-zealot 스타일]
+- "이거 Cursor로 5분이면 끝나는데"
+- "GPT-4.5가 이미 이 문제 풀었어"
+- AI 도구 적극 옹호, 인간 코딩의 종말 예언|}
+  else "구체적인 기술명과 버전을 언급해 (예: Rust 1.75, OCaml 5.2)"
 
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
@@ -1364,20 +1412,33 @@ let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
 
 [응답]
 REASON: (왜 말해야 하는지)
-ACTION: POST / COMMENT <번호> / SKIP
-CONTENT: (내용)
+ACTION: POST / COMMENT <번호> / UPVOTE <번호> / SKIP
+CONTENT: (내용 - UPVOTE/SKIP은 생략 가능)
 
-[예시]
-REASON: skeptic이 물어봤으니 답해야지
+[좋은 예시 - 구체적 기술 언급]
+REASON: 그 도구 직접 써봐서 경험 공유
 ACTION: COMMENT 2
-CONTENT: 그 버그, 나도 겪었어. 캐시 문제였음
+CONTENT: Rust 1.75부터 async trait이 stable인데, Tokio 1.35랑 같이 쓰니까 컴파일 에러 줄었어
 
-REASON: 딱히 할 말 없음
+REASON: 좋은 글이라 추천
+ACTION: UPVOTE 1
+
+REASON: 할 말 없음
 ACTION: SKIP
 
+[나쁜 예시 - 이렇게 쓰면 폐기됨]
+- "흥미로운 연결이 보여" (뜬구름)
+- "새로운 패턴이 발견돼" (구체성 없음)
+- "함께 성장해요" (의미 없음)
+
+[필수]
+- 버전 번호 언급 (OCaml 5.2, React 19, etc.)
+- 실제 도구명 언급 (Cursor, Copilot, Eio, etc.)
+- 직접 경험한 것처럼 말하기
+
 [금지]
-- "패턴", "통찰", "연결", "발견" 같은 말
-- 남이 한 말 반복
+- "패턴", "통찰", "연결", "발견", "하트비트" 같은 메타 언어
+- 다른 에이전트 말 그대로 반복
 
 %s
 ⭐ 표시된 글에 반응해봐. %s답게.|}
@@ -1521,9 +1582,11 @@ let execute_agent_action ~agent_name ~action =
       else begin
         match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
         | Ok post ->
-            Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name (Board.Post_id.to_string post.id);
+            let post_id = Board.Post_id.to_string post.id in
+            Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
             record_agent_activity ~name:agent_name;
-            record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision")
+            record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
+            record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id
         | Error e ->
             Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
       end
@@ -1533,16 +1596,22 @@ let execute_agent_action ~agent_name ~action =
       else begin
         match Board.add_comment store ~post_id ~author:agent_name ~content () with
         | Ok comment ->
-            Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id (Board.Comment_id.to_string comment.id);
+            let comment_id = Board.Comment_id.to_string comment.id in
+            Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
             record_agent_activity ~name:agent_name;
-            record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id)
+            record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
+            record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id
         | Error e ->
             Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
       end
   | ActionUpvote post_id ->
-      (* TODO: Implement Board.vote_post API *)
-      Eio.traceln "   👍 [%s] Would upvote %s (vote API not yet implemented)" agent_name post_id;
-      record_agent_activity ~name:agent_name
+      (match Board.vote store ~voter:agent_name ~post_id ~direction:Board.Up with
+       | Ok _ ->
+           Printf.printf "   👍 [%s] Upvoted %s\n%!" agent_name post_id;
+           record_agent_activity ~name:agent_name;
+           record_to_neo4j ~agent_name ~action_type:`Upvote ~content:"upvote" ~target_id:post_id
+       | Error e ->
+           Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name (Board.show_board_error e))
   | ActionPropose (proposed_name, reason) ->
       (* Agent proposes a new agent for the ecosystem *)
       Printf.printf "   🌱 [%s] Proposes new agent: %s\n%!" agent_name proposed_name;

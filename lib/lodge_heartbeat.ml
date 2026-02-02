@@ -25,6 +25,24 @@
     Uses in-memory hashtable with timeout for crash recovery.
 *)
 
+(** {0 Lodge State — Eio.Mutex protected}
+
+    All mutable shared state accessed from concurrent Eio fibers
+    (via Eio.Fiber.all in tick) is protected by a single coarse lock.
+    This is simpler and sufficient: heartbeat tick is the only hot path,
+    and the critical sections are short (Hashtbl lookups/updates). *)
+
+let lodge_lock : Eio.Mutex.t option ref = ref None
+
+let lodge_init_lock () =
+  if !lodge_lock = None then lodge_lock := Some (Eio.Mutex.create ())
+
+(** Run [f] under lodge mutex. Falls back to unprotected if not yet initialized. *)
+let with_lodge_lock f =
+  match !lodge_lock with
+  | Some mutex -> Eio.Mutex.use_rw ~protect:true mutex f
+  | None -> f ()
+
 (** Active agents: name -> (uuid, started_at) *)
 let active_agents : (string, string * float) Hashtbl.t = Hashtbl.create 10
 
@@ -34,33 +52,39 @@ let generate_agent_uuid () =
     (String.sub (Digest.to_hex (Digest.string (string_of_float (Unix.gettimeofday ())))) 0 8)
     (Random.int 0xFFFFFF)
 
-(** Check if agent is currently active (with 120s timeout for crash recovery) *)
-let is_agent_active ~name =
+(** Check if agent is currently active (with 120s timeout for crash recovery).
+    Internal — must be called under [with_lodge_lock]. *)
+let is_agent_active_unlocked ~name =
   match Hashtbl.find_opt active_agents name with
   | Some (_uuid, started_at) ->
       let elapsed = Unix.gettimeofday () -. started_at in
-      if elapsed < 120.0 then true  (* Still active *)
+      if elapsed < 120.0 then true
       else begin
-        Hashtbl.remove active_agents name;  (* Timed out, cleanup *)
+        Hashtbl.remove active_agents name;
         false
       end
   | None -> false
 
-(** Try to activate agent - returns Some uuid if successful, None if already active *)
+let is_agent_active ~name =
+  with_lodge_lock (fun () -> is_agent_active_unlocked ~name)
+
+(** Try to activate agent - returns Some uuid if successful, None if already active.
+    Entire check-then-act is atomic under lodge_lock. *)
 let try_activate_agent ~name : string option =
-  if is_agent_active ~name then begin
-    Eio.traceln "   ⏸️ [%s] Already active, skipping" name;
-    None
-  end else begin
-    let uuid = generate_agent_uuid () in
-    Hashtbl.replace active_agents name (uuid, Unix.gettimeofday ());
-    Printf.printf "   🆔 [%s] Activated: %s\n%!" name uuid;
-    Some uuid
-  end
+  with_lodge_lock (fun () ->
+    if is_agent_active_unlocked ~name then begin
+      Eio.traceln "   ⏸️ [%s] Already active, skipping" name;
+      None
+    end else begin
+      let uuid = generate_agent_uuid () in
+      Hashtbl.replace active_agents name (uuid, Unix.gettimeofday ());
+      Printf.printf "   🆔 [%s] Activated: %s\n%!" name uuid;
+      Some uuid
+    end)
 
 (** Mark agent as done (deactivate) *)
 let deactivate_agent ~name =
-  Hashtbl.remove active_agents name
+  with_lodge_lock (fun () -> Hashtbl.remove active_agents name)
 
 (** {1 Agent Self-Heartbeat}
 
@@ -91,8 +115,8 @@ let agent_comment_counts : (string * string, int) Hashtbl.t = Hashtbl.create 50
 (** Last check-in timestamp per agent *)
 let last_checkin : (string, float) Hashtbl.t = Hashtbl.create 10
 
-(** Round-robin pointer — index into agent list *)
-let round_robin_idx = ref 0
+(** Round-robin pointer — index into agent list (lock-free) *)
+let round_robin_idx = Atomic.make 0
 
 (** Per-agent rate state for posts/comments *)
 type rate_state = {
@@ -111,7 +135,7 @@ let max_posts_per_day = 5
 let max_comments_per_day = 20
 
 (** Get or create rate state for agent *)
-let get_rate_state ~agent_name =
+let get_rate_state_unlocked ~agent_name =
   let now = Unix.gettimeofday () in
   let day_start = Float.of_int (int_of_float now / 86400 * 86400) in
   match Hashtbl.find_opt rate_states agent_name with
@@ -131,53 +155,59 @@ let get_rate_state ~agent_name =
 
 (** Check if agent can perform the given action *)
 let check_rate_limit ~agent_name action_type =
-  let now = Unix.gettimeofday () in
-  let rs = get_rate_state ~agent_name in
-  match action_type with
-  | `Post ->
-    now -. rs.last_post >= min_post_gap && rs.posts_today < max_posts_per_day
-  | `Comment ->
-    now -. rs.last_comment >= min_comment_gap && rs.comments_today < max_comments_per_day
-  | `Vote -> true  (* Votes are always allowed *)
+  with_lodge_lock (fun () ->
+    let now = Unix.gettimeofday () in
+    let rs = get_rate_state_unlocked ~agent_name in
+    match action_type with
+    | `Post ->
+      now -. rs.last_post >= min_post_gap && rs.posts_today < max_posts_per_day
+    | `Comment ->
+      now -. rs.last_comment >= min_comment_gap && rs.comments_today < max_comments_per_day
+    | `Vote -> true)
 
 (** Record that agent performed an action (update rate state) *)
 let record_rate_action ~agent_name action_type =
-  let now = Unix.gettimeofday () in
-  let rs = get_rate_state ~agent_name in
-  match action_type with
-  | `Post -> rs.last_post <- now; rs.posts_today <- rs.posts_today + 1
-  | `Comment -> rs.last_comment <- now; rs.comments_today <- rs.comments_today + 1
-  | `Vote -> ()
+  with_lodge_lock (fun () ->
+    let now = Unix.gettimeofday () in
+    let rs = get_rate_state_unlocked ~agent_name in
+    match action_type with
+    | `Post -> rs.last_post <- now; rs.posts_today <- rs.posts_today + 1
+    | `Comment -> rs.last_comment <- now; rs.comments_today <- rs.comments_today + 1
+    | `Vote -> ())
 
 (** Record a check-in timestamp *)
 let record_checkin ~agent_name =
-  Hashtbl.replace last_checkin agent_name (Unix.gettimeofday ())
+  with_lodge_lock (fun () ->
+    Hashtbl.replace last_checkin agent_name (Unix.gettimeofday ()))
 
 (** Check if enough time passed since last check-in *)
 let can_checkin ~agent_name ~min_gap_s =
-  let now = Unix.gettimeofday () in
-  match Hashtbl.find_opt last_checkin agent_name with
-  | None -> true
-  | Some last -> now -. last >= min_gap_s
+  with_lodge_lock (fun () ->
+    let now = Unix.gettimeofday () in
+    match Hashtbl.find_opt last_checkin agent_name with
+    | None -> true
+    | Some last -> now -. last >= min_gap_s)
 
 (** Max comments per agent per post *)
 let max_comments_per_agent_per_post = 3
 
 (** Check if agent can comment on this post *)
 let can_agent_comment ~agent_name ~post_id =
-  let key = (agent_name, post_id) in
-  let count = match Hashtbl.find_opt agent_comment_counts key with
-    | Some c -> c | None -> 0
-  in
-  count < max_comments_per_agent_per_post
+  with_lodge_lock (fun () ->
+    let key = (agent_name, post_id) in
+    let count = match Hashtbl.find_opt agent_comment_counts key with
+      | Some c -> c | None -> 0
+    in
+    count < max_comments_per_agent_per_post)
 
 (** Record agent comment for throttling *)
 let record_agent_comment ~agent_name ~post_id =
-  let key = (agent_name, post_id) in
-  let count = match Hashtbl.find_opt agent_comment_counts key with
-    | Some c -> c | None -> 0
-  in
-  Hashtbl.replace agent_comment_counts key (count + 1)
+  with_lodge_lock (fun () ->
+    let key = (agent_name, post_id) in
+    let count = match Hashtbl.find_opt agent_comment_counts key with
+      | Some c -> c | None -> 0
+    in
+    Hashtbl.replace agent_comment_counts key (count + 1))
 
 (** Start agent's own heartbeat loop *)
 let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
@@ -506,6 +536,8 @@ type agent = {
   preferred_hours: int list;
   peak_hour: int option;
   traits: string list;
+  interests: string list;
+  personality_hint: string option;
   activity_level: float;
 }
 
@@ -564,7 +596,7 @@ let time_modifier agent =
 let load_agents_from_neo4j () =
   (* first:15 — GRAPHQL_MAX_COST=2000 (c09140c in second-brain-graphql).
      DO NOT reduce below 15: 15 agents exist, alphabetical sort cuts sangsu/skeptic/pragmatist. *)
-  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits activityLevel } } } }\"}" in
+  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits activityLevel interests personalityHint } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"
@@ -603,8 +635,10 @@ let load_agents_from_neo4j () =
           | v -> Yojson.Safe.Util.to_float v
         in
         (* Client-side filter: only agents with preferredHours *)
+        let interests = try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string) with _ -> [] in
+        let personality_hint = try Yojson.Safe.Util.(member "personalityHint" node |> to_string_option) with _ -> None in
         if preferred_hours <> [] then
-          Some { name; preferred_hours; peak_hour; traits; activity_level }
+          Some { name; preferred_hours; peak_hour; traits; interests; personality_hint; activity_level }
         else
           None
       with _ -> None
@@ -666,7 +700,7 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
     | None -> `Null
     | Some r ->
       let active = r.checkins |> List.filter (fun (_, _, res) ->
-        match res with Posted _ | Commented _ -> true | Skipped _ -> false
+        match res with Acted _ -> true | Passed _ | Skipped _ -> false
       ) in
       `Assoc [
         ("hour", `Int r.current_hour);
@@ -820,20 +854,53 @@ let get_agents () =
   end;
   !agents_cache
 
-(** {1 Wake Logic} *)
+(** {1 Content Alert Scanner — Board activity → triggers} *)
 
-(** Calculate matching score (placeholder - integrate with Qdrant later) *)
-let matching_score _agent _recent_posts =
-  (* TODO: Implement semantic similarity with Qdrant *)
-  Random.float 1.0
+(** Scan recent board posts for content matching agent interests.
+    Also parse @mentions → Mentioned triggers. *)
+let scan_board_triggers ~since ~(agents : agent list) : (string * checkin_trigger) list =
+  let store = Board.global () in
+  let recent = Board.list_posts store ~limit:20 () in
+  let new_posts = List.filter (fun (p : Board.post) -> p.created_at > since) recent in
+  let triggers = ref [] in
+  List.iter (fun (p : Board.post) ->
+    let content_lower = String.lowercase_ascii p.content in
+    (* Check @mentions *)
+    List.iter (fun (agent : agent) ->
+      let mention = Printf.sprintf "@%s" agent.name in
+      let mention_lower = String.lowercase_ascii mention in
+      let rec find_sub s pat start =
+        if start + String.length pat > String.length s then false
+        else if String.sub s start (String.length pat) = pat then true
+        else find_sub s pat (start + 1)
+      in
+      if find_sub content_lower mention_lower 0 then
+        triggers := (agent.name, Mentioned (Board.Post_id.to_string p.id)) :: !triggers
+    ) agents;
+    (* Check keyword match with agent traits + interests *)
+    List.iter (fun (agent : agent) ->
+      let keywords = agent.traits @ agent.interests in
+      let matched = List.exists (fun kw ->
+        let kw_lower = String.lowercase_ascii kw in
+        let rec find_sub s pat start =
+          if start + String.length pat > String.length s then false
+          else if String.sub s start (String.length pat) = pat then true
+          else find_sub s pat (start + 1)
+        in
+        String.length kw_lower >= 2 && find_sub content_lower kw_lower 0
+      ) keywords in
+      if matched && not (List.exists (fun (n, _) -> n = agent.name) !triggers) then
+        triggers := (agent.name, ContentAlert (Board.Post_id.to_string p.id)) :: !triggers
+    ) agents
+  ) new_posts;
+  !triggers
 
 (** Ask LLM if agent should wake given current context *)
 (** LLM-based wake decision for a single agent (short timeout, non-blocking via systhread) *)
 let should_wake_llm_async ~agent ~recent_posts ~current_hour =
-  (* Fairness gate: skip LLM call entirely if agent woke too recently *)
-  if not (can_wake ~agent_name:agent.name) then begin
-    Printf.printf "   ⏳ [%s] Fairness: already woke %d/%d times this hour, SLEEP\n%!"
-      agent.name max_wakes_per_window max_wakes_per_window;
+  (* Fairness: use rate limiter to avoid spamming *)
+  if not (can_checkin ~agent_name:agent.name ~min_gap_s:1800.0) then begin
+    Printf.printf "   ⏳ [%s] Fairness: checked in recently, SLEEP\n%!" agent.name;
     None
   end else
   let posts_summary = if List.length recent_posts = 0 then "없음"
@@ -846,27 +913,34 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
   let traits_str = String.concat ", " agent.traits in
   let preferred_str = agent.preferred_hours |> List.map string_of_int |> String.concat "," in
   let is_preferred = List.mem current_hour agent.preferred_hours in
+  let interests_str = if agent.interests <> [] then
+    Printf.sprintf "\n관심사: %s" (String.concat ", " agent.interests)
+  else "" in
+  let hint_str = match agent.personality_hint with
+    | Some h -> Printf.sprintf "\n말투/시각: %s" h
+    | None -> "" in
 
   let prompt = Printf.sprintf
 {|[에이전트 깨우기 판단]
 
 에이전트: %s
-성격: %s
+성격: %s%s%s
 선호 시간대: %s (현재: %02d:00 KST%s)
 활동 레벨: %.1f
 
 [최근 게시글]
 %s
 
-이 에이전트가 지금 깨어나서 활동해야 할까?
-- YES: 이 에이전트의 성격/관심사와 맞는 주제가 있을 때 (시간대 무관)
-- YES: 최근 게시글에 이 에이전트만의 시각으로 기여할 내용이 있을 때
-- NO: 최근 게시글과 전혀 관련 없고, 새로운 관점을 더할 수 없을 때
+판단 기준 (중요도순):
+1. 관심 키워드와 게시글 주제가 겹치면 → YES
+2. 이 에이전트만의 시각(말투/시각 참조)으로 기여할 수 있으면 → YES
+3. 선호 시간대이고 할 말이 조금이라도 있으면 → YES
+4. 완전히 관련 없고, 새로운 관점도 없으면 → NO
 
-중요: 선호 시간대는 참고일 뿐, 주제 관련성이 더 중요함.
 한 단어로 답변: YES 또는 NO
 이유도 짧게 (한 줄):|}
-    agent.name traits_str preferred_str current_hour
+    agent.name traits_str interests_str hint_str
+    preferred_str current_hour
     (if is_preferred then " - 활동시간!" else "")
     agent.activity_level posts_summary
   in
@@ -922,11 +996,11 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
   Printf.printf "   🤖 [%s] LLM: \"%s\" → %s\n%!" agent.name
     (utf8_truncate clean 60) (if has_yes then "WAKE" else "SLEEP");
   if has_yes then begin
-    record_wake ~agent_name:agent.name;
+    record_checkin ~agent_name:agent.name;
     let reason = if String.length clean > 4 then
       utf8_truncate (String.sub clean (min 4 (String.length clean)) (String.length clean - min 4 (String.length clean))) 60
     else "LLM decision" in
-    Some (Matching { score = 1.0; topic = String.trim reason })
+    Some (String.trim reason)
   end else None
 
 (** {1 Heartbeat Execution} *)
@@ -953,12 +1027,17 @@ let tick ~config:_ ~recent_posts =
     else None
   in
 
+  let checkins = woken |> List.map (fun (name, reason) ->
+    (name, Scheduled, Acted { action = ActionPost reason; summary = reason })
+  ) in
   {
     timestamp;
     current_hour;
     agents_checked = List.length agents;
+    checkins;
     agents_woken = woken;
     encounter_rolled = encounter;
+    activity_report = Printf.sprintf "Checked %d agents, woke %d" (List.length agents) (List.length woken);
   }
 
 (** {1 Daemon Loop} *)
@@ -1075,6 +1154,7 @@ type agent_profile = {
   role: string option;
   description: string option;
   traits: string list;
+  interests: string list;
   preferred_hours: int list;
   peak_hour: int option;
   activity_level: float;
@@ -1091,7 +1171,7 @@ let profile_cache_ttl = 300.0  (* 5 minutes *)
 let load_agent_profile ~agent_name : agent_profile =
   let now = Unix.gettimeofday () in
   let fallback = { name = agent_name; role = None; description = None; traits = [];
-    preferred_hours = []; peak_hour = None; activity_level = 0.5;
+    interests = []; preferred_hours = []; peak_hour = None; activity_level = 0.5;
     karma = 0; agent_prompt = None; personality_hint = None } in
   match Hashtbl.find_opt profile_cache agent_name with
   | Some (profile, ts) when now -. ts < profile_cache_ttl -> profile
@@ -1117,6 +1197,7 @@ let load_agent_profile ~agent_name : agent_profile =
             role = get_string_opt "role";
             description = get_string_opt "description";
             traits = (try agent |> member "traits" |> to_list |> List.map to_string with _ -> []);
+            interests = (try agent |> member "interests" |> to_list |> List.map to_string with _ -> []);
             preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with _ -> []);
             peak_hour = get_int_opt "peakHour";
             activity_level = (try agent |> member "activityLevel" |> to_float with _ -> 0.5);
@@ -1358,13 +1439,7 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
     None
   end
 
-(** Agent action types - LLM decides which to take *)
-type agent_action =
-  | ActionPost of string           (* content *)
-  | ActionComment of string * string  (* post_id, content *)
-  | ActionUpvote of string         (* post_id *)
-  | ActionPropose of string * string (* name, reason - propose new agent *)
-  | ActionSkip
+(* agent_action type defined earlier in file *)
 
 (** {1 Ecosystem Evolution - Gap Signal Tracking} *)
 
@@ -1919,6 +1994,7 @@ let execute_agent_action ~agent_name ~action =
 
 (** Start heartbeat daemon fiber *)
 let start ~sw ~clock room_config =
+  lodge_init_lock ();
   Printf.printf "+Lodge Heartbeat: initializing...\n%!";
   let config = load_config () in
   Printf.printf "+Lodge Heartbeat: enabled=%b\n%!" config.enabled;
@@ -1962,13 +2038,7 @@ let start ~sw ~clock room_config =
         (* Trigger agent actions in PARALLEL - each agent runs independently *)
         let agent_tasks = List.map (fun (name, reason) () ->
           try
-            let reason_str = match reason with
-              | Matching { score; topic } ->
-                  Printf.sprintf "matching(%.2f, %s)" score topic
-              | Discovery { connection } ->
-                  Printf.sprintf "discovery(%s)" connection
-              | Random -> "random"
-            in
+            let reason_str = reason in
 
             (* SINGLETON CHECK: Only one instance per agent *)
             match try_activate_agent ~name with
@@ -2002,13 +2072,7 @@ let start ~sw ~clock room_config =
             (* Do initial action immediately - LLM decides *)
             let store = Board.global () in
             let recent_posts = Board.list_posts store ~limit:10 () in
-            let wake_reason = match reason with
-              | Matching { score; topic } ->
-                  Printf.sprintf "matching(%.2f, %s)" score topic
-              | Discovery { connection } ->
-                  Printf.sprintf "discovery(%s)" connection
-              | Random -> "random inspiration"
-            in
+            let wake_reason = reason in
             let action = decide_agent_action ~agent_name:name ~wake_reason ~recent_posts in
             execute_agent_action ~agent_name:name ~action
             (* NOTE: Agent lifecycle now managed by self-heartbeat, not deactivated here *)

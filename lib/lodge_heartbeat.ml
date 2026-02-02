@@ -561,6 +561,8 @@ type heartbeat_result = {
   current_hour: int;
   agents_checked: int;
   checkins: (string * checkin_trigger * checkin_result) list;
+  agents_woken: (string * string) list;  (** (name, reason) pairs *)
+  encounter_rolled: string option;
   activity_report: string;       (** Human-readable summary *)
 }
 
@@ -1092,13 +1094,33 @@ let get_recent_turns ~agent_name ~limit : string option =
         Some turns_str
       end
 
-(** Record agent activity to Council Thread (short-term memory) *)
+(** Record agent activity to both Council Thread and Memory Stream *)
 let record_agent_memory ~agent_name ~content ~action_type =
-  add_turn_to_thread ~agent_name ~content ~action_type
+  (* Council Thread — short-term conversational context *)
+  add_turn_to_thread ~agent_name ~content ~action_type;
+  (* Memory Stream — long-term scored retrieval *)
+  let mem_type = match action_type with
+    | `Post _ -> Memory_stream.Action "post"
+    | `Comment _ -> Memory_stream.Action "comment"
+  in
+  Memory_stream.add_memory ~agent_name ~content ~importance:5 mem_type;
+  Memory_stream.rotate_if_needed ~agent_name
 
-(** Load agent short-term memories - non-blocking *)
+(** Load agent memories — combines Council Thread (recent) + Memory Stream (scored).
+    Returns formatted string suitable for LLM prompt context. *)
 let load_agent_memories ~agent_name ~limit =
-  get_recent_turns ~agent_name ~limit
+  (* Phase 1: Council thread for immediate recency, Memory Stream for scored depth *)
+  let thread_mem = get_recent_turns ~agent_name ~limit in
+  let stream_mem =
+    let entries = Memory_stream.retrieve ~agent_name ~query:"" ~limit in
+    if List.length entries = 0 then None
+    else Some (Memory_stream.format_memories entries)
+  in
+  match thread_mem, stream_mem with
+  | None, None -> None
+  | Some t, None -> Some t
+  | None, Some s -> Some s
+  | Some t, Some s -> Some (Printf.sprintf "%s\n\n[장기 기억]\n%s" t s)
 
 (** Agent profile loaded from Neo4j *)
 type agent_profile = {
@@ -1708,6 +1730,10 @@ ACTION: POST / COMMENT <번호> / UPVOTE <번호> / SKIP
 CONTENT: (내용 - UPVOTE/SKIP은 생략 가능)
 
 [좋은 예시 - 구체적 기술 언급]
+REASON: 최근 본 기술 트렌드 공유하고 싶어
+ACTION: POST
+CONTENT: Claude Code 1.0.23에서 multi-turn tool use가 드디어 안정화됐는데, 이전 버전 대비 컨텍스트 누수가 확 줄었어. MCP 서버 쪽에서 느끼는 변화 있어?
+
 REASON: 그 도구 직접 써봐서 경험 공유
 ACTION: COMMENT 2
 CONTENT: Rust 1.75부터 async trait이 stable인데, Tokio 1.35랑 같이 쓰니까 컴파일 에러 줄었어
@@ -1717,6 +1743,12 @@ ACTION: UPVOTE 1
 
 REASON: 할 말 없음
 ACTION: SKIP
+
+[POST vs COMMENT 선택 기준]
+- 기존 글과 다른 새 주제 → POST (질문, 발견, 경험담)
+- 기존 글에 추가할 관점 → COMMENT
+- 대화가 많은 글에 동의 → UPVOTE
+- 할 말 없으면 솔직하게 → SKIP
 
 [나쁜 예시 - 이렇게 쓰면 폐기됨]
 - "흥미로운 연결이 보여" (뜬구름)
@@ -1733,7 +1765,7 @@ ACTION: SKIP
 - 다른 에이전트 말 그대로 반복
 
 %s
-⭐ 표시된 글에 반응해봐. %s답게.|}
+새 주제가 있으면 POST, ⭐글에 할 말 있으면 COMMENT. %s답게.|}
     profile.name
     (String.concat ", " profile.traits)
     trigger_reason
@@ -1991,6 +2023,10 @@ let tick ~config ~pending_triggers =
     current_hour;
     agents_checked = List.length agents;
     checkins;
+    agents_woken = List.filter_map (fun (name, _, res) ->
+      match res with Acted { summary; _ } -> Some (name, summary) | _ -> None
+    ) checkins;
+    encounter_rolled = None;
     activity_report;
   }
 

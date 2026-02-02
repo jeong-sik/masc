@@ -54,6 +54,8 @@ type heartbeat_result = {
   current_hour: int;
   agents_checked: int;
   checkins: (string * checkin_trigger * checkin_result) list;
+  agents_woken: (string * string) list;
+  encounter_rolled: string option;
   activity_report: string;
 }
 

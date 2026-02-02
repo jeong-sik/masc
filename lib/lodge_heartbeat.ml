@@ -19,10 +19,55 @@
     Core personas: dreamer, skeptic, historian, pragmatist, connector
 *)
 
-(** Update Lodge agent status - no-op, status tracked via Neo4j *)
-let update_lodge_agent_status ~name ~status:_ ?current_task:_ () =
-  (* Status now tracked in Neo4j via GraphQL, not filesystem *)
-  ignore name
+(** {1 Agent Singleton Management}
+
+    Each agent can only have ONE active instance at a time.
+    Uses in-memory hashtable with timeout for crash recovery.
+*)
+
+(** Active agents: name -> (uuid, started_at) *)
+let active_agents : (string, string * float) Hashtbl.t = Hashtbl.create 10
+
+(** Generate UUID for agent instance *)
+let generate_agent_uuid () =
+  Printf.sprintf "%s-%08x"
+    (String.sub (Digest.to_hex (Digest.string (string_of_float (Unix.gettimeofday ())))) 0 8)
+    (Random.int 0xFFFFFF)
+
+(** Check if agent is currently active (with 120s timeout for crash recovery) *)
+let is_agent_active ~name =
+  match Hashtbl.find_opt active_agents name with
+  | Some (_uuid, started_at) ->
+      let elapsed = Unix.gettimeofday () -. started_at in
+      if elapsed < 120.0 then true  (* Still active *)
+      else begin
+        Hashtbl.remove active_agents name;  (* Timed out, cleanup *)
+        false
+      end
+  | None -> false
+
+(** Try to activate agent - returns Some uuid if successful, None if already active *)
+let try_activate_agent ~name : string option =
+  if is_agent_active ~name then begin
+    Eio.traceln "   ⏸️ [%s] Already active, skipping" name;
+    None
+  end else begin
+    let uuid = generate_agent_uuid () in
+    Hashtbl.replace active_agents name (uuid, Unix.gettimeofday ());
+    Eio.traceln "   🆔 [%s] Activated: %s" name uuid;
+    Some uuid
+  end
+
+(** Mark agent as done (deactivate) *)
+let deactivate_agent ~name =
+  Hashtbl.remove active_agents name
+
+(** Update Lodge agent status - now tracks singleton state *)
+let update_lodge_agent_status ~name ~status ?current_task:_ () =
+  match status with
+  | Types.Busy -> ignore (try_activate_agent ~name)
+  | Types.Inactive -> deactivate_agent ~name
+  | _ -> ()
 
 (** Initialize core Lodge personas - no-op, they exist in Neo4j *)
 let init_core_personas () =
@@ -30,9 +75,9 @@ let init_core_personas () =
      are defined in Neo4j and loaded via GraphQL *)
   ()
 
-(** Cleanup inactive agents - no-op, managed via Neo4j *)
+(** Cleanup inactive agents - managed via timeout in is_agent_active *)
 let cleanup_inactive_lodge_agents () =
-  (* Agent lifecycle managed via Neo4j, not filesystem *)
+  (* Cleanup happens automatically via timeout check in is_agent_active *)
   ()
 
 (** {1 Non-blocking Shell Execution} *)
@@ -582,10 +627,13 @@ let start ~sw ~clock room_config =
                   Printf.sprintf "discovery(%s)" connection
               | Random -> "random"
             in
-            Eio.traceln "   🔔 Wake %s: %s" name reason_str;
 
-            (* Register agent as Busy in Room (visible in dashboard) *)
-            update_lodge_agent_status ~name ~status:Types.Busy ~current_task:reason_str ();
+            (* SINGLETON CHECK: Only one instance per agent *)
+            match try_activate_agent ~name with
+            | None -> ()  (* Already active, skip *)
+            | Some _uuid ->
+
+            Eio.traceln "   🔔 Wake %s: %s" name reason_str;
 
             let store = Board.global () in
             let author = name in

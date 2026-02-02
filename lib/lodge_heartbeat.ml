@@ -1127,8 +1127,8 @@ let check_gap_threshold () =
   (* Group by topic and count *)
   let topic_counts = Hashtbl.create 10 in
   !gap_signals |> List.iter (fun s ->
-    let count = Hashtbl.find_opt topic_counts s.topic |> Option.value ~default:0 in
-    Hashtbl.replace topic_counts s.topic (count + 1)
+    let count = Hashtbl.find_opt topic_counts s.gs_topic |> Option.value ~default:0 in
+    Hashtbl.replace topic_counts s.gs_topic (count + 1)
   );
   (* Find topics above threshold *)
   let mature_gaps = Hashtbl.fold (fun topic count acc ->
@@ -1138,7 +1138,11 @@ let check_gap_threshold () =
 
 (** Clear gap signals for a topic after agent is created *)
 let clear_gap_signals ~topic =
-  gap_signals := !gap_signals |> List.filter (fun s -> s.topic <> topic)
+  gap_signals := !gap_signals |> List.filter (fun s -> s.gs_topic <> topic)
+
+(** Get signals for a specific topic *)
+let get_signals_for_topic ~topic =
+  !gap_signals |> List.filter (fun s -> s.gs_topic = topic)
 
 (** Parse LLM response to extract action *)
 let parse_action_response response =
@@ -1510,11 +1514,11 @@ let execute_agent_action ~agent_name ~action =
       Printf.printf "   🌱 [%s] Proposes new agent: %s\n%!" agent_name proposed_name;
       Printf.printf "      Reason: %s\n%!" (String.sub reason 0 (min 80 (String.length reason)));
       (* Record as gap signal - accumulate until threshold *)
-      let signal = {
-        topic = proposed_name;
-        detected_by = agent_name;
-        context = reason;
-        timestamp = Unix.gettimeofday ();
+      let signal : gap_signal_t = {
+        gs_topic = proposed_name;
+        gs_detected_by = agent_name;
+        gs_context = reason;
+        gs_timestamp = Unix.gettimeofday ();
       } in
       gap_signals := signal :: !gap_signals;
       (* Check if threshold met for any topic *)
@@ -1522,9 +1526,9 @@ let execute_agent_action ~agent_name ~action =
       if List.length mature_gaps > 0 then begin
         let (topic, count) = List.hd mature_gaps in
         Printf.printf "   🎉 [ECOSYSTEM] Gap threshold met! Topic: %s (signals: %d)\n%!" topic count;
-        (* TODO: Actually create the agent in Neo4j *)
-        Printf.printf "   🚀 [ECOSYSTEM] Would create agent: %s\n%!" topic;
-        Printf.printf "      (Neo4j agent creation not yet implemented)\n%!";
+        (* Spawn the new agent! *)
+        let signals = get_signals_for_topic ~topic in
+        let _success = spawn_agent_from_gap ~topic ~signals in
         clear_gap_signals ~topic
       end;
       record_agent_activity ~name:agent_name

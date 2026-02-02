@@ -141,6 +141,3 @@ module Tool_misc = Tool_misc
 
 (* Lodge subsystem *)
 module Lodge_heartbeat = Lodge_heartbeat
-
-(* Shutdown hooks *)
-module Shutdown_hooks = Shutdown_hooks

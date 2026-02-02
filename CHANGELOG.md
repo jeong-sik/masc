@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.0] - 2026-02-02
+
+### Added
+- **Shutdown Hooks**: New `shutdown_hooks.ml` module for centralized graceful shutdown
+- **Cleanup Loops**: Auto-cleanup for rate limit buckets and MCP sessions
+- **Env Config**: `MASC_QDRANT_TIMEOUT_SEC`, `MASC_LLM_TIMEOUT_SEC`, `MASC_RATE_LIMIT_*`
+
+### Fixed
+- **SSE Zombie Prevention**: Snapshot-based broadcast + failed client auto-removal
+- **Atomic Race Condition**: `Atomic.fetch_and_add` in sse.ml (event/client counters)
+- **Timeout Guards**: Qdrant and LLM calls now have configurable timeouts
+- **Subscriptions**: O(1) Queue-based notifications (was O(n) List append)
+- **Orchestrator**: Cancellation flag support for graceful loop termination
+
 ## [2.20.0] - 2026-02-02
 
 ### Added

@@ -69,21 +69,32 @@ let float_to_iso (t : float) =
     (:Agent)-[:PARTICIPATED_IN {role: STRING, joined_at: DATETIME}]->(:Thread)
 *)
 
+(** {1 Cypher Helpers} *)
+
+(** Escape a string for safe inclusion in Cypher queries.
+    Handles single quotes and backslashes. *)
+let cypher_escape s =
+  s
+  |> String.split_on_char '\\'
+  |> String.concat "\\\\"
+  |> String.split_on_char '\''
+  |> String.concat "\\'"
+
 (** {1 Neo4j Cypher Queries} *)
 
 let thread_merge_cypher (th : Conversation.thread) =
   let started_at_iso = float_to_iso th.started_at in
   let concluded_at_str = match th.concluded_at with
     | None -> "null"
-    | Some t -> Printf.sprintf "'%s'" (float_to_iso t)
+    | Some t -> Printf.sprintf "datetime('%s')" (float_to_iso t)
   in
   let conclusion_str = match th.conclusion with
     | None -> "null"
-    | Some c -> Printf.sprintf "'%s'" (String.escaped c)
+    | Some c -> Printf.sprintf "'%s'" (cypher_escape c)
   in
   let floor_str = match th.floor_holder with
     | None -> "null"
-    | Some f -> Printf.sprintf "'%s'" f
+    | Some f -> Printf.sprintf "'%s'" (cypher_escape f)
   in
   Printf.sprintf {|
     MERGE (t:Thread {id: '%s'})
@@ -98,9 +109,9 @@ let thread_merge_cypher (th : Conversation.thread) =
         t.floor_holder = %s
     RETURN t.id as id
   |}
-    th.id
-    (String.escaped th.topic)
-    th.room
+    (cypher_escape th.id)
+    (cypher_escape th.topic)
+    (cypher_escape th.room)
     (Conversation.thread_status_to_string th.status)
     started_at_iso
     concluded_at_str
@@ -121,7 +132,7 @@ let turn_merge_cypher ~thread_id (turn : Conversation.turn) =
       WITH t, turn
       MATCH (replied:Turn {id: '%s'})
       MERGE (turn)-[:REPLIED_TO]->(replied)
-    |} r
+    |} (cypher_escape r)
   in
   let mentions_str =
     turn.mentions
@@ -129,7 +140,7 @@ let turn_merge_cypher ~thread_id (turn : Conversation.turn) =
       WITH t, turn
       MERGE (a:Agent {name: '%s'})
       MERGE (turn)-[:MENTIONS]->(a)
-    |} m)
+    |} (cypher_escape m))
     |> String.concat "\n"
   in
   Printf.sprintf {|
@@ -146,11 +157,11 @@ let turn_merge_cypher ~thread_id (turn : Conversation.turn) =
     %s
     RETURN turn.id as id
   |}
-    thread_id
-    turn.id
+    (cypher_escape thread_id)
+    (cypher_escape turn.id)
     turn.seq
-    turn.speaker
-    (String.escaped turn.content)
+    (cypher_escape turn.speaker)
+    (cypher_escape turn.content)
     (Conversation.turn_type_to_string turn.turn_type)
     created_at_iso
     confidence_str
@@ -166,50 +177,81 @@ let participant_merge_cypher ~thread_id ~participant ~role =
         r.joined_at = datetime()
     RETURN a.name as agent
   |}
-    thread_id
-    participant
-    role
+    (cypher_escape thread_id)
+    (cypher_escape participant)
+    (cypher_escape role)
 
-(** {1 Neo4j HTTP Client (Simple)} *)
+(** {1 Neo4j HTTP Client} *)
+
+(** Read all bytes from an input channel (pipe-safe, does NOT use in_channel_length). *)
+let read_all_from_ic ic =
+  let buf = Buffer.create 4096 in
+  (try while true do
+    Buffer.add_char buf (input_char ic)
+  done with End_of_file -> ());
+  Buffer.contents buf
 
 (** Execute a Cypher query via Neo4j HTTP API.
-    Returns Ok () on success, Error msg on failure.
+    Returns Ok json_response on success, Error msg on failure.
     Uses environment variables: NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD *)
-let execute_cypher_http ~cypher : (unit, string) result =
-  (* Read from environment *)
-  let uri = try Sys.getenv "NEO4J_URI" with Not_found -> "http://localhost:7474" in
-  let user = try Sys.getenv "NEO4J_USER" with Not_found -> "neo4j" in
-  let password = try Sys.getenv "NEO4J_PASSWORD" with Not_found -> "password" in
+let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
+  let uri = match Sys.getenv_opt "NEO4J_URI" with Some v -> v | None -> "http://localhost:7474" in
+  let user = match Sys.getenv_opt "NEO4J_USER" with Some v -> v | None -> "neo4j" in
+  let password = match Sys.getenv_opt "NEO4J_PASSWORD" with Some v -> v | None -> "password" in
 
-  (* Build curl command *)
   let endpoint = uri ^ "/db/neo4j/tx/commit" in
-  let payload = Printf.sprintf {|{"statements":[{"statement":"%s"}]}|}
-    (String.escaped cypher) in
-  let auth = Printf.sprintf "%s:%s" user password in
+  (* Build JSON payload using Yojson to avoid injection *)
+  let payload = Yojson.Safe.to_string (`Assoc [
+    ("statements", `List [
+      `Assoc [("statement", `String cypher)]
+    ])
+  ]) in
 
-  let cmd = Printf.sprintf
-    "curl -s -X POST '%s' -H 'Content-Type: application/json' -u '%s' -d '%s' 2>/dev/null"
-    endpoint auth (String.escaped payload)
-  in
+  (* Write payload to temp file to avoid shell escaping issues *)
+  let tmp_file = Filename.temp_file "neo4j_" ".json" in
+  Fun.protect ~finally:(fun () ->
+    try Sys.remove tmp_file with _ -> ()
+  ) (fun () ->
+    let oc = open_out tmp_file in
+    output_string oc payload;
+    close_out oc;
 
-  try
+    let cmd = Printf.sprintf
+      "curl -s --max-time 10 -X POST '%s' -H 'Content-Type: application/json' -u '%s:%s' -d @'%s' 2>/dev/null"
+      endpoint user password tmp_file
+    in
     let ic = Unix.open_process_in cmd in
-    let response = really_input_string ic (in_channel_length ic) in
+    let response = read_all_from_ic ic in
     let status = Unix.close_process_in ic in
     match status with
     | Unix.WEXITED 0 ->
-        (* Check for errors in response *)
-        if String.length response > 0 &&
-           (String.sub response 0 1 = "{") &&
-           not (String.exists (fun c -> c = 'e') response &&
-                String.exists (fun c -> c = 'r') response &&
-                String.exists (fun c -> c = 'o') response) then
-          Ok ()
-        else
-          Ok ()  (* Assume success if curl succeeded *)
-    | _ -> Error "curl command failed"
-  with e ->
-    Error (Printf.sprintf "Neo4j HTTP error: %s" (Printexc.to_string e))
+        (try
+          let json = Yojson.Safe.from_string response in
+          let open Yojson.Safe.Util in
+          let errors = json |> member "errors" |> to_list in
+          if errors = [] then Ok json
+          else
+            let err_msg = errors
+              |> List.map (fun e -> e |> member "message" |> to_string_option |> Option.value ~default:"unknown")
+              |> String.concat "; "
+            in
+            Error (Printf.sprintf "Neo4j error: %s" err_msg)
+        with e ->
+          if String.length response = 0 then
+            Error "Neo4j: empty response (server unreachable?)"
+          else
+            Error (Printf.sprintf "Neo4j response parse error: %s" (Printexc.to_string e)))
+    | Unix.WEXITED code ->
+        Error (Printf.sprintf "curl exited with code %d" code)
+    | _ -> Error "curl command terminated abnormally"
+  )
+
+(** Execute a Cypher query, ignoring the response data.
+    Returns Ok () on success, Error msg on failure. *)
+let execute_cypher_http ~cypher : (unit, string) result =
+  match execute_cypher_raw ~cypher with
+  | Ok _ -> Ok ()
+  | Error e -> Error e
 
 (** {1 Dual-Stream Write} *)
 
@@ -272,7 +314,7 @@ let search_by_topic ~(query : string) ?(room : string option) ?(limit = 10) ()
     : (string list, string) result =
   let room_filter = match room with
     | None -> ""
-    | Some r -> Printf.sprintf "AND t.room = '%s'" r
+    | Some r -> Printf.sprintf "AND t.room = '%s'" (cypher_escape r)
   in
   let cypher = Printf.sprintf {|
     MATCH (t:Thread)
@@ -280,12 +322,25 @@ let search_by_topic ~(query : string) ?(room : string option) ?(limit = 10) ()
     RETURN t.id as id
     ORDER BY t.started_at DESC
     LIMIT %d
-  |} (String.escaped query) room_filter limit in
+  |} (cypher_escape query) room_filter limit in
 
-  (* Execute and parse - simplified, returns empty on error *)
-  match execute_cypher_http ~cypher with
+  match execute_cypher_raw ~cypher with
   | Error e -> Error e
-  | Ok () -> Ok []  (* Would need to parse response for actual IDs *)
+  | Ok json ->
+      (try
+        let open Yojson.Safe.Util in
+        let results = json |> member "results" |> to_list in
+        let ids = match results with
+          | [] -> []
+          | first :: _ ->
+              first |> member "data" |> to_list
+              |> List.filter_map (fun row ->
+                  try Some (row |> member "row" |> to_list |> List.hd |> to_string)
+                  with _ -> None)
+        in
+        Ok ids
+      with e ->
+        Error (Printf.sprintf "Failed to parse search results: %s" (Printexc.to_string e)))
 
 (** {1 Sync Operations} *)
 

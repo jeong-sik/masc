@@ -1,11 +1,15 @@
 (** SSE (Server-Sent Events) module for MCP Streamable HTTP Transport
     MCP Spec 2025-03-26 compliant *)
 
+(** Maximum concurrent SSE clients — prevents connection storm on restart *)
+let max_clients = 50
+
 (** SSE client state *)
 type client = {
   id: int;
   push: string -> unit;
   mutable last_event_id: int;
+  created_at: float;
 }
 
 (** Client registry - maps session_id to client *)
@@ -54,13 +58,29 @@ let next_id () =
   (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
   Atomic.fetch_and_add event_counter 1 + 1
 
-(** Register a new SSE client *)
+(** Register a new SSE client.
+    Returns (client_id, evicted_session_id option).
+    Evicts the oldest client when at capacity. *)
 let register session_id ~push ~last_event_id =
-  (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
+  (* Evict oldest if at capacity *)
+  let evicted =
+    if Hashtbl.length clients >= max_clients then
+      let oldest = Hashtbl.fold (fun sid c acc ->
+        match acc with
+        | None -> Some (sid, c)
+        | Some (_, c2) -> if c.created_at < c2.created_at then Some (sid, c) else acc
+      ) clients None in
+      match oldest with
+      | Some (sid, _) ->
+          Printf.eprintf "[SSE] Evicting oldest client %s (at cap %d)\n%!" sid max_clients;
+          Hashtbl.remove clients sid; Some sid
+      | None -> None
+    else None
+  in
   let new_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
-  let client = { id = new_id; push; last_event_id } in
+  let client = { id = new_id; push; last_event_id; created_at = Unix.gettimeofday () } in
   Hashtbl.replace clients session_id client;
-  client.id
+  (client.id, evicted)
 
 (** Unregister an SSE client *)
 let unregister session_id =
@@ -130,3 +150,16 @@ let close_all_clients () =
   let sessions = Hashtbl.fold (fun sid _ acc -> sid :: acc) clients [] in
   List.iter (Hashtbl.remove clients) sessions;
   List.length sessions
+
+(** Remove stale clients older than max_age_s (default 30 min).
+    Returns list of evicted session_ids so caller can clean up writers. *)
+let cleanup_stale ?(max_age_s=1800.0) () =
+  let now = Unix.gettimeofday () in
+  let stale = Hashtbl.fold (fun sid c acc ->
+    if now -. c.created_at > max_age_s then sid :: acc else acc
+  ) clients [] in
+  List.iter (fun sid ->
+    Printf.eprintf "[SSE] TTL evict: %s (age %.0fs)\n%!" sid (now -. (Hashtbl.find clients sid).created_at);
+    Hashtbl.remove clients sid
+  ) stale;
+  stale

@@ -858,10 +858,14 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
     | None -> ()
     | Some info -> ignore (send_raw info event)
   in
-  let client_id =
+  let (client_id, evicted) =
     Sse.register session_id ~push
       ~last_event_id:(Option.value ~default:0 last_event_id)
   in
+  (* Clean up writer for evicted session *)
+  (match evicted with
+   | Some evicted_sid -> stop_sse_session evicted_sid
+   | None -> ());
   let info = {
     session_id;
     client_id;
@@ -923,9 +927,10 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
            else Printf.eprintf "[SSE] ping loop error: %s\n%!" (Printexc.to_string exn))
    | _ -> ());
 
-  Printf.printf "📡 SSE connected: %s (last_event_id: %s)\n%!"
+  Printf.printf "📡 SSE connected: %s (last_event_id: %s, active: %d/%d)\n%!"
     session_id
     (match last_event_id with Some id -> string_of_int id | None -> "none")
+    (Sse.client_count ()) Sse.max_clients
 
 (** SSE simple handler - for compatibility, returns single event *)
 let sse_simple_handler request reqd =
@@ -1388,6 +1393,19 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
   (* Start MCP session cleanup loop *)
   Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
+
+  (* Periodic SSE stale-client reaper — every 60s, evict connections older than 30min *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 60.0;
+      let stale_sids = Masc_mcp.Sse.cleanup_stale () in
+      List.iter stop_sse_session stale_sids;
+      if stale_sids <> [] then
+        Printf.eprintf "[SSE] Reaped %d stale connections (active: %d)\n%!"
+          (List.length stale_sids) (Masc_mcp.Sse.client_count ());
+      loop ()
+    in
+    loop ());
 
   let config = { Http.default_config with port; host = "0.0.0.0" } in
   let routes = make_routes ~port:config.port ~host:config.host in

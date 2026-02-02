@@ -405,24 +405,22 @@ let () =
             Eio.traceln "   ⚠️ [%s] Rewrite failed" name
         end
 
-(** {1 Configuration} *)
+(** {1 Configuration — Check-in Model v2} *)
 
 type config = {
-  interval_s: float;           (** Heartbeat interval (default: 60.0 = 1분) *)
-  enabled: bool;               (** Enable heartbeat (default: false) *)
-  matching_weight: float;      (** Weight for similarity matching (default: 0.7) *)
-  discovery_weight: float;     (** Weight for interesting discoveries (default: 0.2) *)
-  random_weight: float;        (** Weight for pure random (default: 0.1) *)
-  wake_threshold: float;       (** Minimum score to wake agent (default: 0.5) *)
+  interval_s: float;           (** Heartbeat interval (default: 120.0 = 2분) *)
+  enabled: bool;               (** Enable heartbeat (default: true) *)
+  agents_per_tick: int;        (** Max agents to check-in per tick (default: 2) *)
+  min_checkin_gap_s: float;    (** Min seconds between same agent check-ins (default: 1800 = 30분) *)
+  quiet_hours: int * int;      (** KST quiet hours range, exclusive (default: 1-6) *)
 }
 
 let default_config = {
-  interval_s = 60.0;
-  enabled = true;  (* Always on - heartbeat is the pulse of Lodge *)
-  matching_weight = 0.7;
-  discovery_weight = 0.2;
-  random_weight = 0.1;
-  wake_threshold = 0.5;
+  interval_s = 120.0;
+  enabled = true;
+  agents_per_tick = 2;
+  min_checkin_gap_s = 1800.0;
+  quiet_hours = (1, 6);
 }
 
 (** Load config from environment *)
@@ -432,6 +430,11 @@ let load_config () =
     | Some v -> (try Float.of_string v with _ -> default)
     | None -> default
   in
+  let get_int name default =
+    match Sys.getenv_opt name with
+    | Some v -> (try int_of_string v with _ -> default)
+    | None -> default
+  in
   let get_bool name default =
     match Sys.getenv_opt name with
     | Some "1" | Some "true" | Some "yes" -> true
@@ -439,12 +442,11 @@ let load_config () =
     | _ -> default
   in
   {
-    interval_s = get_float "LODGE_INTERVAL" 60.0;
-    enabled = get_bool "LODGE_ENABLED" true;  (* Default ON *)
-    matching_weight = get_float "LODGE_MATCHING_WEIGHT" 0.7;
-    discovery_weight = get_float "LODGE_DISCOVERY_WEIGHT" 0.2;
-    random_weight = get_float "LODGE_RANDOM_WEIGHT" 0.1;
-    wake_threshold = get_float "LODGE_WAKE_THRESHOLD" 0.5;
+    interval_s = get_float "LODGE_INTERVAL" 120.0;
+    enabled = get_bool "LODGE_ENABLED" true;
+    agents_per_tick = get_int "LODGE_AGENTS_PER_TICK" 2;
+    min_checkin_gap_s = get_float "LODGE_MIN_CHECKIN_GAP" 1800.0;
+    quiet_hours = (1, 6);
   }
 
 (** {1 Types} *)
@@ -661,8 +663,8 @@ let generate_agent_traits ~topic ~reason =
   let tmp = Printf.sprintf "/tmp/traits_%s.json" topic in
   let oc = open_out tmp in output_string oc json_payload; close_out oc;
   let cmd = Printf.sprintf
-    "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500"
-    tmp
+    "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500; rm -f %s"
+    tmp tmp
   in
   let response = run_shell_nonblocking cmd in
   (* Extract JSON from response *)

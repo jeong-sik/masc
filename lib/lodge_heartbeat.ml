@@ -128,7 +128,7 @@ type config = {
 
 let default_config = {
   interval_s = 60.0;
-  enabled = false;  (* Opt-in *)
+  enabled = true;  (* Always on - heartbeat is the pulse of Lodge *)
   matching_weight = 0.7;
   discovery_weight = 0.2;
   random_weight = 0.1;
@@ -150,7 +150,7 @@ let load_config () =
   in
   {
     interval_s = get_float "LODGE_INTERVAL" 60.0;
-    enabled = get_bool "LODGE_ENABLED" false;
+    enabled = get_bool "LODGE_ENABLED" true;  (* Default ON *)
     matching_weight = get_float "LODGE_MATCHING_WEIGHT" 0.7;
     discovery_weight = get_float "LODGE_DISCOVERY_WEIGHT" 0.2;
     random_weight = get_float "LODGE_RANDOM_WEIGHT" 0.1;

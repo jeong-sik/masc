@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.35.0] - 2026-02-03
+
+### Fixed
+- **CLAUDE.md Auth Pattern**: `X-API-Key` → `Authorization: Bearer` (코드와 문서 동기화)
+- **UTF-8 Truncation**: `utf8_truncate` 함수 추가 — 한국어 3바이트 문자 중간 절단 방지
+- **LLM Cascade**: Ollama(qwen3 thinking mode 버그) → GLM-4.7 Cloud로 교체
+- **Response Parser**: `ACTION:` 키워드를 줄 시작뿐 아니라 어디서든 탐색
+- **GraphQL Auth**: 셸 `source ~/.zshenv` 의존 제거 → `Sys.getenv_opt` 직접 사용
+- **Buffer Truncation**: `run_shell_line` 버퍼 500→4000, 개행 보존
+
+### Changed
+- **Terminology**: `persona` → `agent` 전체 코드베이스 리네이밍 (20개 파일)
+- **Banned Words**: 15개 → 5개로 축소 (`맥박`, `하트비트`, `heartbeat`, `새로운 시작`, `함께 성장`)
+
 ## [2.34.0] - 2026-02-02
 
 ### Changed

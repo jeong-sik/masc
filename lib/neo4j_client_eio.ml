@@ -1,0 +1,135 @@
+(** Neo4j Bolt Native Client (Eio-based)
+
+    Provides a thin wrapper around neo4j_bolt_eio with:
+    - Connection pooling (single connection reuse)
+    - Idle timeout (300s)
+    - Thread-safe Yojson result conversion
+*)
+
+module Bolt = Neo4j_bolt_eio
+
+type error =
+  | Connection_failed of string
+  | Query_failed of string
+  | Timeout
+  | Disconnected
+
+let string_of_error = function
+  | Connection_failed s -> Printf.sprintf "Connection failed: %s" s
+  | Query_failed s -> Printf.sprintf "Query failed: %s" s
+  | Timeout -> "Connection timeout"
+  | Disconnected -> "Disconnected from Neo4j"
+
+(** Connection state *)
+type connection_state = {
+  mutable conn: Bolt.t option;
+  mutable last_used: float;
+  mutex: Eio.Mutex.t;
+}
+
+let global_state = {
+  conn = None;
+  last_used = 0.0;
+  mutex = Eio.Mutex.create ();
+}
+
+(** Configuration *)
+let idle_timeout_sec = 300.0
+
+(** Get Neo4j URI from environment *)
+let get_neo4j_uri () =
+  match Sys.getenv_opt "NEO4J_URI" with
+  | Some uri -> uri
+  | None -> "bolt://localhost:7687"
+
+let get_neo4j_user () =
+  Sys.getenv_opt "NEO4J_USER" |> Option.value ~default:"neo4j"
+
+let get_neo4j_password () =
+  Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"password"
+
+(** Close existing connection if any *)
+let close_connection () =
+  match global_state.conn with
+  | Some conn ->
+      Bolt.close conn;
+      global_state.conn <- None
+  | None -> ()
+
+(** Get or create connection *)
+let get_connection ~sw ~net ~clock () : (Bolt.t, error) result =
+  Eio.Mutex.use_rw global_state.mutex ~protect:true (fun () ->
+    let now = Eio.Time.now clock in
+    (* Check if existing connection is still valid *)
+    match global_state.conn with
+    | Some conn when now -. global_state.last_used < idle_timeout_sec ->
+        Ok conn
+    | Some _ ->
+        (* Connection timed out, close and reconnect *)
+        close_connection ();
+        let uri = get_neo4j_uri () in
+        let user = get_neo4j_user () in
+        let password = get_neo4j_password () in
+        (match Bolt.connect ~sw ~net ~clock ~uri ~user ~password () with
+         | Ok conn ->
+             global_state.conn <- Some conn;
+             global_state.last_used <- now;
+             Ok conn
+         | Error e ->
+             Error (Connection_failed (Bolt.string_of_error e)))
+    | None ->
+        (* No connection, create new *)
+        let uri = get_neo4j_uri () in
+        let user = get_neo4j_user () in
+        let password = get_neo4j_password () in
+        (match Bolt.connect ~sw ~net ~clock ~uri ~user ~password () with
+         | Ok conn ->
+             global_state.conn <- Some conn;
+             global_state.last_used <- now;
+             Ok conn
+         | Error e ->
+             Error (Connection_failed (Bolt.string_of_error e)))
+  )
+
+(** Execute a Cypher query and return JSON result *)
+let query ~sw ~net ~clock ~cypher ?(params=`Assoc []) ()
+    : (Yojson.Safe.t, error) result =
+  match get_connection ~sw ~net ~clock () with
+  | Error e -> Error e
+  | Ok conn ->
+      match Bolt.query ~clock conn ~cypher ~params () with
+      | Ok json ->
+          global_state.last_used <- Eio.Time.now clock;
+          Ok (json :> Yojson.Safe.t)
+      | Error e ->
+          (* On query error, close connection for next retry *)
+          close_connection ();
+          Error (Query_failed (Bolt.string_of_error e))
+
+(** Execute a write query (CREATE, MERGE, SET, DELETE) *)
+let execute ~sw ~net ~clock ~cypher ?(params=`Assoc []) ()
+    : (unit, error) result =
+  match query ~sw ~net ~clock ~cypher ~params () with
+  | Ok _ -> Ok ()
+  | Error e -> Error e
+
+(** Check if connection is available *)
+let is_connected () =
+  match global_state.conn with
+  | Some _ -> true
+  | None -> false
+
+(** Force disconnect *)
+let disconnect () =
+  Eio.Mutex.use_rw global_state.mutex ~protect:true (fun () ->
+    close_connection ()
+  )
+
+(** Get connection stats *)
+let stats () =
+  let now = Unix.gettimeofday () in
+  `Assoc [
+    ("connected", `Bool (is_connected ()));
+    ("idle_seconds", `Float (if is_connected () then now -. global_state.last_used else 0.0));
+    ("idle_timeout", `Float idle_timeout_sec);
+  ]

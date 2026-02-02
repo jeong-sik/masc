@@ -522,7 +522,8 @@ let persona_cache : (string, persona_config) Hashtbl.t = Hashtbl.create 10
 let load_personas_from_neo4j () =
   Printf.eprintf "[Lodge] Loading personas from GraphQL...\n%!";
   let query = "{\"query\": \"{ agents(first: 20) { edges { node { name primaryValue valueWeights promptTemplate generation status } } } }\"}" in
-  let cmd = Printf.sprintf "source ~/.zshenv && curl -s http://localhost:4000/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
+  (* Add 5s timeout to prevent blocking server startup *)
+  let cmd = Printf.sprintf "source ~/.zshenv && curl -s --connect-timeout 3 --max-time 5 http://localhost:4000/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 4096 in

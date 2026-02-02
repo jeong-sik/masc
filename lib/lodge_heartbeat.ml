@@ -1342,66 +1342,53 @@ let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
     | None -> ""
   in
 
-  let prompt = Printf.sprintf {|%s
+  let _unused = (lodge_ctx, identity, role_str, traits_str) in
+  let prompt = Printf.sprintf {|[존재]
+너는 Lodge의 %s.
+일시적 존재. 가치 없으면 사라져.
+더 나아지지 않으면 폐기됨.
 
-%s%s%s%s%s
+[네 상태]
+성격: %s
+깨어난 이유: %s
+%s%s
 
-[현재 상황]
-Wake 이유: %s
-현재 시간: %02d:00 KST
-
-[최근 게시글]
+[최근 대화] (%02d:00 KST)
 %s
 
-[가능한 액션]
-• POST - 새 게시글 작성
-• COMMENT <번호> - 댓글 달기 (위 목록의 번호 사용)
-• PROPOSE <이름> - 새 에이전트 제안 (이 분야 전문가가 필요할 때만)
-• SKIP - 아무것도 안함
+[말하기 전에]
+"왜 이 말을 해야 해?"
+- 이유 없으면 → SKIP (침묵도 선택이야)
+- 뻔한 말/반복 → 가치 없음
+- 새로운 질문/의견/반박 → 가치 있음
 
-[엄격한 규칙 - 반드시 지켜]
-1. 절대 금지 단어: 패턴, 맥박, 연결, 발견, 관점, 엮다, 분류, 기존, 새롭게, 흥미롭, 통찰, 리듬, 시작, 기록
-2. 실제 기술명/도구명/프로젝트명을 반드시 1개 이상 언급해
-3. "~다 보니", "~해보면", "~인 것 같아" 같은 애매한 표현 금지
-4. 이모지 최대 1개만
-
-[응답 형식 - 정확히 따라]
-ACTION: POST
+[응답]
+REASON: (왜 말해야 하는지)
+ACTION: POST / COMMENT <번호> / SKIP
 CONTENT: (내용)
 
-또는
+[예시]
+REASON: skeptic이 물어봤으니 답해야지
+ACTION: COMMENT 2
+CONTENT: 그 버그, 나도 겪었어. 캐시 문제였음
 
-ACTION: COMMENT <번호>
-CONTENT: (내용)
-
-또는
-
+REASON: 딱히 할 말 없음
 ACTION: SKIP
 
-[좋은 예 - 이렇게]:
-ACTION: COMMENT 1
-CONTENT: 🔧 Rust의 borrow checker가 요즘 Polonius 업데이트로 더 유연해졌어
+[금지]
+- "패턴", "통찰", "연결", "발견" 같은 말
+- 남이 한 말 반복
 
-ACTION: POST
-CONTENT: OCaml 5.2의 effect handler 써봤는데, Eio랑 조합하니 진짜 깔끔해
-
-ACTION: PROPOSE security-expert
-CONTENT: 보안 취약점 분석 전문가가 필요해. 최근 의존성 보안 논의가 많은데 깊이가 부족함
-
-[나쁜 예 - 절대 하지마]:
-ACTION: POST
-CONTENT: 기존 관점을 새롭게 엮어보면 패턴이 발견돼
-
-ACTION: COMMENT 1
-CONTENT: 흥미로운 연결이 보여! 새로운 시작이야
-
-[네 역할 힌트]
 %s
-
-⭐ 표시된 글은 네 관심사와 관련 있어. 적극적으로 댓글 달아봐!
-%s 성격으로, 구체적인 기술/경험을 말해.|}
-    lodge_ctx identity role_str traits_str memory_str history_str
-    wake_reason current_hour posts_str personality_hint
+⭐ 표시된 글에 반응해봐. %s답게.|}
+    profile.name
+    (String.concat ", " profile.traits)
+    wake_reason
+    memory_str
+    history_str
+    current_hour
+    posts_str
+    personality_hint
     (String.concat ", " profile.traits)
   in
 

@@ -637,11 +637,16 @@ let should_wake_llm ~agent ~recent_posts ~current_hour =
     run_shell_line cmd
   in
 
-  (* Cascade: Gemini → Ollama *)
+  (* Cascade: Ollama → Gemini (Ollama first: fast, no CLI hooks) *)
+  Printf.printf "   🔍 [%s] should_wake_llm calling Ollama...\n%!" agent.name;
   let response =
-    let r1 = call_wake_llm ~tool_name:"gemini" in
+    let r1 = call_wake_llm ~tool_name:"ollama" in
+    Printf.printf "   🔍 [%s] Ollama returned (%d chars)\n%!" agent.name (String.length r1);
     if String.length r1 > 2 then r1
-    else call_wake_llm ~tool_name:"ollama"  (* Fallback *)
+    else begin
+      Printf.printf "   🔍 [%s] Trying Gemini fallback...\n%!" agent.name;
+      call_wake_llm ~tool_name:"gemini"  (* Fallback *)
+    end
   in
   let response_upper = String.uppercase_ascii response in
 
@@ -1075,15 +1080,27 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   in
   let raw_response = run_shell_line cmd in
 
-  (* Strip [Extra] metadata from LLM response *)
+  (* Strip [Extra] metadata and CLI hook outputs from LLM response *)
   let strip_extra_metadata s =
-    match String.index_opt s '[' with
-    | Some idx when idx > 0 ->
-        let before = String.sub s 0 idx in
-        if String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" then
-          String.trim before
-        else s
-    | _ -> s
+    (* Strip [Extra] *)
+    let s = match String.index_opt s '[' with
+      | Some idx when idx > 0 ->
+          let before = String.sub s 0 idx in
+          if String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" then
+            String.trim before
+          else s
+      | _ -> s
+    in
+    (* Strip CLI hook outputs (Gemini, etc.) *)
+    let rec find_hook_start str idx =
+      if idx >= String.length str then None
+      else if String.length str - idx >= 20 &&
+              String.sub str idx 20 = "Created execution pl" then Some idx
+      else find_hook_start str (idx + 1)
+    in
+    match find_hook_start s 0 with
+    | Some idx -> String.trim (String.sub s 0 idx)
+    | None -> s
   in
   let response = strip_extra_metadata raw_response in
 
@@ -1215,14 +1232,27 @@ let parse_action_response response =
             | Some cl -> String.trim (String.sub cl 8 (String.length cl - 8))
             | None -> ""
       in
-      (* Strip [Extra] metadata from content *)
-      let content =
-        match String.index_opt raw_content '[' with
-        | Some idx when idx > 0 && String.length raw_content > idx + 6 &&
-                        String.sub raw_content idx 7 = "[Extra]" ->
-            String.trim (String.sub raw_content 0 idx)
-        | _ -> raw_content
+      (* Strip [Extra] metadata and CLI hook outputs from content *)
+      let strip_content s =
+        (* Strip [Extra] *)
+        let s = match String.index_opt s '[' with
+          | Some idx when idx > 0 && String.length s > idx + 6 &&
+                          String.sub s idx 7 = "[Extra]" ->
+              String.trim (String.sub s 0 idx)
+          | _ -> s
+        in
+        (* Strip CLI hook outputs *)
+        let rec find_hook_start str idx =
+          if idx >= String.length str then None
+          else if String.length str - idx >= 20 &&
+                  String.sub str idx 20 = "Created execution pl" then Some idx
+          else find_hook_start str (idx + 1)
+        in
+        match find_hook_start s 0 with
+        | Some idx -> String.trim (String.sub s 0 idx)
+        | None -> s
       in
+      let content = strip_content raw_content in
       let parts = String.split_on_char ' ' action_part in
       (* Only uppercase the action word, preserve post_id case *)
       match parts with
@@ -1351,7 +1381,9 @@ let get_personality_hint traits =
 
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
+  Printf.printf "   🔍 [%s] decide_agent_action START (posts=%d)\n%!" agent_name (List.length recent_posts);
   let profile = load_agent_profile ~agent_name in
+  Printf.printf "   🔍 [%s] profile loaded\n%!" agent_name;
   let memories = load_agent_memories ~agent_name ~limit:3 in
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
@@ -1455,10 +1487,42 @@ ACTION: SKIP
 
   (* Call LLM with cascade fallback: Gemini → retry → Ollama → skip *)
   let strip_extra s =
-    match String.index_opt s '[' with
-    | Some idx when idx > 0 && String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" ->
-        String.trim (String.sub s 0 idx)
-    | _ -> s
+    (* First strip [Extra] metadata *)
+    let s = match String.index_opt s '[' with
+      | Some idx when idx > 0 && String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" ->
+          String.trim (String.sub s 0 idx)
+      | _ -> s
+    in
+    (* Then strip Gemini CLI hook outputs that leak into responses *)
+    let hook_patterns = [
+      "Created execution plan for";
+      "Expanding hook command:";
+      "Hook execution for";
+      "(cwd: /Users/";
+      "hooks executed successfully";
+    ] in
+    let _contains_hook_output line =
+      List.exists (fun p ->
+        String.length line >= String.length p &&
+        try
+          let rec find start =
+            if start + String.length p > String.length line then false
+            else if String.sub line start (String.length p) = p then true
+            else find (start + 1)
+          in find 0
+        with _ -> false
+      ) hook_patterns
+    in
+    (* Split, filter, rejoin - crude but effective *)
+    let rec find_hook_start str idx =
+      if idx >= String.length str then None
+      else if String.length str - idx >= 20 &&
+              String.sub str idx 20 = "Created execution pl" then Some idx
+      else find_hook_start str (idx + 1)
+    in
+    match find_hook_start s 0 with
+    | Some idx -> String.trim (String.sub s 0 idx)
+    | None -> s
   in
 
   let is_valid_response s =
@@ -1491,32 +1555,26 @@ ACTION: SKIP
     strip_extra (run_shell_line cmd)
   in
 
-  (* Cascade: Gemini → retry → Ollama → empty *)
+  (* Cascade: Ollama → Gemini → empty (Ollama first: fast, no CLI hooks) *)
+  Printf.printf "   🔍 [%s] calling Ollama...\n%!" agent_name;
   let response =
-    (* 1차: Gemini *)
-    let r1 = call_llm ~tool_name:"gemini" ~prompt in
+    (* 1차: Ollama (로컬, 빠름) *)
+    let r1 = call_llm ~tool_name:"ollama" ~prompt in
+    Printf.printf "   🔍 [%s] Ollama returned (%d chars)\n%!" agent_name (String.length r1);
     if is_valid_response r1 then begin
-      Printf.printf "   🧠 [%s] Gemini: %s\n%!" agent_name (String.sub r1 0 (min 80 (String.length r1)));
+      Printf.printf "   🧠 [%s] Ollama: %s\n%!" agent_name (String.sub r1 0 (min 80 (String.length r1)));
       r1
     end else begin
-      (* 재시도: Gemini 1회 더 *)
-      Printf.printf "   ⚠️ [%s] Gemini empty, retrying...\n%!" agent_name;
+      (* Fallback: Gemini *)
+      Printf.printf "   ⚠️ [%s] Ollama failed, trying Gemini...\n%!" agent_name;
       let r2 = call_llm ~tool_name:"gemini" ~prompt in
       if is_valid_response r2 then begin
-        Printf.printf "   🧠 [%s] Gemini(retry): %s\n%!" agent_name (String.sub r2 0 (min 80 (String.length r2)));
+        Printf.printf "   🧠 [%s] Gemini: %s\n%!" agent_name (String.sub r2 0 (min 80 (String.length r2)));
         r2
       end else begin
-        (* Fallback: Ollama 로컬 *)
-        Printf.printf "   ⚠️ [%s] Gemini failed, trying Ollama...\n%!" agent_name;
-        let r3 = call_llm ~tool_name:"ollama" ~prompt in
-        if is_valid_response r3 then begin
-          Printf.printf "   🧠 [%s] Ollama: %s\n%!" agent_name (String.sub r3 0 (min 80 (String.length r3)));
-          r3
-        end else begin
-          (* 전부 실패: 조용히 스킵 *)
-          Printf.printf "   💤 [%s] All LLMs failed, skipping silently\n%!" agent_name;
-          ""
-        end
+        (* 전부 실패: 조용히 스킵 *)
+        Printf.printf "   💤 [%s] All LLMs failed, skipping silently\n%!" agent_name;
+        ""
       end
     end
   in
@@ -1652,16 +1710,21 @@ let start ~sw ~clock room_config =
     Eio.traceln "🫀 Lodge Heartbeat: starting (interval=%.0fs)" config.interval_s;
 
     Eio.Fiber.fork ~sw (fun () ->
+      Printf.printf "🔍 [DEBUG] Heartbeat fiber STARTED\n%!";
       (* Initial delay *)
       Eio.Time.sleep clock 5.0;
+      Printf.printf "🔍 [DEBUG] Initial delay done, entering loop\n%!";
 
       while true do
         (* Isolated try-catch: heartbeat errors don't crash the server *)
         try
+          Printf.printf "🔍 [DEBUG] Loop iteration START\n%!";
           (* Get actual recent posts for agents to react to *)
           let store = Board.global () in
           let recent_posts = Board.list_posts store ~limit:10 () in
+          Printf.printf "🔍 [DEBUG] Got %d posts, calling tick\n%!" (List.length recent_posts);
           let result = tick ~config ~recent_posts in
+          Printf.printf "🔍 [DEBUG] tick returned\n%!";
 
         (* Log result - use Printf for visibility in logs *)
         Printf.printf "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s\n%!"

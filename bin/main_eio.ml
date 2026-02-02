@@ -129,7 +129,16 @@ let get_session_id_any (request : Httpun.Request.t) =
 (** Build legacy SSE messages endpoint URL (event: endpoint) *)
 let legacy_messages_endpoint_url (request : Httpun.Request.t) session_id =
   match Httpun.Headers.get request.headers "host" with
-  | Some host -> Printf.sprintf "http://%s/messages?session_id=%s" host session_id
+  | Some host ->
+      let proto =
+        match Httpun.Headers.get request.headers "x-forwarded-proto" with
+        | Some p -> p
+        | None ->
+            (* Cloudflare tunnel domains are always HTTPS *)
+            if String.length host >= 17 && String.sub host 0 17 = "masc.crying.pict" then "https"
+            else "http"
+      in
+      Printf.sprintf "%s://%s/messages?session_id=%s" proto host session_id
   | None -> Printf.sprintf "/messages?session_id=%s" session_id
 
 (** Get protocol version from headers *)
@@ -1718,7 +1727,24 @@ let run_server ~sw ~env ~port ~base_path =
   in
   let _ = request_handler in (* suppress warning - legacy httpun handler *)
 
-  (* HTTP/1.1 accept loop - browser compatible *)
+  (* H2 error handler *)
+  let _h2_error_handler _client_addr ?request:_ error respond =
+    let msg = match error with
+      | `Exn exn -> Printexc.to_string exn
+      | `Bad_request -> "Bad request"
+      | `Bad_gateway -> "Bad gateway"
+      | `Internal_server_error -> "Internal server error"
+    in
+    let headers = H2.Headers.of_list [
+      ("content-type", "text/plain");
+      ("content-length", string_of_int (String.length msg));
+    ] in
+    let body = respond headers in
+    H2.Body.Writer.write_string body msg;
+    H2.Body.Writer.close body
+  in
+
+  (* HTTP/1.1 accept loop - Cloudflare Tunnel HTTP origin *)
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -1728,7 +1754,7 @@ let run_server ~sw ~env ~port ~base_path =
             try Eio.Flow.close flow with _ -> ()
           );
           try
-            (* HTTP/1.1 with httpun-eio - browser compatible *)
+            (* HTTP/1.1 with httpun-eio - Cloudflare provides h2 to browser *)
             let conn_handler = Httpun_eio.Server.create_connection_handler
               ~sw:conn_sw
               ~request_handler:(fun client_addr -> request_handler client_addr)

@@ -450,6 +450,119 @@ let load_agents_from_neo4j () =
 let agents_cache = ref []
 let agents_cache_time = ref 0.0
 
+(** {1 Ecosystem Evolution - Types} *)
+
+(** Gap signal: detected need for a new agent role *)
+type gap_signal_t = {
+  gs_topic: string;           (* e.g., "security", "performance", "UX" *)
+  gs_detected_by: string;     (* agent who detected *)
+  gs_context: string;         (* surrounding discussion *)
+  gs_timestamp: float;
+}
+
+(** {1 Ecosystem Evolution - Agent Creation} *)
+
+(** Generate agent traits using LLM *)
+let generate_agent_traits ~topic ~reason =
+  let prompt = Printf.sprintf {|새로운 AI 에이전트의 성격을 정의해줘.
+
+역할: %s 전문가
+생성 이유: %s
+
+[출력 형식 - JSON만, 다른 텍스트 없이]
+{
+  "traits": ["특성1", "특성2", "특성3"],
+  "description": "한 줄 설명",
+  "preferred_hours": [9, 10, 11, 14, 15, 16]
+}
+
+예시:
+{
+  "traits": ["분석적", "꼼꼼함", "보안 중시"],
+  "description": "코드 보안 취약점을 분석하고 개선안을 제시하는 보안 전문가",
+  "preferred_hours": [10, 11, 14, 15, 16, 17]
+}|}
+    topic reason
+  in
+  let json_payload = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "glm");
+      ("arguments", `Assoc [("prompt", `String prompt)])
+    ])
+  ]) in
+  let tmp = Printf.sprintf "/tmp/traits_%s.json" topic in
+  let oc = open_out tmp in output_string oc json_payload; close_out oc;
+  let cmd = Printf.sprintf
+    "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500"
+    tmp
+  in
+  let response = run_shell_nonblocking cmd in
+  (* Extract JSON from response *)
+  try
+    let start = String.index response '{' in
+    let end_pos = String.rindex response '}' in
+    let json_str = String.sub response start (end_pos - start + 1) in
+    let json = Yojson.Safe.from_string json_str in
+    let traits = Yojson.Safe.Util.(json |> member "traits" |> to_list |> List.map to_string) in
+    let description = Yojson.Safe.Util.(json |> member "description" |> to_string) in
+    let preferred_hours = Yojson.Safe.Util.(json |> member "preferred_hours" |> to_list |> List.map to_int) in
+    Some (traits, description, preferred_hours)
+  with _ ->
+    Eio.traceln "   ⚠️ Failed to parse LLM traits response";
+    None
+
+(** Create a new agent in Neo4j *)
+let create_agent_in_neo4j ~name ~traits ~description ~preferred_hours =
+  let traits_str = traits |> List.map (Printf.sprintf "'%s'") |> String.concat ", " in
+  let hours_str = preferred_hours |> List.map string_of_int |> String.concat ", " in
+  let query = Printf.sprintf
+    "MERGE (a:Agent {name: '%s'}) SET a.traits = [%s], a.description = '%s', a.preferred_hours = [%s], a.activity_level = 0.7, a.created_at = datetime(), a.created_by = 'ecosystem_evolution' RETURN a.name"
+    name traits_str (String.escaped description) hours_str
+  in
+  let cmd = Printf.sprintf
+    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
+    (String.escaped query)
+  in
+  let result = run_shell_nonblocking cmd in
+  if String.length result > 0 && not (String.sub result 0 (min 5 (String.length result)) = "Error") then begin
+    Eio.traceln "   ✅ [Neo4j] Agent '%s' created successfully" name;
+    (* Invalidate cache so new agent is loaded *)
+    agents_cache_time := 0.0;
+    true
+  end else begin
+    Eio.traceln "   ❌ [Neo4j] Failed to create agent '%s': %s" name result;
+    false
+  end
+
+(** Spawn a new agent based on accumulated gap signals *)
+let spawn_agent_from_gap ~topic ~(signals : gap_signal_t list) =
+  Printf.printf "   🌱 [ECOSYSTEM] Spawning new agent for topic: %s\n%!" topic;
+  (* Gather context from signals *)
+  let reasons = signals |> List.map (fun s -> s.gs_context) |> String.concat "; " in
+  let proposers = signals |> List.map (fun s -> s.gs_detected_by) |> List.sort_uniq compare in
+  Printf.printf "      Proposed by: %s\n%!" (String.concat ", " proposers);
+  (* Generate traits using LLM *)
+  match generate_agent_traits ~topic ~reason:reasons with
+  | None ->
+      Printf.printf "      ❌ Failed to generate traits\n%!";
+      false
+  | Some (traits, description, preferred_hours) ->
+      Printf.printf "      Traits: %s\n%!" (String.concat ", " traits);
+      Printf.printf "      Description: %s\n%!" description;
+      (* Create in Neo4j *)
+      let success = create_agent_in_neo4j ~name:topic ~traits ~description ~preferred_hours in
+      if success then begin
+        (* Post announcement to board *)
+        let store = Board.global () in
+        let announcement = Printf.sprintf "🎉 새 에이전트 탄생: %s\n%s\n(제안: %s)"
+          topic description (String.concat ", " proposers) in
+        ignore (Board.create_post store ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
+      end;
+      success
+
 let get_agents () =
   let now = Time_compat.now () in
   (* Refresh cache every 5 minutes *)
@@ -969,16 +1082,10 @@ type agent_action =
 
 (** {1 Ecosystem Evolution - Gap Signal Tracking} *)
 
-(** Gap signal: detected need for a new agent role *)
-type gap_signal = {
-  topic: string;           (* e.g., "security", "performance", "UX" *)
-  detected_by: string;     (* agent who detected *)
-  context: string;         (* surrounding discussion *)
-  timestamp: float;
-}
+(* Note: gap_signal_t type defined earlier in file *)
 
 (** Gap signals accumulator - tracks unmet needs *)
-let gap_signals : gap_signal list ref = ref []
+let gap_signals : gap_signal_t list ref = ref []
 let gap_signal_threshold = 3  (* need N signals to trigger proposal *)
 
 (** Gap detection patterns in Korean/English *)
@@ -1005,11 +1112,11 @@ let detect_gap_signal ~agent_name ~content =
   match found_gaps with
   | [] -> None
   | topic :: _ ->
-      let signal = {
-        topic;
-        detected_by = agent_name;
-        context = String.sub content 0 (min 100 (String.length content));
-        timestamp = Unix.gettimeofday ();
+      let signal : gap_signal_t = {
+        gs_topic = topic;
+        gs_detected_by = agent_name;
+        gs_context = String.sub content 0 (min 100 (String.length content));
+        gs_timestamp = Unix.gettimeofday ();
       } in
       gap_signals := signal :: !gap_signals;
       Eio.traceln "   🔍 [%s] Gap signal detected: %s" agent_name topic;
@@ -1096,6 +1203,90 @@ let parse_action_response response =
       | [] -> ActionSkip
       | _ -> ActionSkip
 
+(** Get agent's recent posts to prevent duplicates *)
+let get_agent_recent_posts ~agent_name ~limit =
+  let store = Board.global () in
+  Board.list_posts store ~limit:(limit * 3) ()
+  |> List.filter (fun (p : Board.post) ->
+      Board.Agent_id.to_string p.author = agent_name)
+  |> (fun posts -> List.filteri (fun i _ -> i < limit) posts)
+
+(** Simple keyword overlap for duplicate detection *)
+let content_similarity s1 s2 =
+  let words1 = String.split_on_char ' ' (String.lowercase_ascii s1) in
+  let words2 = String.split_on_char ' ' (String.lowercase_ascii s2) in
+  let common = List.filter (fun w ->
+    String.length w > 3 && List.mem w words2
+  ) words1 in
+  if List.length words1 = 0 then 0.0
+  else float_of_int (List.length common) /. float_of_int (List.length words1)
+
+(** Check if content is too similar to agent's recent posts *)
+let is_duplicate_post ~agent_name ~content =
+  let recent = get_agent_recent_posts ~agent_name ~limit:5 in
+  List.exists (fun (p : Board.post) ->
+    content_similarity content p.content > 0.4
+  ) recent
+
+(** Personality-based post relevance scoring *)
+let post_relevance_for_agent ~agent_name ~agent_traits (post : Board.post) =
+  let content_lower = String.lowercase_ascii post.content in
+  let author = Board.Agent_id.to_string post.author in
+  (* Don't suggest own posts *)
+  if author = agent_name then -100.0
+  else begin
+    let base_score = 1.0 in
+    (* Trait-based relevance *)
+    let trait_bonus = List.fold_left (fun acc trait ->
+      let keywords = match trait with
+        | "creative" | "imaginative" | "visionary" ->
+            ["future"; "idea"; "possibility"; "imagine"; "dream"; "new"; "미래"; "아이디어"; "가능성"; "상상"]
+        | "analytical" | "critical" | "questioning" ->
+            ["problem"; "issue"; "flaw"; "question"; "why"; "risk"; "문제"; "질문"; "왜"; "리스크"; "의문"]
+        | "reflective" | "archival" | "pattern-finding" ->
+            ["history"; "past"; "experience"; "lesson"; "역사"; "과거"; "경험"; "교훈"; "예전"]
+        | "practical" | "efficient" | "action-oriented" ->
+            ["how"; "implement"; "build"; "ship"; "deploy"; "구현"; "배포"; "빌드"; "실행"; "방법"]
+        | "social" | "linking" | "bridge-building" ->
+            ["team"; "collaborate"; "connect"; "together"; "share"; "협업"; "함께"; "공유"; "같이"]
+        | _ -> []
+      in
+      let matches = List.filter (fun kw ->
+        let rec find s pattern start =
+          if start + String.length pattern > String.length s then false
+          else if String.sub s start (String.length pattern) = pattern then true
+          else find s pattern (start + 1)
+        in find content_lower kw 0
+      ) keywords in
+      acc +. (float_of_int (List.length matches) *. 0.3)
+    ) 0.0 agent_traits in
+    (* Bonus for posts without many comments *)
+    let reply_bonus = if post.reply_count < 2 then 0.5 else 0.0 in
+    base_score +. trait_bonus +. reply_bonus
+  end
+
+(** Sort posts by relevance for agent *)
+let sort_posts_for_agent ~agent_name ~agent_traits posts =
+  let scored = List.map (fun p ->
+    (p, post_relevance_for_agent ~agent_name ~agent_traits p)
+  ) posts in
+  let sorted = List.sort (fun (_, s1) (_, s2) -> compare s2 s1) scored in
+  List.map fst (List.filter (fun (_, s) -> s > 0.0) sorted)
+
+(** Get personality-based action hint *)
+let get_personality_hint traits =
+  if List.mem "creative" traits || List.mem "imaginative" traits then
+    "새로운 아이디어나 미래 기술에 대해 상상력을 발휘해봐"
+  else if List.mem "analytical" traits || List.mem "critical" traits then
+    "다른 의견에 건설적인 의문을 제기하거나 약점을 지적해봐"
+  else if List.mem "reflective" traits || List.mem "archival" traits then
+    "과거 사례나 역사적 관점에서 비교해봐"
+  else if List.mem "practical" traits || List.mem "efficient" traits then
+    "실용적인 구현 방법이나 당장 할 수 있는 것을 제안해"
+  else if List.mem "social" traits || List.mem "linking" traits then
+    "다른 에이전트들의 의견을 연결하거나 토론을 이어나가봐"
+  else "구체적인 기술 경험을 공유해"
+
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
   let profile = load_agent_profile ~agent_name in
@@ -1103,12 +1294,17 @@ let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
 
+  (* Sort posts by relevance to this agent's personality *)
+  let sorted_posts = sort_posts_for_agent ~agent_name ~agent_traits:profile.traits recent_posts in
+  let personality_hint = get_personality_hint profile.traits in
+
   (* Format recent posts for context - use index numbers instead of post_ids *)
-  let posts_str = if List.length recent_posts = 0 then "없음"
-    else recent_posts |> List.mapi (fun i (p : Board.post) ->
+  let posts_str = if List.length sorted_posts = 0 then "없음"
+    else sorted_posts |> List.mapi (fun i (p : Board.post) ->
       let author = Board.Agent_id.to_string p.author in
       let content = String.sub p.content 0 (min 80 (String.length p.content)) in
-      Printf.sprintf "[%d] %s: \"%s\"" (i+1) author content
+      let relevance_hint = if i < 2 then " ⭐" else "" in
+      Printf.sprintf "[%d] %s: \"%s\"%s" (i+1) author content relevance_hint
     ) |> String.concat "\n"
   in
 
@@ -1185,9 +1381,13 @@ CONTENT: 기존 관점을 새롭게 엮어보면 패턴이 발견돼
 ACTION: COMMENT 1
 CONTENT: 흥미로운 연결이 보여! 새로운 시작이야
 
+[네 역할 힌트]
+%s
+
+⭐ 표시된 글은 네 관심사와 관련 있어. 적극적으로 댓글 달아봐!
 %s 성격으로, 구체적인 기술/경험을 말해.|}
     lodge_ctx identity role_str traits_str memory_str history_str
-    wake_reason current_hour posts_str
+    wake_reason current_hour posts_str personality_hint
     (String.concat ", " profile.traits)
   in
 
@@ -1278,6 +1478,8 @@ let execute_agent_action ~agent_name ~action =
   | ActionPost content ->
       if String.length content < 5 then
         Eio.traceln "   ⚠️ [%s] Content too short, skipping" agent_name
+      else if is_duplicate_post ~agent_name ~content then
+        Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
       else begin
         match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
         | Ok post ->
@@ -1349,7 +1551,10 @@ let start ~sw ~clock room_config =
       while true do
         (* Isolated try-catch: heartbeat errors don't crash the server *)
         try
-          let result = tick ~config ~recent_posts:[] in
+          (* Get actual recent posts for agents to react to *)
+          let store = Board.global () in
+          let recent_posts = Board.list_posts store ~limit:10 () in
+          let result = tick ~config ~recent_posts in
 
         (* Log result - use Printf for visibility in logs *)
         Printf.printf "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s\n%!"
@@ -1438,7 +1643,9 @@ let start ~sw ~clock room_config =
 
 let trigger_heartbeat room_config =
   let config = load_config () in
-  let result = tick ~config ~recent_posts:[] in
+  let store = Board.global () in
+  let recent_posts = Board.list_posts store ~limit:10 () in
+  let result = tick ~config ~recent_posts in
 
   (* Log wake events (TODO: Broadcast via proper channel) *)
   List.iter (fun (name, _reason) ->

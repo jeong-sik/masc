@@ -13,6 +13,8 @@
 type context = {
   config: Room_utils.config;
   logger: (string -> unit) option;  (** Optional logging callback *)
+  sw: Eio.Switch.t option;
+  proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 (** Create context with just config (backward compatible) *)
@@ -20,6 +22,13 @@ val make_context : Room_utils.config -> context
 
 (** Create context with config and logger *)
 val make_context_with_logger : Room_utils.config -> (string -> unit) -> context
+
+(** Create context with sw and proc_mgr for non-blocking spawn *)
+val make_context_with_eio :
+  config:Room_utils.config ->
+  sw:Eio.Switch.t ->
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
+  context
 
 (** Internal logging helper (for testing) *)
 val log : context -> string -> unit

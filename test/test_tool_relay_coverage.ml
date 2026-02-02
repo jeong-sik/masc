@@ -23,7 +23,8 @@ let make_test_ctx () =
     (Printf.sprintf "masc-relay-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
   let config = Room.default_config tmp in
-  { Tool_relay.config; agent_name = "test-agent" }
+  (* Use dummy sw/proc_mgr for testing - actual spawn won't be called in these tests *)
+  { Tool_relay.config; agent_name = "test-agent"; sw = Obj.magic (); proc_mgr = None }
 
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->

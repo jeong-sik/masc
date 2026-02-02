@@ -23,6 +23,8 @@ let get_string_list args key =
 type context = {
   config: Room.config;
   agent_name: string;
+  sw: Eio.Switch.t;
+  proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 type result = bool * string
@@ -61,7 +63,7 @@ let handle_relay_checkpoint _ctx args =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
-let handle_relay_now _ctx args =
+let handle_relay_now ctx args =
   let summary = get_string args "summary" "" in
   let current_task = get_string_opt args "current_task" in
   let target_agent = get_string args "target_agent" "claude" in
@@ -76,21 +78,25 @@ let handle_relay_now _ctx args =
     relay_generation = generation;
   } in
   let prompt = Relay.build_handoff_prompt ~payload ~generation:(generation + 1) in
-  let result = Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
-  let output_preview =
-    if String.length result.Spawn.output > 500 then
-      String.sub result.Spawn.output 0 500
-    else result.Spawn.output
-  in
-  let json = `Assoc [
-    ("success", `Bool result.Spawn.success);
-    ("exit_code", `Int result.Spawn.exit_code);
-    ("elapsed_ms", `Int result.Spawn.elapsed_ms);
-    ("target_agent", `String target_agent);
-    ("generation", `Int (generation + 1));
-    ("output_preview", `String output_preview);
-  ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (* Use Eio-native spawn to avoid blocking HTTP server *)
+  match ctx.proc_mgr with
+  | None -> (false, "❌ Process manager not available for relay spawn")
+  | Some pm ->
+      let result = Spawn_eio.spawn ~sw:ctx.sw ~proc_mgr:pm ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
+      let output_preview =
+        if String.length result.Spawn_eio.output > 500 then
+          String.sub result.Spawn_eio.output 0 500
+        else result.Spawn_eio.output
+      in
+      let json = `Assoc [
+        ("success", `Bool result.Spawn_eio.success);
+        ("exit_code", `Int result.Spawn_eio.exit_code);
+        ("elapsed_ms", `Int result.Spawn_eio.elapsed_ms);
+        ("target_agent", `String target_agent);
+        ("generation", `Int (generation + 1));
+        ("output_preview", `String output_preview);
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
 
 let handle_relay_smart_check _ctx args =
   let messages = get_int args "messages" 0 in

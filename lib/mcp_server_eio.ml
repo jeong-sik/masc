@@ -815,7 +815,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_run = { Tool_run.config } in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
-  let simple_ctx_mitosis = Tool_mitosis.make_context config in
+  let simple_ctx_mitosis = Tool_mitosis.make_context_with_eio ~config ~sw ~proc_mgr:state.Mcp_server.proc_mgr in
   let simple_ctx_portal : Tool_portal.context = { config; agent_name } in
   let simple_ctx_worktree : Tool_worktree.context = { config; agent_name } in
   let simple_ctx_vote : Tool_vote.context = { config; agent_name } in
@@ -832,7 +832,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     proc_mgr = state.Mcp_server.proc_mgr;
     sw = Some sw;
   } in
-  let simple_ctx_relay : Tool_relay.context = { config; agent_name } in
+  let simple_ctx_relay : Tool_relay.context = { config; agent_name; sw; proc_mgr = state.Mcp_server.proc_mgr } in
   let simple_ctx_heartbeat = { Tool_heartbeat.config; agent_name; sw; clock } in
   let simple_ctx_encryption : Tool_encryption.context = { state } in
   let simple_ctx_auth : Tool_auth.context = { config; agent_name } in
@@ -1517,36 +1517,50 @@ Time: %s
           (* Broadcast last words to the room *)
           let _ = Room.broadcast config ~from_agent:agent_name ~content:last_words in
 
-          (* Create spawn function *)
-          let spawn_fn ~prompt =
-            Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
-          in
+          (* Create spawn function - use Eio-native spawn to avoid blocking *)
+          match state.Mcp_server.proc_mgr with
+          | None ->
+              (false, "❌ Process manager not available for mitosis spawn")
+          | Some pm ->
+              let spawn_fn ~prompt =
+                let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
+                (* Convert Spawn_eio.spawn_result to Spawn.spawn_result for Mitosis compatibility *)
+                { Spawn.success = result.Spawn_eio.success;
+                  output = result.Spawn_eio.output;
+                  exit_code = result.Spawn_eio.exit_code;
+                  elapsed_ms = result.Spawn_eio.elapsed_ms;
+                  input_tokens = result.Spawn_eio.input_tokens;
+                  output_tokens = result.Spawn_eio.output_tokens;
+                  cache_creation_tokens = result.Spawn_eio.cache_creation_tokens;
+                  cache_read_tokens = result.Spawn_eio.cache_read_tokens;
+                  cost_usd = result.Spawn_eio.cost_usd }
+              in
 
-          (* Execute full mitosis *)
-          let (spawn_result, new_cell, new_pool) =
-            Mitosis.execute_mitosis
-              ~config:mitosis_config
-              ~pool:!(Mcp_server.stem_pool)
-              ~parent:cell
-              ~full_context:(Printf.sprintf "Summary: %s\n\nCurrent Task: %s\n\nContext:\n%s"
-                  (if summary = "" then "Memento mori - context limit reached" else summary)
-                  current_task full_context)
-              ~spawn_fn
-          in
-          Mcp_server.current_cell := new_cell;
-          Mcp_server.stem_pool := new_pool;
+              (* Execute full mitosis *)
+              let (spawn_result, new_cell, new_pool) =
+                Mitosis.execute_mitosis
+                  ~config:mitosis_config
+                  ~pool:!(Mcp_server.stem_pool)
+                  ~parent:cell
+                  ~full_context:(Printf.sprintf "Summary: %s\n\nCurrent Task: %s\n\nContext:\n%s"
+                      (if summary = "" then "Memento mori - context limit reached" else summary)
+                      current_task full_context)
+                  ~spawn_fn
+              in
+              Mcp_server.current_cell := new_cell;
+              Mcp_server.stem_pool := new_pool;
 
-          let response = `Assoc [
-            ("status", `String "divided");
-            ("context_ratio", `Float context_ratio);
-            ("previous_generation", `Int cell.generation);
-            ("new_generation", `Int new_cell.generation);
-            ("successor_spawned", `Bool spawn_result.Spawn.success);
-            ("successor_agent", `String target_agent);
-            ("successor_output", `String (String.sub spawn_result.Spawn.output 0 (min 500 (String.length spawn_result.Spawn.output))));
-            ("message", `String (Printf.sprintf "🔴 Context critical (%.0f%%). Cell divided. %s successor spawned." (context_ratio *. 100.0) target_agent));
-          ] in
-          (true, Yojson.Safe.pretty_to_string response)
+              let response = `Assoc [
+                ("status", `String "divided");
+                ("context_ratio", `Float context_ratio);
+                ("previous_generation", `Int cell.generation);
+                ("new_generation", `Int new_cell.generation);
+                ("successor_spawned", `Bool spawn_result.Spawn.success);
+                ("successor_agent", `String target_agent);
+                ("successor_output", `String (String.sub spawn_result.Spawn.output 0 (min 500 (String.length spawn_result.Spawn.output))));
+                ("message", `String (Printf.sprintf "🔴 Context critical (%.0f%%). Cell divided. %s successor spawned." (context_ratio *. 100.0) target_agent));
+              ] in
+              (true, Yojson.Safe.pretty_to_string response)
         end
       end
 

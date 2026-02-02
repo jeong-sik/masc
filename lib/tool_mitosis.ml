@@ -17,19 +17,49 @@
 type context = {
   config: Room.config;
   logger: (string -> unit) option;  (** Optional logging callback *)
+  sw: Eio.Switch.t option;
+  proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 (** Create context with just config (backward compatible) *)
-let make_context config : context = { config; logger = None }
+let make_context config : context = { config; logger = None; sw = None; proc_mgr = None }
 
 (** Create context with config and logger *)
-let make_context_with_logger config logger : context = { config; logger = Some logger }
+let make_context_with_logger config logger : context = { config; logger = Some logger; sw = None; proc_mgr = None }
+
+(** Create context with sw and proc_mgr for non-blocking spawn *)
+let make_context_with_eio ~config ~sw ~proc_mgr : context =
+  { config; logger = None; sw = Some sw; proc_mgr }
 
 (** Internal logging helper *)
 let log ctx msg =
   match ctx.logger with
   | Some f -> f msg
   | None -> ()
+
+(** Convert Spawn_eio result to Spawn result for Mitosis compatibility *)
+let spawn_eio_to_spawn (r : Spawn_eio.spawn_result) : Spawn.spawn_result =
+  { Spawn.success = r.Spawn_eio.success;
+    output = r.Spawn_eio.output;
+    exit_code = r.Spawn_eio.exit_code;
+    elapsed_ms = r.Spawn_eio.elapsed_ms;
+    input_tokens = r.Spawn_eio.input_tokens;
+    output_tokens = r.Spawn_eio.output_tokens;
+    cache_creation_tokens = r.Spawn_eio.cache_creation_tokens;
+    cache_read_tokens = r.Spawn_eio.cache_read_tokens;
+    cost_usd = r.Spawn_eio.cost_usd }
+
+(** Create non-blocking spawn_fn when Eio context is available *)
+let make_spawn_fn ~ctx ~agent_name ~timeout_seconds : (prompt:string -> Spawn.spawn_result) =
+  match ctx.sw, ctx.proc_mgr with
+  | Some sw, Some pm ->
+      (fun ~prompt ->
+        let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt ~timeout_seconds () in
+        spawn_eio_to_spawn result)
+  | _ ->
+      (* Fallback to blocking spawn when Eio context unavailable *)
+      (fun ~prompt ->
+        Spawn.spawn ~agent_name ~prompt ~timeout_seconds ())
 
 (** Tool result type *)
 type result = bool * string
@@ -161,9 +191,7 @@ let handle_mitosis_divide ctx args : result =
   in
   let cell = !(Mcp_server.current_cell) in
   let config_mitosis = Mitosis.default_config in
-  let spawn_fn ~prompt =
-    Spawn.spawn ~agent_name:"claude" ~prompt ~timeout_seconds:Mitosis.Defaults.spawn_timeout_seconds ()
-  in
+  let spawn_fn = make_spawn_fn ~ctx ~agent_name:"claude" ~timeout_seconds:Mitosis.Defaults.spawn_timeout_seconds in
   let (spawn_result, new_cell, new_pool) =
     Mitosis.execute_mitosis ~config:config_mitosis ~pool:!(Mcp_server.stem_pool)
       ~parent:cell ~full_context ~spawn_fn
@@ -318,10 +346,8 @@ let handle_mitosis_handoff ctx args : result =
     handoff_threshold;
   } in
   let pool = !(Mcp_server.stem_pool) in
-  
-  let spawn_fn ~prompt =
-    Spawn.spawn ~agent_name:target_agent ~prompt ~timeout_seconds:spawn_timeout ()
-  in
+
+  let spawn_fn = make_spawn_fn ~ctx ~agent_name:target_agent ~timeout_seconds:spawn_timeout in
   
   let result = Mitosis.auto_mitosis_check_2phase
     ~config:config_mitosis

@@ -8,6 +8,8 @@ val get_string_list : Yojson.Safe.t -> string -> string list
 type context = {
   config: Room.config;
   agent_name: string;
+  sw: Eio.Switch.t;
+  proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 type result = bool * string

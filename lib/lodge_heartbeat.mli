@@ -20,7 +20,6 @@ val load_config : unit -> config
 (** {1 Types} *)
 
 type agent = {
-  uuid: string;
   name: string;
   preferred_hours: int list;
   peak_hour: int option;

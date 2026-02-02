@@ -30,23 +30,26 @@ let cmd = Printf.sprintf
 ```
 
 ### GraphQL Query Cost 주의
+
+**⚠️ GRAPHQL_MAX_COST = 2000** (second-brain-graphql c09140c에서 상향)
+
 ```
-first: 10  → OK (cost ~200)
-first: 50  → cost 3051 > limit 1000 ❌
-where 필터 + first: 50 → cost 폭증 ❌
+first: 15  → OK (cost ~1200, limit 2000) ← 현재 사용 중
+first: 10  → ❌ sangsu/skeptic/pragmatist 누락 (알파벳순 정렬)
+first: 50  → cost 3051 > limit 2000 ❌
 ```
-→ `first: 10`으로 제한하고, 추가 필터링은 클라이언트 측에서.
+→ **`first: 15` 미만으로 줄이지 말 것** (15개 에이전트 존재, 알파벳순 페이지네이션)
 
 ### Heartbeat Agent Fields
 ```graphql
-{ agents(first: 10) { edges { node {
+{ agents(first: 15) { edges { node {
   name preferredHours peakHour traits activityLevel
 } } } }
 ```
 
 ### Lodge Identity Fields
 ```graphql
-{ agents(first: 10) { edges { node {
+{ agents(first: 15) { edges { node {
   name primaryValue status emoji koreanName model interests
 } } } }
 ```

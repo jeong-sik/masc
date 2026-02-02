@@ -117,7 +117,7 @@ let build_spawn_command ~agent_type ~prompt ~working_dir =
     | "claude" -> Printf.sprintf "echo %s | claude -p --allowedTools 'mcp__masc__*'" escaped_prompt
     | "gemini" -> Printf.sprintf "echo %s | gemini --yolo" escaped_prompt
     | "codex" -> Printf.sprintf "echo %s | codex exec" escaped_prompt
-    | "ollama" -> Printf.sprintf "echo %s | ollama run glm-4.7-flash" escaped_prompt
+    | "ollama" -> Printf.sprintf "echo %s | ollama run %s" escaped_prompt Env_config.Ollama.default_model
     | "glm" ->
         (* GLM has no standalone CLI - use temp file to avoid shell escaping issues *)
         let llm_url = llm_mcp_url () in

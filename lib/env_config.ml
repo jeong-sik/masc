@@ -115,6 +115,14 @@ module Spawn = struct
     int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
 end
 
+(** {1 Ollama Configuration} *)
+
+module Ollama = struct
+  (** Default model — always resident in VRAM via launchd preload *)
+  let default_model =
+    get_string ~default:"glm-4.7-flash" "OLLAMA_DEFAULT_MODEL"
+end
+
 (** {1 Federation Configuration} *)
 
 module Federation = struct

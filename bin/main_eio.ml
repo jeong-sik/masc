@@ -1054,13 +1054,13 @@ let make_routes ~port ~host =
   |> Http.Router.post "/messages" handle_post_messages
   |> Http.Router.get "/sse"
        (fun request reqd ->
-         with_read_auth (fun _state req reqd ->
+         with_public_read (fun _state req reqd ->
            handle_get_mcp
              ~legacy_messages_endpoint:(legacy_messages_endpoint_url req)
              req reqd
          ) request reqd)
   |> Http.Router.get "/sse/simple" (fun request reqd ->
-       with_read_auth (fun _state req reqd -> sse_simple_handler req reqd) request reqd)
+       with_public_read (fun _state req reqd -> sse_simple_handler req reqd) request reqd)
   (* REST API for dashboard - direct Room access *)
   |> Http.Router.get "/api/v1/status" (fun request reqd ->
        with_public_read (fun state _req reqd ->

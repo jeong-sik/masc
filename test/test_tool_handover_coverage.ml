@@ -61,7 +61,7 @@ let test_context_creation () =
     agent_name = "test-agent";
     fs = None;
     proc_mgr = None;
-    sw = Obj.magic ();  (* Cannot create real switch without Eio runtime *)
+    sw = None;  (* Cannot create real switch without Eio runtime *)
   } in
   check string "agent_name" "test-agent" ctx.agent_name
 
@@ -76,7 +76,7 @@ let make_ctx () : Tool_handover.context =
     agent_name = "test-agent";
     fs = None;
     proc_mgr = None;
-    sw = Obj.magic ();
+    sw = None;
   }
 
 let test_dispatch_handover_create_no_fs () =

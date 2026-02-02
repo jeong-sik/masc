@@ -38,7 +38,7 @@ type context = {
   agent_name: string;
   fs: Eio.Fs.dir_ty Eio.Path.t option;
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
-  sw: Eio.Switch.t;
+  sw: Eio.Switch.t option;  (* Only needed when fs and proc_mgr are Some *)
 }
 
 type result = bool * string
@@ -100,14 +100,15 @@ let handle_handover_claim_and_spawn ctx args =
   let handover_id = get_string args "handover_id" "" in
   let additional_instructions = get_string_opt args "additional_instructions" in
   let timeout_seconds = _get_int_opt args "timeout_seconds" in
-  match ctx.fs, ctx.proc_mgr with
-  | Some fs, Some pm ->
-      (match Handover_eio.claim_and_spawn ~sw:ctx.sw ~fs ~proc_mgr:pm ctx.config
+  match ctx.fs, ctx.proc_mgr, ctx.sw with
+  | Some fs, Some pm, Some sw ->
+      (match Handover_eio.claim_and_spawn ~sw ~fs ~proc_mgr:pm ctx.config
                ~handover_id ~agent_name:ctx.agent_name ?additional_instructions ?timeout_seconds () with
        | Ok result -> (true, Spawn_eio.result_to_human_string result)
        | Error e -> (false, Printf.sprintf "❌ Failed to claim/spawn: %s" e))
-  | None, _ -> (false, "❌ Filesystem not available")
-  | _, None -> (false, "❌ Process manager not available in this environment")
+  | None, _, _ -> (false, "❌ Filesystem not available")
+  | _, None, _ -> (false, "❌ Process manager not available in this environment")
+  | _, _, None -> (false, "❌ Eio Switch not available in this environment")
 
 let handle_handover_get ctx args =
   let handover_id = get_string args "handover_id" "" in

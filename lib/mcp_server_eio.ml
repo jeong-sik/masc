@@ -828,7 +828,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     config; agent_name;
     fs = state.Mcp_server.fs;
     proc_mgr = state.Mcp_server.proc_mgr;
-    sw;
+    sw = Some sw;
   } in
   let simple_ctx_relay : Tool_relay.context = { config; agent_name } in
   let simple_ctx_heartbeat = { Tool_heartbeat.config; agent_name; sw; clock } in
@@ -1889,7 +1889,8 @@ Time: %s
 
   (* Lodge tools delegated to Tool_lodge module *)
   | "lodge_heartbeat" | "lodge_classify" | "lodge_react" | "lodge_cycle"
-  | "lodge_discussion" | "lodge_evolve" | "lodge_spawn" | "lodge_agents"
+  | "lodge_discussion" | "lodge_orchestrate" | "lodge_auto_chain"
+  | "lodge_evolve" | "lodge_spawn" | "lodge_agents"
   | "lodge_persona_patrol" | "lodge_autonomous_loop"
   (* Project collaboration *)
   | "lodge_propose_project" | "lodge_join_project" | "lodge_share_code"

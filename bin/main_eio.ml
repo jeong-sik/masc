@@ -1253,8 +1253,9 @@ let run_server ~sw ~env ~port ~base_path =
   current_clock := Some clock;
   current_net := Some net;
 
-  (* Set net reference in Mcp_eio for Walph chain execution *)
+  (* Set net and clock references in Mcp_eio for async operations *)
   Mcp_eio.set_net net;
+  Mcp_eio.set_clock clock;
 
   (* Create Caqti-compatible stdenv adapter
      Note: net type coercion from [Generic|Unix] to [Generic] is safe

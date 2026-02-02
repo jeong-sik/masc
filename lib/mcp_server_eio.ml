@@ -29,10 +29,25 @@ type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
 let current_net : eio_net option ref = ref None
 let net_initialized : bool ref = ref false
 
+(** Eio clock reference for async sleep *)
+let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+
 (** Set the Eio network reference. Called from main_eio.ml. *)
 let set_net net =
   current_net := Some (net :> eio_net);
   net_initialized := true
+
+(** Set the Eio clock reference. Called from main_eio.ml. *)
+let set_clock clock = current_clock := Some clock
+
+(** Get the Eio clock reference optionally. *)
+let get_clock_opt () = !current_clock
+
+(** Get the Eio clock reference. Raises if not set. *)
+let get_clock () =
+  match !current_clock with
+  | Some clock -> clock
+  | None -> invalid_arg "Eio clock not initialized"
 
 (** Get the Eio network reference optionally - for graceful handling *)
 let get_net_opt () : eio_net option = !current_net

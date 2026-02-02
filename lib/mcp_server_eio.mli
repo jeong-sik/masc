@@ -55,6 +55,15 @@ type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
     @param net Eio network capability *)
 val set_net : _ Eio.Net.t -> unit
 
+(** Set the Eio clock reference for async sleep. *)
+val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit
+
+(** Get the Eio clock reference optionally. *)
+val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
+
+(** Get the Eio clock reference. Raises if not set. *)
+val get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t
+
 (** {1 State Management} *)
 
 (** Create server state (synchronous, no effect)

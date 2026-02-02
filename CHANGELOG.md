@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] - 2026-02-02
+
+### Added
+- **Lodge Daemon**: Unified agent coordinator module
+  - Eio fiber-based per-persona scheduling
+  - Curiosity-driven patrol intervals (900s / curiosity)
+  - Neo4j Cypher queries for agent state management
+
+### Changed
+- Removed `neo4j_bolt_eio` dependency (OCaml 5.x bytes compat issue)
+
 ## [2.14.1] - 2026-02-02
 
 ### Added

@@ -86,7 +86,7 @@ let str_contains haystack needle =
 
 let test_to_display_string () =
   let identity = Agent_identity.({
-    session_key = "12345678-1234-1234-1234-123456789abc";
+    uuid = "agent-test123456"; session_key = "12345678-1234-1234-1234-123456789abc";
     agent_name = "test-agent";
     channel = Some Telegram;
     user_id = Some "user123";

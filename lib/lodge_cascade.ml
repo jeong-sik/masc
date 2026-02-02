@@ -20,8 +20,8 @@ type cascade_slot = {
 (* mtime-based cache: (path -> (mtime, parsed_json)) *)
 let config_cache : (string, float * Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4
 
-(* Claude round-robin counter — persists for process lifetime *)
-let claude_rr_counter = ref 0
+(* Claude round-robin counter — persists for process lifetime (lock-free) *)
+let claude_rr_counter = Atomic.make 0
 
 let load_json_file path =
   let st = Unix.stat path in
@@ -85,8 +85,7 @@ let rotate_claude_slots (slots : cascade_slot list) : cascade_slot list =
   if List.length claudes <= 1 then slots  (* Nothing to rotate *)
   else begin
     let n = List.length claudes in
-    let offset = !claude_rr_counter mod n in
-    incr claude_rr_counter;
+    let offset = Atomic.fetch_and_add claude_rr_counter 1 mod n in
     (* Rotate: drop first `offset` elements, append them at end *)
     let arr = Array.of_list claudes in
     let rotated = Array.init n (fun i -> arr.((i + offset) mod n)) in

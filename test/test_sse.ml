@@ -5,11 +5,11 @@ let test_unregister_if_current () =
   let session_id = "test_session" in
   let noop _ = () in
 
-  let id1 = register session_id ~push:noop ~last_event_id:0 in
+  let (id1, _) = register session_id ~push:noop ~last_event_id:0 in
   check bool "registered" true (exists session_id);
 
   (* Re-register same session_id (simulates reconnect) *)
-  let id2 = register session_id ~push:noop ~last_event_id:0 in
+  let (id2, _) = register session_id ~push:noop ~last_event_id:0 in
   check bool "still registered" true (exists session_id);
 
   (* Old connection cleanup must not unregister the new connection *)

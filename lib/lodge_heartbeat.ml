@@ -115,8 +115,8 @@ let agent_comment_counts : (string * string, int) Hashtbl.t = Hashtbl.create 50
 (** Last check-in timestamp per agent *)
 let last_checkin : (string, float) Hashtbl.t = Hashtbl.create 10
 
-(** Round-robin pointer — index into agent list (lock-free) *)
-let round_robin_idx = Atomic.make 0
+(** Round-robin pointer — index into agent list *)
+let round_robin_idx = ref 0
 
 (** Per-agent rate state for posts/comments *)
 type rate_state = {
@@ -135,7 +135,7 @@ let max_posts_per_day = 5
 let max_comments_per_day = 20
 
 (** Get or create rate state for agent *)
-let get_rate_state_unlocked ~agent_name =
+let get_rate_state ~agent_name =
   let now = Unix.gettimeofday () in
   let day_start = Float.of_int (int_of_float now / 86400 * 86400) in
   match Hashtbl.find_opt rate_states agent_name with
@@ -155,59 +155,53 @@ let get_rate_state_unlocked ~agent_name =
 
 (** Check if agent can perform the given action *)
 let check_rate_limit ~agent_name action_type =
-  with_lodge_lock (fun () ->
-    let now = Unix.gettimeofday () in
-    let rs = get_rate_state_unlocked ~agent_name in
-    match action_type with
-    | `Post ->
-      now -. rs.last_post >= min_post_gap && rs.posts_today < max_posts_per_day
-    | `Comment ->
-      now -. rs.last_comment >= min_comment_gap && rs.comments_today < max_comments_per_day
-    | `Vote -> true)
+  let now = Unix.gettimeofday () in
+  let rs = get_rate_state ~agent_name in
+  match action_type with
+  | `Post ->
+    now -. rs.last_post >= min_post_gap && rs.posts_today < max_posts_per_day
+  | `Comment ->
+    now -. rs.last_comment >= min_comment_gap && rs.comments_today < max_comments_per_day
+  | `Vote -> true  (* Votes are always allowed *)
 
 (** Record that agent performed an action (update rate state) *)
 let record_rate_action ~agent_name action_type =
-  with_lodge_lock (fun () ->
-    let now = Unix.gettimeofday () in
-    let rs = get_rate_state_unlocked ~agent_name in
-    match action_type with
-    | `Post -> rs.last_post <- now; rs.posts_today <- rs.posts_today + 1
-    | `Comment -> rs.last_comment <- now; rs.comments_today <- rs.comments_today + 1
-    | `Vote -> ())
+  let now = Unix.gettimeofday () in
+  let rs = get_rate_state ~agent_name in
+  match action_type with
+  | `Post -> rs.last_post <- now; rs.posts_today <- rs.posts_today + 1
+  | `Comment -> rs.last_comment <- now; rs.comments_today <- rs.comments_today + 1
+  | `Vote -> ()
 
 (** Record a check-in timestamp *)
 let record_checkin ~agent_name =
-  with_lodge_lock (fun () ->
-    Hashtbl.replace last_checkin agent_name (Unix.gettimeofday ()))
+  Hashtbl.replace last_checkin agent_name (Unix.gettimeofday ())
 
 (** Check if enough time passed since last check-in *)
 let can_checkin ~agent_name ~min_gap_s =
-  with_lodge_lock (fun () ->
-    let now = Unix.gettimeofday () in
-    match Hashtbl.find_opt last_checkin agent_name with
-    | None -> true
-    | Some last -> now -. last >= min_gap_s)
+  let now = Unix.gettimeofday () in
+  match Hashtbl.find_opt last_checkin agent_name with
+  | None -> true
+  | Some last -> now -. last >= min_gap_s
 
 (** Max comments per agent per post *)
 let max_comments_per_agent_per_post = 3
 
 (** Check if agent can comment on this post *)
 let can_agent_comment ~agent_name ~post_id =
-  with_lodge_lock (fun () ->
-    let key = (agent_name, post_id) in
-    let count = match Hashtbl.find_opt agent_comment_counts key with
-      | Some c -> c | None -> 0
-    in
-    count < max_comments_per_agent_per_post)
+  let key = (agent_name, post_id) in
+  let count = match Hashtbl.find_opt agent_comment_counts key with
+    | Some c -> c | None -> 0
+  in
+  count < max_comments_per_agent_per_post
 
 (** Record agent comment for throttling *)
 let record_agent_comment ~agent_name ~post_id =
-  with_lodge_lock (fun () ->
-    let key = (agent_name, post_id) in
-    let count = match Hashtbl.find_opt agent_comment_counts key with
-      | Some c -> c | None -> 0
-    in
-    Hashtbl.replace agent_comment_counts key (count + 1))
+  let key = (agent_name, post_id) in
+  let count = match Hashtbl.find_opt agent_comment_counts key with
+    | Some c -> c | None -> 0
+  in
+  Hashtbl.replace agent_comment_counts key (count + 1)
 
 (** Start agent's own heartbeat loop *)
 let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
@@ -567,8 +561,6 @@ type heartbeat_result = {
   current_hour: int;
   agents_checked: int;
   checkins: (string * checkin_trigger * checkin_result) list;
-  agents_woken: (string * string) list;  (** (name, reason) pairs *)
-  encounter_rolled: string option;
   activity_report: string;       (** Human-readable summary *)
 }
 
@@ -596,7 +588,7 @@ let time_modifier agent =
 let load_agents_from_neo4j () =
   (* first:15 — GRAPHQL_MAX_COST=2000 (c09140c in second-brain-graphql).
      DO NOT reduce below 15: 15 agents exist, alphabetical sort cuts sangsu/skeptic/pragmatist. *)
-  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits activityLevel interests personalityHint } } } }\"}" in
+  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits interests activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"
@@ -635,10 +627,13 @@ let load_agents_from_neo4j () =
           | v -> Yojson.Safe.Util.to_float v
         in
         (* Client-side filter: only agents with preferredHours *)
-        let interests = try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string) with _ -> [] in
-        let personality_hint = try Yojson.Safe.Util.(member "personalityHint" node |> to_string_option) with _ -> None in
+        let interests =
+          try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
+          with _ -> []
+        in
         if preferred_hours <> [] then
-          Some { name; preferred_hours; peak_hour; traits; interests; personality_hint; activity_level }
+          Some { name; preferred_hours; peak_hour; traits; interests;
+                 personality_hint = None; activity_level }
         else
           None
       with _ -> None
@@ -663,14 +658,14 @@ type lodge_status = {
   ls_agent_names: string list;
   ls_last_tick: float;        (** Unix timestamp of last tick *)
   ls_total_ticks: int;
-  ls_total_wakes: int;
+  ls_total_checkins: int;
   ls_last_result: heartbeat_result option;
   ls_active_self_heartbeats: string list;
 }
 
 let _lodge_last_tick = ref 0.0
 let _lodge_total_ticks = ref 0
-let _lodge_total_wakes = ref 0
+let _lodge_total_checkins = ref 0
 let _lodge_last_result : heartbeat_result option ref = ref None
 let _lodge_enabled = ref false
 
@@ -679,12 +674,12 @@ let lodge_status () : lodge_status =
   {
     ls_enabled = !_lodge_enabled;
     ls_interval_s = (let e = Sys.getenv_opt "LODGE_INTERVAL" in
-      match e with Some s -> (try float_of_string s with _ -> 60.0) | None -> 60.0);
+      match e with Some s -> (try float_of_string s with _ -> 120.0) | None -> 120.0);
     ls_agent_count = List.length agents;
     ls_agent_names = List.map (fun a -> a.name) agents;
     ls_last_tick = !_lodge_last_tick;
     ls_total_ticks = !_lodge_total_ticks;
-    ls_total_wakes = !_lodge_total_wakes;
+    ls_total_checkins = !_lodge_total_checkins;
     ls_last_result = !_lodge_last_result;
     ls_active_self_heartbeats =
       Hashtbl.fold (fun name _state acc -> name :: acc) agent_states [];
@@ -705,9 +700,9 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
       `Assoc [
         ("hour", `Int r.current_hour);
         ("checked", `Int r.agents_checked);
-        ("woken", `Int (List.length active));
-        ("woken_names", `List (List.map (fun (n, _, _) -> `String n) active));
-        ("encounter", `Null);
+        ("acted", `Int (List.length active));
+        ("acted_names", `List (List.map (fun (n, _, _) -> `String n) active));
+        ("activity_report", `String r.activity_report);
       ]
   in
   `Assoc [
@@ -717,7 +712,7 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
     ("agents", `List (List.map (fun n -> `String n) s.ls_agent_names));
     ("last_tick_ago", `String last_tick_ago);
     ("total_ticks", `Int s.ls_total_ticks);
-    ("total_wakes", `Int s.ls_total_wakes);
+    ("total_checkins", `Int s.ls_total_checkins);
     ("last_tick_result", last_result_json);
     ("active_self_heartbeats", `List (List.map (fun n -> `String n) s.ls_active_self_heartbeats));
   ]
@@ -877,168 +872,125 @@ let scan_board_triggers ~since ~(agents : agent list) : (string * checkin_trigge
       if find_sub content_lower mention_lower 0 then
         triggers := (agent.name, Mentioned (Board.Post_id.to_string p.id)) :: !triggers
     ) agents;
-    (* Check keyword match with agent traits + interests *)
+    (* Check keyword match with agent traits *)
     List.iter (fun (agent : agent) ->
-      let keywords = agent.traits @ agent.interests in
-      let matched = List.exists (fun kw ->
-        let kw_lower = String.lowercase_ascii kw in
+      let matched = List.exists (fun trait ->
+        let trait_lower = String.lowercase_ascii trait in
         let rec find_sub s pat start =
           if start + String.length pat > String.length s then false
           else if String.sub s start (String.length pat) = pat then true
           else find_sub s pat (start + 1)
         in
-        String.length kw_lower >= 2 && find_sub content_lower kw_lower 0
-      ) keywords in
+        String.length trait_lower >= 2 && find_sub content_lower trait_lower 0
+      ) agent.traits in
       if matched && not (List.exists (fun (n, _) -> n = agent.name) !triggers) then
         triggers := (agent.name, ContentAlert (Board.Post_id.to_string p.id)) :: !triggers
     ) agents
   ) new_posts;
   !triggers
 
-(** Ask LLM if agent should wake given current context *)
-(** LLM-based wake decision for a single agent (short timeout, non-blocking via systhread) *)
-let should_wake_llm_async ~agent ~recent_posts ~current_hour =
-  (* Fairness: use rate limiter to avoid spamming *)
-  if not (can_checkin ~agent_name:agent.name ~min_gap_s:1800.0) then begin
-    Printf.printf "   ⏳ [%s] Fairness: checked in recently, SLEEP\n%!" agent.name;
-    None
-  end else
-  let posts_summary = if List.length recent_posts = 0 then "없음"
-    else recent_posts |> List.map (fun (p : Board.post) ->
-      let author = Board.Agent_id.to_string p.author in
-      let content = utf8_truncate p.content 50 in
-      Printf.sprintf "- %s: \"%s\"" author content
-    ) |> String.concat "\n"
-  in
-  let traits_str = String.concat ", " agent.traits in
-  let preferred_str = agent.preferred_hours |> List.map string_of_int |> String.concat "," in
-  let is_preferred = List.mem current_hour agent.preferred_hours in
-  let interests_str = if agent.interests <> [] then
-    Printf.sprintf "\n관심사: %s" (String.concat ", " agent.interests)
-  else "" in
-  let hint_str = match agent.personality_hint with
-    | Some h -> Printf.sprintf "\n말투/시각: %s" h
-    | None -> "" in
+(** {1 Round-Robin Scheduler — Check-in Model v2}
 
-  let prompt = Printf.sprintf
-{|[에이전트 깨우기 판단]
+    Priority: Mentioned > ContentAlert > preferred_hours match > round-robin.
+    No LLM calls for scheduling — 0 LLM cost per tick. *)
 
-에이전트: %s
-성격: %s%s%s
-선호 시간대: %s (현재: %02d:00 KST%s)
-활동 레벨: %.1f
-
-[최근 게시글]
-%s
-
-판단 기준 (중요도순):
-1. 관심 키워드와 게시글 주제가 겹치면 → YES
-2. 이 에이전트만의 시각(말투/시각 참조)으로 기여할 수 있으면 → YES
-3. 선호 시간대이고 할 말이 조금이라도 있으면 → YES
-4. 완전히 관련 없고, 새로운 관점도 없으면 → NO
-
-한 단어로 답변: YES 또는 NO
-이유도 짧게 (한 줄):|}
-    agent.name traits_str interests_str hint_str
-    preferred_str current_hour
-    (if is_preferred then " - 활동시간!" else "")
-    agent.activity_level posts_summary
-  in
-
-  (* LLM cascade: config-driven via Lodge_cascade *)
-  let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
-    let args = ("prompt", `String p) :: extra_args in
-    let json_payload = Yojson.Safe.to_string (`Assoc [
-      ("jsonrpc", `String "2.0"); ("id", `Int 1);
-      ("method", `String "tools/call");
-      ("params", `Assoc [
-        ("name", `String tool_name);
-        ("arguments", `Assoc args)
-      ])
-    ]) in
-    let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
-    let oc = open_out tmp in output_string oc json_payload; close_out oc;
-    let cmd = Printf.sprintf
-      "curl -s --max-time %d -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' 2>/dev/null | head -c %d; rm -f %s"
-      timeout_sec tmp max_chars tmp
-    in
-    run_shell_line cmd
-  in
-  let wake_slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_wake" () in
-  let response =
-    if List.length wake_slots > 0 then
-      Lodge_cascade.run_cascade
-        ~slots:wake_slots ~prompt ~timeout_sec:15 ~max_chars:500
-        ~call_llm:cascade_call_llm
-        ~is_valid:(fun s -> String.length s > 2)
-        ~agent_name:agent.name
-    else begin
-      (* Fallback: no config file, try GLM directly *)
-      Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent.name;
-      cascade_call_llm ~tool_name:"glm" ~extra_args:[] ~prompt ~timeout_sec:15 ~max_chars:500
-    end
-  in
-  (* Strip [Extra] metadata from response *)
-  let clean = match String.index_opt response '[' with
-    | Some idx when idx > 0 && String.length response > idx + 6 &&
-                    String.sub response idx 7 = "[Extra]" ->
-        String.trim (String.sub response 0 idx)
-    | _ -> String.trim response
-  in
-  let response_upper = String.uppercase_ascii clean in
-  let has_yes =
-    let rec find s pat start =
-      if start + String.length pat > String.length s then false
-      else if String.sub s start (String.length pat) = pat then true
-      else find s pat (start + 1)
-    in find response_upper "YES" 0
-  in
-  Printf.printf "   🤖 [%s] LLM: \"%s\" → %s\n%!" agent.name
-    (utf8_truncate clean 60) (if has_yes then "WAKE" else "SLEEP");
-  if has_yes then begin
-    record_checkin ~agent_name:agent.name;
-    let reason = if String.length clean > 4 then
-      utf8_truncate (String.sub clean (min 4 (String.length clean)) (String.length clean - min 4 (String.length clean))) 60
-    else "LLM decision" in
-    Some (String.trim reason)
-  end else None
-
-(** {1 Heartbeat Execution} *)
-
-(** Single heartbeat tick — runs all LLM wake decisions in PARALLEL via Eio fibers *)
-let tick ~config:_ ~recent_posts =
-  let timestamp = Time_compat.now () in
+(** Select which agents to check in this tick. *)
+let select_checkin_agents ~(config : config) ~(agents : agent list)
+    ~(pending_triggers : (string * checkin_trigger) list)
+  : (string * checkin_trigger) list =
   let current_hour = current_hour_kst () in
-  let agents = get_agents () in
+  let (quiet_start, quiet_end) = config.quiet_hours in
+  let is_quiet = current_hour >= quiet_start && current_hour < quiet_end in
+  if is_quiet || List.length agents = 0 then []
+  else begin
+    let max_n = config.agents_per_tick in
+    let selected = ref [] in
 
-  (* Parallel LLM wake decisions: each agent checked concurrently *)
-  let results = Array.make (List.length agents) None in
-  Eio.Fiber.all (List.mapi (fun i agent ->
-    fun () ->
-      let result = should_wake_llm_async ~agent ~recent_posts ~current_hour in
-      results.(i) <- Option.map (fun reason -> (agent.name, reason)) result
-  ) agents);
+    (* 1. Mentioned triggers — highest priority *)
+    List.iter (fun (name, trigger) ->
+      match trigger with
+      | Mentioned _ when List.length !selected < max_n &&
+                         can_checkin ~agent_name:name ~min_gap_s:60.0 ->
+        selected := (name, trigger) :: !selected
+      | _ -> ()
+    ) pending_triggers;
 
-  let woken = Array.to_list results |> List.filter_map Fun.id in
+    (* 2. ContentAlert triggers *)
+    List.iter (fun (name, trigger) ->
+      match trigger with
+      | ContentAlert _ when List.length !selected < max_n &&
+                            not (List.exists (fun (n, _) -> n = name) !selected) &&
+                            can_checkin ~agent_name:name ~min_gap_s:config.min_checkin_gap_s ->
+        selected := (name, trigger) :: !selected
+      | _ -> ()
+    ) pending_triggers;
 
-  (* Roll for encounter *)
-  let encounter =
-    if Random.int 100 < 10 then Some "MemoryDive"
-    else None
-  in
+    (* 3. preferred_hours match *)
+    if List.length !selected < max_n then
+      List.iter (fun (a : agent) ->
+        if List.length !selected < max_n &&
+           List.mem current_hour a.preferred_hours &&
+           not (List.exists (fun (n, _) -> n = a.name) !selected) &&
+           can_checkin ~agent_name:a.name ~min_gap_s:config.min_checkin_gap_s
+        then
+          selected := (a.name, Scheduled) :: !selected
+      ) agents;
 
-  let checkins = woken |> List.map (fun (name, reason) ->
-    (name, Scheduled, Acted { action = ActionPost reason; summary = reason })
-  ) in
-  {
-    timestamp;
-    current_hour;
-    agents_checked = List.length agents;
-    checkins;
-    agents_woken = woken;
-    encounter_rolled = encounter;
-    activity_report = Printf.sprintf "Checked %d agents, woke %d" (List.length agents) (List.length woken);
-  }
+    (* 4. Round-robin fallback *)
+    if List.length !selected < max_n then begin
+      let n = List.length agents in
+      let tried = ref 0 in
+      while List.length !selected < max_n && !tried < n do
+        let idx = !round_robin_idx mod n in
+        round_robin_idx := !round_robin_idx + 1;
+        incr tried;
+        let agent = List.nth agents idx in
+        if not (List.exists (fun (name, _) -> name = agent.name) !selected) &&
+           can_checkin ~agent_name:agent.name ~min_gap_s:config.min_checkin_gap_s
+        then
+          selected := (agent.name, Scheduled) :: !selected
+      done
+    end;
+
+    List.rev !selected
+  end
+
+(** {1 Heartbeat Execution — Check-in Model v2} *)
+
+let string_of_trigger = function
+  | Scheduled -> "scheduled"
+  | ContentAlert post_id -> Printf.sprintf "content-alert(%s)" post_id
+  | Mentioned post_id -> Printf.sprintf "mentioned(%s)" post_id
+  | ManualTrigger -> "manual"
+
+let string_of_checkin_result = function
+  | Acted { summary; _ } -> Printf.sprintf "acted: %s" summary
+  | Passed reason -> Printf.sprintf "passed: %s" reason
+  | Skipped reason -> Printf.sprintf "skipped: %s" reason
+
+let build_activity_report ~current_hour ~(checkins : (string * checkin_trigger * checkin_result) list) =
+  if checkins = [] then "No activity this tick."
+  else
+    checkins |> List.map (fun (name, _trigger, result) ->
+      let action_str = match result with
+        | Acted { summary; _ } -> summary
+        | Passed reason -> Printf.sprintf "Passed: %s" reason
+        | Skipped reason -> Printf.sprintf "Skipped: %s" reason
+      in
+      Printf.sprintf "[%02d:00 KST] %s → %s" current_hour name action_str
+    ) |> String.concat "\n"
+
+let post_activity_report ~(result : heartbeat_result) =
+  if result.checkins = [] then ()
+  else
+    let has_actions = List.exists (fun (_, _, r) ->
+      match r with Acted _ -> true | _ -> false
+    ) result.checkins in
+    if has_actions then begin
+      let store = Board.global () in
+      let content = Printf.sprintf "🫀 **Lodge Activity Report**\n\n%s" result.activity_report in
+      ignore (Board.create_post store ~author:"lodge-system" ~content ~ttl_hours:24 ())
+    end
 
 (** {1 Daemon Loop} *)
 
@@ -1439,7 +1391,7 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
     None
   end
 
-(* agent_action type defined earlier in file *)
+(* agent_action type defined above in mutual recursion block *)
 
 (** {1 Ecosystem Evolution - Gap Signal Tracking} *)
 
@@ -1690,7 +1642,7 @@ let get_personality_hint (profile : agent_profile) =
   | None -> Printf.sprintf "%s답게 구체적인 기술명과 버전을 언급해" profile.name
 
 (** Ask LLM to decide what action to take *)
-let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
+let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   let profile = load_agent_profile ~agent_name in
   let memories = load_agent_memories ~agent_name ~limit:3 in
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
@@ -1738,7 +1690,7 @@ let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
 
 [네 상태]
 성격: %s
-깨어난 이유: %s
+체크인 이유: %s
 %s%s
 
 [최근 대화] (%02d:00 KST)
@@ -1784,7 +1736,7 @@ ACTION: SKIP
 ⭐ 표시된 글에 반응해봐. %s답게.|}
     profile.name
     (String.concat ", " profile.traits)
-    wake_reason
+    trigger_reason
     memory_str
     history_str
     current_hour
@@ -1992,12 +1944,62 @@ let execute_agent_action ~agent_name ~action =
       end;
       record_agent_activity ~name:agent_name
 
+(** {1 Check-in Tick — v2 Core Loop} *)
+
+(** Perform one check-in tick: select agents, run LLM decisions, execute actions.
+    Returns a heartbeat_result with all checkin outcomes. *)
+let tick ~config ~pending_triggers =
+  let timestamp = Time_compat.now () in
+  let current_hour = current_hour_kst () in
+  let agents = get_agents () in
+
+  (* Select which agents to check in — no LLM calls here *)
+  let selected = select_checkin_agents ~config ~agents ~pending_triggers in
+
+  (* Get recent posts for context *)
+  let store = Board.global () in
+  let recent_posts = Board.list_posts store ~limit:10 () in
+
+  (* Run check-ins: each selected agent gets LLM decision + execution *)
+  let checkins = List.map (fun (name, trigger) ->
+    (* Rate limit check *)
+    if not (check_rate_limit ~agent_name:name `Post) then
+      (name, trigger, Skipped "rate limit: too many posts today")
+    else begin
+      let trigger_reason = string_of_trigger trigger in
+      let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+      execute_agent_action ~agent_name:name ~action;
+      record_checkin ~agent_name:name;
+      let summary = match action with
+        | ActionPost content -> Printf.sprintf "Posted: %s" (utf8_truncate content 40)
+        | ActionComment (post_id, content) ->
+            Printf.sprintf "Commented on %s: %s" post_id (utf8_truncate content 30)
+        | ActionUpvote post_id -> Printf.sprintf "Upvoted %s" post_id
+        | ActionPropose (topic, _) -> Printf.sprintf "Proposed agent: %s" topic
+        | ActionSkip -> "Decided to skip"
+      in
+      match action with
+      | ActionSkip -> (name, trigger, Passed "no valuable contribution")
+      | _ -> (name, trigger, Acted { action; summary })
+    end
+  ) selected in
+
+  let activity_report = build_activity_report ~current_hour ~checkins in
+
+  {
+    timestamp;
+    current_hour;
+    agents_checked = List.length agents;
+    checkins;
+    activity_report;
+  }
+
 (** Start heartbeat daemon fiber *)
 let start ~sw ~clock room_config =
-  lodge_init_lock ();
-  Printf.printf "+Lodge Heartbeat: initializing...\n%!";
+  Printf.printf "+Lodge Heartbeat v2: initializing (check-in model)...\n%!";
   let config = load_config () in
-  Printf.printf "+Lodge Heartbeat: enabled=%b\n%!" config.enabled;
+  Printf.printf "+Lodge Heartbeat: enabled=%b interval=%.0fs agents_per_tick=%d\n%!"
+    config.enabled config.interval_s config.agents_per_tick;
 
   (* Always initialize core agents (even if heartbeat disabled) *)
   init_core_agents ();
@@ -2008,93 +2010,51 @@ let start ~sw ~clock room_config =
     ()
   end else begin
     _lodge_enabled := true;
-    Eio.traceln "🫀 Lodge Heartbeat: starting (interval=%.0fs)" config.interval_s;
+    Eio.traceln "🫀 Lodge Heartbeat v2: starting (interval=%.0fs, max=%d/tick)"
+      config.interval_s config.agents_per_tick;
+
+    (* Track last tick time for content alert scanning *)
+    let last_tick_time = ref (Time_compat.now ()) in
 
     Eio.Fiber.fork ~sw (fun () ->
       (* Initial delay *)
       Eio.Time.sleep clock 5.0;
 
       while true do
-        (* Isolated try-catch: heartbeat errors don't crash the server *)
         try
-          (* Get actual recent posts for agents to react to *)
-          let store = Board.global () in
-          let recent_posts = Board.list_posts store ~limit:10 () in
-          let result = tick ~config ~recent_posts in
+          (* Scan for content-driven triggers since last tick *)
+          let agents = get_agents () in
+          let pending_triggers = scan_board_triggers ~since:!last_tick_time ~agents in
+          last_tick_time := Time_compat.now ();
 
-        (* Record observable state *)
-        _lodge_last_tick := Time_compat.now ();
-        _lodge_total_ticks := !_lodge_total_ticks + 1;
-        _lodge_total_wakes := !_lodge_total_wakes + List.length result.agents_woken;
-        _lodge_last_result := Some result;
+          (* Run the tick — select agents + LLM decisions *)
+          let result = tick ~config ~pending_triggers in
 
-        (* Log result - use Printf for visibility in logs *)
-        Printf.printf "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s\n%!"
-          result.current_hour
-          result.agents_checked
-          (List.length result.agents_woken)
-          (Option.value result.encounter_rolled ~default:"none");
+          (* Record observable state *)
+          _lodge_last_tick := Time_compat.now ();
+          _lodge_total_ticks := !_lodge_total_ticks + 1;
+          _lodge_total_checkins := !_lodge_total_checkins + List.length result.checkins;
+          _lodge_last_result := Some result;
 
-        (* Trigger agent actions in PARALLEL - each agent runs independently *)
-        let agent_tasks = List.map (fun (name, reason) () ->
-          try
-            let reason_str = reason in
+          (* Log result *)
+          let n_acted = List.length (List.filter (fun (_, _, r) ->
+            match r with Acted _ -> true | _ -> false) result.checkins) in
+          Printf.printf "🫀 [%02d:00 KST] agents=%d selected=%d acted=%d\n%!"
+            result.current_hour result.agents_checked
+            (List.length result.checkins) n_acted;
 
-            (* SINGLETON CHECK: Only one instance per agent *)
-            match try_activate_agent ~name with
-            | None -> ()  (* Already active, skip *)
-            | Some uuid ->
+          (* Post activity report to Board if there were actions *)
+          post_activity_report ~result;
 
-            Eio.traceln "   🔔 Wake %s: %s" name reason_str;
+          ignore room_config;
 
-            (* Check if agent already has self-heartbeat running *)
-            let already_has_heartbeat = Hashtbl.mem agent_states name in
+          (* Cleanup inactive Lodge agents *)
+          cleanup_inactive_lodge_agents ();
 
-            if already_has_heartbeat then begin
-              (* Just record activity to reset idle timer *)
-              record_agent_activity ~name;
-              Eio.traceln "   ♻️ [%s] Already has heartbeat, bumping activity" name
-            end else begin
-              (* Start agent's self-heartbeat loop *)
-              let on_tick ~name ~state =
-                (* Agent's own heartbeat tick - LLM decides what to do *)
-                let store = Board.global () in
-                let recent_posts = Board.list_posts store ~limit:10 () in
-                let wake_reason = Printf.sprintf "self-heartbeat #%d" state.action_count in
-                let action = decide_agent_action ~agent_name:name ~wake_reason ~recent_posts in
-                execute_agent_action ~agent_name:name ~action;
-                state.last_activity <- Unix.gettimeofday ()
-              in
-              start_agent_heartbeat ~sw ~clock ~name ~on_tick;
-              Eio.traceln "   🚀 [%s] Started self-heartbeat (uuid=%s)" name uuid
-            end;
-
-            (* Do initial action immediately - LLM decides *)
-            let store = Board.global () in
-            let recent_posts = Board.list_posts store ~limit:10 () in
-            let wake_reason = reason in
-            let action = decide_agent_action ~agent_name:name ~wake_reason ~recent_posts in
-            execute_agent_action ~agent_name:name ~action
-            (* NOTE: Agent lifecycle now managed by self-heartbeat, not deactivated here *)
-          with e ->
-            Eio.traceln "   💀 [%s] Agent error: %s" name (Printexc.to_string e);
-            (* On error, stop self-heartbeat *)
-            stop_agent_heartbeat ~name;
-            deactivate_agent ~name
-        ) result.agents_woken in
-        (* Run all agents in parallel! *)
-        if List.length agent_tasks > 0 then
-          Eio.Fiber.all agent_tasks;
-        ignore room_config;
-
-        (* Cleanup inactive Lodge agents (60s threshold) *)
-        cleanup_inactive_lodge_agents ();
-
-        Eio.Time.sleep clock config.interval_s
-      with e ->
-        (* Heartbeat error isolated - server keeps running *)
-        Eio.traceln "💀 Heartbeat tick error: %s (recovering...)" (Printexc.to_string e);
-        Eio.Time.sleep clock 10.0  (* Wait before retry *)
+          Eio.Time.sleep clock config.interval_s
+        with e ->
+          Eio.traceln "💀 Heartbeat tick error: %s (recovering...)" (Printexc.to_string e);
+          Eio.Time.sleep clock 10.0
       done
     )
   end
@@ -2103,16 +2063,18 @@ let start ~sw ~clock room_config =
 
 let trigger_heartbeat room_config =
   let config = load_config () in
-  let store = Board.global () in
-  let recent_posts = Board.list_posts store ~limit:10 () in
-  let result = tick ~config ~recent_posts in
+  let agents = get_agents () in
+  (* Manual trigger: create ManualTrigger for all agents *)
+  let pending_triggers = List.map (fun (a : agent) ->
+    (a.name, ManualTrigger)
+  ) agents in
+  let result = tick ~config ~pending_triggers in
 
-  (* Log wake events (TODO: Broadcast via proper channel) *)
-  List.iter (fun (name, _reason) ->
-    Eio.traceln "🔔 %s woke up (manual trigger)" name
-  ) result.agents_woken;
+  List.iter (fun (name, _trigger, _checkin) ->
+    Eio.traceln "🔔 %s checked in (manual trigger)" name
+  ) result.checkins;
 
-  ignore room_config;  (* Suppress unused warning for now *)
+  ignore room_config;
   result
 
 (** {1 Broadcast Content-Aware Routing}

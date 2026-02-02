@@ -658,12 +658,31 @@ let load_persisted_comments store =
       Printf.eprintf "[Board] Load comments failed: %s\n%!" (Printexc.to_string e)
   end
 
+(** Recalculate reply_count for all posts based on actual comments.
+    This ensures data consistency after loading from disk. *)
+let recalculate_reply_counts store =
+  (* First, reset all reply_counts to 0 *)
+  Hashtbl.iter (fun key (p : post) ->
+    Hashtbl.replace store.posts key { p with reply_count = 0 }
+  ) store.posts;
+  (* Then, count actual comments per post *)
+  Hashtbl.iter (fun _ (c : comment) ->
+    let post_key = Post_id.to_string c.post_id in
+    match Hashtbl.find_opt store.posts post_key with
+    | Some p ->
+        Hashtbl.replace store.posts post_key { p with reply_count = p.reply_count + 1 }
+    | None -> ()
+  ) store.comments;
+  let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
+  Printf.eprintf "[Board] Recalculated reply_counts: %d total comments across posts\n%!" total
+
 (** {1 Global Store} *)
 
 let global_store = lazy (
   let store = create_store () in
   load_persisted_posts store;
   load_persisted_comments store;
+  recalculate_reply_counts store;  (* Derive reply_count from actual comments *)
   store
 )
 

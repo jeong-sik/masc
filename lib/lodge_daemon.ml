@@ -1,11 +1,11 @@
-(** Lodge Daemon - Unified Agent Coordinator
+(** Lodge Daemon - Utility Types and Neo4j Queries
 
-    Integrates heartbeat and patrol logic into a single Eio-based daemon.
-    No external launchd plists needed - runs as fibers inside MCP server.
+    Provides persona configuration types and Neo4j Cypher query builders.
+    The actual Eio fiber daemon is in {!Lodge_heartbeat}.
 
-    Phase 1: Core types and Neo4j queries ✓
-    Phase 2: Eio fiber main loop ✓
-    Phase 3: Feature integration (Ollama LLM calls, Board posting)
+    - Persona types: mood, trait, value, trust
+    - Neo4j queries: influence, mood update, reflection
+    - Curiosity-based interval calculation
 *)
 
 (** {1 Types} *)
@@ -277,36 +277,6 @@ let generate_reflection ~config ~persona =
   if config.enabled && config.neo4j_enabled then
     Printf.printf "[Lodge Daemon] Reflection: %s\n%!" persona
 
-(** {1 Phase 2: Eio Fiber Main Loop} *)
-
-(** Run patrol loop for a single persona.
-    Sleeps for interval based on curiosity, then patrols. *)
-let run_persona_loop ~clock ~(config : config) (persona_cfg : persona_config) =
-  let interval = patrol_interval_for_curiosity persona_cfg.curiosity in
-  Printf.printf "[Lodge Daemon] Starting loop for %s (interval=%.0fs)\n%!"
-    persona_cfg.persona interval;
-  while true do
-    let state = get_state persona_cfg.persona in
-    if is_patrol_due state persona_cfg then begin
-      Printf.printf "[Lodge Daemon] Patrol due for %s\n%!" persona_cfg.persona;
-      patrol_once ~config ~persona:persona_cfg.persona;
-      (* Optional: generate reflection periodically *)
-      if config.neo4j_enabled then
-        generate_reflection ~config ~persona:persona_cfg.persona
-    end;
-    Eio.Time.sleep clock interval
-  done
-
-(** Start Lodge daemon with all personas as concurrent Eio fibers.
-    Each persona runs its own patrol loop based on curiosity-driven intervals. *)
-let start ~sw ~clock ~(config : config) (personas : persona_config list) =
-  if not config.enabled then
-    Printf.printf "[Lodge Daemon] Disabled, skipping start\n%!"
-  else begin
-    Printf.printf "[Lodge Daemon] Starting with %d personas\n%!" (List.length personas);
-    init ~config;
-    List.iter (fun p ->
-      Eio.Fiber.fork ~sw (fun () -> run_persona_loop ~clock ~config p)
-    ) personas;
-    Printf.printf "[Lodge Daemon] All persona fibers spawned\n%!"
-  end
+(* NOTE: Eio fiber main loop is in lodge_heartbeat.ml
+   This module provides utility types and Neo4j queries only.
+   See Lodge_heartbeat.start for the actual daemon. *)

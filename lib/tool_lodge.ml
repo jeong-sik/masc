@@ -23,8 +23,8 @@ let read_lodge_config () =
   let config_path = me_root ^ "/.masc/config.json" in
   try
     let ic = open_in config_path in
-    let content = really_input_string ic (in_channel_length ic) in
-    close_in ic;
+    let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> really_input_string ic (in_channel_length ic)) in
     let json = Yojson.Safe.from_string content in
     let lodge = Yojson.Safe.Util.(member "lodge" json) in
     let lang = Yojson.Safe.Util.(member "language" lodge |> to_string_option) in

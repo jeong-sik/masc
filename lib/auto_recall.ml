@@ -179,10 +179,11 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
   let read_preview path =
     try
       let ic = open_in path in
-      let len = min max_preview_bytes (in_channel_length ic) in
-      let content = really_input_string ic len in
-      close_in ic;
-      let truncated = in_channel_length ic > max_preview_bytes in
+      let len = in_channel_length ic in
+      let read_len = min max_preview_bytes len in
+      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
+        (fun () -> really_input_string ic read_len) in
+      let truncated = len > max_preview_bytes in
       if truncated then content ^ "\n... [truncated]" else content
     with Sys_error _ -> ""
   in

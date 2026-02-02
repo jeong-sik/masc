@@ -1,7 +1,7 @@
 (lang dune 3.13)
 
 (name masc_mcp)
-(version 2.32.1)
+(version 2.33.0)
 
 (generate_opam_files true)
 

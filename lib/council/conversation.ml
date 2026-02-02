@@ -61,8 +61,10 @@ type config = {
 let read_file_safe path =
   try
     let ic = open_in path in
-    let content = really_input_string ic (in_channel_length ic) in
-    close_in ic;
+    let content =
+      Fun.protect ~finally:(fun () -> close_in_noerr ic)
+        (fun () -> really_input_string ic (in_channel_length ic))
+    in
     Ok content
   with e -> Error (Printexc.to_string e)
 

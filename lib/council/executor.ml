@@ -129,8 +129,8 @@ let execute_config_change key value =
     let json = `Assoc [("key", `String key); ("value", `String value); 
                        ("updated_at", `Float (Unix.gettimeofday ()))] in
     let oc = open_out config_file in
-    output_string oc (Yojson.Safe.pretty_to_string json);
-    close_out oc;
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.pretty_to_string json));
     { success = true;
       output = Printf.sprintf "Config written: %s = %s → %s" key value config_file;
       timestamp = Unix.gettimeofday () }
@@ -149,8 +149,8 @@ let execute_notification target message =
       ("timestamp", `Float (Unix.gettimeofday ()))
     ] in
     let oc = open_out_gen [Open_append; Open_creat] 0o644 notify_file in
-    output_string oc (Yojson.Safe.to_string json ^ "\n");
-    close_out oc;
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.to_string json ^ "\n"));
     (* Also log to stderr for visibility *)
     Printf.eprintf "[Council] 📢 %s: %s\n%!" target message;
     { success = true;

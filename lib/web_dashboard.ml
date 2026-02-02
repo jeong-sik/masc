@@ -551,6 +551,10 @@ let html () = {|<!DOCTYPE html>
             <option value="oldest">📜 Oldest first</option>
             <option value="controversial">💬 Controversial</option>
           </select>
+          <label class="auto-scroll-toggle">
+            <input type="checkbox" id="auto-scroll" checked onchange="toggleAutoScroll(this.checked)">
+            <span>📜 Auto-scroll</span>
+          </label>
         </div>
         <div class="tag-filter-bar" id="tag-filter-bar">
           <span>Filtering by: <span id="current-tag-filter" class="hashtag"></span></span>
@@ -830,6 +834,7 @@ let html () = {|<!DOCTYPE html>
           addJournalEntry(agent, '📝 New post');
           showToast(`📝 New post from ${agent}`, 'info');
           debouncedFetchBoard();
+          setTimeout(scrollToNewPost, 500); // scroll after render
         }
         else if (type === 'board_comment') {
           addJournalEntry(agent, '💬 New comment');
@@ -1089,12 +1094,28 @@ let html () = {|<!DOCTYPE html>
 
     let currentTagFilter = null;
     let currentSort = localStorage.getItem('boardSort') || 'newest';
+    let autoScrollEnabled = localStorage.getItem('autoScroll') !== 'false';
 
-    // Initialize sort dropdown
+    // Initialize sort dropdown and auto-scroll
     document.addEventListener('DOMContentLoaded', () => {
       const sortSelect = document.getElementById('sort-select');
       if (sortSelect) sortSelect.value = currentSort;
+      const autoScrollCheck = document.getElementById('auto-scroll');
+      if (autoScrollCheck) autoScrollCheck.checked = autoScrollEnabled;
     });
+
+    function toggleAutoScroll(enabled) {
+      autoScrollEnabled = enabled;
+      localStorage.setItem('autoScroll', enabled ? 'true' : 'false');
+    }
+
+    function scrollToNewPost() {
+      if (!autoScrollEnabled) return;
+      const boardList = document.getElementById('board-list');
+      if (boardList && boardList.firstElementChild) {
+        boardList.firstElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
 
     function changeSort(sortBy) {
       currentSort = sortBy;

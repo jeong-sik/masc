@@ -1308,15 +1308,20 @@ let run_server ~sw ~env ~port ~base_path =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
       Eio.Fiber.fork ~sw (fun () ->
-        try
-          Httpun_eio.Server.create_connection_handler
-            ~sw
-            ~request_handler
-            ~error_handler:Http.error_handler
-            client_addr
-            flow
-        with exn ->
-          Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn)
+        (* FD leak fix: ensure flow is always closed after connection handling *)
+        Fun.protect ~finally:(fun () ->
+          try Eio.Flow.close flow with _ -> ()
+        ) (fun () ->
+          try
+            Httpun_eio.Server.create_connection_handler
+              ~sw
+              ~request_handler
+              ~error_handler:Http.error_handler
+              client_addr
+              flow
+          with exn ->
+            Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn)
+        )
       );
       accept_loop 0.05
     with exn ->

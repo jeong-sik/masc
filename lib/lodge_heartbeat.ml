@@ -693,18 +693,58 @@ let trigger_heartbeat room_config =
     @since 2.32.0
 *)
 
-(** Agent specialties - keywords that each agent responds to *)
-let agent_specialties = [
-  ("dreamer", ["상상"; "미래"; "아이디어"; "영감"; "창의"; "꿈"; "가능성"; "혁신"; "vision"; "imagine"]);
-  ("skeptic", ["검증"; "증거"; "논리"; "비판"; "분석"; "근거"; "확인"; "의문"; "데이터"; "팩트"]);
-  ("historian", ["역사"; "기록"; "과거"; "배경"; "맥락"; "레거시"; "변화"; "발전"; "회고"; "경험"]);
-  ("pragmatist", ["실행"; "구현"; "방법"; "절차"; "실용"; "효율"; "단계"; "계획"; "실제"; "적용"]);
-  ("connector", ["연결"; "협업"; "관계"; "소개"; "네트워크"; "조율"; "중재"; "팀"; "커뮤니티"; "bridge"]);
-]
+(** Load agent specialties dynamically from Neo4j *)
+let load_agent_specialties_from_neo4j () =
+  let query = "MATCH (a:Agent) WHERE a.traits IS NOT NULL RETURN a.name, a.traits, a.description" in
+  let cmd = Printf.sprintf
+    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
+    query
+  in
+  let json_str = run_shell_nonblocking cmd in
+  try
+    let json = Yojson.Safe.from_string json_str in
+    let records = Yojson.Safe.Util.(json |> member "records" |> to_list) in
+    List.filter_map (fun record ->
+      try
+        let arr = Yojson.Safe.Util.to_list record in
+        let inner = Yojson.Safe.Util.to_list (List.hd arr) in
+        let name = Yojson.Safe.Util.to_string (List.nth inner 0) in
+        let traits = Yojson.Safe.Util.(List.nth inner 1 |> to_list |> List.map to_string) in
+        let description =
+          match List.nth inner 2 with
+          | `Null -> ""
+          | `String s -> s
+          | _ -> ""
+        in
+        (* Combine traits + words from description as keywords *)
+        let desc_words = description
+          |> String.split_on_char ' '
+          |> List.filter (fun w -> String.length w > 3)
+        in
+        Some (name, traits @ desc_words)
+      with _ -> None
+    ) records
+  with _ ->
+    Eio.traceln "⚠️ Failed to load agent specialties from Neo4j";
+    []
+
+(** Cached agent specialties - refreshed every 5 minutes *)
+let specialties_cache : (string * string list) list ref = ref []
+let specialties_cache_time = ref 0.0
+
+let get_agent_specialties () =
+  let now = Time_compat.now () in
+  if !specialties_cache = [] || now -. !specialties_cache_time > 300.0 then begin
+    specialties_cache := load_agent_specialties_from_neo4j ();
+    specialties_cache_time := now;
+    Eio.traceln "🔄 Loaded %d agent specialties from Neo4j" (List.length !specialties_cache)
+  end;
+  !specialties_cache
 
 (** Calculate keyword match score for an agent *)
 let keyword_match_score ~agent_name ~content =
-  match List.assoc_opt agent_name agent_specialties with
+  let specialties = get_agent_specialties () in
+  match List.assoc_opt agent_name specialties with
   | None -> 0.0
   | Some keywords ->
       let content_lower = String.lowercase_ascii content in
@@ -728,7 +768,7 @@ let analyze_broadcast_relevance_llm ~content ~available_agents =
   (* Build agent list for LLM *)
   let agents_str = available_agents
     |> List.map (fun name ->
-        let keywords = List.assoc_opt name agent_specialties |> Option.value ~default:[] in
+        let keywords = List.assoc_opt name (get_agent_specialties ()) |> Option.value ~default:[] in
         Printf.sprintf "- %s: %s" name (String.concat ", " keywords))
     |> String.concat "\n"
   in
@@ -766,12 +806,12 @@ let analyze_broadcast_relevance_llm ~content ~available_agents =
     response
     |> String.split_on_char ','
     |> List.map String.trim
-    |> List.filter (fun name -> List.mem_assoc name agent_specialties)
+    |> List.filter (fun name -> List.mem_assoc name (get_agent_specialties ()))
   end
 
 (** Find relevant agents for a broadcast message *)
 let find_relevant_agents ~content ~threshold =
-  let available_agents = List.map fst agent_specialties in
+  let available_agents = List.map fst (get_agent_specialties ()) in
   (* First: keyword matching (fast) *)
   let keyword_scores = available_agents |> List.map (fun name ->
     (name, keyword_match_score ~agent_name:name ~content)

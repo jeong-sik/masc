@@ -1,7 +1,7 @@
 (lang dune 3.13)
 
 (name masc_mcp)
-(version 2.16.0)
+(version 2.17.0)
 
 (generate_opam_files true)
 
@@ -63,4 +63,6 @@
   (h2-eio (>= 0.10))
   (alcotest (and :with-test (>= 1.6)))
   (mtime (>= 2.0))
-  (uuidm (>= 0.9))))
+  (uuidm (>= 0.9))
+  ; Neo4j Bolt native driver
+  (neo4j_bolt_eio (>= 0.4))))

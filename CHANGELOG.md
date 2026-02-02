@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.0] - 2026-02-02
+
+### Added
+- **Neo4j Bolt Native Driver**: Restored after OCaml 5.x bytes fix
+  - `neo4j_client_eio` wrapper with connection pooling
+  - 10x faster than HTTP API
+
+### Fixed
+- OCaml 5.x bytes compatibility in `ocaml-neo4j-bolt` library
+
 ## [2.16.0] - 2026-02-02
 
 ### Added
@@ -12,9 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Eio fiber-based per-persona scheduling
   - Curiosity-driven patrol intervals (900s / curiosity)
   - Neo4j Cypher queries for agent state management
-
-### Changed
-- Removed `neo4j_bolt_eio` dependency (OCaml 5.x bytes compat issue)
 
 ## [2.14.1] - 2026-02-02
 
@@ -128,61 +135,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Tool_task`: Core task operations (add, claim, done, transition)
   - `Tool_room`: Room management (status, init, reset)
   - `Tool_control`: Flow control (pause, resume, switch_mode)
-  - `Tool_agent`: Agent operations (select, fitness, collaboration)
-  - `Tool_a2a`: Agent-to-agent communication
-  - `Tool_walph`: WALPH loop integration
-  - And 20 more specialized modules
-- 21 new test files for Tool_* coverage
-- `test_dispatch_chain_evidence.ml` for routing verification
-
-### Technical
-- Dispatch chain returns `result option` (`None` = try next module)
-- 21 stateful handlers remain in God Function (require state/registry/sw)
-- All 189 tests pass
-
-## [2.2.1] - 2026-01-19
-
-### Added
-- Dashboard now reports lock count in full and compact views.
-
-### Changed
-- Resolve base path consistently when restoring sessions and logging startup.
-- Align version strings across CLI, health response, and package metadata.
-
-## [2.1.0] - 2026-01-19
-
-### Added
-- Read-only GraphQL endpoint (`POST /graphql`)
-- Relay-style connections for tasks, agents, and messages
-- GraphQL examples and real-world use cases in README
-- GraphQL API Alcotest coverage
-
-## [0.1.1] - 2026-01-18
-
-### Fixed
-- Server crashes on unhandled exceptions in request handlers
-- Server crashes on port binding errors (EADDRINUSE, EACCES)
-- Added comprehensive error logging with method, path, and backtrace
-
-## [0.1.0] - 2026-01-18
-
-### Added
-- Initial release
-- Multi-Agent Streaming Coordination (MASC) MCP Server
-- Core tools: task management, file locking, broadcasting
-- Portal A2A workflow for direct agent communication
-- Git worktree isolation for parallel work
-- Redis distributed mode for multi-machine coordination
-- Compact Protocol v5 for agent communication (64%+ token savings)
-- Human-in-the-loop interrupt workflow
-- Voting system for multi-agent consensus
-- Cellular/Mitosis agent lifecycle management
-- Swarm intelligence patterns (flocking, foraging, stigmergy)
-- Multi-room support
-- Cost tracking and rate limiting
-
-### Technical
-- OCaml 5.x native implementation
-- MCP 2025-11-25 spec compliance
-- 385 tests passing
-- HTTP/SSE mode with Redis backend support

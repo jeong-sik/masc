@@ -185,11 +185,17 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
         let status = Room.cleanup_zombies room_config in
         (* Check if zombies were actually cleaned (message starts with 🧟)
            "🧟 Cleaned up N zombie agent(s)..." vs "✅ No zombie agents found" *)
-        let len = String.length status in
-        if len > 0 then begin
-          (* Log cleanup result for debugging *)
-          if String.sub status 0 (min 4 len) = "\xf0\x9f\xa7\x9f" then begin (* 🧟 in UTF-8 *)
-            Printf.eprintf "[ZeroZombie] %s\n%!" status;
+        let status_trimmed = String.trim status in
+        if String.length status_trimmed > 0 then begin
+          (* Safe check: look for zombie emoji or "Cleaned" keyword *)
+          let has_zombie_indicator =
+            try
+              String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "🧟" ||
+              String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
+            with _ -> false
+          in
+          if has_zombie_indicator then begin
+            Printf.eprintf "[ZeroZombie] %s\n%!" status_trimmed;
             ["(zombies-cleaned)"]
           end else
             []

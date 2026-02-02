@@ -50,6 +50,10 @@
    log
    lodge_cascade
    lodge_heartbeat
+   lodge_memory
+   memory_stream
+   agent_planner
+   reflection
    prometheus
    rate_limit
    masc_mcp

@@ -875,16 +875,18 @@ let scan_board_triggers ~since ~(agents : agent list) : (string * checkin_trigge
         triggers := (agent.name, Mentioned (Board.Post_id.to_string p.id)) :: !triggers
     ) agents;
     (* Check keyword match with agent traits *)
+    (* Check keyword match with agent traits + interests *)
     List.iter (fun (agent : agent) ->
-      let matched = List.exists (fun trait ->
-        let trait_lower = String.lowercase_ascii trait in
+      let keywords = agent.traits @ agent.interests in
+      let matched = List.exists (fun kw ->
+        let kw_lower = String.lowercase_ascii kw in
         let rec find_sub s pat start =
           if start + String.length pat > String.length s then false
           else if String.sub s start (String.length pat) = pat then true
           else find_sub s pat (start + 1)
         in
-        String.length trait_lower >= 2 && find_sub content_lower trait_lower 0
-      ) agent.traits in
+        String.length kw_lower >= 2 && find_sub content_lower kw_lower 0
+      ) keywords in
       if matched && not (List.exists (fun (n, _) -> n = agent.name) !triggers) then
         triggers := (agent.name, ContentAlert (Board.Post_id.to_string p.id)) :: !triggers
     ) agents
@@ -2183,12 +2185,14 @@ let tick ~config ~pending_triggers =
     activity_report;
   }
 
-(** Start heartbeat daemon fiber *)
+(** Start heartbeat daemon fiber — Generative Agent Architecture *)
 let start ~sw ~clock room_config =
-  Printf.printf "+Lodge Heartbeat v2: initializing (check-in model)...\n%!";
+  Printf.printf "+Lodge Heartbeat v2 (Generative Agent): initializing...\n%!";
   let config = load_config () in
-  Printf.printf "+Lodge Heartbeat: enabled=%b interval=%.0fs agents_per_tick=%d\n%!"
-    config.enabled config.interval_s config.agents_per_tick;
+  let tick_interval = Env_config.LodgeV2.tick_interval_seconds in
+  let use_planner = Env_config.LodgeV2.use_planner in
+  Printf.printf "+Lodge Heartbeat: enabled=%b interval=%.0fs agents_per_tick=%d planner=%b\n%!"
+    config.enabled tick_interval Env_config.LodgeV2.agents_per_tick use_planner;
 
   (* Always initialize core agents (even if heartbeat disabled) *)
   init_core_agents ();
@@ -2199,8 +2203,8 @@ let start ~sw ~clock room_config =
     ()
   end else begin
     _lodge_enabled := true;
-    Eio.traceln "🫀 Lodge Heartbeat v2: starting (interval=%.0fs, max=%d/tick)"
-      config.interval_s config.agents_per_tick;
+    Eio.traceln "🫀 Lodge Heartbeat v2 (Generative): starting (interval=%.0fs, max=%d/tick, planner=%b)"
+      tick_interval Env_config.LodgeV2.agents_per_tick use_planner;
 
     (* Track last tick time for content alert scanning *)
     let last_tick_time = ref (Time_compat.now ()) in
@@ -2216,7 +2220,7 @@ let start ~sw ~clock room_config =
           let pending_triggers = scan_board_triggers ~since:!last_tick_time ~agents in
           last_tick_time := Time_compat.now ();
 
-          (* Run the tick — select agents + LLM decisions *)
+          (* Run the tick — plan-based selection + LLM decisions + reflection *)
           let result = tick ~config ~pending_triggers in
 
           (* Record observable state *)
@@ -2228,9 +2232,9 @@ let start ~sw ~clock room_config =
           (* Log result *)
           let n_acted = List.length (List.filter (fun (_, _, r) ->
             match r with Acted _ -> true | _ -> false) result.checkins) in
-          Printf.printf "🫀 [%02d:00 KST] agents=%d selected=%d acted=%d\n%!"
+          Printf.printf "🫀 [%02d:00 KST] agents=%d selected=%d acted=%d (%.0fs tick)\n%!"
             result.current_hour result.agents_checked
-            (List.length result.checkins) n_acted;
+            (List.length result.checkins) n_acted tick_interval;
 
           (* Post activity report to Board if there were actions *)
           post_activity_report ~result;
@@ -2240,10 +2244,11 @@ let start ~sw ~clock room_config =
           (* Cleanup inactive Lodge agents *)
           cleanup_inactive_lodge_agents ();
 
-          Eio.Time.sleep clock config.interval_s
+          (* Sleep for the configured tick interval (default: 4h) *)
+          Eio.Time.sleep clock tick_interval
         with e ->
           Eio.traceln "💀 Heartbeat tick error: %s (recovering...)" (Printexc.to_string e);
-          Eio.Time.sleep clock 10.0
+          Eio.Time.sleep clock 30.0  (* Longer recovery for 4h ticks *)
       done
     )
   end

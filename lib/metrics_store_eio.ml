@@ -84,11 +84,15 @@ let record config (metric : task_metric) : unit =
   let line = Yojson.Safe.to_string json ^ "\n" in
   (* Use file locking to prevent concurrent write corruption *)
   (* Security: 0o600 - only owner can read/write metrics data *)
+  (* FD leak fix: ensure fd is always closed with Fun.protect *)
   let fd = Unix.openfile file [Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT] 0o600 in
-  Unix.lockf fd Unix.F_LOCK 0;
-  let _ = Unix.write_substring fd line 0 (String.length line) in
-  Unix.lockf fd Unix.F_ULOCK 0;
-  Unix.close fd
+  Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
+    Unix.lockf fd Unix.F_LOCK 0;
+    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
+      let _ = Unix.write_substring fd line 0 (String.length line) in
+      ()
+    )
+  )
 
 (** Create a new task metric (helper) - pure *)
 let create_metric ~agent_id ~task_id ?(collaborators=[]) ?handoff_from () =

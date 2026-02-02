@@ -158,17 +158,28 @@ let call_with_http ~http_post ?(model=Gemini) ?(host=default_host) ?(port=defaul
 (** Call LLM model with prompt (Eio-native, non-blocking)
 
     @param net Eio network capability
+    @param clock Eio clock for timeout (optional)
+    @param timeout_sec Timeout in seconds (default: from env config)
     @param model LLM model to use (default: Gemini for speed)
     @param host llm-mcp server host (default: 127.0.0.1)
     @param port llm-mcp server port (default: 8932)
     @param prompt The prompt to send
     @return Response or error *)
-let call ~net ?(model=Gemini) ?(host=default_host) ?(port=default_port) ~prompt () =
-  call_with_http ~http_post:(eio_http_post ~net) ~model ~host ~port ~prompt ()
+let call ~net ?clock ?(timeout_sec=Env_config.Llm.timeout_seconds) ?(model=Gemini) ?(host=default_host) ?(port=default_port) ~prompt () =
+  let do_call () =
+    call_with_http ~http_post:(eio_http_post ~net) ~model ~host ~port ~prompt ()
+  in
+  match clock with
+  | None -> do_call ()
+  | Some clk ->
+    try
+      Eio.Time.with_timeout_exn clk timeout_sec (fun () -> do_call ())
+    with
+    | Eio.Time.Timeout -> Error Timeout
 
 (** Convenience function for quick classification tasks *)
-let classify ~net ~prompt () =
-  call ~net ~model:Gemini ~prompt ()
+let classify ~net ?clock ~prompt () =
+  call ~net ?clock ~model:Gemini ~prompt ()
 
 (** {1 Walph Intent Classification} *)
 
@@ -184,9 +195,10 @@ type walph_intent =
 (** Classify natural language message into Walph intent
 
     @param net Eio network capability
+    @param clock Eio clock for timeout (optional)
     @param message Natural language message to classify
     @return Classified intent with confidence *)
-let classify_walph_intent ~net ~message () =
+let classify_walph_intent ~net ?clock ~message () =
   let prompt = Printf.sprintf {|You are a command classifier for Walph automation system.
 
 Classify this message into exactly one intent:
@@ -202,7 +214,7 @@ Message: "%s"
 Output JSON only (no markdown):
 {"intent": "START|STOP|PAUSE|RESUME|STATUS|IGNORE", "preset": "drain|coverage|refactor|docs|null", "target": "file/path or null", "confidence": 0.0-1.0}|} message
   in
-  match call ~net ~model:Gemini ~prompt () with
+  match call ~net ?clock ~model:Gemini ~prompt () with
   | Error e -> Error e
   | Ok response ->
       try

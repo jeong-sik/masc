@@ -28,6 +28,7 @@ module Room_worktree = Room_worktree
 module Room_eio = Room_eio
 
 module Session = Session
+module Shutdown_hooks = Shutdown_hooks
 module Tools = Tools
 module Auto_responder = Auto_responder
 module Mcp_protocol = Mcp_protocol
@@ -140,3 +141,6 @@ module Tool_misc = Tool_misc
 
 (* Lodge subsystem *)
 module Lodge_heartbeat = Lodge_heartbeat
+
+(* Shutdown hooks *)
+module Shutdown_hooks = Shutdown_hooks

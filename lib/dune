@@ -87,6 +87,7 @@
    safe_ops
    sdp
    session
+   shutdown_hooks
    spawn
    spawn_eio
    spawn_registry

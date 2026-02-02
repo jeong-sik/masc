@@ -131,6 +131,34 @@ module Cancellation = struct
     get_float ~default:3600.0 "MASC_CANCELLATION_TOKEN_MAX_AGE_SEC"
 end
 
+(** {1 Qdrant Configuration} *)
+
+module Qdrant = struct
+  (** Timeout for Qdrant API calls (seconds) *)
+  let timeout_seconds =
+    get_float ~default:30.0 "MASC_QDRANT_TIMEOUT_SEC"
+end
+
+(** {1 LLM Configuration} *)
+
+module Llm = struct
+  (** Timeout for LLM API calls (seconds) *)
+  let timeout_seconds =
+    get_float ~default:30.0 "MASC_LLM_TIMEOUT_SEC"
+end
+
+(** {1 Rate Limit Cleanup Configuration} *)
+
+module RateLimit = struct
+  (** Cleanup interval for stale rate limit buckets (seconds) *)
+  let cleanup_interval_seconds =
+    get_float ~default:300.0 "MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC"
+
+  (** Max age for rate limit entries before cleanup (seconds) *)
+  let entry_max_age_seconds =
+    get_float ~default:3600.0 "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
+end
+
 (** Print configuration summary for debugging *)
 let print_summary () =
   Printf.eprintf "[env_config] Zombie: threshold=%.0fs cleanup_interval=%.0fs\n%!"
@@ -140,4 +168,8 @@ let print_summary () =
   Printf.eprintf "[env_config] Session: max_age=%.0fs rate_limit_window=%.0fs\n%!"
     Session.max_age_seconds Session.rate_limit_window_seconds;
   Printf.eprintf "[env_config] Tempo: min=%.0fs max=%.0fs default=%.0fs\n%!"
-    Tempo.min_interval_seconds Tempo.max_interval_seconds Tempo.default_interval_seconds
+    Tempo.min_interval_seconds Tempo.max_interval_seconds Tempo.default_interval_seconds;
+  Printf.eprintf "[env_config] Qdrant: timeout=%.0fs\n%!" Qdrant.timeout_seconds;
+  Printf.eprintf "[env_config] Llm: timeout=%.0fs\n%!" Llm.timeout_seconds;
+  Printf.eprintf "[env_config] RateLimit: cleanup_interval=%.0fs entry_max_age=%.0fs\n%!"
+    RateLimit.cleanup_interval_seconds RateLimit.entry_max_age_seconds

@@ -62,7 +62,8 @@ type notification = {
 (** Subscription store *)
 module SubscriptionStore = struct
   let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 64
-  let pending_notifications : (string, notification list) Hashtbl.t = Hashtbl.create 64
+  (* Use Queue for O(1) append instead of O(n) list append *)
+  let pending_notifications : (string, notification Queue.t) Hashtbl.t = Hashtbl.create 64
 
   (** Generate subscription ID *)
   let generate_id () : string =
@@ -116,20 +117,23 @@ module SubscriptionStore = struct
       if sub.subscriber = subscriber then sub :: acc else acc
     ) subscriptions []
 
-  (** Queue notification for a subscription *)
+  (** Queue notification for a subscription - O(1) with Queue *)
   let queue_notification (sub_id : string) (notif : notification) : unit =
-    let existing = match Hashtbl.find_opt pending_notifications sub_id with
-      | Some l -> l
-      | None -> []
+    let q = match Hashtbl.find_opt pending_notifications sub_id with
+      | Some q -> q
+      | None ->
+        let q = Queue.create () in
+        Hashtbl.add pending_notifications sub_id q;
+        q
     in
-    Hashtbl.replace pending_notifications sub_id (existing @ [notif])
+    Queue.add notif q
 
-  (** Pop notifications for a subscription *)
+  (** Pop notifications for a subscription - returns all pending as list *)
   let pop_notifications (sub_id : string) : notification list =
     match Hashtbl.find_opt pending_notifications sub_id with
-    | Some l ->
+    | Some q ->
       Hashtbl.remove pending_notifications sub_id;
-      l
+      Queue.fold (fun acc n -> n :: acc) [] q |> List.rev
     | None -> []
 
   (** List all subscriptions *)

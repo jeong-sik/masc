@@ -480,6 +480,20 @@ module McpSessionStore = struct
     end else false
 end
 
+(** Start a background fiber that periodically cleans up stale MCP sessions.
+    Call this once at server startup with the main switch. *)
+let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_age_seconds /. 10.0) () =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock interval;
+      let removed = McpSessionStore.cleanup_stale () in
+      if removed > 0 then
+        Printf.eprintf "[Session] Cleaned up %d stale MCP sessions\n%!" removed;
+      loop ()
+    in
+    loop ()
+  )
+
 (** Extract MCP Session ID from HTTP headers (supports both naming conventions) *)
 let extract_mcp_session_id (headers : Cohttp.Header.t) : string option =
   match Cohttp.Header.get headers "Mcp-Session-Id" with

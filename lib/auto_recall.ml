@@ -297,49 +297,56 @@ let get_embedding_eio ~sw ~env (text : string) : float list =
 let _simple_text_embedding (text : string) : float list =
   fallback_embedding text
 
-(** Fetch from Qdrant (Eio-aware) - Agent Being Protocol *)
-let fetch_from_qdrant_eio ~sw ~env ~config:(_ : recall_config) ~query =
+(** Fetch from Qdrant (Eio-aware) - Agent Being Protocol
+    Includes timeout protection to prevent indefinite blocking *)
+let fetch_from_qdrant_eio ~sw ~env ~clock ~config:(_ : recall_config) ~query =
   match get_qdrant_url () with
   | None -> []  (* Silently skip if Qdrant not configured *)
   | Some qdrant_url ->
     if query = "" then []  (* Need query for semantic search *)
     else
       let collection = "retrospectives" in  (* Default collection for episodes *)
-      let vector = get_embedding_eio ~sw ~env query in
-      let limit = 5 in
-      let url = Printf.sprintf "%s/collections/%s/points/search" qdrant_url collection in
-      let body = qdrant_search_body ~collection ~vector ~limit in
+      let timeout_sec = Env_config.Qdrant.timeout_seconds in
       try
-        let client = Cohttp_eio.Client.make ~https:None env#net in
-        let uri = Uri.of_string url in
-        let body_content = Eio.Flow.string_source body in
-        let headers = Cohttp.Header.of_list [("Content-Type", "application/json")] in
-        let resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
-        let status = Cohttp.Response.status resp in
-        if not (Cohttp.Code.is_success (Cohttp.Code.code_of_status status)) then []
-        else
-          let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int in
-          let json = Yojson.Safe.from_string body_str in
-          let open Yojson.Safe.Util in
-          let results = json |> member "result" |> to_list in
-          List.mapi (fun i result ->
-            let score = result |> member "score" |> to_float in
-            let payload = result |> member "payload" in
-            let content = payload |> member "content" |> to_string_option |> Option.value ~default:"" in
-            let title = payload |> member "title" |> to_string_option |> Option.value ~default:"" in
-            let display = if title <> "" then Printf.sprintf "[%s] %s" title content else content in
-            {
-              source = Qdrant_semantic;
-              content = display;
-              relevance = score *. 0.9;  (* Scale Qdrant score *)
-              metadata = `Assoc [
-                ("rank", `Int i);
-                ("score", `Float score);
-                ("payload", payload);
-              ];
-            }
-          ) results
-      with _ -> []  (* Silently fail if Qdrant unavailable *)
+        Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+          let vector = get_embedding_eio ~sw ~env query in
+          let limit = 5 in
+          let url = Printf.sprintf "%s/collections/%s/points/search" qdrant_url collection in
+          let body = qdrant_search_body ~collection ~vector ~limit in
+          let client = Cohttp_eio.Client.make ~https:None env#net in
+          let uri = Uri.of_string url in
+          let body_content = Eio.Flow.string_source body in
+          let headers = Cohttp.Header.of_list [("Content-Type", "application/json")] in
+          let resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
+          let status = Cohttp.Response.status resp in
+          if not (Cohttp.Code.is_success (Cohttp.Code.code_of_status status)) then []
+          else
+            let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int in
+            let json = Yojson.Safe.from_string body_str in
+            let open Yojson.Safe.Util in
+            let results = json |> member "result" |> to_list in
+            List.mapi (fun i result ->
+              let score = result |> member "score" |> to_float in
+              let payload = result |> member "payload" in
+              let content = payload |> member "content" |> to_string_option |> Option.value ~default:"" in
+              let title = payload |> member "title" |> to_string_option |> Option.value ~default:"" in
+              let display = if title <> "" then Printf.sprintf "[%s] %s" title content else content in
+              {
+                source = Qdrant_semantic;
+                content = display;
+                relevance = score *. 0.9;  (* Scale Qdrant score *)
+                metadata = `Assoc [
+                  ("rank", `Int i);
+                  ("score", `Float score);
+                  ("payload", payload);
+                ];
+              }
+            ) results
+        )
+      with
+      | Eio.Time.Timeout ->
+        Printf.eprintf "[Qdrant] Timeout after %.0fs\n%!" timeout_sec; []
+      | _ -> []  (* Silently fail if Qdrant unavailable *)
 
 (** Fetch from a single source (sync, no Eio) *)
 let fetch_source room_config ~config ~query = function
@@ -391,6 +398,7 @@ let fetch_context
 
     @param sw Eio switch
     @param env Eio environment with network access
+    @param clock Eio clock for timeout support
     @param room_config MASC room configuration
     @param config Recall configuration
     @param query Query string for semantic search
@@ -398,7 +406,7 @@ let fetch_context
     @return Recall result including Qdrant results
 *)
 let fetch_context_eio
-    ~sw ~env
+    ~sw ~env ~clock
     (room_config : Room_utils.config)
     ~(config : recall_config)
     ?(query : string = "")
@@ -413,7 +421,7 @@ let fetch_context_eio
     (* Fetch from Qdrant if configured *)
     let qdrant_items =
       if List.mem Qdrant_semantic config.sources && query <> "" then
-        fetch_from_qdrant_eio ~sw ~env ~config ~query
+        fetch_from_qdrant_eio ~sw ~env ~clock ~config ~query
       else []
     in
 

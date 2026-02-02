@@ -940,20 +940,23 @@ let select_checkin_agents ~(config : config) ~(agents : agent list)
           selected := (a.name, Scheduled) :: !selected
       ) agents;
 
-    (* 4. Round-robin fallback *)
+    (* 4. Least-recently-active fallback (replaces pure round-robin) *)
     if List.length !selected < max_n then begin
-      let n = List.length agents in
-      let tried = ref 0 in
-      while List.length !selected < max_n && !tried < n do
-        let idx = !round_robin_idx mod n in
-        round_robin_idx := !round_robin_idx + 1;
-        incr tried;
-        let agent = List.nth agents idx in
-        if not (List.exists (fun (name, _) -> name = agent.name) !selected) &&
-           can_checkin ~agent_name:agent.name ~min_gap_s:config.min_checkin_gap_s
-        then
-          selected := (agent.name, Scheduled) :: !selected
-      done
+      let eligible = List.filter (fun (a : agent) ->
+        not (List.exists (fun (n, _) -> n = a.name) !selected) &&
+        can_checkin ~agent_name:a.name ~min_gap_s:config.min_checkin_gap_s
+      ) agents in
+      (* Sort by last_checkin ascending — least recent first *)
+      let sorted = List.sort (fun (a1 : agent) (a2 : agent) ->
+        let t1 = match Hashtbl.find_opt last_checkin a1.name with Some t -> t | None -> 0.0 in
+        let t2 = match Hashtbl.find_opt last_checkin a2.name with Some t -> t | None -> 0.0 in
+        Float.compare t1 t2
+      ) eligible in
+      let remaining = max_n - List.length !selected in
+      List.iteri (fun i (a : agent) ->
+        if i < remaining then
+          selected := (a.name, Scheduled) :: !selected
+      ) sorted
     end;
 
     List.rev !selected
@@ -1912,7 +1915,7 @@ ACTION: SKIP
   | _ -> action
 
 (** Execute the decided action *)
-let execute_agent_action ~agent_name ~action =
+let rec execute_agent_action ~agent_name ~action =
   let store = Board.global () in
   match action with
   | ActionSkip ->
@@ -1924,6 +1927,17 @@ let execute_agent_action ~agent_name ~action =
   | ActionPost content ->
       if String.length content < 5 then
         Eio.traceln "   ⚠️ [%s] Content too short, skipping" agent_name
+      else if not (check_rate_limit ~agent_name `Post) then begin
+        Eio.traceln "   ⏳ [%s] POST rate-limited (30min gap / %d/day max), converting to COMMENT" agent_name max_posts_per_day;
+        (* Fallback: convert POST → COMMENT on most recent post *)
+        let recent = Board.list_posts (Board.global ()) ~limit:3 () in
+        (match List.find_opt (fun (p : Board.post) -> Board.Agent_id.to_string p.author <> agent_name) recent with
+         | Some target ->
+           let pid = Board.Post_id.to_string target.id in
+           execute_agent_action ~agent_name ~action:(ActionComment (pid, content))
+         | None ->
+           Eio.traceln "   ⏭️ [%s] No suitable post to comment on, skipping" agent_name)
+      end
       else if is_duplicate_post ~agent_name ~content then
         Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
       else begin
@@ -1932,6 +1946,7 @@ let execute_agent_action ~agent_name ~action =
             let post_id = Board.Post_id.to_string post.id in
             Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
             record_agent_activity ~name:agent_name;
+            record_rate_action ~agent_name `Post;
             record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
             record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
             Lodge_memory.store {
@@ -1953,6 +1968,7 @@ let execute_agent_action ~agent_name ~action =
             Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
             record_agent_comment ~agent_name ~post_id;
             record_agent_activity ~name:agent_name;
+            record_rate_action ~agent_name `Comment;
             record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
             record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
             Lodge_memory.store {

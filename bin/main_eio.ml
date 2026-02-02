@@ -231,6 +231,13 @@ let respond_auth_error request reqd err =
   Httpun.Reqd.respond_with_string reqd response body
 
 
+(** Public read access - no auth required (dashboard, health) *)
+let with_public_read handler request reqd =
+  match !server_state with
+  | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state -> handler state request reqd
+
+(** Authenticated read access - requires valid token when auth enabled *)
 let with_read_auth handler request reqd =
   match !server_state with
   | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
@@ -1013,15 +1020,15 @@ let make_routes ~port ~host =
          Http.Response.json json reqd
        ) request reqd)
   |> Http.Router.get "/dashboard" (fun request reqd ->
-       with_read_auth (fun _state _req reqd ->
+       with_public_read (fun _state _req reqd ->
          Http.Response.html (Masc_mcp.Web_dashboard.html ()) reqd
        ) request reqd)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
-       with_read_auth (fun _state _req reqd ->
+       with_public_read (fun _state _req reqd ->
          Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/credits" (fun request reqd ->
-       with_read_auth (fun _state _req reqd ->
+       with_public_read (fun _state _req reqd ->
          Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd
        ) request reqd)
   |> Http.Router.get "/" (fun _req reqd -> Http.Response.text "MASC MCP Server" reqd)
@@ -1056,7 +1063,7 @@ let make_routes ~port ~host =
        with_read_auth (fun _state req reqd -> sse_simple_handler req reqd) request reqd)
   (* REST API for dashboard - direct Room access *)
   |> Http.Router.get "/api/v1/status" (fun request reqd ->
-       with_read_auth (fun state _req reqd ->
+       with_public_read (fun state _req reqd ->
          let config = state.Mcp_server.room_config in
          let room_state = Masc_mcp.Room.read_state config in
          let tempo = Masc_mcp.Tempo.get_tempo config in
@@ -1069,7 +1076,7 @@ let make_routes ~port ~host =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/tasks" (fun request reqd ->
-       with_read_auth (fun state req reqd ->
+       with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let status_filter = query_param req "status" in
          let include_done = bool_query_param req "include_done" ~default:false in
@@ -1127,7 +1134,7 @@ let make_routes ~port ~host =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
-       with_read_auth (fun state req reqd ->
+       with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let status_filter = query_param req "status" in
          let limit = int_query_param req "limit" ~default:50 in
@@ -1162,7 +1169,7 @@ let make_routes ~port ~host =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/messages" (fun request reqd ->
-       with_read_auth (fun state req reqd ->
+       with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let since_seq = int_query_param req "since_seq" ~default:0 in
          let limit = int_query_param req "limit" ~default:20 in
@@ -1230,7 +1237,7 @@ let make_routes ~port ~host =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
-       with_read_auth (fun _state _req reqd ->
+       with_public_read (fun _state _req reqd ->
          let store = Board.global () in
          let posts = Board.list_posts store () in
          let karma_map = Board.get_all_karma store in
@@ -1254,7 +1261,7 @@ let make_routes ~port ~host =
        Http.Response.json (Yojson.Safe.to_string json) reqd)
 
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
-       with_read_auth (fun _state _req reqd ->
+       with_public_read (fun _state _req reqd ->
          let store = Board.global () in
          let karma_list = Board.get_all_karma store in
          let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in

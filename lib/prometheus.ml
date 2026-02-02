@@ -120,10 +120,10 @@ let init () =
   register_gauge ~name:"masc_uptime_seconds"
     ~help:"Server uptime in seconds" ()
 
-let start_time = Unix.gettimeofday ()
+let start_time = Time_compat.now ()
 
 let update_uptime () =
-  set_gauge "masc_uptime_seconds" (Unix.gettimeofday () -. start_time)
+  set_gauge "masc_uptime_seconds" (Time_compat.now () -. start_time)
 
 (** {1 Prometheus Export} *)
 

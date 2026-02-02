@@ -48,7 +48,7 @@ let make_config
   { base_interval_s; idle_multiplier; busy_skip; idle_threshold_s }
 
 let effective_interval ~config ~last_activity =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let idle_duration = now -. last_activity in
   if idle_duration > config.idle_threshold_s then
     config.base_interval_s *. config.idle_multiplier
@@ -56,7 +56,7 @@ let effective_interval ~config ~last_activity =
     config.base_interval_s
 
 let should_emit ~config ~agent_status ~last_activity ~last_heartbeat =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
 
   (* Rule 1: Skip if busy and busy_skip is enabled *)
   if config.busy_skip && agent_status = Types.Busy then
@@ -76,7 +76,7 @@ let decision_to_string = function
   | Emit -> "emit"
   | Skip_busy -> "skip:busy"
   | Skip_idle next ->
-      let wait = next -. Unix.gettimeofday () in
+      let wait = next -. Time_compat.now () in
       Printf.sprintf "skip:idle(next in %.1fs)" (max 0.0 wait)
 
 let should_emit_now = function

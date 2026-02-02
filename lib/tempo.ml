@@ -90,7 +90,7 @@ let set_tempo (config : Room_utils.config) ~interval_s ~reason : tempo_state =
   in
   let state = {
     current_interval_s = clamped;
-    last_adjusted = Unix.gettimeofday ();
+    last_adjusted = Time_compat.now ();
     reason;
   } in
   save_state config state;
@@ -143,7 +143,7 @@ let format_state (state : tempo_state) : string =
       Printf.sprintf "%.1fm" (state.current_interval_s /. 60.0)
   in
   let age =
-    let elapsed = Unix.gettimeofday () -. state.last_adjusted in
+    let elapsed = Time_compat.now () -. state.last_adjusted in
     if elapsed < 60.0 then "just now"
     else if elapsed < 3600.0 then Printf.sprintf "%.0fm ago" (elapsed /. 60.0)
     else Printf.sprintf "%.1fh ago" (elapsed /. 3600.0)

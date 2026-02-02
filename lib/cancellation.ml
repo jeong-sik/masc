@@ -34,7 +34,7 @@ module TokenStore = struct
 
   (** Internal cleanup - removes tokens older than max_age *)
   let cleanup_internal ~(max_age : float) : int =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let old_tokens = Hashtbl.fold (fun id t acc ->
       if now -. t.created_at > max_age then id :: acc else acc
     ) tokens [] in
@@ -43,7 +43,7 @@ module TokenStore = struct
 
   (** Auto-cleanup on access if interval elapsed *)
   let maybe_auto_cleanup () =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     if now -. !last_cleanup > cleanup_interval then begin
       last_cleanup := now;
       let max_age = Env_config.Cancellation.token_max_age_seconds in
@@ -70,7 +70,7 @@ module TokenStore = struct
         cancelled = false;
         reason = None;
         callbacks = [];
-        created_at = Unix.gettimeofday ();
+        created_at = Time_compat.now ();
       } in
       Hashtbl.add tokens token.id token;
       token
@@ -91,7 +91,7 @@ module TokenStore = struct
   (** Cleanup old tokens (older than max_age seconds) *)
   let cleanup ~(max_age : float) : int =
     with_lock (fun () ->
-      last_cleanup := Unix.gettimeofday ();
+      last_cleanup := Time_compat.now ();
       cleanup_internal ~max_age
     )
 
@@ -106,7 +106,7 @@ module TokenStore = struct
           cancelled = false;
           reason = None;
           callbacks = [];
-          created_at = Unix.gettimeofday ();
+          created_at = Time_compat.now ();
         } in
         Hashtbl.add tokens id token
       end

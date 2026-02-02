@@ -31,7 +31,7 @@ type debate = {
 let debate_rng = Random.State.make_self_init ()
 
 let generate_debate_id () =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rand = Random.State.int debate_rng 1_000_000 in
   Printf.sprintf "debate-%d-%06d" ts rand
 
@@ -178,7 +178,7 @@ let start_debate config ~topic ?(notify_agents=[]) ~notify_fn () : (debate, stri
     topic;
     status = Open;
     arguments = [];
-    created_at = Unix.gettimeofday ();
+    created_at = Time_compat.now ();
   } in
   let path = debate_path config id in
   try

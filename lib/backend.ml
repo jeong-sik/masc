@@ -265,7 +265,7 @@ module MemoryBackend : BACKEND = struct
 
   let acquire_lock t ~key ~ttl_seconds ~owner =
     with_lock t (fun () ->
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       match Hashtbl.find_opt t.locks key with
       | Some lock when lock.expires_at > now && lock.owner <> owner ->
           Ok false  (* Locked by someone else *)
@@ -289,7 +289,7 @@ module MemoryBackend : BACKEND = struct
     with_lock t (fun () ->
       match Hashtbl.find_opt t.locks key with
       | Some lock when lock.owner = owner ->
-          let expires_at = Unix.gettimeofday () +. float_of_int ttl_seconds in
+          let expires_at = Time_compat.now () +. float_of_int ttl_seconds in
           Hashtbl.replace t.locks key { lock with expires_at };
           Ok true
       | _ ->
@@ -527,7 +527,7 @@ module FileSystemBackend : BACKEND = struct
         let lock_key = "locks:" ^ key in
         let path = key_to_path t lock_key in  (* calls validate_key internally *)
         ensure_dir path;
-        let now = Unix.gettimeofday () in
+        let now = Time_compat.now () in
         let expires_at = now +. float_of_int safe_ttl in
 
         (* File-level locking for cross-process safety *)
@@ -640,7 +640,7 @@ module FileSystemBackend : BACKEND = struct
                 let open Yojson.Safe.Util in
                 let own = json |> member "owner" |> to_string in
                 if own = owner then begin
-                  let now = Unix.gettimeofday () in
+                  let now = Time_compat.now () in
                   let expires_at = now +. float_of_int safe_ttl in
                   let new_json = `Assoc [
                     ("owner", `String owner);

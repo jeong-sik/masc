@@ -79,7 +79,7 @@ let parse_iso_timestamp (s : string) : float option =
 (** Get agents section *)
 let agents_section (config : Room_utils.config) : section =
   let agents = Room.get_agents_raw config in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let content = List.map (fun (a : Types.agent) ->
     let status_str = Types.agent_status_to_string a.status in
     let elapsed_str = match parse_iso_timestamp a.last_seen with
@@ -224,7 +224,7 @@ let count_locks (config : Room_utils.config) : int =
 
 (** Generate full dashboard *)
 let generate (config : Room_utils.config) : string =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let timestamp =
     let tm = Unix.localtime now in
     Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"

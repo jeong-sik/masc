@@ -81,7 +81,7 @@ module SubscriptionStore = struct
       subscriber;
       resource;
       filter;
-      created_at = Unix.gettimeofday ();
+      created_at = Time_compat.now ();
     } in
     Hashtbl.add subscriptions sub.id sub;
     Log.Sub.info "%s subscribed to %s" subscriber (resource_type_to_string resource);
@@ -149,7 +149,7 @@ end
 let notify_change ~(resource : resource_type) ~(change : change_type) 
     ~(resource_id : string) ~(data : Yojson.Safe.t) : int =
   let subs = SubscriptionStore.find_matching ~resource ~resource_id in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   List.iter (fun sub ->
     let notif = {
       subscription_id = sub.id;

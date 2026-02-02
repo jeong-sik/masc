@@ -29,7 +29,7 @@ let reset_rejection_stats () =
 (** Internal: Log validation rejection at WARN level *)
 let log_rejection ~validator ~input ~reason =
   Atomic.incr rejection_count;
-  last_rejection_time := Unix.gettimeofday ();
+  last_rejection_time := Time_compat.now ();
   (* Truncate input for log safety *)
   let safe_input = if String.length input > 32
     then String.sub input 0 32 ^ "..."

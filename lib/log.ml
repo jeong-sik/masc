@@ -53,7 +53,7 @@ let init_from_env () =
 
 (** Get current timestamp *)
 let timestamp () =
-  let t = Unix.gettimeofday () in
+  let t = Time_compat.now () in
   let tm = Unix.localtime t in
   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
     (tm.Unix.tm_year + 1900)

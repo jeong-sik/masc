@@ -39,7 +39,7 @@ end = struct
   let equal = String.equal
   let () = Random.self_init ()  (* Seed RNG on module load *)
   let generate () =
-    let timestamp = int_of_float (Unix.gettimeofday () *. 1000.0) in
+    let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
     let random = Random.int 10000 in  (* 4 digits for less collision *)
     Printf.sprintf "task-%d-%04d" timestamp random
   let to_yojson t = `String t
@@ -63,7 +63,7 @@ end = struct
   let to_string t = t
   let equal = String.equal
   let generate () =
-    let timestamp = int_of_float (Unix.gettimeofday () *. 1000.0) in
+    let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
     let random = Random.int 10000 in
     Printf.sprintf "thread-%d-%04d" timestamp random
   let to_yojson t = `String t
@@ -107,7 +107,7 @@ let now_iso () =
     tm.tm_hour tm.tm_min tm.tm_sec
 
 (** Parse ISO8601 timestamp to Unix float. Returns default_time on parse failure. *)
-let parse_iso8601 ?(default_time = Unix.gettimeofday () -. 60.0) timestamp =
+let parse_iso8601 ?(default_time = Time_compat.now () -. 60.0) timestamp =
   try
     Scanf.sscanf timestamp "%d-%d-%dT%d:%d:%d"
       (fun y m d h mi s ->

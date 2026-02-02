@@ -88,7 +88,7 @@ let handle_audit_query ctx args =
   let event_type = get_string args "event_type" "all" in
   let limit = get_int args "limit" 50 in
   let since_hours = get_float args "since_hours" 24.0 in
-  let since = Unix.gettimeofday () -. (since_hours *. 3600.0) in
+  let since = Time_compat.now () -. (since_hours *. 3600.0) in
   let events = read_audit_events ctx.config ~since in
   let filtered =
     events
@@ -118,7 +118,7 @@ let handle_audit_query ctx args =
 (* Handle masc_audit_stats *)
 let handle_audit_stats ctx args =
   let agent_filter = get_string_opt args "agent" in
-  let since = Unix.gettimeofday () -. (24.0 *. 3600.0) in
+  let since = Time_compat.now () -. (24.0 *. 3600.0) in
   let events = read_audit_events ctx.config ~since in
   let agents =
     let from_events = List.map (fun e -> e.agent) events in

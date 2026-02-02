@@ -97,13 +97,13 @@ let get_or_create_breaker t ~agent_id =
         agent_id;
         state = Closed;
         failures = [];
-        last_check = Unix.gettimeofday ();
+        last_check = Time_compat.now ();
       } in
       Hashtbl.add t.breakers agent_id b;
       b
 
 let prune_old_failures t breaker =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let threshold = now -. t.failure_window_sec in
   breaker.failures <- List.filter (fun f -> f.timestamp > threshold) breaker.failures
 
@@ -113,7 +113,7 @@ let prune_old_failures t breaker =
 let record_failure t ~agent_id ~reason =
   with_lock t (fun () ->
     let breaker = get_or_create_breaker t ~agent_id in
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
 
     (* Add new failure *)
     breaker.failures <- { timestamp = now; reason } :: breaker.failures;
@@ -156,7 +156,7 @@ let record_success t ~agent_id =
 let check t ~agent_id : (unit, string) result =
   with_lock t (fun () ->
     let breaker = get_or_create_breaker t ~agent_id in
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     breaker.last_check <- now;
 
     match breaker.state with
@@ -184,7 +184,7 @@ let check t ~agent_id : (unit, string) result =
 let force_open t ~agent_id ~reason ~duration_sec =
   with_lock t (fun () ->
     let breaker = get_or_create_breaker t ~agent_id in
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     breaker.state <- Open {
       until = now +. duration_sec;
       reason = "MANUAL: " ^ reason;
@@ -272,7 +272,7 @@ let list_all_breakers t =
 
 let cleanup t ~older_than_seconds =
   with_lock t (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let threshold = now -. float_of_int older_than_seconds in
     let to_remove = Hashtbl.fold (fun agent_id breaker acc ->
       match breaker.state with

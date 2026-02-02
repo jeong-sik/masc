@@ -9,7 +9,7 @@ let default_warning_threshold = 120.0
 (** Timestamp utilities for resilience checks *)
 module Time = struct
   (** Get current time as Unix float *)
-  let now () = Unix.gettimeofday ()
+  let now () = Time_compat.now ()
 
   (** Parse ISO timestamp to Unix float.
       Handles "YYYY-MM-DDTHH:MM:SSZ" format.

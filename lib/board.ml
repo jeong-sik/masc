@@ -165,7 +165,7 @@ let create_store () = {
   posts = Hashtbl.create 1024;
   comments = Hashtbl.create 4096;
   post_count = ref 0;
-  last_sweep = Unix.gettimeofday ();
+  last_sweep = Time_compat.now ();
   mutex = Eio.Mutex.create ();
 }
 
@@ -179,7 +179,7 @@ let with_lock store f =
 
 let sweep store =
   with_lock store (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let removed_posts = ref 0 in
     let removed_comments = ref 0 in
 
@@ -210,7 +210,7 @@ let sweep store =
 
 (** Auto-sweep if needed *)
 let maybe_sweep store =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
     ignore (sweep store)
 
@@ -241,7 +241,7 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
     if !(store.post_count) >= Limits.max_posts then
       Error (Capacity_exceeded { current = !(store.post_count); max = Limits.max_posts })
     else begin
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       let post = {
         id = Post_id.generate ();
         author = author_id;
@@ -359,7 +359,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
         if post_comment_count >= Limits.max_comments_per_post then
           Error (Capacity_exceeded { current = post_comment_count; max = Limits.max_comments_per_post })
         else begin
-          let now = Unix.gettimeofday () in
+          let now = Time_compat.now () in
           let ttl = min ttl_hours Limits.max_ttl_hours in
           let comment = {
             id = Comment_id.generate ();
@@ -499,7 +499,7 @@ let stats store =
   with_lock store (fun () ->
     let post_count = Hashtbl.length store.posts in
     let comment_count = Hashtbl.length store.comments in
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let expired_posts = Hashtbl.fold (fun _ (p : post) acc ->
       if p.expires_at < now then acc + 1 else acc
     ) store.posts 0 in
@@ -614,7 +614,7 @@ let load_persisted_posts store =
   if Sys.file_exists path then begin
     try
       let ic = open_in path in
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       let loaded = ref 0 in
       (try
         while true do
@@ -639,7 +639,7 @@ let load_persisted_comments store =
   if Sys.file_exists path then begin
     try
       let ic = open_in path in
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       let loaded = ref 0 in
       (try
         while true do

@@ -74,7 +74,7 @@ let handle_get_metrics ctx args =
 
 (** Create default metrics for agent *)
 let create_default_metrics ~agent_id ~days =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   { Metrics_store_eio.agent_id = agent_id;
     period_start = now -. (float_of_int days *. 86400.0);
     period_end = now;

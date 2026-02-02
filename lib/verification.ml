@@ -184,7 +184,7 @@ let request_of_yojson = function
            in
            let created_at = match get_float "created_at" with
              | Some f -> f
-             | None -> Unix.gettimeofday ()
+             | None -> Time_compat.now ()
            in
            let status = match List.assoc_opt "status" fields with
              | Some json -> (match request_status_of_yojson json with
@@ -200,7 +200,7 @@ let request_of_yojson = function
 let () = Random.self_init ()
 
 let generate_id () =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rand = Random.int 1_000_000 in
   Printf.sprintf "vrf-%d-%06d" ts rand
 
@@ -322,7 +322,7 @@ let create_request ~base_path ~task_id ~output ~criteria ~worker ?verifier () =
     criteria;
     worker;
     verifier;
-    created_at = Unix.gettimeofday ();
+    created_at = Time_compat.now ();
     status = Pending;
   } in
   match save_request base_path req with

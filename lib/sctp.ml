@@ -695,7 +695,7 @@ let generate_state_cookie ~peer_tag ~peer_tsn ~my_tag ~my_tsn =
   write_uint32_be buf 8 my_tag;
   write_uint32_be buf 12 my_tsn;
   (* Timestamp for expiration *)
-  let timestamp = Int64.of_float (Unix.gettimeofday () *. 1000.0) in
+  let timestamp = Int64.of_float (Time_compat.now () *. 1000.0) in
   Bytes.set_int64_be buf 16 timestamp;
   (* Random nonce for uniqueness *)
   let nonce = Random.int32 Int32.max_int in
@@ -748,7 +748,7 @@ let create_rtx_timer ?(max_retransmits = Rto.max_retransmits) () = {
 (** Start the timer *)
 let start_rtx_timer timer =
   timer.rtx_state <- Rtx_running;
-  timer.start_time <- Some (Unix.gettimeofday () *. 1000.0);
+  timer.start_time <- Some (Time_compat.now () *. 1000.0);
   timer.n_rtos <- 0
 
 (** Stop the timer *)
@@ -760,7 +760,7 @@ let stop_rtx_timer timer =
 let reset_rtx_timer timer ~rto =
   timer.rto <- rto;
   timer.rtx_state <- Rtx_running;
-  timer.start_time <- Some (Unix.gettimeofday () *. 1000.0)
+  timer.start_time <- Some (Time_compat.now () *. 1000.0)
 
 (** Update RTO based on RTT measurement - RFC 4960 Section 6.3.1 *)
 let update_rto timer ~measured_rtt =
@@ -788,7 +788,7 @@ let handle_timeout timer =
     timer.n_rtos <- timer.n_rtos + 1;
     (* Exponential backoff: double RTO, cap at max *)
     timer.rto <- Float.min (timer.rto *. 2.0) Rto.max_ms;
-    timer.start_time <- Some (Unix.gettimeofday () *. 1000.0);
+    timer.start_time <- Some (Time_compat.now () *. 1000.0);
     true  (* Should retransmit *)
   end
 
@@ -796,7 +796,7 @@ let handle_timeout timer =
 let is_expired timer =
   match timer.rtx_state, timer.start_time with
   | Rtx_running, Some start ->
-    let now = Unix.gettimeofday () *. 1000.0 in
+    let now = Time_compat.now () *. 1000.0 in
     now -. start >= timer.rto
   | _ -> false
 
@@ -804,7 +804,7 @@ let is_expired timer =
 let time_until_expiry timer =
   match timer.rtx_state, timer.start_time with
   | Rtx_running, Some start ->
-    let now = Unix.gettimeofday () *. 1000.0 in
+    let now = Time_compat.now () *. 1000.0 in
     let elapsed = now -. start in
     if elapsed >= timer.rto then Some 0.0
     else Some (timer.rto -. elapsed)

@@ -197,7 +197,7 @@ let checkpoints : checkpoint list ref = ref []
 (** Save a checkpoint *)
 let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
   let cp = {
-    cp_timestamp = Unix.gettimeofday ();
+    cp_timestamp = Time_compat.now ();
     cp_summary = summary;
     cp_task = task;
     cp_todos = todos;

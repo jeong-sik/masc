@@ -78,7 +78,7 @@ let handle_done ctx args =
   (* Get task info BEFORE completion to extract actual start time *)
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
-  let default_time = Unix.gettimeofday () -. 60.0 in
+  let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
         | Types.InProgress { started_at; assignee } ->
@@ -109,11 +109,11 @@ let handle_done ctx args =
   (match result with
    | Ok _ ->
        let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Unix.gettimeofday () *. 1000.));
+         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
          task_id;
          started_at = started_at_actual;
-         completed_at = Some (Unix.gettimeofday ());
+         completed_at = Some (Time_compat.now ());
          success = true;
          error_message = None;
          collaborators = collaborators_from_task;
@@ -132,22 +132,22 @@ let handle_cancel_task ctx args =
   let started_at_actual = match task_opt with
     | Some t -> (match t.task_status with
         | Types.InProgress { started_at; _ } ->
-            Types.parse_iso8601 ~default_time:(Unix.gettimeofday () -. 60.0) started_at
+            Types.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) started_at
         | Types.Claimed { claimed_at; _ } ->
-            Types.parse_iso8601 ~default_time:(Unix.gettimeofday () -. 60.0) claimed_at
-        | _ -> Unix.gettimeofday () -. 60.0)
-    | None -> Unix.gettimeofday () -. 60.0
+            Types.parse_iso8601 ~default_time:(Time_compat.now () -. 60.0) claimed_at
+        | _ -> Time_compat.now () -. 60.0)
+    | None -> Time_compat.now () -. 60.0
   in
   let result = Room.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~reason in
   (* Record failed metric on cancellation *)
   (match result with
    | Ok _ ->
        let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Unix.gettimeofday () *. 1000.));
+         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
          task_id;
          started_at = started_at_actual;
-         completed_at = Some (Unix.gettimeofday ());
+         completed_at = Some (Time_compat.now ());
          success = false;
          error_message = Some (if reason = "" then "Cancelled" else reason);
          collaborators = [];
@@ -167,7 +167,7 @@ let handle_transition ctx args =
   let action_lc = String.lowercase_ascii action in
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
-  let default_time = Unix.gettimeofday () -. 60.0 in
+  let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
         | Types.InProgress { started_at; assignee } ->
@@ -200,11 +200,11 @@ let handle_transition ctx args =
   (match result, action_lc with
    | Ok _, "done" ->
        let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Unix.gettimeofday () *. 1000.));
+         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
          task_id;
          started_at = started_at_actual;
-         completed_at = Some (Unix.gettimeofday ());
+         completed_at = Some (Time_compat.now ());
          success = true;
          error_message = None;
          collaborators = collaborators_from_task;
@@ -214,11 +214,11 @@ let handle_transition ctx args =
        ignore (Metrics_store_eio.record ctx.config metric)
    | Ok _, "cancel" ->
        let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Unix.gettimeofday () *. 1000.));
+         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
          task_id;
          started_at = started_at_actual;
-         completed_at = Some (Unix.gettimeofday ());
+         completed_at = Some (Time_compat.now ());
          success = false;
          error_message = Some (if reason = "" then "Cancelled" else reason);
          collaborators = collaborators_from_task;

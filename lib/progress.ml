@@ -90,13 +90,13 @@ module Tracker = struct
     current = 0.0;
     total_steps;
     completed_steps = 0;
-    start_time = Unix.gettimeofday ();
+    start_time = Time_compat.now ();
   }
 
   (** Update progress directly (0.0 ~ 1.0) *)
   let update t ~progress ?message () =
     t.current <- Float.min 1.0 (Float.max 0.0 progress);
-    let elapsed = Unix.gettimeofday () -. t.start_time in
+    let elapsed = Time_compat.now () -. t.start_time in
     let estimated_remaining =
       (* Only estimate when progress > 10% to avoid wild initial estimates *)
       if t.current > 0.1 then

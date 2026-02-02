@@ -122,7 +122,7 @@ let create_token config ~agent_name ~role : (string * agent_credential, masc_err
   let now = now_iso () in
   let expires_at =
     if auth_cfg.token_expiry_hours > 0 then
-      let expiry = Unix.gettimeofday () +. (float_of_int auth_cfg.token_expiry_hours *. 3600.0) in
+      let expiry = Time_compat.now () +. (float_of_int auth_cfg.token_expiry_hours *. 3600.0) in
       let tm = Unix.gmtime expiry in
       Some (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
         (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday

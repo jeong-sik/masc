@@ -134,7 +134,7 @@ let build_touch_query hash =
 MATCH (a:Agent {hash: '%s'})
 SET a.last_seen = %f
 RETURN a.hash AS hash
-|} hash (Unix.gettimeofday ())
+|} hash (Time_compat.now ())
 
 (** Build query to create COLLABORATED_WITH relationship *)
 let build_collaboration_query hash1 hash2 context =

@@ -262,8 +262,8 @@ let create_stem_cell ~generation =
     generation;
     state = Stem;
     phase = Idle;
-    born_at = Unix.gettimeofday ();
-    last_activity = Unix.gettimeofday ();
+    born_at = Time_compat.now ();
+    last_activity = Time_compat.now ();
     context_dna = None;
     prepared_dna = None;
     prepare_context_len = 0;
@@ -284,7 +284,7 @@ let init_pool ~config =
 
 (** Check if non-context triggers are met *)
 let check_non_context_triggers ~config ~cell =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let age = now -. cell.born_at in
   List.exists (function
     | Time_based interval -> age >= interval
@@ -344,7 +344,7 @@ let compress_to_dna ~ratio ~context =
     - Warnings about context pressure
 *)
 let generate_mentor_wisdom ~parent_cell =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let age_seconds = now -. parent_cell.born_at in
   let age_str =
     if age_seconds < 60.0 then Printf.sprintf "%.0f seconds" age_seconds
@@ -522,7 +522,7 @@ let activate_stem ~pool ~dna =
       phase = Idle;  (* Fresh start *)
       context_dna = Some dna;
       prepared_dna = None;
-      last_activity = Unix.gettimeofday ();
+      last_activity = Time_compat.now ();
     } in
     (activated, pool)
   | Some stem ->
@@ -531,7 +531,7 @@ let activate_stem ~pool ~dna =
       phase = Idle;  (* Fresh start *)
       context_dna = Some dna;
       prepared_dna = None;
-      last_activity = Unix.gettimeofday ();
+      last_activity = Time_compat.now ();
     } in
     let remaining = List.filter (fun c -> c.id <> stem.id) pool.cells in
     (activated, { pool with cells = remaining })
@@ -618,7 +618,7 @@ let record_activity ~cell ~task_done ~tool_called =
   { cell with
     task_count;
     tool_call_count;
-    last_activity = Unix.gettimeofday ();
+    last_activity = Time_compat.now ();
   }
 
 (** 2-Phase mitosis result *)
@@ -735,7 +735,7 @@ let write_status ~base_path ~cell ~config =
     ("phase", `String (phase_to_string cell.phase));
     ("prepare_threshold", `Float config.prepare_threshold);
     ("handoff_threshold", `Float config.handoff_threshold);
-    ("updated_at", `Float (Unix.gettimeofday ()));
+    ("updated_at", `Float (Time_compat.now ()));
   ] in
   (* Ensure .masc directory exists *)
   if Sys.file_exists masc_dir && Sys.is_directory masc_dir then begin
@@ -777,7 +777,7 @@ let write_status_with_backend ~room_config ~cell ~config =
     ("phase", `String (phase_to_string cell.phase));
     ("prepare_threshold", `Float config.prepare_threshold);
     ("handoff_threshold", `Float config.handoff_threshold);
-    ("updated_at", `Float (Unix.gettimeofday ()));
+    ("updated_at", `Float (Time_compat.now ()));
   ] in
   let json_str = Yojson.Safe.to_string json in
 

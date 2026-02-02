@@ -30,7 +30,7 @@ let rng_initialized = ref false
 
 let ensure_rng_init () =
   if not !rng_initialized then begin
-    let seed = get_env_int "MASC_SWARM_SEED" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+    let seed = get_env_int "MASC_SWARM_SEED" (int_of_float (Time_compat.now () *. 1000.0)) in
     Random.init seed;
     rng_initialized := true
   end
@@ -54,7 +54,7 @@ let random_int max =
 let make_rng ?seed () =
   let s = match seed with
     | Some s -> s
-    | None -> get_env_int "MASC_SWARM_SEED" (int_of_float (Unix.gettimeofday () *. 1000.0))
+    | None -> get_env_int "MASC_SWARM_SEED" (int_of_float (Time_compat.now () *. 1000.0))
   in
   Random.State.make [|s|]
 

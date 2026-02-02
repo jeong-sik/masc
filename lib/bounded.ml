@@ -125,7 +125,7 @@ let create_state constraints =
     tokens_out = 0;
     cost_usd = 0.0;
     total_retries = 0;
-    start_time = Unix.gettimeofday ();
+    start_time = Time_compat.now ();
     constraints;
   }
 
@@ -146,7 +146,7 @@ let check_single_float name current limit =
 
 (** Check all constraints - returns first violation or None *)
 let check_constraints state =
-  let elapsed = Unix.gettimeofday () -. state.start_time in
+  let elapsed = Time_compat.now () -. state.start_time in
   let total_tokens = state.tokens_in + state.tokens_out in
   let checks = [
     check_single "turns" state.turns state.constraints.max_turns;
@@ -432,7 +432,7 @@ let result_to_json result =
       ("tokens_total", `Int (result.stats.tokens_in + result.stats.tokens_out));
       ("cost_usd", `Float result.stats.cost_usd);
       ("total_retries", `Int result.stats.total_retries);
-      ("elapsed_seconds", `Float (Unix.gettimeofday () -. result.stats.start_time));
+      ("elapsed_seconds", `Float (Time_compat.now () -. result.stats.start_time));
     ]);
     ("history", `List history_json);
     ("warning", match result.warning with

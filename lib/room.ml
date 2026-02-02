@@ -1086,7 +1086,7 @@ let claim_next config ~agent_name =
 
         (* Starvation prevention: Calculate effective priority
            Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
-        let now = Unix.gettimeofday () in
+        let now = Time_compat.now () in
         let parse_time iso =
           try
             (* Parse ISO 8601: 2026-01-05T12:30:00Z *)
@@ -1754,7 +1754,7 @@ let gc config ?(days=7) () =
 
   (* 2. Archive stale tasks (older than N days, not completed) *)
   let cutoff_time =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     now -. (float_of_int days *. 24. *. 60. *. 60.)
   in
   let cutoff_iso =

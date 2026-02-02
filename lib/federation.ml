@@ -363,7 +363,7 @@ let members_file (config : config) : (string, string) result =
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =
-  let t = Unix.gettimeofday () in
+  let t = Time_compat.now () in
   let tm = Unix.gmtime t in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.Unix.tm_year + 1900)
@@ -493,7 +493,7 @@ let get_config () : federation_config option =
     @return Handshake challenge to send back
 *)
 let create_challenge (from_org : organization) : handshake_challenge =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let timeout = 3600.0 in  (* 1 hour timeout *)
   let challenge : handshake_challenge = {
     challenge_id = generate_id ();

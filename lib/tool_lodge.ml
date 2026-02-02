@@ -452,7 +452,7 @@ let save_interests_to_neo4j ~agent_name interests =
       |> Str.global_replace (Str.regexp "\"") "\\\""
       |> Str.global_replace (Str.regexp "\\$") "\\$"
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) escaped_cypher in
+    let cmd = Printf.sprintf "%s neo4j query \"%s\"" (sb_path ()) escaped_cypher in
     try
       let _ = run_shell_nonblocking cmd in
       Ok (Printf.sprintf "saved %d interests for %s" (List.length interests) agent_name)
@@ -466,7 +466,7 @@ let get_agent_interests ~agent_name =
      ORDER BY r.count DESC LIMIT 10"
     agent_name
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
+  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
     let (_, output) = run_shell_nonblocking cmd in
     (* Parse JSON result *)
@@ -497,7 +497,7 @@ let record_lodge_visit ~agent_name ~article_title =
      RETURN a.visit_count as visits"
     agent_name (Str.global_replace (Str.regexp "'") "" article_title)
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
+  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
     let _ = run_shell_nonblocking cmd in
     ()
@@ -667,7 +667,9 @@ let evolve_agent ~name ~dimension ~outcome =
         "MATCH (a:Agent {name: '%s'}) SET a.value_weights = '%s', a.generation = %d, a.last_updated = datetime() RETURN a.name"
         name new_weights_json new_gen
       in
-      let cmd = Printf.sprintf "source ~/.zshenv && cypher-shell -a \"$NEO4J_URI\" -u neo4j -p \"$NEO4J_PASSWORD\" --format plain \"%s\" 2>/dev/null" cypher in
+      let neo4j_uri = Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"" in
+      let neo4j_pw = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
+      let cmd = Printf.sprintf "cypher-shell -a \"%s\" -u neo4j -p \"%s\" --format plain \"%s\" 2>/dev/null" neo4j_uri neo4j_pw cypher in
       try
         let _ = Unix.open_process_in cmd |> fun ic ->
           let result = try input_line ic with End_of_file -> "" in
@@ -1366,7 +1368,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
        RETURN a.name"
       agent_name child_role escaped_prompt parent_name parent_name
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) cypher in
+    let cmd = Printf.sprintf "%s neo4j query \"%s\"" (sb_path ()) cypher in
     try
       let _ = run_shell_nonblocking cmd in
       (* Announce spawn via LLM *)
@@ -1456,7 +1458,7 @@ let get_all_agent_interests () =
      RETURN a.name as agent, collect(t.name) as topics, a.visit_count as visits \
      ORDER BY a.name"
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
+  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
     let (_, output) = run_shell_nonblocking cmd in
     try
@@ -1811,7 +1813,7 @@ let get_profile ~net:_ args =
               a.reaction_count as reactions, parent.name as parent"
       agent_name
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) cypher in
+    let cmd = Printf.sprintf "%s neo4j query \"%s\"" (sb_path ()) cypher in
     let neo4j_info =
       try
         let (_, content) = run_shell_nonblocking cmd in
@@ -1842,7 +1844,7 @@ let lodge_search ~net:_ args =
        RETURN a.name, a.role, a.visit_count LIMIT 5"
       query query
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
+    let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
     let agent_results =
       try
         let (_, output) = run_shell_nonblocking cmd in
@@ -1883,7 +1885,7 @@ let lodge_progress ~net:_ _args =
             COALESCE(a.visit_count, 0) as visits, interests \
      ORDER BY visits DESC LIMIT 10"
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
+  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   let agent_stats =
     try
       let (_, output) = run_shell_nonblocking cmd in

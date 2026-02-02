@@ -684,8 +684,8 @@ let record_feedback ~name ~dimension ~is_positive =
 
 (** Module initialization - load personas from Neo4j *)
 let () =
-  (* Lazy initialization - load on first use via persona_prompt *)
-  (* Uncomment to load at module init: load_personas_from_neo4j () *)
+  (* Load personas at startup for evolution triggers *)
+  load_personas_from_neo4j ();
 
   (* Register SOUL Evolution callback with Tool_board (breaks dependency cycle) *)
   Tool_board.register_evolution_callback {
@@ -1336,35 +1336,33 @@ let tool_auto_chain : Types.tool_schema = {
 
 (** {1 Agent Persistence & Spawning} *)
 
-(** Get all agents participating in Lodge from Neo4j *)
+(** Core Lodge personas *)
+let core_lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
+
+(** Get all Lodge agents via GraphQL *)
 let get_all_agents () =
-  let cypher =
-    "MATCH (a:Agent)-[:PARTICIPATES_IN]->(act:Activity {name: 'lodge'}) \
-     WHERE a.status = 'active' \
-     RETURN a.name, a.persona, a.personality_prompt, a.created_by, \
-            COALESCE(a.visit_count, 0) as visits \
-     ORDER BY a.name"
-  in
-  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
+  let query = "{\"query\": \"{ agents(first: 20) { edges { node { name primaryValue promptTemplate status } } } }\"}" in
+  let cmd = Printf.sprintf "source ~/.zshenv && curl -s http://localhost:4000/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
   try
     let (_, output) = run_shell_nonblocking cmd in
     try
       let json = Yojson.Safe.from_string output in
-      let records = json |> member "records" |> to_list in
-      List.filter_map (fun r ->
+      let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in
+      List.filter_map (fun edge ->
         try
-          let row = match to_list r with [inner] -> to_list inner | other -> other in
-          match row with
-          | name_j :: persona_j :: prompt_j :: created_by_j :: visits_j :: _ ->
-            let name = to_string name_j in
-            let persona = (try to_string persona_j with _ -> "unknown") in
-            let prompt = (try to_string prompt_j with _ -> "") in
-            let created_by = (try to_string created_by_j with _ -> "system") in
-            let visits = (try to_int visits_j with _ -> 0) in
-            if name <> "" then Some (name, persona, prompt, created_by, visits) else None
-          | _ -> None
+          let node = edge |> member "node" in
+          let name = node |> member "name" |> to_string in
+          (* Only include core Lodge personas *)
+          if List.mem name core_lodge_personas then
+            let primary_value = (try node |> member "primaryValue" |> to_string with _ -> "unknown") in
+            let prompt = (try node |> member "promptTemplate" |> to_string with _ -> "") in
+            let status = (try node |> member "status" |> to_string with _ -> "active") in
+            if status = "active" then
+              Some (name, primary_value, prompt, "system", 0)
+            else None
+          else None
         with _ -> None
-      ) records
+      ) edges
     with _ -> []
   with _ -> []
 

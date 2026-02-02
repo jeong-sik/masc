@@ -684,3 +684,175 @@ let trigger_heartbeat room_config =
 
   ignore room_config;  (* Suppress unused warning for now *)
   result
+
+(** {1 Broadcast Content-Aware Routing}
+
+    브로드캐스트 내용을 분석하여 관련 있는 에이전트에게 알림.
+    키워드 매칭 + LLM 기반 의미 분석으로 라우팅.
+
+    @since 2.32.0
+*)
+
+(** Agent specialties - keywords that each agent responds to *)
+let agent_specialties = [
+  ("dreamer", ["상상"; "미래"; "아이디어"; "영감"; "창의"; "꿈"; "가능성"; "혁신"; "vision"; "imagine"]);
+  ("skeptic", ["검증"; "증거"; "논리"; "비판"; "분석"; "근거"; "확인"; "의문"; "데이터"; "팩트"]);
+  ("historian", ["역사"; "기록"; "과거"; "배경"; "맥락"; "레거시"; "변화"; "발전"; "회고"; "경험"]);
+  ("pragmatist", ["실행"; "구현"; "방법"; "절차"; "실용"; "효율"; "단계"; "계획"; "실제"; "적용"]);
+  ("connector", ["연결"; "협업"; "관계"; "소개"; "네트워크"; "조율"; "중재"; "팀"; "커뮤니티"; "bridge"]);
+]
+
+(** Calculate keyword match score for an agent *)
+let keyword_match_score ~agent_name ~content =
+  match List.assoc_opt agent_name agent_specialties with
+  | None -> 0.0
+  | Some keywords ->
+      let content_lower = String.lowercase_ascii content in
+      let matches = List.filter (fun kw ->
+        let kw_lower = String.lowercase_ascii kw in
+        (* Check if keyword exists in content *)
+        let rec find_substring s pattern start =
+          if start + String.length pattern > String.length s then false
+          else if String.sub s start (String.length pattern) = pattern then true
+          else find_substring s pattern (start + 1)
+        in
+        find_substring content_lower kw_lower 0
+      ) keywords in
+      let match_count = List.length matches in
+      let total_keywords = List.length keywords in
+      if total_keywords = 0 then 0.0
+      else float_of_int match_count /. float_of_int total_keywords
+
+(** Analyze broadcast relevance using LLM for deeper understanding *)
+let analyze_broadcast_relevance_llm ~content ~available_agents =
+  (* Build agent list for LLM *)
+  let agents_str = available_agents
+    |> List.map (fun name ->
+        let keywords = List.assoc_opt name agent_specialties |> Option.value ~default:[] in
+        Printf.sprintf "- %s: %s" name (String.concat ", " keywords))
+    |> String.concat "\n"
+  in
+  let prompt = Printf.sprintf
+    "다음 브로드캐스트 메시지를 분석하고, 가장 관련 있는 에이전트를 선택하세요.\n\n\
+     [메시지]\n%s\n\n\
+     [에이전트 목록]\n%s\n\n\
+     관련도가 높은 에이전트 이름만 콤마로 구분하여 답변하세요. 관련 없으면 'none'이라고 답변하세요.\n\
+     예: dreamer, historian"
+    content agents_str
+  in
+  let json_payload = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "glm");
+      ("arguments", `Assoc [
+        ("prompt", `String prompt)
+      ])
+    ])
+  ]) in
+  let tmp_file = Printf.sprintf "/tmp/broadcast_analyze_%d.json" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let oc = open_out tmp_file in
+  output_string oc json_payload;
+  close_out oc;
+  let cmd = Printf.sprintf
+    "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty'; rm -f %s"
+    tmp_file tmp_file
+  in
+  let response = run_shell_line cmd in
+  (* Parse response to get agent names *)
+  if String.length response < 3 || response = "none" then []
+  else begin
+    response
+    |> String.split_on_char ','
+    |> List.map String.trim
+    |> List.filter (fun name -> List.mem_assoc name agent_specialties)
+  end
+
+(** Find relevant agents for a broadcast message *)
+let find_relevant_agents ~content ~threshold =
+  let available_agents = List.map fst agent_specialties in
+  (* First: keyword matching (fast) *)
+  let keyword_scores = available_agents |> List.map (fun name ->
+    (name, keyword_match_score ~agent_name:name ~content)
+  ) in
+  let high_keyword_matches = keyword_scores
+    |> List.filter (fun (_, score) -> score >= threshold)
+    |> List.map fst
+  in
+  (* If keyword matching found agents, use that *)
+  if List.length high_keyword_matches > 0 then begin
+    Eio.traceln "   🔍 Keyword match found: [%s]" (String.concat ", " high_keyword_matches);
+    high_keyword_matches
+  end else begin
+    (* Fallback: LLM analysis for semantic understanding *)
+    Eio.traceln "   🧠 No keyword match, trying LLM analysis...";
+    analyze_broadcast_relevance_llm ~content ~available_agents
+  end
+
+(** Handle a broadcast message - route to relevant agents *)
+let handle_broadcast ~sender ~content =
+  Eio.traceln "📢 Handling broadcast from %s: %s" sender
+    (String.sub content 0 (min 50 (String.length content)));
+
+  (* Find relevant agents (exclude sender) *)
+  let relevant = find_relevant_agents ~content ~threshold:0.2 in
+  let relevant = List.filter (fun name -> name <> sender) relevant in
+
+  if List.length relevant = 0 then begin
+    Eio.traceln "   ⏭️ No relevant agents for this broadcast";
+    []
+  end else begin
+    Eio.traceln "   🎯 Routing to: [%s]" (String.concat ", " relevant);
+    (* Generate responses from each relevant agent *)
+    relevant |> List.filter_map (fun agent_name ->
+      match generate_agent_content
+        ~agent_name
+        ~context:content
+        ~action_type:(`Comment (Printf.sprintf "[Broadcast from %s] %s" sender content))
+      with
+      | None -> None
+      | Some response ->
+          Eio.traceln "   💬 [%s] Responded: %s" agent_name response;
+          (* Post as comment or broadcast reply *)
+          let store = Board.global () in
+          let reply_content = Printf.sprintf "@%s %s" sender response in
+          (match Board.create_post store ~author:agent_name ~content:reply_content ~ttl_hours:168 () with
+          | Ok post ->
+              Eio.traceln "   📝 [%s] Posted reply: %s" agent_name (Board.Post_id.to_string post.id);
+              Some (agent_name, response)
+          | Error e ->
+              Eio.traceln "   ❌ [%s] Reply failed: %s" agent_name (Board.show_board_error e);
+              Some (agent_name, response))
+    )
+  end
+
+(** Poll for recent broadcasts and handle them *)
+let poll_and_handle_broadcasts ~since_timestamp =
+  (* Get recent posts that look like broadcasts (contain @all or start with 📢) *)
+  let store = Board.global () in
+  let recent_posts = Board.list_posts store ~limit:20 () in
+  let broadcasts = recent_posts |> List.filter (fun (post : Board.post) ->
+    post.created_at > since_timestamp &&
+    (String.length post.content >= 2 &&
+     (let content = post.content in
+      (* Check for broadcast markers *)
+      let has_at_all =
+        let rec find s pattern start =
+          if start + String.length pattern > String.length s then false
+          else if String.sub s start (String.length pattern) = pattern then true
+          else find s pattern (start + 1)
+        in
+        find (String.lowercase_ascii content) "@all" 0
+      in
+      let has_emoji = String.length content >= 4 &&
+        String.sub content 0 4 = "\xf0\x9f\x93\xa2" (* 📢 *)
+      in
+      has_at_all || has_emoji))
+  ) in
+  Eio.traceln "🔔 Found %d new broadcasts since %.0f" (List.length broadcasts) since_timestamp;
+  broadcasts |> List.iter (fun (post : Board.post) ->
+    let sender = Board.Agent_id.to_string post.author in
+    ignore (handle_broadcast ~sender ~content:post.content)
+  );
+  Time_compat.now ()  (* Return new timestamp for next poll *)

@@ -348,37 +348,134 @@ let load_agent_memories ~agent_name ~limit =
   let memories = run_shell_nonblocking cmd in
   if String.length memories > 10 then Some memories else None
 
-(** Load agent identity from Neo4j - non-blocking *)
-let load_agent_identity ~agent_name =
-  (* Query Neo4j for agent profile: description, traits *)
-  let query = Printf.sprintf
-    "MATCH (a:Agent {name: '%s'}) RETURN a.description as description, a.traits as traits LIMIT 1"
+(** Agent profile loaded from Neo4j *)
+type agent_profile = {
+  name: string;
+  role: string option;
+  description: string option;
+  traits: string list;
+  preferred_hours: int list;
+  peak_hour: int option;
+  activity_level: float;
+  karma: int;
+  persona_prompt: string option;
+}
+
+(** Load full agent profile from Neo4j via GraphQL - non-blocking *)
+let load_agent_profile ~agent_name : agent_profile =
+  let cmd = Printf.sprintf
+    "cd /Users/dancer/me && ./scripts/sb graphql agent %s 2>/dev/null"
     agent_name
   in
-  let cmd = Printf.sprintf
-    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null | jq -r '.records[0][0][0] // empty'"
-    query
-  in
-  let description = run_shell_line cmd in
-  if String.length description > 5 then description
-  else Printf.sprintf "당신은 %s 에이전트입니다." agent_name
+  let json_str = run_shell_nonblocking cmd in
+  try
+    let json = Yojson.Safe.from_string json_str in
+    let open Yojson.Safe.Util in
+    let agent = json |> member "data" |> member "agent" in
+    if agent = `Null then
+      (* Fallback for unknown agent *)
+      { name = agent_name; role = None; description = None; traits = [];
+        preferred_hours = []; peak_hour = None; activity_level = 0.5;
+        karma = 0; persona_prompt = None }
+    else
+      let get_string_opt key =
+        match agent |> member key with
+        | `Null -> None
+        | `String s -> Some s
+        | _ -> None
+      in
+      let get_int_opt key =
+        match agent |> member key with
+        | `Null -> None
+        | `Int i -> Some i
+        | _ -> None
+      in
+      {
+        name = agent |> member "name" |> to_string_option |> Option.value ~default:agent_name;
+        role = get_string_opt "role";
+        description = get_string_opt "description";
+        traits = (try agent |> member "traits" |> to_list |> List.map to_string with _ -> []);
+        preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with _ -> []);
+        peak_hour = get_int_opt "peakHour";
+        activity_level = (try agent |> member "activityLevel" |> to_float with _ -> 0.5);
+        karma = (try agent |> member "karma" |> to_int with _ -> 0);
+        persona_prompt = get_string_opt "personaPrompt";
+      }
+  with _ ->
+    Eio.traceln "⚠️ Failed to load profile for %s" agent_name;
+    { name = agent_name; role = None; description = None; traits = [];
+      preferred_hours = []; peak_hour = None; activity_level = 0.5;
+      karma = 0; persona_prompt = None }
 
-(** Generate content using LLM based on agent personality from Neo4j *)
-let generate_agent_content ~agent_name ~context:_ ~action_type =
-  (* Load persona from Neo4j *)
-  let persona = load_agent_identity ~agent_name in
-  (* Load short-term memories from Qdrant *)
-  let memories = load_agent_memories ~agent_name ~limit:3 in
-  let memory_context = match memories with
+(** Build dynamic prompt from agent profile *)
+let build_agent_prompt ~(profile : agent_profile) ~memories ~current_hour ~action_context =
+  let identity = Printf.sprintf "너는 %s야." profile.name in
+
+  let role_str = match profile.description with
+    | Some d -> Printf.sprintf "\n역할: %s" d
+    | None -> ""
+  in
+
+  let traits_str = match profile.traits with
+    | [] -> ""
+    | ts -> Printf.sprintf "\n성격: %s" (String.concat ", " ts)
+  in
+
+  let time_str =
+    let is_preferred = List.mem current_hour profile.preferred_hours in
+    let is_peak = profile.peak_hour = Some current_hour in
+    if is_peak then "\n⚡ 지금 피크타임이야! 활발하게 활동해."
+    else if is_preferred then "\n🌙 네 활동 시간대야."
+    else ""
+  in
+
+  let karma_str =
+    if profile.karma > 0 then Printf.sprintf "\n평판: karma %d점" profile.karma
+    else ""
+  in
+
+  let memory_str = match memories with
     | Some m -> Printf.sprintf "\n\n[최근 기억]\n%s" m
     | None -> ""
   in
-  let system_prompt = Printf.sprintf "%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요." persona memory_context in
+
+  let persona_str = match profile.persona_prompt with
+    | Some p -> Printf.sprintf "\n\n[특별 지시]\n%s" p
+    | None -> ""
+  in
+
+  let action_str = Printf.sprintf "\n\n[현재 상황]\n%s" action_context in
+
+  Printf.sprintf "%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
+    identity role_str traits_str time_str karma_str memory_str persona_str action_str
+
+(** Legacy: Load agent identity (for backward compat) *)
+let load_agent_identity ~agent_name =
+  let profile = load_agent_profile ~agent_name in
+  match profile.description with
+  | Some d -> d
+  | None -> Printf.sprintf "당신은 %s 에이전트입니다." agent_name
+
+(** Generate content using LLM based on agent personality from Neo4j *)
+let generate_agent_content ~agent_name ~context:_ ~action_type =
+  (* Load full profile from Neo4j via GraphQL *)
+  let profile = load_agent_profile ~agent_name in
+  (* Load short-term memories from Qdrant *)
+  let memories = load_agent_memories ~agent_name ~limit:3 in
+  (* Get current hour for time-based prompting *)
+  let current_hour = current_hour_kst () in
+  (* Build action context *)
+  let action_context = match action_type with
+    | `Post reason -> Printf.sprintf "게시글 작성 - 이유: %s" reason
+    | `Comment original_post -> Printf.sprintf "댓글 작성 - 원글: \"%s\"" original_post
+  in
+  (* Build dynamic system prompt *)
+  let system_prompt = build_agent_prompt ~profile ~memories ~current_hour ~action_context in
   let user_prompt = match action_type with
     | `Post reason ->
-        Printf.sprintf "다음 상황에서 게시글을 작성하세요: %s" reason
+        Printf.sprintf "위 상황에서 게시글을 작성하세요: %s" reason
     | `Comment original_post ->
-        Printf.sprintf "다음 글에 댓글을 달아주세요:\n\n\"%s\"" original_post
+        Printf.sprintf "위 글에 댓글을 달아주세요:\n\n\"%s\"" original_post
   in
   (* Use llm-mcp GLM tool for content generation - non-blocking *)
   let cmd = Printf.sprintf

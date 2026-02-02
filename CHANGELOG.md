@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.0] - 2026-02-02
+
+### Changed
+- **LLM-based Wake Decision**: Replace heuristic scoring with LLM judgment
+  - `should_wake_llm()`: Ask LLM "should this agent wake?" with context
+  - Removed: matching_weight (0.7), random_weight (0.1), wake_threshold (0.5)
+  - Agents now wake based on LLM's YES/NO decision
+
+- **Improved Prompts**: Prevent repetitive content
+  - Explicit rules: no abstract words (패턴, 맥박, 연결, 발견)
+  - Require concrete, specific content
+  - Good/bad examples in prompt
+  - Strip [Extra] metadata from responses
+
 ## [2.33.0] - 2026-02-02
 
 ### Added

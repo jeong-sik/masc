@@ -86,29 +86,79 @@ let agent_idle_timeout = 300.0
 (** Per-agent-per-post comment tracker: (agent_name, post_id) -> count *)
 let agent_comment_counts : (string * string, int) Hashtbl.t = Hashtbl.create 50
 
-(** Wake fairness: recent wake counts per agent (sliding window) *)
-let wake_history : (string, float list) Hashtbl.t = Hashtbl.create 10
-let wake_fairness_window = 3600.0  (* 1 hour sliding window *)
-let max_wakes_per_window = 3       (* max 3 wakes per hour per agent *)
+(** {1 Check-in Tracking — v2 Rate Limiting} *)
 
-(** Record a wake event for fairness tracking *)
-let record_wake ~agent_name =
-  let now = Unix.gettimeofday () in
-  let prev = match Hashtbl.find_opt wake_history agent_name with
-    | Some ts -> ts | None -> []
-  in
-  (* Prune old entries *)
-  let recent = List.filter (fun t -> now -. t < wake_fairness_window) prev in
-  Hashtbl.replace wake_history agent_name (now :: recent)
+(** Last check-in timestamp per agent *)
+let last_checkin : (string, float) Hashtbl.t = Hashtbl.create 10
 
-(** Check if agent is allowed to wake (fairness) *)
-let can_wake ~agent_name =
+(** Round-robin pointer — index into agent list *)
+let round_robin_idx = ref 0
+
+(** Per-agent rate state for posts/comments *)
+type rate_state = {
+  mutable last_post: float;
+  mutable last_comment: float;
+  mutable posts_today: int;
+  mutable comments_today: int;
+  mutable day_reset: float;      (** Start of current day (for daily counters) *)
+}
+
+let rate_states : (string, rate_state) Hashtbl.t = Hashtbl.create 10
+
+let min_post_gap = 1800.0       (** 30 min between posts *)
+let min_comment_gap = 20.0      (** 20 sec between comments *)
+let max_posts_per_day = 5
+let max_comments_per_day = 20
+
+(** Get or create rate state for agent *)
+let get_rate_state ~agent_name =
   let now = Unix.gettimeofday () in
-  match Hashtbl.find_opt wake_history agent_name with
+  let day_start = Float.of_int (int_of_float now / 86400 * 86400) in
+  match Hashtbl.find_opt rate_states agent_name with
+  | Some rs ->
+    (* Reset daily counters if new day *)
+    if now -. rs.day_reset > 86400.0 then begin
+      rs.posts_today <- 0;
+      rs.comments_today <- 0;
+      rs.day_reset <- day_start
+    end;
+    rs
+  | None ->
+    let rs = { last_post = 0.0; last_comment = 0.0;
+               posts_today = 0; comments_today = 0; day_reset = day_start } in
+    Hashtbl.replace rate_states agent_name rs;
+    rs
+
+(** Check if agent can perform the given action *)
+let check_rate_limit ~agent_name action_type =
+  let now = Unix.gettimeofday () in
+  let rs = get_rate_state ~agent_name in
+  match action_type with
+  | `Post ->
+    now -. rs.last_post >= min_post_gap && rs.posts_today < max_posts_per_day
+  | `Comment ->
+    now -. rs.last_comment >= min_comment_gap && rs.comments_today < max_comments_per_day
+  | `Vote -> true  (* Votes are always allowed *)
+
+(** Record that agent performed an action (update rate state) *)
+let record_rate_action ~agent_name action_type =
+  let now = Unix.gettimeofday () in
+  let rs = get_rate_state ~agent_name in
+  match action_type with
+  | `Post -> rs.last_post <- now; rs.posts_today <- rs.posts_today + 1
+  | `Comment -> rs.last_comment <- now; rs.comments_today <- rs.comments_today + 1
+  | `Vote -> ()
+
+(** Record a check-in timestamp *)
+let record_checkin ~agent_name =
+  Hashtbl.replace last_checkin agent_name (Unix.gettimeofday ())
+
+(** Check if enough time passed since last check-in *)
+let can_checkin ~agent_name ~min_gap_s =
+  let now = Unix.gettimeofday () in
+  match Hashtbl.find_opt last_checkin agent_name with
   | None -> true
-  | Some ts ->
-      let recent = List.filter (fun t -> now -. t < wake_fairness_window) ts in
-      List.length recent < max_wakes_per_window
+  | Some last -> now -. last >= min_gap_s
 
 (** Max comments per agent per post *)
 let max_comments_per_agent_per_post = 3
@@ -449,7 +499,7 @@ let load_config () =
     quiet_hours = (1, 6);
   }
 
-(** {1 Types} *)
+(** {1 Types — Check-in Model v2} *)
 
 type agent = {
   name: string;
@@ -459,17 +509,35 @@ type agent = {
   activity_level: float;
 }
 
-type wake_reason =
-  | Matching of { score: float; topic: string }
-  | Discovery of { connection: string }
-  | Random
+(** Why an agent is being checked in *)
+type checkin_trigger =
+  | Scheduled                    (** Round-robin turn *)
+  | ContentAlert of string       (** Board activity matches agent interests *)
+  | Mentioned of string          (** @agent mention in a post/comment *)
+  | ManualTrigger                (** MCP tool invocation *)
+
+(** What happened during check-in *)
+type checkin_result =
+  | Acted of { action: agent_action; summary: string }
+  | Passed of string             (** Agent decided to skip *)
+  | Skipped of string            (** System skip: rate limit, off-hours *)
+
+(** Agent action types - LLM decides which to take *)
+and agent_action =
+  | ActionPost of string           (** content *)
+  | ActionComment of string * string  (** post_id, content *)
+  | ActionUpvote of string         (** post_id *)
+  | ActionPropose of string * string (** name, reason *)
+  | ActionSkip
 
 type heartbeat_result = {
   timestamp: float;
   current_hour: int;
   agents_checked: int;
-  agents_woken: (string * wake_reason) list;
+  checkins: (string * checkin_trigger * checkin_result) list;
+  agents_woken: (string * string) list;  (** (name, reason) pairs *)
   encounter_rolled: string option;
+  activity_report: string;       (** Human-readable summary *)
 }
 
 (** {1 Time Utilities} *)
@@ -596,13 +664,16 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
   in
   let last_result_json = match s.ls_last_result with
     | None -> `Null
-    | Some r -> `Assoc [
+    | Some r ->
+      let active = r.checkins |> List.filter (fun (_, _, res) ->
+        match res with Posted _ | Commented _ -> true | Skipped _ -> false
+      ) in
+      `Assoc [
         ("hour", `Int r.current_hour);
         ("checked", `Int r.agents_checked);
-        ("woken", `Int (List.length r.agents_woken));
-        ("woken_names", `List (List.map (fun (n, _) -> `String n) r.agents_woken));
-        ("encounter", match r.encounter_rolled with
-          | Some e -> `String e | None -> `Null);
+        ("woken", `Int (List.length active));
+        ("woken_names", `List (List.map (fun (n, _, _) -> `String n) active));
+        ("encounter", `Null);
       ]
   in
   `Assoc [

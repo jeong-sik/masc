@@ -1005,11 +1005,17 @@ let parse_action_response response =
             | None -> ""
       in
       let parts = String.split_on_char ' ' action_part in
-      match List.map String.uppercase_ascii parts with
-      | ["POST"] | ["POST;"] -> ActionPost content
-      | ["COMMENT"; post_id] | ["COMMENT;"; post_id] -> ActionComment (post_id, content)
-      | ["UPVOTE"; post_id] | ["UPVOTE;"; post_id] -> ActionUpvote post_id
-      | ["SKIP"] | ["SKIP;"] | [] -> ActionSkip
+      (* Only uppercase the action word, preserve post_id case *)
+      match parts with
+      | [action] when String.uppercase_ascii action = "POST" || action = "POST;" ->
+          ActionPost content
+      | [action; pid] when String.uppercase_ascii action = "COMMENT" || action = "COMMENT;" ->
+          ActionComment (pid, content)
+      | [action; pid] when String.uppercase_ascii action = "UPVOTE" || action = "UPVOTE;" ->
+          ActionUpvote pid
+      | [action] when String.uppercase_ascii action = "SKIP" || action = "SKIP;" ->
+          ActionSkip
+      | [] -> ActionSkip
       | _ -> ActionSkip
 
 (** Ask LLM to decide what action to take *)

@@ -571,6 +571,113 @@ let get_persona_primary_value name =
   | Some config -> config.primary_value
   | None -> None
 
+(** {1 SOUL Evolution - Feedback-driven weight adjustment} *)
+
+(** Feedback type for evolution *)
+type feedback_outcome = Positive | Negative | Neutral
+
+(** Learning rate for weight adjustments (small steps) *)
+let learning_rate = 0.01
+
+(** Clamp value between min and max *)
+let clamp min_v max_v v =
+  if v < min_v then min_v
+  else if v > max_v then max_v
+  else v
+
+(** Parse value_weights JSON string to association list *)
+let parse_value_weights json_str =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc pairs ->
+      List.filter_map (fun (k, v) ->
+        match v with
+        | `Float f -> Some (k, f)
+        | `Int i -> Some (k, float_of_int i)
+        | _ -> None
+      ) pairs
+    | _ -> []
+  with _ -> []
+
+(** Serialize value_weights back to JSON string *)
+let serialize_value_weights weights =
+  let pairs = List.map (fun (k, v) -> (k, `Float v)) weights in
+  Yojson.Safe.to_string (`Assoc pairs)
+
+(** Evolve persona's value_weights based on feedback
+    - Adjusts weights by learning_rate
+    - Ensures primary_value never drops below 0.5
+    - Increments generation
+    - Updates Neo4j
+*)
+let evolve_persona ~name ~dimension ~outcome =
+  match get_cached_persona name with
+  | None ->
+    Printf.eprintf "[Evolution] Persona %s not found in cache\n%!" name;
+    false
+  | Some config ->
+    let weights = match config.value_weights with
+      | Some json -> parse_value_weights json
+      | None -> []
+    in
+    if weights = [] then begin
+      Printf.eprintf "[Evolution] No value_weights for %s\n%!" name;
+      false
+    end else begin
+      (* Calculate delta based on outcome *)
+      let delta = match outcome with
+        | Positive -> learning_rate
+        | Negative -> -. learning_rate
+        | Neutral -> 0.0
+      in
+      (* Update the specific dimension *)
+      let new_weights = List.map (fun (dim, weight) ->
+        if dim = dimension then
+          let new_weight = clamp 0.0 1.0 (weight +. delta) in
+          (* Constraint: primary_value can't go below 0.5 *)
+          let final_weight =
+            match config.primary_value with
+            | Some pv when pv = dim && new_weight < 0.5 -> 0.5
+            | _ -> new_weight
+          in
+          (dim, final_weight)
+        else (dim, weight)
+      ) weights in
+      let new_weights_json = serialize_value_weights new_weights in
+      let new_gen = config.generation + 1 in
+      (* Update Neo4j via cypher-shell *)
+      let cypher = Printf.sprintf
+        "MATCH (a:Agent {name: '%s'}) SET a.value_weights = '%s', a.generation = %d, a.last_updated = datetime() RETURN a.name"
+        name new_weights_json new_gen
+      in
+      let cmd = Printf.sprintf "source ~/.zshenv && cypher-shell -a \"$NEO4J_URI\" -u neo4j -p \"$NEO4J_PASSWORD\" --format plain \"%s\" 2>/dev/null" cypher in
+      try
+        let _ = Unix.open_process_in cmd |> fun ic ->
+          let result = try input_line ic with End_of_file -> "" in
+          ignore (Unix.close_process_in ic);
+          result
+        in
+        (* Update cache *)
+        Hashtbl.replace persona_cache name {
+          config with
+          value_weights = Some new_weights_json;
+          generation = new_gen;
+        };
+        Printf.eprintf "[Evolution] %s evolved: %s %s%.2f -> gen %d\n%!"
+          name dimension
+          (if delta >= 0.0 then "+" else "") delta new_gen;
+        true
+      with e ->
+        Printf.eprintf "[Evolution] Failed to update %s: %s\n%!" name (Printexc.to_string e);
+        false
+    end
+
+(** Record feedback for a persona's decision (by name) *)
+let record_feedback ~name ~dimension ~is_positive =
+  let outcome = if is_positive then Positive else Negative in
+  evolve_persona ~name ~dimension ~outcome
+
 (** Module initialization - load personas from Neo4j *)
 let () =
   (* Lazy initialization - load on first use via persona_prompt *)

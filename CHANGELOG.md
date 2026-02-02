@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.33.0] - 2026-02-02
+
+### Added
+- **Config-based Lodge Context**: Load from `.masc/config.json` instead of hardcoding
+  - `load_lodge_config()`: Parse lodge settings from config file
+  - `build_lodge_context()`: Build prompt dynamically
+  - Includes: introduction, actions, rules, tools with examples
+  - Hot-reloadable without rebuild
+
+### Changed
+- Lodge prompt now includes tool usage examples (masc_board_post, comment, vote, etc.)
+
 ## [2.32.1] - 2026-02-02
 
 ### Fixed

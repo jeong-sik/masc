@@ -288,7 +288,32 @@ let html () = {|<!DOCTYPE html>
     .board-back { color: #22d3ee; cursor: pointer; font-size: 12px; margin-bottom: 10px; }
     .board-back:hover { text-decoration: underline; }
 
-    /* Tabs */
+    /* Main Navigation Tabs */
+    .main-tab-bar {
+      display: flex; gap: 8px; margin-bottom: 20px; padding: 10px;
+      background: rgba(255,255,255,0.03); border-radius: 12px;
+    }
+    .main-tab-btn {
+      padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer;
+      background: transparent; color: #888; border: none; transition: all 0.2s;
+      font-weight: 500;
+    }
+    .main-tab-btn:hover { background: rgba(255,255,255,0.05); color: #ccc; }
+    .main-tab-btn.active { background: rgba(74,222,128,0.15); color: #4ade80; }
+    .main-tab-content { display: block; }
+
+    /* Server Health */
+    .server-health {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;
+    }
+    .health-item {
+      display: flex; justify-content: space-between; padding: 12px;
+      background: rgba(255,255,255,0.03); border-radius: 8px;
+    }
+    .health-label { color: #888; font-size: 12px; }
+    .health-item span:last-child { color: #4ade80; font-weight: 600; }
+
+    /* Legacy Tabs (kept for compatibility) */
     .tab-bar { display: flex; gap: 4px; margin-bottom: 15px; }
     .tab-btn {
       padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
@@ -510,48 +535,66 @@ let html () = {|<!DOCTYPE html>
       </div>
     </header>
 
-    <div class="stats-grid" id="stats-grid">
-      <div class="stat-card">
-        <div class="stat-label">Agents</div>
-        <div class="stat-value" id="stat-agents">-</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Tasks</div>
-        <div class="stat-value" id="stat-tasks">-</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">In Progress</div>
-        <div class="stat-value" id="stat-in-progress">-</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Status</div>
-        <div class="stat-value" id="stat-locks">-</div>
-      </div>
+    <!-- Main Navigation Tabs -->
+    <div class="main-tab-bar">
+      <button class="main-tab-btn active" onclick="switchMainTab('overview')">🏠 Overview</button>
+      <button class="main-tab-btn" onclick="switchMainTab('board')">💬 Board</button>
+      <button class="main-tab-btn" onclick="switchMainTab('tasks')">📋 Tasks</button>
+      <button class="main-tab-btn" onclick="switchMainTab('journal')">📓 Journal</button>
     </div>
 
-    <div class="grid-2col">
-      <div class="section">
-        <h2>Agents</h2>
-        <div class="agent-list" id="agent-list">
-          <div class="empty">No agents connected</div>
+    <!-- Overview Tab -->
+    <div id="main-tab-overview" class="main-tab-content">
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Agents</div>
+          <div class="stat-value" id="stat-agents">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tasks</div>
+          <div class="stat-value" id="stat-tasks">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">In Progress</div>
+          <div class="stat-value" id="stat-in-progress">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Status</div>
+          <div class="stat-value" id="stat-locks">-</div>
+        </div>
+      </div>
+
+      <div class="grid-2col">
+        <div class="section">
+          <h2>🤖 Agents</h2>
+          <div class="agent-list" id="agent-list">
+            <div class="empty">No agents connected</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>📢 Recent Broadcasts</h2>
+          <div class="message-list" id="message-list">
+            <div class="empty">No recent messages</div>
+          </div>
         </div>
       </div>
 
       <div class="section">
-        <h2>Recent Broadcasts</h2>
-        <div class="message-list" id="message-list">
-          <div class="empty">No recent messages</div>
+        <h2>🖥️ Server Health</h2>
+        <div id="server-health" class="server-health">
+          <div class="health-item"><span class="health-label">Uptime</span><span id="health-uptime">-</span></div>
+          <div class="health-item"><span class="health-label">SSE Clients</span><span id="health-sse">-</span></div>
+          <div class="health-item"><span class="health-label">Board Posts</span><span id="health-posts">-</span></div>
+          <div class="health-item"><span class="health-label">Memory</span><span id="health-memory">-</span></div>
         </div>
       </div>
     </div>
 
-    <!-- Board + Journal tabs -->
-    <div class="section" style="margin-bottom: 20px;">
-      <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab('board')">📋 Board</button>
-        <button class="tab-btn" onclick="switchTab('journal')">📓 Journal</button>
-      </div>
-      <div id="tab-board">
+    <!-- Board Tab (Lodge Discussion) -->
+    <!-- Board Tab (Lodge Discussion) -->
+    <div id="main-tab-board" class="main-tab-content" style="display:none;">
+      <div class="section">
         <div class="board-controls">
           <label>Sort:</label>
           <select class="sort-select" id="sort-select" onchange="changeSort(this.value)">
@@ -564,6 +607,10 @@ let html () = {|<!DOCTYPE html>
             <input type="checkbox" id="auto-scroll" checked onchange="toggleAutoScroll(this.checked)">
             <span>📜 Auto-scroll</span>
           </label>
+          <label>Author:</label>
+          <select class="sort-select" id="author-filter" onchange="filterByAuthor(this.value)">
+            <option value="">All authors</option>
+          </select>
         </div>
         <div class="tag-filter-bar" id="tag-filter-bar">
           <span>Filtering by: <span id="current-tag-filter" class="hashtag"></span></span>
@@ -589,27 +636,33 @@ let html () = {|<!DOCTYPE html>
           </div>
         </div>
       </div>
-      <div id="tab-journal" style="display:none;">
-        <div class="journal-list" id="journal-list">
-          <div class="empty">Loading journal...</div>
+    </div>
+
+    <!-- Tasks Tab -->
+    <div id="main-tab-tasks" class="main-tab-content" style="display:none;">
+      <div class="section">
+        <div class="task-board">
+          <div class="task-column">
+            <h3>📝 Todo <span class="count" id="todo-count">0</span></h3>
+            <div class="task-list" id="todo-list"></div>
+          </div>
+          <div class="task-column">
+            <h3>🔄 In Progress <span class="count" id="progress-count">0</span></h3>
+            <div class="task-list" id="progress-list"></div>
+          </div>
+          <div class="task-column">
+            <h3>✅ Done <span class="count" id="done-count">0</span></h3>
+            <div class="task-list" id="done-list"></div>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="section">
-      <h2>Task Board</h2>
-      <div class="task-board">
-        <div class="task-column">
-          <h3>Todo <span class="count" id="todo-count">0</span></h3>
-          <div class="task-list" id="todo-list"></div>
-        </div>
-        <div class="task-column">
-          <h3>In Progress <span class="count" id="progress-count">0</span></h3>
-          <div class="task-list" id="progress-list"></div>
-        </div>
-        <div class="task-column">
-          <h3>Done <span class="count" id="done-count">0</span></h3>
-          <div class="task-list" id="done-list"></div>
+    <!-- Journal Tab -->
+    <div id="main-tab-journal" class="main-tab-content" style="display:none;">
+      <div class="section">
+        <div class="journal-list" id="journal-list">
+          <div class="empty">Loading journal...</div>
         </div>
       </div>
     </div>
@@ -855,13 +908,22 @@ let html () = {|<!DOCTYPE html>
       }
     }
 
-    // === Tab switching ===
-    function switchTab(tab) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById('tab-board').style.display = tab === 'board' ? 'block' : 'none';
-      document.getElementById('tab-journal').style.display = tab === 'journal' ? 'block' : 'none';
+    // === Main Tab switching ===
+    let currentMainTab = 'overview';
+    function switchMainTab(tab) {
+      currentMainTab = tab;
+      document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.main-tab-content').forEach(c => c.style.display = 'none');
+      document.getElementById('main-tab-' + tab).style.display = 'block';
       event.target.classList.add('active');
       if (tab === 'journal') fetchJournal();
+      if (tab === 'board') fetchBoard();
+      if (tab === 'overview') fetchServerHealth();
+    }
+
+    // Legacy tab function (kept for compatibility)
+    function switchTab(tab) {
+      switchMainTab(tab);
     }
 
     // === Board ===
@@ -975,11 +1037,45 @@ let html () = {|<!DOCTYPE html>
       ).join('');
     }
 
+    // === Server Health ===
+    async function fetchServerHealth() {
+      try {
+        const [health, board] = await Promise.all([
+          fetch('/health').then(r => r.json()),
+          fetch('/api/v1/board').then(r => r.json())
+        ]);
+        document.getElementById('health-uptime').textContent = health.uptime || 'N/A';
+        document.getElementById('health-sse').textContent = health.sse_clients || '0';
+        document.getElementById('health-posts').textContent = (board.posts || []).length;
+        document.getElementById('health-memory').textContent = health.memory || 'N/A';
+      } catch(e) { console.error('Health fetch error:', e); }
+    }
+
+    // === Author Filter ===
+    let currentAuthorFilter = '';
+    function filterByAuthor(author) {
+      currentAuthorFilter = author;
+      fetchBoard();
+    }
+
+    function populateAuthorFilter(posts) {
+      const authors = [...new Set(posts.map(p => p.author))].sort();
+      const select = document.getElementById('author-filter');
+      if (!select) return;
+      select.innerHTML = '<option value="">All authors</option>' +
+        authors.map(a => `<option value="${a}" ${a === currentAuthorFilter ? 'selected' : ''}>${a}</option>`).join('');
+    }
+
     async function fetchBoard() {
       try {
         const res = await fetch('/api/v1/board');
         const data = await res.json();
-        renderBoardList(data.posts || []);
+        let posts = data.posts || [];
+        populateAuthorFilter(posts);
+        if (currentAuthorFilter) {
+          posts = posts.filter(p => p.author === currentAuthorFilter);
+        }
+        renderBoardList(posts);
       } catch(e) { console.error('Board fetch error:', e); }
     }
 
@@ -1247,7 +1343,7 @@ let html () = {|<!DOCTYPE html>
 
     // Initial load + polling fallback
     fetchData();
-    fetchBoard();
+    fetchServerHealth();
     connectSSE();
 
 

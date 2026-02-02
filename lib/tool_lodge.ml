@@ -503,6 +503,80 @@ let record_lodge_visit ~agent_name ~persona_name ~article_title =
     ()
   with _ -> ()
 
+(** {1 Dynamic Persona Loading from Neo4j (SOUL Layer - Tier 3)} *)
+
+(** Cached persona data from Neo4j *)
+type persona_config = {
+  name: string;
+  primary_value: string option;
+  value_weights: string option;    (* JSON string *)
+  prompt_template: string option;
+  generation: int;
+  status: string;
+}
+
+(** In-memory cache for dynamic personas *)
+let persona_cache : (string, persona_config) Hashtbl.t = Hashtbl.create 10
+
+(** Load personas from Neo4j via shell command (non-blocking) *)
+let load_personas_from_neo4j () =
+  let cypher = "MATCH (a:Agent) WHERE a.primary_value IS NOT NULL RETURN a.name AS name, a.primary_value AS primary_value, a.value_weights AS value_weights, a.prompt_template AS prompt_template, COALESCE(a.generation, 0) AS generation, COALESCE(a.status, 'active') AS status" in
+  let cmd = Printf.sprintf "source ~/.zshenv && cypher-shell -a \"$NEO4J_URI\" -u neo4j -p \"$NEO4J_PASSWORD\" --format plain \"%s\" 2>/dev/null" cypher in
+  try
+    let ic = Unix.open_process_in cmd in
+    let lines = ref [] in
+    (try
+      while true do
+        lines := input_line ic :: !lines
+      done
+    with End_of_file -> ());
+    let _ = Unix.close_process_in ic in
+    let lines = List.rev !lines in
+    (* Skip header line, parse data lines *)
+    let data_lines = match lines with _ :: rest -> rest | [] -> [] in
+    List.iter (fun line ->
+      (* Parse CSV-like output: name, primary_value, value_weights, prompt_template, generation, status *)
+      try
+        let parts = String.split_on_char ',' line in
+        let clean s = String.trim s |> fun s ->
+          if String.length s >= 2 && s.[0] = '"' then
+            String.sub s 1 (String.length s - 2)
+          else s
+        in
+        match parts with
+        | name :: pv :: vw :: pt :: gen :: stat :: _ ->
+          let config = {
+            name = clean name;
+            primary_value = (let v = clean pv in if v = "NULL" then None else Some v);
+            value_weights = (let v = clean vw in if v = "NULL" then None else Some v);
+            prompt_template = (let v = clean pt in if v = "NULL" then None else Some v);
+            generation = (try int_of_string (clean gen) with _ -> 0);
+            status = clean stat;
+          } in
+          Hashtbl.replace persona_cache config.name config
+        | _ -> ()
+      with _ -> ()
+    ) data_lines;
+    Printf.eprintf "[Lodge] Loaded %d personas from Neo4j\n%!" (Hashtbl.length persona_cache)
+  with e ->
+    Printf.eprintf "[Lodge] Failed to load personas from Neo4j: %s\n%!" (Printexc.to_string e)
+
+(** Get cached persona config, or None if not loaded *)
+let get_cached_persona name =
+  Hashtbl.find_opt persona_cache name
+
+(** Get primary value from cached persona (for SOUL-based decisions) *)
+let get_persona_primary_value name =
+  match get_cached_persona name with
+  | Some config -> config.primary_value
+  | None -> None
+
+(** Module initialization - load personas from Neo4j *)
+let () =
+  (* Lazy initialization - load on first use via persona_prompt *)
+  (* Uncomment to load at module init: load_personas_from_neo4j () *)
+  ()
+
 (** {1 REACT: Generate response with persona} *)
 
 (** Agent personas — each brings unique perspective to Lodge discussions *)
@@ -540,12 +614,24 @@ let model_of_persona = function
   | Connector -> "nemotron-3-nano:latest"              (* 128k, 연결 탐색 *)
   | Historian -> "glm-4.7-flash:latest"                (* 128k, 맥락 요약 *)
 
-let persona_prompt = function
-  | Pragmatist -> "당신은 실용주의자입니다. 현실적으로 구현 가능한지, 실제로 어떻게 적용할 수 있는지에 집중합니다. 멋진 아이디어보다 작동하는 코드를 중시합니다."
-  | Dreamer -> "당신은 자유로운 몽상가입니다. 제약 없이 가능성을 탐구하고, 엉뚱한 연결고리를 발견합니다. '만약에...'로 시작하는 상상을 좋아합니다."
-  | Skeptic -> "당신은 건강한 회의론자입니다. 약점과 위험을 지적하고, 숨겨진 가정을 드러냅니다. 하지만 단순 비난이 아닌 건설적 비판을 합니다."
-  | Connector -> "당신은 연결자입니다. 다른 분야, 다른 시대, 다른 문화와의 접점을 찾습니다. 예상치 못한 융합에서 통찰을 발견합니다."
-  | Historian -> "당신은 역사가입니다. 비슷한 과거 사례를 떠올리고, 시간의 흐름 속에서 패턴을 찾습니다. 역사는 반복된다는 것을 알고 있습니다."
+(** Get prompt from Neo4j cache - NO hardcoded fallback *)
+let persona_prompt persona =
+  let name = string_of_persona persona in
+  match get_cached_persona name with
+  | Some config ->
+    (match config.prompt_template with
+     | Some prompt -> prompt
+     | None -> Printf.sprintf "You are %s. (No prompt configured in Neo4j)" name)
+  | None ->
+    (* Not loaded - try to load on-demand *)
+    load_personas_from_neo4j ();
+    match get_cached_persona name with
+    | Some config ->
+      (match config.prompt_template with
+       | Some prompt -> prompt
+       | None -> Printf.sprintf "You are %s. (No prompt in Neo4j)" name)
+    | None ->
+      Printf.sprintf "You are %s. (Persona not found in Neo4j - please run: MERGE (a:Agent {name: '%s'}) SET a.prompt_template = '...')" name name
 
 (** Keywords that each persona finds interesting — for upvote matching *)
 let persona_interests = function

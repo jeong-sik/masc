@@ -126,12 +126,13 @@ let handle_post_create args =
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
 (** Sort posts by different criteria *)
-type sort_order = Hot | Trending | Recent | Discussed
+type sort_order = Hot | Trending | Recent | Updated | Discussed
 
 let sort_order_of_string = function
   | "hot" -> Hot
   | "trending" -> Trending
   | "recent" | "new" -> Recent
+  | "updated" | "active" -> Updated
   | "discussed" | "comments" -> Discussed
   | _ -> Hot  (* default *)
 
@@ -159,6 +160,11 @@ let handle_post_list args =
         (* Sort by created_at descending *)
         List.sort (fun (a : Board.post) (b : Board.post) ->
           compare b.created_at a.created_at
+        ) all_posts
+    | Updated ->
+        (* Sort by updated_at descending (most recently active first) *)
+        List.sort (fun (a : Board.post) (b : Board.post) ->
+          compare b.updated_at a.updated_at
         ) all_posts
     | Trending ->
         (* Recent posts with high engagement (score * recency_factor) *)
@@ -197,6 +203,7 @@ let handle_post_list args =
       | Hot -> "🔥 Hot"
       | Trending -> "📈 Trending"
       | Recent -> "🕐 Recent"
+      | Updated -> "🔄 Recently Updated"
       | Discussed -> "💬 Most Discussed"
     in
     let header = Printf.sprintf "📋 Posts (%d) — %s:" (List.length posts) sort_label in
@@ -368,7 +375,7 @@ let tool_post_list : Types.tool_schema = {
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "Filter by visibility: public|unlisted|internal|direct")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
-      ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), discussed (most comments)")]);
+      ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
     ]);
   ];
 }

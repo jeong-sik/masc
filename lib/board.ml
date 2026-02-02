@@ -121,6 +121,7 @@ type post = {
   content: string;
   visibility: visibility;
   created_at: float;
+  updated_at: float;   (* Last activity: vote, comment, edit *)
   expires_at: float;   (* MANDATORY - no eternal posts *)
   votes_up: int;
   votes_down: int;
@@ -248,6 +249,7 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
         content;
         visibility;
         created_at = now;
+        updated_at = now;  (* Initially same as created_at *)
         expires_at = now +. (float_of_int ttl *. 3600.0);
         votes_up = 0;
         votes_down = 0;
@@ -268,6 +270,7 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
           ("content", `String post.content);
           ("visibility", `String (match post.visibility with Public->"public"|Unlisted->"unlisted"|Internal->"internal"|Direct->"direct"));
           ("created_at", `Float post.created_at);
+          ("updated_at", `Float post.updated_at);
           ("expires_at", `Float post.expires_at);
           ("votes_up", `Int post.votes_up);
           ("votes_down", `Int post.votes_down);
@@ -373,9 +376,9 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
             votes_down = 0;
           } in
           Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
-          (* Update post reply count *)
+          (* Update post reply count and updated_at *)
           Hashtbl.replace store.posts (Post_id.to_string pid)
-            { post with reply_count = post.reply_count + 1 };
+            { post with reply_count = post.reply_count + 1; updated_at = now };
           (* Persist comment - inline *)
           (try
             let base = match Sys.getenv_opt "ME_ROOT" with Some pp -> pp | None -> Sys.getcwd () in
@@ -440,9 +443,10 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
         match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
         | None -> Error (Post_not_found post_id)
         | Some post ->
+            let now = Time_compat.now () in
             let updated = match direction with
-              | Up -> { post with votes_up = post.votes_up + 1 }
-              | Down -> { post with votes_down = post.votes_down + 1 }
+              | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
+              | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
             in
             Hashtbl.replace store.posts (Post_id.to_string pid) updated;
             (* Persist vote by rewriting posts file - inline *)
@@ -460,6 +464,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                   ("content", `String pst.content);
                   ("visibility", `String (match pst.visibility with Public->"public"|Unlisted->"unlisted"|Internal->"internal"|Direct->"direct"));
                   ("created_at", `Float pst.created_at);
+                  ("updated_at", `Float pst.updated_at);
                   ("expires_at", `Float pst.expires_at);
                   ("votes_up", `Int pst.votes_up);
                   ("votes_down", `Int pst.votes_down);
@@ -577,13 +582,15 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     let content = json |> member "content" |> to_string in
     let vis_str = json |> member "visibility" |> to_string in
     let created_at = json |> member "created_at" |> to_float in
+    (* Backward compat: default updated_at to created_at if missing *)
+    let updated_at = json |> member "updated_at" |> to_float_option |> Option.value ~default:created_at in
     let expires_at = json |> member "expires_at" |> to_float in
     let votes_up = json |> member "votes_up" |> to_int in
     let votes_down = json |> member "votes_down" |> to_int in
     let reply_count = json |> member "reply_count" |> to_int_option |> Option.value ~default:0 in
     match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
     | Ok id, Ok author, Some visibility ->
-        Some { id; author; content; visibility; created_at; expires_at; votes_up; votes_down; reply_count }
+        Some { id; author; content; visibility; created_at; updated_at; expires_at; votes_up; votes_down; reply_count }
     | _ -> None
   with _ -> None
 

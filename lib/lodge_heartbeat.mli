@@ -8,10 +8,9 @@
 type config = {
   interval_s: float;
   enabled: bool;
-  matching_weight: float;
-  discovery_weight: float;
-  random_weight: float;
-  wake_threshold: float;
+  agents_per_tick: int;
+  min_checkin_gap_s: float;
+  quiet_hours: int * int;
 }
 
 val default_config : config
@@ -32,12 +31,22 @@ type wake_reason =
   | Discovery of { connection: string }
   | Random
 
+type checkin_trigger =
+  | Scheduled
+  | TopicRelevant of string
+  | MentionResponse of string
+
+type checkin_result =
+  | Posted of string
+  | Commented of string
+  | Skipped of string
+
 type heartbeat_result = {
   timestamp: float;
   current_hour: int;
   agents_checked: int;
-  agents_woken: (string * wake_reason) list;
-  encounter_rolled: string option;
+  checkins: (string * checkin_trigger * checkin_result) list;
+  activity_report: string;
 }
 
 (** {1 Time Utilities} *)

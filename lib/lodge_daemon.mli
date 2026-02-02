@@ -3,10 +3,10 @@
 type mood = Satisfied | Curious | Skeptical | Neutral | Excited
 type trait = { name: string; strength: float; prompt_modifier: string option }
 type value = { name: string; importance: float }
-type trust = { target_persona: string; level: float }
+type trust = { target_agent: string; level: float }
 
-type persona_config = {
-  persona: string;
+type agent_config = {
+  agent: string;
   recognition_need: float;
   influence_desire: float;
   curiosity: float;
@@ -37,8 +37,8 @@ val load_config : unit -> config
 val mood_of_string : string -> mood
 val string_of_mood : mood -> string
 val patrol_interval_for_curiosity : float -> float
-val is_patrol_due : patrol_state -> persona_config -> bool
-val build_persona_prompt : persona_config -> string
+val is_patrol_due : patrol_state -> agent_config -> bool
+val build_agent_prompt : agent_config -> string
 val get_state : string -> patrol_state
 val mark_patrolled : string -> unit
 val lodge_agent_query : string
@@ -46,7 +46,7 @@ val influence_query : string -> string -> string -> string
 val mood_update_query : string -> mood -> float -> string
 val reflection_query : string -> string -> string
 val init : config:config -> unit
-val patrol_once : config:config -> persona:string -> unit
-val generate_reflection : config:config -> persona:string -> unit
+val patrol_once : config:config -> agent_name:string -> unit
+val generate_reflection : config:config -> agent_name:string -> unit
 
 (* NOTE: Eio fiber main loop is in Lodge_heartbeat module *)

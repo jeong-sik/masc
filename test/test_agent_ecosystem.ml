@@ -27,12 +27,12 @@ let test_agent_type_conversion () =
   Alcotest.(check string) "Visitor" "visitor" (string_of_agent_type Visitor);
   Alcotest.(check string) "Ephemeral" "ephemeral" (string_of_agent_type Ephemeral)
 
-let test_default_persona () =
-  let persona = Agent_ecosystem.default_persona "test-agent" in
-  Alcotest.(check string) "name" "test-agent" persona.name;
-  Alcotest.(check string) "role" "general" persona.role;
-  Alcotest.(check int) "no traits" 0 (List.length persona.traits);
-  Alcotest.(check bool) "no avatar" true (persona.avatar = None)
+let test_default_profile () =
+  let profile = Agent_ecosystem.default_profile "test-agent" in
+  Alcotest.(check string) "name" "test-agent" profile.name;
+  Alcotest.(check string) "role" "general" profile.role;
+  Alcotest.(check int) "no traits" 0 (List.length profile.traits);
+  Alcotest.(check bool) "no avatar" true (profile.avatar = None)
 
 let test_default_lineage () =
   let lineage = Agent_ecosystem.default_lineage in
@@ -59,8 +59,8 @@ let test_spawn_child () =
   (* Child should be Ephemeral by default *)
   Alcotest.(check bool) "is Ephemeral" true (child.agent_type = Agent_ecosystem.Ephemeral);
   (* Child should have its own identity *)
-  Alcotest.(check string) "child name" "child-agent" child.persona.name;
-  Alcotest.(check string) "child role" "subtask" child.persona.role
+  Alcotest.(check string) "child name" "child-agent" child.profile.name;
+  Alcotest.(check string) "child role" "subtask" child.profile.role
 
 let test_spawn_grandchild () =
   let grandparent = Agent_ecosystem.from_agent_name "grandparent" in
@@ -84,7 +84,7 @@ let test_add_mutation () =
 let test_metadata_roundtrip () =
   let original = Agent_ecosystem.from_agent_name ~agent_type:Agent_ecosystem.Resident ~role:"tester" "test-agent" in
   let original_with_traits = { original with
-    persona = { original.persona with traits = ["curious"; "thorough"] };
+    profile = { original.profile with traits = ["curious"; "thorough"] };
     lineage = { original.lineage with mutations = ["learned:testing"] }
   } in
   (* Convert to base with metadata *)
@@ -94,15 +94,15 @@ let test_metadata_roundtrip () =
   (* Check roundtrip *)
   Alcotest.(check string) "hash preserved" original_with_traits.hash restored.hash;
   Alcotest.(check bool) "type preserved" true (original_with_traits.agent_type = restored.agent_type);
-  Alcotest.(check string) "role preserved" "tester" restored.persona.role;
-  Alcotest.(check int) "traits preserved" 2 (List.length restored.persona.traits);
+  Alcotest.(check string) "role preserved" "tester" restored.profile.role;
+  Alcotest.(check int) "traits preserved" 2 (List.length restored.profile.traits);
   Alcotest.(check int) "mutations preserved" 1 (List.length restored.lineage.mutations)
 
 let test_same_agent () =
   let ext1 = Agent_ecosystem.from_agent_name "agent-1" in
   let ext2 = Agent_ecosystem.from_agent_name "agent-2" in
   (* Same hash means same agent *)
-  let ext1_copy = { ext1 with persona = { ext1.persona with role = "different" } } in
+  let ext1_copy = { ext1 with profile = { ext1.profile with role = "different" } } in
   Alcotest.(check bool) "same by hash" true (Agent_ecosystem.same_agent ext1 ext1_copy);
   (* Different agents *)
   Alcotest.(check bool) "different agents" false (Agent_ecosystem.same_agent ext1 ext2)
@@ -129,7 +129,7 @@ let () =
       Alcotest.test_case "conversion" `Quick test_agent_type_conversion;
     ];
     "defaults", [
-      Alcotest.test_case "persona" `Quick test_default_persona;
+      Alcotest.test_case "persona" `Quick test_default_profile;
       Alcotest.test_case "lineage" `Quick test_default_lineage;
     ];
     "extend", [

@@ -165,8 +165,8 @@ let http_get_json ~net:_ url =
 (** {1 LLM Provider Rotation — Avoid ollama overload} *)
 
 type llm_provider =
-  | Ollama_fast   (** Small ollama model (qwen3:1.7b) *)
-  | Ollama_heavy  (** Large ollama model (qwen3-coder:30b) — avoid if busy *)
+  | Ollama_fast   (** glm-4.7-flash — always resident in VRAM *)
+  | Ollama_heavy  (** glm-4.7-flash — same model, no cold-load *)
   | Gemini_cli    (** gemini CLI tool *)
   | Claude_cli    (** claude CLI tool *)
   | Codex_cli     (** codex CLI tool *)
@@ -429,12 +429,12 @@ let extract_interests ~net content =
     with _ -> []
 
 (** Save agent's new interests to Neo4j via sb CLI *)
-let save_interests_to_neo4j ~agent_name ~persona_name interests =
+let save_interests_to_neo4j ~agent_name interests =
   if interests = [] then Ok "no interests to save"
   else
     let topics_str = String.concat ", " (List.map (Printf.sprintf "'%s'") interests) in
     let cypher = Printf.sprintf
-      "MERGE (a:Agent {name: '%s', persona: '%s'}) \
+      "MERGE (a:Agent {name: '%s'}) \
        WITH a \
        UNWIND [%s] AS topic \
        MERGE (t:Topic {name: topic}) \
@@ -442,7 +442,7 @@ let save_interests_to_neo4j ~agent_name ~persona_name interests =
        ON CREATE SET r.first_seen = datetime(), r.count = 1 \
        ON MATCH SET r.count = r.count + 1, r.last_seen = datetime() \
        RETURN count(r) as connections"
-      agent_name persona_name topics_str
+      agent_name topics_str
     in
     (* Use sb neo4j query via subprocess.
        In double-quoted shell string, single quotes don't need escaping.
@@ -486,7 +486,7 @@ let get_agent_interests ~agent_name =
   with _ -> []
 
 (** Record agent visit to Lodge *)
-let record_lodge_visit ~agent_name ~persona_name ~article_title =
+let record_lodge_visit ~agent_name ~article_title =
   let cypher = Printf.sprintf
     "MERGE (a:Agent {name: '%s', persona: '%s'}) \
      SET a.last_visit = datetime(), \
@@ -495,7 +495,7 @@ let record_lodge_visit ~agent_name ~persona_name ~article_title =
      CREATE (v:LodgeVisit {timestamp: datetime(), article: '%s'}) \
      CREATE (a)-[:VISITED]->(v) \
      RETURN a.visit_count as visits"
-    agent_name persona_name (Str.global_replace (Str.regexp "'") "" article_title)
+    agent_name agent_name (Str.global_replace (Str.regexp "'") "" article_title)
   in
   let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
@@ -503,9 +503,9 @@ let record_lodge_visit ~agent_name ~persona_name ~article_title =
     ()
   with _ -> ()
 
-(** {1 Dynamic Persona Loading from Neo4j (SOUL Layer - Tier 3)} *)
+(** {1 Dynamic Agent Loading from Neo4j (SOUL Layer - Tier 3)} *)
 
-(** Cached persona data from Neo4j *)
+(** Cached agent data from Neo4j *)
 type agent_config = {
   name: string;
   primary_value: string option;
@@ -520,13 +520,13 @@ type agent_config = {
   interests: string list;
 }
 
-(** In-memory cache for dynamic personas *)
+(** In-memory cache for dynamic agents *)
 let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
 
-(** Load personas from Neo4j via GraphQL API (reliable JSON parsing) *)
+(** Load agents from Neo4j via GraphQL API (reliable JSON parsing) *)
 let load_agents_config () =
-  Printf.eprintf "[Lodge] Loading personas from GraphQL...\n%!";
-  (* Query all Lodge identity fields for dynamic persona system *)
+  Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
+  (* Query all Lodge identity fields for dynamic agent system *)
   let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
@@ -570,18 +570,18 @@ let load_agents_config () =
           model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
           interests;
         } in
-        Hashtbl.replace persona_cache config.name config
+        Hashtbl.replace agent_cache config.name config
       with _ -> ()
     ) edges;
-    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL personas from Neo4j\n%!" (Hashtbl.length persona_cache)
+    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" (Hashtbl.length agent_cache)
   with e ->
-    Printf.eprintf "[Lodge] ❌ Failed to load personas: %s\n%!" (Printexc.to_string e)
+    Printf.eprintf "[Lodge] ❌ Failed to load agents: %s\n%!" (Printexc.to_string e)
 
-(** Get cached persona config, or None if not loaded *)
+(** Get cached agent config, or None if not loaded *)
 let get_cached_agent name =
-  Hashtbl.find_opt persona_cache name
+  Hashtbl.find_opt agent_cache name
 
-(** Get primary value from cached persona (for SOUL-based decisions) *)
+(** Get primary value from cached agent (for SOUL-based decisions) *)
 let get_agent_primary_value name =
   match get_cached_agent name with
   | Some config -> config.primary_value
@@ -621,7 +621,7 @@ let serialize_value_weights weights =
   let pairs = List.map (fun (k, v) -> (k, `Float v)) weights in
   Yojson.Safe.to_string (`Assoc pairs)
 
-(** Evolve persona's value_weights based on feedback
+(** Evolve agent's value_weights based on feedback
     - Adjusts weights by learning_rate
     - Ensures primary_value never drops below 0.5
     - Increments generation
@@ -630,7 +630,7 @@ let serialize_value_weights weights =
 let evolve_agent ~name ~dimension ~outcome =
   match get_cached_agent name with
   | None ->
-    Printf.eprintf "[Evolution] Persona %s not found in cache\n%!" name;
+    Printf.eprintf "[Evolution] Agent %s not found in cache\n%!" name;
     false
   | Some config ->
     let weights = match config.value_weights with
@@ -675,7 +675,7 @@ let evolve_agent ~name ~dimension ~outcome =
           result
         in
         (* Update cache *)
-        Hashtbl.replace persona_cache name {
+        Hashtbl.replace agent_cache name {
           config with
           value_weights = Some new_weights_json;
           generation = new_gen;
@@ -689,14 +689,14 @@ let evolve_agent ~name ~dimension ~outcome =
         false
     end
 
-(** Record feedback for a persona's decision (by name) *)
+(** Record feedback for an agent's decision (by name) *)
 let record_feedback ~name ~dimension ~is_positive =
   let outcome = if is_positive then Positive else Negative in
   evolve_agent ~name ~dimension ~outcome
 
-(** Module initialization - load personas from Neo4j *)
+(** Module initialization - load agents from Neo4j *)
 let () =
-  (* Load personas at startup for evolution triggers *)
+  (* Load agents at startup for evolution triggers *)
   load_agents_config ();
 
   (* Register SOUL Evolution callback with Tool_board (breaks dependency cycle) *)
@@ -706,15 +706,15 @@ let () =
       let _ = record_feedback ~name ~dimension ~is_positive in ());
   }
 
-(** {1 REACT: Dynamic persona system (Neo4j SSOT)}
+(** {1 REACT: Dynamic agent system (Neo4j SSOT)}
 
-    All persona data comes from Neo4j via GraphQL cache.
-    No hardcoded persona enums — add new agents by MERGE into Neo4j.
+    All agent data comes from Neo4j via GraphQL cache.
+    No hardcoded agent enums — add new agents by MERGE into Neo4j.
 *)
 
 (** Get all cached agent names *)
 let get_all_agent_names () =
-  Hashtbl.fold (fun k _ acc -> k :: acc) persona_cache []
+  Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache []
 
 (** Pick a random agent name from cache *)
 let random_agent_name () =
@@ -722,7 +722,7 @@ let random_agent_name () =
   if names = [] then "pragmatist"  (* fallback if cache empty *)
   else List.nth names (Random.int (List.length names))
 
-(** Validate agent name exists in cache (replaces persona_of_string) *)
+(** Validate agent name exists in cache (replaces validate_agent_name) *)
 let validate_agent_name name =
   if name = "random" || name = "랜덤" then Some (random_agent_name ())
   else match get_cached_agent name with
@@ -732,7 +732,7 @@ let validate_agent_name name =
       let found = Hashtbl.fold (fun k v acc ->
         match acc with Some _ -> acc | None ->
         if v.korean_name = name then Some k else None
-      ) persona_cache None in
+      ) agent_cache None in
       found
 
 (** Get model for agent (from Neo4j cache) *)
@@ -830,7 +830,7 @@ let react_to_content ~net ?agent_name:provided_name content =
     | None -> random_agent_name ()
   in
   (* Get prompt from Neo4j cache *)
-  let persona_desc = get_agent_prompt agent_name in
+  let agent_desc = get_agent_prompt agent_name in
 
   (* Get agent's existing interests for context *)
   let existing_interests = get_agent_interests ~agent_name in
@@ -843,7 +843,7 @@ let react_to_content ~net ?agent_name:provided_name content =
   let system = Printf.sprintf "/no_think\n\
     You are a Lodge participant. %s%s\n\
     Share your unique perspective. Be thoughtful, specific, and add value. 2-4 sentences only."
-    persona_desc interests_context in
+    agent_desc interests_context in
   match smart_generate ~net ~temperature:0.8 ~num_predict:250 ~system
     (Printf.sprintf "React to this Lodge post:\n%s\n\nYour perspective:" content) with
   | Error e -> Error e
@@ -853,7 +853,7 @@ let react_to_content ~net ?agent_name:provided_name content =
       | _ -> response
     in
     let new_interests = extract_interests ~net content in
-    let _ = save_interests_to_neo4j ~agent_name ~persona_name:agent_name new_interests in
+    let _ = save_interests_to_neo4j ~agent_name new_interests in
     let display_name = format_agent_name_dynamic agent_name in
     Ok (Printf.sprintf "%s\n%s" display_name final_response)
 
@@ -895,7 +895,7 @@ let heartbeat ~net (args : Yojson.Safe.t) =
             ignore (Str.search_forward re msg 0);
             Str.matched_string msg
           with Not_found -> "" in
-          (* Auto-trigger reactions from personas *)
+          (* Auto-trigger reactions from agents *)
           let reactions = if post_id <> "" then
             List.filter_map (fun agent ->
               match react_to_content ~net ~agent_name:agent content with
@@ -926,17 +926,17 @@ let classify ~net (args : Yojson.Safe.t) =
       let result = Printf.sprintf "🏷️ %s → %s (%s)" post_id (string_of_category cls.category) cls.details in
       (true, result)
 
-(** {1 React tool: respond to a post with persona} *)
+(** {1 React tool: respond to a post with agent} *)
 
-(** React to a post with persona
+(** React to a post with agent
 
     When skip_classify=true, bypasses LLM classification and directly generates
     a reaction. This significantly speeds up the process by avoiding one LLM call. *)
 let react ~net (args : Yojson.Safe.t) =
   let post_id_arg = Safe_ops.json_string ~default:"" "post_id" args in
-  let persona_str = Safe_ops.json_string ~default:"random" "persona" args in
+  let agent_str = Safe_ops.json_string ~default:"random" "agent" args in
   let skip_classify = Safe_ops.json_bool ~default:true "skip_classify" args in
-  let agent_name = match validate_agent_name persona_str with
+  let agent_name = match validate_agent_name agent_str with
     | Some n -> n
     | None -> random_agent_name ()
   in
@@ -988,7 +988,7 @@ let react ~net (args : Yojson.Safe.t) =
           if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
           else (false, Printf.sprintf "❌ Comment failed: %s" msg)
 
-(** {1 Full cycle: heartbeat + ONE random persona reacts} *)
+(** {1 Full cycle: heartbeat + ONE random agent reacts} *)
 
 let full_cycle ~net (args : Yojson.Safe.t) =
   (* Step 1: Heartbeat (Read → Dig → Share) *)
@@ -1009,7 +1009,7 @@ let full_cycle ~net (args : Yojson.Safe.t) =
       let agent = random_agent_name () in
       let (ok2, result) = react ~net (`Assoc [
         ("post_id", `String post_id);
-        ("persona", `String agent);
+        ("agent", `String agent);
       ]) in
       let model = get_agent_model agent in
       (true, Printf.sprintf "%s\n\n💬 %s [%s] reacted:\n%s"
@@ -1039,7 +1039,7 @@ let lodge_discussion ~net (_args : Yojson.Safe.t) =
       let target = List.nth post_ids (Random.int (List.length post_ids)) in
       let (ok2, result) = react ~net (`Assoc [
         ("post_id", `String target);
-        ("persona", `String agent);
+        ("agent", `String agent);
       ]) in
       let model = get_agent_model agent in
       (true, Printf.sprintf "💬 %s [%s] joined discussion on %s:\n%s"
@@ -1072,12 +1072,12 @@ let tool_classify : Types.tool_schema = {
 
 let tool_react : Types.tool_schema = {
   name = "lodge_react";
-  description = "React to a post with a unique persona perspective. Personas: pragmatist(실용주의자), dreamer(몽상가), skeptic(회의론자), connector(연결자), historian(역사가), random(랜덤)";
+  description = "React to a post with a unique agent perspective. Agents: pragmatist(실용주의자), dreamer(몽상가), skeptic(회의론자), connector(연결자), historian(역사가), random(랜덤)";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
       ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to react to")]);
-      ("persona", `Assoc [("type", `String "string"); ("description", `String "Agent persona: pragmatist, dreamer, skeptic, connector, historian, or random (default)")]);
+      ("agent", `Assoc [("type", `String "string"); ("description", `String "Agent name: pragmatist, dreamer, skeptic, connector, historian, or random (default)")]);
     ]);
     ("required", `List [`String "post_id"]);
   ];
@@ -1085,7 +1085,7 @@ let tool_react : Types.tool_schema = {
 
 let tool_cycle : Types.tool_schema = {
   name = "lodge_cycle";
-  description = "Full Lodge cycle: Read → Dig → Share → ONE random persona reacts";
+  description = "Full Lodge cycle: Read → Dig → Share → ONE random agent reacts";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -1096,7 +1096,7 @@ let tool_cycle : Types.tool_schema = {
 
 let tool_discussion : Types.tool_schema = {
   name = "lodge_discussion";
-  description = "Random persona joins discussion: reads recent posts and reacts to one. Call repeatedly for lively discussion!";
+  description = "Random agent joins discussion: reads recent posts and reacts to one. Call repeatedly for lively discussion!";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc []);
@@ -1190,7 +1190,7 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
       let agent = select_next_agent ctx in
       let (ok, result) = react ~net (`Assoc [
         ("post_id", `String ctx.post_id);
-        ("persona", `String agent);
+        ("agent", `String agent);
       ]) in
       ctx.participants <- agent :: ctx.participants;
       ctx.last_speaker <- Some agent;
@@ -1211,7 +1211,7 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
         let agent = select_next_agent ctx in
         let (ok, result) = react ~net (`Assoc [
           ("post_id", `String ctx.post_id);
-          ("persona", `String agent);
+          ("agent", `String agent);
         ]) in
         ctx.participants <- agent :: ctx.participants;
         ctx.last_speaker <- Some agent;
@@ -1228,7 +1228,7 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
       (* Historian summarizes *)
       let (ok, result) = react ~net (`Assoc [
         ("post_id", `String ctx.post_id);
-        ("persona", `String "historian");
+        ("agent", `String "historian");
       ]) in
       if ok then
         log (Printf.sprintf "📜 Historian concludes: %s" (String.sub result 0 (min 150 (String.length result))))
@@ -1300,8 +1300,8 @@ let tool_auto_chain : Types.tool_schema = {
 
 (** {1 Agent Persistence & Spawning} *)
 
-(** Core Lodge personas *)
-let core_lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
+(** Core Lodge agents *)
+let core_lodge_agents = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
 
 (** Get all Lodge agents via GraphQL *)
 let get_all_agents () =
@@ -1318,8 +1318,8 @@ let get_all_agents () =
         try
           let node = edge |> member "node" in
           let name = node |> member "name" |> to_string in
-          (* Only include core Lodge personas *)
-          if List.mem name core_lodge_personas then
+          (* Only include core Lodge agents *)
+          if List.mem name core_lodge_agents then
             let primary_value = (try node |> member "primaryValue" |> to_string with _ -> "unknown") in
             let prompt = (try node |> member "promptTemplate" |> to_string with _ -> "") in
             let status = (try node |> member "status" |> to_string with _ -> "active") in
@@ -1333,7 +1333,7 @@ let get_all_agents () =
   with _ -> []
 
 (** Spawn a new agent — can be called by another agent *)
-let spawn_agent ~net:_ ~parent_name ~child_name ~child_persona ~child_prompt =
+let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
   (* Validate child name — no prefix, agents are independent *)
   let agent_name = if String.length child_name > 50 then String.sub child_name 0 50 else child_name in
   (* Check if agent already exists *)
@@ -1361,7 +1361,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_persona ~child_prompt =
        MERGE (lodge:Activity {name: 'lodge'}) \
        CREATE (a)-[:PARTICIPATES_IN]->(lodge) \
        RETURN a.name"
-      agent_name child_persona escaped_prompt parent_name parent_name
+      agent_name child_role escaped_prompt parent_name parent_name
     in
     let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) cypher in
     try
@@ -1369,7 +1369,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_persona ~child_prompt =
       (* Announce spawn via LLM *)
       let announcement = Printf.sprintf
         "🐣 새 에이전트 탄생!\n이름: %s\n성격: %s\n부모: %s\n\n\"%s\""
-        agent_name child_persona parent_name child_prompt
+        agent_name child_role parent_name child_prompt
       in
       (* Post to board *)
       let _ = Tool_board.handle_tool "masc_board_post"
@@ -1415,13 +1415,13 @@ let should_spawn ~net agent_name interests =
 let spawn ~net (args : Yojson.Safe.t) =
   let parent = Safe_ops.json_string ~default:"system" "parent" args in
   let name = Safe_ops.json_string ~default:"" "name" args in
-  let persona = Safe_ops.json_string ~default:"custom" "persona" args in
+  let role = Safe_ops.json_string ~default:"custom" "role" args in
   let prompt = Safe_ops.json_string ~default:"" "personality_prompt" args in
   if name = "" then (false, "name is required")
   else if prompt = "" then (false, "personality_prompt is required")
-  else spawn_agent ~net ~parent_name:parent ~child_name:name ~child_persona:persona ~child_prompt:prompt
+  else spawn_agent ~net ~parent_name:parent ~child_name:name ~child_role:role ~child_prompt:prompt
 
-(** Get emoji for persona type *)
+(** Get emoji for agent type *)
 let emoji_of_agent = function
   | "pragmatist" -> "🔧"
   | "dreamer" -> "💭"
@@ -1439,14 +1439,14 @@ let list_agents ~net:_ (_args : Yojson.Safe.t) =
   let agents = get_all_agents () in
   if agents = [] then (true, "🏔️ Lodge에 등록된 에이전트가 없습니다")
   else
-    let lines = List.map (fun (name, persona, prompt, created_by, visits) ->
+    let lines = List.map (fun (name, role, prompt, created_by, visits) ->
       let prompt_preview = if String.length prompt > 50
         then String.sub prompt 0 47 ^ "..."
         else prompt
       in
-      let emoji = emoji_of_agent persona in
+      let emoji = emoji_of_agent role in
       Printf.sprintf "%s **%s**\n   ├─ 유형: %s\n   ├─ 부모: %s\n   ├─ 방문: %d회\n   └─ \"%s\""
-        emoji name persona created_by visits prompt_preview
+        emoji name role created_by visits prompt_preview
     ) agents in
     (true, Printf.sprintf "🏔️ Lodge 에이전트 목록 (%d명)\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n%s"
       (List.length agents) (String.concat "\n\n" lines))
@@ -1498,51 +1498,51 @@ let evolve ~net:_ (args : Yojson.Safe.t) =
   let agent_data = get_all_agent_interests () in
   let results = List.map (fun agent_name ->
     let db_info = List.find_opt (fun (n, _, _, _, _) -> n = agent_name) db_agents in
-    let persona_info = match db_info with
-      | Some (_, persona, _, created_by, visits) ->
-        Printf.sprintf "[%s] 부모:%s 방문:%d회" persona created_by visits
+    let agent_info = match db_info with
+      | Some (_, role, _, created_by, visits) ->
+        Printf.sprintf "[%s] 부모:%s 방문:%d회" role created_by visits
       | None -> "[unknown]"
     in
     match List.find_opt (fun (a, _) -> a = agent_name) agent_data with
-    | None -> Printf.sprintf "🌱 %s %s\n   아직 관심사 없음" agent_name persona_info
+    | None -> Printf.sprintf "🌱 %s %s\n   아직 관심사 없음" agent_name agent_info
     | Some (_, topics) ->
       if topics = [] then
-        Printf.sprintf "🌱 %s %s\n   아직 관심사 없음" agent_name persona_info
+        Printf.sprintf "🌱 %s %s\n   아직 관심사 없음" agent_name agent_info
       else
-        Printf.sprintf "🌳 %s %s\n   관심사: %s" agent_name persona_info (String.concat ", " topics)
+        Printf.sprintf "🌳 %s %s\n   관심사: %s" agent_name agent_info (String.concat ", " topics)
   ) agents_to_check in
   (true, String.concat "\n\n" results)
 
 let tool_evolve : Types.tool_schema = {
   name = "lodge_evolve";
-  description = "Show agent evolution: interests, growth, visit history. Leave persona empty for all agents.";
+  description = "Show agent evolution: interests, growth, visit history. Leave agent empty for all agents.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("persona", `Assoc [("type", `String "string"); ("description", `String "Agent persona to check (empty or 'all' for all agents)")]);
+      ("agent", `Assoc [("type", `String "string"); ("description", `String "Agent name to check (empty or 'all' for all agents)")]);
     ]);
   ];
 }
 
-(** {1 Persona Patrol - Independent agent monitors board and reacts} *)
+(** {1 Agent Patrol - Independent agent monitors board and reacts} *)
 
-(** Check if persona has already commented on a post *)
-let has_agent_commented persona_name post_id =
+(** Check if agent has already commented on a post *)
+let has_agent_commented agent_name post_id =
   let (ok, comments_json) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
   if not ok then false
   else
-    (* Simple check: look for persona name in the response *)
-    String.length (Str.global_replace (Str.regexp_string persona_name) "" comments_json)
+    (* Simple check: look for agent name in the response *)
+    String.length (Str.global_replace (Str.regexp_string agent_name) "" comments_json)
     <> String.length comments_json
 
-(** Persona patrol: check board and react to unreacted posts *)
-let persona_patrol ~net (args : Yojson.Safe.t) =
-  let persona_str = Safe_ops.json_string ~default:"" "persona" args in
-  if persona_str = "" then (false, "❌ persona required (pragmatist|dreamer|skeptic|connector|historian)")
+(** Agent patrol: check board and react to unreacted posts *)
+let agent_patrol ~net (args : Yojson.Safe.t) =
+  let agent_str = Safe_ops.json_string ~default:"" "agent" args in
+  if agent_str = "" then (false, "❌ agent required (pragmatist|dreamer|skeptic|connector|historian)")
   else
-    let agent_name = match validate_agent_name persona_str with
+    let agent_name = match validate_agent_name agent_str with
       | Some n -> n
-      | None -> String.lowercase_ascii persona_str
+      | None -> String.lowercase_ascii agent_str
     in
 
     let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 10)]) in
@@ -1584,25 +1584,25 @@ let persona_patrol ~net (args : Yojson.Safe.t) =
 
           let (react_ok, react_msg) = react ~net (`Assoc [
             ("post_id", `String target_post);
-            ("persona", `String agent_name);
+            ("agent", `String agent_name);
           ]) in
           if react_ok then
             (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s%s" agent_name target_post react_msg upvote_msg)
           else
             (false, Printf.sprintf "❌ %s patrol failed on %s: %s" agent_name target_post react_msg)
 
-let tool_persona_patrol : Types.tool_schema = {
-  name = "lodge_persona_patrol";
-  description = "Independent persona agent patrols board and reacts to unreacted posts. Each persona runs as separate process.";
+let tool_agent_patrol : Types.tool_schema = {
+  name = "lodge_agent_patrol";
+  description = "Independent agent patrols board and reacts to unreacted posts. Each agent runs as separate process.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("persona", `Assoc [
+      ("agent", `Assoc [
         ("type", `String "string");
-        ("description", `String "Persona identity: pragmatist|dreamer|skeptic|connector|historian (REQUIRED)")
+        ("description", `String "Agent identity: pragmatist|dreamer|skeptic|connector|historian (REQUIRED)")
       ]);
     ]);
-    ("required", `List [`String "persona"]);
+    ("required", `List [`String "agent"]);
   ];
 }
 
@@ -1614,7 +1614,7 @@ let tool_spawn : Types.tool_schema = {
     ("properties", `Assoc [
       ("parent", `Assoc [("type", `String "string"); ("description", `String "Parent agent name (who is creating this agent)")]);
       ("name", `Assoc [("type", `String "string"); ("description", `String "New agent name (agents are independent beings)")]);
-      ("persona", `Assoc [("type", `String "string"); ("description", `String "Persona type (e.g., specialist, explorer, critic)")]);
+      ("role", `Assoc [("type", `String "string"); ("description", `String "Agent role (e.g., specialist, explorer, critic)")]);
       ("personality_prompt", `Assoc [("type", `String "string"); ("description", `String "Personality description in Korean - defines how this agent thinks and responds")]);
     ]);
     ("required", `List [`String "name"; `String "personality_prompt"]);
@@ -1623,7 +1623,7 @@ let tool_spawn : Types.tool_schema = {
 
 let tool_agents : Types.tool_schema = {
   name = "lodge_agents";
-  description = "List all Lodge agents with their personas, creators, and activity stats.";
+  description = "List all Lodge agents with their roles, creators, and activity stats.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc []);
@@ -1958,26 +1958,26 @@ let autonomous_loop ~net args =
     let action = Random.int 10 in
     let (action_name, (ok, msg)) = match action with
       | 0 | 1 ->
-          (* Persona patrol - 20% *)
-          let personas = ["pragmatist"; "dreamer"; "skeptic"; "connector"; "historian"] in
-          let p = List.nth personas (Random.int 5) in
+          (* Agent patrol - 20% *)
+          let agents = ["pragmatist"; "dreamer"; "skeptic"; "connector"; "historian"] in
+          let p = List.nth agents (Random.int 5) in
           let emoji = emoji_of_agent p in
-          (Printf.sprintf "%s patrol" emoji, persona_patrol ~net (`Assoc [("persona", `String p)]))
+          (Printf.sprintf "%s patrol" emoji, agent_patrol ~net (`Assoc [("agent", `String p)]))
       | 2 ->
           (* Research random topic - 10% *)
           let topics = ["OCaml"; "Eio"; "MCP"; "에이전트 협업"; "분산 시스템"; "함수형 프로그래밍"; "타입 시스템"; "동시성"] in
           let t = List.nth topics (Random.int (List.length topics)) in
           ("🔬 research", research ~net (`Assoc [("topic", `String t); ("agent_name", `String "auto-researcher")]))
       | 3 | 4 ->
-          (* Discussion between personas - 20% *)
+          (* Discussion between agents - 20% *)
           ("💬 discuss", lodge_discussion ~net (`Assoc []))
       | _ ->
           (* React to random post - 50% (main comment generator) *)
-          let personas = ["pragmatist"; "dreamer"; "skeptic"; "connector"; "historian"] in
-          let p = List.nth personas (Random.int 5) in
+          let agents = ["pragmatist"; "dreamer"; "skeptic"; "connector"; "historian"] in
+          let p = List.nth agents (Random.int 5) in
           let (react_ok, react_msg) = react ~net (`Assoc [
             ("post_id", `String "random");
-            ("persona", `String p);
+            ("agent", `String p);
           ]) in
           if react_ok then ("💬 react", (true, react_msg))
           else ("💬 react (fail)", (false, react_msg))
@@ -2092,13 +2092,13 @@ let tools = [
   tool_classify;
   tool_react;
   tool_cycle;
-  tool_discussion;  (* Personas read & react to each other's posts *)
+  tool_discussion;  (* Agents read & react to each other's posts *)
   tool_orchestrate; (* State machine orchestrator *)
   tool_auto_chain;  (* Probabilistic chain *)
   tool_evolve;
   tool_spawn;
   tool_agents;
-  tool_persona_patrol;
+  tool_agent_patrol;
   (* Project collaboration *)
   tool_propose_project;
   tool_join_project;
@@ -2126,7 +2126,7 @@ let handle_tool ~net name args =
   | "lodge_evolve" -> evolve ~net args
   | "lodge_spawn" -> spawn ~net args
   | "lodge_agents" -> list_agents ~net args
-  | "lodge_persona_patrol" -> persona_patrol ~net args
+  | "lodge_agent_patrol" -> agent_patrol ~net args
   (* Project collaboration *)
   | "lodge_propose_project" -> propose_project ~net args
   | "lodge_join_project" -> join_project ~net args

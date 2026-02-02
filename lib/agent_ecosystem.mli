@@ -11,8 +11,8 @@ type agent_type =
   | Visitor    (** 🚶 Session-based *)
   | Ephemeral  (** ⚡ Task-based *)
 
-(** Agent persona - public identity *)
-type persona = {
+(** Agent profile - public identity *)
+type agent_profile = {
   name : string;
   role : string;
   traits : string list;
@@ -32,13 +32,13 @@ type extended = {
   base : Agent_identity.t;
   hash : string;
   agent_type : agent_type;
-  persona : persona;
+  profile : agent_profile;
   lineage : lineage;
 }
 
 (** {1 Defaults} *)
 
-val default_persona : string -> persona
+val default_profile : string -> agent_profile
 val default_lineage : lineage
 
 (** {1 Hash Generation} *)
@@ -53,7 +53,7 @@ val agent_type_emoji : agent_type -> string
 
 (** {1 Extended Identity Creation} *)
 
-val extend : ?agent_type:agent_type -> ?persona:persona option -> ?lineage:lineage option -> Agent_identity.t -> extended
+val extend : ?agent_type:agent_type -> ?profile:agent_profile option -> ?lineage:lineage option -> Agent_identity.t -> extended
 val from_mcp_params : Yojson.Safe.t -> extended
 val from_agent_name : ?agent_type:agent_type -> ?role:string -> string -> extended
 val anonymous : unit -> extended
@@ -75,8 +75,8 @@ val from_base_with_metadata : Agent_identity.t -> extended
 
 val agent_type_to_yojson : agent_type -> Yojson.Safe.t
 val agent_type_of_yojson : Yojson.Safe.t -> (agent_type, string) result
-val persona_to_yojson : persona -> Yojson.Safe.t
-val persona_of_yojson : Yojson.Safe.t -> (persona, string) result
+val agent_profile_to_yojson : agent_profile -> Yojson.Safe.t
+val agent_profile_of_yojson : Yojson.Safe.t -> (agent_profile, string) result
 val lineage_to_yojson : lineage -> Yojson.Safe.t
 val lineage_of_yojson : Yojson.Safe.t -> (lineage, string) result
 val extended_to_yojson : extended -> Yojson.Safe.t
@@ -88,9 +88,9 @@ val pp_agent_type : Format.formatter -> agent_type -> unit
 val show_agent_type : agent_type -> string
 val equal_agent_type : agent_type -> agent_type -> bool
 
-val pp_persona : Format.formatter -> persona -> unit
-val show_persona : persona -> string
-val equal_persona : persona -> persona -> bool
+val pp_agent_profile : Format.formatter -> agent_profile -> unit
+val show_agent_profile : agent_profile -> string
+val equal_agent_profile : agent_profile -> agent_profile -> bool
 
 val pp_lineage : Format.formatter -> lineage -> unit
 val show_lineage : lineage -> string

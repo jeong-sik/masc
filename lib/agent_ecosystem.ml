@@ -2,7 +2,7 @@
 
     This module extends Agent_identity with:
     - Agent types: Resident (daemon), Visitor (session), Ephemeral (task)
-    - Persona: name, role, traits, avatar for community presence
+    - Profile: name, role, traits, avatar for community presence
     - Lineage: DNA-based generational tracking with mutations
     - Hash: 12-char hex for concise display (derived from session_key)
 
@@ -21,8 +21,8 @@ type agent_type =
   | Ephemeral  (** ⚡ Task-based - spawned for single task, then gone *)
 [@@deriving yojson, show, eq]
 
-(** Agent persona - public identity for community presence *)
-type persona = {
+(** Agent profile - public identity for community presence *)
+type agent_profile = {
   name : string;              (** Display name (e.g., "Pandora") *)
   role : string;              (** Primary role (e.g., "idea_generator") *)
   traits : string list;       (** Personality traits (e.g., ["curious"; "creative"]) *)
@@ -44,15 +44,15 @@ type extended = {
   base : Agent_identity.t;        (** Core identity *)
   hash : string;                  (** 12-char hex hash for display *)
   agent_type : agent_type;        (** Lifecycle type *)
-  persona : persona;              (** Public identity for community *)
+  profile : agent_profile;        (** Public identity for community *)
   lineage : lineage;              (** DNA-based generational tracking *)
 }
 [@@deriving yojson]
 
 (** {1 Defaults} *)
 
-(** Default persona for agents without explicit persona *)
-let default_persona name = {
+(** Default profile for agents without explicit profile *)
+let default_profile name = {
   name;
   role = "general";
   traits = [];
@@ -97,17 +97,17 @@ let agent_type_emoji = function
 (** {1 Extended Identity Creation} *)
 
 (** Extend a base identity with ecosystem data *)
-let extend ?(agent_type=Visitor) ?(persona=None) ?(lineage=None) (base : Agent_identity.t) =
+let extend ?(agent_type=Visitor) ?(profile=None) ?(lineage=None) (base : Agent_identity.t) =
   let hash = hash_of_session_key base.session_key in
-  let persona = match persona with
+  let profile = match profile with
     | Some p -> p
-    | None -> default_persona base.agent_name
+    | None -> default_profile base.agent_name
   in
   let lineage = match lineage with
     | Some l -> l
     | None -> default_lineage
   in
-  { base; hash; agent_type; persona; lineage }
+  { base; hash; agent_type; profile; lineage }
 
 (** Create extended identity from MCP request params *)
 let from_mcp_params params =
@@ -126,7 +126,7 @@ let from_mcp_params params =
     | Some t -> agent_type_of_string t
     | None -> Visitor
   in
-  let persona = {
+  let profile = {
     name = Option.value (get_opt "_persona_name") ~default:base.agent_name;
     role = Option.value (get_opt "_persona_role") ~default:"general";
     traits = get_list "_persona_traits";
@@ -138,14 +138,14 @@ let from_mcp_params params =
     ancestors = get_list "_ancestors";
     mutations = get_list "_mutations";
   } in
-  { base; hash; agent_type; persona; lineage }
+  { base; hash; agent_type; profile; lineage }
 
 (** Create extended identity from agent_name *)
 let from_agent_name ?(agent_type=Visitor) ?(role="general") agent_name =
   let base = Agent_identity.from_agent_name agent_name in
   let hash = hash_of_session_key base.session_key in
-  let persona = { (default_persona agent_name) with role } in
-  { base; hash; agent_type; persona; lineage = default_lineage }
+  let profile = { (default_profile agent_name) with role } in
+  { base; hash; agent_type; profile; lineage = default_lineage }
 
 (** Create anonymous extended identity *)
 let anonymous () =
@@ -155,7 +155,7 @@ let anonymous () =
     base;
     hash;
     agent_type = Ephemeral;
-    persona = default_persona base.agent_name;
+    profile = default_profile base.agent_name;
     lineage = default_lineage;
   }
 
@@ -180,7 +180,7 @@ let spawn_child ~parent ~child_name ~role =
     };
     hash;
     agent_type = Ephemeral;  (* Children are typically ephemeral *)
-    persona = { parent.persona with name = child_name; role };
+    profile = { parent.profile with name = child_name; role };
     lineage = {
       generation = parent.lineage.generation + 1;
       parent_hash = Some parent.hash;
@@ -213,7 +213,7 @@ let to_display_string ext =
   in
   Printf.sprintf "%s %s (%s)%s%s%s"
     type_emoji
-    ext.persona.name
+    ext.profile.name
     ext.hash
     channel_str
     room_str
@@ -227,7 +227,7 @@ let to_identity_card ext =
     | Some parent -> Printf.sprintf "  Parent: %s\n  Generation: %d" parent ext.lineage.generation
     | None -> Printf.sprintf "  Generation: %d (origin)" ext.lineage.generation
   in
-  let traits_str = match ext.persona.traits with
+  let traits_str = match ext.profile.traits with
     | [] -> "none"
     | ts -> String.concat ", " ts
   in
@@ -243,7 +243,7 @@ let to_identity_card ext =
 📜 **Lineage**
 %s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-|} emoji ext.persona.name ext.hash emoji type_str ext.persona.role traits_str lineage_str
+|} emoji ext.profile.name ext.hash emoji type_str ext.profile.role traits_str lineage_str
 
 (** Check if two extended identities refer to the same agent *)
 let same_agent a b =
@@ -258,17 +258,17 @@ let to_base_with_metadata ext =
   let metadata =
     [ ("_hash", ext.hash);
       ("_agent_type", string_of_agent_type ext.agent_type);
-      ("_persona_name", ext.persona.name);
-      ("_persona_role", ext.persona.role);
+      ("_persona_name", ext.profile.name);
+      ("_persona_role", ext.profile.role);
       ("_generation", string_of_int ext.lineage.generation);
     ]
     @ (match ext.lineage.parent_hash with
        | Some h -> [("_parent_hash", h)]
        | None -> [])
-    @ (match ext.persona.avatar with
+    @ (match ext.profile.avatar with
        | Some a -> [("_avatar", a)]
        | None -> [])
-    @ (List.mapi (fun i t -> (Printf.sprintf "_trait_%d" i, t)) ext.persona.traits)
+    @ (List.mapi (fun i t -> (Printf.sprintf "_trait_%d" i, t)) ext.profile.traits)
     @ (List.mapi (fun i m -> (Printf.sprintf "_mutation_%d" i, m)) ext.lineage.mutations)
     @ (List.mapi (fun i a -> (Printf.sprintf "_ancestor_%d" i, a)) ext.lineage.ancestors)
     @ ext.base.metadata
@@ -294,7 +294,7 @@ let from_base_with_metadata (base : Agent_identity.t) =
     | Some t -> agent_type_of_string t
     | None -> Visitor
   in
-  let persona = {
+  let profile = {
     name = Option.value (get "_persona_name") ~default:base.agent_name;
     role = Option.value (get "_persona_role") ~default:"general";
     traits = get_indexed "_trait";
@@ -308,7 +308,7 @@ let from_base_with_metadata (base : Agent_identity.t) =
     ancestors = get_indexed "_ancestor";
     mutations = get_indexed "_mutation";
   } in
-  { base; hash; agent_type; persona; lineage }
+  { base; hash; agent_type; profile; lineage }
 
 (** {1 Registry for Extended Identities} *)
 

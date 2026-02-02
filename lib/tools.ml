@@ -3712,10 +3712,10 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
     ];
   };
 
-  (* Hat System: Role-based personas for agents *)
+  (* Hat System: Role-based hats for agents *)
   {
     name = "masc_hat_wear";
-    description = "Wear a hat (persona) to specialize agent behavior. Hats: builder (🔨 code), reviewer (🔍 review), researcher (🔬 explore), tester (🧪 tests), architect (📐 design), debugger (🐛 fix), documenter (📝 docs). Broadcast format: @agent:hat (e.g., @claude:builder).";
+    description = "Wear a hat (role) to specialize agent behavior. Hats: builder (🔨 code), reviewer (🔍 review), researcher (🔬 explore), tester (🧪 tests), architect (📐 design), debugger (🐛 fix), documenter (📝 docs). Broadcast format: @agent:hat (e.g., @claude:builder).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -3739,7 +3739,7 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
 
   {
     name = "masc_hat_status";
-    description = "Show current hat status for all agents. Displays which persona each agent is currently using.";
+    description = "Show current hat status for all agents. Displays which role each agent is currently using.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

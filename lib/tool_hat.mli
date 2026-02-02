@@ -1,4 +1,4 @@
-(** Hat tools - Agent persona management *)
+(** Hat tools - Agent role management *)
 
 val get_string : Yojson.Safe.t -> string -> string -> string
 

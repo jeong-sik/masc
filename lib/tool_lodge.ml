@@ -833,7 +833,8 @@ let react_to_content ~net ?persona content =
     | Some p -> p
     | None -> List.nth all_personas (Random.int (List.length all_personas))
   in
-  let persona_desc_en = persona_prompt_en selected_persona in
+  (* Use persona_prompt which loads from Neo4j (SOUL Layer) *)
+  let persona_desc_en = persona_prompt selected_persona in
   let persona_name = string_of_persona selected_persona in
   let agent_name = persona_name in  (* Agent name = persona name (no prefix) *)
 

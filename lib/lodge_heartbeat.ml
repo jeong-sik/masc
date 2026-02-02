@@ -12,88 +12,28 @@
 
 [@@@warning "-32-69"]
 
-(** {1 Lodge Agent Room Integration} *)
+(** {1 Lodge Agent Status (GraphQL-based)}
 
-(** Get MASC agents directory path *)
-let agents_dir () =
-  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
-  Filename.concat me_root ".masc/agents"
+    Agent data is stored in Neo4j and accessed via GraphQL.
+    No filesystem-based agent registration needed.
+    Core personas: dreamer, skeptic, historian, pragmatist, connector
+*)
 
-(** Register a Lodge agent in the Room (makes it visible in dashboard) *)
-let register_lodge_agent ~name ~status =
-  let agent : Types.agent = {
-    name;
-    agent_type = "lodge";
-    status;
-    capabilities = ["autonomous"; "llm-powered"];
-    current_task = None;
-    joined_at = Types.now_iso ();
-    last_seen = Types.now_iso ();
-    meta = None;
-  } in
-  let json_str = Yojson.Safe.to_string (Types.agent_to_yojson agent) in
-  let dir = agents_dir () in
-  let () = if not (Sys.file_exists dir) then Unix.mkdir dir 0o755 in
-  let path = Filename.concat dir (name ^ ".json") in
-  let oc = open_out path in
-  output_string oc json_str;
-  close_out oc
+(** Update Lodge agent status - no-op, status tracked via Neo4j *)
+let update_lodge_agent_status ~name ~status:_ ?current_task:_ () =
+  (* Status now tracked in Neo4j via GraphQL, not filesystem *)
+  ignore name
 
-(** Update Lodge agent status *)
-let update_lodge_agent_status ~name ~status ?current_task () =
-  let dir = agents_dir () in
-  let path = Filename.concat dir (name ^ ".json") in
-  if Sys.file_exists path then begin
-    let ic = open_in path in
-    let content = really_input_string ic (in_channel_length ic) in
-    close_in ic;
-    match Types.agent_of_yojson (Yojson.Safe.from_string content) with
-    | Ok agent ->
-        let updated = { agent with
-          status;
-          last_seen = Types.now_iso ();
-          current_task = (match current_task with Some t -> Some t | None -> agent.current_task);
-        } in
-        let json_str = Yojson.Safe.to_string (Types.agent_to_yojson updated) in
-        let oc = open_out path in
-        output_string oc json_str;
-        close_out oc
-    | Error _ -> ()
-  end else
-    (* Agent not registered yet, register now *)
-    register_lodge_agent ~name ~status
+(** Initialize core Lodge personas - no-op, they exist in Neo4j *)
+let init_core_personas () =
+  (* Core personas (dreamer, skeptic, historian, pragmatist, connector)
+     are defined in Neo4j and loaded via GraphQL *)
+  ()
 
-(** Core Lodge personas - never cleaned up (persistent) *)
-let core_lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
-
-(** Cleanup inactive Lodge agents (60s threshold) - excludes core personas *)
+(** Cleanup inactive agents - no-op, managed via Neo4j *)
 let cleanup_inactive_lodge_agents () =
-  let dir = agents_dir () in
-  if Sys.file_exists dir then begin
-    let now = Time_compat.now () in
-    let threshold = 60.0 in (* 60 seconds *)
-    Sys.readdir dir |> Array.iter (fun filename ->
-      if Filename.check_suffix filename ".json" then begin
-        let path = Filename.concat dir filename in
-        try
-          let ic = open_in path in
-          let content = really_input_string ic (in_channel_length ic) in
-          close_in ic;
-          match Types.agent_of_yojson (Yojson.Safe.from_string content) with
-          | Ok agent when agent.agent_type = "lodge" && agent.status = Types.Inactive ->
-              (* Skip core personas - they are persistent *)
-              if not (List.mem agent.name core_lodge_personas) then begin
-                let last_seen = Types.parse_iso8601 ~default_time:0.0 agent.last_seen in
-                if now -. last_seen > threshold then begin
-                  Sys.remove path;
-                  Eio.traceln "   🧹 Cleaned up inactive Lodge agent: %s" agent.name
-                end
-              end
-          | _ -> ()
-        with _ -> ()
-      end
-    )
-  end
+  (* Agent lifecycle managed via Neo4j, not filesystem *)
+  ()
 
 (** {1 Non-blocking Shell Execution} *)
 
@@ -112,13 +52,22 @@ let run_shell_nonblocking cmd =
     Buffer.contents buf
   )
 
-(** Run shell command and get single line result *)
+(** Run shell command and get all output (up to 500 chars) *)
 let run_shell_line cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let result = try input_line ic with End_of_file -> "" in
+    let buf = Buffer.create 512 in
+    let rec read_all () =
+      match input_line ic with
+      | line ->
+          if Buffer.length buf > 0 then Buffer.add_char buf ' ';
+          Buffer.add_string buf line;
+          if Buffer.length buf < 500 then read_all ()
+      | exception End_of_file -> ()
+    in
+    read_all ();
     let _ = Unix.close_process_in ic in
-    result
+    Buffer.contents buf
   )
 
 (** {1 Configuration} *)
@@ -562,20 +511,25 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
     | `Comment original_post ->
         Printf.sprintf "위 글에 댓글을 달아주세요:\n\n\"%s\"" original_post
   in
-  (* Use llm-mcp GLM tool for content generation - non-blocking *)
-  let cmd = Printf.sprintf
-    "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d '%s' 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200"
-    (Yojson.Safe.to_string (`Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", `Int 1);
-      ("method", `String "tools/call");
-      ("params", `Assoc [
-        ("name", `String "glm");
-        ("arguments", `Assoc [
-          ("prompt", `String (system_prompt ^ "\n\n" ^ user_prompt))
-        ])
+  (* Use llm-mcp GLM tool for content generation - write JSON to temp file to avoid escaping issues *)
+  let json_payload = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "glm");
+      ("arguments", `Assoc [
+        ("prompt", `String (system_prompt ^ "\n\n" ^ user_prompt))
       ])
-    ]))
+    ])
+  ]) in
+  let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let oc = open_out tmp_file in
+  output_string oc json_payload;
+  close_out oc;
+  let cmd = Printf.sprintf
+    "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 300; rm -f %s"
+    tmp_file tmp_file
   in
   let response = run_shell_line cmd in
   (* Save to thread if successful *)
@@ -592,6 +546,9 @@ let start ~sw ~clock room_config =
   Printf.printf "+Lodge Heartbeat: initializing...\n%!";
   let config = load_config () in
   Printf.printf "+Lodge Heartbeat: enabled=%b\n%!" config.enabled;
+
+  (* Always initialize core personas (even if heartbeat disabled) *)
+  init_core_personas ();
 
   if not config.enabled then begin
     Printf.printf "+💤 Lodge Heartbeat: disabled (set LODGE_ENABLED=1 to enable)\n%!";

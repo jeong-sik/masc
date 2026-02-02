@@ -1200,8 +1200,8 @@ let start ~sw ~clock room_config =
         try
           let result = tick ~config ~recent_posts:[] in
 
-        (* Log result *)
-        Eio.traceln "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s"
+        (* Log result - use Printf for visibility in logs *)
+        Printf.printf "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s\n%!"
           result.current_hour
           result.agents_checked
           (List.length result.agents_woken)

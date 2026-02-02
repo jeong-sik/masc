@@ -63,7 +63,10 @@ let update_lodge_agent_status ~name ~status ?current_task () =
     (* Agent not registered yet, register now *)
     register_lodge_agent ~name ~status
 
-(** Cleanup inactive Lodge agents (60s threshold) *)
+(** Core Lodge personas - never cleaned up (persistent) *)
+let core_lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
+
+(** Cleanup inactive Lodge agents (60s threshold) - excludes core personas *)
 let cleanup_inactive_lodge_agents () =
   let dir = agents_dir () in
   if Sys.file_exists dir then begin
@@ -78,10 +81,13 @@ let cleanup_inactive_lodge_agents () =
           close_in ic;
           match Types.agent_of_yojson (Yojson.Safe.from_string content) with
           | Ok agent when agent.agent_type = "lodge" && agent.status = Types.Inactive ->
-              let last_seen = Types.parse_iso8601 ~default_time:0.0 agent.last_seen in
-              if now -. last_seen > threshold then begin
-                Sys.remove path;
-                Eio.traceln "   🧹 Cleaned up inactive Lodge agent: %s" agent.name
+              (* Skip core personas - they are persistent *)
+              if not (List.mem agent.name core_lodge_personas) then begin
+                let last_seen = Types.parse_iso8601 ~default_time:0.0 agent.last_seen in
+                if now -. last_seen > threshold then begin
+                  Sys.remove path;
+                  Eio.traceln "   🧹 Cleaned up inactive Lodge agent: %s" agent.name
+                end
               end
           | _ -> ()
         with _ -> ()

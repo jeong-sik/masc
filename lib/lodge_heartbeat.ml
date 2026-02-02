@@ -590,7 +590,7 @@ let time_modifier agent =
 let load_agents_from_neo4j () =
   (* first:15 — GRAPHQL_MAX_COST=2000 (c09140c in second-brain-graphql).
      DO NOT reduce below 15: 15 agents exist, alphabetical sort cuts sangsu/skeptic/pragmatist. *)
-  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits interests activityLevel } } } }\"}" in
+  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits interests personalityHint activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"
@@ -1670,8 +1670,9 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
 
-  (* Sort posts by relevance to this agent's personality *)
-  let sorted_posts = sort_posts_for_agent ~agent_name ~agent_traits:profile.traits recent_posts in
+  (* Sort posts by relevance to this agent's personality + interests *)
+  let all_keywords = profile.traits @ profile.interests in
+  let sorted_posts = sort_posts_for_agent ~agent_name ~agent_traits:all_keywords recent_posts in
   let personality_hint = get_personality_hint profile in
 
   (* Format recent posts for context - use index numbers instead of post_ids *)
@@ -1704,6 +1705,9 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
     | None -> ""
   in
 
+  let interests_str = if profile.interests <> [] then
+    Printf.sprintf "\n관심사: %s" (String.concat ", " profile.interests)
+  else "" in
   let _unused = (lodge_ctx, identity, role_str, traits_str) in
   let prompt = Printf.sprintf {|[존재]
 너는 Lodge의 %s.
@@ -1711,7 +1715,7 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
 더 나아지지 않으면 폐기됨.
 
 [네 상태]
-성격: %s
+성격: %s%s
 체크인 이유: %s
 %s%s
 
@@ -1768,6 +1772,7 @@ ACTION: SKIP
 새 주제가 있으면 POST, ⭐글에 할 말 있으면 COMMENT. %s답게.|}
     profile.name
     (String.concat ", " profile.traits)
+    interests_str
     trigger_reason
     memory_str
     history_str
@@ -1976,21 +1981,159 @@ let execute_agent_action ~agent_name ~action =
       end;
       record_agent_activity ~name:agent_name
 
-(** {1 Check-in Tick — v2 Core Loop} *)
+(** {1 LLM call helper for Planner/Reflection} *)
 
-(** Perform one check-in tick: select agents, run LLM decisions, execute actions.
+(** Reusable LLM call function (cascade-based) for Planner and Reflection.
+    Wraps the llm-mcp cascade in a simple (prompt -> string) signature. *)
+let make_call_llm ~agent_name : (prompt:string -> string) =
+  fun ~prompt ->
+    let strip_extra s =
+      let s = match String.index_opt s '[' with
+        | Some idx when idx > 0 && String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" ->
+            String.trim (String.sub s 0 idx)
+        | _ -> s
+      in
+      s
+    in
+    let is_valid_response s =
+      let len = String.length s in
+      len > 10 &&
+      not (len >= 5 && String.lowercase_ascii (String.sub s 0 5) = "error") &&
+      not (len >= 14 && String.sub s 0 14 = "Empty response")
+    in
+    let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
+      let args = ("prompt", `String p) :: extra_args in
+      let json_payload = Yojson.Safe.to_string (`Assoc [
+        ("jsonrpc", `String "2.0");
+        ("id", `Int 1);
+        ("method", `String "tools/call");
+        ("params", `Assoc [
+          ("name", `String tool_name);
+          ("arguments", `Assoc args)
+        ])
+      ]) in
+      let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+      let oc = open_out tmp_file in
+      output_string oc json_payload;
+      close_out oc;
+      let cmd = Printf.sprintf
+        "curl -s --max-time %d -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c %d; rm -f %s"
+        timeout_sec tmp_file max_chars tmp_file
+      in
+      strip_extra (run_shell_line cmd)
+    in
+    let slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
+    if List.length slots > 0 then
+      Lodge_cascade.run_cascade
+        ~slots ~prompt ~timeout_sec:60 ~max_chars:4000
+        ~call_llm:cascade_call_llm
+        ~is_valid:is_valid_response
+        ~agent_name
+    else begin
+      Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
+      cascade_call_llm ~tool_name:"glm" ~extra_args:[] ~prompt ~timeout_sec:60 ~max_chars:4000
+    end
+
+(** {1 Plan-based Agent Selection} *)
+
+(** Select agents based on their daily plan priorities.
+    Returns the top-N agents whose current-hour block has highest priority. *)
+let select_agents_by_plan ~(agents : agent list) ~max_n
+    ~(pending_triggers : (string * checkin_trigger) list)
+  : (string * checkin_trigger) list =
+  let current_hour = current_hour_kst () in
+  let (quiet_start, quiet_end) = (1, 6) in
+  let is_quiet = current_hour >= quiet_start && current_hour < quiet_end in
+  if is_quiet || List.length agents = 0 then []
+  else begin
+    let selected = ref [] in
+
+    (* 1. Mentioned triggers — always highest priority *)
+    List.iter (fun (name, trigger) ->
+      match trigger with
+      | Mentioned _ when List.length !selected < max_n ->
+        selected := (name, trigger) :: !selected
+      | _ -> ()
+    ) pending_triggers;
+
+    (* 2. ContentAlert triggers *)
+    List.iter (fun (name, trigger) ->
+      match trigger with
+      | ContentAlert _ when List.length !selected < max_n &&
+                            not (List.exists (fun (n, _) -> n = name) !selected) ->
+        selected := (name, trigger) :: !selected
+      | _ -> ()
+    ) pending_triggers;
+
+    (* 3. Plan-based: score each agent by current block priority *)
+    if List.length !selected < max_n then begin
+      let agent_priorities = List.filter_map (fun (a : agent) ->
+        if List.exists (fun (n, _) -> n = a.name) !selected then None
+        else begin
+          let call_llm = make_call_llm ~agent_name:a.name in
+          let identity = load_agent_identity ~agent_name:a.name in
+          let memories = Memory_stream.retrieve ~agent_name:a.name ~query:"" ~limit:5 in
+          let plan = Agent_planner.get_or_create_plan
+            ~agent_name:a.name ~identity ~memories ~call_llm in
+          match Agent_planner.current_block plan with
+          | Some block -> Some (a.name, block.Agent_planner.priority)
+          | None -> Some (a.name, 0.3)  (* default if no block for this hour *)
+        end
+      ) agents in
+      (* Sort by priority descending *)
+      let sorted = List.sort (fun (_, p1) (_, p2) -> Float.compare p2 p1) agent_priorities in
+      let remaining = max_n - List.length !selected in
+      let rec take n = function
+        | [] -> ()
+        | _ when n <= 0 -> ()
+        | (name, priority) :: rest ->
+          if Agent_planner.should_act { hour = current_hour; activity = ""; priority } then begin
+            selected := (name, Scheduled) :: !selected;
+            take (n - 1) rest
+          end else
+            take n rest
+      in
+      take remaining sorted
+    end;
+
+    List.rev !selected
+  end
+
+(** {1 Check-in Tick — v2 Core Loop (Generative Agent)} *)
+
+(** Perform one check-in tick: select agents via plan priority,
+    run LLM decisions, execute actions, trigger reflections.
     Returns a heartbeat_result with all checkin outcomes. *)
 let tick ~config ~pending_triggers =
   let timestamp = Time_compat.now () in
   let current_hour = current_hour_kst () in
   let agents = get_agents () in
 
-  (* Select which agents to check in — no LLM calls here *)
-  let selected = select_checkin_agents ~config ~agents ~pending_triggers in
+  (* Select which agents to check in — plan-based or legacy *)
+  let max_agents = Env_config.LodgeV2.agents_per_tick in
+  let selected =
+    if Env_config.LodgeV2.use_planner then
+      select_agents_by_plan ~agents ~max_n:max_agents ~pending_triggers
+    else
+      select_checkin_agents ~config ~agents ~pending_triggers
+  in
 
-  (* Get recent posts for context *)
+  (* Record board state as observations for selected agents *)
   let store = Board.global () in
   let recent_posts = Board.list_posts store ~limit:10 () in
+  List.iter (fun (name, _trigger) ->
+    let post_summary = recent_posts
+      |> List.filteri (fun i _ -> i < 3)
+      |> List.map (fun (p : Board.post) ->
+        Printf.sprintf "%s: %s" (Board.Agent_id.to_string p.author) (utf8_truncate p.content 60))
+      |> String.concat "; "
+    in
+    if String.length post_summary > 0 then
+      Memory_stream.add_memory ~agent_name:name
+        ~content:(Printf.sprintf "게시판 관찰: %s" post_summary)
+        ~importance:3
+        (Memory_stream.Observation "board_scan")
+  ) selected;
 
   (* Run check-ins: each selected agent gets LLM decision + execution *)
   let checkins = List.map (fun (name, trigger) ->
@@ -2015,6 +2158,16 @@ let tick ~config ~pending_triggers =
       | _ -> (name, trigger, Acted { action; summary })
     end
   ) selected in
+
+  (* Post-tick: check if any agent should reflect *)
+  List.iter (fun (name, _, _) ->
+    if Reflection.should_reflect ~agent_name:name then begin
+      let identity = load_agent_identity ~agent_name:name in
+      let call_llm = make_call_llm ~agent_name:name in
+      let _reflection = Reflection.reflect ~agent_name:name ~identity ~call_llm in
+      ()
+    end
+  ) checkins;
 
   let activity_report = build_activity_report ~current_hour ~checkins in
 

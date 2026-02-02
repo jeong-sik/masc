@@ -43,19 +43,9 @@ type route_decision = {
 
 (** Default agent pool - configurable *)
 let default_agents : agent_spec list = [
-  (* Tiny tier - local, fast, cheap *)
-  { name = "qwen-tiny"; model = "qwen2.5:0.5b"; tier = Tiny;
-    strengths = [Factual; Conversation]; cost_per_1k = 0.0001 };
-  { name = "phi-mini"; model = "phi3:mini"; tier = Tiny;
-    strengths = [Code; Factual]; cost_per_1k = 0.0001 };
-  
-  (* Small tier - local capable *)
-  { name = "qwen-7b"; model = "qwen2.5:7b"; tier = Small;
-    strengths = [Code; Analysis; Factual]; cost_per_1k = 0.00025 };
-  { name = "llama-8b"; model = "llama3.1:8b"; tier = Small;
-    strengths = [Creative; Conversation; Analysis]; cost_per_1k = 0.00025 };
-  { name = "codestral"; model = "codestral:22b"; tier = Small;
-    strengths = [Code]; cost_per_1k = 0.0005 };
+  (* Local tier - glm-4.7-flash always resident in VRAM (202k ctx) *)
+  { name = "glm-flash"; model = "glm-4.7-flash"; tier = Tiny;
+    strengths = [Factual; Conversation; Code; Analysis; Creative]; cost_per_1k = 0.0 };
   
   (* Medium tier - cloud balanced *)
   { name = "sonnet"; model = "claude-3.5-sonnet"; tier = Medium;

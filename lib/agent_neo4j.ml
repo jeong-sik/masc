@@ -2,7 +2,7 @@
 
     Stores Agent nodes with:
     - Core identity (hash, name, type, role)
-    - Persona (traits, avatar)
+    - Profile (traits, avatar)
     - Lineage (generation, parent_hash)
     - Activity tracking (born_at, last_seen, visit_count)
 
@@ -47,7 +47,7 @@ let escape_string s =
 let build_agent_merge_query (agent : Agent_ecosystem.extended) =
   let type_str = Agent_ecosystem.string_of_agent_type agent.agent_type in
   let traits_json =
-    agent.persona.traits
+    agent.profile.traits
     |> List.map (fun t -> sprintf "'%s'" (escape_string t))
     |> String.concat ", "
     |> sprintf "[%s]"
@@ -64,7 +64,7 @@ let build_agent_merge_query (agent : Agent_ecosystem.extended) =
     |> String.concat ", "
     |> sprintf "[%s]"
   in
-  let avatar_str = match agent.persona.avatar with
+  let avatar_str = match agent.profile.avatar with
     | Some a -> sprintf "'%s'" (escape_string a)
     | None -> "null"
   in
@@ -98,10 +98,10 @@ RETURN a.hash AS hash, a.visit_count AS visit_count
 |}
     agent.hash
     (escape_string agent.base.session_key)
-    (escape_string agent.persona.name)
+    (escape_string agent.profile.name)
     (escape_string agent.base.agent_name)
     type_str
-    (escape_string agent.persona.role)
+    (escape_string agent.profile.role)
     traits_json
     avatar_str
     agent.lineage.generation

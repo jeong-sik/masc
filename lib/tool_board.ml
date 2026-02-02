@@ -245,8 +245,8 @@ let handle_comment_add args =
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
-(** Lodge personas that can evolve *)
-let lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
+(** Lodge agents that can evolve *)
+let lodge_agents = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
 
 (** SOUL Evolution callback - registered by Tool_lodge at startup to break dependency cycle *)
 type evolution_callback = {
@@ -279,7 +279,7 @@ let handle_vote args =
             | Ok post ->
                 let author = Board.Agent_id.to_string post.author in
                 (* Agent-only evolution: 에이전트끼리만 서로 진화시킴 *)
-                if List.mem voter lodge_personas && List.mem author lodge_personas then begin
+                if List.mem voter lodge_agents && List.mem author lodge_agents then begin
                   let dimension = match cb.get_primary_value author with
                     | Some pv -> pv
                     | None -> "Creativity"

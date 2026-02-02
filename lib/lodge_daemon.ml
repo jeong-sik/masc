@@ -1,9 +1,9 @@
 (** Lodge Daemon - Utility Types and Neo4j Queries
 
-    Provides persona configuration types and Neo4j Cypher query builders.
+    Provides agent configuration types and Neo4j Cypher query builders.
     The actual Eio fiber daemon is in {!Lodge_heartbeat}.
 
-    - Persona types: mood, trait, value, trust
+    - Agent types: mood, trait, value, trust
     - Neo4j queries: influence, mood update, reflection
     - Curiosity-based interval calculation
 *)
@@ -24,12 +24,12 @@ type value = {
 }
 
 type trust = {
-  target_persona: string;
+  target_agent: string;
   level: float;
 }
 
-type persona_config = {
-  persona: string;
+type agent_config = {
+  agent: string;
   recognition_need: float;
   influence_desire: float;
   curiosity: float;
@@ -131,14 +131,14 @@ let patrol_interval_for_curiosity curiosity =
   if curiosity <= 0.0 then base *. 10.0  (* Very infrequent if no curiosity *)
   else base /. curiosity
 
-let is_patrol_due state persona_cfg =
+let is_patrol_due state agent_cfg =
   let now = Time_compat.now () in  (* Note: unix library needed in dune *)
-  let interval = patrol_interval_for_curiosity persona_cfg.curiosity in
+  let interval = patrol_interval_for_curiosity agent_cfg.curiosity in
   (now -. state.last_patrol) >= interval
 
 (** {1 Prompt building} *)
 
-let build_persona_prompt cfg =
+let build_agent_prompt cfg =
   let trait_desc =
     cfg.traits
     |> List.map (fun (t : trait) ->
@@ -166,9 +166,9 @@ let build_persona_prompt cfg =
 ## Values
 %s
 
-Respond authentically to this persona. Keep responses concise (2-3 sentences).
+Respond authentically to this agent. Keep responses concise (2-3 sentences).
 |}
-    cfg.persona
+    cfg.agent
     cfg.recognition_need
     cfg.influence_desire
     cfg.curiosity
@@ -181,14 +181,14 @@ Respond authentically to this persona. Keep responses concise (2-3 sentences).
 (* In-memory state storage - will be persisted to Neo4j in Phase 2 *)
 let state_table : (string, patrol_state) Hashtbl.t = Hashtbl.create 10
 
-let get_state persona =
-  match Hashtbl.find_opt state_table persona with
+let get_state agent =
+  match Hashtbl.find_opt state_table agent with
   | Some s -> s
   | None -> { last_patrol = 0.0; patrol_count = 0; last_reflection = None }
 
-let mark_patrolled persona =
-  let state = get_state persona in
-  Hashtbl.replace state_table persona {
+let mark_patrolled agent =
+  let state = get_state agent in
+  Hashtbl.replace state_table agent {
     state with
     last_patrol = Time_compat.now ();
     patrol_count = state.patrol_count + 1;
@@ -212,7 +212,7 @@ RETURN la.persona AS persona,
        collect(DISTINCT {target: other.persona, level: la.trust_level}) AS trusts
 |}
 
-(** Record social influence between personas *)
+(** Record social influence between agents *)
 let influence_query source target content =
   let src = cypher_escape source in
   let tgt = cypher_escape target in
@@ -227,8 +227,8 @@ RETURN r.count AS influence_count
 |} src tgt cnt cnt
 
 (** Update mood with history tracking *)
-let mood_update_query persona mood trigger_score =
-  let p = cypher_escape persona in
+let mood_update_query agent_name mood trigger_score =
+  let p = cypher_escape agent_name in
   let m = string_of_mood mood in  (* enum, safe *)
   Printf.sprintf {|
 MATCH (la:LodgeAgent {persona: '%s'})
@@ -244,8 +244,8 @@ RETURN la.persona, la.mood
 |} p m p m trigger_score
 
 (** Generate reflection (Stanford Generative Agents pattern) *)
-let reflection_query persona content =
-  let p = cypher_escape persona in
+let reflection_query agent_name content =
+  let p = cypher_escape agent_name in
   let c = cypher_escape content in
   Printf.sprintf {|
 MATCH (la:LodgeAgent {persona: '%s'})
@@ -265,17 +265,17 @@ let init ~config =
     Printf.printf "[Lodge Daemon] Initializing with interval=%.0fs, model=%s\n%!"
       config.check_interval_s config.ollama_model
 
-(** Patrol once for a specific persona - Phase 2 will add actual LLM call *)
-let patrol_once ~config ~persona =
+(** Patrol once for a specific agent - Phase 2 will add actual LLM call *)
+let patrol_once ~config ~agent_name =
   if config.enabled then begin
-    Printf.printf "[Lodge Daemon] Patrol: %s (model: %s)\n%!" persona config.ollama_model;
-    mark_patrolled persona
+    Printf.printf "[Lodge Daemon] Patrol: %s (model: %s)\n%!" agent_name config.ollama_model;
+    mark_patrolled agent_name
   end
 
-(** Generate reflection for a persona *)
-let generate_reflection ~config ~persona =
+(** Generate reflection for an agent *)
+let generate_reflection ~config ~agent_name =
   if config.enabled && config.neo4j_enabled then
-    Printf.printf "[Lodge Daemon] Reflection: %s\n%!" persona
+    Printf.printf "[Lodge Daemon] Reflection: %s\n%!" agent_name
 
 (* NOTE: Eio fiber main loop is in lodge_heartbeat.ml
    This module provides utility types and Neo4j queries only.

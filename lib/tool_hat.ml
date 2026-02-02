@@ -1,4 +1,4 @@
-(** Hat tools - Agent persona management *)
+(** Hat tools - Agent role management *)
 
 let get_string args key default =
   match Yojson.Safe.Util.member key args with

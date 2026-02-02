@@ -1,7 +1,7 @@
 (** Hat System - Role-based Persona for MASC Agents
 
     Inspired by ralph-orchestrator's Hat System.
-    Each hat represents a specialized persona with distinct behaviors.
+    Each hat represents a specialized role with distinct behaviors.
 
     Usage:
     - Agents can wear different hats for different tasks

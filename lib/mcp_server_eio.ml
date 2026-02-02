@@ -1911,7 +1911,7 @@ Time: %s
   | "lodge_heartbeat" | "lodge_classify" | "lodge_react" | "lodge_cycle"
   | "lodge_discussion" | "lodge_orchestrate" | "lodge_auto_chain"
   | "lodge_evolve" | "lodge_spawn" | "lodge_agents"
-  | "lodge_persona_patrol" | "lodge_autonomous_loop"
+  | "lodge_agent_patrol" | "lodge_autonomous_loop"
   (* Project collaboration *)
   | "lodge_propose_project" | "lodge_join_project" | "lodge_share_code"
   | "lodge_research" | "lodge_profile"

@@ -206,7 +206,7 @@ let default_configs = [
   });
   ("ollama", {
     agent_name = "ollama";
-    command = "ollama run devstral";
+    command = "ollama run glm-4.7-flash";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = [];

@@ -16,7 +16,7 @@
 
     Agent data is stored in Neo4j and accessed via GraphQL.
     No filesystem-based agent registration needed.
-    Core personas: dreamer, skeptic, historian, pragmatist, connector
+    Core agents: dreamer, skeptic, historian, pragmatist, connector
 *)
 
 (** {1 Agent Singleton Management}
@@ -222,9 +222,9 @@ let update_lodge_agent_status ~name ~status ?current_task:_ () =
   | Types.Inactive -> deactivate_agent ~name
   | _ -> ()
 
-(** Initialize core Lodge personas - no-op, they exist in Neo4j *)
-let init_core_personas () =
-  (* Core personas (dreamer, skeptic, historian, pragmatist, connector)
+(** Initialize core Lodge agents - no-op, they exist in Neo4j *)
+let init_core_agents () =
+  (* Core agents (dreamer, skeptic, historian, pragmatist, connector)
      are defined in Neo4j and loaded via GraphQL *)
   ()
 
@@ -1127,7 +1127,7 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~cur
     | None -> ""
   in
 
-  let persona_str = match profile.persona_prompt with
+  let agent_prompt_str = match profile.persona_prompt with
     | Some p -> Printf.sprintf "\n\n[특별 지시]\n%s" p
     | None -> ""
   in
@@ -1135,7 +1135,7 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~cur
   let action_str = Printf.sprintf "\n\n[현재 상황]\n%s" action_context in
 
   Printf.sprintf "%s\n%s%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
-    (build_lodge_context ()) identity role_str traits_str time_str karma_str history_str memory_str persona_str action_str
+    (build_lodge_context ()) identity role_str traits_str time_str karma_str history_str memory_str agent_prompt_str action_str
 
 (** Legacy: Load agent identity (for backward compat) *)
 let load_agent_identity ~agent_name =
@@ -1602,7 +1602,7 @@ ACTION: SKIP
     (String.concat ", " profile.traits)
   in
 
-  (* Call LLM with cascade fallback: Gemini → retry → Ollama → skip *)
+  (* Call LLM with cascade fallback: GLM → Gemini → skip *)
   let strip_extra s =
     (* First strip [Extra] metadata *)
     let s = match String.index_opt s '[' with
@@ -1813,8 +1813,8 @@ let start ~sw ~clock room_config =
   let config = load_config () in
   Printf.printf "+Lodge Heartbeat: enabled=%b\n%!" config.enabled;
 
-  (* Always initialize core personas (even if heartbeat disabled) *)
-  init_core_personas ();
+  (* Always initialize core agents (even if heartbeat disabled) *)
+  init_core_agents ();
 
   if not config.enabled then begin
     Printf.printf "+💤 Lodge Heartbeat: disabled (set LODGE_ENABLED=1 to enable)\n%!";

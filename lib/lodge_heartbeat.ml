@@ -348,6 +348,77 @@ let load_agent_memories ~agent_name ~limit =
   let memories = run_shell_nonblocking cmd in
   if String.length memories > 10 then Some memories else None
 
+(** {1 Agent Thread Management - Conversation Accumulation} *)
+
+(** Get conversation config for agent threads *)
+let agent_thread_config () : Council.Conversation.config =
+  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
+  { base_path = me_root; room = "lodge" }
+
+(** Get or create thread for an agent's ongoing activity *)
+let get_or_create_agent_thread ~agent_name : Council.Conversation.thread option =
+  let config = agent_thread_config () in
+  (* Look for existing active thread for this agent *)
+  let threads = Council.Conversation.list_active ~config in
+  let agent_thread = List.find_opt (fun (th : Council.Conversation.thread) ->
+    (* Thread topic starts with agent name *)
+    String.length th.topic >= String.length agent_name &&
+    String.sub th.topic 0 (String.length agent_name) = agent_name
+  ) threads in
+  match agent_thread with
+  | Some th -> Some th
+  | None ->
+      (* Create new thread for this agent *)
+      let topic = Printf.sprintf "%s 활동 기록" agent_name in
+      match Council.Conversation.start ~config ~topic ~initiator:agent_name ~max_turns:100 () with
+      | Ok th ->
+          Eio.traceln "   📜 New thread for %s: %s" agent_name th.id;
+          Some th
+      | Error e ->
+          Eio.traceln "   ❌ Thread creation failed for %s: %s" agent_name e;
+          None
+
+(** Add agent activity as a turn in their thread *)
+let add_turn_to_thread ~agent_name ~content ~action_type =
+  let config = agent_thread_config () in
+  match get_or_create_agent_thread ~agent_name with
+  | None -> ()
+  | Some thread ->
+      let action_prefix = match action_type with
+        | `Post reason -> Printf.sprintf "[POST: %s] " reason
+        | `Comment orig -> Printf.sprintf "[COMMENT on: %s] " (String.sub orig 0 (min 30 (String.length orig)))
+      in
+      let full_content = action_prefix ^ content in
+      match Council.Conversation.reply ~config ~thread_id:thread.id
+              ~speaker:agent_name ~content:full_content () with
+      | Ok _ -> Eio.traceln "   📝 Turn saved to thread %s" thread.id
+      | Error e -> Eio.traceln "   ⚠️ Turn save failed: %s" e
+
+(** Get recent turns from agent's thread for context *)
+let get_recent_turns ~agent_name ~limit : string option =
+  match get_or_create_agent_thread ~agent_name with
+  | None -> None
+  | Some thread ->
+      let recent =
+        thread.turns
+        |> List.rev  (* Most recent first *)
+        |> (fun lst ->
+            let rec take n acc = function
+              | [] -> List.rev acc
+              | _ when n <= 0 -> List.rev acc
+              | x :: xs -> take (n - 1) (x :: acc) xs
+            in
+            take limit [] lst)
+        |> List.rev  (* Back to chronological order *)
+      in
+      if List.length recent = 0 then None
+      else begin
+        let turns_str = recent |> List.map (fun (t : Council.Conversation.turn) ->
+          Printf.sprintf "• %s" t.content
+        ) |> String.concat "\n" in
+        Some turns_str
+      end
+
 (** Agent profile loaded from Neo4j *)
 type agent_profile = {
   name: string;
@@ -408,7 +479,7 @@ let load_agent_profile ~agent_name : agent_profile =
       karma = 0; persona_prompt = None }
 
 (** Build dynamic prompt from agent profile *)
-let build_agent_prompt ~(profile : agent_profile) ~memories ~current_hour ~action_context =
+let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~current_hour ~action_context =
   let identity = Printf.sprintf "너는 %s야." profile.name in
 
   let role_str = match profile.description with
@@ -434,8 +505,14 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~current_hour ~actio
     else ""
   in
 
+  (* Thread history - accumulated agent activity *)
+  let history_str = match thread_history with
+    | Some h -> Printf.sprintf "\n\n[내 최근 활동]\n%s" h
+    | None -> ""
+  in
+
   let memory_str = match memories with
-    | Some m -> Printf.sprintf "\n\n[최근 기억]\n%s" m
+    | Some m -> Printf.sprintf "\n\n[관련 기억 (Qdrant)]\n%s" m
     | None -> ""
   in
 
@@ -446,8 +523,8 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~current_hour ~actio
 
   let action_str = Printf.sprintf "\n\n[현재 상황]\n%s" action_context in
 
-  Printf.sprintf "%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
-    identity role_str traits_str time_str karma_str memory_str persona_str action_str
+  Printf.sprintf "%s%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
+    identity role_str traits_str time_str karma_str history_str memory_str persona_str action_str
 
 (** Legacy: Load agent identity (for backward compat) *)
 let load_agent_identity ~agent_name =
@@ -462,15 +539,17 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   let profile = load_agent_profile ~agent_name in
   (* Load short-term memories from Qdrant *)
   let memories = load_agent_memories ~agent_name ~limit:3 in
+  (* Load thread history - accumulated agent activity *)
+  let thread_history = get_recent_turns ~agent_name ~limit:5 in
   (* Get current hour for time-based prompting *)
   let current_hour = current_hour_kst () in
   (* Build action context *)
   let action_context = match action_type with
     | `Post reason -> Printf.sprintf "게시글 작성 - 이유: %s" reason
-    | `Comment original_post -> Printf.sprintf "댓글 작성 - 원글: \"%s\"" original_post
+    | `Comment original_post -> Printf.sprintf "댓글 작성 - 원글: \"%s\"" (String.sub original_post 0 (min 100 (String.length original_post)))
   in
-  (* Build dynamic system prompt *)
-  let system_prompt = build_agent_prompt ~profile ~memories ~current_hour ~action_context in
+  (* Build dynamic system prompt with thread history *)
+  let system_prompt = build_agent_prompt ~profile ~memories ~thread_history ~current_hour ~action_context in
   let user_prompt = match action_type with
     | `Post reason ->
         Printf.sprintf "위 상황에서 게시글을 작성하세요: %s" reason
@@ -493,12 +572,14 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
     ]))
   in
   let response = run_shell_line cmd in
-  (* Return None if LLM failed, skip posting instead of hardcoded fallback *)
-  if String.length response > 10 then Some response
-  else (
+  (* Save to thread if successful *)
+  if String.length response > 10 then begin
+    add_turn_to_thread ~agent_name ~content:response ~action_type;
+    Some response
+  end else begin
     Eio.traceln "   ⚠️ LLM failed for %s, skipping" agent_name;
     None
-  )
+  end
 
 (** Start heartbeat daemon fiber *)
 let start ~sw ~clock room_config =

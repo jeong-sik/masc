@@ -36,9 +36,10 @@ let get_events_after last_id =
 
 (** Format SSE event with optional ID and event type *)
 let format_event ?id ?event_type data =
-  Atomic.incr event_counter;
+  (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
+  let new_id = Atomic.fetch_and_add event_counter 1 + 1 in
   let id_line = Printf.sprintf "id: %d\n"
-    (match id with Some i -> i | None -> Atomic.get event_counter) in
+    (match id with Some i -> i | None -> new_id) in
   let event_line = match event_type with
     | Some e -> Printf.sprintf "event: %s\n" e
     | None -> ""
@@ -50,13 +51,14 @@ let current_id () = Atomic.get event_counter
 
 (** Allocate next event ID without emitting data. *)
 let next_id () =
-  Atomic.incr event_counter;
-  Atomic.get event_counter
+  (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
+  Atomic.fetch_and_add event_counter 1 + 1
 
 (** Register a new SSE client *)
 let register session_id ~push ~last_event_id =
-  Atomic.incr client_id_counter;
-  let client = { id = Atomic.get client_id_counter; push; last_event_id } in
+  (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
+  let new_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
+  let client = { id = new_id; push; last_event_id } in
   Hashtbl.replace clients session_id client;
   client.id
 
@@ -82,20 +84,27 @@ let update_last_event_id session_id event_id =
   | Some client -> client.last_event_id <- event_id
   | None -> ()
 
-(** Broadcast event to all connected clients *)
+(** Broadcast event to all connected clients
+    Uses snapshot-based iteration to safely remove failed connections *)
 let broadcast json =
   let data = Yojson.Safe.to_string json in
   let current_event_id = Atomic.get event_counter + 1 in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
-  Hashtbl.iter (fun session_id client ->
+  (* Take snapshot first to avoid modifying Hashtbl during iteration *)
+  let clients_snapshot = Hashtbl.fold (fun k v acc -> (k, v) :: acc) clients [] in
+  let failed = ref [] in
+  List.iter (fun (session_id, client) ->
     if current_event_id > client.last_event_id then begin
       match client.push event with
       | () -> update_last_event_id session_id current_event_id
       | exception e ->
-        Printf.eprintf "[SSE] Push failed for session %s: %s\n%!" session_id (Printexc.to_string e)
+        Printf.eprintf "[SSE] Push failed for session %s: %s\n%!" session_id (Printexc.to_string e);
+        failed := session_id :: !failed
     end
-  ) clients
+  ) clients_snapshot;
+  (* Remove failed connections after iteration *)
+  List.iter (Hashtbl.remove clients) !failed
 
 (** Send a JSON-RPC message to a specific session (legacy SSE transport) *)
 let send_to session_id json =
@@ -114,3 +123,10 @@ let send_to session_id json =
 (** Get client count *)
 let client_count () =
   Hashtbl.length clients
+
+(** Close all SSE clients - for graceful shutdown
+    Returns the number of clients that were closed *)
+let close_all_clients () =
+  let sessions = Hashtbl.fold (fun sid _ acc -> sid :: acc) clients [] in
+  List.iter (Hashtbl.remove clients) sessions;
+  List.length sessions

@@ -1827,7 +1827,7 @@ Time: %s
              ~max_broadcasts:limit
              ()
            in
-           let result = Auto_recall.fetch_context_eio ~sw ~env config ~config:recall_config ~query () in
+           let result = Auto_recall.fetch_context_eio ~sw ~env ~clock config ~config:recall_config ~query () in
            let response = `Assoc [
              ("success", `Bool true);
              ("query", `String query);

@@ -1186,9 +1186,35 @@ let make_routes ~port ~host =
        with_read_auth (fun _state _req reqd ->
          let store = Board.global () in
          let posts = Board.list_posts store () in
+         let karma_map = Board.get_all_karma store in
+         let get_karma author =
+           try List.assoc author karma_map with Not_found -> 0
+         in
+         let posts_json = List.map (fun p ->
+           Board.post_to_yojson_with_karma p
+             ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
+         ) posts in
          let json = `Assoc [
-           ("posts", `List (List.map Board.post_to_yojson posts));
+           ("posts", `List posts_json);
            ("count", `Int (List.length posts));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/board/flairs" (fun _request reqd ->
+       let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+       let json = `Assoc [("flairs", `List flairs)] in
+       Http.Response.json (Yojson.Safe.to_string json) reqd)
+
+  |> Http.Router.get "/api/v1/karma" (fun request reqd ->
+       with_read_auth (fun _state _req reqd ->
+         let store = Board.global () in
+         let karma_list = Board.get_all_karma store in
+         let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+         let json = `Assoc [
+           ("karma", `List (List.map (fun (agent, k) ->
+             `Assoc [("agent", `String agent); ("karma", `Int k)]
+           ) sorted));
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -1284,9 +1310,13 @@ let run_server ~sw ~env ~port ~base_path =
   server_state := Some state;
   Mcp_server.set_sse_callback state Sse.broadcast;
   Progress.set_sse_callback Sse.broadcast;
-  Masc_mcp.Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config;
+  let cancel_orchestrator = Masc_mcp.Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config in
+  (* Store cancel function for graceful shutdown *)
+  Masc_mcp.Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator;
   (* Lodge world heartbeat - wakes agents every 60s *)
   Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
+  (* Start MCP session cleanup loop *)
+  Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
 
   let config = { Http.default_config with port; host = "127.0.0.1" } in
   let routes = make_routes ~port:config.port ~host:config.host in
@@ -1392,7 +1422,10 @@ let run_cmd port base_path =
       (* Give clients 200ms to receive the notification *)
       Unix.sleepf 0.2;
 
-      (* Gracefully close all SSE connections before Switch.fail *)
+      (* Run all shutdown hooks (cancel orchestrator, close SSE, etc.) *)
+      Masc_mcp.Shutdown_hooks.run_all ();
+
+      (* Also close local SSE connections tracked in main_eio *)
       close_all_sse_connections ();
 
       (* Give connections 200ms to complete close handshake *)

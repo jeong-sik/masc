@@ -101,6 +101,7 @@ val fetch_context :
 val fetch_context_eio :
   sw:Eio.Switch.t ->
   env:< net : _ Eio.Net.t; .. > ->
+  clock:_ Eio.Time.clock ->
   Room_utils.config ->
   config:recall_config ->
   ?query:string ->

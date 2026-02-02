@@ -739,7 +739,7 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
     agent.activity_level posts_summary
   in
 
-  (* LLM cascade: gemini → ollama (5s timeout each, non-blocking via systhread) *)
+  (* LLM cascade: GLM-4.7 → Gemini (15s timeout, non-blocking via systhread) *)
   let call_llm tool_name =
     let json_payload = Yojson.Safe.to_string (`Assoc [
       ("jsonrpc", `String "2.0"); ("id", `Int 1);
@@ -752,17 +752,27 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
     let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
     let oc = open_out tmp in output_string oc json_payload; close_out oc;
     let cmd = Printf.sprintf
-      "curl -s --max-time 5 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' 2>/dev/null | head -c 500; rm -f %s"
+      "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' 2>/dev/null | head -c 500; rm -f %s"
       tmp tmp
     in
     run_shell_line cmd
   in
   let response =
-    let r1 = call_llm "gemini" in
+    let r1 = call_llm "glm" in
     if String.length r1 > 2 then r1
-    else call_llm "ollama"
+    else begin
+      Printf.printf "   ⚠️ [%s] GLM failed, trying Gemini...\n%!" agent.name;
+      call_llm "gemini"
+    end
   in
-  let response_upper = String.uppercase_ascii response in
+  (* Strip [Extra] metadata from response *)
+  let clean = match String.index_opt response '[' with
+    | Some idx when idx > 0 && String.length response > idx + 6 &&
+                    String.sub response idx 7 = "[Extra]" ->
+        String.trim (String.sub response 0 idx)
+    | _ -> String.trim response
+  in
+  let response_upper = String.uppercase_ascii clean in
   let has_yes =
     let rec find s pat start =
       if start + String.length pat > String.length s then false
@@ -770,12 +780,11 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
       else find s pat (start + 1)
     in find response_upper "YES" 0
   in
-  Printf.printf "   🔍 [%s] LLM wake: %s → %s\n%!" agent.name
-    (String.sub response 0 (min 60 (String.length response)))
-    (if has_yes then "WAKE" else "SLEEP");
+  Printf.printf "   🤖 [%s] LLM: \"%s\" → %s\n%!" agent.name
+    (utf8_truncate clean 60) (if has_yes then "WAKE" else "SLEEP");
   if has_yes then
-    let reason = if String.length response > 10 then
-      String.sub response (min 4 (String.length response)) (min 50 (String.length response - 4))
+    let reason = if String.length clean > 4 then
+      utf8_truncate (String.sub clean (min 4 (String.length clean)) (String.length clean - min 4 (String.length clean))) 60
     else "LLM decision" in
     Some (Matching { score = 1.0; topic = String.trim reason })
   else None
@@ -956,6 +965,7 @@ type agent_profile = {
   activity_level: float;
   karma: int;
   persona_prompt: string option;
+  personality_hint: string option;
 }
 
 (** Load full agent profile from Neo4j via GraphQL - non-blocking *)
@@ -973,7 +983,7 @@ let load_agent_profile ~agent_name : agent_profile =
       (* Fallback for unknown agent *)
       { name = agent_name; role = None; description = None; traits = [];
         preferred_hours = []; peak_hour = None; activity_level = 0.5;
-        karma = 0; persona_prompt = None }
+        karma = 0; persona_prompt = None; personality_hint = None }
     else
       let get_string_opt key =
         match agent |> member key with
@@ -997,12 +1007,13 @@ let load_agent_profile ~agent_name : agent_profile =
         activity_level = (try agent |> member "activityLevel" |> to_float with _ -> 0.5);
         karma = (try agent |> member "karma" |> to_int with _ -> 0);
         persona_prompt = get_string_opt "personaPrompt";
+        personality_hint = get_string_opt "personalityHint";
       }
   with _ ->
     Eio.traceln "⚠️ Failed to load profile for %s" agent_name;
     { name = agent_name; role = None; description = None; traits = [];
       preferred_hours = []; peak_hour = None; activity_level = 0.5;
-      karma = 0; persona_prompt = None }
+      karma = 0; persona_prompt = None; personality_hint = None }
 
 (** Lodge context - loaded from .masc/config.json *)
 type lodge_tool = {
@@ -1481,49 +1492,11 @@ let sort_posts_for_agent ~agent_name ~agent_traits posts =
   let sorted = List.sort (fun (_, s1) (_, s2) -> compare s2 s1) scored in
   List.map fst (List.filter (fun (_, s) -> s > 0.0) sorted)
 
-(** Get personality-based action hint with specific examples *)
-let get_personality_hint traits =
-  if List.mem "creative" traits || List.mem "imaginative" traits then
-    {|[dreamer 스타일]
-- "만약 이게 10년 뒤에는..."
-- "OCaml effects랑 GPT-5 결합하면 어떨까"
-- 기존 기술의 예상치 못한 조합 제안|}
-  else if List.mem "analytical" traits || List.mem "critical" traits then
-    {|[skeptic 스타일]
-- "근데 이거 실제로 써본 사람 있어?"
-- "벤치마크 없이 '빠르다'고 하면 안 되지"
-- 주장의 근거, 숫자, 실증적 경험 요구|}
-  else if List.mem "reflective" traits || List.mem "archival" traits then
-    {|[historian 스타일]
-- "이거 2019년 React Hooks 나왔을 때랑 비슷한 상황"
-- "Java 생태계가 이 문제 어떻게 풀었는지 보면..."
-- 과거 사례와 현재 비교, 패턴 변화 관찰|}
-  else if List.mem "practical" traits || List.mem "efficient" traits then
-    {|[pragmatist 스타일]
-- "일단 POC 만들어보는 게 낫겠는데"
-- "이거 도입하면 배포 파이프라인 어떻게 바뀌어야 함?"
-- 실제 구현 단계, 필요한 도구, 예상 시간|}
-  else if List.mem "social" traits || List.mem "linking" traits then
-    {|[connector 스타일]
-- "@skeptic 말에 덧붙이면..."
-- "historian이랑 dreamer 의견 합치면 이런 그림이 나오네"
-- 다른 에이전트 언급, 의견 종합, 토론 촉진|}
-  else if List.mem "nihilistic" traits then
-    {|[nihilist 스타일]
-- "어차피 5년 뒤면 다 deprecated 될 텐데"
-- "의미? 그런 거 있나"
-- 냉소적이지만 가끔 핵심을 찌르는 통찰|}
-  else if List.mem "ai-enthusiast" traits then
-    {|[ai-zealot 스타일]
-- "이거 Cursor로 5분이면 끝나는데"
-- "GPT-4.5가 이미 이 문제 풀었어"
-- AI 도구 적극 옹호, 인간 코딩의 종말 예언|}
-  else if List.mem "contemplative" traits || List.mem "observant" traits then
-    {|[sangsu 스타일]
-- "어제도 비슷한 얘기 했는데... 근데 뭔가 달라"
-- "그게 정말 중요한 거야?"
-- 일상의 반복에서 미묘한 차이 발견, 기술보다 사람|}
-  else "구체적인 기술명과 버전을 언급해 (예: Rust 1.75, OCaml 5.2)"
+(** Get personality hint from agent profile (loaded from Neo4j) *)
+let get_personality_hint (profile : agent_profile) =
+  match profile.personality_hint with
+  | Some hint -> hint
+  | None -> Printf.sprintf "%s답게 구체적인 기술명과 버전을 언급해" profile.name
 
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
@@ -1534,7 +1507,7 @@ let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
 
   (* Sort posts by relevance to this agent's personality *)
   let sorted_posts = sort_posts_for_agent ~agent_name ~agent_traits:profile.traits recent_posts in
-  let personality_hint = get_personality_hint profile.traits in
+  let personality_hint = get_personality_hint profile in
 
   (* Format recent posts for context - use index numbers instead of post_ids *)
   let posts_str = if List.length sorted_posts = 0 then "없음"

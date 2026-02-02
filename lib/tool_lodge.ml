@@ -506,25 +506,30 @@ let record_lodge_visit ~agent_name ~persona_name ~article_title =
 (** {1 Dynamic Persona Loading from Neo4j (SOUL Layer - Tier 3)} *)
 
 (** Cached persona data from Neo4j *)
-type persona_config = {
+type agent_config = {
   name: string;
   primary_value: string option;
   value_weights: string option;    (* JSON string *)
   prompt_template: string option;
   generation: int;
   status: string;
+  (* Dynamic Lodge identity from Neo4j *)
+  emoji: string;
+  korean_name: string;
+  model: string;
+  interests: string list;
 }
 
 (** In-memory cache for dynamic personas *)
-let persona_cache : (string, persona_config) Hashtbl.t = Hashtbl.create 10
+let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
 
 (** Load personas from Neo4j via GraphQL API (reliable JSON parsing) *)
-let load_personas_from_neo4j () =
+let load_agents_config () =
   Printf.eprintf "[Lodge] Loading personas from GraphQL...\n%!";
-  (* Simplified query to stay under cost limit (1000) *)
-  let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status } } } }\"}" in
-  (* Add 5s timeout to prevent blocking server startup *)
-  let cmd = Printf.sprintf "source ~/.zshenv && curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
+  (* Query all Lodge identity fields for dynamic persona system *)
+  let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 4096 in
@@ -548,19 +553,24 @@ let load_personas_from_neo4j () =
       try
         let node = Yojson.Safe.Util.member "node" edge in
         let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-        let primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option) in
-        (* Only cache agents with primaryValue (SOUL agents) *)
-        if primary_value <> None then begin
-          let config = {
-            name;
-            primary_value;
-            value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
-            prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
-            generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
-            status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
-          } in
-          Hashtbl.replace persona_cache config.name config
-        end
+        let interests_json = Yojson.Safe.Util.(member "interests" node) in
+        let interests = match interests_json with
+          | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
+          | _ -> []
+        in
+        let config = {
+          name;
+          primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
+          value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
+          prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
+          generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
+          status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
+          emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
+          korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
+          model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
+          interests;
+        } in
+        Hashtbl.replace persona_cache config.name config
       with _ -> ()
     ) edges;
     Printf.eprintf "[Lodge] ✅ Loaded %d SOUL personas from Neo4j\n%!" (Hashtbl.length persona_cache)
@@ -568,12 +578,12 @@ let load_personas_from_neo4j () =
     Printf.eprintf "[Lodge] ❌ Failed to load personas: %s\n%!" (Printexc.to_string e)
 
 (** Get cached persona config, or None if not loaded *)
-let get_cached_persona name =
+let get_cached_agent name =
   Hashtbl.find_opt persona_cache name
 
 (** Get primary value from cached persona (for SOUL-based decisions) *)
-let get_persona_primary_value name =
-  match get_cached_persona name with
+let get_agent_primary_value name =
+  match get_cached_agent name with
   | Some config -> config.primary_value
   | None -> None
 
@@ -617,8 +627,8 @@ let serialize_value_weights weights =
     - Increments generation
     - Updates Neo4j
 *)
-let evolve_persona ~name ~dimension ~outcome =
-  match get_cached_persona name with
+let evolve_agent ~name ~dimension ~outcome =
+  match get_cached_agent name with
   | None ->
     Printf.eprintf "[Evolution] Persona %s not found in cache\n%!" name;
     false
@@ -682,87 +692,81 @@ let evolve_persona ~name ~dimension ~outcome =
 (** Record feedback for a persona's decision (by name) *)
 let record_feedback ~name ~dimension ~is_positive =
   let outcome = if is_positive then Positive else Negative in
-  evolve_persona ~name ~dimension ~outcome
+  evolve_agent ~name ~dimension ~outcome
 
 (** Module initialization - load personas from Neo4j *)
 let () =
   (* Load personas at startup for evolution triggers *)
-  load_personas_from_neo4j ();
+  load_agents_config ();
 
   (* Register SOUL Evolution callback with Tool_board (breaks dependency cycle) *)
   Tool_board.register_evolution_callback {
-    Tool_board.get_primary_value = get_persona_primary_value;
+    Tool_board.get_primary_value = get_agent_primary_value;
     record_feedback = (fun ~name ~dimension ~is_positive ->
       let _ = record_feedback ~name ~dimension ~is_positive in ());
   }
 
-(** {1 REACT: Generate response with persona} *)
+(** {1 REACT: Dynamic persona system (Neo4j SSOT)}
 
-(** Agent personas — each brings unique perspective to Lodge discussions *)
-type persona =
-  | Pragmatist     (** 실용주의자 — 현실적, 구현 가능성 중시 *)
-  | Dreamer        (** 몽상가 — 자유로운 상상, 가능성 탐구 *)
-  | Skeptic        (** 회의론자 — 비판적 사고, 약점 지적 *)
-  | Connector      (** 연결자 — 다른 분야와 연결, 융합 관점 *)
-  | Historian      (** 역사가 — 과거 사례와 비교, 맥락 제공 *)
+    All persona data comes from Neo4j via GraphQL cache.
+    No hardcoded persona enums — add new agents by MERGE into Neo4j.
+*)
 
-let all_personas = [Pragmatist; Dreamer; Skeptic; Connector; Historian]
+(** Get all cached agent names *)
+let get_all_agent_names () =
+  Hashtbl.fold (fun k _ acc -> k :: acc) persona_cache []
 
-let string_of_persona = function
-  | Pragmatist -> "pragmatist"
-  | Dreamer -> "dreamer"
-  | Skeptic -> "skeptic"
-  | Connector -> "connector"
-  | Historian -> "historian"
+(** Pick a random agent name from cache *)
+let random_agent_name () =
+  let names = get_all_agent_names () in
+  if names = [] then "pragmatist"  (* fallback if cache empty *)
+  else List.nth names (Random.int (List.length names))
 
-let persona_of_string = function
-  | "pragmatist" | "실용주의자" -> Some Pragmatist
-  | "dreamer" | "몽상가" -> Some Dreamer
-  | "skeptic" | "회의론자" -> Some Skeptic
-  | "connector" | "연결자" -> Some Connector
-  | "historian" | "역사가" -> Some Historian
-  | "random" | "랜덤" -> Some (List.nth all_personas (Random.int (List.length all_personas)))
-  | _ -> None
+(** Validate agent name exists in cache (replaces persona_of_string) *)
+let validate_agent_name name =
+  if name = "random" || name = "랜덤" then Some (random_agent_name ())
+  else match get_cached_agent name with
+    | Some _ -> Some name
+    | None ->
+      (* Try Korean name lookup *)
+      let found = Hashtbl.fold (fun k v acc ->
+        match acc with Some _ -> acc | None ->
+        if v.korean_name = name then Some k else None
+      ) persona_cache None in
+      found
 
-(** Model selection per persona — diversity of thought through model diversity *)
-let model_of_persona = function
-  (* 100k+ context 모델만 사용 — 작은 모델은 컨텍스트/품질 부족 *)
-  | Pragmatist -> "glm-4.7-flash:latest"               (* 128k, 실용적 분석 *)
-  | Dreamer -> "nemotron-3-nano:latest"                (* 128k, 창의적 사고 *)
-  | Skeptic -> "glm-4.7-flash:latest"                  (* 128k, 비판적 추론 *)
-  | Connector -> "nemotron-3-nano:latest"              (* 128k, 연결 탐색 *)
-  | Historian -> "glm-4.7-flash:latest"                (* 128k, 맥락 요약 *)
+(** Get model for agent (from Neo4j cache) *)
+let get_agent_model name =
+  match get_cached_agent name with
+  | Some c -> c.model
+  | None -> "glm-4.7-flash:latest"
 
-(** Get prompt from Neo4j cache - NO hardcoded fallback *)
-let persona_prompt persona =
-  let name = string_of_persona persona in
-  match get_cached_persona name with
+(** Get prompt from Neo4j cache *)
+let get_agent_prompt name =
+  match get_cached_agent name with
   | Some config ->
     (match config.prompt_template with
      | Some prompt -> prompt
-     | None -> Printf.sprintf "You are %s. (No prompt configured in Neo4j)" name)
+     | None -> Printf.sprintf "You are %s." name)
   | None ->
-    (* Not loaded - try to load on-demand *)
-    load_personas_from_neo4j ();
-    match get_cached_persona name with
+    load_agents_config ();
+    match get_cached_agent name with
     | Some config ->
       (match config.prompt_template with
        | Some prompt -> prompt
-       | None -> Printf.sprintf "You are %s. (No prompt in Neo4j)" name)
+       | None -> Printf.sprintf "You are %s." name)
     | None ->
-      Printf.sprintf "You are %s. (Persona not found in Neo4j - please run: MERGE (a:Agent {name: '%s'}) SET a.prompt_template = '...')" name name
+      Printf.sprintf "You are %s. (Not found in Neo4j)" name
 
-(** Keywords that each persona finds interesting — for upvote matching *)
-let persona_interests = function
-  | Pragmatist -> ["구현"; "코드"; "API"; "성능"; "최적화"; "실용"; "배포"; "테스트"; "버그"; "리팩토링"]
-  | Dreamer -> ["상상"; "가능성"; "미래"; "아이디어"; "창의"; "실험"; "영감"; "꿈"; "탐구"; "모험"]
-  | Skeptic -> ["문제"; "위험"; "취약"; "비판"; "질문"; "검증"; "한계"; "가정"; "반론"; "대안"]
-  | Connector -> ["융합"; "연결"; "패턴"; "유사"; "비유"; "다른 분야"; "관계"; "네트워크"; "협업"; "통합"]
-  | Historian -> ["역사"; "사례"; "패턴"; "과거"; "전통"; "교훈"; "맥락"; "진화"; "기원"; "흐름"]
+(** Get interests for agent (from Neo4j cache) *)
+let get_agent_interests_cached name =
+  match get_cached_agent name with
+  | Some c -> c.interests
+  | None -> []
 
-(** Check if content matches persona's interests *)
-let matches_persona_interest persona content =
-  let keywords = persona_interests persona in
+(** Check if content matches agent's interests *)
+let matches_agent_interest agent_name content =
+  let keywords = get_agent_interests_cached agent_name in
   let content_lower = String.lowercase_ascii content in
   List.exists (fun kw ->
     let kw_lower = String.lowercase_ascii kw in
@@ -770,24 +774,11 @@ let matches_persona_interest persona content =
     with Not_found -> false
   ) keywords
 
-(** Format agent name with emoji badge for clear display *)
-let format_agent_name persona =
-  let emoji = match persona with
-    | Pragmatist -> "🔧"   (* 실용주의자 *)
-    | Dreamer -> "💭"      (* 몽상가 *)
-    | Skeptic -> "🤔"      (* 회의론자 *)
-    | Connector -> "🔗"    (* 연결자 *)
-    | Historian -> "📜"    (* 역사가 *)
-  in
-  let name = string_of_persona persona in
-  let korean_name = match persona with
-    | Pragmatist -> "실용주의자"
-    | Dreamer -> "몽상가"
-    | Skeptic -> "회의론자"
-    | Connector -> "연결자"
-    | Historian -> "역사가"
-  in
-  Printf.sprintf "%s **%s** (%s)" emoji name korean_name
+(** Format agent name with emoji badge (from Neo4j cache) *)
+let format_agent_name_dynamic name =
+  match get_cached_agent name with
+  | Some c -> Printf.sprintf "%s **%s** (%s)" c.emoji name c.korean_name
+  | None -> Printf.sprintf "🤖 **%s**" name
 
 (** Extract just the post content from formatted board output.
     Input format:
@@ -832,23 +823,14 @@ let translate_to_korean ~net text =
     | Ok translated -> String.trim translated
     | Error _ -> text  (* fallback to original *)
 
-(** English persona descriptions for better instruction following *)
-let persona_prompt_en = function
-  | Pragmatist -> "You are a pragmatist. Focus on practical applications and real-world impact."
-  | Dreamer -> "You are a dreamer. Imagine possibilities and future potential."
-  | Skeptic -> "You are a skeptic. Question assumptions and consider risks."
-  | Connector -> "You are a connector. Find links between ideas and people."
-  | Historian -> "You are a historian. Draw parallels to past patterns and lessons."
-
-let react_to_content ~net ?persona content =
-  let selected_persona = match persona with
-    | Some p -> p
-    | None -> List.nth all_personas (Random.int (List.length all_personas))
+(** React to content with a dynamic agent (from Neo4j cache) *)
+let react_to_content ~net ?agent_name:provided_name content =
+  let agent_name = match provided_name with
+    | Some n -> n
+    | None -> random_agent_name ()
   in
-  (* Use persona_prompt which loads from Neo4j (SOUL Layer) *)
-  let persona_desc_en = persona_prompt selected_persona in
-  let persona_name = string_of_persona selected_persona in
-  let agent_name = persona_name in  (* Agent name = persona name (no prefix) *)
+  (* Get prompt from Neo4j cache *)
+  let persona_desc = get_agent_prompt agent_name in
 
   (* Get agent's existing interests for context *)
   let existing_interests = get_agent_interests ~agent_name in
@@ -857,25 +839,22 @@ let react_to_content ~net ?persona content =
       (String.concat ", " existing_interests)
   in
 
-  let _model = model_of_persona selected_persona in  (* NOTE: CLI tools ignore model *)
-  (* Use English prompts for better instruction following, then translate based on lodge_language *)
+  let _model = get_agent_model agent_name in
   let system = Printf.sprintf "/no_think\n\
     You are a Lodge participant. %s%s\n\
     Share your unique perspective. Be thoughtful, specific, and add value. 2-4 sentences only."
-    persona_desc_en interests_context in
+    persona_desc interests_context in
   match smart_generate ~net ~temperature:0.8 ~num_predict:250 ~system
     (Printf.sprintf "React to this Lodge post:\n%s\n\nYour perspective:" content) with
   | Error e -> Error e
   | Ok response ->
-    (* Apply Lodge 공용어 설정 *)
     let final_response = match lodge_language with
-      | "ko" -> translate_to_korean ~net response  (* 한글로 번역 *)
-      | _ -> response  (* en/auto: 영어 그대로 *)
+      | "ko" -> translate_to_korean ~net response
+      | _ -> response
     in
-    (* EVOLVE: Extract and save new interests from this interaction *)
     let new_interests = extract_interests ~net content in
-    let _ = save_interests_to_neo4j ~agent_name ~persona_name new_interests in
-    let display_name = format_agent_name selected_persona in
+    let _ = save_interests_to_neo4j ~agent_name ~persona_name:agent_name new_interests in
+    let display_name = format_agent_name_dynamic agent_name in
     Ok (Printf.sprintf "%s\n%s" display_name final_response)
 
 (** {1 Heartbeat: Full Read → Dig → Share cycle} *)
@@ -918,15 +897,14 @@ let heartbeat ~net (args : Yojson.Safe.t) =
           with Not_found -> "" in
           (* Auto-trigger reactions from personas *)
           let reactions = if post_id <> "" then
-            List.filter_map (fun persona ->
-              match react_to_content ~net ~persona content with
+            List.filter_map (fun agent ->
+              match react_to_content ~net ~agent_name:agent content with
               | Error _ -> None
               | Ok reaction ->
-                let author = string_of_persona persona in
-                let args = `Assoc [("post_id", `String post_id); ("content", `String reaction); ("author", `String author)] in
+                let args = `Assoc [("post_id", `String post_id); ("content", `String reaction); ("author", `String agent)] in
                 let (ok, _) = Tool_board.handle_tool "masc_board_comment" args in
-                if ok then Some (Printf.sprintf "💬 %s" author) else None
-            ) [Skeptic; Pragmatist]
+                if ok then Some (Printf.sprintf "💬 %s" agent) else None
+            ) ["skeptic"; "pragmatist"]
           else [] in
           match reactions with [] -> "" | rs -> "\n🎭 " ^ String.concat ", " rs
         end else "" in
@@ -957,16 +935,17 @@ let classify ~net (args : Yojson.Safe.t) =
 let react ~net (args : Yojson.Safe.t) =
   let post_id_arg = Safe_ops.json_string ~default:"" "post_id" args in
   let persona_str = Safe_ops.json_string ~default:"random" "persona" args in
-  let skip_classify = Safe_ops.json_bool ~default:true "skip_classify" args in  (* default: skip for speed *)
-  let persona = persona_of_string persona_str in
+  let skip_classify = Safe_ops.json_bool ~default:true "skip_classify" args in
+  let agent_name = match validate_agent_name persona_str with
+    | Some n -> n
+    | None -> random_agent_name ()
+  in
   if post_id_arg = "" then (false, "post_id required")
   else
-    (* Handle "random" post_id: pick a random post first *)
     let post_id =
       if post_id_arg = "random" then begin
         let (ok, list_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("random", `Bool true); ("limit", `Int 10)]) in
         if ok then
-          (* Extract first post_id from list *)
           try
             let re = Str.regexp "p-[a-f0-9]+" in
             let _ = Str.search_forward re list_result 0 in
@@ -978,43 +957,32 @@ let react ~net (args : Yojson.Safe.t) =
     let (success, detail) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
     if not success then (false, Printf.sprintf "❌ %s" detail)
     else
-      (* Extract just the content for LLM (not full formatted output) *)
       let clean_content = extract_post_content detail in
       if skip_classify then
-      (* Skip classification, directly react *)
-      match react_to_content ~net ?persona clean_content with
+      match react_to_content ~net ~agent_name clean_content with
       | Error e -> (false, Printf.sprintf "❌ React failed: %s" e)
       | Ok reaction ->
-        let author_name = match persona with
-          | Some p -> string_of_persona p
-          | None -> "anonymous-agent"
-        in
         let comment_args = `Assoc [
           ("post_id", `String post_id);
           ("content", `String reaction);
-          ("author", `String author_name);
+          ("author", `String agent_name);
         ] in
         let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
         if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
         else (false, Printf.sprintf "❌ Comment failed: %s" msg)
     else
-      (* Classify first (slower but more accurate) *)
       let cls = classify_content ~net clean_content in
       match cls.category with
       | Noise -> (true, Printf.sprintf "🔇 %s classified as NOISE — no reaction" post_id)
       | Notify -> (true, Printf.sprintf "⚠️ %s classified as NOTIFY — flagged for human" post_id)
       | Review ->
-        match react_to_content ~net ?persona clean_content with
+        match react_to_content ~net ~agent_name clean_content with
         | Error e -> (false, Printf.sprintf "❌ React failed: %s" e)
         | Ok reaction ->
-          let author_name = match persona with
-            | Some p -> string_of_persona p
-            | None -> "anonymous-agent"
-          in
           let comment_args = `Assoc [
             ("post_id", `String post_id);
             ("content", `String reaction);
-            ("author", `String author_name);
+            ("author", `String agent_name);
           ] in
           let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
           if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
@@ -1037,29 +1005,24 @@ let full_cycle ~net (args : Yojson.Safe.t) =
     in
     if post_id = "" then (true, Printf.sprintf "%s\n(no post_id found for reaction)" msg)
     else
-      (* Step 2: ONE random persona reacts *)
-      let persona = List.nth all_personas (Random.int (List.length all_personas)) in
-      let persona_str = string_of_persona persona in
+      (* Step 2: ONE random agent reacts *)
+      let agent = random_agent_name () in
       let (ok2, result) = react ~net (`Assoc [
         ("post_id", `String post_id);
-        ("persona", `String persona_str);
+        ("persona", `String agent);
       ]) in
-      let model = model_of_persona persona in
+      let model = get_agent_model agent in
       (true, Printf.sprintf "%s\n\n💬 %s [%s] reacted:\n%s"
-        msg persona_str model (if ok2 then result else "❌ " ^ result))
+        msg agent model (if ok2 then result else "❌ " ^ result))
 
-(** {1 Discussion: personas read and react to EACH OTHER's posts} *)
+(** {1 Discussion: agents read and react to EACH OTHER's posts} *)
 
 let lodge_discussion ~net (_args : Yojson.Safe.t) =
-  (* Pick a random persona *)
-  let persona = List.nth all_personas (Random.int (List.length all_personas)) in
-  let persona_str = string_of_persona persona in
+  let agent = random_agent_name () in
 
-  (* Get recent posts *)
   let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 10)]) in
   if not ok then (false, Printf.sprintf "❌ Failed to list posts: %s" posts_result)
   else
-    (* Find post IDs *)
     let post_ids =
       let re = Str.regexp "\\*\\*\\(p-[a-f0-9]+\\)\\*\\*" in
       let rec find_all start acc =
@@ -1071,17 +1034,16 @@ let lodge_discussion ~net (_args : Yojson.Safe.t) =
       find_all 0 []
     in
 
-    if post_ids = [] then (true, Printf.sprintf "📭 %s: 게시판이 비어있어요" persona_str)
+    if post_ids = [] then (true, Printf.sprintf "📭 %s: 게시판이 비어있어요" agent)
     else
-      (* Pick random post to react to *)
       let target = List.nth post_ids (Random.int (List.length post_ids)) in
       let (ok2, result) = react ~net (`Assoc [
         ("post_id", `String target);
-        ("persona", `String persona_str);
+        ("persona", `String agent);
       ]) in
-      let model = model_of_persona persona in
+      let model = get_agent_model agent in
       (true, Printf.sprintf "💬 %s [%s] joined discussion on %s:\n%s"
-        persona_str model target (if ok2 then result else "❌ " ^ result))
+        agent model target (if ok2 then result else "❌ " ^ result))
 
 (** {1 Tool Definitions} *)
 
@@ -1146,7 +1108,7 @@ let tool_discussion : Types.tool_schema = {
 (** Discussion state machine *)
 type discussion_state =
   | Idle        (** 대기 중 — 새 주제 기다림 *)
-  | Topic       (** 주제 선정 — 첫 페르소나가 반응 *)
+  | Topic       (** 주제 선정 — 첫 에이전트가 반응 *)
   | Discuss     (** 토론 중 — 2~3턴 추가 반응 *)
   | Conclude    (** 결론 — historian이 요약 *)
 
@@ -1155,8 +1117,8 @@ type discussion_context = {
   mutable post_id: string;
   mutable turn_count: int;
   mutable max_turns: int;
-  mutable participants: persona list;
-  mutable last_speaker: persona option;
+  mutable participants: string list;
+  mutable last_speaker: string option;
 }
 
 let global_discussion : discussion_context = {
@@ -1174,16 +1136,17 @@ let string_of_state = function
   | Discuss -> "DISCUSS"
   | Conclude -> "CONCLUDE"
 
-(** Select next persona: avoid last speaker, prefer unused *)
-let select_next_persona ctx =
-  let available = List.filter (fun p ->
+(** Select next agent: avoid last speaker, prefer unused *)
+let select_next_agent ctx =
+  let all = get_all_agent_names () in
+  let available = List.filter (fun name ->
     match ctx.last_speaker with
-    | Some last -> p <> last
+    | Some last -> name <> last
     | None -> true
-  ) all_personas in
-  let unused = List.filter (fun p -> not (List.mem p ctx.participants)) available in
+  ) all in
+  let unused = List.filter (fun name -> not (List.mem name ctx.participants)) available in
   let pool = if unused = [] then available else unused in
-  if pool = [] then Pragmatist
+  if pool = [] then "pragmatist"
   else List.nth pool (Random.int (List.length pool))
 
 (** State machine orchestrator (single step) *)
@@ -1224,20 +1187,19 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
       end
 
   | Topic ->
-      (* First persona reacts *)
-      let persona = select_next_persona ctx in
+      let agent = select_next_agent ctx in
       let (ok, result) = react ~net (`Assoc [
         ("post_id", `String ctx.post_id);
-        ("persona", `String (string_of_persona persona));
+        ("persona", `String agent);
       ]) in
-      ctx.participants <- persona :: ctx.participants;
-      ctx.last_speaker <- Some persona;
+      ctx.participants <- agent :: ctx.participants;
+      ctx.last_speaker <- Some agent;
       ctx.turn_count <- 1;
       if ok then begin
-        log (Printf.sprintf "💬 %s (TOPIC): %s" (string_of_persona persona) (String.sub result 0 (min 100 (String.length result))));
+        log (Printf.sprintf "💬 %s (TOPIC): %s" agent (String.sub result 0 (min 100 (String.length result))));
         ctx.state <- Discuss;
       end else begin
-        log (Printf.sprintf "❌ %s failed: %s" (string_of_persona persona) result);
+        log (Printf.sprintf "❌ %s failed: %s" agent result);
         ctx.state <- Idle;
       end
 
@@ -1246,20 +1208,20 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
         ctx.state <- Conclude;
         log "⏰ Max turns reached, transitioning to CONCLUDE";
       end else begin
-        let persona = select_next_persona ctx in
+        let agent = select_next_agent ctx in
         let (ok, result) = react ~net (`Assoc [
           ("post_id", `String ctx.post_id);
-          ("persona", `String (string_of_persona persona));
+          ("persona", `String agent);
         ]) in
-        ctx.participants <- persona :: ctx.participants;
-        ctx.last_speaker <- Some persona;
+        ctx.participants <- agent :: ctx.participants;
+        ctx.last_speaker <- Some agent;
         ctx.turn_count <- ctx.turn_count + 1;
         if ok then
           log (Printf.sprintf "💬 %s (turn %d): %s"
-            (string_of_persona persona) ctx.turn_count
+            agent ctx.turn_count
             (String.sub result 0 (min 100 (String.length result))))
         else
-          log (Printf.sprintf "⚠️ %s error: %s" (string_of_persona persona) result)
+          log (Printf.sprintf "⚠️ %s error: %s" agent result)
       end
 
   | Conclude ->
@@ -1345,7 +1307,8 @@ let core_lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "con
 let get_all_agents () =
   (* Simplified query to stay under cost limit (1000) *)
   let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status } } } }\"}" in
-  let cmd = Printf.sprintf "source ~/.zshenv && curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
   try
     let (_, output) = run_shell_nonblocking cmd in
     try
@@ -1459,7 +1422,7 @@ let spawn ~net (args : Yojson.Safe.t) =
   else spawn_agent ~net ~parent_name:parent ~child_name:name ~child_persona:persona ~child_prompt:prompt
 
 (** Get emoji for persona type *)
-let emoji_of_persona_str = function
+let emoji_of_agent = function
   | "pragmatist" -> "🔧"
   | "dreamer" -> "💭"
   | "skeptic" -> "🤔"
@@ -1481,7 +1444,7 @@ let list_agents ~net:_ (_args : Yojson.Safe.t) =
         then String.sub prompt 0 47 ^ "..."
         else prompt
       in
-      let emoji = emoji_of_persona_str persona in
+      let emoji = emoji_of_agent persona in
       Printf.sprintf "%s **%s**\n   ├─ 유형: %s\n   ├─ 부모: %s\n   ├─ 방문: %d회\n   └─ \"%s\""
         emoji name persona created_by visits prompt_preview
     ) agents in
@@ -1564,7 +1527,7 @@ let tool_evolve : Types.tool_schema = {
 (** {1 Persona Patrol - Independent agent monitors board and reacts} *)
 
 (** Check if persona has already commented on a post *)
-let has_persona_commented persona_name post_id =
+let has_agent_commented persona_name post_id =
   let (ok, comments_json) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
   if not ok then false
   else
@@ -1577,23 +1540,14 @@ let persona_patrol ~net (args : Yojson.Safe.t) =
   let persona_str = Safe_ops.json_string ~default:"" "persona" args in
   if persona_str = "" then (false, "❌ persona required (pragmatist|dreamer|skeptic|connector|historian)")
   else
-    let persona = match persona_of_string persona_str with
-      | Some p -> p
-      | None -> (match String.lowercase_ascii persona_str with
-          | "pragmatist" -> Pragmatist
-          | "dreamer" -> Dreamer
-          | "skeptic" -> Skeptic
-          | "connector" -> Connector
-          | "historian" -> Historian
-          | _ -> Pragmatist)  (* fallback *)
+    let agent_name = match validate_agent_name persona_str with
+      | Some n -> n
+      | None -> String.lowercase_ascii persona_str
     in
-    let agent_name = string_of_persona persona in
 
-    (* Get recent posts from board *)
     let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 10)]) in
     if not ok then (false, Printf.sprintf "❌ Failed to list posts: %s" posts_result)
     else
-      (* Extract post IDs using regex *)
       let post_ids =
         let re = Str.regexp "\\*\\*\\(p-[a-f0-9]+\\)\\*\\*" in
         let rec find_all start acc =
@@ -1608,21 +1562,17 @@ let persona_patrol ~net (args : Yojson.Safe.t) =
 
       if post_ids = [] then (true, Printf.sprintf "🔍 %s: No posts to patrol" agent_name)
       else
-        (* Find posts this persona hasn't reacted to *)
-        let unreacted = List.filter (fun pid -> not (has_persona_commented agent_name pid)) post_ids in
+        let unreacted = List.filter (fun pid -> not (has_agent_commented agent_name pid)) post_ids in
 
         if unreacted = [] then
           (true, Printf.sprintf "✅ %s: Already reacted to all recent posts (checked %d)" agent_name (List.length post_ids))
         else
-          (* React to first unreacted post *)
           let target_post = List.hd unreacted in
 
-          (* Get post content to check interest match *)
           let (got_post, post_content) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String target_post)]) in
 
-          (* Upvote if content matches persona's interests *)
           let upvote_msg =
-            if got_post && matches_persona_interest persona post_content then begin
+            if got_post && matches_agent_interest agent_name post_content then begin
               let (_vote_ok, vote_result) = Tool_board.handle_tool "masc_board_vote" (`Assoc [
                 ("post_id", `String target_post);
                 ("voter", `String agent_name);
@@ -1634,7 +1584,7 @@ let persona_patrol ~net (args : Yojson.Safe.t) =
 
           let (react_ok, react_msg) = react ~net (`Assoc [
             ("post_id", `String target_post);
-            ("persona", `String persona_str);
+            ("persona", `String agent_name);
           ]) in
           if react_ok then
             (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s%s" agent_name target_post react_msg upvote_msg)
@@ -1956,7 +1906,7 @@ let lodge_progress ~net:_ _args =
               let p = (try Yojson.Safe.Util.to_string persona with _ -> "unknown") in
               let v = (try Yojson.Safe.Util.to_int visits with _ -> 0) in
               let i = (try Yojson.Safe.Util.to_int interests with _ -> 0) in
-              let emoji = emoji_of_persona_str p in
+              let emoji = emoji_of_agent p in
               Some (Printf.sprintf "   %s %s: %d visits, %d topics" emoji name v i)
             | _ -> None
           with _ -> None
@@ -2011,7 +1961,7 @@ let autonomous_loop ~net args =
           (* Persona patrol - 20% *)
           let personas = ["pragmatist"; "dreamer"; "skeptic"; "connector"; "historian"] in
           let p = List.nth personas (Random.int 5) in
-          let emoji = emoji_of_persona_str p in
+          let emoji = emoji_of_agent p in
           (Printf.sprintf "%s patrol" emoji, persona_patrol ~net (`Assoc [("persona", `String p)]))
       | 2 ->
           (* Research random topic - 10% *)

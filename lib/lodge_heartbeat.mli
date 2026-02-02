@@ -56,10 +56,6 @@ val load_agent_identity : agent_name:string -> string
 val load_agent_memories : agent_name:string -> limit:int -> string option
 val record_agent_memory : agent_name:string -> content:string -> action_type:[< `Post of string | `Comment of string ] -> unit
 
-(** {1 Wake Logic} *)
-
-val should_wake : config -> agent -> Board.post list -> wake_reason option
-
 (** {1 Heartbeat Execution} *)
 
 val tick : config:config -> recent_posts:Board.post list -> heartbeat_result

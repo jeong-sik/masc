@@ -339,34 +339,47 @@ let generate_reflection ~config ~persona =
     | Error e -> Printf.eprintf "[Lodge Daemon] Reflection error: %s\n%!" e
   end
 
-(** {1 Eio Main Loop (Phase 2)} *)
+(** {1 Eio Main Loop (Phase 3)} *)
 
-(** Run patrol loop for a single persona — blocking, call in Eio fiber *)
-let run_persona_loop ~config (persona_cfg : persona_config) =
+(** Run patrol loop for a single persona — Eio-aware, runs in fiber *)
+let run_persona_loop ~clock ~config (persona_cfg : persona_config) =
+  let persona = persona_cfg.persona in
+  Eio.traceln "🔄 [Lodge] Fiber started: %s (curiosity=%.2f)" persona persona_cfg.curiosity;
   let rec loop () =
-    let state = get_state persona_cfg.persona in
+    let state = get_state persona in
     if is_patrol_due state persona_cfg then begin
-      patrol_once ~config ~persona:persona_cfg.persona;
+      Eio.traceln "🎯 [Lodge] Patrol due: %s" persona;
+      patrol_once ~config ~persona;
       let needs_reflection = match state.last_reflection with
         | None -> state.patrol_count > 5
         | Some last -> (Unix.gettimeofday () -. last) >= config.reflection_interval_s
       in
       if needs_reflection then
-        generate_reflection ~config ~persona:persona_cfg.persona
+        generate_reflection ~config ~persona
     end;
-    Unix.sleepf config.check_interval_s;
+    (* Eio non-blocking sleep *)
+    Eio.Time.sleep clock config.check_interval_s;
     loop ()
   in
-  loop ()
+  try loop ()
+  with exn ->
+    Eio.traceln "❌ [Lodge] Fiber %s crashed: %s" persona (Printexc.to_string exn)
 
-(** Start the daemon with persona list — call from MASC server *)
-let start ~sw:_ ~config personas =
+(** Start the daemon with persona list — call from MASC server startup *)
+let start ~sw ~clock ~config personas =
   if not config.enabled then
-    Printf.printf "[Lodge Daemon] Disabled, skipping startup\n%!"
+    Eio.traceln "⏸️ [Lodge Daemon] Disabled, skipping startup"
   else begin
-    Printf.printf "[Lodge Daemon] Starting with %d personas\n%!" (List.length personas);
-    (* TODO: Spawn Eio.Fiber for each persona using Eio.Fiber.fork *)
+    Eio.traceln "🚀 [Lodge Daemon] Starting with %d personas" (List.length personas);
+    (* Spawn one Eio fiber per persona *)
     List.iter (fun p ->
-      Printf.printf "[Lodge Daemon] Registered: %s (curiosity=%.2f)\n%!" p.persona p.curiosity
-    ) personas
+      Eio.Fiber.fork ~sw (fun () ->
+        (* Stagger start times based on persona index to avoid thundering herd *)
+        let delay = float_of_int (Hashtbl.hash p.persona mod 30) in
+        Eio.Time.sleep clock delay;
+        run_persona_loop ~clock ~config p
+      );
+      Eio.traceln "  ✓ Spawned fiber: %s" p.persona
+    ) personas;
+    Eio.traceln "🎮 [Lodge Daemon] All fibers spawned"
   end

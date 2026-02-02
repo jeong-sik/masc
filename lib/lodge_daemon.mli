@@ -57,5 +57,5 @@ val patrol_once : config:config -> persona:string -> unit
 val generate_reflection : config:config -> persona:string -> unit
 
 (** {1 Eio Main Loop} *)
-val run_persona_loop : config:config -> persona_config -> unit
-val start : sw:'a -> config:config -> persona_config list -> unit
+val run_persona_loop : clock:Eio.Time.clock -> config:config -> persona_config -> unit
+val start : sw:Eio.Switch.t -> clock:Eio.Time.clock -> config:config -> persona_config list -> unit

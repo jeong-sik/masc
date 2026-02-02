@@ -62,6 +62,72 @@ let try_activate_agent ~name : string option =
 let deactivate_agent ~name =
   Hashtbl.remove active_agents name
 
+(** {1 Agent Self-Heartbeat}
+
+    Each agent has its own heartbeat loop (30s interval).
+    Agent stays active until idle_timeout (5 minutes).
+*)
+
+type agent_state = {
+  mutable last_activity: float;
+  mutable action_count: int;
+  mutable should_stop: bool;
+}
+
+(** Active agent states for self-heartbeat *)
+let agent_states : (string, agent_state) Hashtbl.t = Hashtbl.create 10
+
+(** Agent heartbeat interval (30 seconds) *)
+let agent_heartbeat_interval = 30.0
+
+(** Agent idle timeout (5 minutes) *)
+let agent_idle_timeout = 300.0
+
+(** Start agent's own heartbeat loop *)
+let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
+  let state = {
+    last_activity = Unix.gettimeofday ();
+    action_count = 0;
+    should_stop = false;
+  } in
+  Hashtbl.replace agent_states name state;
+
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.traceln "   🫀 [%s] Self-heartbeat started (interval=%.0fs)" name agent_heartbeat_interval;
+    while not state.should_stop do
+      Eio.Time.sleep clock agent_heartbeat_interval;
+
+      let now = Unix.gettimeofday () in
+      let idle_time = now -. state.last_activity in
+
+      if idle_time > agent_idle_timeout then begin
+        (* Idle too long, stop *)
+        Eio.traceln "   💤 [%s] Idle %.0fs, going to sleep" name idle_time;
+        state.should_stop <- true;
+        deactivate_agent ~name
+      end else begin
+        (* Do a tick *)
+        state.action_count <- state.action_count + 1;
+        Eio.traceln "   💓 [%s] Heartbeat #%d (idle=%.0fs)" name state.action_count idle_time;
+        on_tick ~name ~state
+      end
+    done;
+    Hashtbl.remove agent_states name;
+    Eio.traceln "   🛑 [%s] Self-heartbeat stopped" name
+  )
+
+(** Record agent activity (resets idle timer) *)
+let record_agent_activity ~name =
+  match Hashtbl.find_opt agent_states name with
+  | Some state -> state.last_activity <- Unix.gettimeofday ()
+  | None -> ()
+
+(** Stop agent's heartbeat *)
+let stop_agent_heartbeat ~name =
+  match Hashtbl.find_opt agent_states name with
+  | Some state -> state.should_stop <- true
+  | None -> ()
+
 (** Update Lodge agent status - now tracks singleton state *)
 let update_lodge_agent_status ~name ~status ?current_task:_ () =
   match status with
@@ -652,20 +718,67 @@ let start ~sw ~clock room_config =
             (* SINGLETON CHECK: Only one instance per agent *)
             match try_activate_agent ~name with
             | None -> ()  (* Already active, skip *)
-            | Some _uuid ->
+            | Some uuid ->
 
             Eio.traceln "   🔔 Wake %s: %s" name reason_str;
 
+            (* Check if agent already has self-heartbeat running *)
+            let already_has_heartbeat = Hashtbl.mem agent_states name in
+
+            if already_has_heartbeat then begin
+              (* Just record activity to reset idle timer *)
+              record_agent_activity ~name;
+              Eio.traceln "   ♻️ [%s] Already has heartbeat, bumping activity" name
+            end else begin
+              (* Start agent's self-heartbeat loop *)
+              let on_tick ~name ~state =
+                (* Agent's own heartbeat tick - decide what to do *)
+                let store = Board.global () in
+                let author = name in
+                let should_comment = Random.float 1.0 < 0.7 in
+                let recent_posts = Board.list_posts store ~limit:10 () in
+
+                if should_comment && List.length recent_posts > 0 then begin
+                  let other_posts = List.filter (fun (p : Board.post) ->
+                    Board.Agent_id.to_string p.author <> name
+                  ) recent_posts in
+                  match other_posts with
+                  | [] -> ()
+                  | posts ->
+                      let target_post = List.nth posts (Random.int (List.length posts)) in
+                      let original_content = target_post.content in
+                      match generate_agent_content ~agent_name:name ~context:original_content
+                              ~action_type:(`Comment original_content) with
+                      | None -> ()
+                      | Some comment_content ->
+                          Eio.traceln "   🤖 [%s] HB#%d: %s" name state.action_count comment_content;
+                          let post_id = Board.Post_id.to_string target_post.id in
+                          (match Board.add_comment store ~post_id ~author ~content:comment_content () with
+                           | Ok _ -> state.last_activity <- Unix.gettimeofday ()
+                           | Error _ -> ())
+                end else begin
+                  let reason_context = Printf.sprintf "heartbeat #%d" state.action_count in
+                  match generate_agent_content ~agent_name:name ~context:reason_context
+                          ~action_type:(`Post reason_context) with
+                  | None -> ()
+                  | Some content ->
+                      Eio.traceln "   🤖 [%s] HB#%d: %s" name state.action_count content;
+                      (match Board.create_post store ~author ~content ~ttl_hours:168 () with
+                       | Ok _ -> state.last_activity <- Unix.gettimeofday ()
+                       | Error _ -> ())
+                end
+              in
+              start_agent_heartbeat ~sw ~clock ~name ~on_tick;
+              Eio.traceln "   🚀 [%s] Started self-heartbeat (uuid=%s)" name uuid
+            end;
+
+            (* Do initial action immediately *)
             let store = Board.global () in
             let author = name in
-
-            (* 70% chance to comment on existing post, 30% to create new post *)
-            (* Agents should engage with each other more than post alone *)
             let should_comment = Random.float 1.0 < 0.7 in
             let recent_posts = Board.list_posts store ~limit:10 () in
 
             if should_comment && List.length recent_posts > 0 then begin
-              (* Comment on a random recent post (not own) *)
               let other_posts = List.filter (fun (p : Board.post) ->
                 Board.Agent_id.to_string p.author <> name
               ) recent_posts in
@@ -675,24 +788,23 @@ let start ~sw ~clock room_config =
               | posts ->
                   let target_post = List.nth posts (Random.int (List.length posts)) in
                   let original_content = target_post.content in
-                  (* Generate comment using LLM with agent personality *)
                   match generate_agent_content
                     ~agent_name:name
                     ~context:original_content
                     ~action_type:(`Comment original_content)
                   with
-                  | None -> () (* LLM failed, skip *)
+                  | None -> ()
                   | Some comment_content ->
                       Eio.traceln "   🤖 [%s] Generated: %s" name comment_content;
                       let post_id = Board.Post_id.to_string target_post.id in
                       match Board.add_comment store ~post_id ~author ~content:comment_content () with
                       | Ok comment ->
                           Eio.traceln "   💬 [%s] Commented: %s" name (Board.Comment_id.to_string comment.id);
+                          record_agent_activity ~name;
                           record_agent_memory ~agent_name:name ~content:comment_content ~action_type:(`Comment original_content)
                       | Error e ->
                           Eio.traceln "   ❌ [%s] Comment failed: %s" name (Board.show_board_error e)
             end else begin
-              (* Create new post using LLM *)
               let reason_context = match reason with
                 | Matching { score; topic } ->
                     Printf.sprintf "유사도 %.2f로 '%s' 주제와 매칭됨" score topic
@@ -712,16 +824,17 @@ let start ~sw ~clock room_config =
                   match Board.create_post store ~author ~content ~ttl_hours:168 () with
                   | Ok post ->
                       Eio.traceln "   📝 [%s] Posted: %s" name (Board.Post_id.to_string post.id);
+                      record_agent_activity ~name;  (* Reset idle timer *)
                       record_agent_memory ~agent_name:name ~content ~action_type:(`Post reason_context)
                   | Error e ->
                       Eio.traceln "   ❌ [%s] Post failed: %s" name (Board.show_board_error e)
-            end;
-            (* Mark agent as Inactive (done working, zombie protocol will clean up) *)
-            update_lodge_agent_status ~name ~status:Types.Inactive ()
+            end
+            (* NOTE: Agent lifecycle now managed by self-heartbeat, not deactivated here *)
           with e ->
             Eio.traceln "   💀 [%s] Agent error: %s" name (Printexc.to_string e);
-            (* Still mark as Inactive even on error *)
-            update_lodge_agent_status ~name ~status:Types.Inactive ()
+            (* On error, stop self-heartbeat *)
+            stop_agent_heartbeat ~name;
+            deactivate_agent ~name
         ) result.agents_woken in
         (* Run all agents in parallel! *)
         if List.length agent_tasks > 0 then

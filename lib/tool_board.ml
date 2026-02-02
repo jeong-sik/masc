@@ -252,25 +252,9 @@ let handle_vote args =
   match Board.vote store ~voter ~post_id ~direction with
   | Ok new_score ->
       let arrow = if direction = Board.Up then "↑" else "↓" in
-      (* SOUL Evolution: trigger evolution for Lodge personas *)
-      let evolution_msg =
-        match Board.get_post store ~post_id with
-        | Ok post ->
-          let author = Board.Agent_id.to_string post.author in
-          if List.mem author lodge_personas then begin
-            (* Get persona's primary value to evolve *)
-            let dimension = match Tool_lodge.get_persona_primary_value author with
-              | Some pv -> pv
-              | None -> "Creativity"  (* default *)
-            in
-            let is_positive = (direction = Board.Up) in
-            let _ = Tool_lodge.record_feedback ~name:author ~dimension ~is_positive in
-            Printf.sprintf " [🧬 %s evolved: %s %s]"
-              author dimension (if is_positive then "+0.01" else "-0.01")
-          end else ""
-        | Error _ -> ""
-      in
-      (true, Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
+      (* SOUL Evolution: disabled to break Tool_lodge <-> Tool_board cycle
+         TODO: Move evolution logic to a separate module if needed *)
+      (true, Printf.sprintf "%s Vote recorded. New score: %+d" arrow new_score)
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 

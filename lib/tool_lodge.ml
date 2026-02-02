@@ -527,7 +527,7 @@ let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
 let load_agents_config () =
   Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
   (* Query all Lodge identity fields for dynamic agent system *)
-  let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
+  let query = "{\"query\": \"{ agents(first: 8) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
   try
@@ -1311,7 +1311,7 @@ let core_lodge_agents () = get_all_agent_names ()
 (** Get all Lodge agents via GraphQL *)
 let get_all_agents () =
   (* Simplified query to stay under cost limit (1000) *)
-  let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status } } } }\"}" in
+  let query = "{\"query\": \"{ agents(first: 8) { edges { node { name primaryValue status } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
   try

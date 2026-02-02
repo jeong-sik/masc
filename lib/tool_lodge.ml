@@ -521,9 +521,10 @@ let persona_cache : (string, persona_config) Hashtbl.t = Hashtbl.create 10
 (** Load personas from Neo4j via GraphQL API (reliable JSON parsing) *)
 let load_personas_from_neo4j () =
   Printf.eprintf "[Lodge] Loading personas from GraphQL...\n%!";
-  let query = "{\"query\": \"{ agents(first: 20) { edges { node { name primaryValue valueWeights promptTemplate generation status } } } }\"}" in
+  (* Simplified query to stay under cost limit (1000) *)
+  let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status } } } }\"}" in
   (* Add 5s timeout to prevent blocking server startup *)
-  let cmd = Printf.sprintf "source ~/.zshenv && curl -s --connect-timeout 3 --max-time 5 http://localhost:4000/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
+  let cmd = Printf.sprintf "source ~/.zshenv && curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 4096 in
@@ -1342,8 +1343,9 @@ let core_lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "con
 
 (** Get all Lodge agents via GraphQL *)
 let get_all_agents () =
-  let query = "{\"query\": \"{ agents(first: 20) { edges { node { name primaryValue promptTemplate status } } } }\"}" in
-  let cmd = Printf.sprintf "source ~/.zshenv && curl -s http://localhost:4000/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
+  (* Simplified query to stay under cost limit (1000) *)
+  let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status } } } }\"}" in
+  let cmd = Printf.sprintf "source ~/.zshenv && curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
   try
     let (_, output) = run_shell_nonblocking cmd in
     try

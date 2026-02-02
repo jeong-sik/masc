@@ -1356,6 +1356,65 @@ let run_server ~sw ~env ~port ~base_path =
     | Eio.Cancel.Cancelled _ -> true
     | _ -> false
   in
+  (* ═══════════════════════════════════════════════════════════════════════
+     HTTP/2 Response Helpers - Reduce duplication in handlers
+     ═══════════════════════════════════════════════════════════════════════ *)
+
+  let h2_respond_json ?(status = `OK) ?(extra_headers = []) h2_reqd body =
+    let headers = H2.Headers.of_list ([
+      ("content-type", "application/json; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+    ] @ extra_headers) in
+    let response = H2.Response.create ~headers status in
+    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+    H2.Body.Writer.write_string writer body;
+    H2.Body.Writer.close writer
+  in
+
+  let h2_respond_text ?(status = `OK) ?(extra_headers = []) h2_reqd body =
+    let headers = H2.Headers.of_list ([
+      ("content-type", "text/plain; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+    ] @ extra_headers) in
+    let response = H2.Response.create ~headers status in
+    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+    H2.Body.Writer.write_string writer body;
+    H2.Body.Writer.close writer
+  in
+
+  let h2_respond_html ?(status = `OK) ?(extra_headers = []) h2_reqd body =
+    let headers = H2.Headers.of_list ([
+      ("content-type", "text/html; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+    ] @ extra_headers) in
+    let response = H2.Response.create ~headers status in
+    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+    H2.Body.Writer.write_string writer body;
+    H2.Body.Writer.close writer
+  in
+
+  let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
+    let headers = H2.Headers.of_list (("content-length", "0") :: extra_headers) in
+    let response = H2.Response.create ~headers status in
+    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+    H2.Body.Writer.close writer
+  in
+
+  (* Read H2 request body asynchronously *)
+  let h2_read_body h2_reqd callback =
+    let body = H2.Reqd.request_body h2_reqd in
+    let buf = Buffer.create 4096 in
+    let rec read_loop () =
+      H2.Body.Reader.schedule_read body
+        ~on_eof:(fun () -> callback (Buffer.contents buf))
+        ~on_read:(fun bigstring ~off ~len ->
+          let chunk = Bigstringaf.substring bigstring ~off ~len in
+          Buffer.add_string buf chunk;
+          read_loop ())
+    in
+    read_loop ()
+  in
+
   (* HTTP/2 error handler *)
   let h2_error_handler _client_addr ?request:_ error respond =
     let message = match error with
@@ -1370,82 +1429,231 @@ let run_server ~sw ~env ~port ~base_path =
     H2.Body.Writer.close body
   in
 
-  (* HTTP/2 request handler - adapts H2.Reqd.t to existing handler logic *)
+  (* ═══════════════════════════════════════════════════════════════════════
+     HTTP/2 Request Handler - Full implementation
+     ═══════════════════════════════════════════════════════════════════════ *)
   let h2_request_handler _client_addr h2_reqd =
     let h2_req = H2.Reqd.request h2_reqd in
-    (* Convert H2.Request to Httpun.Request for compatibility *)
-    let httpun_headers = Httpun.Headers.of_list (H2.Headers.to_list h2_req.headers) in
+    let h2_headers = h2_req.headers in
+    (* Convert H2.Request to Httpun.Request for compatibility with existing code *)
+    let httpun_headers = Httpun.Headers.of_list (H2.Headers.to_list h2_headers) in
     let httpun_meth = match h2_req.meth with
       | `GET -> `GET | `POST -> `POST | `DELETE -> `DELETE
       | `OPTIONS -> `OPTIONS | `PUT -> `PUT | `HEAD -> `HEAD
       | `CONNECT -> `CONNECT | `TRACE -> `TRACE | `Other s -> `Other s
     in
     let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h2_req.target in
-    (* Create a Gluten-style wrapper for the H2.Reqd.t
-       This is a minimal adapter - we'll call handlers directly with H2 *)
     let path = Http.Request.path httpun_request in
-    (* Will be used after full migration for validation *)
-    let _is_mcp_like =
-      String.equal path "/mcp"
-      || String.equal path "/sse"
-      || String.equal path "/messages"
+    let origin = match H2.Headers.get h2_headers "origin" with
+      | Some o -> o | None -> "*"
     in
-    let origin = match H2.Headers.get h2_req.headers "origin" with
-      | Some o -> o
-      | None -> "*"
-    in
+    let cors = cors_headers origin in
+    let session_id_opt = get_session_id_any httpun_request in
 
-    (* Fast path: handle common cases directly with H2 API *)
     try
       match httpun_meth, path with
+      (* ─────────────────────────────────────────────────────────────────────
+         Health & Metrics
+         ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
-          let body = Printf.sprintf
-            {|{"status":"ok","server":"masc-mcp","version":"%s","protocol":"h2"}|}
-            Masc_mcp.Version.version
+          let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
+          let uptime_str =
+            if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
+            else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
+            else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
           in
-          let headers = H2.Headers.of_list [
-            ("content-type", "application/json");
+          let body = Printf.sprintf
+            {|{"status":"ok","server":"masc-mcp","version":"%s","protocol":"h2","uptime":"%s","sse_clients":%d}|}
+            Masc_mcp.Version.version uptime_str (Sse.client_count ())
+          in
+          h2_respond_json h2_reqd body ~extra_headers:cors
+
+      | `GET, "/metrics" ->
+          let body = Masc_mcp.Prometheus.to_prometheus_text () in
+          let headers = H2.Headers.of_list ([
+            ("content-type", "text/plain; version=0.0.4; charset=utf-8");
             ("content-length", string_of_int (String.length body));
-          ] in
+          ] @ cors) in
           let response = H2.Response.create ~headers `OK in
           let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
           H2.Body.Writer.write_string writer body;
           H2.Body.Writer.close writer
 
-      | `OPTIONS, _ ->
-          let headers = H2.Headers.of_list (
-            ("content-length", "0") ::
-            cors_preflight_headers origin
-          ) in
-          let response = H2.Response.create ~headers `No_content in
-          let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-          H2.Body.Writer.close writer
+      | `GET, "/" ->
+          h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
 
-      | _ ->
-          (* For now, return 501 Not Implemented for other routes during migration *)
-          let body = Printf.sprintf "H2 migration in progress: %s %s" (Httpun.Method.to_string httpun_meth) path in
-          let headers = H2.Headers.of_list [
-            ("content-type", "text/plain");
-            ("content-length", string_of_int (String.length body));
+      (* ─────────────────────────────────────────────────────────────────────
+         CORS Preflight
+         ───────────────────────────────────────────────────────────────────── *)
+      | `OPTIONS, _ ->
+          h2_respond_empty h2_reqd ~extra_headers:(cors_preflight_headers origin)
+
+      (* ─────────────────────────────────────────────────────────────────────
+         MCP Endpoints
+         ───────────────────────────────────────────────────────────────────── *)
+      | `POST, "/mcp" | `POST, "/" ->
+          let session_id = match session_id_opt with
+            | Some id -> id
+            | None -> Mcp_session.generate ()
+          in
+          let auth_token = auth_token_from_request httpun_request in
+          h2_read_body h2_reqd (fun body_str ->
+            let state = match !server_state with
+              | Some s -> s
+              | None -> failwith "Server state not initialized"
+            in
+            let response_json =
+              Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id ?auth_token state body_str
+            in
+            (match protocol_version_from_body body_str with
+             | Some v -> remember_protocol_version session_id v
+             | None -> ());
+            let protocol_version = get_protocol_version_for_session ~session_id httpun_request in
+            let mcp_hdrs = mcp_headers session_id protocol_version @ cors in
+            match response_json with
+            | `Null ->
+                h2_respond_empty h2_reqd ~status:`Accepted ~extra_headers:mcp_hdrs
+            | json when is_http_error_response json ->
+                let body = Yojson.Safe.to_string json in
+                h2_respond_json h2_reqd body ~status:`Bad_request ~extra_headers:mcp_hdrs
+            | json ->
+                let body = Yojson.Safe.to_string json in
+                h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs
+          )
+
+      | `DELETE, "/mcp" ->
+          (match session_id_opt with
+           | Some session_id ->
+               stop_sse_session session_id;
+               Sse.unregister session_id;
+               Hashtbl.remove protocol_version_by_session session_id;
+               Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+               let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
+               h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs
+           | None ->
+               h2_respond_text h2_reqd "Mcp-Session-Id required" ~status:`Bad_request ~extra_headers:cors)
+
+      (* ─────────────────────────────────────────────────────────────────────
+         Dashboard
+         ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/dashboard" ->
+          h2_respond_html h2_reqd (Masc_mcp.Web_dashboard.html ()) ~extra_headers:cors
+
+      | `GET, "/dashboard/credits" ->
+          h2_respond_html h2_reqd (Masc_mcp.Credits_dashboard.html ()) ~extra_headers:cors
+
+      (* ─────────────────────────────────────────────────────────────────────
+         GraphQL
+         ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/graphql" ->
+          let nonce =
+            let rng = Random.State.make_self_init () in
+            let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
+            Base64.encode_string (Bytes.to_string bytes)
+          in
+          let csp_header = ("content-security-policy", graphql_csp_header nonce) in
+          h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors)
+
+      | `POST, "/graphql" ->
+          h2_read_body h2_reqd (fun body_str ->
+            let state = match !server_state with
+              | Some s -> s
+              | None -> failwith "Server state not initialized"
+            in
+            let response = Graphql_api.handle_request ~config:state.room_config body_str in
+            let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
+            h2_respond_json h2_reqd response.body ~status ~extra_headers:cors
+          )
+
+      (* ─────────────────────────────────────────────────────────────────────
+         REST API
+         ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/api/v1/status" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let config = state.Mcp_server.room_config in
+          let room_state = Masc_mcp.Room.read_state config in
+          let tempo = Masc_mcp.Tempo.get_tempo config in
+          let json = `Assoc [
+            ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+            ("project", `String room_state.project);
+            ("tempo_interval_s", `Float tempo.current_interval_s);
+            ("paused", `Bool room_state.paused);
           ] in
-          let response = H2.Response.create ~headers `Not_implemented in
-          let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-          H2.Body.Writer.write_string writer body;
-          H2.Body.Writer.close writer
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/credits" ->
+          h2_respond_json h2_reqd (Masc_mcp.Credits_dashboard.json_api ()) ~extra_headers:cors
+
+      | `GET, "/api/v1/board" ->
+          let store = Board.global () in
+          let posts = Board.list_posts store () in
+          let karma_map = Board.get_all_karma store in
+          let get_karma author =
+            try List.assoc author karma_map with Not_found -> 0
+          in
+          let posts_json = List.map (fun p ->
+            Board.post_to_yojson_with_karma p ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
+          ) posts in
+          let json = `Assoc [("posts", `List posts_json); ("count", `Int (List.length posts))] in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/board/flairs" ->
+          let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+          let json = `Assoc [("flairs", `List flairs)] in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/karma" ->
+          let store = Board.global () in
+          let karma_list = Board.get_all_karma store in
+          let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+          let json = `Assoc [
+            ("karma", `List (List.map (fun (agent, k) ->
+              `Assoc [("agent", `String agent); ("karma", `Int k)]
+            ) sorted));
+          ] in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      (* ─────────────────────────────────────────────────────────────────────
+         Static Assets
+         ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/static/css/middleware.css" ->
+          (match read_file (playground_asset_path "static/css/middleware.css") with
+           | Ok body ->
+               let headers = H2.Headers.of_list [
+                 ("content-type", "text/css; charset=utf-8");
+                 ("content-length", string_of_int (String.length body));
+               ] in
+               let response = H2.Response.create ~headers `OK in
+               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+               H2.Body.Writer.write_string writer body;
+               H2.Body.Writer.close writer
+           | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found)
+
+      | `GET, "/static/js/middleware.js" ->
+          (match read_file (playground_asset_path "static/js/middleware.js") with
+           | Ok body ->
+               let headers = H2.Headers.of_list [
+                 ("content-type", "application/javascript; charset=utf-8");
+                 ("content-length", string_of_int (String.length body));
+               ] in
+               let response = H2.Response.create ~headers `OK in
+               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+               H2.Body.Writer.write_string writer body;
+               H2.Body.Writer.close writer
+           | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found)
+
+      (* ─────────────────────────────────────────────────────────────────────
+         Fallback
+         ───────────────────────────────────────────────────────────────────── *)
+      | _ ->
+          h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path) ~status:`Not_found ~extra_headers:cors
+
     with exn ->
       let msg = Printexc.to_string exn in
       Printf.eprintf "[H2] Handler error: %s\n%!" msg;
-      let body = "500 Internal Server Error: " ^ msg in
-      let headers = H2.Headers.of_list [
-        ("content-type", "text/plain");
-        ("content-length", string_of_int (String.length body));
-      ] in
-      let response = H2.Response.create ~headers `Internal_server_error in
-      let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-      H2.Body.Writer.write_string writer body;
-      H2.Body.Writer.close writer
+      h2_respond_text h2_reqd ("500 Internal Server Error: " ^ msg) ~status:`Internal_server_error ~extra_headers:cors
   in
-  let _ = request_handler in (* suppress warning - will be used after full migration *)
+  let _ = request_handler in (* suppress warning - legacy httpun handler *)
 
   let rec accept_loop backoff_s =
     try

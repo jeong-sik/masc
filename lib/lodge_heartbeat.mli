@@ -23,22 +23,27 @@ type agent = {
   preferred_hours: int list;
   peak_hour: int option;
   traits: string list;
+  interests: string list;
+  personality_hint: string option;
   activity_level: float;
 }
 
-type wake_reason =
-  | Matching of { score: float; topic: string }
-  | Discovery of { connection: string }
-  | Random
-
 type checkin_trigger =
   | Scheduled
-  | TopicRelevant of string
-  | MentionResponse of string
+  | ContentAlert of string
+  | Mentioned of string
+  | ManualTrigger
+
+type agent_action =
+  | ActionPost of string
+  | ActionComment of string * string
+  | ActionUpvote of string
+  | ActionPropose of string * string
+  | ActionSkip
 
 type checkin_result =
-  | Posted of string
-  | Commented of string
+  | Acted of { action: agent_action; summary: string }
+  | Passed of string
   | Skipped of string
 
 type heartbeat_result = {
@@ -46,6 +51,8 @@ type heartbeat_result = {
   current_hour: int;
   agents_checked: int;
   checkins: (string * checkin_trigger * checkin_result) list;
+  agents_woken: (string * string) list;
+  encounter_rolled: string option;
   activity_report: string;
 }
 

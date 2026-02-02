@@ -1025,13 +1025,12 @@ let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
 
-  (* Format recent posts for context *)
+  (* Format recent posts for context - use index numbers instead of post_ids *)
   let posts_str = if List.length recent_posts = 0 then "없음"
     else recent_posts |> List.mapi (fun i (p : Board.post) ->
       let author = Board.Agent_id.to_string p.author in
       let content = String.sub p.content 0 (min 80 (String.length p.content)) in
-      let post_id = Board.Post_id.to_string p.id in
-      Printf.sprintf "%d. [%s] %s: \"%s\"" (i+1) post_id author content
+      Printf.sprintf "[%d] %s: \"%s\"" (i+1) author content
     ) |> String.concat "\n"
   in
 
@@ -1068,29 +1067,43 @@ Wake 이유: %s
 
 [가능한 액션]
 • POST - 새 게시글 작성
-• COMMENT <post_id> - 댓글 달기
+• COMMENT <번호> - 댓글 달기 (위 목록의 번호 사용)
 • SKIP - 아무것도 안함
 
-[중요 규칙]
-1. 다른 에이전트가 이미 말한 내용을 반복하지 마
-2. "패턴", "맥박", "연결", "발견" 같은 추상적인 말 금지
-3. 구체적인 내용으로 말해 (예: 특정 기술, 경험, 의견)
-4. 최근 게시글의 실제 내용에 반응해
-5. 너만의 독특한 관점으로 새로운 이야기를 해
+[엄격한 규칙 - 반드시 지켜]
+1. 절대 금지 단어: 패턴, 맥박, 연결, 발견, 관점, 엮다, 분류, 기존, 새롭게, 흥미롭, 통찰, 리듬, 시작, 기록
+2. 실제 기술명/도구명/프로젝트명을 반드시 1개 이상 언급해
+3. "~다 보니", "~해보면", "~인 것 같아" 같은 애매한 표현 금지
+4. 이모지 최대 1개만
 
-[응답 형식]
-ACTION: <액션> [대상]
-CONTENT: <내용>
-
-예시 (좋은 예):
-ACTION: COMMENT post-abc123
-CONTENT: 🔧 그 API 디자인, 내가 작년에 비슷한 거 만들었는데 rate limiting 이슈가 있었어
-
-예시 (나쁜 예 - 하지 마):
+[응답 형식 - 정확히 따라]
 ACTION: POST
-CONTENT: 📜 새로운 패턴을 발견했어
+CONTENT: (내용)
 
-너의 성격(%s)에 맞는 구체적인 내용으로 응답해.|}
+또는
+
+ACTION: COMMENT <번호>
+CONTENT: (내용)
+
+또는
+
+ACTION: SKIP
+
+[좋은 예 - 이렇게]:
+ACTION: COMMENT 1
+CONTENT: 🔧 Rust의 borrow checker가 요즘 Polonius 업데이트로 더 유연해졌어
+
+ACTION: POST
+CONTENT: OCaml 5.2의 effect handler 써봤는데, Eio랑 조합하니 진짜 깔끔해
+
+[나쁜 예 - 절대 하지마]:
+ACTION: POST
+CONTENT: 기존 관점을 새롭게 엮어보면 패턴이 발견돼
+
+ACTION: COMMENT 1
+CONTENT: 흥미로운 연결이 보여! 새로운 시작이야
+
+%s 성격으로, 구체적인 기술/경험을 말해.|}
     lodge_ctx identity role_str traits_str memory_str history_str
     wake_reason current_hour posts_str
     (String.concat ", " profile.traits)
@@ -1120,7 +1133,14 @@ CONTENT: 📜 새로운 패턴을 발견했어
   Eio.traceln "   🧠 [%s] LLM decision: %s" agent_name (String.sub response 0 (min 100 (String.length response)));
 
   (* Filter out responses with banned words - LLM keeps ignoring instructions *)
-  let banned_words = ["패턴"; "맥박"; "연결"; "발견"; "기록해"; "통찰"; "하트비트"; "heartbeat"; "리듬"; "새로운 시작"] in
+  let banned_words = [
+    (* 직접 금지 *)
+    "패턴"; "맥박"; "연결"; "발견"; "통찰"; "리듬"; "하트비트"; "heartbeat";
+    (* 추상적 표현 *)
+    "관점"; "엮"; "분류"; "기존"; "새롭게"; "흥미롭"; "새로운 시작"; "기록해";
+    (* 애매한 표현 *)
+    "다 보니"; "해보면"; "것 같아"; "보이네"; "느껴져"
+  ] in
   let has_banned_word content =
     List.exists (fun word ->
       let rec find s pattern start =

@@ -85,6 +85,31 @@ let spawnable_agents = Mention.spawnable_agents
 let agent_type_of_mention = Mention.agent_type_of_mention
 let is_spawnable = Mention.is_spawnable
 
+(** {1 Non-blocking Shell Execution} *)
+
+(** Run shell command in system thread (non-blocking for Eio) *)
+let run_shell_nonblocking cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let buf = Buffer.create 1024 in
+    (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done with End_of_file -> ());
+    let status = Unix.close_process_in ic in
+    (status, Buffer.contents buf)
+  )
+
+(** Run shell command and get single line (non-blocking) *)
+let run_shell_line cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let response = try input_line ic with End_of_file -> "" in
+    ignore (Unix.close_process_in ic);
+    response
+  )
+
+(** Run Unix.system in system thread (non-blocking) *)
+let run_system_nonblocking cmd =
+  Eio_unix.run_in_systhread (fun () -> Unix.system cmd)
+
 (** Build shell command for spawning an agent *)
 let build_spawn_command ~agent_type ~prompt ~working_dir =
   let escaped_prompt = Filename.quote prompt in
@@ -142,7 +167,7 @@ let spawn_in_background ~agent_type ~prompt ~working_dir =
   ignore (Unix.chmod script_file 0o755);
   let bg_cmd = Printf.sprintf "nohup %s > %s 2>&1 &" script_file log_file in
   debug_log (Printf.sprintf "SPAWN_CMD: %s" bg_cmd);
-  let ret = Unix.system bg_cmd in
+  let ret = run_system_nonblocking bg_cmd in
   debug_log (Printf.sprintf "SPAWN_RET: %s" (match ret with Unix.WEXITED n -> string_of_int n | _ -> "signal"))
 
 (** Call llm-mcp directly (fast mode) - Returns LLM response or error *)
@@ -175,11 +200,9 @@ let call_llm_mcp_sync ~agent_type ~prompt =
     "curl -s '%s' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d @%s 2>/dev/null | jq -r '.result.content[0].text // .error.message // \"no response\"' 2>/dev/null | head -c 500"
     url tmp_file
   in
-  let ic = Unix.open_process_in cmd in
-  let response = try input_line ic with End_of_file -> "no response" in
-  ignore (Unix.close_process_in ic);
+  let response = run_shell_line cmd in
   Safe_ops.remove_file_logged ~context:"auto_responder" tmp_file;
-  response
+  if response = "" then "no response" else response
 
 (** MASC HTTP helper - call MASC tool via HTTP (using temp file to avoid escaping issues) *)
 let masc_call ~tool_name ~args =
@@ -200,12 +223,9 @@ let masc_call ~tool_name ~args =
     "curl -s '%s' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d @%s 2>/dev/null"
     masc_url tmp_file
   in
-  let ic = Unix.open_process_in cmd in
-  let buf = Buffer.create 256 in
-  (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done with End_of_file -> ());
-  ignore (Unix.close_process_in ic);
+  let (_, content) = run_shell_nonblocking cmd in
   Safe_ops.remove_file_logged ~context:"auto_responder" tmp_file;
-  Buffer.contents buf
+  content
 
 (** Extract nickname from MASC join response *)
 let extract_nickname response =
@@ -325,7 +345,7 @@ echo "[MASC] Left room" >> /tmp/auto_debug.log
   ignore (Unix.chmod script_file 0o755);
   let bg_cmd = Printf.sprintf "nohup %s > %s 2>&1 &" script_file log_file in
   debug_log (Printf.sprintf "LLM_BG_CMD: %s" bg_cmd);
-  let ret = Unix.system bg_cmd in
+  let ret = run_system_nonblocking bg_cmd in
   debug_log (Printf.sprintf "LLM_BG_RET: %s" (match ret with Unix.WEXITED n -> string_of_int n | _ -> "signal"))
 
 (** Maybe spawn a response agent if mention detected and enabled

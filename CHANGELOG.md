@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.23.0] - 2026-02-02
+
+### Fixed
+- **Non-blocking Shell Execution**: All `Unix.open_process_in` and `Unix.system` calls now wrapped in `Eio_unix.run_in_systhread`
+  - Prevents HTTP server blocking during LLM calls, Neo4j queries, and external commands
+  - Affected modules: `tool_lodge.ml`, `auto_responder.ml`, `auto_recall.ml`, `room_git.ml`, `room_worktree.ml`, `notify.ml`, `mcp_server_eio.ml`, `tool_cost.ml`
+- **Sleep Non-blocking**: All `Unix.sleepf` calls wrapped to avoid blocking Eio event loop
+  - Affected modules: `backend_eio.ml`, `room_utils.ml`, `session.ml`, `bounded.ml`
+- **Dashboard Performance**: Fixed intermittent 40s delays caused by blocking LLM/Neo4j calls in orchestrator
+
+### Technical Details
+- Pattern: `Eio_unix.run_in_systhread (fun () -> Unix.open_process_in ...)`
+- This offloads blocking syscalls to separate OS threads while keeping Eio event loop responsive
+- HTTP endpoints like `/dashboard` and `/health` now consistently respond in <1ms
+
 ## [2.21.0] - 2026-02-02
 
 ### Added

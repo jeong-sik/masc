@@ -16,6 +16,21 @@ type focus_payload = {
   task_id: string option;
 }
 
+(** {1 Non-blocking Shell Execution} *)
+
+(** Run shell command and get single line (non-blocking) *)
+let run_shell_line cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let result = try input_line ic with End_of_file -> "" in
+    let _ = Unix.close_process_in ic in
+    result
+  )
+
+(** Run system command in background (non-blocking) *)
+let run_system_nonblocking cmd =
+  Eio_unix.run_in_systhread (fun () -> ignore (Unix.system cmd))
+
 (** Get non-empty environment variable *)
 let getenv_nonempty name =
   match Sys.getenv_opt name with
@@ -58,19 +73,15 @@ let render_focus_template template payload =
 (** Check if running on macOS *)
 let is_macos () =
   try
-    let ic = Unix.open_process_in "uname -s" in
-    let os = try input_line ic with End_of_file -> "" in
-    let _ = Unix.close_process_in ic in
+    let os = run_shell_line "uname -s" in
     os = "Darwin"
   with End_of_file | Unix.Unix_error _ -> false
 
 (** Check if terminal-notifier is available *)
 let has_terminal_notifier =
   lazy (
-    let ic = Unix.open_process_in "which terminal-notifier 2>/dev/null" in
-    let result = try Some (input_line ic) with End_of_file -> None in
-    let _ = Unix.close_process_in ic in
-    Option.is_some result
+    let result = run_shell_line "which terminal-notifier 2>/dev/null" in
+    result <> ""
   )
 
 (** Escape string for shell *)
@@ -159,7 +170,7 @@ let send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd =
     "terminal-notifier -title '%s' -subtitle '%s' -message '%s' -group masc %s%s >/dev/null 2>&1 &"
     title subtitle message sound_arg focus_arg
   in
-  let _ = Unix.system cmd in
+  run_system_nonblocking cmd;
   ()
 
 (** Send notification via osascript (fallback) *)
@@ -172,13 +183,13 @@ let send_via_osascript ~title ~subtitle ~message =
     message title subtitle
   in
   let cmd = Printf.sprintf "osascript -e '%s' 2>/dev/null &" script in
-  let _ = Unix.system cmd in
+  run_system_nonblocking cmd;
   ()
 
 let run_focus_command = function
   | Some cmd ->
       let cmd = Printf.sprintf "%s >/dev/null 2>&1 &" cmd in
-      let _ = Unix.system cmd in
+      run_system_nonblocking cmd;
       ()
   | None -> ()
 

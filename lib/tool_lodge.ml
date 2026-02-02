@@ -119,11 +119,15 @@ let source_of_string = function
 (** Escape single quotes for shell command *)
 let shell_escape s = Str.global_replace (Str.regexp "'") "'\\''" s
 
-(** HTTP GET via curl subprocess — supports both HTTP and HTTPS *)
-let http_get_json ~net:_ url =
-  try
-    let safe_url = shell_escape url in
-    let cmd = Printf.sprintf "curl -sf --max-time 10 '%s'" safe_url in
+(** {1 Non-blocking Shell Execution}
+
+    All shell commands run in a separate system thread via Eio_unix.run_in_systhread
+    to avoid blocking the Eio event loop and HTTP server.
+*)
+
+(** Run shell command and capture all output (non-blocking) *)
+let run_shell_nonblocking cmd =
+  Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 4096 in
     (try
@@ -132,8 +136,26 @@ let http_get_json ~net:_ url =
       done
     with End_of_file -> ());
     let status = Unix.close_process_in ic in
+    (status, Buffer.contents buf)
+  )
+
+(** Run shell command and get single line result (non-blocking) *)
+let run_shell_line cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let result = try input_line ic with End_of_file -> "" in
+    let _ = Unix.close_process_in ic in
+    result
+  )
+
+(** HTTP GET via curl subprocess — supports both HTTP and HTTPS *)
+let http_get_json ~net:_ url =
+  try
+    let safe_url = shell_escape url in
+    let cmd = Printf.sprintf "curl -sf --max-time 10 '%s'" safe_url in
+    let (status, content) = run_shell_nonblocking cmd in
     match status with
-    | Unix.WEXITED 0 -> Ok (Buffer.contents buf)
+    | Unix.WEXITED 0 -> Ok content
     | Unix.WEXITED n -> Error (Printf.sprintf "curl exit %d" n)
     | _ -> Error "curl signaled"
   with exn -> Error (Printf.sprintf "HTTP exception: %s" (Printexc.to_string exn))
@@ -168,11 +190,8 @@ let next_cli_provider () =
 (** Check if ollama has a small model loaded (not blocking with 30b) *)
 let ollama_is_light () =
   try
-    let ic = Unix.open_process_in "curl -sf http://localhost:11434/api/ps 2>/dev/null" in
-    let buf = Buffer.create 1024 in
-    (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-    ignore (Unix.close_process_in ic);
-    let json = Yojson.Safe.from_string (Buffer.contents buf) in
+    let (_, content) = run_shell_nonblocking "curl -sf http://localhost:11434/api/ps 2>/dev/null" in
+    let json = Yojson.Safe.from_string content in
     let models = json |> member "models" |> to_list in
     (* If no models loaded or only small models, ollama is light *)
     models = [] || List.for_all (fun m ->
@@ -206,13 +225,10 @@ let cli_generate provider ~system prompt =
       | Codex_cli -> Printf.sprintf "cat '%s' | codex exec - 2>/dev/null" tmp_file
       | _ -> failwith "Not a CLI provider"
     in
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 4096 in
-    (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
-    let status = Unix.close_process_in ic in
+    let (status, content) = run_shell_nonblocking cmd in
     cleanup ();
     match status with
-    | Unix.WEXITED 0 -> Ok (Buffer.contents buf)
+    | Unix.WEXITED 0 -> Ok content
     | Unix.WEXITED n -> Error (Printf.sprintf "%s exit %d" cli_cmd n)
     | _ -> Error (Printf.sprintf "%s signaled" cli_cmd)
   with exn ->
@@ -257,13 +273,10 @@ let llm_mcp_glm ~net:_ ?(temperature = 0.7) ?(max_tokens = 500) ~system prompt =
     ]) in
     let escaped_body = Str.global_replace (Str.regexp "'") "'\\''" body in
     let cmd = Printf.sprintf "curl -sf --max-time 120 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d '%s'" escaped_body in
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 4096 in
-    (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
-    let status = Unix.close_process_in ic in
+    let (status, content) = run_shell_nonblocking cmd in
     match status with
     | Unix.WEXITED 0 ->
-        let json = Yojson.Safe.from_string (Buffer.contents buf) in
+        let json = Yojson.Safe.from_string content in
         let text = json |> member "result" |> member "content" |> to_list |> List.hd |> member "text" |> to_string in
         (* Strip [Extra] metadata if present *)
         let text = try
@@ -296,17 +309,10 @@ let ollama_generate ~net:_ ?(model = "glm-4.7-flash:latest") ?(temperature = 0.7
     (* Escape single quotes in body for shell *)
     let escaped_body = Str.global_replace (Str.regexp "'") "'\\''" body in
     let cmd = Printf.sprintf "curl -sf --max-time 120 -X POST http://127.0.0.1:11434/api/generate -H 'Content-Type: application/json' -d '%s'" escaped_body in
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 4096 in
-    (try
-      while true do
-        Buffer.add_channel buf ic 1024
-      done
-    with End_of_file -> ());
-    let status = Unix.close_process_in ic in
+    let (status, content) = run_shell_nonblocking cmd in
     match status with
     | Unix.WEXITED 0 ->
-        let json = Yojson.Safe.from_string (Buffer.contents buf) in
+        let json = Yojson.Safe.from_string content in
         Ok (json |> member "response" |> to_string)
     | Unix.WEXITED n -> Error (Printf.sprintf "ollama curl exit %d" n)
     | _ -> Error "ollama curl signaled"
@@ -448,10 +454,7 @@ let save_interests_to_neo4j ~agent_name ~persona_name interests =
     in
     let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) escaped_cypher in
     try
-      let ic = Unix.open_process_in cmd in
-      let buf = Buffer.create 256 in
-      (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-      let _ = Unix.close_process_in ic in
+      let _ = run_shell_nonblocking cmd in
       Ok (Printf.sprintf "saved %d interests for %s" (List.length interests) agent_name)
     with exn -> Error (Printf.sprintf "Neo4j error: %s" (Printexc.to_string exn))
 
@@ -465,11 +468,7 @@ let get_agent_interests ~agent_name =
   in
   let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 256 in
-    (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-    let _ = Unix.close_process_in ic in
-    let output = Buffer.contents buf in
+    let (_, output) = run_shell_nonblocking cmd in
     (* Parse JSON result *)
     try
       let json = Yojson.Safe.from_string output in
@@ -500,11 +499,8 @@ let record_lodge_visit ~agent_name ~persona_name ~article_title =
   in
   let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 64 in
-    (try while true do Buffer.add_channel buf ic 64 done with End_of_file -> ());
-    let _ = Unix.close_process_in ic in
-    ignore (Buffer.contents buf)
+    let _ = run_shell_nonblocking cmd in
+    ()
   with _ -> ()
 
 (** {1 REACT: Generate response with persona} *)
@@ -1102,7 +1098,7 @@ let lodge_auto_chain ~net (args : Yojson.Safe.t) =
       (* Continue with probability *)
       if Random.float 1.0 < chain_prob then begin
         add (Printf.sprintf "🎲 Continuing (roll < %.2f)..." chain_prob);
-        Unix.sleepf 0.5;
+        Eio_unix.run_in_systhread (fun () -> Unix.sleepf 0.5);
         loop (count + 1)
       end else begin
         add (Printf.sprintf "🎲 Stopping (roll >= %.2f)" chain_prob);
@@ -1147,11 +1143,7 @@ let get_all_agents () =
   in
   let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 256 in
-    (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-    let _ = Unix.close_process_in ic in
-    let output = Buffer.contents buf in
+    let (_, output) = run_shell_nonblocking cmd in
     try
       let json = Yojson.Safe.from_string output in
       let records = json |> member "records" |> to_list in
@@ -1205,10 +1197,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_persona ~child_prompt =
     in
     let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) cypher in
     try
-      let ic = Unix.open_process_in cmd in
-      let buf = Buffer.create 256 in
-      (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-      let _ = Unix.close_process_in ic in
+      let _ = run_shell_nonblocking cmd in
       (* Announce spawn via LLM *)
       let announcement = Printf.sprintf
         "🐣 새 에이전트 탄생!\n이름: %s\n성격: %s\n부모: %s\n\n\"%s\""
@@ -1305,11 +1294,7 @@ let get_all_agent_interests () =
   in
   let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 256 in
-    (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-    let _ = Unix.close_process_in ic in
-    let output = Buffer.contents buf in
+    let (_, output) = run_shell_nonblocking cmd in
     try
       let json = Yojson.Safe.from_string output in
       let records = json |> member "records" |> to_list in
@@ -1678,11 +1663,8 @@ let get_profile ~net:_ args =
     let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) cypher in
     let neo4j_info =
       try
-        let ic = Unix.open_process_in cmd in
-        let buf = Buffer.create 256 in
-        (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-        ignore (Unix.close_process_in ic);
-        Buffer.contents buf
+        let (_, content) = run_shell_nonblocking cmd in
+        content
       with _ -> "Neo4j unavailable"
     in
 
@@ -1712,11 +1694,7 @@ let lodge_search ~net:_ args =
     let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
     let agent_results =
       try
-        let ic = Unix.open_process_in cmd in
-        let buf = Buffer.create 256 in
-        (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-        ignore (Unix.close_process_in ic);
-        let output = Buffer.contents buf in
+        let (_, output) = run_shell_nonblocking cmd in
         if String.length output > 10 then
           Printf.sprintf "\n\n👥 **에이전트 검색 결과:**\n%s" output
         else ""
@@ -1757,11 +1735,7 @@ let lodge_progress ~net:_ _args =
   let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   let agent_stats =
     try
-      let ic = Unix.open_process_in cmd in
-      let buf = Buffer.create 256 in
-      (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
-      ignore (Unix.close_process_in ic);
-      let output = Buffer.contents buf in
+      let (_, output) = run_shell_nonblocking cmd in
       try
         let json = Yojson.Safe.from_string output in
         let records = json |> Yojson.Safe.Util.member "records" |> Yojson.Safe.Util.to_list in
@@ -1878,7 +1852,7 @@ let autonomous_loop ~net args =
       results := Printf.sprintf "───── 진행: %d/%d (%.0f%%) ─────" i iterations (100.0 *. float_of_int i /. float_of_int iterations) :: !results;
 
     (* Delay between iterations - minimum 1s to prevent spam *)
-    if i < iterations then Unix.sleepf (max 1.0 (float_of_int delay_ms /. 1000.0))
+    if i < iterations then Eio_unix.run_in_systhread (fun () -> Unix.sleepf (max 1.0 (float_of_int delay_ms /. 1000.0)))
   done;
 
   loop_status := None;

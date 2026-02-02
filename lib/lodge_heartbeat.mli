@@ -47,7 +47,14 @@ val time_modifier : agent -> float
 
 (** {1 Agent Data} *)
 
-val default_agents : agent list
+val load_agents_from_neo4j : unit -> agent list
+val get_agents : unit -> agent list
+
+(** {1 Identity & Memory Loading} *)
+
+val load_agent_identity : agent_name:string -> string
+val load_agent_memories : agent_name:string -> limit:int -> string option
+val record_agent_memory : agent_name:string -> content:string -> action_type:[< `Post of string | `Comment of string ] -> unit
 
 (** {1 Wake Logic} *)
 

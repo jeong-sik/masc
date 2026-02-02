@@ -139,6 +139,25 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
     }
   ) messages
 
+(** {1 Non-blocking Shell Execution} *)
+
+(** Run shell command and read lines (non-blocking for Eio) *)
+let run_shell_lines cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    try
+      let ic = Unix.open_process_in cmd in
+      let rec read_lines acc =
+        try
+          let line = input_line ic in
+          read_lines (String.trim line :: acc)
+        with End_of_file ->
+          ignore (Unix.close_process_in ic);
+          List.rev acc
+      in
+      read_lines []
+    with Unix.Unix_error _ | Sys_error _ -> []
+  )
+
 (** Fetch recently modified files from working directory *)
 let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_config) ~query =
   let _ = config in  (* suppress unused warning *)
@@ -154,20 +173,7 @@ let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_
     (Filename.quote work_dir) max_files
   in
   
-  let files = 
-    try
-      let ic = Unix.open_process_in cmd in
-      let rec read_lines acc =
-        try
-          let line = input_line ic in
-          read_lines (String.trim line :: acc)
-        with End_of_file -> 
-          ignore (Unix.close_process_in ic);
-          List.rev acc
-      in
-      read_lines []
-    with Unix.Unix_error _ | Sys_error _ -> []
-  in
+  let files = run_shell_lines cmd in
   
   (* Read preview of each file *)
   let read_preview path =

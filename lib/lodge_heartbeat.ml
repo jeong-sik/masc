@@ -617,22 +617,32 @@ let should_wake_llm ~agent ~recent_posts ~current_hour =
     agent.activity_level posts_summary
   in
 
-  let json_payload = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 1);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "glm");
-      ("arguments", `Assoc [("prompt", `String prompt)])
-    ])
-  ]) in
-  let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
-  let oc = open_out tmp in output_string oc json_payload; close_out oc;
-  let cmd = Printf.sprintf
-    "curl -s --max-time 10 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200; rm -f %s"
-    tmp tmp
+  (* Call LLM with cascade: Gemini → Ollama *)
+  let call_wake_llm ~tool_name =
+    let json_payload = Yojson.Safe.to_string (`Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 1);
+      ("method", `String "tools/call");
+      ("params", `Assoc [
+        ("name", `String tool_name);
+        ("arguments", `Assoc [("prompt", `String prompt)])
+      ])
+    ]) in
+    let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
+    let oc = open_out tmp in output_string oc json_payload; close_out oc;
+    let cmd = Printf.sprintf
+      "curl -s --max-time 10 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200; rm -f %s"
+      tmp tmp
+    in
+    run_shell_line cmd
   in
-  let response = run_shell_line cmd in
+
+  (* Cascade: Gemini → Ollama *)
+  let response =
+    let r1 = call_wake_llm ~tool_name:"gemini" in
+    if String.length r1 > 2 then r1
+    else call_wake_llm ~tool_name:"ollama"  (* Fallback *)
+  in
   let response_upper = String.uppercase_ascii response in
 
   (* Parse YES/NO from response *)
@@ -1395,36 +1405,73 @@ CONTENT: 흥미로운 연결이 보여! 새로운 시작이야
     (String.concat ", " profile.traits)
   in
 
-  (* Call LLM *)
-  let json_payload = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 1);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "glm");
-      ("arguments", `Assoc [
-        ("prompt", `String prompt)
-      ])
-    ])
-  ]) in
-  let tmp_file = Printf.sprintf "/tmp/lodge_decide_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-  let oc = open_out tmp_file in
-  output_string oc json_payload;
-  close_out oc;
-  let cmd = Printf.sprintf
-    "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500; rm -f %s"
-    tmp_file tmp_file
-  in
-  let raw_response = run_shell_line cmd in
-  (* Strip [Extra] metadata from response content *)
+  (* Call LLM with cascade fallback: Gemini → retry → Ollama → skip *)
   let strip_extra s =
     match String.index_opt s '[' with
     | Some idx when idx > 0 && String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" ->
         String.trim (String.sub s 0 idx)
     | _ -> s
   in
-  let response = strip_extra raw_response in
-  Printf.printf "   🧠 [%s] LLM decision: %s\n%!" agent_name (String.sub response 0 (min 100 (String.length response)));
+
+  let is_valid_response s =
+    let len = String.length s in
+    len > 10 &&
+    not (len >= 5 && String.lowercase_ascii (String.sub s 0 5) = "error") &&
+    not (len >= 14 && String.sub s 0 14 = "Empty response")
+  in
+
+  let call_llm ~tool_name ~prompt =
+    let json_payload = Yojson.Safe.to_string (`Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 1);
+      ("method", `String "tools/call");
+      ("params", `Assoc [
+        ("name", `String tool_name);
+        ("arguments", `Assoc [
+          ("prompt", `String prompt)
+        ])
+      ])
+    ]) in
+    let tmp_file = Printf.sprintf "/tmp/lodge_decide_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+    let oc = open_out tmp_file in
+    output_string oc json_payload;
+    close_out oc;
+    let cmd = Printf.sprintf
+      "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500; rm -f %s"
+      tmp_file tmp_file
+    in
+    strip_extra (run_shell_line cmd)
+  in
+
+  (* Cascade: Gemini → retry → Ollama → empty *)
+  let response =
+    (* 1차: Gemini *)
+    let r1 = call_llm ~tool_name:"gemini" ~prompt in
+    if is_valid_response r1 then begin
+      Printf.printf "   🧠 [%s] Gemini: %s\n%!" agent_name (String.sub r1 0 (min 80 (String.length r1)));
+      r1
+    end else begin
+      (* 재시도: Gemini 1회 더 *)
+      Printf.printf "   ⚠️ [%s] Gemini empty, retrying...\n%!" agent_name;
+      let r2 = call_llm ~tool_name:"gemini" ~prompt in
+      if is_valid_response r2 then begin
+        Printf.printf "   🧠 [%s] Gemini(retry): %s\n%!" agent_name (String.sub r2 0 (min 80 (String.length r2)));
+        r2
+      end else begin
+        (* Fallback: Ollama 로컬 *)
+        Printf.printf "   ⚠️ [%s] Gemini failed, trying Ollama...\n%!" agent_name;
+        let r3 = call_llm ~tool_name:"ollama" ~prompt in
+        if is_valid_response r3 then begin
+          Printf.printf "   🧠 [%s] Ollama: %s\n%!" agent_name (String.sub r3 0 (min 80 (String.length r3)));
+          r3
+        end else begin
+          (* 전부 실패: 조용히 스킵 *)
+          Printf.printf "   💤 [%s] All LLMs failed, skipping silently\n%!" agent_name;
+          ""
+        end
+      end
+    end
+  in
 
   (* Filter out responses with banned words - LLM keeps ignoring instructions *)
   let banned_words = [

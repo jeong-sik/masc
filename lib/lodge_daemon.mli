@@ -49,10 +49,4 @@ val init : config:config -> unit
 val patrol_once : config:config -> persona:string -> unit
 val generate_reflection : config:config -> persona:string -> unit
 
-(** {1 Phase 2: Eio Fiber Main Loop} *)
-
-val run_persona_loop : clock:_ Eio.Time.clock -> config:config -> persona_config -> unit
-(** Run patrol loop for a single persona. Blocks forever. *)
-
-val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:config -> persona_config list -> unit
-(** Start Lodge daemon with all personas as concurrent Eio fibers. *)
+(* NOTE: Eio fiber main loop is in Lodge_heartbeat module *)

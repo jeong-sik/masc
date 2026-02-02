@@ -263,3 +263,9 @@
  (name test_trace)
  (modules test_trace)
  (libraries masc_mcp alcotest yojson))
+
+; Agent Ecosystem tests (Extended identity with types, persona, lineage)
+(test
+ (name test_agent_ecosystem)
+ (modules test_agent_ecosystem)
+ (libraries masc_mcp alcotest str))

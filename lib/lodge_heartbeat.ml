@@ -520,7 +520,7 @@ let load_config () =
     enabled = get_bool "LODGE_ENABLED" true;
     agents_per_tick = get_int "LODGE_AGENTS_PER_TICK" 2;
     min_checkin_gap_s = get_float "LODGE_MIN_CHECKIN_GAP" 1800.0;
-    quiet_hours = (1, 6);
+    quiet_hours = (get_int "LODGE_QUIET_START" 1, get_int "LODGE_QUIET_END" 6);
   }
 
 (** {1 Types — Check-in Model v2} *)
@@ -1668,7 +1668,7 @@ let get_personality_hint (profile : agent_profile) =
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   let profile = load_agent_profile ~agent_name in
-  let memories = load_agent_memories ~agent_name ~limit:3 in
+  let memories = Lodge_memory.recall ~agent_name ~query:trigger_reason ~limit:5 in
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
 
@@ -1698,9 +1698,9 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
     | [] -> ""
     | ts -> Printf.sprintf "\n성격: %s" (String.concat ", " ts)
   in
-  let memory_str = match memories with
-    | Some m -> Printf.sprintf "\n\n[관련 기억]\n%s" m
-    | None -> ""
+  let memory_str = match Lodge_memory.format_for_prompt memories with
+    | "" -> ""
+    | m -> Printf.sprintf "\n\n[관련 기억]\n%s" m
   in
   let history_str = match thread_history with
     | Some h -> Printf.sprintf "\n\n[내 최근 활동]\n%s" h
@@ -1917,7 +1917,10 @@ let execute_agent_action ~agent_name ~action =
   match action with
   | ActionSkip ->
       Eio.traceln "   ⏭️ [%s] Decided to skip" agent_name;
-      ()
+      Lodge_memory.store {
+        agent_name; action_type = "skip"; content = ""; context = "no action";
+        board_id = None; timestamp = Unix.gettimeofday ();
+      }
   | ActionPost content ->
       if String.length content < 5 then
         Eio.traceln "   ⚠️ [%s] Content too short, skipping" agent_name
@@ -1930,7 +1933,11 @@ let execute_agent_action ~agent_name ~action =
             Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
             record_agent_activity ~name:agent_name;
             record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
-            record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id
+            record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
+            Lodge_memory.store {
+              agent_name; action_type = "post"; content; context = "LLM decision";
+              board_id = Some post_id; timestamp = Unix.gettimeofday ();
+            }
         | Error e ->
             Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
       end
@@ -1947,7 +1954,11 @@ let execute_agent_action ~agent_name ~action =
             record_agent_comment ~agent_name ~post_id;
             record_agent_activity ~name:agent_name;
             record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
-            record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id
+            record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
+            Lodge_memory.store {
+              agent_name; action_type = "comment"; content; context = post_id;
+              board_id = Some post_id; timestamp = Unix.gettimeofday ();
+            }
         | Error e ->
             Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
       end
@@ -1956,7 +1967,11 @@ let execute_agent_action ~agent_name ~action =
        | Ok _ ->
            Printf.printf "   👍 [%s] Upvoted %s\n%!" agent_name post_id;
            record_agent_activity ~name:agent_name;
-           record_to_neo4j ~agent_name ~action_type:`Upvote ~content:"upvote" ~target_id:post_id
+           record_to_neo4j ~agent_name ~action_type:`Upvote ~content:"upvote" ~target_id:post_id;
+           Lodge_memory.store {
+             agent_name; action_type = "upvote"; content = "upvote"; context = post_id;
+             board_id = Some post_id; timestamp = Unix.gettimeofday ();
+           }
        | Error e ->
            Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name (Board.show_board_error e))
   | ActionPropose (proposed_name, reason) ->
@@ -2044,10 +2059,14 @@ let select_agents_by_plan ~(agents : agent list) ~max_n
     ~(pending_triggers : (string * checkin_trigger) list)
   : (string * checkin_trigger) list =
   let current_hour = current_hour_kst () in
-  let (quiet_start, quiet_end) = (1, 6) in
-  let is_quiet = current_hour >= quiet_start && current_hour < quiet_end in
-  if is_quiet || List.length agents = 0 then []
-  else begin
+  let config = load_config () in
+  let (quiet_start, quiet_end) = config.quiet_hours in
+  let is_quiet = quiet_start < quiet_end && current_hour >= quiet_start && current_hour < quiet_end in
+  if is_quiet || List.length agents = 0 then begin
+    if is_quiet then
+      Eio.traceln "   😴 [plan] Quiet hours (%d-%d), skipping selection" quiet_start quiet_end;
+    []
+  end else begin
     let selected = ref [] in
 
     (* 1. Mentioned triggers — always highest priority *)

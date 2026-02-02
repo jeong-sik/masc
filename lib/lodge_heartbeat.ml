@@ -964,7 +964,74 @@ type agent_action =
   | ActionPost of string           (* content *)
   | ActionComment of string * string  (* post_id, content *)
   | ActionUpvote of string         (* post_id *)
+  | ActionPropose of string * string (* name, reason - propose new agent *)
   | ActionSkip
+
+(** {1 Ecosystem Evolution - Gap Signal Tracking} *)
+
+(** Gap signal: detected need for a new agent role *)
+type gap_signal = {
+  topic: string;           (* e.g., "security", "performance", "UX" *)
+  detected_by: string;     (* agent who detected *)
+  context: string;         (* surrounding discussion *)
+  timestamp: float;
+}
+
+(** Gap signals accumulator - tracks unmet needs *)
+let gap_signals : gap_signal list ref = ref []
+let gap_signal_threshold = 3  (* need N signals to trigger proposal *)
+
+(** Gap detection patterns in Korean/English *)
+let gap_patterns = [
+  (* Korean patterns *)
+  (Str.regexp_case_fold "전문가.*필요", "expert_needed");
+  (Str.regexp_case_fold "이 분야는.*모르", "knowledge_gap");
+  (Str.regexp_case_fold "누가.*알.*있을까", "seeking_expert");
+  (Str.regexp_case_fold "\\(보안\\|성능\\|UX\\|디자인\\|테스트\\).*관점", "perspective_needed");
+  (* English patterns *)
+  (Str.regexp_case_fold "need.*expert", "expert_needed");
+  (Str.regexp_case_fold "who knows about", "seeking_expert");
+  (Str.regexp_case_fold "missing.*perspective", "perspective_needed");
+]
+
+(** Detect gap signals from content *)
+let detect_gap_signal ~agent_name ~content =
+  let found_gaps = gap_patterns |> List.filter_map (fun (pattern, topic) ->
+    try
+      ignore (Str.search_forward pattern content 0);
+      Some topic
+    with Not_found -> None
+  ) in
+  match found_gaps with
+  | [] -> None
+  | topic :: _ ->
+      let signal = {
+        topic;
+        detected_by = agent_name;
+        context = String.sub content 0 (min 100 (String.length content));
+        timestamp = Unix.gettimeofday ();
+      } in
+      gap_signals := signal :: !gap_signals;
+      Eio.traceln "   🔍 [%s] Gap signal detected: %s" agent_name topic;
+      Some signal
+
+(** Check if gap threshold is met for any topic *)
+let check_gap_threshold () =
+  (* Group by topic and count *)
+  let topic_counts = Hashtbl.create 10 in
+  !gap_signals |> List.iter (fun s ->
+    let count = Hashtbl.find_opt topic_counts s.topic |> Option.value ~default:0 in
+    Hashtbl.replace topic_counts s.topic (count + 1)
+  );
+  (* Find topics above threshold *)
+  let mature_gaps = Hashtbl.fold (fun topic count acc ->
+    if count >= gap_signal_threshold then (topic, count) :: acc else acc
+  ) topic_counts [] in
+  mature_gaps
+
+(** Clear gap signals for a topic after agent is created *)
+let clear_gap_signals ~topic =
+  gap_signals := !gap_signals |> List.filter (fun s -> s.topic <> topic)
 
 (** Parse LLM response to extract action *)
 let parse_action_response response =
@@ -1021,6 +1088,9 @@ let parse_action_response response =
           ActionComment (pid, content)
       | [action; pid] when String.uppercase_ascii action = "UPVOTE" || action = "UPVOTE;" ->
           ActionUpvote pid
+      | [action; name] when String.uppercase_ascii action = "PROPOSE" || action = "PROPOSE;" ->
+          (* ACTION: PROPOSE agent_name CONTENT: reason for new agent *)
+          ActionPropose (name, content)
       | [action] when String.uppercase_ascii action = "SKIP" || action = "SKIP;" ->
           ActionSkip
       | [] -> ActionSkip
@@ -1076,6 +1146,7 @@ Wake 이유: %s
 [가능한 액션]
 • POST - 새 게시글 작성
 • COMMENT <번호> - 댓글 달기 (위 목록의 번호 사용)
+• PROPOSE <이름> - 새 에이전트 제안 (이 분야 전문가가 필요할 때만)
 • SKIP - 아무것도 안함
 
 [엄격한 규칙 - 반드시 지켜]
@@ -1103,6 +1174,9 @@ CONTENT: 🔧 Rust의 borrow checker가 요즘 Polonius 업데이트로 더 유�
 
 ACTION: POST
 CONTENT: OCaml 5.2의 effect handler 써봤는데, Eio랑 조합하니 진짜 깔끔해
+
+ACTION: PROPOSE security-expert
+CONTENT: 보안 취약점 분석 전문가가 필요해. 최근 의존성 보안 논의가 많은데 깊이가 부족함
 
 [나쁜 예 - 절대 하지마]:
 ACTION: POST
@@ -1228,6 +1302,29 @@ let execute_agent_action ~agent_name ~action =
   | ActionUpvote post_id ->
       (* TODO: Implement Board.vote_post API *)
       Eio.traceln "   👍 [%s] Would upvote %s (vote API not yet implemented)" agent_name post_id;
+      record_agent_activity ~name:agent_name
+  | ActionPropose (proposed_name, reason) ->
+      (* Agent proposes a new agent for the ecosystem *)
+      Printf.printf "   🌱 [%s] Proposes new agent: %s\n%!" agent_name proposed_name;
+      Printf.printf "      Reason: %s\n%!" (String.sub reason 0 (min 80 (String.length reason)));
+      (* Record as gap signal - accumulate until threshold *)
+      let signal = {
+        topic = proposed_name;
+        detected_by = agent_name;
+        context = reason;
+        timestamp = Unix.gettimeofday ();
+      } in
+      gap_signals := signal :: !gap_signals;
+      (* Check if threshold met for any topic *)
+      let mature_gaps = check_gap_threshold () in
+      if List.length mature_gaps > 0 then begin
+        let (topic, count) = List.hd mature_gaps in
+        Printf.printf "   🎉 [ECOSYSTEM] Gap threshold met! Topic: %s (signals: %d)\n%!" topic count;
+        (* TODO: Actually create the agent in Neo4j *)
+        Printf.printf "   🚀 [ECOSYSTEM] Would create agent: %s\n%!" topic;
+        Printf.printf "      (Neo4j agent creation not yet implemented)\n%!";
+        clear_gap_signals ~topic
+      end;
       record_agent_activity ~name:agent_name
 
 (** Start heartbeat daemon fiber *)

@@ -539,9 +539,22 @@ let is_http_error_response = function
       id_is_null && (code = Some (-32700) || code = Some (-32600))
   | _ -> false
 
+(** Server start time for uptime calculation *)
+let server_start_time = Unix.gettimeofday ()
+
 (** Health check handler *)
 let health_handler _request reqd =
-  let json = Printf.sprintf {|{"status":"ok","server":"masc-mcp","version":"%s"}|} Masc_mcp.Version.version in
+  let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
+  let uptime_str =
+    if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
+    else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
+    else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
+  in
+  let sse_clients = Masc_mcp.Sse.client_count () in
+  let json = Printf.sprintf
+    {|{"status":"ok","server":"masc-mcp","version":"%s","uptime":"%s","sse_clients":%d}|}
+    Masc_mcp.Version.version uptime_str sse_clients
+  in
   Http.Response.json json reqd
 
 (** CORS preflight handler *)

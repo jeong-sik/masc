@@ -93,7 +93,7 @@ let broadcast json =
       match client.push event with
       | () -> update_last_event_id session_id current_event_id
       | exception e ->
-        Eio.traceln "[SSE] Push failed for session %s: %s" session_id (Printexc.to_string e)
+        Printf.eprintf "[SSE] Push failed for session %s: %s\n%!" session_id (Printexc.to_string e)
     end
   ) clients
 
@@ -109,7 +109,7 @@ let send_to session_id json =
       (match client.push event with
        | () -> update_last_event_id session_id current_event_id
        | exception e ->
-         Eio.traceln "[SSE] Push to %s failed: %s" session_id (Printexc.to_string e))
+         Printf.eprintf "[SSE] Push to %s failed: %s\n%!" session_id (Printexc.to_string e))
 
 (** Get client count *)
 let client_count () =

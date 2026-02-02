@@ -1151,6 +1151,24 @@ CONTENT: 흥미로운 연결이 보여! 새로운 시작이야
     ) banned_words
   in
   let action = parse_action_response response in
+  (* Convert index to actual post_id for COMMENT action *)
+  let action = match action with
+    | ActionComment (index_str, content) ->
+        (try
+          let idx = int_of_string index_str in
+          if idx >= 1 && idx <= List.length recent_posts then
+            let target_post = List.nth recent_posts (idx - 1) in
+            let real_post_id = Board.Post_id.to_string target_post.id in
+            ActionComment (real_post_id, content)
+          else begin
+            Eio.traceln "   ⚠️ [%s] Invalid post index %d, skipping" agent_name idx;
+            ActionSkip
+          end
+        with Failure _ ->
+          (* Not a number - might be old-style post_id, keep as-is *)
+          action)
+    | _ -> action
+  in
   match action with
   | ActionPost content when has_banned_word content ->
       Eio.traceln "   🚫 [%s] Banned words detected, forcing SKIP" agent_name;

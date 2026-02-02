@@ -170,6 +170,21 @@ resolve_base_path() {
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
 
+# Wait for port to become available (prevents EADDRINUSE on launchd restart)
+wait_for_port() {
+    local port="$1" max_wait=10 waited=0
+    while lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1; do
+        if [ "$waited" -ge "$max_wait" ]; then
+            echo "⚠️ Port $port still in use after ${max_wait}s, proceeding anyway" >&2
+            return 0
+        fi
+        echo "⏳ Port $port in use, waiting... (${waited}s/${max_wait}s)" >&2
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+wait_for_port "$PORT"
+
 # Select executable based on EIO_MODE
 SELECTED_EXE="$MASC_EXE"
 RUNTIME_NAME="Lwt"

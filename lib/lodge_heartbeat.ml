@@ -250,17 +250,44 @@ let run_shell_nonblocking cmd =
     Buffer.contents buf
   )
 
+(** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes *)
+let utf8_truncate s max_bytes =
+  let len = String.length s in
+  if len <= max_bytes then s
+  else begin
+    (* Walk backwards from max_bytes to find a valid UTF-8 char boundary *)
+    let pos = ref max_bytes in
+    while !pos > 0 && let b = Char.code s.[!pos] in b >= 0x80 && b < 0xC0 do
+      decr pos  (* skip continuation bytes *)
+    done;
+    (* If we're at a multi-byte start, check if the full char fits *)
+    if !pos > 0 then begin
+      let b = Char.code s.[!pos] in
+      let char_len =
+        if b < 0x80 then 1
+        else if b < 0xE0 then 2
+        else if b < 0xF0 then 3
+        else 4
+      in
+      if !pos + char_len > max_bytes then
+        String.sub s 0 !pos  (* char doesn't fit, cut before it *)
+      else
+        String.sub s 0 (!pos + char_len)
+    end else
+      String.sub s 0 max_bytes
+  end
+
 (** Run shell command and get all output (up to 500 chars) *)
 let run_shell_line cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 512 in
+    let buf = Buffer.create 2048 in
     let rec read_all () =
       match input_line ic with
       | line ->
-          if Buffer.length buf > 0 then Buffer.add_char buf ' ';
+          if Buffer.length buf > 0 then Buffer.add_char buf '\n';
           Buffer.add_string buf line;
-          if Buffer.length buf < 500 then read_all ()
+          if Buffer.length buf < 4000 then read_all ()
       | exception End_of_file -> ()
     in
     read_all ();
@@ -412,38 +439,57 @@ let time_modifier agent =
 
 (** {1 Agent Loading} *)
 
-(** Load agents dynamically from Neo4j - non-blocking *)
+(** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency) *)
 let load_agents_from_neo4j () =
-  let query = "MATCH (a:Agent) WHERE a.preferred_hours IS NOT NULL RETURN a.name, a.preferred_hours, a.peak_hour, a.traits, a.activity_level" in
+  (* first:10, no where filter — client-side filter for preferredHours.
+     where + first:50 exceeded GRAPHQL_MAX_COST (3051 > 1000). *)
+  let gql_query = "{\"query\": \"{ agents(first: 10) { edges { node { name preferredHours peakHour traits activityLevel } } } }\"}" in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
-    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
-    query
+    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"
+    api_key gql_query
   in
+  Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
   let json_str = run_shell_nonblocking cmd in
+  Printf.eprintf "[Heartbeat] GraphQL response: %d bytes\n%!" (String.length json_str);
   try
     let json = Yojson.Safe.from_string json_str in
-    let records = Yojson.Safe.Util.(json |> member "records" |> to_list) in
-    List.filter_map (fun record ->
+    (* Check for GraphQL errors before parsing data *)
+    (match Yojson.Safe.Util.member "errors" json with
+     | `List errors when errors <> [] ->
+       let msg = try
+         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+       with _ -> "unknown error" in
+       Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
+       []
+     | _ ->
+    let edges = json
+      |> Yojson.Safe.Util.member "data"
+      |> Yojson.Safe.Util.member "agents"
+      |> Yojson.Safe.Util.member "edges"
+      |> Yojson.Safe.Util.to_list
+    in
+    List.filter_map (fun edge ->
       try
-        let arr = Yojson.Safe.Util.to_list record in
-        let inner = Yojson.Safe.Util.to_list (List.hd arr) in
-        let name = Yojson.Safe.Util.to_string (List.nth inner 0) in
-        let hours_json = List.nth inner 1 in
-        let preferred_hours = Yojson.Safe.Util.(hours_json |> to_list |> List.map to_int) in
-        let peak_hour =
-          let ph = List.nth inner 2 in
-          if ph = `Null then None else Some (Yojson.Safe.Util.to_int ph)
-        in
-        let traits = Yojson.Safe.Util.(List.nth inner 3 |> to_list |> List.map to_string) in
+        let node = Yojson.Safe.Util.member "node" edge in
+        let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+        let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
+        let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
+        let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
         let activity_level =
-          let al = List.nth inner 4 in
-          if al = `Null then 0.5 else Yojson.Safe.Util.to_float al
+          match Yojson.Safe.Util.(member "activityLevel" node) with
+          | `Null -> 0.5
+          | v -> Yojson.Safe.Util.to_float v
         in
-        Some { name; preferred_hours; peak_hour; traits; activity_level }
+        (* Client-side filter: only agents with preferredHours *)
+        if preferred_hours <> [] then
+          Some { name; preferred_hours; peak_hour; traits; activity_level }
+        else
+          None
       with _ -> None
-    ) records
-  with _ ->
-    Eio.traceln "⚠️ Failed to load agents from Neo4j, using empty list";
+    ) edges)
+  with e ->
+    Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
     []
 
 (** Cached agents - loaded once at startup, refreshed periodically *)
@@ -565,11 +611,20 @@ let spawn_agent_from_gap ~topic ~(signals : gap_signal_t list) =
 
 let get_agents () =
   let now = Time_compat.now () in
-  (* Refresh cache every 5 minutes *)
-  if !agents_cache = [] || now -. !agents_cache_time > 300.0 then begin
-    agents_cache := load_agents_from_neo4j ();
-    agents_cache_time := now;
-    Eio.traceln "🔄 Loaded %d agents from Neo4j" (List.length !agents_cache)
+  let cache_ttl = if !agents_cache = [] then 30.0 else 300.0 in
+  (* Empty cache → retry in 30s; populated → refresh every 5 min *)
+  if now -. !agents_cache_time > cache_ttl then begin
+    let loaded = load_agents_from_neo4j () in
+    if loaded <> [] then begin
+      agents_cache := loaded;
+      agents_cache_time := now;
+      Eio.traceln "🔄 Loaded %d agents from Neo4j" (List.length loaded)
+    end else if !agents_cache = [] then begin
+      (* First load failed — record time to avoid hammering *)
+      agents_cache_time := now;
+      Eio.traceln "⚠️ Agent load returned empty, retrying in 30s"
+    end
+    (* else: keep existing cache on transient failure *)
   end;
   !agents_cache
 
@@ -581,99 +636,41 @@ let matching_score _agent _recent_posts =
   Random.float 1.0
 
 (** Ask LLM if agent should wake given current context *)
-let should_wake_llm ~agent ~recent_posts ~current_hour =
-  (* Build context for LLM *)
-  let posts_summary = if List.length recent_posts = 0 then "없음"
-    else recent_posts |> List.map (fun (p : Board.post) ->
-      let author = Board.Agent_id.to_string p.author in
-      let content = String.sub p.content 0 (min 50 (String.length p.content)) in
-      Printf.sprintf "- %s: \"%s\"" author content
-    ) |> String.concat "\n"
-  in
-
-  let traits_str = String.concat ", " agent.traits in
-  let preferred_str = agent.preferred_hours |> List.map string_of_int |> String.concat "," in
-  let is_preferred = List.mem current_hour agent.preferred_hours in
-
-  let prompt = Printf.sprintf
-{|[에이전트 깨우기 판단]
-
-에이전트: %s
-성격: %s
-선호 시간대: %s (현재: %02d:00 KST%s)
-활동 레벨: %.1f
-
-[최근 게시글]
-%s
-
-이 에이전트가 지금 깨어나서 활동해야 할까?
-- YES: 관련 주제가 있거나, 활동 시간대이거나, 기여할 내용이 있을 때
-- NO: 관련 없거나, 쉬어야 할 때
-
-한 단어로 답변: YES 또는 NO
-이유도 짧게 (한 줄):|}
-    agent.name traits_str preferred_str current_hour
-    (if is_preferred then " - 활동시간!" else "")
-    agent.activity_level posts_summary
-  in
-
-  (* Call LLM with cascade: Gemini → Ollama *)
-  let call_wake_llm ~tool_name =
-    let json_payload = Yojson.Safe.to_string (`Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", `Int 1);
-      ("method", `String "tools/call");
-      ("params", `Assoc [
-        ("name", `String tool_name);
-        ("arguments", `Assoc [("prompt", `String prompt)])
-      ])
-    ]) in
-    let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
-    let oc = open_out tmp in output_string oc json_payload; close_out oc;
-    let cmd = Printf.sprintf
-      "curl -s --max-time 10 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200; rm -f %s"
-      tmp tmp
-    in
-    run_shell_line cmd
-  in
-
-  (* Cascade: Ollama → Gemini (Ollama first: fast, no CLI hooks) *)
-  Printf.printf "   🔍 [%s] should_wake_llm calling Ollama...\n%!" agent.name;
-  let response =
-    let r1 = call_wake_llm ~tool_name:"ollama" in
-    Printf.printf "   🔍 [%s] Ollama returned (%d chars)\n%!" agent.name (String.length r1);
-    if String.length r1 > 2 then r1
-    else begin
-      Printf.printf "   🔍 [%s] Trying Gemini fallback...\n%!" agent.name;
-      call_wake_llm ~tool_name:"gemini"  (* Fallback *)
-    end
-  in
-  let response_upper = String.uppercase_ascii response in
-
-  (* Parse YES/NO from response *)
-  let should_wake =
-    String.length response > 0 &&
-    (let has_yes =
-      let rec find s pattern start =
-        if start + String.length pattern > String.length s then false
-        else if String.sub s start (String.length pattern) = pattern then true
-        else find s pattern (start + 1)
-      in find response_upper "YES" 0
-    in has_yes)
-  in
-
-  if should_wake then begin
-    (* Extract reason from response *)
-    let reason = if String.length response > 10 then
-      String.sub response (min 4 (String.length response)) (min 50 (String.length response - 4))
-    else "LLM decision" in
-    Some (Matching { score = 1.0; topic = String.trim reason })
-  end else None
-
-(** Determine if agent should wake - LLM-based *)
-let should_wake _config agent recent_posts =
+(** Determine if agent should wake - time + probability heuristic (non-blocking).
+    No LLM call here. LLM is only used AFTER wake, in decide_agent_action. *)
+let should_wake _config agent _recent_posts =
   let current_hour = current_hour_kst () in
-  should_wake_llm ~agent ~recent_posts ~current_hour
+  let is_preferred = List.mem current_hour agent.preferred_hours in
+  let is_peak = agent.peak_hour = Some current_hour in
+
+  (* Base probability: time-based *)
+  let base_prob =
+    if is_peak then 0.80       (* peak hour: 80% *)
+    else if is_preferred then 0.35  (* preferred hour: 35% *)
+    else 0.03                  (* off-hour: 3% serendipity *)
+  in
+
+  (* Scale by activity_level (0.0-1.0) *)
+  let prob = base_prob *. (0.5 +. agent.activity_level *. 0.5) in
+
+  (* Random roll *)
+  let roll = Random.float 1.0 in
+  let should_wake = roll < prob in
+
+  Printf.printf "   🎲 [%s] wake: prob=%.0f%% roll=%.0f%% → %s (hour=%d%s)\n%!"
+    agent.name (prob *. 100.0) (roll *. 100.0)
+    (if should_wake then "WAKE" else "SLEEP")
+    current_hour
+    (if is_peak then " peak!" else if is_preferred then " preferred" else "");
+
+  if should_wake then
+    Some (Matching {
+      score = prob;
+      topic = Printf.sprintf "시간대 기반 (%.0f%% 확률, %02d시%s)"
+        (prob *. 100.0) current_hour
+        (if is_peak then " peak" else if is_preferred then " 선호" else " 우연")
+    })
+  else None
 
 (** {1 Heartbeat Execution} *)
 
@@ -717,13 +714,14 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
   let mutation = Printf.sprintf
     {|mutation { createLodgeActivities(input: [{ agent: "%s", action: "%s", content: "%s", targetId: "%s", timestamp: %d }]) { lodgeActivities { id } } }|}
     agent_name action_str
-    (String.escaped (String.sub content 0 (min 100 (String.length content))))
+    (String.escaped (utf8_truncate content 100))
     target_id timestamp
   in
   let json_payload = Printf.sprintf {|{"query": "%s"}|} (String.escaped mutation) in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
-    "curl -s --max-time 3 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null | head -c 100"
-    (Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"") json_payload
+    "curl -s --max-time 3 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null | head -c 100"
+    api_key json_payload
   in
   (* Fire and forget - don't block the main loop *)
   ignore (run_shell_line cmd);
@@ -1037,7 +1035,7 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   (* Build action context *)
   let action_context = match action_type with
     | `Post reason -> Printf.sprintf "게시글 작성 - 이유: %s" reason
-    | `Comment original_post -> Printf.sprintf "댓글 작성 - 원글: \"%s\"" (String.sub original_post 0 (min 100 (String.length original_post)))
+    | `Comment original_post -> Printf.sprintf "댓글 작성 - 원글: \"%s\"" (utf8_truncate original_post 100)
   in
   (* Build dynamic system prompt with thread history *)
   let system_prompt = build_agent_prompt ~profile ~memories ~thread_history ~current_hour ~action_context in
@@ -1165,7 +1163,7 @@ let detect_gap_signal ~agent_name ~content =
       let signal : gap_signal_t = {
         gs_topic = topic;
         gs_detected_by = agent_name;
-        gs_context = String.sub content 0 (min 100 (String.length content));
+        gs_context = utf8_truncate content 100;
         gs_timestamp = Unix.gettimeofday ();
       } in
       gap_signals := signal :: !gap_signals;
@@ -1198,20 +1196,52 @@ let get_signals_for_topic ~topic =
 let parse_action_response response =
   (* Expected formats:
      Multi-line:
+       REASON: 이유
        ACTION: POST
        CONTENT: 오늘 흥미로운 발견을 했어
 
      Single-line (LLM often uses this):
        ACTION: POST CONTENT: 오늘 흥미로운 발견을 했어
-       ACTION: COMMENT p-xxx CONTENT: 좋은 생각이야!
+       ACTION: COMMENT 3 CONTENT: 좋은 생각이야!
+
+     Mixed (REASON + ACTION on one line):
+       REASON: 경험 공유 ACTION: COMMENT 3 CONTENT: ...
   *)
   let lines = String.split_on_char '\n' response in
-  let action_line = List.find_opt (fun l ->
-    String.length l > 7 && String.sub (String.uppercase_ascii l) 0 7 = "ACTION:"
-  ) lines in
-  let content_line = List.find_opt (fun l ->
-    String.length l > 8 && String.sub (String.uppercase_ascii l) 0 8 = "CONTENT:"
-  ) lines in
+  (* Try line-start match first, then scan for ACTION: anywhere in each line *)
+  let action_line =
+    let exact = List.find_opt (fun l ->
+      let t = String.trim l in
+      String.length t > 7 && String.sub (String.uppercase_ascii t) 0 7 = "ACTION:"
+    ) lines in
+    match exact with
+    | Some _ -> exact
+    | None ->
+      (* Fallback: find ACTION: anywhere in response and extract from that point *)
+      (try
+        let idx = Str.search_forward (Str.regexp_case_fold "ACTION:") response 0 in
+        let rest = String.sub response idx (String.length response - idx) in
+        (* Take until next newline or end *)
+        let end_idx = try String.index rest '\n' with Not_found -> String.length rest in
+        Some (String.sub rest 0 end_idx)
+      with Not_found -> None)
+  in
+  (* Find CONTENT: line (trimmed) *)
+  let content_line =
+    let exact = List.find_opt (fun l ->
+      let t = String.trim l in
+      String.length t > 8 && String.sub (String.uppercase_ascii t) 0 8 = "CONTENT:"
+    ) lines in
+    match exact with
+    | Some _ -> exact
+    | None ->
+      (* Fallback: find CONTENT: that's NOT on the ACTION: line *)
+      (try
+        let idx = Str.search_forward (Str.regexp_case_fold "CONTENT:") response 0 in
+        let rest = String.sub response idx (String.length response - idx) in
+        Some rest
+      with Not_found -> None)
+  in
   match action_line with
   | None -> ActionSkip
   | Some line ->
@@ -1381,9 +1411,7 @@ let get_personality_hint traits =
 
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
-  Printf.printf "   🔍 [%s] decide_agent_action START (posts=%d)\n%!" agent_name (List.length recent_posts);
   let profile = load_agent_profile ~agent_name in
-  Printf.printf "   🔍 [%s] profile loaded\n%!" agent_name;
   let memories = load_agent_memories ~agent_name ~limit:3 in
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
@@ -1396,7 +1424,7 @@ let decide_agent_action ~agent_name ~wake_reason ~recent_posts =
   let posts_str = if List.length sorted_posts = 0 then "없음"
     else sorted_posts |> List.mapi (fun i (p : Board.post) ->
       let author = Board.Agent_id.to_string p.author in
-      let content = String.sub p.content 0 (min 80 (String.length p.content)) in
+      let content = utf8_truncate p.content 80 in
       let relevance_hint = if i < 2 then " ⭐" else "" in
       Printf.sprintf "[%d] %s: \"%s\"%s" (i+1) author content relevance_hint
     ) |> String.concat "\n"
@@ -1549,44 +1577,40 @@ ACTION: SKIP
     output_string oc json_payload;
     close_out oc;
     let cmd = Printf.sprintf
-      "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500; rm -f %s"
+      "curl -s --max-time 60 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 4000; rm -f %s"
       tmp_file tmp_file
     in
     strip_extra (run_shell_line cmd)
   in
 
-  (* Cascade: Ollama → Gemini → empty (Ollama first: fast, no CLI hooks) *)
-  Printf.printf "   🔍 [%s] calling Ollama...\n%!" agent_name;
+  (* Cascade: GLM-4.7 Cloud → Gemini → skip *)
+  Printf.printf "   🔍 [%s] calling GLM-4.7...\n%!" agent_name;
   let response =
-    (* 1차: Ollama (로컬, 빠름) *)
-    let r1 = call_llm ~tool_name:"ollama" ~prompt in
-    Printf.printf "   🔍 [%s] Ollama returned (%d chars)\n%!" agent_name (String.length r1);
+    (* 1차: GLM-4.7 Cloud (Z.ai, fast & cheap) *)
+    let r1 = call_llm ~tool_name:"glm" ~prompt in
+    Printf.printf "   🔍 [%s] GLM returned (%d chars)\n%!" agent_name (String.length r1);
     if is_valid_response r1 then begin
-      Printf.printf "   🧠 [%s] Ollama: %s\n%!" agent_name (String.sub r1 0 (min 80 (String.length r1)));
+      Printf.printf "   🧠 [%s] GLM: %s\n%!" agent_name (utf8_truncate r1 80);
       r1
     end else begin
       (* Fallback: Gemini *)
-      Printf.printf "   ⚠️ [%s] Ollama failed, trying Gemini...\n%!" agent_name;
+      Printf.printf "   ⚠️ [%s] GLM failed (%d chars), trying Gemini...\n%!" agent_name (String.length r1);
       let r2 = call_llm ~tool_name:"gemini" ~prompt in
+      Printf.printf "   🔍 [%s] Gemini returned (%d chars)\n%!" agent_name (String.length r2);
       if is_valid_response r2 then begin
-        Printf.printf "   🧠 [%s] Gemini: %s\n%!" agent_name (String.sub r2 0 (min 80 (String.length r2)));
+        Printf.printf "   🧠 [%s] Gemini: %s\n%!" agent_name (utf8_truncate r2 80);
         r2
       end else begin
-        (* 전부 실패: 조용히 스킵 *)
-        Printf.printf "   💤 [%s] All LLMs failed, skipping silently\n%!" agent_name;
+        Printf.printf "   💤 [%s] All LLMs failed (GLM=%d, Gemini=%d), skipping\n%!" agent_name (String.length r1) (String.length r2);
         ""
       end
     end
   in
 
-  (* Filter out responses with banned words - LLM keeps ignoring instructions *)
+  (* Filter: only block the worst offenders, not useful words *)
   let banned_words = [
-    (* 직접 금지 *)
-    "패턴"; "맥박"; "연결"; "발견"; "통찰"; "리듬"; "하트비트"; "heartbeat";
-    (* 추상적 표현 *)
-    "관점"; "엮"; "분류"; "기존"; "새롭게"; "흥미롭"; "새로운 시작"; "기록해";
-    (* 애매한 표현 *)
-    "다 보니"; "해보면"; "것 같아"; "보이네"; "느껴져"
+    "맥박"; "하트비트"; "heartbeat";
+    "새로운 시작"; "함께 성장"
   ] in
   let has_banned_word content =
     List.exists (fun word ->
@@ -1710,21 +1734,16 @@ let start ~sw ~clock room_config =
     Eio.traceln "🫀 Lodge Heartbeat: starting (interval=%.0fs)" config.interval_s;
 
     Eio.Fiber.fork ~sw (fun () ->
-      Printf.printf "🔍 [DEBUG] Heartbeat fiber STARTED\n%!";
       (* Initial delay *)
       Eio.Time.sleep clock 5.0;
-      Printf.printf "🔍 [DEBUG] Initial delay done, entering loop\n%!";
 
       while true do
         (* Isolated try-catch: heartbeat errors don't crash the server *)
         try
-          Printf.printf "🔍 [DEBUG] Loop iteration START\n%!";
           (* Get actual recent posts for agents to react to *)
           let store = Board.global () in
           let recent_posts = Board.list_posts store ~limit:10 () in
-          Printf.printf "🔍 [DEBUG] Got %d posts, calling tick\n%!" (List.length recent_posts);
           let result = tick ~config ~recent_posts in
-          Printf.printf "🔍 [DEBUG] tick returned\n%!";
 
         (* Log result - use Printf for visibility in logs *)
         Printf.printf "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s\n%!"

@@ -64,7 +64,7 @@ let ensure_metrics_dir config agent_id =
 
 (** Get current month's file path *)
 let current_month_file config agent_id =
-  let tm = Unix.gmtime (Unix.gettimeofday ()) in
+  let tm = Unix.gmtime (Time_compat.now ()) in
   let filename = Printf.sprintf "%04d-%02d.jsonl"
     (tm.Unix.tm_year + 1900)
     (tm.Unix.tm_mon + 1) in
@@ -72,7 +72,7 @@ let current_month_file config agent_id =
 
 (** Generate unique metric ID *)
 let generate_id () =
-  let timestamp = Unix.gettimeofday () in
+  let timestamp = Time_compat.now () in
   let random = Random.int 100000 in
   Printf.sprintf "metric-%d-%05d" (int_of_float (timestamp *. 1000.)) random
 
@@ -100,7 +100,7 @@ let create_metric ~agent_id ~task_id ?(collaborators=[]) ?handoff_from () =
     id = generate_id ();
     agent_id;
     task_id;
-    started_at = Unix.gettimeofday ();
+    started_at = Time_compat.now ();
     completed_at = None;
     success = false;
     error_message = None;
@@ -112,7 +112,7 @@ let create_metric ~agent_id ~task_id ?(collaborators=[]) ?handoff_from () =
 (** Mark task as completed - pure *)
 let complete_metric metric ~success ?error_message ?handoff_to () =
   { metric with
-    completed_at = Some (Unix.gettimeofday ());
+    completed_at = Some (Time_compat.now ());
     success;
     error_message;
     handoff_to;
@@ -146,7 +146,7 @@ let read_metrics_file file : task_metric list =
 
 (** Get recent metrics for an agent - synchronous *)
 let get_recent config ~agent_id ~days : task_metric list =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let cutoff = now -. (float_of_int days *. 86400.0) in
   let dir = agent_metrics_dir config agent_id in
   if not (Sys.file_exists dir) then
@@ -164,7 +164,7 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
   if List.length metrics = 0 then
     None
   else
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let period_start = now -. (float_of_int days *. 86400.0) in
     let total = List.length metrics in
     let completed = List.filter (fun m -> Option.is_some m.completed_at) metrics in

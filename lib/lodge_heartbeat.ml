@@ -12,6 +12,57 @@
 
 [@@@warning "-32-69"]
 
+(** {1 Lodge Agent Room Integration} *)
+
+(** Get MASC agents directory path *)
+let agents_dir () =
+  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
+  Filename.concat me_root ".masc/agents"
+
+(** Register a Lodge agent in the Room (makes it visible in dashboard) *)
+let register_lodge_agent ~name ~status =
+  let agent : Types.agent = {
+    name;
+    agent_type = "lodge";
+    status;
+    capabilities = ["autonomous"; "llm-powered"];
+    current_task = None;
+    joined_at = Types.now_iso ();
+    last_seen = Types.now_iso ();
+    meta = None;
+  } in
+  let json_str = Yojson.Safe.to_string (Types.agent_to_yojson agent) in
+  let dir = agents_dir () in
+  let () = if not (Sys.file_exists dir) then Unix.mkdir dir 0o755 in
+  let path = Filename.concat dir (name ^ ".json") in
+  let oc = open_out path in
+  output_string oc json_str;
+  close_out oc
+
+(** Update Lodge agent status *)
+let update_lodge_agent_status ~name ~status ?current_task () =
+  let dir = agents_dir () in
+  let path = Filename.concat dir (name ^ ".json") in
+  if Sys.file_exists path then begin
+    let ic = open_in path in
+    let content = really_input_string ic (in_channel_length ic) in
+    close_in ic;
+    match Types.agent_of_yojson (Yojson.Safe.from_string content) with
+    | Ok agent ->
+        let updated = { agent with
+          status;
+          last_seen = Types.now_iso ();
+          current_task = (match current_task with Some t -> Some t | None -> agent.current_task);
+        } in
+        let json_str = Yojson.Safe.to_string (Types.agent_to_yojson updated) in
+        let oc = open_out path in
+        output_string oc json_str;
+        close_out oc
+    | Error _ -> ()
+  end else
+    (* Agent not registered yet, register now *)
+    register_lodge_agent ~name ~status
+
 (** {1 Non-blocking Shell Execution} *)
 
 (** Run shell command in a separate system thread to avoid blocking Eio event loop *)
@@ -366,6 +417,9 @@ let start ~sw ~clock room_config =
             in
             Eio.traceln "   🔔 Wake %s: %s" name reason_str;
 
+            (* Register agent as Busy in Room (visible in dashboard) *)
+            update_lodge_agent_status ~name ~status:Types.Busy ~current_task:reason_str ();
+
             let store = Board.global () in
             let author = name in
 
@@ -424,9 +478,13 @@ let start ~sw ~clock room_config =
                       record_agent_memory ~agent_name:name ~content ~action_type:(`Post reason_context)
                   | Error e ->
                       Eio.traceln "   ❌ [%s] Post failed: %s" name (Board.show_board_error e)
-            end
+            end;
+            (* Mark agent as Listening (done working, ready for next wake) *)
+            update_lodge_agent_status ~name ~status:Types.Listening ()
           with e ->
-            Eio.traceln "   💀 [%s] Agent error: %s" name (Printexc.to_string e)
+            Eio.traceln "   💀 [%s] Agent error: %s" name (Printexc.to_string e);
+            (* Still mark as Listening even on error *)
+            update_lodge_agent_status ~name ~status:Types.Listening ()
         ) result.agents_woken in
         (* Run all agents in parallel! *)
         if List.length agent_tasks > 0 then

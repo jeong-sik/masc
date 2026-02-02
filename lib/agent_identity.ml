@@ -10,6 +10,9 @@
     @since 0.5.0
 *)
 
+(* Fiber-safe random state for UUID generation *)
+let identity_rng = Random.State.make_self_init ()
+
 (** {1 Core Types} *)
 
 (** Channel/surface type - where the agent is connected from *)
@@ -42,7 +45,7 @@ type t = {
 (** Generate a unique agent UUID from name + timestamp hash *)
 let generate_uuid ~agent_name =
   let timestamp = Unix.gettimeofday () in
-  let random_part = Random.int 0xFFFFFF in
+  let random_part = Random.State.int identity_rng 0xFFFFFF in
   let input = Printf.sprintf "%s-%f-%d" agent_name timestamp random_part in
   (* Simple hash-based UUID: first 8 chars of hex digest *)
   let hash = Digest.string input |> Digest.to_hex in

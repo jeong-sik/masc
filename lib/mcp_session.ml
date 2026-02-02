@@ -1,6 +1,9 @@
 (** MCP HTTP Session ID management
     MCP Spec 2025-03-26: Session IDs must be visible ASCII (0x21-0x7E) *)
 
+(* Fiber-safe random state for session ID generation *)
+let session_rng = Random.State.make_self_init ()
+
 (** Base62 character set for compact, ASCII-safe IDs *)
 let base62_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
@@ -25,7 +28,7 @@ let is_valid id =
 let generate () =
   let timestamp = int_of_float (Unix.gettimeofday () *. 1000.0) in
   let pid = Unix.getpid () in
-  let random = Random.int 1000000 in
+  let random = Random.State.int session_rng 1000000 in
   Printf.sprintf "mcp_%s_%s_%s"
     (encode_base62 timestamp)
     (encode_base62 pid)

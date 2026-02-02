@@ -5,6 +5,8 @@
     structured state for the next agent to inherit.
 *)
 
+(* Fiber-safe random state for handover ID generation *)
+let handover_rng = Random.State.make_self_init ()
 
 (** Handover record - the "DNA" passed to next agent *)
 type handover_record = {
@@ -54,8 +56,8 @@ let trigger_reason_to_string = function
 
 (** Generate unique handover ID *)
 let generate_id () =
-  let timestamp = Unix.gettimeofday () in
-  let random = Random.int 100000 in
+  let timestamp = Time_compat.now () in
+  let random = Random.State.int handover_rng 100000 in
   Printf.sprintf "handover-%d-%05d" (int_of_float (timestamp *. 1000.)) random
 
 (** Create empty handover record *)
@@ -75,7 +77,7 @@ let create_handover ~from_agent ~task_id ~session_id ~reason : handover_record =
     warnings = [];
     unresolved_errors = [];
     modified_files = [];
-    created_at = Unix.gettimeofday ();
+    created_at = Time_compat.now ();
     context_usage_percent = 0;
     handover_reason = trigger_reason_to_string reason;
   }

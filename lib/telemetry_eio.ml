@@ -50,7 +50,7 @@ let ensure_masc_dir fs config =
 
 let event_to_json event =
   let record = {
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
     event;
   } in
   Yojson.Safe.to_string (event_record_to_yojson record)
@@ -164,7 +164,7 @@ let calculate_error_rate events =
 
 (** Get aggregated metrics for last 24 hours *)
 let get_metrics ~fs config : metrics =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let since_24h = now -. 86400.0 in
   let events = read_events_since ~fs config ~since:since_24h in
   {
@@ -229,7 +229,7 @@ let track_tool_called ~fs config ~tool_name ~success ~duration_ms ?agent_id () =
 
 (** Rotate telemetry file *)
 let rotate ~fs config ~max_age_days : unit =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let cutoff = now -. (float_of_int max_age_days *. 86400.0) in
   let all = read_all_events ~fs config in
   let recent = List.filter (fun r -> r.timestamp >= cutoff) all in

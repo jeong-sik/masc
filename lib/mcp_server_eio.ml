@@ -106,7 +106,7 @@ let unregister_sync (registry : Session.registry) ~agent_name =
     This avoids the legacy bridge while keeping the existing registry structure.
 *)
 let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeout =
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
   let check_interval = 2.0 in
 
   (* Ensure session exists *)
@@ -117,7 +117,7 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
   Session.update_activity registry ~agent_name ~is_listening:(Some true) ();
 
   let rec wait_loop () =
-    let elapsed = Unix.gettimeofday () -. start_time in
+    let elapsed = Time_compat.now () -. start_time in
     if elapsed >= timeout then begin
       Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
       None
@@ -955,7 +955,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             (false, Printf.sprintf "❌ file must be under base_path: %s" config.base_path)
         | Some key ->
             let ttl_seconds = config.lock_expiry_minutes * 60 in
-            let now = Unix.gettimeofday () in
+            let now = Time_compat.now () in
             let expires_at = now +. float_of_int ttl_seconds in
             (match Room_utils.backend_acquire_lock config ~key ~ttl_seconds ~owner:agent_name with
              | Ok true ->
@@ -1270,7 +1270,7 @@ Time: %s
 
   | "masc_mcp_session" ->
       let action = get_string "action" "" in
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       let sessions = load_mcp_sessions config in
       let save sessions = save_mcp_sessions config sessions in
       let response =
@@ -1510,7 +1510,7 @@ Time: %s
             (if summary = "" then "My time has come." else summary)
             cell.Mitosis.task_count
             cell.Mitosis.tool_call_count
-            ((Unix.gettimeofday () -. cell.Mitosis.born_at) /. 60.0)
+            ((Time_compat.now () -. cell.Mitosis.born_at) /. 60.0)
             (context_ratio *. 100.0)
             (cell.Mitosis.generation + 1)
           in
@@ -1760,7 +1760,7 @@ Time: %s
       let estimated_remaining_tools = int_of_float (remaining_ratio *. Mitosis.Defaults.tool_calls_per_full_context) in
 
       (* Calculate age in seconds *)
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       let age_seconds = now -. cell.Mitosis.born_at in
       let age_human =
         if age_seconds < 60.0 then Printf.sprintf "%.0f seconds" age_seconds
@@ -2061,7 +2061,7 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
     Safe_ops.json_string ~default:"unknown" "agent_name" arguments
   in
   append_audit_event state.Mcp_server.room_config {
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
     agent = agent_name;
     event_type = "tool_call";
     success;

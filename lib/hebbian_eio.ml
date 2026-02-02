@@ -90,9 +90,9 @@ let with_graph_lock config f =
   let lock_file = synapses_lock_file config in
   let fd = Unix.openfile lock_file [Unix.O_WRONLY; Unix.O_CREAT] 0o600 in
   (* Track lock acquisition time *)
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
   Unix.lockf fd Unix.F_LOCK 0;
-  let wait_ms = (Unix.gettimeofday () -. start_time) *. 1000.0 in
+  let wait_ms = (Time_compat.now () -. start_time) *. 1000.0 in
   Atomic.incr lock_acquisitions;
   lock_total_wait_ms := !lock_total_wait_ms +. wait_ms;
   if wait_ms > !lock_max_wait_ms then lock_max_wait_ms := wait_ms;
@@ -189,7 +189,7 @@ let find_synapse graph ~from_agent ~to_agent : synapse option =
 
 (** Create new synapse - pure *)
 let create_synapse ~from_agent ~to_agent : synapse =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   {
     from_agent;
     to_agent;
@@ -221,7 +221,7 @@ let strengthen config ?params ~from_agent ~to_agent () : unit =
       synapse with
       weight = new_weight;
       success_count = synapse.success_count + 1;
-      last_updated = Unix.gettimeofday ();
+      last_updated = Time_compat.now ();
     } in
     let new_graph = update_synapse graph updated in
     save_graph config new_graph
@@ -240,7 +240,7 @@ let weaken config ?params ~from_agent ~to_agent () : unit =
         synapse with
         weight = new_weight;
         failure_count = synapse.failure_count + 1;
-        last_updated = Unix.gettimeofday ();
+        last_updated = Time_compat.now ();
       } in
       let new_graph = update_synapse graph updated in
       save_graph config new_graph
@@ -262,7 +262,7 @@ let get_preferred_partner config ~agent_id : string option =
 let consolidate config ?params ~decay_after_days () : int =
   let params = Option.value params ~default:(default_params ()) in
   let graph = load_graph config in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let cutoff = now -. (float_of_int decay_after_days *. 86400.0) in
 
   let (decayed, pruned_count) = List.fold_left (fun (acc, count) synapse ->

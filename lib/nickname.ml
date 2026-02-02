@@ -20,19 +20,19 @@ let animals = [|
   "orca"; "rhino"; "sloth"; "tapir"; "zebra";
 |]
 
-(* Initialize random seed once *)
-let () = Random.self_init ()
+(* Fiber-safe random state for nickname generation *)
+let nickname_rng = Random.State.make_self_init ()
 
 (** Generate a short random suffix (4 hex chars) for uniqueness *)
 let random_suffix () =
-  Printf.sprintf "%04x" (Random.int 0xFFFF)
+  Printf.sprintf "%04x" (Random.State.int nickname_rng 0xFFFF)
 
 (** Generate a unique nickname for an agent type.
     Format: {agent_type}-{adjective}-{animal}
     Example: claude-swift-fox, gemini-brave-tiger *)
 let generate agent_type =
-  let adj = adjectives.(Random.int (Array.length adjectives)) in
-  let animal = animals.(Random.int (Array.length animals)) in
+  let adj = adjectives.(Random.State.int nickname_rng (Array.length adjectives)) in
+  let animal = animals.(Random.State.int nickname_rng (Array.length animals)) in
   Printf.sprintf "%s-%s-%s" agent_type adj animal
 
 (** Generate with suffix for guaranteed uniqueness.

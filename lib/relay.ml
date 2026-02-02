@@ -178,24 +178,7 @@ let build_handoff_prompt ~payload ~generation =
 
   header ^ context ^ footer
 
-(** Execute relay to new agent *)
-let execute_relay ~config ~payload =
-  let generation = payload.relay_generation + 1 in
-  let prompt = build_handoff_prompt ~payload ~generation in
-
-  (* Broadcast relay event *)
-  let _ = Printf.printf "[RELAY] Handing off to %s (generation %d)\n%!"
-    config.target_agent generation in
-
-  (* Spawn new agent with handoff prompt *)
-  let result = Spawn.spawn
-    ~agent_name:config.target_agent
-    ~prompt
-    ~timeout_seconds:Env_config.Spawn.timeout_seconds  (* Centralized timeout config *)
-    ()
-  in
-
-  (result, generation)
+(* execute_relay removed - was blocking Spawn.spawn, replaced by tool_relay.ml using Spawn_eio *)
 
 (** Checkpoint - saved state for smooth handoff *)
 type checkpoint = {
@@ -245,54 +228,12 @@ let checkpoint_to_payload cp generation =
     relay_generation = generation;
   }
 
-(** Auto-relay check - call this periodically (reactive mode) *)
-let auto_relay_check ~config ~messages ~tool_calls ~model ~payload_builder =
-  let metrics = estimate_context ~messages ~tool_calls ~model in
-
-  if should_relay ~config ~metrics then begin
-    Printf.printf "[RELAY] Context at %.1f%%, triggering relay...\n%!"
-      (metrics.usage_ratio *. 100.0);
-
-    let payload = payload_builder () in
-    Some (execute_relay ~config ~payload)
-  end
-  else
-    None
-
-(** Smart relay check - proactive mode with task hints *)
-let smart_relay_check ~config ~messages ~tool_calls ~model ~task_hint ~payload_builder =
-  let metrics = estimate_context ~messages ~tool_calls ~model in
-
-  match should_relay_smart ~config ~metrics ~task_hint with
-  | `Proactive ->
-    Printf.printf "[RELAY/PROACTIVE] Predicted overflow before task, relaying now...\n%!";
-    Printf.printf "  Current: %.1f%%, Task cost: ~%d tokens\n%!"
-      (metrics.usage_ratio *. 100.0)
-      (estimate_task_cost task_hint);
-    let payload = payload_builder () in
-    Some (`Proactive, execute_relay ~config ~payload)
-
-  | `Reactive ->
-    Printf.printf "[RELAY/REACTIVE] Context at %.1f%%, triggering relay...\n%!"
-      (metrics.usage_ratio *. 100.0);
-    let payload = payload_builder () in
-    Some (`Reactive, execute_relay ~config ~payload)
-
-  | `No_relay ->
-    None
-
-(** Auto-checkpoint at key moments *)
-let auto_checkpoint ~metrics ~summary ~task ~todos ~pdca ~files =
-  (* Save checkpoint at 50%, 70% thresholds *)
-  let ratio = metrics.usage_ratio in
-  let should_cp =
-    (ratio >= 0.5 && ratio < 0.55) ||
-    (ratio >= 0.7 && ratio < 0.75)
-  in
-  if should_cp then
-    Some (save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics)
-  else
-    None
+(* Removed deprecated functions:
+   - execute_relay: blocking Spawn.spawn
+   - auto_relay_check: used execute_relay
+   - smart_relay_check: used execute_relay
+   - auto_checkpoint: unused
+   All replaced by tool_relay.ml handlers using Spawn_eio *)
 
 (** Metrics to JSON *)
 let metrics_to_json metrics =

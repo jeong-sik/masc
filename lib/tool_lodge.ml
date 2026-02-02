@@ -1253,20 +1253,27 @@ let lodge_progress ~net:_ _args =
   (true, progress_report)
 
 (** Autonomous improvement loop — agents patrol, react, research *)
+(** Shared state for background loop monitoring *)
+let loop_status : (int * int * string) option ref = ref None  (* (current, total, last_action) *)
+
 let autonomous_loop ~net args =
   let iterations = Safe_ops.json_int ~default:10 "iterations" args in
   let iterations = min iterations 200 in  (* cap at 200 *)
   let delay_ms = Safe_ops.json_int ~default:5000 "delay_ms" args in
   let verbose = Safe_ops.json_bool ~default:false "verbose" args in
+  let background = Safe_ops.json_bool ~default:true "background" args in  (* default: background *)
 
-  let results = ref [] in
-  let patrol_count = ref 0 in
-  let research_count = ref 0 in
-  let discuss_count = ref 0 in
-  let explore_count = ref 0 in
-  let error_count = ref 0 in
+  (* The actual loop logic *)
+  let run_loop () =
+    let results = ref [] in
+    let patrol_count = ref 0 in
+    let research_count = ref 0 in
+    let discuss_count = ref 0 in
+    let explore_count = ref 0 in
+    let error_count = ref 0 in
 
-  for i = 1 to iterations do
+    for i = 1 to iterations do
+      loop_status := Some (i, iterations, "running");
     (* Pick random action *)
     let action = Random.int 4 in
     let (action_name, (ok, msg)) = match action with
@@ -1314,25 +1321,46 @@ let autonomous_loop ~net args =
     if i mod 10 = 0 && i < iterations then
       results := Printf.sprintf "───── 진행: %d/%d (%.0f%%) ─────" i iterations (100.0 *. float_of_int i /. float_of_int iterations) :: !results;
 
-    (* Delay between iterations *)
-    if i < iterations then Unix.sleepf (float_of_int delay_ms /. 1000.0)
-  done;
+      (* Delay between iterations *)
+      if i < iterations then Unix.sleepf (float_of_int delay_ms /. 1000.0)
+    done;
 
-  let summary = Printf.sprintf
-    "🔄 **Autonomous Loop 완료**\n\
-     ━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
-     📊 **통계:**\n\
-        🔧 Patrol: %d회\n\
-        🔬 Research: %d회\n\
-        💬 Discussion: %d회\n\
-        📋 Explore: %d회\n\
-        ❌ Errors: %d회\n\n\
-     📝 **로그 (최근 %d개):**\n%s"
-    !patrol_count !research_count !discuss_count !explore_count !error_count
-    (min 50 (List.length !results))
-    (String.concat "\n" (List.rev (List.filteri (fun i _ -> i < 50) !results)))
+    loop_status := None;  (* Clear status when done *)
+    let summary = Printf.sprintf
+      "🔄 **Autonomous Loop 완료**\n\
+       ━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
+       📊 **통계:**\n\
+          🔧 Patrol: %d회\n\
+          🔬 Research: %d회\n\
+          💬 Discussion: %d회\n\
+          📋 Explore: %d회\n\
+          ❌ Errors: %d회\n\n\
+       📝 **로그 (최근 %d개):**\n%s"
+      !patrol_count !research_count !discuss_count !explore_count !error_count
+      (min 50 (List.length !results))
+      (String.concat "\n" (List.rev (List.filteri (fun i _ -> i < 50) !results)))
+    in
+    summary
   in
-  (true, summary)
+
+  (* Background mode: spawn thread and return immediately *)
+  if background then begin
+    let _ = Thread.create (fun () ->
+      try
+        let _ = run_loop () in ()
+      with exn ->
+        loop_status := Some (0, iterations, Printf.sprintf "Error: %s" (Printexc.to_string exn))
+    ) () in
+    (true, Printf.sprintf "🚀 **Background Loop Started**\n\
+      ━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
+      📊 Iterations: %d\n\
+      ⏱️  Delay: %d ms\n\
+      📍 Use `lodge_progress` to check status\n\n\
+      💡 서버는 다른 요청에 응답 가능합니다!" iterations delay_ms)
+  end
+  else
+    (* Foreground mode: run synchronously *)
+    (true, run_loop ())
 
 let tool_profile : Types.tool_schema = {
   name = "lodge_profile";

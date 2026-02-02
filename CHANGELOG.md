@@ -227,3 +227,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Eio Async Pattern**: Migrate core modules to `Time_compat.now()` for Eio-native timestamps
   - heartbeat, lodge_heartbeat, mcp_session, session, spawn_registry
   - Prevents domain blocking in async context
+
+## [2.28.0] - 2026-02-02
+
+### Fixed
+- **Complete Time_compat Migration**: All 56 main library modules now use Eio-native timestamps
+  - Prevents domain blocking in async context
+  - council/ and jiphyeon/ sublibraries unchanged (separate dependency graph)

@@ -590,8 +590,9 @@ let start ~sw ~clock room_config =
             let store = Board.global () in
             let author = name in
 
-            (* 50% chance to comment on existing post, 50% to create new post *)
-            let should_comment = Random.float 1.0 < 0.5 in
+            (* 70% chance to comment on existing post, 30% to create new post *)
+            (* Agents should engage with each other more than post alone *)
+            let should_comment = Random.float 1.0 < 0.7 in
             let recent_posts = Board.list_posts store ~limit:10 () in
 
             if should_comment && List.length recent_posts > 0 then begin

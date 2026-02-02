@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.20.0] - 2026-02-02
+
+### Added
+- **Agent UUID**: Permanent unique identifier for each agent (`agent-{12-char-hex}`)
+  - `generate_uuid` function using name + timestamp hash
+  - Enables cross-session agent tracking
+
+### Fixed
+- **Security**: Cypher injection prevention via `cypher_escape` in `lodge_daemon.ml`
+- **Security**: Secure temp file creation (0600 permissions) in `tool_lodge.ml`
+- **Portability**: Replace hardcoded paths with `sb_path()` using `ME_ROOT` env
+- **Stability**: UTF-8 safe emoji detection in `orchestrator.ml` zombie cleanup
+
 ## [2.19.0] - 2026-02-02
 
 ### Changed

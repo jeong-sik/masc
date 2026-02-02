@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.0] - 2026-02-02
+
+### Added
+- **Broadcast Content-Aware Routing**: Intelligent routing of broadcast messages to relevant agents
+  - `agent_specialties`: Keyword mapping per agent (dreamer, skeptic, historian, pragmatist, connector)
+  - Hybrid routing: Fast keyword matching + LLM semantic analysis fallback
+  - `handle_broadcast`: Route to relevant agents and generate contextual responses
+  - `poll_and_handle_broadcasts`: Poll for new broadcasts during heartbeat loop
+
+### Fixed
+- **SOUL Evolution Callback**: Registered callback in tool_lodge.ml for cross-module feedback
+
 ## [2.26.0] - 2026-02-02
 
 ### Added

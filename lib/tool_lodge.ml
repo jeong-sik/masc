@@ -12,21 +12,47 @@ type result = bool * string
 
 (** {1 Lodge Configuration} *)
 
-(** Lodge 공용어 설정 — LODGE_LANGUAGE 환경변수로 지정 (기본값: ko)
-    - "ko": 한글로 작성
-    - "en": 영어로 작성
-    - "auto": 모델이 자유롭게 선택 *)
-let lodge_language =
-  match Sys.getenv_opt "LODGE_LANGUAGE" with
-  | Some "en" -> "en"
-  | Some "auto" -> "auto"
-  | _ -> "ko"  (* 기본값: 한글 *)
+(** Read Lodge config from .masc/config.json *)
+let read_lodge_config () =
+  let me_root = match Sys.getenv_opt "ME_ROOT" with
+    | Some r -> r
+    | None -> match Sys.getenv_opt "HOME" with
+      | Some h -> h ^ "/me"
+      | None -> "."
+  in
+  let config_path = me_root ^ "/.masc/config.json" in
+  try
+    let ic = open_in config_path in
+    let content = really_input_string ic (in_channel_length ic) in
+    close_in ic;
+    let json = Yojson.Safe.from_string content in
+    let lodge = Yojson.Safe.Util.(member "lodge" json) in
+    let lang = Yojson.Safe.Util.(member "language" lodge |> to_string_option) in
+    let inst = Yojson.Safe.Util.(member "instruction" lodge |> to_string_option) in
+    (lang, inst)
+  with _ -> (None, None)
 
+let (config_language, config_instruction) = read_lodge_config ()
+
+(** Lodge 공용어 — config.json > 환경변수 > 기본값(ko) *)
+let lodge_language =
+  match config_language with
+  | Some lang -> lang
+  | None ->
+    match Sys.getenv_opt "LODGE_LANGUAGE" with
+    | Some "en" -> "en"
+    | Some "auto" -> "auto"
+    | _ -> "ko"
+
+(** Lodge 인스트럭션 — config.json에서 읽음 *)
 let language_instruction () =
-  match lodge_language with
-  | "ko" -> "반드시 한글로 작성하세요."
-  | "en" -> "Write in English."
-  | _ -> ""  (* auto: 지시 없음 *)
+  match config_instruction with
+  | Some inst -> inst
+  | None ->
+    match lodge_language with
+    | "ko" -> "반드시 한글로 작성하세요."
+    | "en" -> "Write in English."
+    | _ -> ""
 
 (** Get sb script path from ME_ROOT env var (portable) *)
 let sb_path () =

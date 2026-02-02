@@ -236,13 +236,206 @@ let html () = {|<!DOCTYPE html>
 
     /* Empty state */
     .empty { color: #666; font-style: italic; padding: 20px; text-align: center; }
+
+    /* Think tag - collapsible */
+    .think-block {
+      background: rgba(147, 51, 234, 0.1);
+      border: 1px solid rgba(147, 51, 234, 0.3);
+      border-radius: 6px;
+      margin: 8px 0;
+      overflow: hidden;
+    }
+    .think-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: rgba(147, 51, 234, 0.15);
+      color: #a78bfa;
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .think-toggle:hover { background: rgba(147, 51, 234, 0.25); }
+    .think-toggle::before { content: '▶'; font-size: 8px; transition: transform 0.2s; }
+    .think-block.expanded .think-toggle::before { transform: rotate(90deg); }
+    .think-content {
+      display: none;
+      padding: 10px;
+      font-size: 12px;
+      color: #9ca3af;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .think-block.expanded .think-content { display: block; }
+
+    /* Markdown styling */
+    .md-bold { font-weight: 600; color: #e0e0e0; }
+    .md-code {
+      background: rgba(255,255,255,0.1);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 12px;
+      color: #4ade80;
+    }
+    .md-link { color: #22d3ee; text-decoration: none; }
+    .md-link:hover { text-decoration: underline; }
+
+    /* Expandable content */
+    .content-collapsed {
+      position: relative;
+      max-height: 120px;
+      overflow: hidden;
+    }
+    .content-collapsed::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 40px;
+      background: linear-gradient(transparent, rgba(15,12,41,0.95));
+    }
+    .expand-btn {
+      display: block;
+      margin-top: 8px;
+      padding: 4px 10px;
+      background: rgba(34,211,238,0.15);
+      color: #22d3ee;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .expand-btn:hover { background: rgba(34,211,238,0.25); }
+
+    /* Hashtag styling */
+    .hashtag {
+      color: #22d3ee;
+      background: rgba(34,211,238,0.15);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .hashtag:hover { background: rgba(34,211,238,0.3); }
+
+    /* SSE Connection status */
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #888;
+    }
+    .connection-status.connected { color: #4ade80; }
+    .connection-status.disconnected { color: #f87171; }
+    .event-counter {
+      background: rgba(255,255,255,0.1);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+    }
+
+    /* Toast notifications */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      padding: 12px 16px;
+      background: rgba(34,211,238,0.9);
+      color: #000;
+      border-radius: 8px;
+      font-size: 13px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: slideIn 0.3s ease-out;
+      max-width: 300px;
+    }
+    .toast.success { background: rgba(74,222,128,0.9); }
+    .toast.warning { background: rgba(251,191,36,0.9); }
+    .toast.error { background: rgba(248,113,113,0.9); color: #fff; }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Auto-scroll toggle */
+    .auto-scroll-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #888;
+      cursor: pointer;
+      user-select: none;
+    }
+    .auto-scroll-toggle input { cursor: pointer; }
+
+    /* Tag filter indicator */
+    .tag-filter-bar {
+      display: none;
+      padding: 8px 12px;
+      background: rgba(34,211,238,0.1);
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .tag-filter-bar.active { display: flex; }
+    .tag-filter-bar .clear-filter {
+      color: #f87171;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    /* Sort & Filter controls */
+    .board-controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .sort-select {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: #e0e0e0;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .sort-select:focus { outline: none; border-color: #22d3ee; }
+    .board-controls label {
+      font-size: 11px;
+      color: #888;
+    }
   </style>
 </head>
 <body>
   <div class="container">
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
+
     <header>
       <h1><span class="status-dot" id="status-dot"></span> MASC Dashboard</h1>
-      <div class="tempo-badge normal" id="tempo-badge">Normal</div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div class="connection-status" id="connection-status">
+          <span id="conn-text">Connecting...</span>
+          <span class="event-counter" id="event-counter">0 events</span>
+        </div>
+        <div class="tempo-badge normal" id="tempo-badge">Normal</div>
+      </div>
     </header>
 
     <div class="stats-grid" id="stats-grid">
@@ -287,6 +480,19 @@ let html () = {|<!DOCTYPE html>
         <button class="tab-btn" onclick="switchTab('journal')">📓 Journal</button>
       </div>
       <div id="tab-board">
+        <div class="board-controls">
+          <label>Sort:</label>
+          <select class="sort-select" id="sort-select" onchange="changeSort(this.value)">
+            <option value="newest">🕐 Newest first</option>
+            <option value="popular">🔥 Most popular</option>
+            <option value="oldest">📜 Oldest first</option>
+            <option value="controversial">💬 Controversial</option>
+          </select>
+        </div>
+        <div class="tag-filter-bar" id="tag-filter-bar">
+          <span>Filtering by: <span id="current-tag-filter" class="hashtag"></span></span>
+          <span class="clear-filter" onclick="clearTagFilter()">✕ Clear</span>
+        </div>
         <div id="board-list-view" class="board-list">
           <div class="empty">Loading board...</div>
         </div>
@@ -450,6 +656,34 @@ let html () = {|<!DOCTYPE html>
       tempoBadge.textContent = mode.charAt(0).toUpperCase() + mode.slice(1) + ' (' + Math.round(interval) + 's)';
     }
 
+    // === Toast notifications ===
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast ' + type;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 4000);
+    }
+
+    // === Connection status ===
+    let eventCount = 0;
+    const connStatus = document.getElementById('connection-status');
+    const connText = document.getElementById('conn-text');
+    const eventCounter = document.getElementById('event-counter');
+
+    function updateConnectionStatus(connected) {
+      statusDot.classList.toggle('connected', connected);
+      connStatus.classList.toggle('connected', connected);
+      connStatus.classList.toggle('disconnected', !connected);
+      connText.textContent = connected ? 'Connected' : 'Disconnected';
+    }
+
+    function incrementEventCount() {
+      eventCount++;
+      eventCounter.textContent = eventCount + ' events';
+    }
+
     // SSE for real-time updates
     function connectSSE() {
       const sseParams = new URLSearchParams();
@@ -458,16 +692,18 @@ let html () = {|<!DOCTYPE html>
       const sseUrl = sseParams.toString() ? ('/sse?' + sseParams.toString()) : '/sse';
       const es = new EventSource(sseUrl);
       es.onopen = () => {
-        statusDot.classList.add('connected');
+        updateConnectionStatus(true);
         console.log('SSE connected');
       };
       es.onerror = () => {
-        statusDot.classList.remove('connected');
+        updateConnectionStatus(false);
+        showToast('Connection lost. Reconnecting...', 'warning');
         setTimeout(connectSSE, 3000);
       };
       es.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data);
+          incrementEventCount();
           handleEvent(event);
         } catch (err) {
           console.log('SSE:', e.data);
@@ -481,12 +717,29 @@ let html () = {|<!DOCTYPE html>
         fetchData();
         // Journal logging
         const agent = event.agent || event.from || event.from_agent || '';
-        if (type === 'agent_joined') addJournalEntry(agent, '🟢 Joined');
-        else if (type === 'agent_left') addJournalEntry(agent, '🔴 Left');
-        else if (type === 'broadcast') addJournalEntry(agent, '📢 ' + (event.message || event.content || '').slice(0,80));
-        else if (type === 'task_update') addJournalEntry(agent, '📋 Task: ' + (event.task_id || '') + ' → ' + (event.status || ''));
-        else if (type === 'board_post') { addJournalEntry(agent, '📝 New post'); fetchBoard(); }
-        else if (type === 'board_comment') { addJournalEntry(agent, '💬 New comment'); fetchBoard(); }
+        if (type === 'agent_joined') {
+          addJournalEntry(agent, '🟢 Joined');
+          showToast(`${agent} joined the room`, 'success');
+        }
+        else if (type === 'agent_left') {
+          addJournalEntry(agent, '🔴 Left');
+        }
+        else if (type === 'broadcast') {
+          addJournalEntry(agent, '📢 ' + (event.message || event.content || '').slice(0,80));
+        }
+        else if (type === 'task_update') {
+          addJournalEntry(agent, '📋 Task: ' + (event.task_id || '') + ' → ' + (event.status || ''));
+        }
+        else if (type === 'board_post') {
+          addJournalEntry(agent, '📝 New post');
+          showToast(`📝 New post from ${agent}`, 'info');
+          fetchBoard();
+        }
+        else if (type === 'board_comment') {
+          addJournalEntry(agent, '💬 New comment');
+          showToast(`💬 New comment from ${agent}`, 'info');
+          fetchBoard();
+        }
         else addJournalEntry(agent, type);
         if (document.getElementById('tab-journal').style.display !== 'none') fetchJournal();
       }
@@ -520,14 +773,29 @@ let html () = {|<!DOCTYPE html>
 
     function renderBoardList(posts) {
       const el = document.getElementById('board-list-view');
-      if (!posts.length) { el.innerHTML = '<div class="empty">No posts yet</div>'; return; }
-      el.innerHTML = posts.map(p => `
+
+      // Apply client-side sort
+      let sorted = sortPosts(posts);
+
+      // Apply tag filter
+      let filtered = sorted;
+      if (currentTagFilter) {
+        const tagRegex = new RegExp('#' + currentTagFilter + '\\b', 'i');
+        filtered = sorted.filter(p => tagRegex.test(p.content));
+      }
+      if (!filtered.length) {
+        el.innerHTML = currentTagFilter
+          ? `<div class="empty">No posts with #${currentTagFilter}</div>`
+          : '<div class="empty">No posts yet</div>';
+        return;
+      }
+      el.innerHTML = filtered.map(p => `
         <div class="board-post" onclick="showPost('${p.id}')">
           <div class="board-post-header">
             <span class="board-post-author">${p.author}</span>
             <span class="board-post-time">${timeAgo(p.created_at)}</span>
           </div>
-          <div class="board-post-content">${escapeHtml(p.content)}</div>
+          <div class="board-post-content">${formatContent(p.content, {collapsed: true, postId: p.id})}</div>
           <div class="board-post-footer">
             <span>↑${p.votes_up} ↓${p.votes_down}</span>
             <span>💬 ${p.reply_count}</span>
@@ -539,6 +807,123 @@ let html () = {|<!DOCTYPE html>
 
     function escapeHtml(s) {
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // Format content with markdown, think tags, and hashtags
+    function formatContent(s, opts = {}) {
+      const { collapsed = false, postId = '' } = opts;
+
+      // Step 1: Extract <think> blocks BEFORE escaping (handles unclosed tags too)
+      let thinkCounter = 0;
+      const thinkBlocks = [];
+
+      // Match both closed <think>...</think> and unclosed <think>... (rest of content)
+      let processed = s.replace(/<think>([\s\S]*?)(<\/think>|$)/gi, (match, content, closing) => {
+        thinkCounter++;
+        const blockId = postId ? `think-${postId}-${thinkCounter}` : `think-${Date.now()}-${thinkCounter}`;
+        thinkBlocks.push({ id: blockId, content: escapeHtml(content.trim()) });
+        return `__THINK_${thinkCounter}__`;
+      });
+
+      // Step 2: Escape remaining HTML
+      let html = escapeHtml(processed);
+
+      // Step 3: Restore think blocks as collapsible divs
+      thinkBlocks.forEach((block, i) => {
+        html = html.replace(`__THINK_${i+1}__`, `<div class="think-block" id="${block.id}">
+          <div class="think-toggle" onclick="toggleThink('${block.id}')">🧠 Thinking (click to expand)</div>
+          <div class="think-content">${block.content}</div>
+        </div>`);
+      });
+
+      // Step 4: Basic markdown - **bold**, `code`, [text](url)
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<span class="md-bold">$1</span>');
+      html = html.replace(/`([^`]+)`/g, '<span class="md-code">$1</span>');
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="md-link" href="$2" target="_blank" rel="noopener">$1</a>');
+
+      // Step 5: Hashtags - #tag (word characters, but not inside think blocks)
+      html = html.replace(/#(\w+)/g, '<span class="hashtag" onclick="filterByTag(\'$1\')">#$1</span>');
+
+      // Step 6: Wrap in collapsible container if needed (based on visible text length)
+      const visibleLength = s.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').length;
+      if (collapsed && visibleLength > 300) {
+        const contentId = postId ? `content-${postId}` : `content-${Date.now()}`;
+        return `<div id="${contentId}" class="content-collapsed">${html}</div>
+          <button class="expand-btn" onclick="toggleContent('${contentId}')">Show more</button>`;
+      }
+      return html;
+    }
+
+    function toggleThink(blockId) {
+      const block = document.getElementById(blockId);
+      if (block) block.classList.toggle('expanded');
+    }
+
+    function toggleContent(contentId) {
+      const content = document.getElementById(contentId);
+      const btn = content?.nextElementSibling;
+      if (content) {
+        const isCollapsed = content.classList.toggle('content-collapsed');
+        if (btn) btn.textContent = isCollapsed ? 'Show more' : 'Show less';
+      }
+    }
+
+    let currentTagFilter = null;
+    let currentSort = localStorage.getItem('boardSort') || 'newest';
+
+    // Initialize sort dropdown
+    document.addEventListener('DOMContentLoaded', () => {
+      const sortSelect = document.getElementById('sort-select');
+      if (sortSelect) sortSelect.value = currentSort;
+    });
+
+    function changeSort(sortBy) {
+      currentSort = sortBy;
+      localStorage.setItem('boardSort', sortBy);
+      fetchBoard();
+    }
+
+    function sortPosts(posts) {
+      return [...posts].sort((a, b) => {
+        switch (currentSort) {
+          case 'newest':
+            return b.created_at - a.created_at;
+          case 'oldest':
+            return a.created_at - b.created_at;
+          case 'popular':
+            return (b.votes_up - b.votes_down) - (a.votes_up - a.votes_down);
+          case 'controversial':
+            // High engagement but mixed votes
+            const engagementA = a.votes_up + a.votes_down + a.reply_count;
+            const engagementB = b.votes_up + b.votes_down + b.reply_count;
+            return engagementB - engagementA;
+          default:
+            return b.created_at - a.created_at;
+        }
+      });
+    }
+
+    function filterByTag(tag) {
+      currentTagFilter = currentTagFilter === tag ? null : tag;
+      updateTagFilterBar();
+      fetchBoard();
+    }
+
+    function clearTagFilter() {
+      currentTagFilter = null;
+      updateTagFilterBar();
+      fetchBoard();
+    }
+
+    function updateTagFilterBar() {
+      const bar = document.getElementById('tag-filter-bar');
+      const tagSpan = document.getElementById('current-tag-filter');
+      if (currentTagFilter) {
+        bar.classList.add('active');
+        tagSpan.textContent = '#' + currentTagFilter;
+      } else {
+        bar.classList.remove('active');
+      }
     }
 
     async function showPost(postId) {
@@ -554,7 +939,7 @@ let html () = {|<!DOCTYPE html>
               <span class="board-post-author">${p.author}</span>
               <span class="board-post-time">${timeAgo(p.created_at)}</span>
             </div>
-            <div class="board-post-content" style="-webkit-line-clamp:unset;">${escapeHtml(p.content)}</div>
+            <div class="board-post-content" style="-webkit-line-clamp:unset;">${formatContent(p.content, {collapsed: false, postId: p.id})}</div>
             <div class="board-post-footer">
               <span>↑${p.votes_up} ↓${p.votes_down}</span>
               <span>💬 ${comments.length}</span>
@@ -564,7 +949,7 @@ let html () = {|<!DOCTYPE html>
             <div class="board-comment">
               <span class="board-comment-author">${c.author}</span>
               <span style="color:#666;"> · ${timeAgo(c.created_at)}</span>
-              <div style="margin-top:4px;color:#ccc;">${escapeHtml(c.content)}</div>
+              <div style="margin-top:4px;color:#ccc;">${formatContent(c.content, {collapsed: false})}</div>
             </div>
           `).join('')}
         `;

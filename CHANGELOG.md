@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.0] - 2026-02-02
+
+### Added
+- **Lodge Agent Cleanup**: Automatic cleanup of inactive Lodge agents
+  - 60-second threshold for zombie agent detection
+  - Agents marked as Inactive after work completion
+  - Auto-cleanup during heartbeat loop
+
+### Fixed
+- **Lodge Heartbeat**: Use `Time_compat.now()` in cleanup function
+
 ## [2.25.0] - 2026-02-02
 
 ### Added

@@ -128,7 +128,7 @@ type registry = {
 let create_registry () = {
   entries = Hashtbl.create 1024;
   cooldowns = Hashtbl.create 64;
-  last_sweep = Unix.gettimeofday ();
+  last_sweep = Time_compat.now ();
   restore_attempted = false;
   mutex = Eio.Mutex.create ();
 }
@@ -142,7 +142,7 @@ let with_lock reg f =
 
 let sweep reg =
   with_lock reg (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let removed = ref 0 in
 
     (* Sweep expired entries *)
@@ -165,7 +165,7 @@ let sweep reg =
   )
 
 let maybe_sweep reg =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   if now -. reg.last_sweep > float_of_int Limits.sweeper_interval_sec then
     ignore (sweep reg)
 
@@ -179,7 +179,7 @@ let check_cooldown reg agent_name : (unit, spawn_error) result =
         match Hashtbl.find_opt reg.cooldowns (Agent_name.to_string agent) with
         | None -> Ok ()
         | Some cd ->
-            let now = Unix.gettimeofday () in
+            let now = Time_compat.now () in
             if cd.cooldown_until > now then
               Error (Cooldown_active {
                 agent = agent_name;
@@ -197,7 +197,7 @@ let record_failure reg agent_name =
   | Ok agent ->
       with_lock reg (fun () ->
         let key = Agent_name.to_string agent in
-        let now = Unix.gettimeofday () in
+        let now = Time_compat.now () in
         let current = match Hashtbl.find_opt reg.cooldowns key with
           | None -> { agent; failures = 0; cooldown_until = 0.0 }
           | Some cd -> cd
@@ -246,7 +246,7 @@ let register reg ~agent_name ?task_id ?parent_session ?(ttl_hours=Limits.default
         max = Limits.max_entries
       })
     else begin
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       let ttl = min ttl_hours Limits.max_ttl_hours in
       let entry = {
         run_id = Run_id.generate ();
@@ -282,7 +282,7 @@ let update_state reg ~run_id ~state : (spawn_entry, spawn_error) result =
         match Hashtbl.find_opt reg.entries (Run_id.to_string rid) with
         | None -> Error (Entry_not_found run_id)
         | Some entry ->
-            let now = Unix.gettimeofday () in
+            let now = Time_compat.now () in
             let updated = { entry with state; updated_at = now } in
             Hashtbl.replace reg.entries (Run_id.to_string rid) updated;
 
@@ -303,7 +303,7 @@ let set_child_session reg ~run_id ~child_session : (spawn_entry, spawn_error) re
         match Hashtbl.find_opt reg.entries (Run_id.to_string rid) with
         | None -> Error (Entry_not_found run_id)
         | Some entry ->
-            let now = Unix.gettimeofday () in
+            let now = Time_compat.now () in
             let updated = { entry with child_session = Some child_session; updated_at = now } in
             Hashtbl.replace reg.entries (Run_id.to_string rid) updated;
             Ok updated
@@ -366,7 +366,7 @@ let persist reg ~reg_path : (unit, spawn_error) result =
     let json = `Assoc [
       ("version", `Int 1);
       ("entries", `List (List.map entry_to_yojson entries));
-      ("persisted_at", `Float (Unix.gettimeofday ()));
+      ("persisted_at", `Float (Time_compat.now ()));
     ] in
     let content = Yojson.Safe.pretty_to_string json in
     let tmp_path = persist_tmp_path reg_path in

@@ -63,5 +63,4 @@
   (h2-eio (>= 0.10))
   (alcotest (and :with-test (>= 1.6)))
   (mtime (>= 2.0))
-  (uuidm (>= 0.9))
-  (neo4j_bolt_eio (>= 0.4))))
+  (uuidm (>= 0.9))))

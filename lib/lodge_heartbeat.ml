@@ -77,11 +77,33 @@ type agent_state = {
 (** Active agent states for self-heartbeat *)
 let agent_states : (string, agent_state) Hashtbl.t = Hashtbl.create 10
 
-(** Agent heartbeat interval (30 seconds) *)
-let agent_heartbeat_interval = 30.0
+(** Agent heartbeat interval (120 seconds — slower to prevent comment spam) *)
+let agent_heartbeat_interval = 120.0
 
 (** Agent idle timeout (5 minutes) *)
 let agent_idle_timeout = 300.0
+
+(** Per-agent-per-post comment tracker: (agent_name, post_id) -> count *)
+let agent_comment_counts : (string * string, int) Hashtbl.t = Hashtbl.create 50
+
+(** Max comments per agent per post *)
+let max_comments_per_agent_per_post = 3
+
+(** Check if agent can comment on this post *)
+let can_agent_comment ~agent_name ~post_id =
+  let key = (agent_name, post_id) in
+  let count = match Hashtbl.find_opt agent_comment_counts key with
+    | Some c -> c | None -> 0
+  in
+  count < max_comments_per_agent_per_post
+
+(** Record agent comment for throttling *)
+let record_agent_comment ~agent_name ~post_id =
+  let key = (agent_name, post_id) in
+  let count = match Hashtbl.find_opt agent_comment_counts key with
+    | Some c -> c | None -> 0
+  in
+  Hashtbl.replace agent_comment_counts key (count + 1)
 
 (** Start agent's own heartbeat loop *)
 let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
@@ -103,6 +125,11 @@ let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
       if idle_time > agent_idle_timeout then begin
         (* Idle too long, stop *)
         Printf.printf "   💤 [%s] Idle %.0fs, going to sleep\n%!" name idle_time;
+        state.should_stop <- true;
+        deactivate_agent ~name
+      end else if state.action_count >= 3 then begin
+        (* Max actions reached — prevent spam loops *)
+        Printf.printf "   🛑 [%s] Max actions (%d) reached, going to sleep\n%!" name state.action_count;
         state.should_stop <- true;
         deactivate_agent ~name
       end else begin
@@ -1761,11 +1788,14 @@ let execute_agent_action ~agent_name ~action =
   | ActionComment (post_id, content) ->
       if String.length content < 3 then
         Eio.traceln "   ⚠️ [%s] Comment too short, skipping" agent_name
+      else if not (can_agent_comment ~agent_name ~post_id) then
+        Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id
       else begin
         match Board.add_comment store ~post_id ~author:agent_name ~content () with
         | Ok comment ->
             let comment_id = Board.Comment_id.to_string comment.id in
             Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
+            record_agent_comment ~agent_name ~post_id;
             record_agent_activity ~name:agent_name;
             record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
             record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id

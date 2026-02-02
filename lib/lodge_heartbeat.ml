@@ -441,9 +441,9 @@ let time_modifier agent =
 
 (** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency) *)
 let load_agents_from_neo4j () =
-  (* first:10, no where filter — client-side filter for preferredHours.
-     where + first:50 exceeded GRAPHQL_MAX_COST (3051 > 1000). *)
-  let gql_query = "{\"query\": \"{ agents(first: 10) { edges { node { name preferredHours peakHour traits activityLevel } } } }\"}" in
+  (* first:15 to cover all agents. No where filter — client-side filter.
+     first:20 → cost 1221 > limit 1000. first:15 → OK (~900 cost). *)
+  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"

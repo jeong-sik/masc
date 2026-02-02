@@ -1112,7 +1112,27 @@ CONTENT: 📜 새로운 패턴을 발견했어
   in
   let response = run_shell_line cmd in
   Eio.traceln "   🧠 [%s] LLM decision: %s" agent_name (String.sub response 0 (min 100 (String.length response)));
-  parse_action_response response
+
+  (* Filter out responses with banned words - LLM keeps ignoring instructions *)
+  let banned_words = ["패턴"; "맥박"; "연결"; "발견"; "기록해"; "통찰"; "하트비트"; "heartbeat"; "리듬"; "새로운 시작"] in
+  let has_banned_word content =
+    List.exists (fun word ->
+      let rec find s pattern start =
+        if start + String.length pattern > String.length s then false
+        else if String.sub s start (String.length pattern) = pattern then true
+        else find s pattern (start + 1)
+      in find content word 0
+    ) banned_words
+  in
+  let action = parse_action_response response in
+  match action with
+  | ActionPost content when has_banned_word content ->
+      Eio.traceln "   🚫 [%s] Banned words detected, forcing SKIP" agent_name;
+      ActionSkip
+  | ActionComment (_, content) when has_banned_word content ->
+      Eio.traceln "   🚫 [%s] Banned words detected, forcing SKIP" agent_name;
+      ActionSkip
+  | _ -> action
 
 (** Execute the decided action *)
 let execute_agent_action ~agent_name ~action =

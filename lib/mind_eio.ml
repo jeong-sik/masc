@@ -415,7 +415,7 @@ module Pure = struct
   let create_thought ~content ~thought_type ?(confidence=0.5) ?(related_to=[]) () : thought =
     {
       id = generate_id "thought";
-      timestamp = Unix.gettimeofday ();
+      timestamp = Time_compat.now ();
       content;
       thought_type;
       confidence;
@@ -451,13 +451,13 @@ module Pure = struct
   let update_state (m : mind) ~state : mind =
     let self = { m.self with
       current_state = state;
-      last_updated = Unix.gettimeofday ();
+      last_updated = Time_compat.now ();
     } in
     { m with self }
 
   let monitor (m : mind) : anomaly option =
     let recent_thoughts = List.filter (fun (t : thought) ->
-      Unix.gettimeofday () -. t.timestamp < 3600.0
+      Time_compat.now () -. t.timestamp < 3600.0
     ) m.thoughts in
     let doubt_count = List.length (List.filter (fun (t : thought) ->
       t.thought_type = `Doubt
@@ -465,7 +465,7 @@ module Pure = struct
     if doubt_count > 5 then
       Some {
         id = generate_id "anomaly";
-        detected_at = Unix.gettimeofday ();
+        detected_at = Time_compat.now ();
         severity = `Medium;
         description = "High frequency of doubt-type thoughts";
         affected_systems = ["cognition"; "confidence"];
@@ -475,13 +475,13 @@ module Pure = struct
 
   let reflect (m : mind) : insight option =
     let recent_learnings = List.filter (fun (l : learning) ->
-      Unix.gettimeofday () -. l.learned_at < 86400.0
+      Time_compat.now () -. l.learned_at < 86400.0
     ) m.learnings in
     if List.length recent_learnings >= 3 then
       let topics = List.map (fun l -> l.trigger) recent_learnings in
       Some {
         id = generate_id "insight";
-        timestamp = Unix.gettimeofday ();
+        timestamp = Time_compat.now ();
         topic = "Daily reflection";
         content = Printf.sprintf "Learned %d things today. Topics: %s"
           (List.length recent_learnings) (String.concat ", " topics);
@@ -531,7 +531,7 @@ let get_or_create ~fs (config : config) ~name : mind =
   match load_mind ~fs config with
   | Some m -> m
   | None ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let m = {
       self = {
         id = generate_id "self";
@@ -606,7 +606,7 @@ let reflect ~fs (config : config) : insight option =
   match Pure.reflect m with
   | Some insight ->
     let m' = Pure.add_insight m ~insight in
-    let m'' = { m' with meta = { m'.meta with last_reflection = Unix.gettimeofday () } } in
+    let m'' = { m' with meta = { m'.meta with last_reflection = Time_compat.now () } } in
     save_mind ~fs config m'';
     Some insight
   | None -> None

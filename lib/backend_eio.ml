@@ -396,7 +396,7 @@ module FileSystem = struct
 
   let acquire_lock t ~key ~owner ~ttl_seconds =
     let lock_key = "locks:" ^ key in
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let info = {
       owner;
       acquired_at = now;
@@ -443,7 +443,7 @@ module FileSystem = struct
     | Ok json ->
         (match lock_info_of_json json with
          | Some info when info.owner = owner ->
-             let now = Unix.gettimeofday () in
+             let now = Time_compat.now () in
              let new_info = { info with expires_at = now +. float_of_int ttl_seconds } in
              (match set t lock_key (lock_info_to_json new_info) with
               | Ok () -> Ok true
@@ -615,7 +615,7 @@ module FileSystem = struct
 
   let health_check t =
     let test_key = "_health_check_" ^ t.config.node_id in
-    let test_value = string_of_float (Unix.gettimeofday ()) in
+    let test_value = string_of_float (Time_compat.now ()) in
     match set t test_key test_value with
     | Ok () ->
         (match delete t test_key with

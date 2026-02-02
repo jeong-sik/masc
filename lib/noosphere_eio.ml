@@ -278,7 +278,7 @@ module Pure = struct
     }
 
   let connect (n : noosphere) ~from_mind ~to_mind ?(strength=0.5) () : noosphere =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let existing = List.exists (fun c -> c.from_mind = from_mind && c.to_mind = to_mind) n.connections in
     if existing then
       let connections = List.map (fun conn ->
@@ -292,7 +292,7 @@ module Pure = struct
       { n with connections = conn :: n.connections }
 
   let share_belief (n : noosphere) ~content ~mind_id : noosphere =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let existing = List.find_opt (fun (b : shared_belief) ->
       String.lowercase_ascii b.content = String.lowercase_ascii content
     ) n.beliefs in
@@ -323,7 +323,7 @@ module Pure = struct
         topic;
         synthesis = Printf.sprintf "Collective understanding of %s from %d minds" topic (List.length contributions);
         contributing_insights = contributions;
-        emerged_at = Unix.gettimeofday ();
+        emerged_at = Time_compat.now ();
         depth = min 10 (List.length contributions + 2);
       }
 
@@ -342,10 +342,10 @@ module Pure = struct
     let coherence = calculate_coherence n in
     let activity = if List.length n.connections = 0 then 0.0
       else
-        let recent = List.filter (fun c -> Unix.gettimeofday () -. c.last_interaction < 3600.0) n.connections in
+        let recent = List.filter (fun c -> Time_compat.now () -. c.last_interaction < 3600.0) n.connections in
         float_of_int (List.length recent) /. float_of_int (List.length n.connections)
     in
-    let state = { n.state with coherence; activity_level = activity; last_sync = Unix.gettimeofday () } in
+    let state = { n.state with coherence; activity_level = activity; last_sync = Time_compat.now () } in
     { n with state }
 end
 
@@ -355,7 +355,7 @@ let get_or_create ~fs (config : config) ~name : noosphere =
   match load_noosphere ~fs config with
   | Some n -> n
   | None ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let n = {
       id = generate_id "noosphere"; name; minds = []; connections = []; beliefs = [];
       goals = []; insights = []; created_at = now;

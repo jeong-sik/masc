@@ -248,7 +248,7 @@ let parse_command cmd =
     - This enables multi-generational knowledge transfer
 *)
 let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_config () =
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
 
   let config = match get_config agent_name with
     | Some c -> c
@@ -391,7 +391,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
         success = (exit_code = 0);
         output;
         exit_code;
-        elapsed_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0);
+        elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
         input_tokens;
         output_tokens;
         cache_creation_tokens = cache_creation;
@@ -403,7 +403,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
         success = false;
         output = Printf.sprintf "Spawn error (Eio): %s" (Printexc.to_string e);
         exit_code = -99;
-        elapsed_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0);
+        elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
         input_tokens = None;
         output_tokens = None;
         cache_creation_tokens = None;

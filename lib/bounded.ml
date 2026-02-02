@@ -8,6 +8,9 @@
     Designed based on MAGI review (Gemini + Qwen3 formal verification).
 *)
 
+(* Fiber-safe random state for jitter calculation *)
+let bounded_rng = Random.State.make_self_init ()
+
 open Spawn_eio
 
 (** Comparison operators for goal conditions *)
@@ -85,7 +88,7 @@ let calc_backoff_delay retry_config attempt =
   let capped = min exp_delay max_delay in
   (* Add jitter: delay * (1 - jitter/2 + random * jitter) *)
   let jitter_range = capped *. retry_config.jitter_factor in
-  let jitter = (Random.float jitter_range) -. (jitter_range /. 2.0) in
+  let jitter = (Random.State.float bounded_rng jitter_range) -. (jitter_range /. 2.0) in
   int_of_float (capped +. jitter)
 
 (** Check if error is retryable (transient failures) *)

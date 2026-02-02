@@ -99,7 +99,7 @@ let default_succession () : succession_policy = {
 }
 
 let create_institution ~name ~mission () : institution =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   {
     identity = {
       id = Printf.sprintf "inst-%d" (Level4_config.random_int 100000);
@@ -385,7 +385,7 @@ let get_or_create ~fs (config : config) ~name ~mission =
 let record_episode ~fs config inst ~event_type ~summary ~participants ~outcome ~learnings =
   let episode : episode = {
     id = Printf.sprintf "ep-%d" (Level4_config.random_int 100000);
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
     participants; event_type; summary; outcome; learnings; context = [];
   } in
   let inst' = Pure.record_episode inst ~episode in
@@ -393,7 +393,7 @@ let record_episode ~fs config inst ~event_type ~summary ~participants ~outcome ~
   inst'
 
 let learn_knowledge ~fs config inst ~topic ~content ~source =
-  let now = Unix.gettimeofday (); in
+  let now = Time_compat.now (); in
   let knowledge : knowledge = {
     id = Printf.sprintf "know-%d" (Level4_config.random_int 100000);
     topic; content; confidence = 0.5; source; created_at = now; last_verified = now; references = [];
@@ -406,7 +406,7 @@ let codify_pattern ~fs config inst ~name ~description ~trigger ~steps =
   let pattern : pattern = {
     id = Printf.sprintf "pat-%d" (Level4_config.random_int 100000);
     name; description; trigger; steps; success_rate = 0.5; usage_count = 0;
-    last_used = Unix.gettimeofday (); evolved_from = None;
+    last_used = Time_compat.now (); evolved_from = None;
   } in
   let inst' = Pure.add_pattern inst ~pattern in
   save_institution ~fs config inst';

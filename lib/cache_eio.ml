@@ -84,13 +84,13 @@ let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
 let is_expired entry =
   match entry.expires_at with
   | None -> false
-  | Some exp -> Unix.gettimeofday () > exp
+  | Some exp -> Time_compat.now () > exp
 
 (** Set cache entry - synchronous *)
 let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []) ()
     : (cache_entry, string) result =
   ensure_cache_dir config;
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
   let entry = { key; value; created_at = now; expires_at; tags } in
   let path = cache_file config key in

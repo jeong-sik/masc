@@ -47,7 +47,7 @@ type room_state = {
 (** {1 Helpers} *)
 
 let now_iso () =
-  let t = Unix.gettimeofday () in
+  let t = Time_compat.now () in
   let tm = Unix.gmtime t in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
@@ -150,14 +150,14 @@ let log_event config ~event_type ~agent ~payload =
   (* Atomic increment via file lock - safe for multiple processes *)
   let seq = match Backend_eio.FileSystem.atomic_increment config.backend event_seq_key with
     | Ok n -> n - 1  (* atomic_increment returns NEW value, events are 0-indexed *)
-    | Error _ -> int_of_float (Unix.gettimeofday () *. 1000.) mod 100000
+    | Error _ -> int_of_float (Time_compat.now () *. 1000.) mod 100000
   in
   let event = {
     event_seq = seq;
     event_type;
     agent;
     payload;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   } in
   let json_str = Yojson.Safe.to_string (event_to_json event) in
   let _ = Backend_eio.FileSystem.set config.backend (event_key seq) json_str in
@@ -189,8 +189,8 @@ let get_recent_events config ~limit =
 
 let default_room_state () = {
   protocol_version = "1.0.0";
-  started_at = Unix.gettimeofday ();
-  last_updated = Unix.gettimeofday ();
+  started_at = Time_compat.now ();
+  last_updated = Time_compat.now ();
   active_agents = [];
   message_seq = 0;
   event_seq = 0;
@@ -255,7 +255,7 @@ let read_state config =
 
 (** Write room state *)
 let write_state config state =
-  let state = { state with last_updated = Unix.gettimeofday () } in
+  let state = { state with last_updated = Time_compat.now () } in
   let json_str = Yojson.Safe.to_string (room_state_to_json state) in
   Backend_eio.FileSystem.set config.backend state_key json_str
 
@@ -278,7 +278,7 @@ let atomic_update_state config ~f =
           with Eio.Io _ | Yojson.Json_error _ -> default_room_state ())
     in
     let new_state = f current_state in
-    let new_state = { new_state with last_updated = Unix.gettimeofday () } in
+    let new_state = { new_state with last_updated = Time_compat.now () } in
     Yojson.Safe.to_string (room_state_to_json new_state)
   in
   match Backend_eio.FileSystem.atomic_update config.backend state_key ~f:transform with
@@ -324,7 +324,7 @@ let agent_state_of_json json =
 let register_agent config ~name ?(capabilities=[]) () =
   let agent = {
     name;
-    last_seen = Unix.gettimeofday ();
+    last_seen = Time_compat.now ();
     capabilities;
     status = "active";
   } in
@@ -451,8 +451,8 @@ let acquire_lock config ~resource ~owner =
       let lock = {
         resource;
         owner;
-        acquired_at = Unix.gettimeofday ();
-        expires_at = Unix.gettimeofday () +. float_of_int ttl_seconds;
+        acquired_at = Time_compat.now ();
+        expires_at = Time_compat.now () +. float_of_int ttl_seconds;
       } in
       Ok (Some lock)
   | Ok false ->
@@ -535,14 +535,14 @@ let broadcast config ~from_agent ~content =
     | Ok n -> n
     | Error _ ->
         (* Fallback: use timestamp-based unique seq (less reliable but won't fail) *)
-        int_of_float (Unix.gettimeofday () *. 1000000.) mod 1000000
+        int_of_float (Time_compat.now () *. 1000000.) mod 1000000
   in
   let msg = {
     seq;
     from_agent;
     content;
     mention = extract_mention content;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   } in
   let json_str = Yojson.Safe.to_string (message_to_json msg) in
   match Backend_eio.FileSystem.set config.backend (message_key seq) json_str with
@@ -644,8 +644,8 @@ let task_of_json json =
 
 (** Create a new task *)
 let create_task config ~description ?(priority=1) () =
-  let id = Printf.sprintf "task_%d_%d" (int_of_float (Unix.gettimeofday () *. 1000.)) (Random.int 10000) in
-  let now = Unix.gettimeofday () in
+  let id = Printf.sprintf "task_%d_%d" (int_of_float (Time_compat.now () *. 1000.)) (Random.int 10000) in
+  let now = Time_compat.now () in
   let task = {
     id;
     description;
@@ -677,7 +677,7 @@ let claim_task config ~task_id ~agent =
             | Pending ->
                 let updated = { task with
                   status = InProgress agent;
-                  updated_at = Unix.gettimeofday ();
+                  updated_at = Time_compat.now ();
                 } in
                 let new_json = Yojson.Safe.to_string (task_to_json updated) in
                 (match Backend_eio.FileSystem.set config.backend (task_key task_id) new_json with
@@ -708,7 +708,7 @@ let complete_task config ~task_id ~agent =
             | InProgress claimer when claimer = agent ->
                 let updated = { task with
                   status = Completed agent;
-                  updated_at = Unix.gettimeofday ();
+                  updated_at = Time_compat.now ();
                 } in
                 let new_json = Yojson.Safe.to_string (task_to_json updated) in
                 (match Backend_eio.FileSystem.set config.backend (task_key task_id) new_json with

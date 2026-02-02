@@ -441,7 +441,7 @@ end
 (** {1 Lifecycle (Eio)} *)
 
 let create ~fs (config : config) ?(swarm_config = default_config ()) () : swarm =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let swarm = {
     swarm_cfg = swarm_config;
     agents = [];
@@ -458,7 +458,7 @@ let join ~fs (config : config) ~agent_id ~agent_name : (swarm, string) result =
   match load_swarm ~fs config with
   | Error e -> Error ("join: " ^ e)
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     match Pure.join_agent swarm ~agent_id ~agent_name ~now with
     | Pure.Joined updated ->
       save_swarm ~fs config updated;
@@ -483,7 +483,7 @@ let update_fitness ~fs (config : config) ~agent_id ~fitness : (swarm, string) re
   match load_swarm ~fs config with
   | Error e -> Error ("update_fitness: " ^ e)
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     match Pure.update_agent_fitness swarm ~agent_id ~fitness ~now with
     | None -> Error (Printf.sprintf "update_fitness: agent %s not found" agent_id)
     | Some updated ->
@@ -504,7 +504,7 @@ let evolve ~fs (config : config) ?(rng = Level4_config.make_rng ()) () : (swarm,
   match load_swarm ~fs config with
   | Error e -> Error ("evolve: " ^ e)
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let updated = Pure.evolve_agents swarm ~rng ~now in
     save_swarm ~fs config updated;
     Ok updated
@@ -513,7 +513,7 @@ let deposit_pheromone ~fs (config : config) ~path_id ~agent_id ~(strength : Leve
   match load_swarm ~fs config with
   | Error e -> Error ("deposit_pheromone: " ^ e)
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let updated = Pure.deposit_pheromone swarm ~path_id ~agent_id ~strength ~now in
     save_swarm ~fs config updated;
     Ok updated
@@ -522,7 +522,7 @@ let read_pheromone ~fs (config : config) ~path_id : float =
   match load_swarm ~fs config with
   | Error _ -> 0.0
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     match List.find_opt (fun p -> p.path_id = path_id) swarm.pheromones with
     | None -> 0.0
     | Some p ->
@@ -535,7 +535,7 @@ let evaporate_pheromones ~fs (config : config) : (swarm, string) result =
   match load_swarm ~fs config with
   | Error e -> Error ("evaporate_pheromones: " ^ e)
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let updated = Pure.evaporate_pheromones swarm ~now in
     save_swarm ~fs config updated;
     Ok updated
@@ -551,7 +551,7 @@ let propose ~fs (config : config) ~description ~proposed_by ?threshold ?deadline
   match load_swarm ~fs config with
   | Error e -> Error ("propose: " ^ e)
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let proposal = {
       proposal_id = Printf.sprintf "prop-%d-%d" (int_of_float (now *. 1000.0)) (Random.State.int rng 10000);
       description;
@@ -573,7 +573,7 @@ let vote ~fs (config : config) ~proposal_id ~agent_id ~vote_for : (quorum_propos
   match load_swarm ~fs config with
   | Error e -> Error ("vote: " ^ e)
   | Ok swarm ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let with_vote = Pure.record_vote swarm ~proposal_id ~agent_id ~vote_for in
     let updated = Pure.update_proposal_status with_vote ~proposal_id ~now in
     save_swarm ~fs config updated;

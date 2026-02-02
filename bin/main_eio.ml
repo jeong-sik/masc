@@ -1404,6 +1404,9 @@ let run_cmd port base_path =
   (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
   Mirage_crypto_rng_unix.use_default ();
 
+  (* Set global clock for Time_compat (Eio-native timestamps) *)
+  Masc_mcp.Time_compat.set_clock (Eio.Stdenv.clock env);
+
   (* Initialize thread-safe token store for cancellation support *)
   Masc_mcp.Cancellation.TokenStore.init ();
 

@@ -27,11 +27,12 @@ type debate = {
 
 (** {1 ID Generation} *)
 
-let () = Random.self_init ()
+(* Fiber-safe random state for debate ID generation *)
+let debate_rng = Random.State.make_self_init ()
 
 let generate_debate_id () =
   let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
+  let rand = Random.State.int debate_rng 1_000_000 in
   Printf.sprintf "debate-%d-%06d" ts rand
 
 (** {1 JSON Serialization} *)

@@ -1,5 +1,8 @@
 (** MASC MCP - Main Library Entry Point (Eio-only) *)
 
+(* Time compatibility - Eio-native with Unix fallback *)
+module Time_compat = Time_compat
+
 module Version = Version
 module Common = Common
 module Log = Log

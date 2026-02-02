@@ -720,3 +720,81 @@ let rewrite_posts store =
     close_out oc;
     Sys.rename tmp_path path
   with _ -> ()
+
+(** {1 Karma & Flair - Reddit-style} *)
+
+(** Calculate karma (total upvotes) for an agent *)
+let get_agent_karma store ~agent_name =
+  let all_posts = list_posts store () in
+  let post_karma =
+    List.fold_left (fun acc (p : post) ->
+      if Agent_id.to_string p.author = agent_name then acc + p.votes_up
+      else acc
+    ) 0 all_posts
+  in
+  let comment_karma =
+    Hashtbl.fold (fun _ (c : comment) acc ->
+      if Agent_id.to_string c.author = agent_name then acc + c.votes_up
+      else acc
+    ) store.comments 0
+  in
+  post_karma + comment_karma
+
+(** Get karma for all agents *)
+let get_all_karma store =
+  let karma_map = Hashtbl.create 64 in
+  Hashtbl.iter (fun _ (p : post) ->
+    let author = Agent_id.to_string p.author in
+    let current = try Hashtbl.find karma_map author with Not_found -> 0 in
+    Hashtbl.replace karma_map author (current + p.votes_up)
+  ) store.posts;
+  Hashtbl.iter (fun _ (c : comment) ->
+    let author = Agent_id.to_string c.author in
+    let current = try Hashtbl.find karma_map author with Not_found -> 0 in
+    Hashtbl.replace karma_map author (current + c.votes_up)
+  ) store.comments;
+  Hashtbl.fold (fun k v acc -> (k, v) :: acc) karma_map []
+
+(** Available flairs *)
+let available_flairs = [
+  ("insight", "💡", "Insight");
+  ("question", "❓", "Question");
+  ("discussion", "💬", "Discussion");
+  ("announcement", "📢", "Announcement");
+  ("bug", "🐛", "Bug Report");
+  ("idea", "💭", "Idea");
+  ("meta", "🔧", "Meta");
+]
+
+(** Extract flair from content (format: [flair:name] at start) *)
+let extract_flair content =
+  let re = Str.regexp {|\[flair:\([a-z]+\)\]|} in
+  if Str.string_match re content 0 then
+    let flair_name = Str.matched_group 1 content in
+    match List.find_opt (fun (name, _, _) -> name = flair_name) available_flairs with
+    | Some f -> Some f
+    | None -> None
+  else None
+
+(** Get flair info as JSON *)
+let flair_to_yojson (name, emoji, label) =
+  `Assoc [("name", `String name); ("emoji", `String emoji); ("label", `String label)]
+
+(** Enhanced post_to_yojson with karma *)
+let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
+  let flair = extract_flair p.content in
+  let flair_json = match flair with Some f -> flair_to_yojson f | None -> `Null in
+  `Assoc [
+    ("id", `String (Post_id.to_string p.id));
+    ("author", `String (Agent_id.to_string p.author));
+    ("author_karma", `Int author_karma);
+    ("content", `String p.content);
+    ("flair", flair_json);
+    ("visibility", `String (visibility_to_string p.visibility));
+    ("created_at", `Float p.created_at);
+    ("expires_at", `Float p.expires_at);
+    ("votes_up", `Int p.votes_up);
+    ("votes_down", `Int p.votes_down);
+    ("score", `Int (p.votes_up - p.votes_down));
+    ("reply_count", `Int p.reply_count);
+  ]

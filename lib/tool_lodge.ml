@@ -686,7 +686,13 @@ let record_feedback ~name ~dimension ~is_positive =
 let () =
   (* Lazy initialization - load on first use via persona_prompt *)
   (* Uncomment to load at module init: load_personas_from_neo4j () *)
-  ()
+
+  (* Register SOUL Evolution callback with Tool_board (breaks dependency cycle) *)
+  Tool_board.register_evolution_callback {
+    Tool_board.get_primary_value = get_persona_primary_value;
+    record_feedback = (fun ~name ~dimension ~is_positive ->
+      let _ = record_feedback ~name ~dimension ~is_positive in ());
+  }
 
 (** {1 REACT: Generate response with persona} *)
 

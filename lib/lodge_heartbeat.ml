@@ -63,6 +63,32 @@ let update_lodge_agent_status ~name ~status ?current_task () =
     (* Agent not registered yet, register now *)
     register_lodge_agent ~name ~status
 
+(** Cleanup inactive Lodge agents (60s threshold) *)
+let cleanup_inactive_lodge_agents () =
+  let dir = agents_dir () in
+  if Sys.file_exists dir then begin
+    let now = Unix.gettimeofday () in
+    let threshold = 60.0 in (* 60 seconds *)
+    Sys.readdir dir |> Array.iter (fun filename ->
+      if Filename.check_suffix filename ".json" then begin
+        let path = Filename.concat dir filename in
+        try
+          let ic = open_in path in
+          let content = really_input_string ic (in_channel_length ic) in
+          close_in ic;
+          match Types.agent_of_yojson (Yojson.Safe.from_string content) with
+          | Ok agent when agent.agent_type = "lodge" && agent.status = Types.Inactive ->
+              let last_seen = Types.parse_iso8601 ~default_time:0.0 agent.last_seen in
+              if now -. last_seen > threshold then begin
+                Sys.remove path;
+                Eio.traceln "   🧹 Cleaned up inactive Lodge agent: %s" agent.name
+              end
+          | _ -> ()
+        with _ -> ()
+      end
+    )
+  end
+
 (** {1 Non-blocking Shell Execution} *)
 
 (** Run shell command in a separate system thread to avoid blocking Eio event loop *)
@@ -479,17 +505,20 @@ let start ~sw ~clock room_config =
                   | Error e ->
                       Eio.traceln "   ❌ [%s] Post failed: %s" name (Board.show_board_error e)
             end;
-            (* Mark agent as Listening (done working, ready for next wake) *)
-            update_lodge_agent_status ~name ~status:Types.Listening ()
+            (* Mark agent as Inactive (done working, zombie protocol will clean up) *)
+            update_lodge_agent_status ~name ~status:Types.Inactive ()
           with e ->
             Eio.traceln "   💀 [%s] Agent error: %s" name (Printexc.to_string e);
-            (* Still mark as Listening even on error *)
-            update_lodge_agent_status ~name ~status:Types.Listening ()
+            (* Still mark as Inactive even on error *)
+            update_lodge_agent_status ~name ~status:Types.Inactive ()
         ) result.agents_woken in
         (* Run all agents in parallel! *)
         if List.length agent_tasks > 0 then
           Eio.Fiber.all agent_tasks;
         ignore room_config;
+
+        (* Cleanup inactive Lodge agents (60s threshold) *)
+        cleanup_inactive_lodge_agents ();
 
         Eio.Time.sleep clock config.interval_s
       with e ->

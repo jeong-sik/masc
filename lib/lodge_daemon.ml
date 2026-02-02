@@ -202,14 +202,14 @@ MATCH (la:LodgeAgent {active: true})
 OPTIONAL MATCH (la)-[:HAS_TRAIT]->(t:Trait)
 OPTIONAL MATCH (la)-[:VALUES]->(v:Value)
 OPTIONAL MATCH (la)-[:TRUSTS]->(other:LodgeAgent)
-RETURN la.persona AS persona,
+RETURN la.role AS role,
        la.recognition_need AS recognition_need,
        la.influence_desire AS influence_desire,
        la.curiosity AS curiosity,
        la.mood AS mood,
        collect(DISTINCT {name: t.name, strength: t.strength, modifier: t.prompt_modifier}) AS traits,
        collect(DISTINCT {name: v.name, importance: v.importance}) AS values,
-       collect(DISTINCT {target: other.persona, level: la.trust_level}) AS trusts
+       collect(DISTINCT {target: other.role, level: la.trust_level}) AS trusts
 |}
 
 (** Record social influence between agents *)
@@ -218,8 +218,8 @@ let influence_query source target content =
   let tgt = cypher_escape target in
   let cnt = cypher_escape content in
   Printf.sprintf {|
-MATCH (source:LodgeAgent {persona: '%s'})
-MATCH (target:LodgeAgent {persona: '%s'})
+MATCH (source:LodgeAgent {role: '%s'})
+MATCH (target:LodgeAgent {role: '%s'})
 MERGE (source)-[r:INFLUENCED]->(target)
 ON CREATE SET r.count = 1, r.first_at = datetime(), r.last_content = '%s'
 ON MATCH SET r.count = r.count + 1, r.last_at = datetime(), r.last_content = '%s'
@@ -231,16 +231,16 @@ let mood_update_query agent_name mood trigger_score =
   let p = cypher_escape agent_name in
   let m = string_of_mood mood in  (* enum, safe *)
   Printf.sprintf {|
-MATCH (la:LodgeAgent {persona: '%s'})
+MATCH (la:LodgeAgent {role: '%s'})
 SET la.mood = '%s',
     la.mood_updated_at = datetime()
 CREATE (mh:MoodHistory {
-  persona: '%s',
+  role: '%s',
   mood: '%s',
   trigger_score: %.2f,
   timestamp: datetime()
 })
-RETURN la.persona, la.mood
+RETURN la.role, la.mood
 |} p m p m trigger_score
 
 (** Generate reflection (Stanford Generative Agents pattern) *)
@@ -248,9 +248,9 @@ let reflection_query agent_name content =
   let p = cypher_escape agent_name in
   let c = cypher_escape content in
   Printf.sprintf {|
-MATCH (la:LodgeAgent {persona: '%s'})
+MATCH (la:LodgeAgent {role: '%s'})
 CREATE (r:Reflection {
-  persona: '%s',
+  role: '%s',
   content: '%s',
   timestamp: datetime()
 })

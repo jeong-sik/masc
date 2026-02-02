@@ -739,30 +739,37 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
     agent.activity_level posts_summary
   in
 
-  (* LLM cascade: GLM-4.7 → Gemini (15s timeout, non-blocking via systhread) *)
-  let call_llm tool_name =
+  (* LLM cascade: config-driven via Lodge_cascade *)
+  let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
+    let args = ("prompt", `String p) :: extra_args in
     let json_payload = Yojson.Safe.to_string (`Assoc [
       ("jsonrpc", `String "2.0"); ("id", `Int 1);
       ("method", `String "tools/call");
       ("params", `Assoc [
         ("name", `String tool_name);
-        ("arguments", `Assoc [("prompt", `String prompt)])
+        ("arguments", `Assoc args)
       ])
     ]) in
     let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
     let oc = open_out tmp in output_string oc json_payload; close_out oc;
     let cmd = Printf.sprintf
-      "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' 2>/dev/null | head -c 500; rm -f %s"
-      tmp tmp
+      "curl -s --max-time %d -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' 2>/dev/null | head -c %d; rm -f %s"
+      timeout_sec tmp max_chars tmp
     in
     run_shell_line cmd
   in
+  let wake_slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_wake" () in
   let response =
-    let r1 = call_llm "glm" in
-    if String.length r1 > 2 then r1
+    if List.length wake_slots > 0 then
+      Lodge_cascade.run_cascade
+        ~slots:wake_slots ~prompt ~timeout_sec:15 ~max_chars:500
+        ~call_llm:cascade_call_llm
+        ~is_valid:(fun s -> String.length s > 2)
+        ~agent_name:agent.name
     else begin
-      Printf.printf "   ⚠️ [%s] GLM failed, trying Gemini...\n%!" agent.name;
-      call_llm "gemini"
+      (* Fallback: no config file, try GLM directly *)
+      Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent.name;
+      cascade_call_llm ~tool_name:"glm" ~extra_args:[] ~prompt ~timeout_sec:15 ~max_chars:500
     end
   in
   (* Strip [Extra] metadata from response *)
@@ -964,7 +971,7 @@ type agent_profile = {
   peak_hour: int option;
   activity_level: float;
   karma: int;
-  persona_prompt: string option;
+  agent_prompt: string option;  (* "agentPrompt" GraphQL field *)
   personality_hint: string option;
 }
 
@@ -983,7 +990,7 @@ let load_agent_profile ~agent_name : agent_profile =
       (* Fallback for unknown agent *)
       { name = agent_name; role = None; description = None; traits = [];
         preferred_hours = []; peak_hour = None; activity_level = 0.5;
-        karma = 0; persona_prompt = None; personality_hint = None }
+        karma = 0; agent_prompt = None; personality_hint = None }
     else
       let get_string_opt key =
         match agent |> member key with
@@ -1006,14 +1013,14 @@ let load_agent_profile ~agent_name : agent_profile =
         peak_hour = get_int_opt "peakHour";
         activity_level = (try agent |> member "activityLevel" |> to_float with _ -> 0.5);
         karma = (try agent |> member "karma" |> to_int with _ -> 0);
-        persona_prompt = get_string_opt "personaPrompt";
+        agent_prompt = get_string_opt "agentPrompt";
         personality_hint = get_string_opt "personalityHint";
       }
   with _ ->
     Eio.traceln "⚠️ Failed to load profile for %s" agent_name;
     { name = agent_name; role = None; description = None; traits = [];
       preferred_hours = []; peak_hour = None; activity_level = 0.5;
-      karma = 0; persona_prompt = None; personality_hint = None }
+      karma = 0; agent_prompt = None; personality_hint = None }
 
 (** Lodge context - loaded from .masc/config.json *)
 type lodge_tool = {
@@ -1127,7 +1134,7 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~cur
     | None -> ""
   in
 
-  let agent_prompt_str = match profile.persona_prompt with
+  let agent_prompt_str = match profile.agent_prompt with
     | Some p -> Printf.sprintf "\n\n[특별 지시]\n%s" p
     | None -> ""
   in
@@ -1602,7 +1609,7 @@ ACTION: SKIP
     (String.concat ", " profile.traits)
   in
 
-  (* Call LLM with cascade fallback: GLM → Gemini → skip *)
+  (* Call LLM with cascade fallback: GLM-4.7 → GLM-4.7-flash (Ollama) → skip *)
   let strip_extra s =
     (* First strip [Extra] metadata *)
     let s = match String.index_opt s '[' with
@@ -1649,16 +1656,15 @@ ACTION: SKIP
     not (len >= 14 && String.sub s 0 14 = "Empty response")
   in
 
-  let call_llm ~tool_name ~prompt =
+  let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
+    let args = ("prompt", `String p) :: extra_args in
     let json_payload = Yojson.Safe.to_string (`Assoc [
       ("jsonrpc", `String "2.0");
       ("id", `Int 1);
       ("method", `String "tools/call");
       ("params", `Assoc [
         ("name", `String tool_name);
-        ("arguments", `Assoc [
-          ("prompt", `String prompt)
-        ])
+        ("arguments", `Assoc args)
       ])
     ]) in
     let tmp_file = Printf.sprintf "/tmp/lodge_decide_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
@@ -1666,33 +1672,25 @@ ACTION: SKIP
     output_string oc json_payload;
     close_out oc;
     let cmd = Printf.sprintf
-      "curl -s --max-time 60 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 4000; rm -f %s"
-      tmp_file tmp_file
+      "curl -s --max-time %d -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c %d; rm -f %s"
+      timeout_sec tmp_file max_chars tmp_file
     in
     strip_extra (run_shell_line cmd)
   in
 
-  (* Cascade: GLM-4.7 Cloud → Gemini → skip *)
-  Printf.printf "   🔍 [%s] calling GLM-4.7...\n%!" agent_name;
+  (* LLM cascade: config-driven via Lodge_cascade *)
+  let action_slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
   let response =
-    (* 1차: GLM-4.7 Cloud (Z.ai, fast & cheap) *)
-    let r1 = call_llm ~tool_name:"glm" ~prompt in
-    Printf.printf "   🔍 [%s] GLM returned (%d chars)\n%!" agent_name (String.length r1);
-    if is_valid_response r1 then begin
-      Printf.printf "   🧠 [%s] GLM: %s\n%!" agent_name (utf8_truncate r1 80);
-      r1
-    end else begin
-      (* Fallback: Gemini *)
-      Printf.printf "   ⚠️ [%s] GLM failed (%d chars), trying Gemini...\n%!" agent_name (String.length r1);
-      let r2 = call_llm ~tool_name:"gemini" ~prompt in
-      Printf.printf "   🔍 [%s] Gemini returned (%d chars)\n%!" agent_name (String.length r2);
-      if is_valid_response r2 then begin
-        Printf.printf "   🧠 [%s] Gemini: %s\n%!" agent_name (utf8_truncate r2 80);
-        r2
-      end else begin
-        Printf.printf "   💤 [%s] All LLMs failed (GLM=%d, Gemini=%d), skipping\n%!" agent_name (String.length r1) (String.length r2);
-        ""
-      end
+    if List.length action_slots > 0 then
+      Lodge_cascade.run_cascade
+        ~slots:action_slots ~prompt ~timeout_sec:60 ~max_chars:4000
+        ~call_llm:cascade_call_llm
+        ~is_valid:is_valid_response
+        ~agent_name
+    else begin
+      (* Fallback: no config file, try GLM directly *)
+      Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
+      cascade_call_llm ~tool_name:"glm" ~extra_args:[] ~prompt ~timeout_sec:60 ~max_chars:4000
     end
   in
 

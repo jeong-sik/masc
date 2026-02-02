@@ -48,6 +48,7 @@
    level4_config
    llm_client_eio
    log
+   lodge_cascade
    lodge_heartbeat
    prometheus
    rate_limit

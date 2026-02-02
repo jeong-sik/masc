@@ -43,8 +43,8 @@ type route_decision = {
 
 (** Default agent pool - configurable *)
 let default_agents : agent_spec list = [
-  (* Local tier - glm-4.7-flash always resident in VRAM (202k ctx) *)
-  { name = "glm-flash"; model = "glm-4.7-flash"; tier = Tiny;
+  (* Local tier - always resident in VRAM via OLLAMA_DEFAULT_MODEL *)
+  { name = "glm-flash"; model = (match Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" with Some m -> m | None -> "glm-4.7-flash"); tier = Tiny;
     strengths = [Factual; Conversation; Code; Analysis; Creative]; cost_per_1k = 0.0 };
   
   (* Medium tier - cloud balanced *)

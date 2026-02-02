@@ -127,10 +127,10 @@ let from_mcp_params params =
     | None -> Visitor
   in
   let profile = {
-    name = Option.value (get_opt "_persona_name") ~default:base.agent_name;
-    role = Option.value (get_opt "_persona_role") ~default:"general";
-    traits = get_list "_persona_traits";
-    avatar = get_opt "_persona_avatar";
+    name = Option.value (get_opt "_agent_display_name") ~default:base.agent_name;
+    role = Option.value (get_opt "_agent_role") ~default:"general";
+    traits = get_list "_agent_traits";
+    avatar = get_opt "_agent_avatar";
   } in
   let lineage = {
     generation = (try params |> member "_generation" |> to_int with _ -> 0);
@@ -258,8 +258,8 @@ let to_base_with_metadata ext =
   let metadata =
     [ ("_hash", ext.hash);
       ("_agent_type", string_of_agent_type ext.agent_type);
-      ("_persona_name", ext.profile.name);
-      ("_persona_role", ext.profile.role);
+      ("_agent_display_name", ext.profile.name);
+      ("_agent_role", ext.profile.role);
       ("_generation", string_of_int ext.lineage.generation);
     ]
     @ (match ext.lineage.parent_hash with
@@ -295,8 +295,8 @@ let from_base_with_metadata (base : Agent_identity.t) =
     | None -> Visitor
   in
   let profile = {
-    name = Option.value (get "_persona_name") ~default:base.agent_name;
-    role = Option.value (get "_persona_role") ~default:"general";
+    name = Option.value (get "_agent_display_name") ~default:base.agent_name;
+    role = Option.value (get "_agent_role") ~default:"general";
     traits = get_indexed "_trait";
     avatar = get "_avatar";
   } in

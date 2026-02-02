@@ -26,7 +26,7 @@ let is_valid id =
 
 (** Generate unique session ID (MCP spec format: visible ASCII 0x21-0x7E) *)
 let generate () =
-  let timestamp = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
   let pid = Unix.getpid () in
   let random = Random.State.int session_rng 1000000 in
   Printf.sprintf "mcp_%s_%s_%s"

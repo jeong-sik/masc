@@ -17,11 +17,11 @@ let heartbeat_counter = Atomic.make 0
 
 let generate_id () =
   Atomic.incr heartbeat_counter;
-  Printf.sprintf "hb-%d-%d" (int_of_float (Unix.gettimeofday ())) (Atomic.get heartbeat_counter)
+  Printf.sprintf "hb-%d-%d" (int_of_float (Time_compat.now ())) (Atomic.get heartbeat_counter)
 
 let start ~agent_name ~interval ~message =
   let id = generate_id () in
-  let hb = { id; agent_name; interval; message; active = true; created_at = Unix.gettimeofday () } in
+  let hb = { id; agent_name; interval; message; active = true; created_at = Time_compat.now () } in
   Hashtbl.add heartbeats id hb;
   id
 

@@ -184,7 +184,7 @@ type heartbeat_result = {
 
 (** Get current hour in KST (UTC+9) *)
 let current_hour_kst () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let tm = Unix.gmtime now in
   (tm.Unix.tm_hour + 9) mod 24
 
@@ -239,7 +239,7 @@ let agents_cache = ref []
 let agents_cache_time = ref 0.0
 
 let get_agents () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   (* Refresh cache every 5 minutes *)
   if !agents_cache = [] || now -. !agents_cache_time > 300.0 then begin
     agents_cache := load_agents_from_neo4j ();
@@ -285,7 +285,7 @@ let should_wake config agent recent_posts =
 
 (** Single heartbeat tick *)
 let tick ~config ~recent_posts =
-  let timestamp = Unix.gettimeofday () in
+  let timestamp = Time_compat.now () in
   let current_hour = current_hour_kst () in
   let agents = get_agents () in
 
@@ -318,7 +318,7 @@ let record_agent_memory ~agent_name ~content ~action_type =
     | `Post _ -> "post"
     | `Comment _ -> "comment"
   in
-  let timestamp = Unix.gettimeofday () |> int_of_float |> string_of_int in
+  let timestamp = Time_compat.now () |> int_of_float |> string_of_int in
   let memory_text = Printf.sprintf "[%s] %s: %s" action_str agent_name content in
   ignore timestamp; ignore memory_text;
   (* Use Python script to embed and store in Qdrant - run in systhread *)

@@ -56,7 +56,7 @@ let with_lock registry f =
 (** Register a new session *)
 let register registry ~agent_name =
   with_lock registry (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let session = {
       agent_name;
       connected_at = now;
@@ -83,7 +83,7 @@ let update_activity registry ~agent_name ?(is_listening = None) () =
   with_lock registry (fun () ->
     match Hashtbl.find_opt registry.sessions agent_name with
     | Some session ->
-        session.last_activity <- Unix.gettimeofday ();
+        session.last_activity <- Time_compat.now ();
         (match is_listening with
          | Some v -> session.is_listening <- v
          | None -> ())
@@ -96,7 +96,7 @@ let create_tracker () = {
   broadcast_timestamps = [];
   task_ops_timestamps = [];
   burst_used = 0;  (* Initial value for atomic field *)
-  last_burst_reset = Unix.gettimeofday ();  (* Initial value for atomic field *)
+  last_burst_reset = Time_compat.now ();  (* Initial value for atomic field *)
 }
 
 (** Atomic helpers for rate tracker - OCaml 5.4+ *)
@@ -131,7 +131,7 @@ let set_timestamps tracker category ts =
 (** Enhanced rate limit check with category and role *)
 let check_rate_limit_ex registry ~agent_name ~category ~role =
   with_lock registry (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let one_minute_ago = now -. 60.0 in
 
     (* Get or create tracker *)
@@ -191,7 +191,7 @@ let check_rate_limit registry ~agent_name =
 (** Get rate limit status for an agent *)
 let get_rate_limit_status registry ~agent_name ~role =
   with_lock registry (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let one_minute_ago = now -. 60.0 in
 
     let tracker =
@@ -274,7 +274,7 @@ let pop_message registry ~agent_name =
 
 (** Wait for message (blocking with timeout) *)
 let wait_for_message registry ~agent_name ~timeout =
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
   let check_interval = 2.0 in
 
   (* Ensure session exists *)
@@ -285,7 +285,7 @@ let wait_for_message registry ~agent_name ~timeout =
   update_activity registry ~agent_name ~is_listening:(Some true) ();
 
   let rec wait_loop () =
-    let elapsed = Unix.gettimeofday () -. start_time in
+    let elapsed = Time_compat.now () -. start_time in
     if elapsed >= timeout then
       None
     else begin
@@ -309,7 +309,7 @@ let wait_for_message registry ~agent_name ~timeout =
 
 (** Get inactive agents (idle > threshold seconds) *)
 let get_inactive_agents registry ~threshold =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   Hashtbl.fold (fun name session acc ->
     if now -. session.last_activity > threshold then
       name :: acc
@@ -319,7 +319,7 @@ let get_inactive_agents registry ~threshold =
 
 (** Get all agent statuses *)
 let get_agent_statuses registry =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   Hashtbl.fold (fun name session acc ->
     let idle_secs = int_of_float (now -. session.last_activity) in
     let status_icon =
@@ -378,7 +378,7 @@ let connected_agents registry =
 (** Restore sessions from disk (call on server startup) *)
 let restore_from_disk registry ~agents_path =
   if Sys.file_exists agents_path && Sys.is_directory agents_path then begin
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let restored = ref 0 in
     Sys.readdir agents_path |> Array.iter (fun name ->
       if Filename.check_suffix name ".json" then begin
@@ -427,7 +427,7 @@ module McpSessionStore = struct
 
   (** Create new MCP session *)
   let create ?agent_name () : mcp_session =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let session = {
       id = generate_id ();
       created_at = now;
@@ -444,13 +444,13 @@ module McpSessionStore = struct
     match Hashtbl.find_opt sessions session_id with
     | None -> None
     | Some session ->
-      session.last_activity <- Unix.gettimeofday ();
+      session.last_activity <- Time_compat.now ();
       session.request_count <- session.request_count + 1;
       Some session
 
   (** Cleanup stale MCP sessions *)
   let cleanup_stale () : int =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let stale = Hashtbl.fold (fun id session acc ->
       if now -. session.last_activity > !max_age then id :: acc else acc
     ) sessions [] in

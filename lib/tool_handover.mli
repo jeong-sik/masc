@@ -11,7 +11,7 @@ type context = {
   agent_name: string;
   fs: Eio.Fs.dir_ty Eio.Path.t option;
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
-  sw: Eio.Switch.t;
+  sw: Eio.Switch.t option;  (** Only needed when fs and proc_mgr are Some *)
 }
 
 type result = bool * string

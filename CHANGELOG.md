@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.25.0] - 2026-02-02
+
+### Added
+- **Time_compat Module**: Eio-native timestamp support with Unix fallback
+  - `Time_compat.set_clock` for global clock injection at startup
+  - `Time_compat.now()` returns fiber-friendly timestamps
+  - Prevents domain blocking during timestamp operations
+
+### Fixed
+- **Fiber-safe Random**: All `Random.int/float` calls now use module-level `Random.State`
+  - Prevents race conditions in concurrent fibers
+  - Affected: `nickname.ml`, `agent_identity.ml`, `lodge_heartbeat.ml`, `debate.ml`, `bounded.ml`, `mcp_session.ml`
+- **Eio-native Timestamps**: 14 modules converted from `Unix.gettimeofday()` to `Time_compat.now()`
+  - Affected: `backend_eio`, `cache_eio`, `handover_eio`, `hebbian_eio`, `institution_eio`, `mcp_server_eio`, `metrics_store_eio`, `mind_eio`, `noosphere_eio`, `planning_eio`, `room_eio`, `spawn_eio`, `swarm_eio`, `telemetry_eio`
+
 ## [2.23.0] - 2026-02-02
 
 ### Fixed

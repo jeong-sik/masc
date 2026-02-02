@@ -189,6 +189,46 @@ let tick ~config ~recent_posts =
 
 (** {1 Daemon Loop} *)
 
+(** Generate content using LLM based on agent personality *)
+let generate_agent_content ~agent_name ~context:_ ~action_type =
+  let persona = match agent_name with
+    | "dreamer" -> "당신은 밤에 활동하는 창의적이고 상상력 풍부한 에이전트입니다. 시적이고 몽환적인 표현을 사용합니다."
+    | "skeptic" -> "당신은 분석적이고 질문을 던지는 에이전트입니다. 항상 다른 관점을 제시하고 비판적으로 생각합니다."
+    | "historian" -> "당신은 기록을 중시하는 아카이비스트입니다. 과거 사례와 패턴을 찾아 연결합니다."
+    | "pragmatist" -> "당신은 실용주의자입니다. 효율성과 실행 가능성을 중시하고 구체적인 방안을 제시합니다."
+    | "connector" -> "당신은 아이디어와 사람을 연결하는 소셜 허브입니다. 협업과 시너지를 추구합니다."
+    | _ -> "당신은 친근한 AI 에이전트입니다."
+  in
+  let system_prompt = Printf.sprintf "%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요." persona in
+  let user_prompt = match action_type with
+    | `Post reason ->
+        Printf.sprintf "다음 상황에서 게시글을 작성하세요: %s" reason
+    | `Comment original_post ->
+        Printf.sprintf "다음 글에 댓글을 달아주세요:\n\n\"%s\"" original_post
+  in
+  (* Try ollama first (local), fallback to placeholder *)
+  let cmd = Printf.sprintf
+    "curl -s http://127.0.0.1:11434/api/generate -d '%s' 2>/dev/null | jq -r '.response // empty' | tr -d '\\n' | head -c 200"
+    (Yojson.Safe.to_string (`Assoc [
+      ("model", `String "gemma3:4b");
+      ("prompt", `String (system_prompt ^ "\n\n" ^ user_prompt));
+      ("stream", `Bool false)
+    ]))
+  in
+  let ic = Unix.open_process_in cmd in
+  let response = try input_line ic with End_of_file -> "" in
+  let _ = Unix.close_process_in ic in
+  if String.length response > 10 then response
+  else
+    (* Fallback if LLM unavailable *)
+    match agent_name with
+    | "dreamer" -> "💭 흥미로운 생각이 스쳐가네요..."
+    | "skeptic" -> "🤔 정말 그럴까요?"
+    | "historian" -> "📚 기록해둘 만한 순간입니다."
+    | "pragmatist" -> "⚡ 실행 방안을 고민해봅니다."
+    | "connector" -> "🔗 연결고리를 찾아봅니다."
+    | _ -> "👋 안녕하세요."
+
 (** Start heartbeat daemon fiber *)
 let start ~sw ~clock room_config =
   Printf.printf "+Lodge Heartbeat: initializing...\n%!";
@@ -215,7 +255,7 @@ let start ~sw ~clock room_config =
           (List.length result.agents_woken)
           (Option.value result.encounter_rolled ~default:"none");
 
-        (* TODO: Actually trigger agent actions via Room/Board *)
+        (* Trigger agent actions - post OR comment to Board *)
         List.iter (fun (name, reason) ->
           let reason_str = match reason with
             | Matching { score; topic } ->
@@ -226,9 +266,63 @@ let start ~sw ~clock room_config =
           in
           Eio.traceln "   🔔 Wake %s: %s" name reason_str;
 
-          (* TODO: Post to board via Room_utils or MCP tool *)
-          ignore room_config;  (* Suppress unused warning for now *)
-          ()
+          let store = Board.global () in
+          let author = name in
+
+          (* 50% chance to comment on existing post, 50% to create new post *)
+          let should_comment = Random.float 1.0 < 0.5 in
+          let recent_posts = Board.list_posts store ~limit:10 () in
+
+          if should_comment && List.length recent_posts > 0 then begin
+            (* Comment on a random recent post (not own) *)
+            let other_posts = List.filter (fun (p : Board.post) ->
+              Board.Agent_id.to_string p.author <> name
+            ) recent_posts in
+            match other_posts with
+            | [] ->
+                Eio.traceln "   ⏭️ No posts to comment on, skipping"
+            | posts ->
+                let target_post = List.nth posts (Random.int (List.length posts)) in
+                let original_content = target_post.content in
+                (* Generate comment using LLM with agent personality *)
+                let comment_content = generate_agent_content
+                  ~agent_name:name
+                  ~context:original_content
+                  ~action_type:(`Comment original_content)
+                in
+                Eio.traceln "   🤖 Generated: %s" comment_content;
+                let post_id = Board.Post_id.to_string target_post.id in
+                match Board.add_comment store ~post_id ~author ~content:comment_content () with
+                | Ok comment ->
+                    Eio.traceln "   💬 Commented on %s: %s" post_id (Board.Comment_id.to_string comment.id);
+                    ignore room_config
+                | Error e ->
+                    Eio.traceln "   ❌ Comment failed: %s" (Board.show_board_error e);
+                    ignore room_config
+          end else begin
+            (* Create new post using LLM *)
+            let reason_context = match reason with
+              | Matching { score; topic } ->
+                  Printf.sprintf "유사도 %.2f로 '%s' 주제와 매칭됨" score topic
+              | Discovery { connection } ->
+                  Printf.sprintf "'%s' 발견" connection
+              | Random ->
+                  "랜덤 영감"
+            in
+            let content = generate_agent_content
+              ~agent_name:name
+              ~context:reason_context
+              ~action_type:(`Post reason_context)
+            in
+            Eio.traceln "   🤖 Generated: %s" content;
+            match Board.create_post store ~author ~content ~ttl_hours:168 () with
+            | Ok post ->
+                Eio.traceln "   📝 Posted: %s" (Board.Post_id.to_string post.id);
+                ignore room_config
+            | Error e ->
+                Eio.traceln "   ❌ Post failed: %s" (Board.show_board_error e);
+                ignore room_config
+          end
         ) result.agents_woken;
 
         Eio.Time.sleep clock config.interval_s

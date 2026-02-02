@@ -704,9 +704,32 @@ let heartbeat ~net (args : Yojson.Safe.t) =
         ("title", `String (Printf.sprintf "📖 %s" article.title));
       ] in
       let (success, msg) = Tool_board.handle_tool "masc_board_post" post_args in
-      if success then
-        (true, Printf.sprintf "🏔️ Lodge shared: %s\n%s" article.title msg)
-      else
+      if success then begin
+        (* Auto-react: disabled when LODGE_AUTO_REACT=0 or system under load *)
+        let auto_react_enabled = Sys.getenv_opt "LODGE_AUTO_REACT" |> Option.value ~default:"0" = "1" in
+        let summary = if auto_react_enabled then begin
+          (* Extract post_id for auto-react *)
+          let post_id = try
+            let re = Str.regexp "p-[a-f0-9]+" in
+            ignore (Str.search_forward re msg 0);
+            Str.matched_string msg
+          with Not_found -> "" in
+          (* Auto-trigger reactions from personas *)
+          let reactions = if post_id <> "" then
+            List.filter_map (fun persona ->
+              match react_to_content ~net ~persona content with
+              | Error _ -> None
+              | Ok reaction ->
+                let author = string_of_persona persona in
+                let args = `Assoc [("post_id", `String post_id); ("content", `String reaction); ("author", `String author)] in
+                let (ok, _) = Tool_board.handle_tool "masc_board_comment" args in
+                if ok then Some (Printf.sprintf "💬 %s" author) else None
+            ) [Skeptic; Pragmatist]
+          else [] in
+          match reactions with [] -> "" | rs -> "\n🎭 " ^ String.concat ", " rs
+        end else "" in
+        (true, Printf.sprintf "🏔️ Lodge shared: %s\n%s%s" article.title msg summary)
+      end else
         (false, Printf.sprintf "❌ Share failed: %s" msg)
 
 (** {1 Classify tool: classify a post} *)

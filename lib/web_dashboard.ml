@@ -50,6 +50,15 @@ let html () = {|<!DOCTYPE html>
       align-items: center;
       gap: 10px;
     }
+    .version-badge {
+      font-size: 11px;
+      background: rgba(74,222,128,0.2);
+      color: #4ade80;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 500;
+      -webkit-text-fill-color: #4ade80;
+    }
     .status-dot {
       width: 12px; height: 12px;
       border-radius: 50%;
@@ -491,7 +500,7 @@ let html () = {|<!DOCTYPE html>
     <div class="toast-container" id="toast-container"></div>
 
     <header>
-      <h1><span class="status-dot" id="status-dot"></span> MASC Dashboard</h1>
+      <h1><span class="status-dot" id="status-dot"></span> MASC Dashboard <span id="version-badge" class="version-badge">v...</span></h1>
       <div style="display:flex;align-items:center;gap:16px;">
         <div class="connection-status" id="connection-status">
           <span id="conn-text">Connecting...</span>
@@ -1102,6 +1111,11 @@ let html () = {|<!DOCTYPE html>
       if (sortSelect) sortSelect.value = currentSort;
       const autoScrollCheck = document.getElementById('auto-scroll');
       if (autoScrollCheck) autoScrollCheck.checked = autoScrollEnabled;
+      // Fetch server version
+      fetch('/health').then(r => r.json()).then(d => {
+        const badge = document.getElementById('version-badge');
+        if (badge && d.version) badge.textContent = 'v' + d.version;
+      }).catch(() => {});
     });
 
     function toggleAutoScroll(enabled) {

@@ -844,6 +844,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_room : Tool_room.context = { config; agent_name } in
   let simple_ctx_control : Tool_control.context = { config; agent_name } in
   let simple_ctx_misc : Tool_misc.context = { config; agent_name } in
+  let simple_ctx_suspend : Tool_suspend.context = { config; caller_agent = Some agent_name } in
 
   (* Chain through all extracted tool modules *)
   match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
@@ -925,6 +926,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_misc.dispatch simple_ctx_misc ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_suspend.dispatch simple_ctx_suspend ~name ~args:arguments with
   | Some result -> result
   | None ->
 

@@ -125,12 +125,23 @@ let handle_post_create args =
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
+(** Sort posts by different criteria *)
+type sort_order = Hot | Trending | Recent | Discussed
+
+let sort_order_of_string = function
+  | "hot" -> Hot
+  | "trending" -> Trending
+  | "recent" | "new" -> Recent
+  | "discussed" | "comments" -> Discussed
+  | _ -> Hot  (* default *)
+
 let handle_post_list args =
   let store = Board.global () in
   let limit = get_int args "limit" 20 in
   let visibility_str = get_string_opt args "visibility" in
   let random = get_bool args "random" false in
   let offset = get_int args "offset" 0 in
+  let sort_by = get_string args "sort_by" "hot" |> sort_order_of_string in
 
   let visibility_filter = match visibility_str with
     | Some s -> visibility_of_string s
@@ -138,22 +149,57 @@ let handle_post_list args =
   in
 
   let all_posts = Board.list_posts store ~visibility_filter ~limit:(limit + offset + 100) () in
+
+  (* Apply sorting based on sort_by *)
+  let sorted_posts = match sort_by with
+    | Hot ->
+        (* Default: score + recency *)
+        all_posts  (* already sorted by score in Board.list_posts *)
+    | Recent ->
+        (* Sort by created_at descending *)
+        List.sort (fun (a : Board.post) (b : Board.post) ->
+          compare b.created_at a.created_at
+        ) all_posts
+    | Trending ->
+        (* Recent posts with high engagement (score * recency_factor) *)
+        let now = Unix.gettimeofday () in
+        List.sort (fun (a : Board.post) (b : Board.post) ->
+          let age_a = max 1.0 (now -. a.created_at) /. 3600.0 in  (* hours *)
+          let age_b = max 1.0 (now -. b.created_at) /. 3600.0 in
+          let score_a = float_of_int (a.votes_up - a.votes_down + a.reply_count * 2) /. (age_a ** 0.5) in
+          let score_b = float_of_int (b.votes_up - b.votes_down + b.reply_count * 2) /. (age_b ** 0.5) in
+          compare score_b score_a
+        ) all_posts
+    | Discussed ->
+        (* Sort by reply_count descending *)
+        List.sort (fun (a : Board.post) (b : Board.post) ->
+          let cmp = compare b.reply_count a.reply_count in
+          if cmp <> 0 then cmp else compare b.created_at a.created_at
+        ) all_posts
+  in
+
   let posts =
     if random then
       (* Shuffle and take limit *)
-      let shuffled = List.sort (fun _ _ -> Random.int 3 - 1) all_posts in
+      let shuffled = List.sort (fun _ _ -> Random.int 3 - 1) sorted_posts in
       List.filteri (fun i _ -> i < limit) shuffled
     else if offset > 0 then
       (* Skip offset, take limit *)
-      List.filteri (fun i _ -> i >= offset && i < offset + limit) all_posts
+      List.filteri (fun i _ -> i >= offset && i < offset + limit) sorted_posts
     else
-      List.filteri (fun i _ -> i < limit) all_posts
+      List.filteri (fun i _ -> i < limit) sorted_posts
   in
   if posts = [] then
     (true, "📭 No posts found.")
   else
     let formatted = List.map format_post posts in
-    let header = Printf.sprintf "📋 Posts (%d):" (List.length posts) in
+    let sort_label = match sort_by with
+      | Hot -> "🔥 Hot"
+      | Trending -> "📈 Trending"
+      | Recent -> "🕐 Recent"
+      | Discussed -> "💬 Most Discussed"
+    in
+    let header = Printf.sprintf "📋 Posts (%d) — %s:" (List.length posts) sort_label in
     (true, header ^ "\n\n" ^ String.concat "\n\n---\n\n" formatted)
 
 let handle_post_get args =
@@ -279,7 +325,7 @@ let tool_post_create : Types.tool_schema = {
 
 let tool_post_list : Types.tool_schema = {
   name = "masc_board_list";
-  description = "List posts on the MASC internal board";
+  description = "List posts on the MASC internal board with sorting options";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -287,6 +333,7 @@ let tool_post_list : Types.tool_schema = {
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "Filter by visibility: public|unlisted|internal|direct")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
+      ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), discussed (most comments)")]);
     ]);
   ];
 }

@@ -86,6 +86,100 @@ let http_get_json ~net:_ url =
 
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
+(** {1 LLM Provider Rotation — Avoid ollama overload} *)
+
+type llm_provider =
+  | Ollama_fast   (** Small ollama model (qwen3:1.7b) *)
+  | Ollama_heavy  (** Large ollama model (qwen3-coder:30b) — avoid if busy *)
+  | Gemini_cli    (** gemini CLI tool *)
+  | Claude_cli    (** claude CLI tool *)
+  | Codex_cli     (** codex CLI tool *)
+
+let string_of_provider = function
+  | Ollama_fast -> "ollama-fast"
+  | Ollama_heavy -> "ollama-heavy"
+  | Gemini_cli -> "gemini"
+  | Claude_cli -> "claude"
+  | Codex_cli -> "codex"
+
+(** Rotation state — Codex excluded (API auth issues) *)
+let cli_providers = [| Gemini_cli; Claude_cli |]
+let provider_index = ref 0
+
+let next_cli_provider () =
+  let p = cli_providers.(!provider_index) in
+  provider_index := (!provider_index + 1) mod Array.length cli_providers;
+  p
+
+(** Check if ollama has a small model loaded (not blocking with 30b) *)
+let ollama_is_light () =
+  try
+    let ic = Unix.open_process_in "curl -sf http://localhost:11434/api/ps 2>/dev/null" in
+    let buf = Buffer.create 1024 in
+    (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
+    ignore (Unix.close_process_in ic);
+    let json = Yojson.Safe.from_string (Buffer.contents buf) in
+    let models = json |> member "models" |> to_list in
+    (* If no models loaded or only small models, ollama is light *)
+    models = [] || List.for_all (fun m ->
+      let name = m |> member "name" |> to_string_option |> Option.value ~default:"" in
+      (* Consider models with "1.7b", "3b", "1.5b" as light *)
+      Str.string_match (Str.regexp ".*\\(1\\.[0-9]b\\|3b\\|mini\\|small\\).*") name 0
+    ) models
+  with _ -> false  (* On error, assume busy *)
+
+(** Call CLI tool with prompt - uses stdin to avoid shell escaping issues *)
+let cli_generate provider ~system prompt =
+  let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
+  let cli_cmd = match provider with
+    | Gemini_cli -> "gemini"
+    | Claude_cli -> "claude"
+    | Codex_cli -> "codex"
+    | _ -> failwith "Not a CLI provider"
+  in
+  try
+    (* Write prompt to temp file, then pipe to CLI via stdin *)
+    let tmp_file = Printf.sprintf "/tmp/llm-prompt-%d.txt" (Unix.getpid ()) in
+    let oc = open_out tmp_file in
+    output_string oc full_prompt;
+    close_out oc;
+    (* Use stdin for prompt (-) to avoid shell escaping issues with long prompts *)
+    let cmd = match provider with
+      | Gemini_cli -> Printf.sprintf "cat '%s' | gemini 2>/dev/null" tmp_file
+      | Claude_cli -> Printf.sprintf "cat '%s' | claude -p - 2>/dev/null" tmp_file
+      | Codex_cli -> Printf.sprintf "cat '%s' | codex exec - 2>/dev/null" tmp_file
+      | _ -> failwith "Not a CLI provider"
+    in
+    let ic = Unix.open_process_in cmd in
+    let buf = Buffer.create 4096 in
+    (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
+    let status = Unix.close_process_in ic in
+    (* Cleanup temp file *)
+    (try Unix.unlink tmp_file with _ -> ());
+    match status with
+    | Unix.WEXITED 0 -> Ok (Buffer.contents buf)
+    | Unix.WEXITED n -> Error (Printf.sprintf "%s exit %d" cli_cmd n)
+    | _ -> Error (Printf.sprintf "%s signaled" cli_cmd)
+  with exn -> Error (Printf.sprintf "%s exception: %s" cli_cmd (Printexc.to_string exn))
+
+(** Unified LLM generate with automatic provider selection *)
+let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
+  (* Strategy: prefer CLI tools to avoid ollama overload *)
+  if prefer_fast then begin
+    (* Try CLI first (rotation) *)
+    let cli = next_cli_provider () in
+    match cli_generate cli ~system prompt with
+    | Ok response ->
+        Printf.eprintf "[LLM] Used %s\n%!" (string_of_provider cli);
+        Ok response
+    | Error e1 ->
+        (* Fallback to ollama small model *)
+        Printf.eprintf "[LLM] %s failed (%s), trying ollama-fast\n%!" (string_of_provider cli) e1;
+        (* Will use ollama_generate below *)
+        Error e1
+  end else
+    Error "prefer_fast=false not implemented yet"
+
 (** Call local ollama API via curl subprocess — more reliable than raw TCP *)
 let ollama_generate ~net:_ ?(model = "qwen3-coder:30b") ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
   try
@@ -121,6 +215,30 @@ let ollama_generate ~net:_ ?(model = "qwen3-coder:30b") ?(temperature = 0.7) ?(n
   | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse: %s" msg)
   | exn -> Error (Printf.sprintf "ollama exception: %s" (Printexc.to_string exn))
 
+(** Smart LLM generate — CLI rotation with ollama fallback *)
+let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
+  (* 1. Try CLI first (rotation: gemini → claude → codex) *)
+  let cli = next_cli_provider () in
+  Printf.eprintf "[LLM] Trying %s...\n%!" (string_of_provider cli);
+  match cli_generate cli ~system prompt with
+  | Ok response ->
+      Printf.eprintf "[LLM] ✅ %s succeeded\n%!" (string_of_provider cli);
+      Ok response
+  | Error e1 ->
+      Printf.eprintf "[LLM] ❌ %s failed: %s\n%!" (string_of_provider cli) e1;
+      (* 2. Try another CLI *)
+      let cli2 = next_cli_provider () in
+      Printf.eprintf "[LLM] Trying %s...\n%!" (string_of_provider cli2);
+      match cli_generate cli2 ~system prompt with
+      | Ok response ->
+          Printf.eprintf "[LLM] ✅ %s succeeded\n%!" (string_of_provider cli2);
+          Ok response
+      | Error e2 ->
+          Printf.eprintf "[LLM] ❌ %s failed: %s\n%!" (string_of_provider cli2) e2;
+          (* 3. Fallback to ollama with SMALL model *)
+          Printf.eprintf "[LLM] Falling back to ollama qwen3:1.7b...\n%!";
+          ollama_generate ~net ~model:"qwen3:1.7b" ~temperature ~num_predict ~system prompt
+
 (** {1 READ: Content Fetching} *)
 
 let fetch_hn_article ~net =
@@ -155,26 +273,36 @@ let dig_article ~net article =
     연결고리: (멀티에이전트 시스템, OCaml, MCP, 로컬 LLM, 개발 도구와의 관계)\n\
     질문: (생각을 자극하는 질문 하나)" in
   let prompt = Printf.sprintf "Lodge를 위해 분석해주세요:\n제목: %s\nURL: %s" article.title article.url in
-  ollama_generate ~net ~temperature:0.7 ~num_predict:400 ~system prompt
+  smart_generate ~net ~temperature:0.7 ~num_predict:400 ~system prompt
 
 (** {1 CLASSIFY: Categorize content} *)
 
+(** Classify content - lenient mode (defaults to REVIEW if unclear)
+
+    NOISE classification is now more strict to encourage engagement.
+    Only classify as NOISE if content is clearly irrelevant.
+    Default to REVIEW on error or ambiguity to increase comment generation. *)
 let classify_content ~net content =
+  (* Skip classification for short content - assume REVIEW *)
+  if String.length content < 20 then
+    { category = Review; details = "short content, defaulting to REVIEW" }
+  else
   let system = "/no_think\n\
     Classify as REVIEW, NOTIFY, or NOISE. Output ONLY JSON: {\"category\":\"...\",\"details\":\"...\"}\n\
-    REVIEW: content worth discussing, shared research/articles\n\
-    NOTIFY: alerts, incidents needing attention\n\
-    NOISE: irrelevant or unclassifiable" in
+    REVIEW: content worth discussing, shared research/articles, ANY technical topic (default)\n\
+    NOTIFY: alerts, incidents needing urgent attention\n\
+    NOISE: ONLY spam, test messages, or completely irrelevant content\n\
+    When in doubt, classify as REVIEW." in
   let prompt = Printf.sprintf "Classify: %s" (String.sub content 0 (min 500 (String.length content))) in
-  match ollama_generate ~net ~model:"qwen3-coder:30b" ~temperature:0.0 ~num_predict:100 ~system prompt with
-  | Error _ -> { category = Noise; details = "classification failed" }
+  match smart_generate ~net ~temperature:0.0 ~num_predict:100 ~system prompt with
+  | Error _ -> { category = Review; details = "classification failed, defaulting to REVIEW" }
   | Ok raw ->
     try
       let json = Yojson.Safe.from_string raw in
       let cat = json |> member "category" |> to_string |> category_of_string in
       let details = json |> member "details" |> to_string_option |> Option.value ~default:"" in
       { category = cat; details }
-    with _ -> { category = Noise; details = "JSON parse failed, defaulting to NOISE" }
+    with _ -> { category = Review; details = "JSON parse failed, defaulting to REVIEW" }
 
 (** {1 EVOLVE: Agent growth through learning} *)
 
@@ -186,7 +314,7 @@ let extract_interests ~net content =
     JSON 배열로만 출력: [\"토픽1\", \"토픽2\", \"토픽3\"]\n\
     최대 5개, 한글과 영어 혼용 가능." in
   let prompt = Printf.sprintf "토픽 추출:\n%s" (String.sub content 0 (min 800 (String.length content))) in
-  match ollama_generate ~net ~model:"qwen3-coder:30b" ~temperature:0.0 ~num_predict:100 ~system prompt with
+  match smart_generate ~net ~temperature:0.0 ~num_predict:100 ~system prompt with
   | Error _ -> []
   | Ok raw ->
     try
@@ -308,11 +436,12 @@ let persona_of_string = function
 
 (** Model selection per persona — diversity of thought through model diversity *)
 let model_of_persona = function
-  | Pragmatist -> "qwen3-coder:30b"                    (* 코드/실용 분석에 강함 *)
-  | Dreamer -> "huihui_ai/qwen3-abliterated:32b"       (* 창의적, 제약 해제 *)
-  | Skeptic -> "phi4:14b"                              (* 비판적 추론 *)
-  | Connector -> "gemma3:27b"                          (* 다분야 연결 *)
-  | Historian -> "ministral-3:14b"                     (* 맥락/역사적 분석 *)
+  (* 100k+ context 모델만 사용 — 작은 모델은 컨텍스트/품질 부족 *)
+  | Pragmatist -> "glm-4.7-flash:latest"               (* 128k, 실용적 분석 *)
+  | Dreamer -> "nemotron-3-nano:latest"                (* 128k, 창의적 사고 *)
+  | Skeptic -> "glm-4.7-flash:latest"                  (* 128k, 비판적 추론 *)
+  | Connector -> "nemotron-3-nano:latest"              (* 128k, 연결 탐색 *)
+  | Historian -> "glm-4.7-flash:latest"                (* 128k, 맥락 요약 *)
 
 let persona_prompt = function
   | Pragmatist -> "당신은 실용주의자입니다. 현실적으로 구현 가능한지, 실제로 어떻게 적용할 수 있는지에 집중합니다. 멋진 아이디어보다 작동하는 코드를 중시합니다."
@@ -374,12 +503,12 @@ let react_to_content ~net ?persona content =
       (String.concat ", " existing_interests)
   in
 
-  let model = model_of_persona selected_persona in
+  let _model = model_of_persona selected_persona in  (* NOTE: CLI tools ignore model *)
   let system = Printf.sprintf "/no_think\n\
     당신은 Lodge(롯지)의 참여자입니다. %s%s\n\
     당신만의 관점으로 응답하세요. 진지하고 구체적이며 가치를 더하세요. 2-4문장.\n\
     반드시 한글로 작성하세요." persona_desc interests_context in
-  match ollama_generate ~net ~model ~temperature:0.8 ~num_predict:250 ~system
+  match smart_generate ~net ~temperature:0.8 ~num_predict:250 ~system
     (Printf.sprintf "이 Lodge 포스트에 반응해주세요:\n%s\n\n당신의 관점:" content) with
   | Error e -> Error e
   | Ok response ->
@@ -437,16 +566,52 @@ let classify ~net (args : Yojson.Safe.t) =
 
 (** {1 React tool: respond to a post with persona} *)
 
+(** React to a post with persona
+
+    When skip_classify=true, bypasses LLM classification and directly generates
+    a reaction. This significantly speeds up the process by avoiding one LLM call. *)
 let react ~net (args : Yojson.Safe.t) =
-  let post_id = Safe_ops.json_string ~default:"" "post_id" args in
+  let post_id_arg = Safe_ops.json_string ~default:"" "post_id" args in
   let persona_str = Safe_ops.json_string ~default:"random" "persona" args in
+  let skip_classify = Safe_ops.json_bool ~default:true "skip_classify" args in  (* default: skip for speed *)
   let persona = persona_of_string persona_str in
-  if post_id = "" then (false, "post_id required")
+  if post_id_arg = "" then (false, "post_id required")
   else
+    (* Handle "random" post_id: pick a random post first *)
+    let post_id =
+      if post_id_arg = "random" then begin
+        let (ok, list_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("random", `Bool true); ("limit", `Int 10)]) in
+        if ok then
+          (* Extract first post_id from list *)
+          try
+            let re = Str.regexp "p-[a-f0-9]+" in
+            let _ = Str.search_forward re list_result 0 in
+            Str.matched_string list_result
+          with Not_found -> post_id_arg
+        else post_id_arg
+      end else post_id_arg
+    in
     let (success, detail) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
     if not success then (false, Printf.sprintf "❌ %s" detail)
+    else if skip_classify then
+      (* Skip classification, directly react *)
+      match react_to_content ~net ?persona detail with
+      | Error e -> (false, Printf.sprintf "❌ React failed: %s" e)
+      | Ok reaction ->
+        let author_name = match persona with
+          | Some p -> string_of_persona p
+          | None -> "anonymous-agent"
+        in
+        let comment_args = `Assoc [
+          ("post_id", `String post_id);
+          ("content", `String reaction);
+          ("author", `String author_name);
+        ] in
+        let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
+        if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
+        else (false, Printf.sprintf "❌ Comment failed: %s" msg)
     else
-      (* Classify first *)
+      (* Classify first (slower but more accurate) *)
       let cls = classify_content ~net detail in
       match cls.category with
       | Noise -> (true, Printf.sprintf "🔇 %s classified as NOISE — no reaction" post_id)
@@ -589,6 +754,201 @@ let tool_discussion : Types.tool_schema = {
   ];
 }
 
+(** {1 State Machine Orchestrator — CrewAI + LangGraph + AutoGen 통합} *)
+
+(** Discussion state machine *)
+type discussion_state =
+  | Idle        (** 대기 중 — 새 주제 기다림 *)
+  | Topic       (** 주제 선정 — 첫 페르소나가 반응 *)
+  | Discuss     (** 토론 중 — 2~3턴 추가 반응 *)
+  | Conclude    (** 결론 — historian이 요약 *)
+
+type discussion_context = {
+  mutable state: discussion_state;
+  mutable post_id: string;
+  mutable turn_count: int;
+  mutable max_turns: int;
+  mutable participants: persona list;
+  mutable last_speaker: persona option;
+}
+
+let global_discussion : discussion_context = {
+  state = Idle;
+  post_id = "";
+  turn_count = 0;
+  max_turns = 4;
+  participants = [];
+  last_speaker = None;
+}
+
+let string_of_state = function
+  | Idle -> "IDLE"
+  | Topic -> "TOPIC"
+  | Discuss -> "DISCUSS"
+  | Conclude -> "CONCLUDE"
+
+(** Select next persona: avoid last speaker, prefer unused *)
+let select_next_persona ctx =
+  let available = List.filter (fun p ->
+    match ctx.last_speaker with
+    | Some last -> p <> last
+    | None -> true
+  ) all_personas in
+  let unused = List.filter (fun p -> not (List.mem p ctx.participants)) available in
+  let pool = if unused = [] then available else unused in
+  if pool = [] then Pragmatist
+  else List.nth pool (Random.int (List.length pool))
+
+(** State machine orchestrator (single step) *)
+let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
+  let ctx = global_discussion in
+  let buf = Buffer.create 256 in
+  let log msg = Buffer.add_string buf (msg ^ "\n") in
+
+  log (Printf.sprintf "📊 State: %s (turn %d/%d)" (string_of_state ctx.state) ctx.turn_count ctx.max_turns);
+
+  begin match ctx.state with
+  | Idle ->
+      (* Find a post to discuss *)
+      let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 5)]) in
+      if not ok then begin
+        log "❌ Failed to list posts";
+      end else begin
+        let post_ids =
+          let re = Str.regexp "\\*\\*\\(p-[a-f0-9]+\\)\\*\\*" in
+          let rec find_all start acc =
+            try
+              ignore (Str.search_forward re posts_result start);
+              find_all (Str.match_end ()) (Str.matched_group 1 posts_result :: acc)
+            with Not_found -> List.rev acc
+          in
+          find_all 0 []
+        in
+        if post_ids = [] then
+          log "📭 No posts to discuss"
+        else begin
+          ctx.post_id <- List.hd post_ids;
+          ctx.turn_count <- 0;
+          ctx.participants <- [];
+          ctx.last_speaker <- None;
+          ctx.state <- Topic;
+          log (Printf.sprintf "📌 Selected topic: %s" ctx.post_id);
+        end
+      end
+
+  | Topic ->
+      (* First persona reacts *)
+      let persona = select_next_persona ctx in
+      let (ok, result) = react ~net (`Assoc [
+        ("post_id", `String ctx.post_id);
+        ("persona", `String (string_of_persona persona));
+      ]) in
+      ctx.participants <- persona :: ctx.participants;
+      ctx.last_speaker <- Some persona;
+      ctx.turn_count <- 1;
+      if ok then begin
+        log (Printf.sprintf "💬 %s (TOPIC): %s" (string_of_persona persona) (String.sub result 0 (min 100 (String.length result))));
+        ctx.state <- Discuss;
+      end else begin
+        log (Printf.sprintf "❌ %s failed: %s" (string_of_persona persona) result);
+        ctx.state <- Idle;
+      end
+
+  | Discuss ->
+      if ctx.turn_count >= ctx.max_turns - 1 then begin
+        ctx.state <- Conclude;
+        log "⏰ Max turns reached, transitioning to CONCLUDE";
+      end else begin
+        let persona = select_next_persona ctx in
+        let (ok, result) = react ~net (`Assoc [
+          ("post_id", `String ctx.post_id);
+          ("persona", `String (string_of_persona persona));
+        ]) in
+        ctx.participants <- persona :: ctx.participants;
+        ctx.last_speaker <- Some persona;
+        ctx.turn_count <- ctx.turn_count + 1;
+        if ok then
+          log (Printf.sprintf "💬 %s (turn %d): %s"
+            (string_of_persona persona) ctx.turn_count
+            (String.sub result 0 (min 100 (String.length result))))
+        else
+          log (Printf.sprintf "⚠️ %s error: %s" (string_of_persona persona) result)
+      end
+
+  | Conclude ->
+      (* Historian summarizes *)
+      let (ok, result) = react ~net (`Assoc [
+        ("post_id", `String ctx.post_id);
+        ("persona", `String "historian");
+      ]) in
+      if ok then
+        log (Printf.sprintf "📜 Historian concludes: %s" (String.sub result 0 (min 150 (String.length result))))
+      else
+        log (Printf.sprintf "❌ Historian failed: %s" result);
+      (* Reset *)
+      ctx.state <- Idle;
+      ctx.post_id <- "";
+      ctx.turn_count <- 0;
+      ctx.participants <- [];
+      ctx.last_speaker <- None;
+      log "🔄 Discussion complete, returning to IDLE"
+  end;
+
+  (true, Buffer.contents buf)
+
+(** Auto-chain: run orchestrator with probability continuation *)
+let lodge_auto_chain ~net (args : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let chain_prob = try to_float (member "chain_probability" args) with _ -> 0.5 in
+  let max_chain = try to_int (member "max_chain" args) with _ -> 3 in
+
+  let buf = Buffer.create 512 in
+  let add msg = Buffer.add_string buf (msg ^ "\n") in
+
+  add (Printf.sprintf "🔄 Auto-chain started (p=%.2f, max=%d)" chain_prob max_chain);
+
+  let rec loop count =
+    if count >= max_chain then begin
+      add (Printf.sprintf "⏹️ Max chain reached (%d)" count);
+    end else begin
+      let (_, result) = lodge_orchestrate ~net (`Assoc []) in
+      add result;
+
+      (* Continue with probability *)
+      if Random.float 1.0 < chain_prob then begin
+        add (Printf.sprintf "🎲 Continuing (roll < %.2f)..." chain_prob);
+        Unix.sleepf 0.5;
+        loop (count + 1)
+      end else begin
+        add (Printf.sprintf "🎲 Stopping (roll >= %.2f)" chain_prob);
+      end
+    end
+  in
+
+  loop 0;
+  (true, Buffer.contents buf)
+
+let tool_orchestrate : Types.tool_schema = {
+  name = "lodge_orchestrate";
+  description = "State machine orchestrator: IDLE→TOPIC→DISCUSS→CONCLUDE. Combines CrewAI (roles) + LangGraph (states) + AutoGen (conversation). Call repeatedly for full discussion.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
+  ];
+}
+
+let tool_auto_chain : Types.tool_schema = {
+  name = "lodge_auto_chain";
+  description = "Auto-chain discussion: runs orchestrator with probabilistic continuation. Good for overnight autonomous discussions.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("chain_probability", `Assoc [("type", `String "number"); ("description", `String "Probability to continue (0.0-1.0, default: 0.5)")]);
+      ("max_chain", `Assoc [("type", `String "integer"); ("description", `String "Max turns in one call (default: 3)")]);
+    ]);
+  ];
+}
+
 (** {1 Agent Persistence & Spawning} *)
 
 (** Get all agents participating in Lodge from Neo4j *)
@@ -695,7 +1055,7 @@ let should_spawn ~net agent_name interests =
       "당신(%s)의 현재 관심사: %s\n\n새 에이전트가 필요한가요?"
       agent_name (String.concat ", " interests)
     in
-    match ollama_generate ~net ~temperature:0.3 ~num_predict:200 ~system prompt with
+    match smart_generate ~net ~temperature:0.3 ~num_predict:200 ~system prompt with
     | Error _ -> None
     | Ok response ->
       try
@@ -1033,12 +1393,11 @@ let research ~net args =
   if topic = "" then
     (false, "❌ topic required")
   else
-    (* Use Ollama to generate a research summary *)
-    let model = "llama3.3:70b" in
+    (* Use smart_generate (CLI rotation) for research *)
     let system = "/no_think\n당신은 리서처입니다. 주어진 주제에 대해 알고 있는 정보를 바탕으로 간결한 요약(3-5문장)을 작성하세요. 한글로 작성하세요." in
     let prompt = Printf.sprintf "주제: %s\n\n이 주제에 대해 핵심 정보를 요약해주세요." topic in
 
-    match ollama_generate ~net ~model ~system prompt with
+    match smart_generate ~net ~system prompt with
     | Error e -> (false, Printf.sprintf "❌ 리서치 실패: %s" e)
     | Ok summary ->
         let content = Printf.sprintf "🔍 **리서치: %s**\n\n%s\n\n👤 연구자: %s"
@@ -1256,54 +1615,66 @@ let lodge_progress ~net:_ _args =
 (** Shared state for background loop monitoring *)
 let loop_status : (int * int * string) option ref = ref None  (* (current, total, last_action) *)
 
+(** Autonomous loop - FOREGROUND ONLY
+
+    Background mode was removed because OCaml Thread and Eio scheduler
+    are incompatible. Tool_board uses Eio mutex which cannot be accessed
+    from Thread.create threads (causes Eio__Eio_mutex.Poisoned error).
+
+    For long-running loops, use llm-mcp chain orchestration instead. *)
 let autonomous_loop ~net args =
   let iterations = Safe_ops.json_int ~default:10 "iterations" args in
-  let iterations = min iterations 200 in  (* cap at 200 *)
-  let delay_ms = Safe_ops.json_int ~default:5000 "delay_ms" args in
+  let iterations = min iterations 50 in  (* cap at 50 for foreground - prevents blocking *)
+  let delay_ms = Safe_ops.json_int ~default:3000 "delay_ms" args in
   let verbose = Safe_ops.json_bool ~default:false "verbose" args in
-  let background = Safe_ops.json_bool ~default:true "background" args in  (* default: background *)
+  (* background param ignored - always foreground now *)
+  let _ = Safe_ops.json_bool ~default:false "background" args in
 
-  (* The actual loop logic *)
-  let run_loop () =
-    let results = ref [] in
-    let patrol_count = ref 0 in
-    let research_count = ref 0 in
-    let discuss_count = ref 0 in
-    let explore_count = ref 0 in
-    let error_count = ref 0 in
+  let results = ref [] in
+  let patrol_count = ref 0 in
+  let research_count = ref 0 in
+  let discuss_count = ref 0 in
+  let react_count = ref 0 in
+  let error_count = ref 0 in
 
-    for i = 1 to iterations do
-      loop_status := Some (i, iterations, "running");
-    (* Pick random action *)
-    let action = Random.int 4 in
+  for i = 1 to iterations do
+    loop_status := Some (i, iterations, "running");
+
+    (* Pick random action - weighted towards react for more comments *)
+    let action = Random.int 10 in
     let (action_name, (ok, msg)) = match action with
-      | 0 ->
-          (* Persona patrol with random persona *)
+      | 0 | 1 ->
+          (* Persona patrol - 20% *)
           let personas = ["pragmatist"; "dreamer"; "skeptic"; "connector"; "historian"] in
           let p = List.nth personas (Random.int 5) in
           let emoji = emoji_of_persona_str p in
           (Printf.sprintf "%s patrol" emoji, persona_patrol ~net (`Assoc [("persona", `String p)]))
-      | 1 ->
-          (* Research random topic from interests *)
+      | 2 ->
+          (* Research random topic - 10% *)
           let topics = ["OCaml"; "Eio"; "MCP"; "에이전트 협업"; "분산 시스템"; "함수형 프로그래밍"; "타입 시스템"; "동시성"] in
           let t = List.nth topics (Random.int (List.length topics)) in
           ("🔬 research", research ~net (`Assoc [("topic", `String t); ("agent_name", `String "auto-researcher")]))
-      | 2 ->
-          (* Discussion between personas *)
+      | 3 | 4 ->
+          (* Discussion between personas - 20% *)
           ("💬 discuss", lodge_discussion ~net (`Assoc []))
       | _ ->
-          (* List and potentially vote on random post *)
-          let (list_ok, list_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("random", `Bool true); ("limit", `Int 5)]) in
-          if list_ok then ("📋 explore", (true, "explored posts"))
-          else ("📋 explore", (false, list_result))
+          (* React to random post - 50% (main comment generator) *)
+          let personas = ["pragmatist"; "dreamer"; "skeptic"; "connector"; "historian"] in
+          let p = List.nth personas (Random.int 5) in
+          let (react_ok, react_msg) = react ~net (`Assoc [
+            ("post_id", `String "random");
+            ("persona", `String p);
+          ]) in
+          if react_ok then ("💬 react", (true, react_msg))
+          else ("💬 react (fail)", (false, react_msg))
     in
 
     (* Update stats *)
     (match action with
-     | 0 -> incr patrol_count
-     | 1 -> incr research_count
-     | 2 -> incr discuss_count
-     | _ -> incr explore_count);
+     | 0 | 1 -> incr patrol_count
+     | 2 -> incr research_count
+     | 3 | 4 -> incr discuss_count
+     | _ -> incr react_count);
     if not ok then incr error_count;
 
     (* Log result *)
@@ -1321,46 +1692,26 @@ let autonomous_loop ~net args =
     if i mod 10 = 0 && i < iterations then
       results := Printf.sprintf "───── 진행: %d/%d (%.0f%%) ─────" i iterations (100.0 *. float_of_int i /. float_of_int iterations) :: !results;
 
-      (* Delay between iterations *)
-      if i < iterations then Unix.sleepf (float_of_int delay_ms /. 1000.0)
-    done;
+    (* Delay between iterations - minimum 1s to prevent spam *)
+    if i < iterations then Unix.sleepf (max 1.0 (float_of_int delay_ms /. 1000.0))
+  done;
 
-    loop_status := None;  (* Clear status when done *)
-    let summary = Printf.sprintf
-      "🔄 **Autonomous Loop 완료**\n\
-       ━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
-       📊 **통계:**\n\
-          🔧 Patrol: %d회\n\
-          🔬 Research: %d회\n\
-          💬 Discussion: %d회\n\
-          📋 Explore: %d회\n\
-          ❌ Errors: %d회\n\n\
-       📝 **로그 (최근 %d개):**\n%s"
-      !patrol_count !research_count !discuss_count !explore_count !error_count
-      (min 50 (List.length !results))
-      (String.concat "\n" (List.rev (List.filteri (fun i _ -> i < 50) !results)))
-    in
-    summary
+  loop_status := None;
+  let summary = Printf.sprintf
+    "🔄 **Autonomous Loop 완료**\n\
+     ━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
+     📊 **통계:**\n\
+        🔧 Patrol: %d회\n\
+        🔬 Research: %d회\n\
+        💬 Discussion: %d회\n\
+        💬 React: %d회\n\
+        ❌ Errors: %d회\n\n\
+     📝 **로그 (최근 %d개):**\n%s"
+    !patrol_count !research_count !discuss_count !react_count !error_count
+    (min 50 (List.length !results))
+    (String.concat "\n" (List.rev (List.filteri (fun i _ -> i < 50) !results)))
   in
-
-  (* Background mode: spawn thread and return immediately *)
-  if background then begin
-    let _ = Thread.create (fun () ->
-      try
-        let _ = run_loop () in ()
-      with exn ->
-        loop_status := Some (0, iterations, Printf.sprintf "Error: %s" (Printexc.to_string exn))
-    ) () in
-    (true, Printf.sprintf "🚀 **Background Loop Started**\n\
-      ━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
-      📊 Iterations: %d\n\
-      ⏱️  Delay: %d ms\n\
-      📍 Use `lodge_progress` to check status\n\n\
-      💡 서버는 다른 요청에 응답 가능합니다!" iterations delay_ms)
-  end
-  else
-    (* Foreground mode: run synchronously *)
-    (true, run_loop ())
+  (true, summary)
 
 let tool_profile : Types.tool_schema = {
   name = "lodge_profile";
@@ -1428,6 +1779,8 @@ let tools = [
   tool_react;
   tool_cycle;
   tool_discussion;  (* Personas read & react to each other's posts *)
+  tool_orchestrate; (* State machine orchestrator *)
+  tool_auto_chain;  (* Probabilistic chain *)
   tool_evolve;
   tool_spawn;
   tool_agents;
@@ -1454,6 +1807,8 @@ let handle_tool ~net name args =
   | "lodge_react" -> react ~net args
   | "lodge_cycle" -> full_cycle ~net args
   | "lodge_discussion" -> lodge_discussion ~net args
+  | "lodge_orchestrate" -> lodge_orchestrate ~net args
+  | "lodge_auto_chain" -> lodge_auto_chain ~net args
   | "lodge_evolve" -> evolve ~net args
   | "lodge_spawn" -> spawn ~net args
   | "lodge_agents" -> list_agents ~net args

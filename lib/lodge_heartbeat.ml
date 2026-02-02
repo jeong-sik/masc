@@ -54,7 +54,7 @@ let try_activate_agent ~name : string option =
   end else begin
     let uuid = generate_agent_uuid () in
     Hashtbl.replace active_agents name (uuid, Unix.gettimeofday ());
-    Eio.traceln "   🆔 [%s] Activated: %s" name uuid;
+    Printf.printf "   🆔 [%s] Activated: %s\n%!" name uuid;
     Some uuid
   end
 
@@ -93,7 +93,7 @@ let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
   Hashtbl.replace agent_states name state;
 
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.traceln "   🫀 [%s] Self-heartbeat started (interval=%.0fs)" name agent_heartbeat_interval;
+    Printf.printf "   🫀 [%s] Self-heartbeat started (interval=%.0fs)\n%!" name agent_heartbeat_interval;
     while not state.should_stop do
       Eio.Time.sleep clock agent_heartbeat_interval;
 
@@ -102,13 +102,13 @@ let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
 
       if idle_time > agent_idle_timeout then begin
         (* Idle too long, stop *)
-        Eio.traceln "   💤 [%s] Idle %.0fs, going to sleep" name idle_time;
+        Printf.printf "   💤 [%s] Idle %.0fs, going to sleep\n%!" name idle_time;
         state.should_stop <- true;
         deactivate_agent ~name
       end else begin
         (* Do a tick *)
         state.action_count <- state.action_count + 1;
-        Eio.traceln "   💓 [%s] Heartbeat #%d (idle=%.0fs)" name state.action_count idle_time;
+        Printf.printf "   💓 [%s] Heartbeat #%d (idle=%.0fs)\n%!" name state.action_count idle_time;
         on_tick ~name ~state
       end
     done;
@@ -998,11 +998,19 @@ let parse_action_response response =
         with Not_found ->
           (after_action, None)
       in
-      let content = match inline_content with
+      let raw_content = match inline_content with
         | Some c -> c
         | None -> match content_line with
             | Some cl -> String.trim (String.sub cl 8 (String.length cl - 8))
             | None -> ""
+      in
+      (* Strip [Extra] metadata from content *)
+      let content =
+        match String.index_opt raw_content '[' with
+        | Some idx when idx > 0 && String.length raw_content > idx + 6 &&
+                        String.sub raw_content idx 7 = "[Extra]" ->
+            String.trim (String.sub raw_content 0 idx)
+        | _ -> raw_content
       in
       let parts = String.split_on_char ' ' action_part in
       (* Only uppercase the action word, preserve post_id case *)
@@ -1129,8 +1137,16 @@ CONTENT: 흥미로운 연결이 보여! 새로운 시작이야
     "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500; rm -f %s"
     tmp_file tmp_file
   in
-  let response = run_shell_line cmd in
-  Eio.traceln "   🧠 [%s] LLM decision: %s" agent_name (String.sub response 0 (min 100 (String.length response)));
+  let raw_response = run_shell_line cmd in
+  (* Strip [Extra] metadata from response content *)
+  let strip_extra s =
+    match String.index_opt s '[' with
+    | Some idx when idx > 0 && String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" ->
+        String.trim (String.sub s 0 idx)
+    | _ -> s
+  in
+  let response = strip_extra raw_response in
+  Printf.printf "   🧠 [%s] LLM decision: %s\n%!" agent_name (String.sub response 0 (min 100 (String.length response)));
 
   (* Filter out responses with banned words - LLM keeps ignoring instructions *)
   let banned_words = [
@@ -1191,7 +1207,7 @@ let execute_agent_action ~agent_name ~action =
       else begin
         match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
         | Ok post ->
-            Eio.traceln "   📝 [%s] Posted: %s" agent_name (Board.Post_id.to_string post.id);
+            Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name (Board.Post_id.to_string post.id);
             record_agent_activity ~name:agent_name;
             record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision")
         | Error e ->
@@ -1203,7 +1219,7 @@ let execute_agent_action ~agent_name ~action =
       else begin
         match Board.add_comment store ~post_id ~author:agent_name ~content () with
         | Ok comment ->
-            Eio.traceln "   💬 [%s] Commented on %s: %s" agent_name post_id (Board.Comment_id.to_string comment.id);
+            Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id (Board.Comment_id.to_string comment.id);
             record_agent_activity ~name:agent_name;
             record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id)
         | Error e ->

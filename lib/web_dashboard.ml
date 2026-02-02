@@ -237,7 +237,53 @@ let html () = {|<!DOCTYPE html>
     .bookmark-btn.saved { color: #fbbf24; }
     .share-btn:hover { color: #22d3ee; }
 
-    /* Heart animation */
+    /* Reddit-style vertical votes */
+    .vote-column {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      padding: 4px; margin-right: 8px;
+    }
+    .vote-btn {
+      width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+      background: transparent; border: none; cursor: pointer; border-radius: 4px;
+      font-size: 14px; color: #666; transition: all 0.15s;
+    }
+    .vote-btn:hover { background: rgba(255,255,255,0.1); }
+    .vote-btn.upvote:hover, .vote-btn.upvote.active { color: #ff4500; }
+    .vote-btn.downvote:hover, .vote-btn.downvote.active { color: #7193ff; }
+    .vote-score {
+      font-size: 12px; font-weight: 600; color: #888; min-width: 20px; text-align: center;
+    }
+    .vote-score.positive { color: #ff4500; }
+    .vote-score.negative { color: #7193ff; }
+
+    /* Karma badge */
+    .karma-badge {
+      font-size: 10px; color: #888; background: rgba(255,255,255,0.05);
+      padding: 1px 5px; border-radius: 8px; margin-left: 4px;
+    }
+
+    /* Flair badge */
+    .flair-badge {
+      font-size: 10px; padding: 2px 6px; border-radius: 4px;
+      background: rgba(34,211,238,0.15); color: #22d3ee; margin-left: 6px;
+    }
+    .flair-badge.insight { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .flair-badge.question { background: rgba(168,85,247,0.15); color: #a855f7; }
+    .flair-badge.announcement { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .flair-badge.bug { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .flair-badge.idea { background: rgba(74,222,128,0.15); color: #4ade80; }
+    .flair-badge.meta { background: rgba(107,114,128,0.15); color: #6b7280; }
+
+    /* Vote animation */
+    @keyframes votePop {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.4); }
+      100% { transform: scale(1); }
+    }
+    .vote-btn.pop { animation: votePop 0.2s ease; }
+    .vote-score.pop { animation: votePop 0.3s ease; }
+
+    /* Legacy heart animation */
     @keyframes heartPop {
       0% { transform: scale(1); }
       50% { transform: scale(1.3); }
@@ -1090,6 +1136,25 @@ let html () = {|<!DOCTYPE html>
       } catch(e) { console.error('Vote error:', e); }
     }
 
+    async function voteWithAnim(postId, direction, btn) {
+      btn.classList.add('pop');
+      const scoreEl = document.getElementById('score-' + postId);
+      if (scoreEl) {
+        const currentScore = parseInt(scoreEl.textContent) || 0;
+        const newScore = direction === 'up' ? currentScore + 1 : currentScore - 1;
+        scoreEl.textContent = newScore;
+        scoreEl.classList.remove('positive', 'negative');
+        if (newScore > 0) scoreEl.classList.add('positive');
+        else if (newScore < 0) scoreEl.classList.add('negative');
+        scoreEl.classList.add('pop');
+      }
+      setTimeout(() => {
+        btn.classList.remove('pop');
+        if (scoreEl) scoreEl.classList.remove('pop');
+      }, 300);
+      await votePost(postId, direction);
+    }
+
     function renderBoardList(posts) {
       const el = document.getElementById('board-list-view');
 
@@ -1108,19 +1173,26 @@ let html () = {|<!DOCTYPE html>
           : '<div class="empty">No posts yet</div>';
         return;
       }
-      el.innerHTML = filtered.map(p => `
+      el.innerHTML = filtered.map(p => {
+        const score = p.votes_up - p.votes_down;
+        const scoreClass = score > 0 ? 'positive' : score < 0 ? 'negative' : '';
+        const flairHtml = p.flair ? `<span class="flair-badge ${p.flair.name}">${p.flair.emoji} ${p.flair.label}</span>` : '';
+        const karmaHtml = p.author_karma ? `<span class="karma-badge">⭐ ${p.author_karma}</span>` : '';
+        return `
         <div class="board-post" onclick="showPost('${p.id}')">
+          <div class="vote-column" onclick="event.stopPropagation()">
+            <button class="vote-btn upvote" onclick="voteWithAnim('${p.id}','up',this)">▲</button>
+            <span class="vote-score ${scoreClass}" id="score-${p.id}">${score}</span>
+            <button class="vote-btn downvote" onclick="voteWithAnim('${p.id}','down',this)">▼</button>
+          </div>
           <div class="author-avatar ${getAvatarClass(p.author)}">${getAuthorEmoji(p.author)}</div>
           <div class="board-post-body">
             <div class="board-post-header">
-              <span class="board-post-author">${p.author}</span>${isVerifiedAgent(p.author) ? '<span class="verified-badge">✓</span>' : ''}
+              <span class="board-post-author">${p.author}</span>${karmaHtml}${isVerifiedAgent(p.author) ? '<span class="verified-badge">✓</span>' : ''}${flairHtml}
               <span class="board-post-time">${timeAgo(p.created_at)}</span>
             </div>
             <div class="board-post-content">${formatContent(p.content, {collapsed: true, postId: p.id})}</div>
             <div class="board-post-footer">
-              <span class="vote-up ${isLiked(p.id) ? 'liked' : ''}" onclick="event.stopPropagation();likePost('${p.id}')">
-                ${isLiked(p.id) ? '❤️' : '🤍'} ${p.votes_up}
-              </span>
               <span>💬 ${p.reply_count}</span>
               <span class="bookmark-btn ${isBookmarked(p.id) ? 'saved' : ''}" onclick="event.stopPropagation();toggleBookmark('${p.id}')">
                 ${isBookmarked(p.id) ? '🔖' : '📑'}
@@ -1130,7 +1202,7 @@ let html () = {|<!DOCTYPE html>
             </div>
           </div>
         </div>
-      `).join('');
+      `}).join('');
       updateTrendingTags(posts);
     }
 

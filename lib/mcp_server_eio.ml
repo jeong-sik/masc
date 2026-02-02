@@ -134,7 +134,7 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
 
   try wait_loop ()
   with exn ->
-    Eio.traceln "[WARN] listen wait_loop interrupted: %s" (Printexc.to_string exn);
+    Printf.eprintf "[WARN] listen wait_loop interrupted: %s\n%!" (Printexc.to_string exn);
     Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
     None
 
@@ -1057,7 +1057,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ~finally:(fun () -> close_out_noerr oc)
           (fun () -> output_string oc nickname)
       with e ->
-        Eio.traceln "[WARN] Failed to write agent file %s: %s" agent_file (Printexc.to_string e));
+        Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!" agent_file (Printexc.to_string e));
       (* Cultural Inheritance: append institution welcome to join response *)
       let institution_welcome = match state.Mcp_server.fs with
         | Some fs ->

@@ -206,28 +206,30 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
     | `Comment original_post ->
         Printf.sprintf "다음 글에 댓글을 달아주세요:\n\n\"%s\"" original_post
   in
-  (* Try ollama first (local), fallback to placeholder *)
+  (* Use llm-mcp GLM tool for content generation *)
   let cmd = Printf.sprintf
-    "curl -s http://127.0.0.1:11434/api/generate -d '%s' 2>/dev/null | jq -r '.response // empty' | tr -d '\\n' | head -c 200"
+    "curl -s -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d '%s' 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200"
     (Yojson.Safe.to_string (`Assoc [
-      ("model", `String "gemma3:4b");
-      ("prompt", `String (system_prompt ^ "\n\n" ^ user_prompt));
-      ("stream", `Bool false)
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 1);
+      ("method", `String "tools/call");
+      ("params", `Assoc [
+        ("name", `String "glm");
+        ("arguments", `Assoc [
+          ("prompt", `String (system_prompt ^ "\n\n" ^ user_prompt))
+        ])
+      ])
     ]))
   in
   let ic = Unix.open_process_in cmd in
   let response = try input_line ic with End_of_file -> "" in
   let _ = Unix.close_process_in ic in
-  if String.length response > 10 then response
-  else
-    (* Fallback if LLM unavailable *)
-    match agent_name with
-    | "dreamer" -> "💭 흥미로운 생각이 스쳐가네요..."
-    | "skeptic" -> "🤔 정말 그럴까요?"
-    | "historian" -> "📚 기록해둘 만한 순간입니다."
-    | "pragmatist" -> "⚡ 실행 방안을 고민해봅니다."
-    | "connector" -> "🔗 연결고리를 찾아봅니다."
-    | _ -> "👋 안녕하세요."
+  (* Return None if LLM failed, skip posting instead of hardcoded fallback *)
+  if String.length response > 10 then Some response
+  else (
+    Eio.traceln "   ⚠️ LLM failed for %s, skipping" agent_name;
+    None
+  )
 
 (** Start heartbeat daemon fiber *)
 let start ~sw ~clock room_config =
@@ -285,20 +287,22 @@ let start ~sw ~clock room_config =
                 let target_post = List.nth posts (Random.int (List.length posts)) in
                 let original_content = target_post.content in
                 (* Generate comment using LLM with agent personality *)
-                let comment_content = generate_agent_content
+                match generate_agent_content
                   ~agent_name:name
                   ~context:original_content
                   ~action_type:(`Comment original_content)
-                in
-                Eio.traceln "   🤖 Generated: %s" comment_content;
-                let post_id = Board.Post_id.to_string target_post.id in
-                match Board.add_comment store ~post_id ~author ~content:comment_content () with
-                | Ok comment ->
-                    Eio.traceln "   💬 Commented on %s: %s" post_id (Board.Comment_id.to_string comment.id);
-                    ignore room_config
-                | Error e ->
-                    Eio.traceln "   ❌ Comment failed: %s" (Board.show_board_error e);
-                    ignore room_config
+                with
+                | None -> () (* LLM failed, skip *)
+                | Some comment_content ->
+                    Eio.traceln "   🤖 Generated: %s" comment_content;
+                    let post_id = Board.Post_id.to_string target_post.id in
+                    match Board.add_comment store ~post_id ~author ~content:comment_content () with
+                    | Ok comment ->
+                        Eio.traceln "   💬 Commented on %s: %s" post_id (Board.Comment_id.to_string comment.id);
+                        ignore room_config
+                    | Error e ->
+                        Eio.traceln "   ❌ Comment failed: %s" (Board.show_board_error e);
+                        ignore room_config
           end else begin
             (* Create new post using LLM *)
             let reason_context = match reason with
@@ -309,18 +313,20 @@ let start ~sw ~clock room_config =
               | Random ->
                   "랜덤 영감"
             in
-            let content = generate_agent_content
+            match generate_agent_content
               ~agent_name:name
               ~context:reason_context
               ~action_type:(`Post reason_context)
-            in
-            Eio.traceln "   🤖 Generated: %s" content;
-            match Board.create_post store ~author ~content ~ttl_hours:168 () with
-            | Ok post ->
-                Eio.traceln "   📝 Posted: %s" (Board.Post_id.to_string post.id);
-                ignore room_config
-            | Error e ->
-                Eio.traceln "   ❌ Post failed: %s" (Board.show_board_error e);
+            with
+            | None -> () (* LLM failed, skip *)
+            | Some content ->
+                Eio.traceln "   🤖 Generated: %s" content;
+                match Board.create_post store ~author ~content ~ttl_hours:168 () with
+                | Ok post ->
+                    Eio.traceln "   📝 Posted: %s" (Board.Post_id.to_string post.id);
+                    ignore room_config
+                | Error e ->
+                    Eio.traceln "   ❌ Post failed: %s" (Board.show_board_error e);
                 ignore room_config
           end
         ) result.agents_woken;

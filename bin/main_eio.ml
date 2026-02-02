@@ -1257,6 +1257,10 @@ let make_extended_handler routes =
         match request.meth, path with
         | `OPTIONS, _ -> options_handler request reqd
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
+        | `GET, "/api/v1/board/flairs" ->
+            let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+            let json = `Assoc [("flairs", `List flairs)] in
+            Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
             let store = Board.global () in

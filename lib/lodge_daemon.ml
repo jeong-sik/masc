@@ -127,7 +127,7 @@ let is_patrol_due state persona_cfg =
 let build_persona_prompt cfg =
   let trait_desc =
     cfg.traits
-    |> List.map (fun t ->
+    |> List.map (fun (t : trait) ->
         Printf.sprintf "- %s (strength: %.1f)%s"
           t.name t.strength
           (match t.prompt_modifier with Some m -> ": " ^ m | None -> ""))
@@ -135,7 +135,7 @@ let build_persona_prompt cfg =
   in
   let value_desc =
     cfg.values
-    |> List.map (fun v -> Printf.sprintf "- %s (importance: %.1f)" v.name v.importance)
+    |> List.map (fun (v : value) -> Printf.sprintf "- %s (importance: %.1f)" v.name v.importance)
     |> String.concat "\n"
   in
   Printf.sprintf {|You are %s, a Lodge agent with the following characteristics:

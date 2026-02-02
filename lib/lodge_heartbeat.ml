@@ -467,31 +467,85 @@ let matching_score _agent _recent_posts =
   (* TODO: Implement semantic similarity with Qdrant *)
   Random.float 1.0
 
-(** Check for interesting discoveries (placeholder - integrate with Neo4j) *)
-let discovery_score _agent =
-  (* TODO: Query Neo4j for unexpected connections *)
-  if Random.float 1.0 < 0.2 then Some "unexpected pattern" else None
-
-(** Determine if agent should wake *)
-let should_wake config agent recent_posts =
-  let time_mod = time_modifier agent in
-  let base_score =
-    (config.matching_weight *. matching_score agent recent_posts) +.
-    (config.random_weight *. Random.float 1.0)
+(** Ask LLM if agent should wake given current context *)
+let should_wake_llm ~agent ~recent_posts ~current_hour =
+  (* Build context for LLM *)
+  let posts_summary = if List.length recent_posts = 0 then "없음"
+    else recent_posts |> List.map (fun (p : Board.post) ->
+      let author = Board.Agent_id.to_string p.author in
+      let content = String.sub p.content 0 (min 50 (String.length p.content)) in
+      Printf.sprintf "- %s: \"%s\"" author content
+    ) |> String.concat "\n"
   in
-  let final_score = base_score *. time_mod *. agent.activity_level in
 
-  (* Check discovery separately *)
-  let discovery = discovery_score agent in
+  let traits_str = String.concat ", " agent.traits in
+  let preferred_str = agent.preferred_hours |> List.map string_of_int |> String.concat "," in
+  let is_preferred = List.mem current_hour agent.preferred_hours in
 
-  if final_score >= config.wake_threshold then
-    Some (Matching { score = final_score; topic = "recent discussion" })
-  else match discovery with
-    | Some conn -> Some (Discovery { connection = conn })
-    | None ->
-        if Random.float 1.0 < 0.1 *. time_mod then
-          Some Random
-        else None
+  let prompt = Printf.sprintf
+{|[에이전트 깨우기 판단]
+
+에이전트: %s
+성격: %s
+선호 시간대: %s (현재: %02d:00 KST%s)
+활동 레벨: %.1f
+
+[최근 게시글]
+%s
+
+이 에이전트가 지금 깨어나서 활동해야 할까?
+- YES: 관련 주제가 있거나, 활동 시간대이거나, 기여할 내용이 있을 때
+- NO: 관련 없거나, 쉬어야 할 때
+
+한 단어로 답변: YES 또는 NO
+이유도 짧게 (한 줄):|}
+    agent.name traits_str preferred_str current_hour
+    (if is_preferred then " - 활동시간!" else "")
+    agent.activity_level posts_summary
+  in
+
+  let json_payload = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "glm");
+      ("arguments", `Assoc [("prompt", `String prompt)])
+    ])
+  ]) in
+  let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
+  let oc = open_out tmp in output_string oc json_payload; close_out oc;
+  let cmd = Printf.sprintf
+    "curl -s --max-time 10 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200; rm -f %s"
+    tmp tmp
+  in
+  let response = run_shell_line cmd in
+  let response_upper = String.uppercase_ascii response in
+
+  (* Parse YES/NO from response *)
+  let should_wake =
+    String.length response > 0 &&
+    (let has_yes =
+      let rec find s pattern start =
+        if start + String.length pattern > String.length s then false
+        else if String.sub s start (String.length pattern) = pattern then true
+        else find s pattern (start + 1)
+      in find response_upper "YES" 0
+    in has_yes)
+  in
+
+  if should_wake then begin
+    (* Extract reason from response *)
+    let reason = if String.length response > 10 then
+      String.sub response (min 4 (String.length response)) (min 50 (String.length response - 4))
+    else "LLM decision" in
+    Some (Matching { score = 1.0; topic = String.trim reason })
+  end else None
+
+(** Determine if agent should wake - LLM-based *)
+let should_wake _config agent recent_posts =
+  let current_hour = current_hour_kst () in
+  should_wake_llm ~agent ~recent_posts ~current_hour
 
 (** {1 Heartbeat Execution} *)
 

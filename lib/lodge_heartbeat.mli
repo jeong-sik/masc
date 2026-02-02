@@ -58,11 +58,11 @@ val record_agent_memory : agent_name:string -> content:string -> action_type:[< 
 
 (** {1 Wake Logic} *)
 
-val should_wake : config -> agent -> 'a list -> wake_reason option
+val should_wake : config -> agent -> Board.post list -> wake_reason option
 
 (** {1 Heartbeat Execution} *)
 
-val tick : config:config -> recent_posts:'a list -> heartbeat_result
+val tick : config:config -> recent_posts:Board.post list -> heartbeat_result
 
 (** {1 Daemon} *)
 

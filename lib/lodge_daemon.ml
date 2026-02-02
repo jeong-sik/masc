@@ -107,6 +107,20 @@ let string_of_mood = function
   | Neutral -> "neutral"
   | Excited -> "excited"
 
+(** {1 Cypher escaping for injection prevention} *)
+
+(** Escape string for safe use in Cypher single-quoted literals *)
+let cypher_escape s =
+  let buf = Buffer.create (String.length s * 2) in
+  String.iter (function
+    | '\'' -> Buffer.add_string buf "\\'"
+    | '\\' -> Buffer.add_string buf "\\\\"
+    | '\n' -> Buffer.add_string buf "\\n"
+    | '\r' -> Buffer.add_string buf "\\r"
+    | c -> Buffer.add_char buf c
+  ) s;
+  Buffer.contents buf
+
 (** {1 Patrol scheduling} *)
 
 (** Calculate patrol interval based on curiosity level.
@@ -199,17 +213,24 @@ RETURN la.persona AS persona,
 |}
 
 (** Record social influence between personas *)
-let influence_query source target content = Printf.sprintf {|
+let influence_query source target content =
+  let src = cypher_escape source in
+  let tgt = cypher_escape target in
+  let cnt = cypher_escape content in
+  Printf.sprintf {|
 MATCH (source:LodgeAgent {persona: '%s'})
 MATCH (target:LodgeAgent {persona: '%s'})
 MERGE (source)-[r:INFLUENCED]->(target)
 ON CREATE SET r.count = 1, r.first_at = datetime(), r.last_content = '%s'
 ON MATCH SET r.count = r.count + 1, r.last_at = datetime(), r.last_content = '%s'
 RETURN r.count AS influence_count
-|} source target content content
+|} src tgt cnt cnt
 
 (** Update mood with history tracking *)
-let mood_update_query persona mood trigger_score = Printf.sprintf {|
+let mood_update_query persona mood trigger_score =
+  let p = cypher_escape persona in
+  let m = string_of_mood mood in  (* enum, safe *)
+  Printf.sprintf {|
 MATCH (la:LodgeAgent {persona: '%s'})
 SET la.mood = '%s',
     la.mood_updated_at = datetime()
@@ -220,10 +241,13 @@ CREATE (mh:MoodHistory {
   timestamp: datetime()
 })
 RETURN la.persona, la.mood
-|} persona (string_of_mood mood) persona (string_of_mood mood) trigger_score
+|} p m p m trigger_score
 
 (** Generate reflection (Stanford Generative Agents pattern) *)
-let reflection_query persona content = Printf.sprintf {|
+let reflection_query persona content =
+  let p = cypher_escape persona in
+  let c = cypher_escape content in
+  Printf.sprintf {|
 MATCH (la:LodgeAgent {persona: '%s'})
 CREATE (r:Reflection {
   persona: '%s',
@@ -232,7 +256,7 @@ CREATE (r:Reflection {
 })
 MERGE (la)-[:REFLECTED]->(r)
 RETURN r.content AS reflection
-|} persona persona content
+|} p p c
 
 (** {1 Main operations} *)
 

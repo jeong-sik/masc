@@ -28,6 +28,16 @@ let language_instruction () =
   | "en" -> "Write in English."
   | _ -> ""  (* auto: 지시 없음 *)
 
+(** Get sb script path from ME_ROOT env var (portable) *)
+let sb_path () =
+  match Sys.getenv_opt "ME_ROOT" with
+  | Some root -> Printf.sprintf "%s/scripts/sb" root
+  | None -> (
+    match Sys.getenv_opt "HOME" with
+    | Some home -> Printf.sprintf "%s/me/scripts/sb" home
+    | None -> "/Users/dancer/me/scripts/sb"  (* legacy fallback *)
+  )
+
 (** {1 Types} *)
 
 type category =
@@ -155,12 +165,14 @@ let cli_generate provider ~system prompt =
     | Codex_cli -> "codex"
     | _ -> failwith "Not a CLI provider"
   in
+  (* Create secure temp file with restricted permissions *)
+  let tmp_file = Filename.temp_file "llm-prompt-" ".txt" in
+  let cleanup () = try Unix.unlink tmp_file with Unix.Unix_error _ -> () in
   try
-    (* Write prompt to temp file, then pipe to CLI via stdin *)
-    let tmp_file = Printf.sprintf "/tmp/llm-prompt-%d.txt" (Unix.getpid ()) in
-    let oc = open_out tmp_file in
-    output_string oc full_prompt;
-    close_out oc;
+    (* Write prompt with owner-only permissions (0600) *)
+    let fd = Unix.openfile tmp_file [Unix.O_WRONLY; Unix.O_TRUNC] 0o600 in
+    let _ = Unix.write_substring fd full_prompt 0 (String.length full_prompt) in
+    Unix.close fd;
     (* Use stdin for prompt (-) to avoid shell escaping issues with long prompts *)
     let cmd = match provider with
       | Gemini_cli -> Printf.sprintf "cat '%s' | gemini 2>/dev/null" tmp_file
@@ -172,8 +184,7 @@ let cli_generate provider ~system prompt =
     let buf = Buffer.create 4096 in
     (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
     let status = Unix.close_process_in ic in
-    (* Cleanup temp file *)
-    (try Unix.unlink tmp_file with _ -> ());
+    cleanup ();
     match status with
     | Unix.WEXITED 0 -> Ok (Buffer.contents buf)
     | Unix.WEXITED n -> Error (Printf.sprintf "%s exit %d" cli_cmd n)
@@ -407,7 +418,7 @@ let save_interests_to_neo4j ~agent_name ~persona_name interests =
       |> Str.global_replace (Str.regexp "\"") "\\\""
       |> Str.global_replace (Str.regexp "\\$") "\\$"
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\"" escaped_cypher in
+    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) escaped_cypher in
     try
       let ic = Unix.open_process_in cmd in
       let buf = Buffer.create 256 in
@@ -424,7 +435,7 @@ let get_agent_interests ~agent_name =
      ORDER BY r.count DESC LIMIT 10"
     agent_name
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\" 2>/dev/null" cypher in
+  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 256 in
@@ -459,7 +470,7 @@ let record_lodge_visit ~agent_name ~persona_name ~article_title =
      RETURN a.visit_count as visits"
     agent_name persona_name (Str.global_replace (Str.regexp "'") "" article_title)
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\" 2>/dev/null" cypher in
+  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 64 in
@@ -1083,7 +1094,7 @@ let get_all_agents () =
             COALESCE(a.visit_count, 0) as visits \
      ORDER BY a.name"
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\" 2>/dev/null" cypher in
+  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 256 in
@@ -1141,7 +1152,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_persona ~child_prompt =
        RETURN a.name"
       agent_name child_persona escaped_prompt parent_name parent_name
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\"" cypher in
+    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) cypher in
     try
       let ic = Unix.open_process_in cmd in
       let buf = Buffer.create 256 in
@@ -1241,7 +1252,7 @@ let get_all_agent_interests () =
      RETURN a.name as agent, collect(t.name) as topics, a.visit_count as visits \
      ORDER BY a.name"
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\" 2>/dev/null" cypher in
+  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 256 in
@@ -1613,7 +1624,7 @@ let get_profile ~net:_ args =
               a.reaction_count as reactions, parent.name as parent"
       agent_name
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\"" cypher in
+    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\"" (sb_path ()) cypher in
     let neo4j_info =
       try
         let ic = Unix.open_process_in cmd in
@@ -1647,7 +1658,7 @@ let lodge_search ~net:_ args =
        RETURN a.name, a.persona, a.visit_count LIMIT 5"
       query query
     in
-    let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\" 2>/dev/null" cypher in
+    let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
     let agent_results =
       try
         let ic = Unix.open_process_in cmd in
@@ -1692,7 +1703,7 @@ let lodge_progress ~net:_ _args =
             COALESCE(a.visit_count, 0) as visits, interests \
      ORDER BY visits DESC LIMIT 10"
   in
-  let cmd = Printf.sprintf "source ~/.zshenv && /Users/dancer/me/scripts/sb neo4j query \"%s\" 2>/dev/null" cypher in
+  let cmd = Printf.sprintf "source ~/.zshenv && %s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   let agent_stats =
     try
       let ic = Unix.open_process_in cmd in

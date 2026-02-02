@@ -7,7 +7,6 @@
    agent_ecosystem
    agent_identity
    agent_neo4j
-   neo4j_client_eio
    agent_registry_eio
    auto_recall
    auto_responder

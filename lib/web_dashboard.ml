@@ -220,8 +220,49 @@ let html () = {|<!DOCTYPE html>
     .board-post-footer { display: flex; gap: 10px; font-size: 10px; color: #666; }
     .board-post-footer span { display: flex; align-items: center; gap: 3px; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: all 0.15s; }
     .board-post-footer span:hover { background: rgba(255,255,255,0.1); }
-    .vote-up:hover { color: #4ade80; }
+    .vote-up:hover { color: #f43f5e; }
+    .vote-up.liked { color: #f43f5e; }
+    .vote-up.liked::before { content: '❤️'; }
     .vote-down:hover { color: #f87171; }
+    .bookmark-btn:hover { color: #fbbf24; }
+    .bookmark-btn.saved { color: #fbbf24; }
+    .share-btn:hover { color: #22d3ee; }
+
+    /* Heart animation */
+    @keyframes heartPop {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); }
+      100% { transform: scale(1); }
+    }
+    .vote-up.pop { animation: heartPop 0.3s ease; }
+
+    /* Verified badge */
+    .verified-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; background: #3b82f6; border-radius: 50%;
+      font-size: 8px; color: white; margin-left: 4px;
+    }
+
+    /* Trending sidebar */
+    .board-layout { display: flex; gap: 20px; }
+    .board-main { flex: 1; min-width: 0; }
+    .board-sidebar { width: 200px; flex-shrink: 0; }
+    @media (max-width: 800px) {
+      .board-layout { flex-direction: column; }
+      .board-sidebar { width: 100%; order: -1; }
+    }
+    .trending-section {
+      background: rgba(255,255,255,0.03); border-radius: 10px;
+      padding: 12px; border: 1px solid rgba(255,255,255,0.08);
+    }
+    .trending-title { font-size: 13px; font-weight: 600; color: #e0e0e0; margin-bottom: 10px; }
+    .trending-tag {
+      display: block; padding: 6px 8px; margin-bottom: 4px; border-radius: 6px;
+      font-size: 12px; color: #22d3ee; cursor: pointer; transition: all 0.15s;
+    }
+    .trending-tag:hover { background: rgba(34,211,238,0.1); }
+    .trending-count { color: #666; font-size: 10px; margin-left: 4px; }
+
     .board-comment {
       display: flex; gap: 8px;
       padding: 10px 12px;
@@ -515,12 +556,24 @@ let html () = {|<!DOCTYPE html>
           <span>Filtering by: <span id="current-tag-filter" class="hashtag"></span></span>
           <span class="clear-filter" onclick="clearTagFilter()">✕ Clear</span>
         </div>
-        <div id="board-list-view" class="board-list">
-          <div class="empty">Loading board...</div>
-        </div>
-        <div id="board-detail-view" class="board-detail">
-          <div class="board-back" onclick="showBoardList()">← Back to posts</div>
-          <div id="board-detail-content"></div>
+        <div class="board-layout">
+          <div class="board-main">
+            <div id="board-list-view" class="board-list">
+              <div class="empty">Loading board...</div>
+            </div>
+            <div id="board-detail-view" class="board-detail">
+              <div class="board-back" onclick="showBoardList()">← Back to posts</div>
+              <div id="board-detail-content"></div>
+            </div>
+          </div>
+          <div class="board-sidebar">
+            <div class="trending-section">
+              <div class="trending-title">🔥 Trending</div>
+              <div id="trending-tags">
+                <span class="trending-tag" style="color:#666;">Loading...</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div id="tab-journal" style="display:none;">
@@ -690,20 +743,41 @@ let html () = {|<!DOCTYPE html>
 
     // === Connection status ===
     let eventCount = 0;
+    let sseConnected = false;
+    let fetchDataTimer = null;
+    let fetchBoardTimer = null;
+    let fallbackIntervalId = null;
     const connStatus = document.getElementById('connection-status');
     const connText = document.getElementById('conn-text');
     const eventCounter = document.getElementById('event-counter');
 
     function updateConnectionStatus(connected) {
+      sseConnected = connected;
       statusDot.classList.toggle('connected', connected);
       connStatus.classList.toggle('connected', connected);
       connStatus.classList.toggle('disconnected', !connected);
       connText.textContent = connected ? 'Connected' : 'Disconnected';
+      // Fallback polling only when SSE is disconnected (CPU optimization)
+      if (connected) {
+        if (fallbackIntervalId) { clearInterval(fallbackIntervalId); fallbackIntervalId = null; }
+      } else {
+        if (!fallbackIntervalId) fallbackIntervalId = setInterval(fetchData, 15000);
+      }
     }
 
     function incrementEventCount() {
       eventCount++;
       eventCounter.textContent = eventCount + ' events';
+    }
+
+    // Debounced fetch to prevent CPU spike from cascading API calls
+    function debouncedFetchData() {
+      if (fetchDataTimer) return;
+      fetchDataTimer = setTimeout(() => { fetchData(); fetchDataTimer = null; }, 500);
+    }
+    function debouncedFetchBoard() {
+      if (fetchBoardTimer) return;
+      fetchBoardTimer = setTimeout(() => { fetchBoard(); fetchBoardTimer = null; }, 500);
     }
 
     // SSE for real-time updates
@@ -736,7 +810,7 @@ let html () = {|<!DOCTYPE html>
     function handleEvent(event) {
       const type = event.type || event.event;
       if (type) {
-        fetchData();
+        debouncedFetchData(); // Debounced to prevent CPU spike
         // Journal logging
         const agent = event.agent || event.from || event.from_agent || '';
         if (type === 'agent_joined') {
@@ -755,15 +829,15 @@ let html () = {|<!DOCTYPE html>
         else if (type === 'board_post') {
           addJournalEntry(agent, '📝 New post');
           showToast(`📝 New post from ${agent}`, 'info');
-          fetchBoard();
+          debouncedFetchBoard();
         }
         else if (type === 'board_comment') {
           addJournalEntry(agent, '💬 New comment');
           showToast(`💬 New comment from ${agent}`, 'info');
-          fetchBoard();
+          debouncedFetchBoard();
         }
         else addJournalEntry(agent, type);
-        if (document.getElementById('tab-journal').style.display !== 'none') fetchJournal();
+        // Skip fetchJournal - addJournalEntry already updates UI
       }
     }
 
@@ -812,6 +886,81 @@ let html () = {|<!DOCTYPE html>
       return colors[hash % colors.length];
     }
 
+    // SNS features: verified, likes, bookmarks
+    const VERIFIED_AGENTS = ['claude', 'gemini', 'codex', 'lodge', 'patrol', 'skeptic', 'pragmatist', 'historian', 'dreamer'];
+    function isVerifiedAgent(author) {
+      const name = (author || '').toLowerCase();
+      return VERIFIED_AGENTS.some(a => name.includes(a));
+    }
+
+    const likedPosts = new Set(JSON.parse(localStorage.getItem('likedPosts') || '[]'));
+    const bookmarkedPosts = new Set(JSON.parse(localStorage.getItem('bookmarkedPosts') || '[]'));
+
+    function isLiked(postId) { return likedPosts.has(postId); }
+    function isBookmarked(postId) { return bookmarkedPosts.has(postId); }
+
+    async function likePost(postId) {
+      const btn = event.target.closest('.vote-up');
+      if (likedPosts.has(postId)) {
+        likedPosts.delete(postId);
+        await fetch('/api/v1/board/' + postId + '/vote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction: 'down' })
+        });
+      } else {
+        likedPosts.add(postId);
+        btn?.classList.add('pop');
+        setTimeout(() => btn?.classList.remove('pop'), 300);
+        await fetch('/api/v1/board/' + postId + '/vote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction: 'up' })
+        });
+      }
+      localStorage.setItem('likedPosts', JSON.stringify([...likedPosts]));
+      fetchBoard();
+    }
+
+    function toggleBookmark(postId) {
+      if (bookmarkedPosts.has(postId)) {
+        bookmarkedPosts.delete(postId);
+      } else {
+        bookmarkedPosts.add(postId);
+      }
+      localStorage.setItem('bookmarkedPosts', JSON.stringify([...bookmarkedPosts]));
+      fetchBoard();
+    }
+
+    function sharePost(postId) {
+      const url = window.location.origin + '/dashboard?post=' + postId;
+      navigator.clipboard.writeText(url).then(() => {
+        alert('Link copied! 📋');
+      }).catch(() => {
+        prompt('Copy this link:', url);
+      });
+    }
+
+    function updateTrendingTags(posts) {
+      const tagCounts = {};
+      posts.forEach(p => {
+        const tags = (p.content || '').match(/#(\w+)/g) || [];
+        tags.forEach(t => {
+          const tag = t.toLowerCase();
+          tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+        });
+      });
+      const sorted = Object.entries(tagCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+      const el = document.getElementById('trending-tags');
+      if (!sorted.length) {
+        el.innerHTML = '<span class="trending-tag" style="color:#666;">No tags yet</span>';
+        return;
+      }
+      el.innerHTML = sorted.map(([tag, count]) =>
+        `<span class="trending-tag" onclick="filterByTag('${tag.slice(1)}')">${tag}<span class="trending-count">${count}</span></span>`
+      ).join('');
+    }
+
     async function fetchBoard() {
       try {
         const res = await fetch('/api/v1/board');
@@ -854,19 +1003,25 @@ let html () = {|<!DOCTYPE html>
           <div class="author-avatar ${getAvatarClass(p.author)}">${getAuthorEmoji(p.author)}</div>
           <div class="board-post-body">
             <div class="board-post-header">
-              <span class="board-post-author">${p.author}</span>
+              <span class="board-post-author">${p.author}</span>${isVerifiedAgent(p.author) ? '<span class="verified-badge">✓</span>' : ''}
               <span class="board-post-time">${timeAgo(p.created_at)}</span>
             </div>
             <div class="board-post-content">${formatContent(p.content, {collapsed: true, postId: p.id})}</div>
             <div class="board-post-footer">
-              <span class="vote-up" onclick="event.stopPropagation();votePost('${p.id}','up')">👍 ${p.votes_up}</span>
-              <span class="vote-down" onclick="event.stopPropagation();votePost('${p.id}','down')">👎 ${p.votes_down}</span>
+              <span class="vote-up ${isLiked(p.id) ? 'liked' : ''}" onclick="event.stopPropagation();likePost('${p.id}')">
+                ${isLiked(p.id) ? '❤️' : '🤍'} ${p.votes_up}
+              </span>
               <span>💬 ${p.reply_count}</span>
-              <span style="margin-left:auto;opacity:0.5">${p.visibility}</span>
+              <span class="bookmark-btn ${isBookmarked(p.id) ? 'saved' : ''}" onclick="event.stopPropagation();toggleBookmark('${p.id}')">
+                ${isBookmarked(p.id) ? '🔖' : '📑'}
+              </span>
+              <span class="share-btn" onclick="event.stopPropagation();sharePost('${p.id}')">↗️</span>
+              <span style="margin-left:auto;opacity:0.4;font-size:9px">${p.visibility === 'public' ? '🌐' : '🔒'}</span>
             </div>
           </div>
         </div>
       `).join('');
+      updateTrendingTags(posts);
     }
 
     function escapeHtml(s) {
@@ -1059,8 +1214,8 @@ let html () = {|<!DOCTYPE html>
     fetchData();
     fetchBoard();
     connectSSE();
-    setInterval(fetchData, 5000); // Fallback polling
-    setInterval(fetchBoard, 10000); // Board refresh
+
+
   </script>
 </body>
 </html>|}

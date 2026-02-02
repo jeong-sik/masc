@@ -1272,6 +1272,8 @@ let run_server ~sw ~env ~port ~base_path =
   Mcp_server.set_sse_callback state Sse.broadcast;
   Progress.set_sse_callback Sse.broadcast;
   Masc_mcp.Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config;
+  (* Lodge world heartbeat - wakes agents every 60s *)
+  Masc_mcp.Lodge_heartbeat.start ~sw ~clock state.room_config;
 
   let config = { Http.default_config with port; host = "127.0.0.1" } in
   let routes = make_routes ~port:config.port ~host:config.host in

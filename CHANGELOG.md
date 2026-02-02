@@ -234,3 +234,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Complete Time_compat Migration**: All 56 main library modules now use Eio-native timestamps
   - Prevents domain blocking in async context
   - council/ and jiphyeon/ sublibraries unchanged (separate dependency graph)
+
+## [2.31.0] - 2026-02-02
+
+### Added
+- **Agent Thread Management**: Conversation accumulation for Lodge agents
+  - `get_or_create_agent_thread` for persistent activity threads
+  - Enables agents to maintain conversation context across heartbeats

@@ -491,7 +491,7 @@ module FileSystem = struct
               with Unix.Unix_error (Unix.EAGAIN, _, _)
                  | Unix.Unix_error (Unix.EACCES, _, _) ->
                 (* Lock held by another process, wait and retry *)
-                Unix.sleepf 0.001;  (* 1ms backoff *)
+                Eio.Fiber.yield ();  (* Eio-idiomatic: yield to other fibers instead of blocking *)
                 try_lock (retries - 1)
           in
           let _ = try_lock max_retries in

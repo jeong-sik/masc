@@ -241,6 +241,17 @@ let handle_comment_add args =
 (** Lodge personas that can evolve *)
 let lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
 
+(** SOUL Evolution callback - registered by Tool_lodge at startup to break dependency cycle *)
+type evolution_callback = {
+  get_primary_value: string -> string option;
+  record_feedback: name:string -> dimension:string -> is_positive:bool -> unit;
+}
+
+let evolution_hook : evolution_callback option ref = ref None
+
+let register_evolution_callback cb =
+  evolution_hook := Some cb
+
 let handle_vote args =
   let store = Board.global () in
   let post_id = get_string args "post_id" "" in
@@ -252,9 +263,28 @@ let handle_vote args =
   match Board.vote store ~voter ~post_id ~direction with
   | Ok new_score ->
       let arrow = if direction = Board.Up then "↑" else "↓" in
-      (* SOUL Evolution: disabled to break Tool_lodge <-> Tool_board cycle
-         TODO: Move evolution logic to a separate module if needed *)
-      (true, Printf.sprintf "%s Vote recorded. New score: %+d" arrow new_score)
+      (* SOUL Evolution via callback (breaks compile-time dependency cycle) *)
+      let evolution_msg =
+        match !evolution_hook with
+        | None -> ""  (* Lodge not initialized yet *)
+        | Some cb ->
+            match Board.get_post store ~post_id with
+            | Ok post ->
+                let author = Board.Agent_id.to_string post.author in
+                (* Agent-only evolution: 에이전트끼리만 서로 진화시킴 *)
+                if List.mem voter lodge_personas && List.mem author lodge_personas then begin
+                  let dimension = match cb.get_primary_value author with
+                    | Some pv -> pv
+                    | None -> "Creativity"
+                  in
+                  let is_positive = (direction = Board.Up) in
+                  cb.record_feedback ~name:author ~dimension ~is_positive;
+                  Printf.sprintf " [🧬 %s evolved: %s %s]"
+                    author dimension (if is_positive then "+0.01" else "-0.01")
+                end else ""
+            | Error _ -> ""
+      in
+      (true, Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 

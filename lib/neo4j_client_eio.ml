@@ -6,7 +6,7 @@
     - Thread-safe Yojson result conversion
 *)
 
-module Bolt = Neo4j_bolt_eio
+module Bolt = Neo4j_bolt_eio.Bolt
 
 type error =
   | Connection_failed of string
@@ -20,9 +20,11 @@ let string_of_error = function
   | Timeout -> "Connection timeout"
   | Disconnected -> "Disconnected from Neo4j"
 
-(** Connection state *)
+(** Connection state - existentially typed to hide polymorphic connection *)
+type connection_box = Box : _ Bolt.connection -> connection_box
+
 type connection_state = {
-  mutable conn: Bolt.t option;
+  mutable conn: connection_box option;
   mutable last_used: float;
   mutex: Eio.Mutex.t;
 }
@@ -51,44 +53,53 @@ let get_neo4j_password () =
 (** Close existing connection if any *)
 let close_connection () =
   match global_state.conn with
-  | Some conn ->
-      Bolt.close conn;
+  | Some (Box conn) ->
+      (try Bolt.close conn with _ -> ());
       global_state.conn <- None
   | None -> ()
 
+(** Convert Bolt error to our error type *)
+let convert_error (e : Bolt.error) : error =
+  match e with
+  | Bolt.ConnectionError s -> Connection_failed s
+  | Bolt.HandshakeError s -> Connection_failed s
+  | Bolt.AuthError s -> Connection_failed s
+  | Bolt.ProtocolError (code, msg) -> Query_failed (Printf.sprintf "[%s] %s" code msg)
+  | Bolt.Timeout -> Timeout
+
 (** Get or create connection *)
-let get_connection ~sw ~net ~clock () : (Bolt.t, error) result =
+let get_connection ~sw ~net ~clock () =
   Eio.Mutex.use_rw global_state.mutex ~protect:true (fun () ->
     let now = Eio.Time.now clock in
     (* Check if existing connection is still valid *)
     match global_state.conn with
-    | Some conn when now -. global_state.last_used < idle_timeout_sec ->
-        Ok conn
+    | Some (Box _conn) when now -. global_state.last_used < idle_timeout_sec ->
+        Ok ()
     | Some _ ->
         (* Connection timed out, close and reconnect *)
         close_connection ();
         let uri = get_neo4j_uri () in
         let user = get_neo4j_user () in
         let password = get_neo4j_password () in
-        (match Bolt.connect ~sw ~net ~clock ~uri ~user ~password () with
+        (match Bolt.connect_uri ~sw ~net ~clock ~uri ~username:user ~password () with
          | Ok conn ->
-             global_state.conn <- Some conn;
+             global_state.conn <- Some (Box conn);
              global_state.last_used <- now;
-             Ok conn
+             Ok ()
          | Error e ->
-             Error (Connection_failed (Bolt.string_of_error e)))
+             Error (convert_error e))
     | None ->
         (* No connection, create new *)
         let uri = get_neo4j_uri () in
         let user = get_neo4j_user () in
         let password = get_neo4j_password () in
-        (match Bolt.connect ~sw ~net ~clock ~uri ~user ~password () with
+        (match Bolt.connect_uri ~sw ~net ~clock ~uri ~username:user ~password () with
          | Ok conn ->
-             global_state.conn <- Some conn;
+             global_state.conn <- Some (Box conn);
              global_state.last_used <- now;
-             Ok conn
+             Ok ()
          | Error e ->
-             Error (Connection_failed (Bolt.string_of_error e)))
+             Error (convert_error e))
   )
 
 (** Execute a Cypher query and return JSON result *)
@@ -96,15 +107,18 @@ let query ~sw ~net ~clock ~cypher ?(params=`Assoc []) ()
     : (Yojson.Safe.t, error) result =
   match get_connection ~sw ~net ~clock () with
   | Error e -> Error e
-  | Ok conn ->
-      match Bolt.query ~clock conn ~cypher ~params () with
-      | Ok json ->
-          global_state.last_used <- Eio.Time.now clock;
-          Ok (json :> Yojson.Safe.t)
-      | Error e ->
-          (* On query error, close connection for next retry *)
-          close_connection ();
-          Error (Query_failed (Bolt.string_of_error e))
+  | Ok () ->
+      match global_state.conn with
+      | None -> Error Disconnected
+      | Some (Box conn) ->
+          match Bolt.query ~clock conn ~cypher ~params () with
+          | Ok json ->
+              global_state.last_used <- Eio.Time.now clock;
+              Ok json
+          | Error e ->
+              (* On query error, close connection for next retry *)
+              close_connection ();
+              Error (convert_error e)
 
 (** Execute a write query (CREATE, MERGE, SET, DELETE) *)
 let execute ~sw ~net ~clock ~cypher ?(params=`Assoc []) ()

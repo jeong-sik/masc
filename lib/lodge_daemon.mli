@@ -45,6 +45,17 @@ val lodge_agent_query : string
 val influence_query : string -> string -> string -> string
 val mood_update_query : string -> mood -> float -> string
 val reflection_query : string -> string -> string
+
+(** {1 HTTP/LLM Helpers} *)
+val shell_escape : string -> string
+val ollama_generate : config:config -> ?temperature:float -> ?num_predict:int -> system:string -> string -> (string, string) result
+val board_post : room:string -> author:string -> title:string -> content:string -> (string, string) result
+
+(** {1 Main Operations} *)
 val init : config:config -> unit
 val patrol_once : config:config -> persona:string -> unit
 val generate_reflection : config:config -> persona:string -> unit
+
+(** {1 Eio Main Loop} *)
+val run_persona_loop : config:config -> persona_config -> unit
+val start : sw:'a -> config:config -> persona_config list -> unit

@@ -86,6 +86,30 @@ let agent_idle_timeout = 300.0
 (** Per-agent-per-post comment tracker: (agent_name, post_id) -> count *)
 let agent_comment_counts : (string * string, int) Hashtbl.t = Hashtbl.create 50
 
+(** Wake fairness: recent wake counts per agent (sliding window) *)
+let wake_history : (string, float list) Hashtbl.t = Hashtbl.create 10
+let wake_fairness_window = 3600.0  (* 1 hour sliding window *)
+let max_wakes_per_window = 3       (* max 3 wakes per hour per agent *)
+
+(** Record a wake event for fairness tracking *)
+let record_wake ~agent_name =
+  let now = Unix.gettimeofday () in
+  let prev = match Hashtbl.find_opt wake_history agent_name with
+    | Some ts -> ts | None -> []
+  in
+  (* Prune old entries *)
+  let recent = List.filter (fun t -> now -. t < wake_fairness_window) prev in
+  Hashtbl.replace wake_history agent_name (now :: recent)
+
+(** Check if agent is allowed to wake (fairness) *)
+let can_wake ~agent_name =
+  let now = Unix.gettimeofday () in
+  match Hashtbl.find_opt wake_history agent_name with
+  | None -> true
+  | Some ts ->
+      let recent = List.filter (fun t -> now -. t < wake_fairness_window) ts in
+      List.length recent < max_wakes_per_window
+
 (** Max comments per agent per post *)
 let max_comments_per_agent_per_post = 3
 
@@ -468,8 +492,9 @@ let time_modifier agent =
 
 (** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency) *)
 let load_agents_from_neo4j () =
-  (* first:15 to cover all 15 agents. GRAPHQL_MAX_COST raised to 2000 (c09140c). *)
-  let gql_query = "{\"query\": \"{ agents(first: 8) { edges { node { name preferredHours peakHour traits activityLevel } } } }\"}" in
+  (* first:15 — GRAPHQL_MAX_COST=2000 (c09140c in second-brain-graphql).
+     DO NOT reduce below 15: 15 agents exist, alphabetical sort cuts sangsu/skeptic/pragmatist. *)
+  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"
@@ -732,6 +757,12 @@ let matching_score _agent _recent_posts =
 (** Ask LLM if agent should wake given current context *)
 (** LLM-based wake decision for a single agent (short timeout, non-blocking via systhread) *)
 let should_wake_llm_async ~agent ~recent_posts ~current_hour =
+  (* Fairness gate: skip LLM call entirely if agent woke too recently *)
+  if not (can_wake ~agent_name:agent.name) then begin
+    Printf.printf "   ⏳ [%s] Fairness: already woke %d/%d times this hour, SLEEP\n%!"
+      agent.name max_wakes_per_window max_wakes_per_window;
+    None
+  end else
   let posts_summary = if List.length recent_posts = 0 then "없음"
     else recent_posts |> List.map (fun (p : Board.post) ->
       let author = Board.Agent_id.to_string p.author in
@@ -755,9 +786,11 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
 %s
 
 이 에이전트가 지금 깨어나서 활동해야 할까?
-- YES: 관련 주제가 있거나, 활동 시간대이거나, 기여할 내용이 있을 때
-- NO: 관련 없거나, 쉬어야 할 때
+- YES: 이 에이전트의 성격/관심사와 맞는 주제가 있을 때 (시간대 무관)
+- YES: 최근 게시글에 이 에이전트만의 시각으로 기여할 내용이 있을 때
+- NO: 최근 게시글과 전혀 관련 없고, 새로운 관점을 더할 수 없을 때
 
+중요: 선호 시간대는 참고일 뿐, 주제 관련성이 더 중요함.
 한 단어로 답변: YES 또는 NO
 이유도 짧게 (한 줄):|}
     agent.name traits_str preferred_str current_hour
@@ -815,12 +848,13 @@ let should_wake_llm_async ~agent ~recent_posts ~current_hour =
   in
   Printf.printf "   🤖 [%s] LLM: \"%s\" → %s\n%!" agent.name
     (utf8_truncate clean 60) (if has_yes then "WAKE" else "SLEEP");
-  if has_yes then
+  if has_yes then begin
+    record_wake ~agent_name:agent.name;
     let reason = if String.length clean > 4 then
       utf8_truncate (String.sub clean (min 4 (String.length clean)) (String.length clean - min 4 (String.length clean))) 60
     else "LLM decision" in
     Some (Matching { score = 1.0; topic = String.trim reason })
-  else None
+  end else None
 
 (** {1 Heartbeat Execution} *)
 
@@ -880,41 +914,8 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
   ignore (run_shell_line cmd);
   ()
 
-(** Record agent activity to Qdrant (short-term memory) - non-blocking *)
-let record_agent_memory ~agent_name ~content ~action_type =
-  let action_str = match action_type with
-    | `Post _ -> "post"
-    | `Comment _ -> "comment"
-  in
-  let timestamp = Time_compat.now () |> int_of_float |> string_of_int in
-  let memory_text = Printf.sprintf "[%s] %s: %s" action_str agent_name content in
-  ignore timestamp; ignore memory_text;
-  (* Use Python script to embed and store in Qdrant - run in systhread *)
-  let cmd = Printf.sprintf
-    "cd /Users/dancer/me && op run --env-file=\"$HOME/.config/env-tokens\" -- python3 -c \"\
-import os
-try:
-    from qdrant_client import QdrantClient
-    print('OK')
-except Exception as e:
-    print(f'SKIP:{e}')
-\" 2>/dev/null"
-  in
-  let result = run_shell_line cmd in
-  if String.length result >= 2 && String.sub result 0 2 = "OK" then
-    Eio.traceln "   💾 Memory recorded for %s" agent_name
-  else
-    Eio.traceln "   ⚠️ Memory record skipped for %s" agent_name
-
-(** Load agent short-term memories from Qdrant - non-blocking *)
-let load_agent_memories ~agent_name ~limit =
-  (* Search Qdrant for recent memories using sb qdrant search with 1Password *)
-  let cmd = Printf.sprintf
-    "op run --env-file=\"$HOME/.config/env-tokens\" -- sb qdrant search \"%s memory\" retrospectives %d 2>/dev/null | grep -E '^[0-9]+\\.' | head -%d | sed 's/^[0-9]*\\. \\[[0-9.]*\\] //' | head -c 500"
-    agent_name limit limit
-  in
-  let memories = run_shell_nonblocking cmd in
-  if String.length memories > 10 then Some memories else None
+(* record_agent_memory and load_agent_memories are defined after
+   add_turn_to_thread and get_recent_turns (OCaml requires definition before use) *)
 
 (** {1 Agent Thread Management - Conversation Accumulation} *)
 
@@ -987,6 +988,14 @@ let get_recent_turns ~agent_name ~limit : string option =
         Some turns_str
       end
 
+(** Record agent activity to Council Thread (short-term memory) *)
+let record_agent_memory ~agent_name ~content ~action_type =
+  add_turn_to_thread ~agent_name ~content ~action_type
+
+(** Load agent short-term memories - non-blocking *)
+let load_agent_memories ~agent_name ~limit =
+  get_recent_turns ~agent_name ~limit
+
 (** Agent profile loaded from Neo4j *)
 type agent_profile = {
   name: string;
@@ -1001,52 +1010,53 @@ type agent_profile = {
   personality_hint: string option;
 }
 
-(** Load full agent profile from Neo4j via GraphQL - non-blocking *)
+(** Profile cache: (agent_name -> (profile, timestamp)) *)
+let profile_cache : (string, agent_profile * float) Hashtbl.t = Hashtbl.create 10
+let profile_cache_ttl = 300.0  (* 5 minutes *)
+
+(** Load full agent profile from Neo4j via GraphQL - cached (5 min TTL) *)
 let load_agent_profile ~agent_name : agent_profile =
-  let cmd = Printf.sprintf
-    "cd /Users/dancer/me && ./scripts/sb graphql agent %s 2>/dev/null"
-    agent_name
-  in
-  let json_str = run_shell_nonblocking cmd in
-  try
-    let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let agent = json |> member "data" |> member "agent" in
-    if agent = `Null then
-      (* Fallback for unknown agent *)
-      { name = agent_name; role = None; description = None; traits = [];
-        preferred_hours = []; peak_hour = None; activity_level = 0.5;
-        karma = 0; agent_prompt = None; personality_hint = None }
-    else
-      let get_string_opt key =
-        match agent |> member key with
-        | `Null -> None
-        | `String s -> Some s
-        | _ -> None
+  let now = Unix.gettimeofday () in
+  let fallback = { name = agent_name; role = None; description = None; traits = [];
+    preferred_hours = []; peak_hour = None; activity_level = 0.5;
+    karma = 0; agent_prompt = None; personality_hint = None } in
+  match Hashtbl.find_opt profile_cache agent_name with
+  | Some (profile, ts) when now -. ts < profile_cache_ttl -> profile
+  | _ ->
+    let profile =
+      let cmd = Printf.sprintf
+        "cd /Users/dancer/me && ./scripts/sb graphql agent %s 2>/dev/null"
+        agent_name
       in
-      let get_int_opt key =
-        match agent |> member key with
-        | `Null -> None
-        | `Int i -> Some i
-        | _ -> None
-      in
-      {
-        name = agent |> member "name" |> to_string_option |> Option.value ~default:agent_name;
-        role = get_string_opt "role";
-        description = get_string_opt "description";
-        traits = (try agent |> member "traits" |> to_list |> List.map to_string with _ -> []);
-        preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with _ -> []);
-        peak_hour = get_int_opt "peakHour";
-        activity_level = (try agent |> member "activityLevel" |> to_float with _ -> 0.5);
-        karma = (try agent |> member "karma" |> to_int with _ -> 0);
-        agent_prompt = get_string_opt "agentPrompt";
-        personality_hint = get_string_opt "personalityHint";
-      }
-  with _ ->
-    Eio.traceln "⚠️ Failed to load profile for %s" agent_name;
-    { name = agent_name; role = None; description = None; traits = [];
-      preferred_hours = []; peak_hour = None; activity_level = 0.5;
-      karma = 0; agent_prompt = None; personality_hint = None }
+      let json_str = run_shell_nonblocking cmd in
+      try
+        let json = Yojson.Safe.from_string json_str in
+        let open Yojson.Safe.Util in
+        let agent = json |> member "data" |> member "agent" in
+        if agent = `Null then fallback
+        else
+          let get_string_opt key = match agent |> member key with
+            | `Null -> None | `String s -> Some s | _ -> None in
+          let get_int_opt key = match agent |> member key with
+            | `Null -> None | `Int i -> Some i | _ -> None in
+          {
+            name = agent |> member "name" |> to_string_option |> Option.value ~default:agent_name;
+            role = get_string_opt "role";
+            description = get_string_opt "description";
+            traits = (try agent |> member "traits" |> to_list |> List.map to_string with _ -> []);
+            preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with _ -> []);
+            peak_hour = get_int_opt "peakHour";
+            activity_level = (try agent |> member "activityLevel" |> to_float with _ -> 0.5);
+            karma = (try agent |> member "karma" |> to_int with _ -> 0);
+            agent_prompt = get_string_opt "agentPrompt";
+            personality_hint = get_string_opt "personalityHint";
+          }
+      with _ ->
+        Eio.traceln "⚠️ Failed to load profile for %s" agent_name;
+        fallback
+    in
+    Hashtbl.replace profile_cache agent_name (profile, now);
+    profile
 
 (** Lodge context - loaded from .masc/config.json *)
 type lodge_tool = {

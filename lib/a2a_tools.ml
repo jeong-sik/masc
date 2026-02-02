@@ -227,6 +227,22 @@ let discover config ?(endpoint : string option) ?(capability : string option) ()
     (* Include local agent card *)
     let local_card = Agent_card.generate_default () in
     let agents_json = List.map (fun (a : agent) ->
+      let context_json =
+        match a.context with
+        | None -> `Null
+        | Some ctx ->
+            let int_opt = function Some v -> `Int v | None -> `Null in
+            let float_opt = function Some v -> `Float v | None -> `Null in
+            let string_opt = function Some v -> `String v | None -> `Null in
+            `Assoc [
+              ("used_tokens", int_opt ctx.used_tokens);
+              ("max_tokens", int_opt ctx.max_tokens);
+              ("ratio", float_opt ctx.ratio);
+              ("messages", int_opt ctx.messages);
+              ("tool_calls", int_opt ctx.tool_calls);
+              ("reported_at", string_opt ctx.reported_at);
+            ]
+      in
       `Assoc [
         ("name", `String a.name);
         ("status", `String (agent_status_to_string a.status));
@@ -236,6 +252,7 @@ let discover config ?(endpoint : string option) ?(capability : string option) ()
           | Some t -> `String t);
         ("joined_at", `String a.joined_at);
         ("last_seen", `String a.last_seen);
+        ("context", context_json);
       ]
     ) filtered in
     Ok (`Assoc [

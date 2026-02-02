@@ -732,7 +732,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     Session.update_activity registry ~agent_name ();
     (* Also update disk-based heartbeat for zombie detection across restarts *)
     if Room.is_initialized config then
-      ignore (Room.heartbeat config ~agent_name)
+      ignore (Room.heartbeat config ~agent_name ~context:None)
   end;
 
   (* Auto-join: if agent not in session and tool requires agent, auto-register *)

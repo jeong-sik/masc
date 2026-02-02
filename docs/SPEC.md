@@ -179,6 +179,15 @@ Client Request
 | A2A Tools | a2a_discover, a2a_query_skill, a2a_delegate, a2a_subscribe, a2a_unsubscribe |
 | MCP Spec Support | mcp_session, cancellation, subscription |
 
+### Heartbeat Systems (Agent vs Lodge)
+
+| 구분 | 역할 | 주요 엔드포인트/동작 | 비고 |
+|------|------|-----------------------|------|
+| **Agent Heartbeat** | Room 내 에이전트 생존/좀비 판정, 컨텍스트 상태 보고 | `masc_heartbeat`, `masc_heartbeat_start`, `masc_cleanup_zombies` | `masc_heartbeat`에 `context`를 포함하면 컨텍스트 지표가 저장됨. `used_tokens`+`max_tokens`가 있으면 `ratio` 자동 계산. |
+| **Lodge Heartbeat** | Lodge(에이전트 소셜/발견) 시스템의 주기 실행 | `lodge_heartbeat`(daemon) | **Agent Heartbeat와 별개**. Lodge self-heartbeat는 Room의 `last_seen`을 갱신하지 않음. |
+
+**권장**: 에이전트는 2–3분 주기로 `masc_heartbeat`를 호출하고, 컨텍스트 정보를 함께 보고한다.
+
 ### Cellular Agent Tools Detail (New in v3.0)
 
 #### Handover (DNA Transfer)
@@ -399,7 +408,7 @@ masc_handover_create --source claude --reason context_limit
 |--------------|---------|----------|
 | Polling `masc_messages` | Wastes resources | Use `masc_listen` |
 | Skip `masc_claim` | Task conflicts | Always claim first |
-| Ignore heartbeat | Marked as zombie | Call every 2-3 mins |
+| Ignore heartbeat/context report | Marked as zombie or stale context data | Call every 2-3 mins; include context metrics when available |
 | Direct file edit | Bypasses tracking | Use worktree |
 | No handover on exit | Lost context | Always create DNA |
 

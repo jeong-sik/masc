@@ -271,6 +271,25 @@ let test_leave_removes_agent () =
     Alcotest.(check bool) "leave success" true (contains_check result)
   )
 
+let test_leave_stops_heartbeat () =
+  with_test_env (fun config ->
+    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["test"] () in
+    let agents = Room.get_agents_raw config in
+    let gemini_agent =
+      match List.find_opt (fun (a : Types.agent) -> a.agent_type = "gemini") agents with
+      | Some agent -> agent
+      | None -> Alcotest.fail "gemini agent missing after join"
+    in
+    let hb_id = Heartbeat.start ~agent_name:gemini_agent.name ~interval:30 ~message:"ping" in
+
+    let result = Room.leave config ~agent_name:"gemini" in
+    Alcotest.(check bool) "leave success" true (contains_check result);
+
+    let hbs = Heartbeat.list () in
+    let still_exists = List.exists (fun hb -> hb.Heartbeat.id = hb_id) hbs in
+    Alcotest.(check bool) "heartbeat removed" false still_exists
+  )
+
 let test_double_join () =
   with_test_env (fun config ->
     let _ = Room.join config ~agent_name:"gemini" ~capabilities:["test"] () in
@@ -504,17 +523,43 @@ let test_heartbeat_updates_lastseen () =
     let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
 
     (* Send heartbeat *)
-    let result = Room.heartbeat config ~agent_name:"gemini" in
+    let result = Room.heartbeat config ~agent_name:"gemini" ~context:None in
     Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
   )
 
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
     (* Heartbeat for non-joined agent *)
-    let result = Room.heartbeat config ~agent_name:"nonexistent" in
+    let result = Room.heartbeat config ~agent_name:"nonexistent" ~context:None in
     Alcotest.(check bool) "heartbeat for nonexistent" true (contains_warning result)
   )
 
+let test_heartbeat_updates_context () =
+  with_test_env (fun config ->
+    let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
+    let ctx : Types.agent_context = {
+      used_tokens = Some 4200;
+      max_tokens = Some 16384;
+      ratio = Some 0.256;
+      messages = Some 42;
+      tool_calls = Some 7;
+      reported_at = None;
+    } in
+
+    let _ = Room.heartbeat config ~agent_name:"gemini" ~context:(Some ctx) in
+    let agents = Room.get_agents_raw config in
+    match List.find_opt (fun (a : Types.agent) -> a.agent_type = "gemini") agents with
+    | None -> Alcotest.fail "agent missing after heartbeat"
+    | Some agent ->
+        (match agent.context with
+         | None -> Alcotest.fail "context not stored"
+         | Some stored ->
+             Alcotest.(check (option int)) "used_tokens" (Some 4200) stored.used_tokens;
+             Alcotest.(check (option int)) "max_tokens" (Some 16384) stored.max_tokens;
+             Alcotest.(check (option int)) "messages" (Some 42) stored.messages;
+             Alcotest.(check (option int)) "tool_calls" (Some 7) stored.tool_calls;
+             Alcotest.(check bool) "reported_at set" true (stored.reported_at <> None))
+  )
 let test_get_agents_status () =
   with_test_env (fun config ->
     let _ = Room.join config ~agent_name:"gemini" ~capabilities:["python"] () in
@@ -1008,6 +1053,7 @@ let () =
     ];
     "leave", [
       Alcotest.test_case "removes agent" `Quick test_leave_removes_agent;
+      Alcotest.test_case "stops heartbeat" `Quick test_leave_stops_heartbeat;
     ];
     "tasks", [
       Alcotest.test_case "add and claim" `Quick test_add_and_claim_task;
@@ -1079,6 +1125,7 @@ let () =
     "heartbeat", [
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
+      Alcotest.test_case "updates context" `Quick test_heartbeat_updates_context;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
     ];

@@ -70,6 +70,22 @@ let () = test "heartbeat_list_multiple" (fun () ->
   ignore (Heartbeat.stop id2)
 )
 
+let () = test "heartbeat_stop_by_agent" (fun () ->
+  let id1 = Heartbeat.start ~agent_name:"agent-x" ~interval:10 ~message:"m1" in
+  let id2 = Heartbeat.start ~agent_name:"agent-x" ~interval:20 ~message:"m2" in
+  let id3 = Heartbeat.start ~agent_name:"agent-y" ~interval:30 ~message:"m3" in
+
+  let removed = Heartbeat.stop_by_agent ~agent_name:"agent-x" in
+  assert (removed = 2);
+
+  let hbs = Heartbeat.list () in
+  assert (not (List.exists (fun hb -> hb.Heartbeat.id = id1) hbs));
+  assert (not (List.exists (fun hb -> hb.Heartbeat.id = id2) hbs));
+  assert (List.exists (fun hb -> hb.Heartbeat.id = id3) hbs);
+
+  ignore (Heartbeat.stop id3)
+)
+
 (* Tool_heartbeat tests *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in

@@ -446,7 +446,7 @@ let load_agents_from_neo4j () =
   let gql_query = "{\"query\": \"{ agents(first: 10) { edges { node { name preferredHours peakHour traits activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"
+    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
     api_key gql_query
   in
   Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);

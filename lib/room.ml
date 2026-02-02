@@ -290,6 +290,7 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
     current_task = None;
     joined_at = now_iso ();
     last_seen = now_iso ();
+    context = None;
     meta = Some meta;
   } in
   write_json config agent_file (agent_to_yojson agent);
@@ -343,9 +344,41 @@ and leave config ~agent_name =
 
   (* Support both exact nickname match and agent_type prefix match *)
   let actual_name = resolve_agent_name config agent_name in
-
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
+  let agent_record =
+    if Sys.file_exists agent_file then
+      match agent_of_yojson (read_json config agent_file) with
+      | Ok agent -> Some agent
+      | Error _ -> None
+    else
+      None
+  in
+  let agent_type =
+    match agent_record with
+    | Some agent -> agent.agent_type
+    | None -> agent_name
+  in
+  let same_type_count =
+    let agents_path = agents_dir config in
+    if not (Sys.file_exists agents_path) then 0
+    else
+      let count = ref 0 in
+      Sys.readdir agents_path |> Array.iter (fun name ->
+        if Filename.check_suffix name ".json" then begin
+          let path = Filename.concat agents_path name in
+          match agent_of_yojson (read_json config path) with
+          | Ok agent when agent.agent_type = agent_type -> incr count
+          | _ -> ()
+        end
+      );
+      !count
+  in
+
   if Sys.file_exists agent_file then begin
+    (* Stop any active heartbeat loops for this agent *)
+    ignore (Heartbeat.stop_by_agent ~agent_name:actual_name);
+    if agent_type <> actual_name && same_type_count <= 1 then
+      ignore (Heartbeat.stop_by_agent ~agent_name:agent_type);
     Sys.remove agent_file;
 
     let _ = update_state config (fun s ->
@@ -1680,7 +1713,7 @@ include Room_worktree
    and is_zombie_agent are defined earlier in the file for use in status *)
 
 (** Update agent heartbeat - must be called periodically *)
-let heartbeat config ~agent_name =
+let heartbeat config ~agent_name ~context =
   ensure_initialized config;
 
   (* Support both exact nickname and agent_type prefix match *)
@@ -1691,7 +1724,46 @@ let heartbeat config ~agent_name =
       let json = read_json config agent_file in
       match agent_of_yojson json with
       | Ok agent ->
-          let updated = { agent with last_seen = now_iso () } in
+          let now = now_iso () in
+          let merged_context =
+            match context with
+            | None -> agent.context
+            | Some ctx ->
+                let merge_field new_val old_val =
+                  match new_val with
+                  | Some _ -> new_val
+                  | None -> old_val
+                in
+                let prev = Option.value agent.context ~default:{
+                  used_tokens = None;
+                  max_tokens = None;
+                  ratio = None;
+                  messages = None;
+                  tool_calls = None;
+                  reported_at = None;
+                } in
+                Some {
+                  used_tokens = merge_field ctx.used_tokens prev.used_tokens;
+                  max_tokens = merge_field ctx.max_tokens prev.max_tokens;
+                  ratio = merge_field ctx.ratio prev.ratio;
+                  messages = merge_field ctx.messages prev.messages;
+                  tool_calls = merge_field ctx.tool_calls prev.tool_calls;
+                  reported_at = Some now;
+                }
+          in
+          let merged_context =
+            match merged_context with
+            | None -> None
+            | Some ctx ->
+                let ratio =
+                  match ctx.ratio, ctx.used_tokens, ctx.max_tokens with
+                  | None, Some used, Some max when max > 0 ->
+                      Some (float_of_int used /. float_of_int max)
+                  | _ -> ctx.ratio
+                in
+                Some { ctx with ratio }
+          in
+          let updated = { agent with last_seen = now; context = merged_context } in
           write_json config agent_file (agent_to_yojson updated);
           Printf.sprintf "💓 %s heartbeat updated" actual_name
       | Error _ ->
@@ -1709,20 +1781,29 @@ let cleanup_zombies config =
     "📋 No agents directory"
   else begin
     let zombies = ref [] in
+    let agents = get_agents_raw config in
+    let live_type_counts = Hashtbl.create 16 in
+    List.iter (fun (agent : Types.agent) ->
+      if not (is_zombie_agent agent.last_seen) then begin
+        let prev = match Hashtbl.find_opt live_type_counts agent.agent_type with Some v -> v | None -> 0 in
+        Hashtbl.replace live_type_counts agent.agent_type (prev + 1)
+      end
+    ) agents;
 
     (* Find zombie agents *)
-    Sys.readdir agents_path |> Array.iter (fun name ->
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat agents_path name in
-        let json = read_json config path in
-        match agent_of_yojson json with
-        | Ok agent when is_zombie_agent agent.last_seen ->
-            zombies := agent.name :: !zombies;
-            (* Remove agent file *)
-            Sys.remove path
-        | _ -> ()
+    List.iter (fun (agent : Types.agent) ->
+      if is_zombie_agent agent.last_seen then begin
+        zombies := agent.name :: !zombies;
+        (* Stop any active heartbeat loops for this agent *)
+        ignore (Heartbeat.stop_by_agent ~agent_name:agent.name);
+        let live_count = match Hashtbl.find_opt live_type_counts agent.agent_type with Some v -> v | None -> 0 in
+        if agent.agent_type <> agent.name && live_count = 0 then
+          ignore (Heartbeat.stop_by_agent ~agent_name:agent.agent_type);
+        (* Remove agent file *)
+        let path = Filename.concat agents_path (safe_filename agent.name ^ ".json") in
+        if Sys.file_exists path then Sys.remove path
       end
-    );
+    ) agents;
 
     (* Update state to remove zombie agents *)
     if !zombies <> [] then begin
@@ -1876,6 +1957,22 @@ let get_agents_status config =
         | Ok agent ->
             let is_zombie = is_zombie_agent agent.last_seen in
             let status = if is_zombie then "zombie" else agent_status_to_string agent.status in
+            let context_json =
+              match agent.context with
+              | None -> `Null
+              | Some ctx ->
+                  let int_opt = function Some v -> `Int v | None -> `Null in
+                  let float_opt = function Some v -> `Float v | None -> `Null in
+                  let string_opt = function Some v -> `String v | None -> `Null in
+                  `Assoc [
+                    ("used_tokens", int_opt ctx.used_tokens);
+                    ("max_tokens", int_opt ctx.max_tokens);
+                    ("ratio", float_opt ctx.ratio);
+                    ("messages", int_opt ctx.messages);
+                    ("tool_calls", int_opt ctx.tool_calls);
+                    ("reported_at", string_opt ctx.reported_at);
+                  ]
+            in
             agents := `Assoc [
               ("name", `String agent.name);
               ("status", `String status);
@@ -1883,6 +1980,7 @@ let get_agents_status config =
               ("current_task", match agent.current_task with Some t -> `String t | None -> `Null);
               ("last_seen", `String agent.last_seen);
               ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
+              ("context", context_json);
             ] :: !agents
         | Error _ -> ()
       end

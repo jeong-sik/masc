@@ -2,6 +2,8 @@
 
 val get_string : Yojson.Safe.t -> string -> string -> string
 val get_int : Yojson.Safe.t -> string -> int -> int
+val get_int_opt : Yojson.Safe.t -> string -> int option
+val get_float_opt : Yojson.Safe.t -> string -> float option
 
 type 'a context = {
   config: Room.config;

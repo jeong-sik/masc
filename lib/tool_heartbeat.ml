@@ -10,6 +10,17 @@ let get_int args key default =
   | `Int n -> n
   | _ -> default
 
+let get_int_opt args key =
+  match Yojson.Safe.Util.member key args with
+  | `Int n -> Some n
+  | _ -> None
+
+let get_float_opt args key =
+  match Yojson.Safe.Util.member key args with
+  | `Float f -> Some f
+  | `Int n -> Some (float_of_int n)
+  | _ -> None
+
 let get_bool args key default =
   match Yojson.Safe.Util.member key args with
   | `Bool b -> b
@@ -24,16 +35,41 @@ type 'a context = {
 
 type result = bool * string
 
-let handle_heartbeat ctx _args =
-  (true, Room.heartbeat ctx.config ~agent_name:ctx.agent_name)
+let parse_context args =
+  match Yojson.Safe.Util.member "context" args with
+  | `Assoc _ as ctx_json ->
+      let used_tokens = get_int_opt ctx_json "used_tokens" in
+      let max_tokens = get_int_opt ctx_json "max_tokens" in
+      let ratio = get_float_opt ctx_json "ratio" in
+      let messages = get_int_opt ctx_json "messages" in
+      let tool_calls = get_int_opt ctx_json "tool_calls" in
+      if used_tokens = None && max_tokens = None && ratio = None && messages = None && tool_calls = None then
+        None
+      else
+        let open Types in
+        Some {
+          used_tokens;
+          max_tokens;
+          ratio;
+          messages;
+          tool_calls;
+          reported_at = None;
+        }
+  | _ -> None
+
+let handle_heartbeat ctx args =
+  let context = parse_context args in
+  (true, Room.heartbeat ctx.config ~agent_name:ctx.agent_name ~context)
 
 let handle_heartbeat_start ctx args =
   let interval = get_int args "interval" 30 in
   let message = get_string args "message" "🏓 heartbeat" in
   let smart = get_bool args "smart" false in
+  let context = parse_context args in
+  let actual_name = Room.resolve_agent_name ctx.config ctx.agent_name in
   (* Validate interval: min 5, max 300 *)
   let interval = max 5 (min 300 interval) in
-  let hb_id = Heartbeat.start ~agent_name:ctx.agent_name ~interval ~message in
+  let hb_id = Heartbeat.start ~agent_name:actual_name ~interval ~message in
 
   (* Smart heartbeat config *)
   let smart_config = Heartbeat_smart.make_config
@@ -57,7 +93,7 @@ let handle_heartbeat_start ctx args =
               (* Get agent status for busy detection *)
               let room_agents = Room.get_agents_raw ctx.config in
               let agent_status : Types.agent_status =
-                match List.find_opt (fun (a : Types.agent) -> a.name = ctx.agent_name) room_agents with
+                match List.find_opt (fun (a : Types.agent) -> a.name = actual_name) room_agents with
                 | Some a -> a.status
                 | None -> Types.Active  (* Default: not busy *)
               in
@@ -73,9 +109,16 @@ let handle_heartbeat_start ctx args =
             end else
               true
           in
+          (* Always update liveness on each tick (with optional context) *)
+          (try
+             ignore (Room.heartbeat ctx.config ~agent_name:actual_name ~context)
+           with exn ->
+             Printf.eprintf "[Heartbeat] liveness update error: %s\n%!"
+               (Printexc.to_string exn));
+
           if should_send then begin
             (try
-               ignore (Room.broadcast ctx.config ~from_agent:ctx.agent_name ~content:message)
+               ignore (Room.broadcast ctx.config ~from_agent:actual_name ~content:message)
              with exn ->
                Printf.eprintf "[Heartbeat] broadcast error: %s\n%!"
                  (Printexc.to_string exn));

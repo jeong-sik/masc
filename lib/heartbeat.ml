@@ -33,6 +33,16 @@ let stop id =
       true
   | None -> false
 
+let stop_by_agent ~agent_name =
+  let ids =
+    Hashtbl.fold
+      (fun id hb acc -> if hb.agent_name = agent_name then id :: acc else acc)
+      heartbeats
+      []
+  in
+  List.iter (fun id -> ignore (stop id)) ids;
+  List.length ids
+
 let list () =
   Hashtbl.fold (fun _ hb acc -> hb :: acc) heartbeats []
 

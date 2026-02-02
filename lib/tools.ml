@@ -723,13 +723,39 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_heartbeat";
-    description = "Update your heartbeat timestamp. Call periodically (every few minutes) to indicate you're still active. Agents without heartbeat for 5+ minutes are considered 'zombies' and can be cleaned up.";
+    description = "Update your heartbeat timestamp (and optionally report context health). Call periodically (every few minutes) to indicate you're still active. Agents without heartbeat for 5+ minutes are considered 'zombies' and can be cleaned up.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("agent_name", `Assoc [
           ("type", `String "string");
           ("description", `String "Your agent name");
+        ]);
+        ("context", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Optional context health report (agent self-report)");
+          ("properties", `Assoc [
+            ("used_tokens", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Estimated total tokens used in current context");
+            ]);
+            ("max_tokens", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Model context window max tokens");
+            ]);
+            ("ratio", `Assoc [
+              ("type", `String "number");
+              ("description", `String "Context usage ratio (0.0-1.0)");
+            ]);
+            ("messages", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Approximate message count in context");
+            ]);
+            ("tool_calls", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Approximate tool call count in context");
+            ]);
+          ]);
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
@@ -747,7 +773,7 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_heartbeat_start";
-    description = "Start periodic heartbeat broadcasts. Runs in background, sending pings at specified interval. Smart mode skips heartbeats when agent is busy (60-80% token savings).";
+    description = "Start periodic heartbeat broadcasts. Runs in background, sending pings at specified interval and updating liveness. Smart mode skips broadcasts when agent is busy (60-80% token savings).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -765,6 +791,32 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
           ("type", `String "boolean");
           ("description", `String "Enable smart mode: skip when busy, 3x interval when idle >5min");
           ("default", `Bool false);
+        ]);
+        ("context", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Optional static context health report to attach on each tick. For dynamic context, call masc_heartbeat directly with updated context.");
+          ("properties", `Assoc [
+            ("used_tokens", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Estimated total tokens used in current context");
+            ]);
+            ("max_tokens", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Model context window max tokens");
+            ]);
+            ("ratio", `Assoc [
+              ("type", `String "number");
+              ("description", `String "Context usage ratio (0.0-1.0)");
+            ]);
+            ("messages", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Approximate message count in context");
+            ]);
+            ("tool_calls", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Approximate tool call count in context");
+            ]);
+          ]);
         ]);
       ]);
     ];

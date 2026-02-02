@@ -167,6 +167,16 @@ type agent_meta = {
   parent_task: string option; [@default None] (* task that spawned this agent *)
 } [@@deriving yojson { strict = false }, show]
 
+(** Agent context report - lifecycle and context health info *)
+type agent_context = {
+  used_tokens: int option; [@default None]
+  max_tokens: int option; [@default None]
+  ratio: float option; [@default None]
+  messages: int option; [@default None]
+  tool_calls: int option; [@default None]
+  reported_at: string option; [@default None]
+} [@@deriving yojson { strict = false }, show]
+
 (** Agent info *)
 type agent = {
   name: string;                           (* unique nickname: claude-swift-fox *)
@@ -176,6 +186,7 @@ type agent = {
   current_task: string option; [@default None]
   joined_at: string;
   last_seen: string;
+  context: agent_context option; [@default None]
   meta: agent_meta option; [@default None] (* session metadata *)
 } [@@deriving yojson { strict = false }, show]
 

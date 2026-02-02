@@ -529,7 +529,7 @@ let load_agents_config () =
   (* Query all Lodge identity fields for dynamic agent system *)
   let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
+  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null" api_key query in
   try
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 4096 in
@@ -1308,7 +1308,7 @@ let get_all_agents () =
   (* Simplified query to stay under cost limit (1000) *)
   let query = "{\"query\": \"{ agents(first: 10) { edges { node { name primaryValue status } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
+  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null" api_key query in
   try
     let (_, output) = run_shell_nonblocking cmd in
     try

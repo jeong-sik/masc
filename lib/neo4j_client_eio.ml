@@ -141,7 +141,7 @@ let disconnect () =
 
 (** Get connection stats *)
 let stats () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   `Assoc [
     ("connected", `Bool (is_connected ()));
     ("idle_seconds", `Float (if is_connected () then now -. global_state.last_used else 0.0));

@@ -132,7 +132,7 @@ let patrol_interval_for_curiosity curiosity =
   else base /. curiosity
 
 let is_patrol_due state persona_cfg =
-  let now = Unix.gettimeofday () in  (* Note: unix library needed in dune *)
+  let now = Time_compat.now () in  (* Note: unix library needed in dune *)
   let interval = patrol_interval_for_curiosity persona_cfg.curiosity in
   (now -. state.last_patrol) >= interval
 
@@ -190,7 +190,7 @@ let mark_patrolled persona =
   let state = get_state persona in
   Hashtbl.replace state_table persona {
     state with
-    last_patrol = Unix.gettimeofday ();
+    last_patrol = Time_compat.now ();
     patrol_count = state.patrol_count + 1;
   }
 

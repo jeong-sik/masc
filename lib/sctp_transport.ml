@@ -95,7 +95,7 @@ let send t ~stream_id:_ ~data =
       let chunk = {
         tsn;
         data;
-        sent_time = Unix.gettimeofday ();
+        sent_time = Time_compat.now ();
         retransmit_count = 0;
       } in
       t.in_flight <- chunk :: t.in_flight;
@@ -114,7 +114,7 @@ let send t ~stream_id:_ ~data =
     @param cum_tsn Cumulative TSN acknowledged *)
 let process_ack t ~cum_tsn =
   Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let acked_bytes = ref 0 in
 
     (* Remove acknowledged chunks from in_flight *)
@@ -176,7 +176,7 @@ let flush_buffer t =
       let chunk = {
         tsn;
         data;
-        sent_time = Unix.gettimeofday ();
+        sent_time = Time_compat.now ();
         retransmit_count = 0;
       } in
       t.in_flight <- chunk :: t.in_flight;

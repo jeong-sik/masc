@@ -38,12 +38,12 @@ type vote_record = {
 let () = Random.self_init ()
 
 let generate_post_id () =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rand = Random.int 1_000_000 in
   Printf.sprintf "post-%d-%06d" ts rand
 
 let generate_comment_id () =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rand = Random.int 1_000_000 in
   Printf.sprintf "cmt-%d-%06d" ts rand
 
@@ -219,7 +219,7 @@ let create_post config ~author ~content ?submolt () =
     author;
     content;
     submolt;
-    created_at = Unix.gettimeofday ();
+    created_at = Time_compat.now ();
     votes = 0;
   } in
   let path = post_path config id in
@@ -289,7 +289,7 @@ let add_comment config ~post_id ~author ~content ?parent_id () : (comment, strin
         parent_id;
         author;
         content;
-        created_at = Unix.gettimeofday ();
+        created_at = Time_compat.now ();
         votes = 0;
       } in
       let path = comment_path config id in
@@ -385,7 +385,7 @@ let vote config ~voter ~target_type ~target_id ~direction : (int, string) result
     (* Remove any existing vote from this voter *)
     let votes_without_current = List.filter (fun (v : vote_record) -> v.voter <> voter) votes in
     (* Add new vote *)
-    let new_vote : vote_record = { voter; direction; voted_at = Unix.gettimeofday () } in
+    let new_vote : vote_record = { voter; direction; voted_at = Time_compat.now () } in
     let new_votes = new_vote :: votes_without_current in
     (* Save votes *)
     save_votes config ~target_type ~target_id new_votes;

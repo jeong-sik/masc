@@ -81,7 +81,7 @@ let record_task ~generation ~task_id ~completed ~duration_ms ~error_count
     error_count;
     input_tokens;
     output_tokens;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   } in
   task_records := record :: !task_records;
   record
@@ -93,7 +93,7 @@ let record_handoff ~from_generation ~to_generation ~dna_size ~context_ratio =
     to_generation;
     dna_size;
     context_ratio;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   } in
   handoff_records := record :: !handoff_records;
   record

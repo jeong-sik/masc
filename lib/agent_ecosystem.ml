@@ -361,7 +361,7 @@ module Registry = struct
     with_lock reg (fun () ->
       match Hashtbl.find_opt reg.identities hash with
       | Some ext ->
-          ext.base.last_seen <- Unix.gettimeofday ();
+          ext.base.last_seen <- Time_compat.now ();
       | None -> ()
     )
 
@@ -384,7 +384,7 @@ module Registry = struct
 
   let list_active reg ~within_seconds =
     with_lock reg (fun () ->
-      let cutoff = Unix.gettimeofday () -. within_seconds in
+      let cutoff = Time_compat.now () -. within_seconds in
       Hashtbl.to_seq_values reg.identities
       |> Seq.filter (fun ext -> ext.base.last_seen > cutoff)
       |> List.of_seq

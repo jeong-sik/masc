@@ -44,7 +44,7 @@ type t = {
 
 (** Generate a unique agent UUID from name + timestamp hash *)
 let generate_uuid ~agent_name =
-  let timestamp = Unix.gettimeofday () in
+  let timestamp = Time_compat.now () in
   let random_part = Random.State.int identity_rng 0xFFFFFF in
   let input = Printf.sprintf "%s-%f-%d" agent_name timestamp random_part in
   (* Simple hash-based UUID: first 8 chars of hex digest *)
@@ -105,7 +105,7 @@ let from_mcp_params params =
     params |> member "_capabilities" |> to_list |> List.map to_string
   with _ -> []
   in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   {
     uuid = generate_uuid ~agent_name;
     session_key;
@@ -121,7 +121,7 @@ let from_mcp_params params =
 
 (** Create identity from agent_name (legacy support) *)
 let from_agent_name agent_name =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   {
     uuid = generate_uuid ~agent_name;
     session_key = generate_session_key ();
@@ -137,7 +137,7 @@ let from_agent_name agent_name =
 
 (** Create anonymous/unknown identity *)
 let anonymous () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let key = generate_session_key () in
   let name = Printf.sprintf "anon-%s" (String.sub key 0 8) in
   {
@@ -198,7 +198,7 @@ module Registry = struct
     with_lock reg (fun () ->
       match Hashtbl.find_opt reg.identities session_key with
       | Some identity ->
-          identity.last_seen <- Unix.gettimeofday ();
+          identity.last_seen <- Time_compat.now ();
           (match room_id with
            | Some rid -> 
                let updated = { identity with room_id = Some rid } in
@@ -220,7 +220,7 @@ module Registry = struct
   (** List all active identities (active within last N seconds) *)
   let list_active reg ~within_seconds =
     with_lock reg (fun () ->
-      let cutoff = Unix.gettimeofday () -. within_seconds in
+      let cutoff = Time_compat.now () -. within_seconds in
       Hashtbl.to_seq_values reg.identities
       |> Seq.filter (fun id -> id.last_seen > cutoff)
       |> List.of_seq

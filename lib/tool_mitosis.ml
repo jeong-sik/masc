@@ -75,7 +75,7 @@ let pending_episodes_dir base_path =
   Filename.concat base_path ".masc/pending_episodes"
 
 let generate_episode_id () =
-  let ts = Unix.gettimeofday () in
+  let ts = Time_compat.now () in
   let rand = Random.int 100000 in
   Printf.sprintf "ep-%d-%05d" (int_of_float (ts *. 1000.0)) rand
 
@@ -122,7 +122,7 @@ let get_session_id () =
   | _ ->
     match Sys.getenv_opt "MCP_SESSION_ID" with
     | Some sid when sid <> "" -> sid
-    | _ -> Printf.sprintf "session-%d" (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000)
+    | _ -> Printf.sprintf "session-%d" (int_of_float (Time_compat.now () *. 1000.0) mod 1000000)
 
 (** {1 Argument Helpers} *)
 
@@ -480,7 +480,7 @@ let handle_metrics_compare _ctx args : result =
 
 (** P1-4: Record task completion *)
 let handle_metrics_record _ctx args : result =
-  let task_id = get_string args "task_id" (Printf.sprintf "task-%d" (int_of_float (Unix.gettimeofday () *. 1000.0) mod 100000)) in
+  let task_id = get_string args "task_id" (Printf.sprintf "task-%d" (int_of_float (Time_compat.now () *. 1000.0) mod 100000)) in
   let completed = match args with
     | `Assoc pairs -> (
         match List.assoc_opt "completed" pairs with

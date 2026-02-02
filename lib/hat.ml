@@ -178,7 +178,7 @@ let get_agent agent_name =
 (** Change agent's hat *)
 let wear ~agent_name hat =
   let agent = get_agent agent_name in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let updated = {
     agent with
     current_hat = hat;

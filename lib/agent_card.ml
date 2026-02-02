@@ -177,7 +177,7 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =
-  let t = Unix.gettimeofday () in
+  let t = Time_compat.now () in
   let tm = Unix.gmtime t in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.Unix.tm_year + 1900)

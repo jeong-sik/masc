@@ -129,7 +129,7 @@ let start_session t ~agent_id ?voice () =
   match Hashtbl.find_opt t.sessions agent_id with
   | Some existing ->
     existing.status <- Active;
-    existing.last_activity <- Unix.gettimeofday ();
+    existing.last_activity <- Time_compat.now ();
     save_session t existing;
     existing
   | None ->
@@ -138,7 +138,7 @@ let start_session t ~agent_id ?voice () =
       | Some v -> v
       | None -> Voice_bridge.get_voice_for_agent agent_id
     in
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let session = {
       session_id = generate_session_id ();
       agent_id;
@@ -171,7 +171,7 @@ let resume_session t ~agent_id =
   match Hashtbl.find_opt t.sessions agent_id with
   | Some session ->
     session.status <- Active;
-    session.last_activity <- Unix.gettimeofday ();
+    session.last_activity <- Time_compat.now ();
     save_session t session
   | None -> ()
 
@@ -194,7 +194,7 @@ let session_count t =
 let heartbeat t ~agent_id =
   match Hashtbl.find_opt t.sessions agent_id with
   | Some session ->
-    session.last_activity <- Unix.gettimeofday ();
+    session.last_activity <- Time_compat.now ();
     save_session t session
   | None -> ()
 
@@ -202,14 +202,14 @@ let increment_turn t ~agent_id =
   match Hashtbl.find_opt t.sessions agent_id with
   | Some session ->
     session.turn_count <- session.turn_count + 1;
-    session.last_activity <- Unix.gettimeofday ();
+    session.last_activity <- Time_compat.now ();
     save_session t session
   | None -> ()
 
 (** {1 Zombie Cleanup} *)
 
 let cleanup_zombies t ?(timeout = Resilience.default_zombie_threshold) () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let to_remove = Hashtbl.fold (fun agent_id session acc ->
     if now -. session.last_activity > timeout then
       agent_id :: acc

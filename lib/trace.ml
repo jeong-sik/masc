@@ -16,7 +16,7 @@ let global_clock = Lamport.create ()
 let () = Random.self_init ()
 
 let generate_id prefix =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rand = Random.int 1_000_000 in
   Printf.sprintf "%s-%d-%06d" prefix ts rand
 
@@ -71,7 +71,7 @@ let start_span ?parent ?trace_id ~operation ~agent () =
     parent_id;
     operation;
     agent;
-    start_time = Unix.gettimeofday ();
+    start_time = Time_compat.now ();
     end_time = None;
     status = Ok;
     attributes = [];
@@ -85,7 +85,7 @@ let start_span ?parent ?trace_id ~operation ~agent () =
 
 (** End a span *)
 let end_span ?(status = Ok) span =
-  span.end_time <- Some (Unix.gettimeofday ());
+  span.end_time <- Some (Time_compat.now ());
   span.status <- status;
   span.lamport_end <- Some (Lamport.tick global_clock)
 

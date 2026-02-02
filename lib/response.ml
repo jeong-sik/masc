@@ -88,7 +88,7 @@ let ok ?(message="OK") (data : Yojson.Safe.t) : t =
     data;
     message;
     errors = [];
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   }
 
 (** Create a success response with warnings *)
@@ -98,7 +98,7 @@ let ok_with_warnings ?(message="OK") ~warnings (data : Yojson.Safe.t) : t =
     data;
     message;
     errors = warnings;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   }
 
 (** Create an error response *)
@@ -113,7 +113,7 @@ let error ?(data=`Null) ~code ~message ?(hints=[]) () : t =
       message;
       recovery_hints = hints;
     }];
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   }
 
 (** Create an error response with multiple errors *)
@@ -123,7 +123,7 @@ let errors ?(data=`Null) ~message (error_list : error_detail list) : t =
     data;
     message;
     errors = error_list;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   }
 
 (** Helper: Create an error detail *)
@@ -249,7 +249,7 @@ let drift_detected ~similarity ~drift_type ~threshold ~details : t =
       message = details;
       recovery_hints = hints;
     }];
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   }
 
 (** Handoff verified successfully *)

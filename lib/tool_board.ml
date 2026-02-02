@@ -16,7 +16,7 @@ type result = bool * string
 (** {1 Helpers} *)
 
 let format_timestamp_relative ts =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let diff = now -. ts in
   if diff < 60.0 then "just now"
   else if diff < 3600.0 then Printf.sprintf "%dm ago" (int_of_float (diff /. 60.0))
@@ -24,7 +24,7 @@ let format_timestamp_relative ts =
   else Printf.sprintf "%dd ago" (int_of_float (diff /. 86400.0))
 
 let format_ttl_remaining expires_at =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let remaining = expires_at -. now in
   if remaining <= 0.0 then "expired"
   else if remaining < 3600.0 then Printf.sprintf "%dm left" (int_of_float (remaining /. 60.0))
@@ -162,7 +162,7 @@ let handle_post_list args =
         ) all_posts
     | Trending ->
         (* Recent posts with high engagement (score * recency_factor) *)
-        let now = Unix.gettimeofday () in
+        let now = Time_compat.now () in
         List.sort (fun (a : Board.post) (b : Board.post) ->
           let age_a = max 1.0 (now -. a.created_at) /. 3600.0 in  (* hours *)
           let age_b = max 1.0 (now -. b.created_at) /. 3600.0 in
@@ -238,6 +238,9 @@ let handle_comment_add args =
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
+(** Lodge personas that can evolve *)
+let lodge_personas = ["dreamer"; "skeptic"; "historian"; "pragmatist"; "connector"]
+
 let handle_vote args =
   let store = Board.global () in
   let post_id = get_string args "post_id" "" in
@@ -249,7 +252,25 @@ let handle_vote args =
   match Board.vote store ~voter ~post_id ~direction with
   | Ok new_score ->
       let arrow = if direction = Board.Up then "↑" else "↓" in
-      (true, Printf.sprintf "%s Vote recorded. New score: %+d" arrow new_score)
+      (* SOUL Evolution: trigger evolution for Lodge personas *)
+      let evolution_msg =
+        match Board.get_post store ~post_id with
+        | Ok post ->
+          let author = Board.Agent_id.to_string post.author in
+          if List.mem author lodge_personas then begin
+            (* Get persona's primary value to evolve *)
+            let dimension = match Tool_lodge.get_persona_primary_value author with
+              | Some pv -> pv
+              | None -> "Creativity"  (* default *)
+            in
+            let is_positive = (direction = Board.Up) in
+            let _ = Tool_lodge.record_feedback ~name:author ~dimension ~is_positive in
+            Printf.sprintf " [🧬 %s evolved: %s %s]"
+              author dimension (if is_positive then "+0.01" else "-0.01")
+          end else ""
+        | Error _ -> ""
+      in
+      (true, Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 

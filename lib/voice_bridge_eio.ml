@@ -300,7 +300,7 @@ let cache_duration () =
   | None -> 0.0         (* No cache: check immediately *)
 
 let is_voice_server_available ~sw ~clock ~net =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   if now -. !voice_server_check_time < cache_duration () then
     Option.value !voice_server_available ~default:false
   else begin

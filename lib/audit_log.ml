@@ -126,7 +126,7 @@ let log_action
     ~outcome
     () =
   let entry = {
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
     agent_id;
     action;
     room_id;

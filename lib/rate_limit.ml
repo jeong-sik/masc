@@ -59,7 +59,7 @@ let with_lock limiter f =
 
 let check limiter ~key =
   with_lock limiter (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let bucket = match Hashtbl.find_opt limiter.buckets key with
       | Some b -> b
       | None ->
@@ -90,7 +90,7 @@ let remaining limiter ~key =
 
 let cleanup limiter ~older_than_seconds =
   with_lock limiter (fun () ->
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let threshold = now -. float_of_int older_than_seconds in
     let to_remove = Hashtbl.fold (fun key bucket acc ->
       if bucket.last_update <= threshold then key :: acc

@@ -52,8 +52,8 @@ module Session = struct
     Mutex.lock mutex;
     let session = {
       id = generate_id ();
-      created_at = Unix.gettimeofday ();
-      last_seen = Unix.gettimeofday ();
+      created_at = Time_compat.now ();
+      last_seen = Time_compat.now ();
       transport;
       subscriptions = [];
     } in
@@ -68,7 +68,7 @@ module Session = struct
     result
 
   let touch session =
-    session.last_seen <- Unix.gettimeofday ()
+    session.last_seen <- Time_compat.now ()
 
   let remove id =
     Mutex.lock mutex;
@@ -82,7 +82,7 @@ module Session = struct
     result
 
   let cleanup ~ttl_seconds =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let cutoff = now -. ttl_seconds in
     Mutex.lock mutex;
     let to_remove = Hashtbl.fold (fun id session acc ->

@@ -31,14 +31,14 @@ let activity_log_file () =
 let debug_log msg =
   let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 "/tmp/auto_debug.log" in
   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    Printf.fprintf oc "[%f] %s\n%!" (Unix.gettimeofday ()) msg)
+    Printf.fprintf oc "[%f] %s\n%!" (Time_compat.now ()) msg)
 
 (** Activity logging - human readable format *)
 let activity_log ~mode ~from_agent ~mention ~status ~detail =
   let log_file = activity_log_file () in
   let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 log_file in
   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    let time = Unix.localtime (Unix.gettimeofday ()) in
+    let time = Unix.localtime (Time_compat.now ()) in
     let timestamp = Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
       (time.Unix.tm_year + 1900) (time.Unix.tm_mon + 1) time.Unix.tm_mday
       time.Unix.tm_hour time.Unix.tm_min time.Unix.tm_sec
@@ -54,7 +54,7 @@ let chain_window = 60.0  (* seconds *)
 
 (** Check if we should throttle this response *)
 let should_throttle ~agent_type =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let key = agent_type in
   (* Clean old entries *)
   Hashtbl.filter_map_inplace (fun _ ts ->
@@ -152,7 +152,7 @@ Respond in 1-2 sentences. Be helpful and concise.|}
 let spawn_in_background ~agent_type ~prompt ~working_dir =
   let cmd = build_spawn_command ~agent_type ~prompt ~working_dir in
   let log_file = Printf.sprintf "/tmp/auto_respond_%s_%d.log"
-    agent_type (int_of_float (Unix.gettimeofday () *. 1000.) mod 10000)
+    agent_type (int_of_float (Time_compat.now () *. 1000.) mod 10000)
   in
   (* Write command to file for debugging *)
   let debug_file = "/tmp/auto_spawn_cmd.txt" in
@@ -192,7 +192,7 @@ let call_llm_mcp_sync ~agent_type ~prompt =
   in
   (* Use temp file with unique name to avoid race conditions between threads *)
   let tmp_file = Printf.sprintf "/tmp/llm_call_%d_%d.json"
-    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.) mod 1000000) in
+    (Unix.getpid ()) (int_of_float (Time_compat.now () *. 1000000.) mod 1000000) in
   (let oc = open_out tmp_file in
    Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
      output_string oc json_body));
@@ -215,7 +215,7 @@ let masc_call ~tool_name ~args =
   in
   (* Use temp file to avoid shell escaping issues *)
   let tmp_file = Printf.sprintf "/tmp/masc_call_%d_%d.json"
-    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.) mod 1000000) in
+    (Unix.getpid ()) (int_of_float (Time_compat.now () *. 1000000.) mod 1000000) in
   (let oc = open_out tmp_file in
    Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
      output_string oc body));
@@ -336,9 +336,9 @@ echo "[MASC] Left room" >> /tmp/auto_debug.log
 |} agent_type llm_url agent_type escaped_prompt masc_url accept_header agent_type masc_url accept_header mention masc_url accept_header
   in
   let script_file = Printf.sprintf "/tmp/llm_bg_%d_%d.sh"
-    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.) mod 10000) in
+    (Unix.getpid ()) (int_of_float (Time_compat.now () *. 1000.) mod 10000) in
   let log_file = Printf.sprintf "/tmp/llm_bg_%s_%d.log"
-    agent_type (int_of_float (Unix.gettimeofday () *. 1000.) mod 10000) in
+    agent_type (int_of_float (Time_compat.now () *. 1000.) mod 10000) in
   (let oc = open_out script_file in
    Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
      output_string oc script));
@@ -393,7 +393,7 @@ let maybe_respond ~base_path ~from_agent ~content ~mention =
       else begin
         let prompt = build_response_prompt ~from_agent ~content ~mention:m in
         let task_id = Printf.sprintf "auto-respond-%s-%d" mention_base
-          (int_of_float (Unix.gettimeofday () *. 1000.) mod 10000) in
+          (int_of_float (Time_compat.now () *. 1000.) mod 10000) in
         debug_log (Printf.sprintf "DISPATCH: mode=%s task_id=%s" mode_str task_id);
         (* Mode-based dispatch *)
         (match mode with

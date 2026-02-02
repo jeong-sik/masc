@@ -208,7 +208,7 @@ let select_koan_by_resonance (reader : reader_context) : koan =
 let select_koan () : koan =
   let reader = {
     current_level = 9;  (* default to void level *)
-    session_entropy = Unix.gettimeofday ();
+    session_entropy = Time_compat.now ();
     recent_themes = [];
   } in
   select_koan_by_resonance reader

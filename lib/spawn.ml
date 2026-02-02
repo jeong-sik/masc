@@ -166,7 +166,7 @@ let parse_command cmd =
 
 (** Spawn an agent with a prompt/task (direct execution, no shell) *)
 let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
 
   (* Get config or use defaults *)
   let config = match get_config agent_name with
@@ -228,7 +228,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     (* Restore directory *)
     Sys.chdir original_dir;
 
-    let elapsed_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
+    let elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
     let exit_code = match status with
       | Unix.WEXITED code -> code
       | Unix.WSIGNALED _ -> -1
@@ -261,7 +261,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       success = false;
       output = Printf.sprintf "Spawn error: %s" (Printexc.to_string e);
       exit_code = -99;
-      elapsed_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0);
+      elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
       input_tokens = None;
       output_tokens = None;
       cache_creation_tokens = None;

@@ -64,7 +64,7 @@ let get_int args key default =
 
 (* Format timestamp as relative time *)
 let format_timestamp_relative ts =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let diff = now -. ts in
   if diff < 60.0 then "just now"
   else if diff < 3600.0 then Printf.sprintf "%dm ago" (int_of_float (diff /. 60.0))

@@ -127,7 +127,7 @@ let mark_client_error t ic message =
   safe_close_client t ic
 
 let update_activity ic =
-  ic.client.last_activity <- Unix.gettimeofday ()
+  ic.client.last_activity <- Time_compat.now ()
 
 let buffer_of_payload payload ~len ~on_complete =
   let buffer = Bytes.create len in
@@ -217,8 +217,8 @@ let add_client t wsd =
   let client = {
     id = client_id;
     agent_filter = None;
-    connected_at = Unix.gettimeofday ();
-    last_activity = Unix.gettimeofday ();
+    connected_at = Time_compat.now ();
+    last_activity = Time_compat.now ();
     pending_sends = 0;
   } in
   let ic = {
@@ -379,7 +379,7 @@ let disconnect_client t ~client_id =
   | None -> ()
 
 let cleanup_zombies t ?(timeout = Resilience.default_zombie_threshold) () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let stale_before = now -. timeout in
   let to_remove = ref [] in
   Hashtbl.iter (fun _id ic ->

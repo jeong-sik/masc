@@ -13,7 +13,7 @@ let a2a_tasks_dir config = Filename.concat (masc_dir config) "a2a_tasks"
 
 (** Generate A2A task ID *)
 let gen_a2a_task_id () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let tm = Unix.gmtime now in
   Printf.sprintf "a2a-%04d%02d%02d%02d%02d%02d-%04d"
     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday

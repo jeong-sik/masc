@@ -164,7 +164,7 @@ let max_buffered_events = 100
 let generate_uuid () =
   (* Initialize Random once with high-resolution timestamp *)
   let () =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let seed = int_of_float (now *. 1_000_000.) land 0x3FFFFFFF in
     Random.init seed
   in
@@ -183,7 +183,7 @@ let generate_uuid () =
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =
-  let t = Unix.gettimeofday () in
+  let t = Time_compat.now () in
   let tm = Unix.gmtime t in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.Unix.tm_year + 1900)
@@ -304,7 +304,7 @@ let delegate config ~agent_name ~target ~message
     () : (Yojson.Safe.t, string) result =
   (* Timeout is stored and returned in response for client-side enforcement *)
   let timeout_ms = timeout * 1000 in
-  let deadline = Unix.gettimeofday () +. (float_of_int timeout) in
+  let deadline = Time_compat.now () +. (float_of_int timeout) in
   let task_type_result = task_type_of_string task_type_str in
   match task_type_result with
   | Error e -> Error e
@@ -498,7 +498,7 @@ let buffer_event sub_id event =
 (** Notify subscribers of an event (internal use)
     Now also buffers events for polling in addition to SSE broadcast *)
 let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Safe.t) : unit =
-  let timestamp = Unix.gettimeofday () in
+  let timestamp = Time_compat.now () in
   Hashtbl.iter (fun _id sub ->
     (* Check agent filter *)
     let agent_match = match sub.agent_filter with

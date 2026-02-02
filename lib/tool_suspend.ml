@@ -64,7 +64,7 @@ let check_blacklist ~agent_id =
       match Hashtbl.find_opt blacklist agent_id with
       | None -> None
       | Some (until, reason) ->
-          let now = Unix.gettimeofday () in
+          let now = Time_compat.now () in
           if now >= until then begin
             (* Expired - remove from blacklist *)
             Hashtbl.remove blacklist agent_id;
@@ -125,7 +125,7 @@ let handle_suspend ctx args =
     in
 
     (* Add to blacklist *)
-    let until = Unix.gettimeofday () +. (duration_hours *. 3600.0) in
+    let until = Time_compat.now () +. (duration_hours *. 3600.0) in
     add_to_blacklist ~agent_id:target_agent ~until ~reason;
 
     (* Trigger circuit breaker *)
@@ -173,7 +173,7 @@ let handle_circuit_status ctx args =
   let blacklist_info = match check_blacklist ~agent_id with
     | None -> `Null
     | Some (until, reason) ->
-        let remaining = until -. Unix.gettimeofday () in
+        let remaining = until -. Time_compat.now () in
         `Assoc [
           ("blacklisted", `Bool true);
           ("until", `Float until);
@@ -207,7 +207,7 @@ let check_can_join ~agent_id =
       (* Also check circuit breaker *)
       Circuit_breaker.check_global ~agent_id
   | Some (until, reason) ->
-      let remaining = int_of_float (until -. Unix.gettimeofday ()) in
+      let remaining = int_of_float (until -. Time_compat.now ()) in
       Error (Printf.sprintf
         "Agent '%s' is suspended for %d more seconds. Reason: %s"
         agent_id remaining reason)

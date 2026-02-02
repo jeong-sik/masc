@@ -44,8 +44,8 @@ let handle_heartbeat_start ctx args =
     () in
 
   (* Mutable state for smart mode *)
-  let last_activity = ref (Unix.gettimeofday ()) in
-  let last_heartbeat = ref (Unix.gettimeofday ()) in
+  let last_activity = ref (Time_compat.now ()) in
+  let last_heartbeat = ref (Time_compat.now ()) in
 
   (* Start background fiber for actual heartbeat *)
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
@@ -63,7 +63,7 @@ let handle_heartbeat_start ctx args =
               in
               (* Update last_activity when agent is actively working *)
               if agent_status = Types.Busy then
-                last_activity := Unix.gettimeofday ();
+                last_activity := Time_compat.now ();
               let decision = Heartbeat_smart.should_emit
                 ~config:smart_config
                 ~agent_status
@@ -79,7 +79,7 @@ let handle_heartbeat_start ctx args =
              with exn ->
                Printf.eprintf "[Heartbeat] broadcast error: %s\n%!"
                  (Printexc.to_string exn));
-            last_heartbeat := Unix.gettimeofday ()
+            last_heartbeat := Time_compat.now ()
           end;
           (* Sleep for base interval (smart mode adjusts internally) *)
           Eio.Time.sleep ctx.clock (float_of_int interval);
@@ -104,7 +104,7 @@ let handle_heartbeat_stop _ctx args =
 let handle_heartbeat_list _ctx _args =
   let hbs = Heartbeat.list () in
   let fmt_hb hb =
-    let uptime = int_of_float (Unix.gettimeofday () -. hb.Heartbeat.created_at) in
+    let uptime = int_of_float (Time_compat.now () -. hb.Heartbeat.created_at) in
     Printf.sprintf "  • %s: agent=%s interval=%ds message=\"%s\" uptime=%ds"
       hb.Heartbeat.id hb.agent_name hb.interval hb.message uptime
   in

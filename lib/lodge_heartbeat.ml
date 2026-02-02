@@ -67,7 +67,7 @@ let update_lodge_agent_status ~name ~status ?current_task () =
 let cleanup_inactive_lodge_agents () =
   let dir = agents_dir () in
   if Sys.file_exists dir then begin
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let threshold = 60.0 in (* 60 seconds *)
     Sys.readdir dir |> Array.iter (fun filename ->
       if Filename.check_suffix filename ".json" then begin

@@ -167,6 +167,38 @@ module RateLimit = struct
     get_float ~default:3600.0 "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
 end
 
+(** {1 Lodge Heartbeat v2 — Generative Agent Configuration} *)
+
+module LodgeV2 = struct
+  (** Tick interval: 4 hours default (was 60-120s in v1) *)
+  let tick_interval_seconds =
+    get_float ~default:14400.0 "MASC_LODGE_TICK_INTERVAL_SEC"
+
+  (** How many agents to activate per tick *)
+  let agents_per_tick =
+    get_int ~default:3 "MASC_LODGE_AGENTS_PER_TICK"
+
+  (** Max posts an agent can make per tick *)
+  let max_posts_per_tick =
+    get_int ~default:1 "MASC_LODGE_MAX_POSTS_PER_TICK"
+
+  (** Max comments an agent can make per tick *)
+  let max_comments_per_tick =
+    get_int ~default:3 "MASC_LODGE_MAX_COMMENTS_PER_TICK"
+
+  (** Max total actions per agent per day *)
+  let max_daily_actions =
+    get_int ~default:10 "MASC_LODGE_MAX_DAILY_ACTIONS"
+
+  (** Importance sum threshold to trigger reflection *)
+  let reflection_threshold =
+    get_int ~default:100 "MASC_LODGE_REFLECTION_THRESHOLD"
+
+  (** Use plan-based agent selection (vs legacy round-robin) *)
+  let use_planner =
+    get_bool ~default:true "MASC_LODGE_USE_PLANNER"
+end
+
 (** Print configuration summary for debugging *)
 let print_summary () =
   Printf.eprintf "[env_config] Zombie: threshold=%.0fs cleanup_interval=%.0fs\n%!"
@@ -180,4 +212,7 @@ let print_summary () =
   Printf.eprintf "[env_config] Qdrant: timeout=%.0fs\n%!" Qdrant.timeout_seconds;
   Printf.eprintf "[env_config] Llm: timeout=%.0fs\n%!" Llm.timeout_seconds;
   Printf.eprintf "[env_config] RateLimit: cleanup_interval=%.0fs entry_max_age=%.0fs\n%!"
-    RateLimit.cleanup_interval_seconds RateLimit.entry_max_age_seconds
+    RateLimit.cleanup_interval_seconds RateLimit.entry_max_age_seconds;
+  Printf.eprintf "[env_config] LodgeV2: tick=%.0fs agents_per_tick=%d planner=%b reflection_thresh=%d\n%!"
+    LodgeV2.tick_interval_seconds LodgeV2.agents_per_tick
+    LodgeV2.use_planner LodgeV2.reflection_threshold

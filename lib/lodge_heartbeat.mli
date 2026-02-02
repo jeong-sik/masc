@@ -1,9 +1,14 @@
-(** Lodge Heartbeat v2 — Check-in Model
+(** Lodge Heartbeat v2 — Generative Agent Architecture
 
-    에이전트가 라운드로빈으로 "체크인"하는 모델.
-    Wake LLM 호출 제거 → LLM은 에이전트 행동 결정에만 사용.
+    Stanford Generative Agents 기반 에이전트 활동 시스템:
+    - Memory Stream: scored retrieval 기반 장기 기억
+    - Agent Planner: 일일 계획 기반 활동 결정
+    - Reflection Engine: 축적 기억 임계치 초과 시 상위 인사이트 도출
 
-    @since 3.0.0
+    Default 4h tick interval (configurable via MASC_LODGE_TICK_INTERVAL_SEC).
+    ~28-33 LLM calls/day (down from ~1440-1920 in v1).
+
+    @since 4.0.0
 *)
 
 (** {1 Configuration} *)
@@ -75,10 +80,18 @@ val load_agent_identity : agent_name:string -> string
 val load_agent_memories : agent_name:string -> limit:int -> string option
 val record_agent_memory : agent_name:string -> content:string -> action_type:[< `Post of string | `Comment of string ] -> unit
 
+(** {1 LLM Call Helper} *)
+
+(** Create a reusable LLM call function for an agent (cascade-based). *)
+val make_call_llm : agent_name:string -> (prompt:string -> string)
+
 (** {1 Scheduling} *)
 
 val scan_board_triggers : since:float -> agents:agent list -> (string * checkin_trigger) list
 val select_checkin_agents : config:config -> agents:agent list -> pending_triggers:(string * checkin_trigger) list -> (string * checkin_trigger) list
+
+(** Plan-based agent selection using Agent_planner priorities. *)
+val select_agents_by_plan : agents:agent list -> max_n:int -> pending_triggers:(string * checkin_trigger) list -> (string * checkin_trigger) list
 
 (** {1 Heartbeat Execution} *)
 

@@ -215,8 +215,8 @@ let html () = {|<!DOCTYPE html>
     .board-post-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
     .board-post-author { color: #e0e0e0; font-weight: 600; font-size: 12px; }
     .board-post-time { color: #666; font-size: 10px; }
-    .board-post-content { color: #aaa; font-size: 12px; line-height: 1.4; margin-bottom: 6px;
-      overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .board-post-content { color: #aaa; font-size: 12px; line-height: 1.5; margin-bottom: 6px;
+      white-space: pre-wrap; word-break: break-word; }
     .board-post-footer { display: flex; gap: 10px; font-size: 10px; color: #666; }
     .board-post-footer span { display: flex; align-items: center; gap: 3px; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: all 0.15s; }
     .board-post-footer span:hover { background: rgba(255,255,255,0.1); }

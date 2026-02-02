@@ -127,6 +127,7 @@
    tool_board
    tool_lodge
    tool_council
+   tool_suspend
    debate
    social
    tool_social
@@ -135,6 +136,8 @@
    udp_socket_eio
    types
    validation
+   circuit_breaker
+   audit_log
   voice_bridge_eio
   voice_bridge
   voice_session_manager

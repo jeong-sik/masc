@@ -7,6 +7,7 @@
    agent_ecosystem
    agent_identity
    agent_neo4j
+   neo4j_client_eio
    agent_registry_eio
    auto_recall
    auto_responder
@@ -198,6 +199,8 @@
    council
    ;; Jiphyeon - Episode storage for Agent Being Protocol
    jiphyeon
+   ;; Neo4j Bolt native driver (OCaml 5.x Eio)
+   neo4j_bolt_eio
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

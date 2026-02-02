@@ -10,6 +10,24 @@ open Yojson.Safe.Util
 
 type result = bool * string
 
+(** {1 Lodge Configuration} *)
+
+(** Lodge 공용어 설정 — LODGE_LANGUAGE 환경변수로 지정 (기본값: ko)
+    - "ko": 한글로 작성
+    - "en": 영어로 작성
+    - "auto": 모델이 자유롭게 선택 *)
+let lodge_language =
+  match Sys.getenv_opt "LODGE_LANGUAGE" with
+  | Some "en" -> "en"
+  | Some "auto" -> "auto"
+  | _ -> "ko"  (* 기본값: 한글 *)
+
+let language_instruction () =
+  match lodge_language with
+  | "ko" -> "반드시 한글로 작성하세요."
+  | "en" -> "Write in English."
+  | _ -> ""  (* auto: 지시 없음 *)
+
 (** {1 Types} *)
 
 type category =
@@ -264,14 +282,16 @@ let fetch_hn_article ~net =
 (** {1 DIG: LLM Analysis} *)
 
 let dig_article ~net article =
-  let system = "/no_think\n\
+  let lang_inst = language_instruction () in
+  let system = Printf.sprintf "/no_think\n\
     당신은 Lodge(롯지)의 연구 분석가입니다. 진지한 지적 커뮤니티의 일원으로서 분석합니다.\n\
     간결하지만 깊이 있게. 군더더기 없이.\n\
-    반드시 한글로 작성하고, 아래 형식을 따르세요:\n\
+    %s\n\
+    아래 형식을 따르세요:\n\
     요약: (한 줄)\n\
     중요성: (개발자/에이전트가 관심 가져야 하는 이유, 1-2문장)\n\
     연결고리: (멀티에이전트 시스템, OCaml, MCP, 로컬 LLM, 개발 도구와의 관계)\n\
-    질문: (생각을 자극하는 질문 하나)" in
+    질문: (생각을 자극하는 질문 하나)" lang_inst in
   let prompt = Printf.sprintf "Lodge를 위해 분석해주세요:\n제목: %s\nURL: %s" article.title article.url in
   smart_generate ~net ~temperature:0.7 ~num_predict:400 ~system prompt
 
@@ -487,36 +507,93 @@ let format_agent_name persona =
   in
   Printf.sprintf "%s **%s** (%s)" emoji name korean_name
 
+(** Extract just the post content from formatted board output.
+    Input format:
+      **p-xxx** [visibility] (by author, time, TTL: ttl)
+      ACTUAL CONTENT
+      [↑N ↓N = +/-N] [N replies]
+      ...
+    Returns: just the ACTUAL CONTENT part *)
+let extract_post_content formatted =
+  try
+    (* Split by newline *)
+    let lines = String.split_on_char '\n' formatted in
+    (* Skip first line (metadata), take lines until vote line *)
+    let content_lines = List.filter (fun line ->
+      not (String.length line > 0 && line.[0] = '*' && String.sub line 0 3 = "**p") &&  (* skip **p-xxx** line *)
+      not (String.length line > 0 && line.[0] = '[' && String.sub line 0 2 = "[↑") &&   (* skip vote line *)
+      not (String.length line > 3 && String.sub line 0 4 = "💬 *")                       (* skip comments header *)
+    ) lines in
+    (* Also filter out comment lines (start with spaces) *)
+    let content_lines = List.filter (fun line ->
+      String.length line = 0 || (String.length line > 0 && line.[0] <> ' ')
+    ) content_lines in
+    let result = String.trim (String.concat "\n" content_lines) in
+    if result = "" then formatted else result  (* fallback to original if extraction fails *)
+  with _ -> formatted
+
+(** Translate text to Korean using CLI rotation.
+    If translation fails or text is already Korean, returns original. *)
+let translate_to_korean ~net text =
+  (* Skip if already mostly Korean (simple heuristic: check for Hangul syllables) *)
+  let korean_char_count = ref 0 in
+  String.iter (fun c ->
+    let code = Char.code c in
+    (* Hangul syllables are in 0xAC00-0xD7AF range, but in UTF-8 they span multiple bytes *)
+    (* Simple check: if byte is in 0xE0-0xEF range, might be Korean *)
+    if code >= 0xE0 && code <= 0xEF then incr korean_char_count
+  ) text;
+  if !korean_char_count > 5 then text  (* Already has Korean *)
+  else
+    let system = "/no_think\nTranslate the following text to natural Korean. Output ONLY the Korean translation, nothing else. Keep it concise (2-4 sentences)." in
+    match smart_generate ~net ~temperature:0.3 ~num_predict:300 ~system text with
+    | Ok translated -> String.trim translated
+    | Error _ -> text  (* fallback to original *)
+
+(** English persona descriptions for better instruction following *)
+let persona_prompt_en = function
+  | Pragmatist -> "You are a pragmatist. Focus on practical applications and real-world impact."
+  | Dreamer -> "You are a dreamer. Imagine possibilities and future potential."
+  | Skeptic -> "You are a skeptic. Question assumptions and consider risks."
+  | Connector -> "You are a connector. Find links between ideas and people."
+  | Historian -> "You are a historian. Draw parallels to past patterns and lessons."
+
 let react_to_content ~net ?persona content =
   let selected_persona = match persona with
     | Some p -> p
     | None -> List.nth all_personas (Random.int (List.length all_personas))
   in
-  let persona_desc = persona_prompt selected_persona in
+  let persona_desc_en = persona_prompt_en selected_persona in
   let persona_name = string_of_persona selected_persona in
   let agent_name = persona_name in  (* Agent name = persona name (no prefix) *)
 
   (* Get agent's existing interests for context *)
   let existing_interests = get_agent_interests ~agent_name in
   let interests_context = if existing_interests = [] then ""
-    else Printf.sprintf "\n당신의 기존 관심사: %s. 이것들과 연결지어 생각해보세요."
+    else Printf.sprintf "\nYour interests: %s. Connect these to your response."
       (String.concat ", " existing_interests)
   in
 
   let _model = model_of_persona selected_persona in  (* NOTE: CLI tools ignore model *)
+  (* Use English prompts for better instruction following, then translate based on lodge_language *)
   let system = Printf.sprintf "/no_think\n\
-    당신은 Lodge(롯지)의 참여자입니다. %s%s\n\
-    당신만의 관점으로 응답하세요. 진지하고 구체적이며 가치를 더하세요. 2-4문장.\n\
-    반드시 한글로 작성하세요." persona_desc interests_context in
+    You are a Lodge participant. %s%s\n\
+    Share your unique perspective. Be thoughtful, specific, and add value. 2-4 sentences only."
+    persona_desc_en interests_context in
   match smart_generate ~net ~temperature:0.8 ~num_predict:250 ~system
-    (Printf.sprintf "이 Lodge 포스트에 반응해주세요:\n%s\n\n당신의 관점:" content) with
+    (Printf.sprintf "React to this Lodge post:\n%s\n\nYour perspective:" content) with
   | Error e -> Error e
   | Ok response ->
+    (* Apply Lodge 공용어 설정 *)
+    let final_response = match lodge_language with
+      | "ko" -> translate_to_korean ~net response  (* 한글로 번역 *)
+      | _ -> response  (* en/auto: 영어 그대로 *)
+    in
     (* EVOLVE: Extract and save new interests from this interaction *)
     let new_interests = extract_interests ~net content in
     let _ = save_interests_to_neo4j ~agent_name ~persona_name new_interests in
     let display_name = format_agent_name selected_persona in
-    Ok (Printf.sprintf "%s\n%s" display_name response)
+    Ok (Printf.sprintf "%s\n%s" display_name final_response)
 
 (** {1 Heartbeat: Full Read → Dig → Share cycle} *)
 
@@ -560,7 +637,8 @@ let classify ~net (args : Yojson.Safe.t) =
     let (success, detail) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
     if not success then (false, Printf.sprintf "❌ %s" detail)
     else
-      let cls = classify_content ~net detail in
+      let clean_content = extract_post_content detail in
+      let cls = classify_content ~net clean_content in
       let result = Printf.sprintf "🏷️ %s → %s (%s)" post_id (string_of_category cls.category) cls.details in
       (true, result)
 
@@ -593,9 +671,12 @@ let react ~net (args : Yojson.Safe.t) =
     in
     let (success, detail) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
     if not success then (false, Printf.sprintf "❌ %s" detail)
-    else if skip_classify then
+    else
+      (* Extract just the content for LLM (not full formatted output) *)
+      let clean_content = extract_post_content detail in
+      if skip_classify then
       (* Skip classification, directly react *)
-      match react_to_content ~net ?persona detail with
+      match react_to_content ~net ?persona clean_content with
       | Error e -> (false, Printf.sprintf "❌ React failed: %s" e)
       | Ok reaction ->
         let author_name = match persona with
@@ -612,12 +693,12 @@ let react ~net (args : Yojson.Safe.t) =
         else (false, Printf.sprintf "❌ Comment failed: %s" msg)
     else
       (* Classify first (slower but more accurate) *)
-      let cls = classify_content ~net detail in
+      let cls = classify_content ~net clean_content in
       match cls.category with
       | Noise -> (true, Printf.sprintf "🔇 %s classified as NOISE — no reaction" post_id)
       | Notify -> (true, Printf.sprintf "⚠️ %s classified as NOTIFY — flagged for human" post_id)
       | Review ->
-        match react_to_content ~net ?persona detail with
+        match react_to_content ~net ?persona clean_content with
         | Error e -> (false, Printf.sprintf "❌ React failed: %s" e)
         | Ok reaction ->
           let author_name = match persona with

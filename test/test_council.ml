@@ -492,6 +492,258 @@ let integration_tests = [
   "debate to consensus handoff", `Quick, test_debate_to_consensus_handoff;
 ]
 
+(* ============================================================
+   Conversation Tests
+   ============================================================ *)
+
+module Conversation = Council.Conversation
+module Loop_guard = Council.Loop_guard
+
+let convo_test_root = "/tmp/masc-test-convo"
+
+let convo_config : Conversation.config = {
+  base_path = convo_test_root;  (* masc_dir uses Sys.getcwd(), we override threads_dir via config *)
+  room = "test-room";
+}
+
+let convo_setup () =
+  (* Since conversation.ml uses Sys.getcwd()/.masc, we need to create
+     the actual dir at CWD/.masc/conversations/threads too.
+     For unit tests, we also create our test dir for direct file checks. *)
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" convo_test_root));
+  let cwd_convo = Sys.getcwd () ^ "/.masc/conversations/threads" in
+  ignore (Sys.command (Printf.sprintf "mkdir -p %s" cwd_convo));
+  ignore (Sys.command (Printf.sprintf "mkdir -p %s/.masc/conversations/threads" convo_test_root))
+
+let convo_teardown () =
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" convo_test_root))
+
+let test_convo_start () =
+  convo_setup ();
+  match Conversation.start ~config:convo_config ~topic:"Test topic" ~initiator:"alice" () with
+  | Ok th ->
+    check bool "has id" (String.length th.Conversation.id > 0) true;
+    check string "topic" th.topic "Test topic";
+    check string "room" th.room "test-room";
+    check bool "active" (th.status = Conversation.Active) true;
+    check bool "alice in participants" (List.mem "alice" th.participants) true;
+    check int "no turns" (List.length th.turns) 0;
+    convo_teardown ()
+  | Error e ->
+    convo_teardown (); fail e
+
+let test_convo_start_with_content () =
+  convo_setup ();
+  match Conversation.start ~config:convo_config ~topic:"With content"
+          ~initiator:"bob" ~initial_content:"Hello everyone" () with
+  | Ok th ->
+    check int "1 turn" (List.length th.Conversation.turns) 1;
+    check int "current_turn 1" th.current_turn 1;
+    let turn = List.hd th.turns in
+    check string "speaker" turn.Conversation.speaker "bob";
+    check string "content" turn.content "Hello everyone";
+    check bool "initiate type" (turn.turn_type = Conversation.Initiate) true;
+    convo_teardown ()
+  | Error e ->
+    convo_teardown (); fail e
+
+let test_convo_reply () =
+  convo_setup ();
+  match Conversation.start ~config:convo_config ~topic:"Reply test"
+          ~initiator:"alice" ~initial_content:"Start" () with
+  | Error e -> convo_teardown (); fail e
+  | Ok th ->
+    match Conversation.reply ~config:convo_config ~thread_id:th.Conversation.id
+            ~speaker:"bob" ~content:"I agree" () with
+    | Error e -> convo_teardown (); fail e
+    | Ok updated ->
+      check int "2 turns" (List.length updated.Conversation.turns) 2;
+      check int "current_turn 2" updated.current_turn 2;
+      check bool "bob in participants" (List.mem "bob" updated.participants) true;
+      check bool "alice in participants" (List.mem "alice" updated.participants) true;
+      convo_teardown ()
+
+let test_convo_conclude () =
+  convo_setup ();
+  match Conversation.start ~config:convo_config ~topic:"Conclude test"
+          ~initiator:"alice" ~initial_content:"Discuss" () with
+  | Error e -> convo_teardown (); fail e
+  | Ok th ->
+    match Conversation.conclude ~config:convo_config ~thread_id:th.Conversation.id
+            ~concluder:"alice" ~conclusion:"We decided X" () with
+    | Error e -> convo_teardown (); fail e
+    | Ok concluded ->
+      check bool "concluded" (concluded.Conversation.status = Conversation.Concluded) true;
+      check bool "has conclusion" (concluded.conclusion = Some "We decided X") true;
+      check bool "has concluded_at" (concluded.concluded_at <> None) true;
+      (* Last turn should be Conclude type *)
+      let last = List.rev concluded.turns |> List.hd in
+      check bool "conclude turn" (last.Conversation.turn_type = Conversation.Conclude) true;
+      convo_teardown ()
+
+let test_convo_reply_after_conclude () =
+  convo_setup ();
+  match Conversation.start ~config:convo_config ~topic:"No reply after" ~initiator:"a" () with
+  | Error e -> convo_teardown (); fail e
+  | Ok th ->
+    let _ = Conversation.conclude ~config:convo_config ~thread_id:th.Conversation.id
+              ~concluder:"a" ~conclusion:"Done" () in
+    match Conversation.reply ~config:convo_config ~thread_id:th.Conversation.id
+            ~speaker:"b" ~content:"Late reply" () with
+    | Ok _ -> convo_teardown (); fail "should not allow reply after conclude"
+    | Error _ -> convo_teardown ()
+
+let test_convo_persistence () =
+  convo_setup ();
+  match Conversation.start ~config:convo_config ~topic:"Persist test"
+          ~initiator:"alice" ~initial_content:"Save me" () with
+  | Error e -> convo_teardown (); fail e
+  | Ok th ->
+    let thread_id = th.Conversation.id in
+    (* Reply to build state *)
+    let _ = Conversation.reply ~config:convo_config ~thread_id
+              ~speaker:"bob" ~content:"Saved too" () in
+    (* Read from disk *)
+    match Conversation.get ~config:convo_config ~thread_id with
+    | None -> convo_teardown (); fail "should find persisted thread"
+    | Some loaded ->
+      check string "same id" loaded.Conversation.id thread_id;
+      check int "2 turns" (List.length loaded.turns) 2;
+      check string "topic preserved" loaded.topic "Persist test";
+      convo_teardown ()
+
+let test_convo_list_active () =
+  convo_setup ();
+  let _ = Conversation.start ~config:convo_config ~topic:"Active 1" ~initiator:"a" () in
+  let _ = Conversation.start ~config:convo_config ~topic:"Active 2" ~initiator:"b" () in
+  let active = Conversation.list_active ~config:convo_config in
+  check bool "at least 2 active" (List.length active >= 2) true;
+  convo_teardown ()
+
+let test_convo_not_found () =
+  convo_setup ();
+  match Conversation.reply ~config:convo_config ~thread_id:"nonexistent"
+          ~speaker:"a" ~content:"Hello" () with
+  | Ok _ -> convo_teardown (); fail "should fail for missing thread"
+  | Error _ -> convo_teardown ()
+
+let conversation_tests = [
+  "start thread", `Quick, test_convo_start;
+  "start with initial content", `Quick, test_convo_start_with_content;
+  "reply to thread", `Quick, test_convo_reply;
+  "conclude thread", `Quick, test_convo_conclude;
+  "reply after conclude blocked", `Quick, test_convo_reply_after_conclude;
+  "persistence roundtrip", `Quick, test_convo_persistence;
+  "list active threads", `Quick, test_convo_list_active;
+  "reply to nonexistent thread", `Quick, test_convo_not_found;
+]
+
+(* ============================================================
+   Loop Guard Tests
+   ============================================================ *)
+
+let make_test_thread ?(turns=[]) ?(max_turns=50) ?(floor_holder=None) () : Conversation.thread =
+  { id = "test-thread"; topic = "test"; room = "test";
+    status = Conversation.Active; turns; participants = [];
+    started_at = Unix.gettimeofday (); concluded_at = None;
+    conclusion = None; max_turns; current_turn = List.length turns;
+    floor_holder }
+
+let make_turn ~speaker ~content ~seq : Conversation.turn =
+  { id = Printf.sprintf "turn-%d" seq; seq; speaker; content;
+    turn_type = Conversation.Respond; created_at = Unix.gettimeofday ();
+    confidence = None; reply_to = None; mentions = [] }
+
+let test_loop_no_loop () =
+  let thread = make_test_thread () in
+  let result = Loop_guard.check ~thread ~speaker:"alice" ~content:"Hello"
+                 ~config:Loop_guard.default_config in
+  check bool "no loop" (result = Loop_guard.NoLoop) true
+
+let test_loop_max_turns () =
+  let config : Loop_guard.loop_config = { max_turns = 5; max_identical = 3; cooldown_sec = 0.0 } in
+  let thread = make_test_thread ~max_turns:5
+    ~turns:(List.init 5 (fun i -> make_turn ~speaker:"a" ~content:(string_of_int i) ~seq:i)) () in
+  let result = Loop_guard.check ~thread ~speaker:"a" ~content:"more" ~config in
+  match result with
+  | Loop_guard.MaxTurnsReached _ -> ()
+  | other -> fail (Printf.sprintf "expected MaxTurnsReached, got %s"
+                     (Loop_guard.loop_detection_to_string other))
+
+let test_loop_identical_pattern () =
+  let turns = List.init 3 (fun i ->
+    make_turn ~speaker:"spammer" ~content:"same message" ~seq:i) in
+  let thread = make_test_thread ~turns () in
+  let result = Loop_guard.check ~thread ~speaker:"spammer" ~content:"same message"
+                 ~config:Loop_guard.default_config in
+  match result with
+  | Loop_guard.IdenticalPattern _ -> ()
+  | _ -> fail (Printf.sprintf "expected IdenticalPattern, got %s"
+                 (Loop_guard.loop_detection_to_string result))
+
+let test_loop_different_speakers_ok () =
+  (* Disable cooldown to focus on identical pattern check *)
+  let config : Loop_guard.loop_config = { max_turns = 50; max_identical = 3; cooldown_sec = 0.0 } in
+  let turns = [
+    make_turn ~speaker:"alice" ~content:"same" ~seq:0;
+    make_turn ~speaker:"bob" ~content:"same" ~seq:1;
+    make_turn ~speaker:"alice" ~content:"same" ~seq:2;
+  ] in
+  let thread = make_test_thread ~turns () in
+  (* bob says "same" - only 1 consecutive from bob, should be OK *)
+  let result = Loop_guard.check ~thread ~speaker:"bob" ~content:"same" ~config in
+  check bool "no loop for different speakers"
+    (result = Loop_guard.NoLoop) true
+
+let test_loop_error_message () =
+  let msg = Loop_guard.to_error_message Loop_guard.NoLoop in
+  check bool "no error for NoLoop" (msg = None) true;
+  let msg2 = Loop_guard.to_error_message
+    (Loop_guard.MaxTurnsReached { current = 50; max = 50 }) in
+  check bool "has error for MaxTurns" (msg2 <> None) true
+
+let loop_guard_tests = [
+  "no loop detected", `Quick, test_loop_no_loop;
+  "max turns reached", `Quick, test_loop_max_turns;
+  "identical pattern blocked", `Quick, test_loop_identical_pattern;
+  "different speakers ok", `Quick, test_loop_different_speakers_ok;
+  "error message generation", `Quick, test_loop_error_message;
+]
+
+(* ============================================================
+   Thread Persist Tests (file-only, no Neo4j)
+   ============================================================ *)
+
+module Thread_persist = Council.Thread_persist
+
+let test_persist_save_load () =
+  convo_setup ();
+  match Conversation.start ~config:convo_config ~topic:"Persist"
+          ~initiator:"alice" ~initial_content:"Test" () with
+  | Error e -> convo_teardown (); fail e
+  | Ok th ->
+    let result = Thread_persist.save_thread ~config:convo_config ~thread:th in
+    check bool "file saved" result.Thread_persist.file_ok true;
+    (* Neo4j may fail in test env - that's expected *)
+    match Thread_persist.load_thread ~config:convo_config ~thread_id:th.Conversation.id with
+    | None -> convo_teardown (); fail "should load after save"
+    | Some loaded ->
+      check string "id matches" loaded.Conversation.id th.id;
+      convo_teardown ()
+
+let test_persist_cypher_escape () =
+  (* Test that cypher_escape handles dangerous strings *)
+  let escaped = Thread_persist.cypher_escape "O'Reilly" in
+  check bool "single quote escaped" (String.contains escaped '\'' = false ||
+    (let i = String.index escaped '\'' in i > 0 && escaped.[i-1] = '\\')) true;
+  let escaped2 = Thread_persist.cypher_escape "back\\slash" in
+  check bool "backslash escaped" (String.length escaped2 > String.length "back\\slash") true
+
+let persist_tests = [
+  "dual-stream save + load", `Quick, test_persist_save_load;
+  "cypher escape safety", `Quick, test_persist_cypher_escape;
+]
+
 let () =
   run "Council" [
     "Debate", debate_tests;
@@ -500,5 +752,8 @@ let () =
     "Balance", balance_tests;
     "Executor", executor_tests;
     "Archive", archive_tests;
+    "Conversation", conversation_tests;
+    "LoopGuard", loop_guard_tests;
+    "ThreadPersist", persist_tests;
     "Integration", integration_tests;
   ]

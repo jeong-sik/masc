@@ -30,10 +30,12 @@ let load_json_file path =
   | Some (cached_mtime, json) when Float.equal cached_mtime mtime -> json
   | _ ->
     let ic = open_in path in
-    let n = in_channel_length ic in
-    let buf = Bytes.create n in
-    really_input ic buf 0 n;
-    close_in ic;
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let n = in_channel_length ic in
+      let buf = Bytes.create n in
+      really_input ic buf 0 n;
+      buf)
+    |> fun buf ->
     let json = Yojson.Safe.from_string (Bytes.to_string buf) in
     Hashtbl.replace config_cache path (mtime, json);
     json
@@ -125,8 +127,15 @@ let run_cascade
       let extra_args =
         let base = [("model", `String slot.model)] in
         match resolve_key slot.key_env with
-        | Some k -> ("api_key", `String k) :: base
-        | None -> base
+        | Some k ->
+          printf "   🔑 [%s] api_key resolved for %s (%d chars)\n%!" agent_name
+            (Option.value ~default:"?" slot.key_env) (String.length k);
+          ("api_key", `String k) :: base
+        | None ->
+          (match slot.key_env with
+           | Some env -> printf "   ⚠️ [%s] env var %s NOT FOUND\n%!" agent_name env
+           | None -> ());
+          base
       in
       let label = match slot.key_env with
         | Some env -> sprintf "%s(%s)" slot.tool_name (String.sub env (max 0 (String.length env - 8)) (min 8 (String.length env)))

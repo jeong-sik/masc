@@ -76,8 +76,11 @@ let list_dir_safe dir =
 
 (** {1 Directory Management} *)
 
+let masc_dir _config =
+  Sys.getcwd () ^ "/.masc"
+
 let conversations_dir config =
-  Filename.concat config.base_path "conversations"
+  Filename.concat (masc_dir config) "conversations"
 
 let threads_dir config =
   Filename.concat (conversations_dir config) "threads"
@@ -88,7 +91,8 @@ let thread_path config thread_id =
 let rec ensure_dir path =
   if not (Sys.file_exists path) then begin
     ensure_dir (Filename.dirname path);
-    try Sys.mkdir path 0o755 with Sys_error _ -> ()
+    (try Sys.mkdir path 0o755 with Sys_error e ->
+      Printf.eprintf "[conversation] ensure_dir failed: %s (path=%s)\n%!" e path)
   end
 
 let ensure_dirs config =

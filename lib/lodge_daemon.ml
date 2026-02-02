@@ -234,6 +234,72 @@ MERGE (la)-[:REFLECTED]->(r)
 RETURN r.content AS reflection
 |} persona persona content
 
+(** {1 HTTP/LLM Helpers} *)
+
+open Yojson.Safe.Util
+
+(** Shell escape for curl *)
+let shell_escape s = Str.global_replace (Str.regexp "'") "'\\''" s
+
+(** Call Ollama API directly via curl subprocess *)
+let ollama_generate ~config ?(temperature = 0.7) ?(num_predict = 300) ~system prompt =
+  try
+    let body = Yojson.Safe.to_string (`Assoc [
+      ("model", `String config.ollama_model);
+      ("prompt", `String prompt);
+      ("system", `String system);
+      ("stream", `Bool false);
+      ("options", `Assoc [
+        ("temperature", `Float temperature);
+        ("num_predict", `Int num_predict);
+      ]);
+    ]) in
+    let escaped_body = shell_escape body in
+    let cmd = Printf.sprintf "curl -sf --max-time 60 -X POST %s/api/generate -H 'Content-Type: application/json' -d '%s'"
+      config.ollama_url escaped_body in
+    let ic = Unix.open_process_in cmd in
+    let buf = Buffer.create 4096 in
+    (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
+    let status = Unix.close_process_in ic in
+    match status with
+    | Unix.WEXITED 0 ->
+        let json = Yojson.Safe.from_string (Buffer.contents buf) in
+        Ok (json |> member "response" |> to_string)
+    | Unix.WEXITED n -> Error (Printf.sprintf "ollama curl exit %d" n)
+    | _ -> Error "ollama curl signaled"
+  with
+  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse: %s" msg)
+  | exn -> Error (Printf.sprintf "ollama exception: %s" (Printexc.to_string exn))
+
+(** Post to MASC Board via MCP *)
+let board_post ~room ~author ~title ~content =
+  try
+    let body = Yojson.Safe.to_string (`Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 1);
+      ("method", `String "tools/call");
+      ("params", `Assoc [
+        ("name", `String "masc_board_post");
+        ("arguments", `Assoc [
+          ("room", `String room);
+          ("author", `String author);
+          ("title", `String title);
+          ("content", `String content);
+        ]);
+      ]);
+    ]) in
+    let escaped_body = shell_escape body in
+    let cmd = Printf.sprintf "curl -sf --max-time 10 -X POST http://127.0.0.1:8935/mcp -H 'Content-Type: application/json' -d '%s'" escaped_body in
+    let ic = Unix.open_process_in cmd in
+    let buf = Buffer.create 1024 in
+    (try while true do Buffer.add_channel buf ic 256 done with End_of_file -> ());
+    let status = Unix.close_process_in ic in
+    match status with
+    | Unix.WEXITED 0 -> Ok (Buffer.contents buf)
+    | Unix.WEXITED n -> Error (Printf.sprintf "board post exit %d" n)
+    | _ -> Error "board post signaled"
+  with exn -> Error (Printexc.to_string exn)
+
 (** {1 Main operations} *)
 
 let init ~config =
@@ -241,14 +307,66 @@ let init ~config =
     Printf.printf "[Lodge Daemon] Initializing with interval=%.0fs, model=%s\n%!"
       config.check_interval_s config.ollama_model
 
-(** Patrol once for a specific persona - Phase 2 will add actual LLM call *)
+(** Patrol once for a specific persona with LLM call and board post *)
 let patrol_once ~config ~persona =
   if config.enabled then begin
-    Printf.printf "[Lodge Daemon] Patrol: %s (model: %s)\n%!" persona config.ollama_model;
-    mark_patrolled persona
+    Printf.printf "[Lodge Daemon] Patrol: %s\n%!" persona;
+    let state = get_state persona in
+    let system = Printf.sprintf "You are %s, a Lodge persona. Write a brief thought or observation (2-3 sentences, Korean preferred)." persona in
+    let prompt = Printf.sprintf "Current mood: neutral. Patrol count: %d. Share your current thought." state.patrol_count in
+    match ollama_generate ~config ~system prompt with
+    | Ok response when String.length response > 10 ->
+        Printf.printf "[Lodge Daemon] %s says: %s\n%!" persona response;
+        let title = Printf.sprintf "%s의 생각" persona in
+        (match board_post ~room:"me" ~author:persona ~title ~content:response with
+         | Ok _ -> Printf.printf "[Lodge Daemon] Posted to board\n%!"
+         | Error e -> Printf.eprintf "[Lodge Daemon] Board post failed: %s\n%!" e);
+        mark_patrolled persona
+    | Ok _ -> Printf.eprintf "[Lodge Daemon] Empty response from %s\n%!" persona
+    | Error e -> Printf.eprintf "[Lodge Daemon] LLM error for %s: %s\n%!" persona e
   end
 
-(** Generate reflection for a persona - Phase 2 will add actual logic *)
+(** Generate reflection for a persona *)
 let generate_reflection ~config ~persona =
-  if config.enabled && config.neo4j_enabled then
-    Printf.printf "[Lodge Daemon] Reflection: %s\n%!" persona
+  if config.enabled && config.neo4j_enabled then begin
+    Printf.printf "[Lodge Daemon] Generating reflection for %s\n%!" persona;
+    let system = "You are reflecting on recent experiences. Summarize key insights in 1-2 sentences." in
+    let prompt = Printf.sprintf "Persona: %s. Reflect on your recent patrols and interactions." persona in
+    match ollama_generate ~config ~system prompt with
+    | Ok reflection when String.length reflection > 10 ->
+        Printf.printf "[Lodge Daemon] Reflection: %s\n%!" reflection
+    | Ok _ -> Printf.eprintf "[Lodge Daemon] Empty reflection\n%!"
+    | Error e -> Printf.eprintf "[Lodge Daemon] Reflection error: %s\n%!" e
+  end
+
+(** {1 Eio Main Loop (Phase 2)} *)
+
+(** Run patrol loop for a single persona — blocking, call in Eio fiber *)
+let run_persona_loop ~config (persona_cfg : persona_config) =
+  let rec loop () =
+    let state = get_state persona_cfg.persona in
+    if is_patrol_due state persona_cfg then begin
+      patrol_once ~config ~persona:persona_cfg.persona;
+      let needs_reflection = match state.last_reflection with
+        | None -> state.patrol_count > 5
+        | Some last -> (Unix.gettimeofday () -. last) >= config.reflection_interval_s
+      in
+      if needs_reflection then
+        generate_reflection ~config ~persona:persona_cfg.persona
+    end;
+    Unix.sleepf config.check_interval_s;
+    loop ()
+  in
+  loop ()
+
+(** Start the daemon with persona list — call from MASC server *)
+let start ~sw:_ ~config personas =
+  if not config.enabled then
+    Printf.printf "[Lodge Daemon] Disabled, skipping startup\n%!"
+  else begin
+    Printf.printf "[Lodge Daemon] Starting with %d personas\n%!" (List.length personas);
+    (* TODO: Spawn Eio.Fiber for each persona using Eio.Fiber.fork *)
+    List.iter (fun p ->
+      Printf.printf "[Lodge Daemon] Registered: %s (curiosity=%.2f)\n%!" p.persona p.curiosity
+    ) personas
+  end

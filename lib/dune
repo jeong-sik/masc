@@ -127,7 +127,6 @@
    tool_misc
    tool_board
    tool_lodge
-   lodge_daemon
    tool_council
    tool_suspend
    debate

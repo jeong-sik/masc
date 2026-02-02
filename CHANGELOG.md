@@ -220,3 +220,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Tool_task`: Core task operations (add, claim, done, transition)
   - `Tool_room`: Room management (status, init, reset)
   - `Tool_control`: Flow control (pause, resume, switch_mode)
+
+## [2.27.0] - 2026-02-02
+
+### Fixed
+- **Eio Async Pattern**: Migrate core modules to `Time_compat.now()` for Eio-native timestamps
+  - heartbeat, lodge_heartbeat, mcp_session, session, spawn_registry
+  - Prevents domain blocking in async context

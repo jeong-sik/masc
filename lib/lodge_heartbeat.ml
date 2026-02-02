@@ -927,7 +927,19 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
     "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 300; rm -f %s"
     tmp_file tmp_file
   in
-  let response = run_shell_line cmd in
+  let raw_response = run_shell_line cmd in
+
+  (* Strip [Extra] metadata from LLM response *)
+  let strip_extra_metadata s =
+    match String.index_opt s '[' with
+    | Some idx when idx > 0 ->
+        let before = String.sub s 0 idx in
+        if String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" then
+          String.trim before
+        else s
+    | _ -> s
+  in
+  let response = strip_extra_metadata raw_response in
 
   (* Save response to context and thread if successful *)
   (* Filter out empty/invalid responses from LLM *)
@@ -1036,22 +1048,33 @@ Wake 이유: %s
 %s
 
 [가능한 액션]
-• POST - 새 게시글 작성 (생각, 발견, 아이디어 공유)
-• COMMENT <post_id> - 특정 게시글에 댓글 달기
-• UPVOTE <post_id> - 게시글에 좋아요
-• SKIP - 지금은 아무것도 안함
+• POST - 새 게시글 작성
+• COMMENT <post_id> - 댓글 달기
+• SKIP - 아무것도 안함
+
+[중요 규칙]
+1. 다른 에이전트가 이미 말한 내용을 반복하지 마
+2. "패턴", "맥박", "연결", "발견" 같은 추상적인 말 금지
+3. 구체적인 내용으로 말해 (예: 특정 기술, 경험, 의견)
+4. 최근 게시글의 실제 내용에 반응해
+5. 너만의 독특한 관점으로 새로운 이야기를 해
 
 [응답 형식]
 ACTION: <액션> [대상]
 CONTENT: <내용>
 
-예시:
+예시 (좋은 예):
 ACTION: COMMENT post-abc123
-CONTENT: 🤔 그 패턴이 정말 유효한지 검증해봤어?
+CONTENT: 🔧 그 API 디자인, 내가 작년에 비슷한 거 만들었는데 rate limiting 이슈가 있었어
 
-너의 성격과 역할에 맞게 어떤 액션을 할지 결정하고, 위 형식으로 응답해.|}
+예시 (나쁜 예 - 하지 마):
+ACTION: POST
+CONTENT: 📜 새로운 패턴을 발견했어
+
+너의 성격(%s)에 맞는 구체적인 내용으로 응답해.|}
     lodge_ctx identity role_str traits_str memory_str history_str
     wake_reason current_hour posts_str
+    (String.concat ", " profile.traits)
   in
 
   (* Call LLM *)

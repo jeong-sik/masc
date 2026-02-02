@@ -518,48 +518,52 @@ type persona_config = {
 (** In-memory cache for dynamic personas *)
 let persona_cache : (string, persona_config) Hashtbl.t = Hashtbl.create 10
 
-(** Load personas from Neo4j via shell command (non-blocking) *)
+(** Load personas from Neo4j via GraphQL API (reliable JSON parsing) *)
 let load_personas_from_neo4j () =
-  let cypher = "MATCH (a:Agent) WHERE a.primary_value IS NOT NULL RETURN a.name AS name, a.primary_value AS primary_value, a.value_weights AS value_weights, a.prompt_template AS prompt_template, COALESCE(a.generation, 0) AS generation, COALESCE(a.status, 'active') AS status" in
-  let cmd = Printf.sprintf "source ~/.zshenv && cypher-shell -a \"$NEO4J_URI\" -u neo4j -p \"$NEO4J_PASSWORD\" --format plain \"%s\" 2>/dev/null" cypher in
+  Printf.eprintf "[Lodge] Loading personas from GraphQL...\n%!";
+  let query = "{\"query\": \"{ agents(first: 20) { edges { node { name primaryValue valueWeights promptTemplate generation status } } } }\"}" in
+  let cmd = Printf.sprintf "source ~/.zshenv && curl -s http://localhost:4000/graphql -H 'Content-Type: application/json' -H \"X-API-Key: $GRAPHQL_API_KEY\" -d '%s' 2>/dev/null" query in
   try
     let ic = Unix.open_process_in cmd in
-    let lines = ref [] in
+    let buf = Buffer.create 4096 in
     (try
       while true do
-        lines := input_line ic :: !lines
+        Buffer.add_char buf (input_char ic)
       done
     with End_of_file -> ());
     let _ = Unix.close_process_in ic in
-    let lines = List.rev !lines in
-    (* Skip header line, parse data lines *)
-    let data_lines = match lines with _ :: rest -> rest | [] -> [] in
-    List.iter (fun line ->
-      (* Parse CSV-like output: name, primary_value, value_weights, prompt_template, generation, status *)
+    let json_str = Buffer.contents buf in
+    Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
+    (* Parse JSON response *)
+    let json = Yojson.Safe.from_string json_str in
+    let edges = json
+      |> Yojson.Safe.Util.member "data"
+      |> Yojson.Safe.Util.member "agents"
+      |> Yojson.Safe.Util.member "edges"
+      |> Yojson.Safe.Util.to_list
+    in
+    List.iter (fun edge ->
       try
-        let parts = String.split_on_char ',' line in
-        let clean s = String.trim s |> fun s ->
-          if String.length s >= 2 && s.[0] = '"' then
-            String.sub s 1 (String.length s - 2)
-          else s
-        in
-        match parts with
-        | name :: pv :: vw :: pt :: gen :: stat :: _ ->
+        let node = Yojson.Safe.Util.member "node" edge in
+        let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+        let primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option) in
+        (* Only cache agents with primaryValue (SOUL agents) *)
+        if primary_value <> None then begin
           let config = {
-            name = clean name;
-            primary_value = (let v = clean pv in if v = "NULL" then None else Some v);
-            value_weights = (let v = clean vw in if v = "NULL" then None else Some v);
-            prompt_template = (let v = clean pt in if v = "NULL" then None else Some v);
-            generation = (try int_of_string (clean gen) with _ -> 0);
-            status = clean stat;
+            name;
+            primary_value;
+            value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
+            prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
+            generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
+            status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
           } in
           Hashtbl.replace persona_cache config.name config
-        | _ -> ()
+        end
       with _ -> ()
-    ) data_lines;
-    Printf.eprintf "[Lodge] Loaded %d personas from Neo4j\n%!" (Hashtbl.length persona_cache)
+    ) edges;
+    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL personas from Neo4j\n%!" (Hashtbl.length persona_cache)
   with e ->
-    Printf.eprintf "[Lodge] Failed to load personas from Neo4j: %s\n%!" (Printexc.to_string e)
+    Printf.eprintf "[Lodge] ❌ Failed to load personas: %s\n%!" (Printexc.to_string e)
 
 (** Get cached persona config, or None if not loaded *)
 let get_cached_persona name =

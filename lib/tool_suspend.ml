@@ -1,0 +1,213 @@
+(** Tool_suspend - Agent suspension and circuit breaker tools
+
+    Implements masc_suspend and masc_circuit_status handlers.
+    Part of MASC Social v4 Tier 1 security layer.
+
+    @since 0.6.0
+*)
+
+(** {1 Context} *)
+
+type context = {
+  config: Room.config;
+  caller_agent: string option;  (** Who is calling the tool *)
+}
+
+(** {1 Helpers} *)
+
+let get_string args key default =
+  match args with
+  | `Assoc l ->
+      (match List.assoc_opt key l with
+       | Some (`String s) -> s
+       | _ -> default)
+  | _ -> default
+
+let get_string_opt args key =
+  match args with
+  | `Assoc l ->
+      (match List.assoc_opt key l with
+       | Some (`String s) when s <> "" -> Some s
+       | _ -> None)
+  | _ -> None
+
+let get_float args key default =
+  match args with
+  | `Assoc l ->
+      (match List.assoc_opt key l with
+       | Some (`Float f) -> f
+       | Some (`Int i) -> float_of_int i
+       | _ -> default)
+  | _ -> default
+
+(** {1 Blacklist Management} *)
+
+(** Blacklist entry: agent_id -> until timestamp *)
+let blacklist : (string, float * string) Hashtbl.t = Hashtbl.create 32
+let blacklist_lock = Mutex.create ()
+
+let add_to_blacklist ~agent_id ~until ~reason =
+  Mutex.lock blacklist_lock;
+  Common.protect
+    ~module_name:"tool_suspend"
+    ~finally_label:"blacklist_add"
+    ~finally:(fun () -> Mutex.unlock blacklist_lock)
+    (fun () -> Hashtbl.replace blacklist agent_id (until, reason))
+
+let check_blacklist ~agent_id =
+  Mutex.lock blacklist_lock;
+  Common.protect
+    ~module_name:"tool_suspend"
+    ~finally_label:"blacklist_check"
+    ~finally:(fun () -> Mutex.unlock blacklist_lock)
+    (fun () ->
+      match Hashtbl.find_opt blacklist agent_id with
+      | None -> None
+      | Some (until, reason) ->
+          let now = Unix.gettimeofday () in
+          if now >= until then begin
+            (* Expired - remove from blacklist *)
+            Hashtbl.remove blacklist agent_id;
+            None
+          end else
+            Some (until, reason)
+    )
+
+let remove_from_blacklist ~agent_id =
+  Mutex.lock blacklist_lock;
+  Common.protect
+    ~module_name:"tool_suspend"
+    ~finally_label:"blacklist_remove"
+    ~finally:(fun () -> Mutex.unlock blacklist_lock)
+    (fun () -> Hashtbl.remove blacklist agent_id)
+
+(** {1 Room Operations} *)
+
+(** Check if agent is in the current room *)
+let is_agent_in_room config ~agent_id =
+  let state = Room.read_state config in
+  List.mem agent_id state.Types.active_agents
+
+(** Force an agent to leave the room (uses Room.update_state for consistency) *)
+let force_leave config ~agent_id ~reason =
+  (* Use update_state for atomic read-modify-write (same pattern as Room.leave) *)
+  let _ = Room.update_state config (fun s ->
+    { s with Types.active_agents = List.filter ((<>) agent_id) s.active_agents }
+  ) in
+  (* Broadcast the forced leave *)
+  let message = Printf.sprintf "[SYSTEM] Agent '%s' forcibly removed: %s" agent_id reason in
+  ignore (Room.broadcast config ~from_agent:"system" ~content:message)
+
+(** {1 Tool Handlers} *)
+
+(** Handle masc_suspend *)
+let handle_suspend ctx args =
+  let target_agent = get_string args "target_agent" "" in
+  let reason = get_string args "reason" "No reason provided" in
+  let duration_hours = get_float args "duration_hours" 1.0 in
+
+  (* Validate target *)
+  if target_agent = "" then
+    (false, "target_agent is required")
+  else
+    (* Check if trying to suspend self (allowed but warn) *)
+    let is_self = match ctx.caller_agent with
+      | Some caller -> caller = target_agent
+      | None -> false
+    in
+
+    (* Check if agent is in the current room and force leave *)
+    let rooms_affected =
+      if is_agent_in_room ctx.config ~agent_id:target_agent then begin
+        force_leave ctx.config ~agent_id:target_agent ~reason;
+        1
+      end else 0
+    in
+
+    (* Add to blacklist *)
+    let until = Unix.gettimeofday () +. (duration_hours *. 3600.0) in
+    add_to_blacklist ~agent_id:target_agent ~until ~reason;
+
+    (* Trigger circuit breaker *)
+    Circuit_breaker.force_open_global
+      ~agent_id:target_agent
+      ~reason:("Suspended: " ^ reason)
+      ~duration_sec:(duration_hours *. 3600.0);
+
+    (* Log to audit *)
+    let caller = Option.value ctx.caller_agent ~default:"unknown" in
+    Audit_log.log_suspend ctx.config
+      ~agent_id:caller
+      ~target_agent
+      ~reason
+      ~rooms_affected;
+
+    (* Log circuit breaker event *)
+    Audit_log.log_circuit_breaker ctx.config
+      ~agent_id:target_agent
+      ~opened:true
+      ~reason:("Suspended by " ^ caller);
+
+    Log.Session.warn "[Suspend] Agent '%s' suspended by '%s': %s (%.1fh, %d rooms)"
+      target_agent caller reason duration_hours rooms_affected;
+
+    let json = `Assoc [
+      ("success", `Bool true);
+      ("target_agent", `String target_agent);
+      ("reason", `String reason);
+      ("duration_hours", `Float duration_hours);
+      ("rooms_affected", `Int rooms_affected);
+      ("is_self_suspend", `Bool is_self);
+      ("blacklisted_until", `Float until);
+    ] in
+    (true, Yojson.Safe.pretty_to_string json)
+
+(** Handle masc_circuit_status *)
+let handle_circuit_status ctx args =
+  let agent_id = match get_string_opt args "agent_id" with
+    | Some id -> id
+    | None -> Option.value ctx.caller_agent ~default:"unknown"
+  in
+
+  let status = Circuit_breaker.get_status_global ~agent_id in
+  let blacklist_info = match check_blacklist ~agent_id with
+    | None -> `Null
+    | Some (until, reason) ->
+        let remaining = until -. Unix.gettimeofday () in
+        `Assoc [
+          ("blacklisted", `Bool true);
+          ("until", `Float until);
+          ("remaining_seconds", `Float remaining);
+          ("reason", `String reason);
+        ]
+  in
+
+  let json = `Assoc [
+    ("agent_id", `String agent_id);
+    ("circuit_breaker", Circuit_breaker.status_to_json status);
+    ("blacklist", blacklist_info);
+  ] in
+  (true, Yojson.Safe.pretty_to_string json)
+
+(** {1 Dispatch} *)
+
+let dispatch ctx ~name ~args =
+  match name with
+  | "masc_suspend" -> Some (handle_suspend ctx args)
+  | "masc_circuit_status" -> Some (handle_circuit_status ctx args)
+  | _ -> None
+
+(** {1 Blacklist Check for Join} *)
+
+(** Call this before allowing an agent to join.
+    Returns Error with message if blacklisted. *)
+let check_can_join ~agent_id =
+  match check_blacklist ~agent_id with
+  | None ->
+      (* Also check circuit breaker *)
+      Circuit_breaker.check_global ~agent_id
+  | Some (until, reason) ->
+      let remaining = int_of_float (until -. Unix.gettimeofday ()) in
+      Error (Printf.sprintf
+        "Agent '%s' is suspended for %d more seconds. Reason: %s"
+        agent_id remaining reason)

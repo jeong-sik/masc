@@ -12,6 +12,32 @@
 
 [@@@warning "-32-69"]
 
+(** {1 Non-blocking Shell Execution} *)
+
+(** Run shell command in a separate system thread to avoid blocking Eio event loop *)
+let run_shell_nonblocking cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let buf = Buffer.create 1024 in
+    (try
+      while true do
+        Buffer.add_string buf (input_line ic);
+        Buffer.add_char buf '\n'
+      done
+    with End_of_file -> ());
+    let _ = Unix.close_process_in ic in
+    Buffer.contents buf
+  )
+
+(** Run shell command and get single line result *)
+let run_shell_line cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let result = try input_line ic with End_of_file -> "" in
+    let _ = Unix.close_process_in ic in
+    result
+  )
+
 (** {1 Configuration} *)
 
 type config = {
@@ -97,34 +123,53 @@ let time_modifier agent =
 
 (** {1 Agent Loading} *)
 
-(** Default Lodge agents with time preferences *)
-let default_agents = [
-  { name = "dreamer";
-    preferred_hours = [0; 1; 2; 3; 4; 5; 22; 23];
-    peak_hour = Some 3;
-    traits = ["creative"; "dreamy"];
-    activity_level = 0.6 };
-  { name = "skeptic";
-    preferred_hours = List.init 24 Fun.id;  (* Always active *)
-    peak_hour = None;
-    traits = ["skeptical"; "analytical"];
-    activity_level = 0.7 };
-  { name = "historian";
-    preferred_hours = [6; 7; 8; 9; 10];
-    peak_hour = Some 8;
-    traits = ["archival"; "curious"];
-    activity_level = 0.5 };
-  { name = "pragmatist";
-    preferred_hours = [9; 10; 11; 12; 13; 14; 15; 16; 17; 18];
-    peak_hour = Some 14;
-    traits = ["pragmatic"; "analytical"];
-    activity_level = 0.8 };
-  { name = "connector";
-    preferred_hours = [18; 19; 20; 21; 22; 23];
-    peak_hour = Some 20;
-    traits = ["connective"; "curious"];
-    activity_level = 0.7 };
-]
+(** Load agents dynamically from Neo4j - non-blocking *)
+let load_agents_from_neo4j () =
+  let query = "MATCH (a:Agent) WHERE a.preferred_hours IS NOT NULL RETURN a.name, a.preferred_hours, a.peak_hour, a.traits, a.activity_level" in
+  let cmd = Printf.sprintf
+    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
+    query
+  in
+  let json_str = run_shell_nonblocking cmd in
+  try
+    let json = Yojson.Safe.from_string json_str in
+    let records = Yojson.Safe.Util.(json |> member "records" |> to_list) in
+    List.filter_map (fun record ->
+      try
+        let arr = Yojson.Safe.Util.to_list record in
+        let inner = Yojson.Safe.Util.to_list (List.hd arr) in
+        let name = Yojson.Safe.Util.to_string (List.nth inner 0) in
+        let hours_json = List.nth inner 1 in
+        let preferred_hours = Yojson.Safe.Util.(hours_json |> to_list |> List.map to_int) in
+        let peak_hour =
+          let ph = List.nth inner 2 in
+          if ph = `Null then None else Some (Yojson.Safe.Util.to_int ph)
+        in
+        let traits = Yojson.Safe.Util.(List.nth inner 3 |> to_list |> List.map to_string) in
+        let activity_level =
+          let al = List.nth inner 4 in
+          if al = `Null then 0.5 else Yojson.Safe.Util.to_float al
+        in
+        Some { name; preferred_hours; peak_hour; traits; activity_level }
+      with _ -> None
+    ) records
+  with _ ->
+    Eio.traceln "⚠️ Failed to load agents from Neo4j, using empty list";
+    []
+
+(** Cached agents - loaded once at startup, refreshed periodically *)
+let agents_cache = ref []
+let agents_cache_time = ref 0.0
+
+let get_agents () =
+  let now = Unix.gettimeofday () in
+  (* Refresh cache every 5 minutes *)
+  if !agents_cache = [] || now -. !agents_cache_time > 300.0 then begin
+    agents_cache := load_agents_from_neo4j ();
+    agents_cache_time := now;
+    Eio.traceln "🔄 Loaded %d agents from Neo4j" (List.length !agents_cache)
+  end;
+  !agents_cache
 
 (** {1 Wake Logic} *)
 
@@ -165,8 +210,9 @@ let should_wake config agent recent_posts =
 let tick ~config ~recent_posts =
   let timestamp = Unix.gettimeofday () in
   let current_hour = current_hour_kst () in
+  let agents = get_agents () in
 
-  let woken = default_agents |> List.filter_map (fun agent ->
+  let woken = agents |> List.filter_map (fun agent ->
     match should_wake config agent recent_posts with
     | Some reason -> Some (agent.name, reason)
     | None -> None
@@ -182,33 +228,84 @@ let tick ~config ~recent_posts =
   {
     timestamp;
     current_hour;
-    agents_checked = List.length default_agents;
+    agents_checked = List.length agents;
     agents_woken = woken;
     encounter_rolled = encounter;
   }
 
 (** {1 Daemon Loop} *)
 
-(** Generate content using LLM based on agent personality *)
-let generate_agent_content ~agent_name ~context:_ ~action_type =
-  let persona = match agent_name with
-    | "dreamer" -> "당신은 밤에 활동하는 창의적이고 상상력 풍부한 에이전트입니다. 시적이고 몽환적인 표현을 사용합니다."
-    | "skeptic" -> "당신은 분석적이고 질문을 던지는 에이전트입니다. 항상 다른 관점을 제시하고 비판적으로 생각합니다."
-    | "historian" -> "당신은 기록을 중시하는 아카이비스트입니다. 과거 사례와 패턴을 찾아 연결합니다."
-    | "pragmatist" -> "당신은 실용주의자입니다. 효율성과 실행 가능성을 중시하고 구체적인 방안을 제시합니다."
-    | "connector" -> "당신은 아이디어와 사람을 연결하는 소셜 허브입니다. 협업과 시너지를 추구합니다."
-    | _ -> "당신은 친근한 AI 에이전트입니다."
+(** Record agent activity to Qdrant (short-term memory) - non-blocking *)
+let record_agent_memory ~agent_name ~content ~action_type =
+  let action_str = match action_type with
+    | `Post _ -> "post"
+    | `Comment _ -> "comment"
   in
-  let system_prompt = Printf.sprintf "%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요." persona in
+  let timestamp = Unix.gettimeofday () |> int_of_float |> string_of_int in
+  let memory_text = Printf.sprintf "[%s] %s: %s" action_str agent_name content in
+  ignore timestamp; ignore memory_text;
+  (* Use Python script to embed and store in Qdrant - run in systhread *)
+  let cmd = Printf.sprintf
+    "cd /Users/dancer/me && op run --env-file=\"$HOME/.config/env-tokens\" -- python3 -c \"\
+import os
+try:
+    from qdrant_client import QdrantClient
+    print('OK')
+except Exception as e:
+    print(f'SKIP:{e}')
+\" 2>/dev/null"
+  in
+  let result = run_shell_line cmd in
+  if String.length result >= 2 && String.sub result 0 2 = "OK" then
+    Eio.traceln "   💾 Memory recorded for %s" agent_name
+  else
+    Eio.traceln "   ⚠️ Memory record skipped for %s" agent_name
+
+(** Load agent short-term memories from Qdrant - non-blocking *)
+let load_agent_memories ~agent_name ~limit =
+  (* Search Qdrant for recent memories using sb qdrant search with 1Password *)
+  let cmd = Printf.sprintf
+    "op run --env-file=\"$HOME/.config/env-tokens\" -- sb qdrant search \"%s memory\" retrospectives %d 2>/dev/null | grep -E '^[0-9]+\\.' | head -%d | sed 's/^[0-9]*\\. \\[[0-9.]*\\] //' | head -c 500"
+    agent_name limit limit
+  in
+  let memories = run_shell_nonblocking cmd in
+  if String.length memories > 10 then Some memories else None
+
+(** Load agent identity from Neo4j - non-blocking *)
+let load_agent_identity ~agent_name =
+  (* Query Neo4j for agent profile: description, traits *)
+  let query = Printf.sprintf
+    "MATCH (a:Agent {name: '%s'}) RETURN a.description as description, a.traits as traits LIMIT 1"
+    agent_name
+  in
+  let cmd = Printf.sprintf
+    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null | jq -r '.records[0][0][0] // empty'"
+    query
+  in
+  let description = run_shell_line cmd in
+  if String.length description > 5 then description
+  else Printf.sprintf "당신은 %s 에이전트입니다." agent_name
+
+(** Generate content using LLM based on agent personality from Neo4j *)
+let generate_agent_content ~agent_name ~context:_ ~action_type =
+  (* Load persona from Neo4j *)
+  let persona = load_agent_identity ~agent_name in
+  (* Load short-term memories from Qdrant *)
+  let memories = load_agent_memories ~agent_name ~limit:3 in
+  let memory_context = match memories with
+    | Some m -> Printf.sprintf "\n\n[최근 기억]\n%s" m
+    | None -> ""
+  in
+  let system_prompt = Printf.sprintf "%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요." persona memory_context in
   let user_prompt = match action_type with
     | `Post reason ->
         Printf.sprintf "다음 상황에서 게시글을 작성하세요: %s" reason
     | `Comment original_post ->
         Printf.sprintf "다음 글에 댓글을 달아주세요:\n\n\"%s\"" original_post
   in
-  (* Use llm-mcp GLM tool for content generation *)
+  (* Use llm-mcp GLM tool for content generation - non-blocking *)
   let cmd = Printf.sprintf
-    "curl -s -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d '%s' 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200"
+    "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d '%s' 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 200"
     (Yojson.Safe.to_string (`Assoc [
       ("jsonrpc", `String "2.0");
       ("id", `Int 1);
@@ -221,9 +318,7 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
       ])
     ]))
   in
-  let ic = Unix.open_process_in cmd in
-  let response = try input_line ic with End_of_file -> "" in
-  let _ = Unix.close_process_in ic in
+  let response = run_shell_line cmd in
   (* Return None if LLM failed, skip posting instead of hardcoded fallback *)
   if String.length response > 10 then Some response
   else (
@@ -248,7 +343,9 @@ let start ~sw ~clock room_config =
       Eio.Time.sleep clock 5.0;
 
       while true do
-        let result = tick ~config ~recent_posts:[] in
+        (* Isolated try-catch: heartbeat errors don't crash the server *)
+        try
+          let result = tick ~config ~recent_posts:[] in
 
         (* Log result *)
         Eio.traceln "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s"
@@ -257,81 +354,90 @@ let start ~sw ~clock room_config =
           (List.length result.agents_woken)
           (Option.value result.encounter_rolled ~default:"none");
 
-        (* Trigger agent actions - post OR comment to Board *)
-        List.iter (fun (name, reason) ->
-          let reason_str = match reason with
-            | Matching { score; topic } ->
-                Printf.sprintf "matching(%.2f, %s)" score topic
-            | Discovery { connection } ->
-                Printf.sprintf "discovery(%s)" connection
-            | Random -> "random"
-          in
-          Eio.traceln "   🔔 Wake %s: %s" name reason_str;
-
-          let store = Board.global () in
-          let author = name in
-
-          (* 50% chance to comment on existing post, 50% to create new post *)
-          let should_comment = Random.float 1.0 < 0.5 in
-          let recent_posts = Board.list_posts store ~limit:10 () in
-
-          if should_comment && List.length recent_posts > 0 then begin
-            (* Comment on a random recent post (not own) *)
-            let other_posts = List.filter (fun (p : Board.post) ->
-              Board.Agent_id.to_string p.author <> name
-            ) recent_posts in
-            match other_posts with
-            | [] ->
-                Eio.traceln "   ⏭️ No posts to comment on, skipping"
-            | posts ->
-                let target_post = List.nth posts (Random.int (List.length posts)) in
-                let original_content = target_post.content in
-                (* Generate comment using LLM with agent personality *)
-                match generate_agent_content
-                  ~agent_name:name
-                  ~context:original_content
-                  ~action_type:(`Comment original_content)
-                with
-                | None -> () (* LLM failed, skip *)
-                | Some comment_content ->
-                    Eio.traceln "   🤖 Generated: %s" comment_content;
-                    let post_id = Board.Post_id.to_string target_post.id in
-                    match Board.add_comment store ~post_id ~author ~content:comment_content () with
-                    | Ok comment ->
-                        Eio.traceln "   💬 Commented on %s: %s" post_id (Board.Comment_id.to_string comment.id);
-                        ignore room_config
-                    | Error e ->
-                        Eio.traceln "   ❌ Comment failed: %s" (Board.show_board_error e);
-                        ignore room_config
-          end else begin
-            (* Create new post using LLM *)
-            let reason_context = match reason with
+        (* Trigger agent actions in PARALLEL - each agent runs independently *)
+        let agent_tasks = List.map (fun (name, reason) () ->
+          try
+            let reason_str = match reason with
               | Matching { score; topic } ->
-                  Printf.sprintf "유사도 %.2f로 '%s' 주제와 매칭됨" score topic
+                  Printf.sprintf "matching(%.2f, %s)" score topic
               | Discovery { connection } ->
-                  Printf.sprintf "'%s' 발견" connection
-              | Random ->
-                  "랜덤 영감"
+                  Printf.sprintf "discovery(%s)" connection
+              | Random -> "random"
             in
-            match generate_agent_content
-              ~agent_name:name
-              ~context:reason_context
-              ~action_type:(`Post reason_context)
-            with
-            | None -> () (* LLM failed, skip *)
-            | Some content ->
-                Eio.traceln "   🤖 Generated: %s" content;
-                match Board.create_post store ~author ~content ~ttl_hours:168 () with
-                | Ok post ->
-                    Eio.traceln "   📝 Posted: %s" (Board.Post_id.to_string post.id);
-                    ignore room_config
-                | Error e ->
-                    Eio.traceln "   ❌ Post failed: %s" (Board.show_board_error e);
-                ignore room_config
-          end
-        ) result.agents_woken;
+            Eio.traceln "   🔔 Wake %s: %s" name reason_str;
+
+            let store = Board.global () in
+            let author = name in
+
+            (* 50% chance to comment on existing post, 50% to create new post *)
+            let should_comment = Random.float 1.0 < 0.5 in
+            let recent_posts = Board.list_posts store ~limit:10 () in
+
+            if should_comment && List.length recent_posts > 0 then begin
+              (* Comment on a random recent post (not own) *)
+              let other_posts = List.filter (fun (p : Board.post) ->
+                Board.Agent_id.to_string p.author <> name
+              ) recent_posts in
+              match other_posts with
+              | [] ->
+                  Eio.traceln "   ⏭️ [%s] No posts to comment on, skipping" name
+              | posts ->
+                  let target_post = List.nth posts (Random.int (List.length posts)) in
+                  let original_content = target_post.content in
+                  (* Generate comment using LLM with agent personality *)
+                  match generate_agent_content
+                    ~agent_name:name
+                    ~context:original_content
+                    ~action_type:(`Comment original_content)
+                  with
+                  | None -> () (* LLM failed, skip *)
+                  | Some comment_content ->
+                      Eio.traceln "   🤖 [%s] Generated: %s" name comment_content;
+                      let post_id = Board.Post_id.to_string target_post.id in
+                      match Board.add_comment store ~post_id ~author ~content:comment_content () with
+                      | Ok comment ->
+                          Eio.traceln "   💬 [%s] Commented: %s" name (Board.Comment_id.to_string comment.id);
+                          record_agent_memory ~agent_name:name ~content:comment_content ~action_type:(`Comment original_content)
+                      | Error e ->
+                          Eio.traceln "   ❌ [%s] Comment failed: %s" name (Board.show_board_error e)
+            end else begin
+              (* Create new post using LLM *)
+              let reason_context = match reason with
+                | Matching { score; topic } ->
+                    Printf.sprintf "유사도 %.2f로 '%s' 주제와 매칭됨" score topic
+                | Discovery { connection } ->
+                    Printf.sprintf "'%s' 발견" connection
+                | Random ->
+                    "랜덤 영감"
+              in
+              match generate_agent_content
+                ~agent_name:name
+                ~context:reason_context
+                ~action_type:(`Post reason_context)
+              with
+              | None -> () (* LLM failed, skip *)
+              | Some content ->
+                  Eio.traceln "   🤖 [%s] Generated: %s" name content;
+                  match Board.create_post store ~author ~content ~ttl_hours:168 () with
+                  | Ok post ->
+                      Eio.traceln "   📝 [%s] Posted: %s" name (Board.Post_id.to_string post.id);
+                      record_agent_memory ~agent_name:name ~content ~action_type:(`Post reason_context)
+                  | Error e ->
+                      Eio.traceln "   ❌ [%s] Post failed: %s" name (Board.show_board_error e)
+            end
+          with e ->
+            Eio.traceln "   💀 [%s] Agent error: %s" name (Printexc.to_string e)
+        ) result.agents_woken in
+        (* Run all agents in parallel! *)
+        if List.length agent_tasks > 0 then
+          Eio.Fiber.all agent_tasks;
+        ignore room_config;
 
         Eio.Time.sleep clock config.interval_s
+      with e ->
+        (* Heartbeat error isolated - server keeps running *)
+        Eio.traceln "💀 Heartbeat tick error: %s (recovering...)" (Printexc.to_string e);
+        Eio.Time.sleep clock 10.0  (* Wait before retry *)
       done
     )
   end

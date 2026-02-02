@@ -789,18 +789,20 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     (false, Printf.sprintf "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b" name name agent_name is_joined)
   else
 
-  (* Safe exec for checkpoint commands *)
+  (* Safe exec for checkpoint commands - non-blocking via systhread *)
   let safe_exec args =
-    try
-      let argv = Array.of_list args in
-      let cmd = argv.(0) in
-      let ic = Unix.open_process_args_in cmd argv in
-      let output = In_channel.input_all ic in
-      match Unix.close_process_in ic with
-      | Unix.WEXITED 0 -> (true, output)
-      | _ -> (false, output)
-    with e ->
-      (false, Printf.sprintf "❌ Command failed: %s" (Printexc.to_string e))
+    Eio_unix.run_in_systhread (fun () ->
+      try
+        let argv = Array.of_list args in
+        let cmd = argv.(0) in
+        let ic = Unix.open_process_args_in cmd argv in
+        let output = In_channel.input_all ic in
+        match Unix.close_process_in ic with
+        | Unix.WEXITED 0 -> (true, output)
+        | _ -> (false, output)
+      with e ->
+        (false, Printf.sprintf "❌ Command failed: %s" (Printexc.to_string e))
+    )
   in
 
   (* Delegate to extracted tool modules first *)

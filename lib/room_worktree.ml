@@ -9,6 +9,21 @@
 open Types
 open Room_utils
 
+(** Run shell command and get lines (non-blocking) *)
+let run_shell_lines cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let rec read_lines acc =
+      try
+        let line = input_line ic in
+        read_lines (line :: acc)
+      with End_of_file ->
+        ignore (Unix.close_process_in ic);
+        List.rev acc
+    in
+    read_lines []
+  )
+
 (** Get git root directory - delegates to Room_git *)
 let git_root config =
   Room_git.git_root ~base_path:config.base_path
@@ -214,15 +229,7 @@ let worktree_list config =
     | None -> `Assoc [("error", `String "Not a git repository")]
     | Some root ->
         let cmd = Printf.sprintf "cd %s && git worktree list --porcelain 2>/dev/null" root in
-        let ic = Unix.open_process_in cmd in
-        let rec read_lines acc =
-          try
-            let line = input_line ic in
-            read_lines (line :: acc)
-          with End_of_file -> List.rev acc
-        in
-        let lines = read_lines [] in
-        let _ = Unix.close_process_in ic in
+        let lines = run_shell_lines cmd in
 
         (* Parse porcelain output into worktree info *)
         let rec parse_worktrees lines current acc =

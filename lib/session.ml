@@ -293,7 +293,7 @@ let wait_for_message registry ~agent_name ~timeout =
       | Some msg ->
           Some msg
       | None ->
-          Unix.sleepf check_interval;
+          Eio_unix.run_in_systhread (fun () -> Unix.sleepf check_interval);
           wait_loop ()
     end
   in

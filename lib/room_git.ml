@@ -7,16 +7,41 @@
 open Types
 
 (* ============================================ *)
+(* Non-blocking Shell Execution                 *)
+(* ============================================ *)
+
+(** Run shell command and get single line (non-blocking for Eio) *)
+let run_shell_line cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let result = try Some (input_line ic) with End_of_file -> None in
+    let _ = Unix.close_process_in ic in
+    result
+  )
+
+(** Run shell command and get all lines (non-blocking for Eio) *)
+let run_shell_lines cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    let ic = Unix.open_process_in cmd in
+    let rec read_lines acc =
+      try
+        let line = input_line ic in
+        read_lines (line :: acc)
+      with End_of_file ->
+        ignore (Unix.close_process_in ic);
+        List.rev acc
+    in
+    read_lines []
+  )
+
+(* ============================================ *)
 (* Git Repository Utilities                     *)
 (* ============================================ *)
 
 (** Get git root directory *)
 let git_root ~base_path =
   let cmd = Printf.sprintf "cd %s && git rev-parse --show-toplevel 2>/dev/null" base_path in
-  let ic = Unix.open_process_in cmd in
-  let result = try Some (input_line ic) with End_of_file -> None in
-  let _ = Unix.close_process_in ic in
-  result
+  run_shell_line cmd
 
 (** Check if directory is a git repository *)
 let is_git_repo ~base_path =
@@ -34,9 +59,7 @@ let origin_head_branch root =
   let cmd = Printf.sprintf
     "cd %s && git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null" root
   in
-  let ic = Unix.open_process_in cmd in
-  let line = try Some (input_line ic) with End_of_file -> None in
-  let _ = Unix.close_process_in ic in
+  let line = run_shell_line cmd in
   match line with
   | None -> None
   | Some refname ->
@@ -160,15 +183,7 @@ let list ~base_path =
   | None -> `Assoc [("error", `String "Not a git repository")]
   | Some root ->
       let cmd = Printf.sprintf "cd %s && git worktree list --porcelain 2>/dev/null" root in
-      let ic = Unix.open_process_in cmd in
-      let rec read_lines acc =
-        try
-          let line = input_line ic in
-          read_lines (line :: acc)
-        with End_of_file -> List.rev acc
-      in
-      let lines = read_lines [] in
-      let _ = Unix.close_process_in ic in
+      let lines = run_shell_lines cmd in
 
       (* Parse porcelain output into worktree info *)
       let rec parse_worktrees lines current acc =

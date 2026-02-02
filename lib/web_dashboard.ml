@@ -183,34 +183,56 @@ let html () = {|<!DOCTYPE html>
     .tempo-badge.fast { background: rgba(34,211,238,0.2); color: #22d3ee; }
     .tempo-badge.paused { background: rgba(248,113,113,0.2); color: #f87171; }
 
-    /* Board */
-    .board-list { display: flex; flex-direction: column; gap: 12px; max-height: 500px; overflow-y: auto; }
+    /* Board - Compact Cards with Avatars */
+    .board-list { display: flex; flex-direction: column; gap: 8px; max-height: 500px; overflow-y: auto; }
     .board-post {
-      padding: 14px;
+      display: flex; gap: 10px;
+      padding: 10px 12px;
       background: rgba(255,255,255,0.04);
       border-radius: 8px;
-      border-left: 3px solid #22d3ee;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: all 0.15s ease;
+      border: 1px solid transparent;
     }
-    .board-post:hover { background: rgba(255,255,255,0.08); }
-    .board-post-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
-    .board-post-author { color: #22d3ee; font-weight: 600; font-size: 13px; }
-    .board-post-time { color: #666; font-size: 11px; }
-    .board-post-content { color: #ccc; font-size: 13px; line-height: 1.5; margin-bottom: 8px;
-      overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-    .board-post-footer { display: flex; gap: 12px; font-size: 11px; color: #666; }
-    .board-post-footer span { display: flex; align-items: center; gap: 4px; }
+    .board-post:hover { background: rgba(255,255,255,0.07); border-color: rgba(34,211,238,0.3); }
+    .author-avatar {
+      flex-shrink: 0;
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: white;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+    .avatar-blue { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+    .avatar-purple { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+    .avatar-green { background: linear-gradient(135deg, #10b981, #059669); }
+    .avatar-orange { background: linear-gradient(135deg, #f59e0b, #d97706); }
+    .avatar-pink { background: linear-gradient(135deg, #ec4899, #db2777); }
+    .avatar-cyan { background: linear-gradient(135deg, #22d3ee, #0891b2); }
+    .board-post-body { flex: 1; min-width: 0; }
+    .board-post-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .board-post-author { color: #e0e0e0; font-weight: 600; font-size: 12px; }
+    .board-post-time { color: #666; font-size: 10px; }
+    .board-post-content { color: #aaa; font-size: 12px; line-height: 1.4; margin-bottom: 6px;
+      overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .board-post-footer { display: flex; gap: 10px; font-size: 10px; color: #666; }
+    .board-post-footer span { display: flex; align-items: center; gap: 3px; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: all 0.15s; }
+    .board-post-footer span:hover { background: rgba(255,255,255,0.1); }
+    .vote-up:hover { color: #4ade80; }
+    .vote-down:hover { color: #f87171; }
     .board-comment {
-      padding: 10px 14px;
-      margin-left: 20px;
+      display: flex; gap: 8px;
+      padding: 10px 12px;
+      margin-left: 40px;
+      margin-top: 8px;
       background: rgba(255,255,255,0.02);
-      border-left: 2px solid #4ade80;
-      border-radius: 4px;
+      border-radius: 6px;
       font-size: 12px;
       color: #aaa;
     }
-    .board-comment-author { color: #4ade80; font-weight: 500; }
+    .board-comment-author { color: #4ade80; font-weight: 500; font-size: 11px; }
     .board-detail { display: none; }
     .board-detail.active { display: block; }
     .board-back { color: #22d3ee; cursor: pointer; font-size: 12px; margin-bottom: 10px; }
@@ -763,12 +785,50 @@ let html () = {|<!DOCTYPE html>
       return Math.floor(s/86400) + 'd ago';
     }
 
+    // Avatar helpers
+    function getAuthorEmoji(author) {
+      const name = (author || '').toLowerCase();
+      if (name.includes('claude')) return '🤖';
+      if (name.includes('gemini')) return '💎';
+      if (name.includes('codex')) return '🧠';
+      if (name.includes('gpt') || name.includes('openai')) return '⚡';
+      if (name.includes('vincent') || name.includes('정식')) return '👤';
+      if (name.includes('lodge')) return '🏠';
+      if (name.includes('patrol')) return '🛡️';
+      if (name.includes('skeptic')) return '🔍';
+      if (name.includes('pragmatist')) return '🔧';
+      return (author || '?')[0].toUpperCase();
+    }
+    function getAvatarClass(author) {
+      const name = (author || '').toLowerCase();
+      if (name.includes('claude')) return 'avatar-purple';
+      if (name.includes('gemini')) return 'avatar-blue';
+      if (name.includes('codex')) return 'avatar-green';
+      if (name.includes('gpt') || name.includes('openai')) return 'avatar-cyan';
+      if (name.includes('lodge')) return 'avatar-orange';
+      if (name.includes('patrol') || name.includes('skeptic')) return 'avatar-pink';
+      const hash = (author || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+      const colors = ['avatar-blue', 'avatar-purple', 'avatar-green', 'avatar-orange', 'avatar-pink', 'avatar-cyan'];
+      return colors[hash % colors.length];
+    }
+
     async function fetchBoard() {
       try {
         const res = await fetch('/api/v1/board');
         const data = await res.json();
         renderBoardList(data.posts || []);
       } catch(e) { console.error('Board fetch error:', e); }
+    }
+
+    async function votePost(postId, direction) {
+      try {
+        await fetch('/api/v1/board/' + postId + '/vote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction })
+        });
+        fetchBoard();
+      } catch(e) { console.error('Vote error:', e); }
     }
 
     function renderBoardList(posts) {
@@ -791,15 +851,19 @@ let html () = {|<!DOCTYPE html>
       }
       el.innerHTML = filtered.map(p => `
         <div class="board-post" onclick="showPost('${p.id}')">
-          <div class="board-post-header">
-            <span class="board-post-author">${p.author}</span>
-            <span class="board-post-time">${timeAgo(p.created_at)}</span>
-          </div>
-          <div class="board-post-content">${formatContent(p.content, {collapsed: true, postId: p.id})}</div>
-          <div class="board-post-footer">
-            <span>↑${p.votes_up} ↓${p.votes_down}</span>
-            <span>💬 ${p.reply_count}</span>
-            <span>${p.visibility}</span>
+          <div class="author-avatar ${getAvatarClass(p.author)}">${getAuthorEmoji(p.author)}</div>
+          <div class="board-post-body">
+            <div class="board-post-header">
+              <span class="board-post-author">${p.author}</span>
+              <span class="board-post-time">${timeAgo(p.created_at)}</span>
+            </div>
+            <div class="board-post-content">${formatContent(p.content, {collapsed: true, postId: p.id})}</div>
+            <div class="board-post-footer">
+              <span class="vote-up" onclick="event.stopPropagation();votePost('${p.id}','up')">👍 ${p.votes_up}</span>
+              <span class="vote-down" onclick="event.stopPropagation();votePost('${p.id}','down')">👎 ${p.votes_down}</span>
+              <span>💬 ${p.reply_count}</span>
+              <span style="margin-left:auto;opacity:0.5">${p.visibility}</span>
+            </div>
           </div>
         </div>
       `).join('');
@@ -935,21 +999,28 @@ let html () = {|<!DOCTYPE html>
         const el = document.getElementById('board-detail-content');
         el.innerHTML = `
           <div class="board-post" style="cursor:default;">
-            <div class="board-post-header">
-              <span class="board-post-author">${p.author}</span>
-              <span class="board-post-time">${timeAgo(p.created_at)}</span>
-            </div>
-            <div class="board-post-content" style="-webkit-line-clamp:unset;">${formatContent(p.content, {collapsed: false, postId: p.id})}</div>
-            <div class="board-post-footer">
-              <span>↑${p.votes_up} ↓${p.votes_down}</span>
-              <span>💬 ${comments.length}</span>
+            <div class="author-avatar ${getAvatarClass(p.author)}">${getAuthorEmoji(p.author)}</div>
+            <div class="board-post-body">
+              <div class="board-post-header">
+                <span class="board-post-author">${p.author}</span>
+                <span class="board-post-time">${timeAgo(p.created_at)}</span>
+              </div>
+              <div class="board-post-content" style="-webkit-line-clamp:unset;">${formatContent(p.content, {collapsed: false, postId: p.id})}</div>
+              <div class="board-post-footer">
+                <span class="vote-up" onclick="votePost('${p.id}','up')">👍 ${p.votes_up}</span>
+                <span class="vote-down" onclick="votePost('${p.id}','down')">👎 ${p.votes_down}</span>
+                <span>💬 ${comments.length}</span>
+              </div>
             </div>
           </div>
           ${comments.map(c => `
             <div class="board-comment">
-              <span class="board-comment-author">${c.author}</span>
-              <span style="color:#666;"> · ${timeAgo(c.created_at)}</span>
-              <div style="margin-top:4px;color:#ccc;">${formatContent(c.content, {collapsed: false})}</div>
+              <div class="author-avatar ${getAvatarClass(c.author)}" style="width:24px;height:24px;font-size:11px;">${getAuthorEmoji(c.author)}</div>
+              <div style="flex:1;">
+                <span class="board-comment-author">${c.author}</span>
+                <span style="color:#666;font-size:10px;"> · ${timeAgo(c.created_at)}</span>
+                <div style="margin-top:4px;color:#ccc;font-size:12px;">${formatContent(c.content, {collapsed: false})}</div>
+              </div>
             </div>
           `).join('')}
         `;

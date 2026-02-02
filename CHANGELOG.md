@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.1] - 2026-02-02
+
+### Fixed
+- **Agent Specialties from Neo4j**: Load traits/keywords dynamically instead of hardcoding
+  - `load_agent_specialties_from_neo4j()`: Query Agent nodes for traits + description
+  - Keywords derived from: traits array + description words (>3 chars)
+  - 5-minute cache for performance
+
 ## [2.32.0] - 2026-02-02
 
 ### Added

@@ -176,7 +176,7 @@ let get_agent_context ~name ~max_tokens =
 
 (** Add message to agent context *)
 let add_to_context ~name ~role ~content =
-  let ctx = get_agent_context ~name ~max_tokens:128000 in
+  let ctx = get_agent_context ~name ~max_tokens:130000 in
   let msg = { role; content; timestamp = Unix.gettimeofday () } in
   let tokens = estimate_tokens content in
   ctx.messages <- ctx.messages @ [msg];
@@ -201,7 +201,7 @@ let rewrite_context ~name = !rewrite_context_ref ~name
 
 (** Build prompt with accumulated context *)
 let build_prompt_with_context ~name ~system_prompt ~user_prompt =
-  let ctx = get_agent_context ~name ~max_tokens:128000 in
+  let ctx = get_agent_context ~name ~max_tokens:130000 in
   if needs_rewrite ~name then rewrite_context ~name;
   let context_str = ctx.messages |> List.map (fun m -> m.content) |> String.concat "\n" in
   if String.length context_str > 0 then
@@ -212,7 +212,7 @@ let build_prompt_with_context ~name ~system_prompt ~user_prompt =
 (** Get context stats *)
 let get_context_stats ~name =
   match Hashtbl.find_opt agent_contexts name with
-  | None -> (0, 128000, 0)
+  | None -> (0, 130000, 0)
   | Some ctx -> (ctx.token_count, ctx.max_tokens, List.length ctx.messages)
 
 (** Update Lodge agent status - now tracks singleton state *)

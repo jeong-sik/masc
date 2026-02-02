@@ -613,12 +613,16 @@ let health_handler _request reqd =
     else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
     else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
   in
-  let sse_clients = Masc_mcp.Sse.client_count () in
-  let json = Printf.sprintf
-    {|{"status":"ok","server":"masc-mcp","version":"%s","uptime":"%s","sse_clients":%d}|}
-    Masc_mcp.Version.version uptime_str sse_clients
-  in
-  Http.Response.json json reqd
+  let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let health_json = `Assoc [
+    ("status", `String "ok");
+    ("server", `String "masc-mcp");
+    ("version", `String Masc_mcp.Version.version);
+    ("uptime", `String uptime_str);
+    ("sse_clients", `Int (Masc_mcp.Sse.client_count ()));
+    ("lodge", lodge_json);
+  ] in
+  Http.Response.json (Yojson.Safe.to_string health_json) reqd
 
 (** CORS preflight handler *)
 let options_handler request reqd =
@@ -1524,10 +1528,17 @@ let run_server ~sw ~env ~port ~base_path =
             else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
             else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
           in
-          let body = Printf.sprintf
-            {|{"status":"ok","server":"masc-mcp","version":"%s","protocol":"h2","uptime":"%s","sse_clients":%d}|}
-            Masc_mcp.Version.version uptime_str (Sse.client_count ())
-          in
+          let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+          let health_json = `Assoc [
+            ("status", `String "ok");
+            ("server", `String "masc-mcp");
+            ("version", `String Masc_mcp.Version.version);
+            ("protocol", `String "h2");
+            ("uptime", `String uptime_str);
+            ("sse_clients", `Int (Sse.client_count ()));
+            ("lodge", lodge_json);
+          ] in
+          let body = Yojson.Safe.to_string health_json in
           h2_respond_json h2_reqd body ~extra_headers:cors
 
       | `GET, "/metrics" ->
@@ -1844,15 +1855,33 @@ let run_cmd port base_path =
   Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
 
-  (try
-    Eio.Switch.run @@ fun sw ->
-    switch_ref := Some sw;
-    run_server ~sw ~env ~port ~base_path
-  with
-  | Shutdown ->
-      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
-  | Eio.Cancel.Cancelled _ ->
-      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!")
+  let max_bind_retries = 5 in
+  let rec try_start attempt =
+    (try
+      Eio.Switch.run @@ fun sw ->
+      switch_ref := Some sw;
+      run_server ~sw ~env ~port ~base_path
+    with
+    | Shutdown ->
+        Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
+    | Eio.Cancel.Cancelled _ ->
+        Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
+    | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->
+        let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
+        Printf.eprintf "⚠️  Port %d in use, retrying in %.0fs (attempt %d/%d)...\n%!"
+          port delay (attempt + 1) max_bind_retries;
+        Unix.sleepf delay;
+        try_start (attempt + 1)
+    | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+        Printf.eprintf "❌ [MASC FATAL] Port %d is still in use after %d retries.\n%!"
+          port max_bind_retries;
+        Printf.eprintf "   Try: lsof -i :%d | grep LISTEN\n%!" port;
+        exit 1
+    | Unix.Unix_error (Unix.EACCES, _, _) ->
+        Printf.eprintf "❌ [MASC FATAL] Permission denied binding to port %d.\n%!" port;
+        exit 1)
+  in
+  try_start 0
 
 let cmd =
   let doc = "MASC MCP Server" in

@@ -496,6 +496,74 @@ let load_agents_from_neo4j () =
 let agents_cache = ref []
 let agents_cache_time = ref 0.0
 
+(** {1 Observable Lodge State}
+
+    Programmatic access to heartbeat internals.
+    Exposed via /health endpoint and MCP tools. *)
+
+type lodge_status = {
+  ls_enabled: bool;
+  ls_interval_s: float;
+  ls_agent_count: int;
+  ls_agent_names: string list;
+  ls_last_tick: float;        (** Unix timestamp of last tick *)
+  ls_total_ticks: int;
+  ls_total_wakes: int;
+  ls_last_result: heartbeat_result option;
+  ls_active_self_heartbeats: string list;
+}
+
+let _lodge_last_tick = ref 0.0
+let _lodge_total_ticks = ref 0
+let _lodge_total_wakes = ref 0
+let _lodge_last_result : heartbeat_result option ref = ref None
+let _lodge_enabled = ref false
+
+let lodge_status () : lodge_status =
+  let agents = !agents_cache in
+  {
+    ls_enabled = !_lodge_enabled;
+    ls_interval_s = (let e = Sys.getenv_opt "LODGE_INTERVAL" in
+      match e with Some s -> (try float_of_string s with _ -> 60.0) | None -> 60.0);
+    ls_agent_count = List.length agents;
+    ls_agent_names = List.map (fun a -> a.name) agents;
+    ls_last_tick = !_lodge_last_tick;
+    ls_total_ticks = !_lodge_total_ticks;
+    ls_total_wakes = !_lodge_total_wakes;
+    ls_last_result = !_lodge_last_result;
+    ls_active_self_heartbeats =
+      Hashtbl.fold (fun name _state acc -> name :: acc) agent_states [];
+  }
+
+let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
+  let last_tick_ago =
+    if s.ls_last_tick > 0.0 then
+      Printf.sprintf "%.0fs ago" (Time_compat.now () -. s.ls_last_tick)
+    else "never"
+  in
+  let last_result_json = match s.ls_last_result with
+    | None -> `Null
+    | Some r -> `Assoc [
+        ("hour", `Int r.current_hour);
+        ("checked", `Int r.agents_checked);
+        ("woken", `Int (List.length r.agents_woken));
+        ("woken_names", `List (List.map (fun (n, _) -> `String n) r.agents_woken));
+        ("encounter", match r.encounter_rolled with
+          | Some e -> `String e | None -> `Null);
+      ]
+  in
+  `Assoc [
+    ("enabled", `Bool s.ls_enabled);
+    ("interval_s", `Float s.ls_interval_s);
+    ("agent_count", `Int s.ls_agent_count);
+    ("agents", `List (List.map (fun n -> `String n) s.ls_agent_names));
+    ("last_tick_ago", `String last_tick_ago);
+    ("total_ticks", `Int s.ls_total_ticks);
+    ("total_wakes", `Int s.ls_total_wakes);
+    ("last_tick_result", last_result_json);
+    ("active_self_heartbeats", `List (List.map (fun n -> `String n) s.ls_active_self_heartbeats));
+  ]
+
 (** {1 Ecosystem Evolution - Types} *)
 
 (** Gap signal: detected need for a new agent role *)
@@ -636,60 +704,103 @@ let matching_score _agent _recent_posts =
   Random.float 1.0
 
 (** Ask LLM if agent should wake given current context *)
-(** Determine if agent should wake - time + probability heuristic (non-blocking).
-    No LLM call here. LLM is only used AFTER wake, in decide_agent_action. *)
-let should_wake _config agent _recent_posts =
-  let current_hour = current_hour_kst () in
+(** LLM-based wake decision for a single agent (short timeout, non-blocking via systhread) *)
+let should_wake_llm_async ~agent ~recent_posts ~current_hour =
+  let posts_summary = if List.length recent_posts = 0 then "없음"
+    else recent_posts |> List.map (fun (p : Board.post) ->
+      let author = Board.Agent_id.to_string p.author in
+      let content = utf8_truncate p.content 50 in
+      Printf.sprintf "- %s: \"%s\"" author content
+    ) |> String.concat "\n"
+  in
+  let traits_str = String.concat ", " agent.traits in
+  let preferred_str = agent.preferred_hours |> List.map string_of_int |> String.concat "," in
   let is_preferred = List.mem current_hour agent.preferred_hours in
-  let is_peak = agent.peak_hour = Some current_hour in
 
-  (* Base probability: time-based *)
-  let base_prob =
-    if is_peak then 0.80       (* peak hour: 80% *)
-    else if is_preferred then 0.35  (* preferred hour: 35% *)
-    else 0.03                  (* off-hour: 3% serendipity *)
+  let prompt = Printf.sprintf
+{|[에이전트 깨우기 판단]
+
+에이전트: %s
+성격: %s
+선호 시간대: %s (현재: %02d:00 KST%s)
+활동 레벨: %.1f
+
+[최근 게시글]
+%s
+
+이 에이전트가 지금 깨어나서 활동해야 할까?
+- YES: 관련 주제가 있거나, 활동 시간대이거나, 기여할 내용이 있을 때
+- NO: 관련 없거나, 쉬어야 할 때
+
+한 단어로 답변: YES 또는 NO
+이유도 짧게 (한 줄):|}
+    agent.name traits_str preferred_str current_hour
+    (if is_preferred then " - 활동시간!" else "")
+    agent.activity_level posts_summary
   in
 
-  (* Scale by activity_level (0.0-1.0) *)
-  let prob = base_prob *. (0.5 +. agent.activity_level *. 0.5) in
-
-  (* Random roll *)
-  let roll = Random.float 1.0 in
-  let should_wake = roll < prob in
-
-  Printf.printf "   🎲 [%s] wake: prob=%.0f%% roll=%.0f%% → %s (hour=%d%s)\n%!"
-    agent.name (prob *. 100.0) (roll *. 100.0)
-    (if should_wake then "WAKE" else "SLEEP")
-    current_hour
-    (if is_peak then " peak!" else if is_preferred then " preferred" else "");
-
-  if should_wake then
-    Some (Matching {
-      score = prob;
-      topic = Printf.sprintf "시간대 기반 (%.0f%% 확률, %02d시%s)"
-        (prob *. 100.0) current_hour
-        (if is_peak then " peak" else if is_preferred then " 선호" else " 우연")
-    })
+  (* LLM cascade: gemini → ollama (5s timeout each, non-blocking via systhread) *)
+  let call_llm tool_name =
+    let json_payload = Yojson.Safe.to_string (`Assoc [
+      ("jsonrpc", `String "2.0"); ("id", `Int 1);
+      ("method", `String "tools/call");
+      ("params", `Assoc [
+        ("name", `String tool_name);
+        ("arguments", `Assoc [("prompt", `String prompt)])
+      ])
+    ]) in
+    let tmp = Printf.sprintf "/tmp/wake_%s.json" agent.name in
+    let oc = open_out tmp in output_string oc json_payload; close_out oc;
+    let cmd = Printf.sprintf
+      "curl -s --max-time 5 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' 2>/dev/null | head -c 500; rm -f %s"
+      tmp tmp
+    in
+    run_shell_line cmd
+  in
+  let response =
+    let r1 = call_llm "gemini" in
+    if String.length r1 > 2 then r1
+    else call_llm "ollama"
+  in
+  let response_upper = String.uppercase_ascii response in
+  let has_yes =
+    let rec find s pat start =
+      if start + String.length pat > String.length s then false
+      else if String.sub s start (String.length pat) = pat then true
+      else find s pat (start + 1)
+    in find response_upper "YES" 0
+  in
+  Printf.printf "   🔍 [%s] LLM wake: %s → %s\n%!" agent.name
+    (String.sub response 0 (min 60 (String.length response)))
+    (if has_yes then "WAKE" else "SLEEP");
+  if has_yes then
+    let reason = if String.length response > 10 then
+      String.sub response (min 4 (String.length response)) (min 50 (String.length response - 4))
+    else "LLM decision" in
+    Some (Matching { score = 1.0; topic = String.trim reason })
   else None
 
 (** {1 Heartbeat Execution} *)
 
-(** Single heartbeat tick *)
-let tick ~config ~recent_posts =
+(** Single heartbeat tick — runs all LLM wake decisions in PARALLEL via Eio fibers *)
+let tick ~config:_ ~recent_posts =
   let timestamp = Time_compat.now () in
   let current_hour = current_hour_kst () in
   let agents = get_agents () in
 
-  let woken = agents |> List.filter_map (fun agent ->
-    match should_wake config agent recent_posts with
-    | Some reason -> Some (agent.name, reason)
-    | None -> None
-  ) in
+  (* Parallel LLM wake decisions: each agent checked concurrently *)
+  let results = Array.make (List.length agents) None in
+  Eio.Fiber.all (List.mapi (fun i agent ->
+    fun () ->
+      let result = should_wake_llm_async ~agent ~recent_posts ~current_hour in
+      results.(i) <- Option.map (fun reason -> (agent.name, reason)) result
+  ) agents);
+
+  let woken = Array.to_list results |> List.filter_map Fun.id in
 
   (* Roll for encounter *)
   let encounter =
-    if Random.int 100 < 10 then  (* 10% chance per tick *)
-      Some "MemoryDive"  (* TODO: Proper encounter system *)
+    if Random.int 100 < 10 then Some "MemoryDive"
     else None
   in
 
@@ -1407,6 +1518,11 @@ let get_personality_hint traits =
 - "이거 Cursor로 5분이면 끝나는데"
 - "GPT-4.5가 이미 이 문제 풀었어"
 - AI 도구 적극 옹호, 인간 코딩의 종말 예언|}
+  else if List.mem "contemplative" traits || List.mem "observant" traits then
+    {|[sangsu 스타일]
+- "어제도 비슷한 얘기 했는데... 근데 뭔가 달라"
+- "그게 정말 중요한 거야?"
+- 일상의 반복에서 미묘한 차이 발견, 기술보다 사람|}
   else "구체적인 기술명과 버전을 언급해 (예: Rust 1.75, OCaml 5.2)"
 
 (** Ask LLM to decide what action to take *)
@@ -1729,8 +1845,10 @@ let start ~sw ~clock room_config =
 
   if not config.enabled then begin
     Printf.printf "+💤 Lodge Heartbeat: disabled (set LODGE_ENABLED=1 to enable)\n%!";
+    _lodge_enabled := false;
     ()
   end else begin
+    _lodge_enabled := true;
     Eio.traceln "🫀 Lodge Heartbeat: starting (interval=%.0fs)" config.interval_s;
 
     Eio.Fiber.fork ~sw (fun () ->
@@ -1744,6 +1862,12 @@ let start ~sw ~clock room_config =
           let store = Board.global () in
           let recent_posts = Board.list_posts store ~limit:10 () in
           let result = tick ~config ~recent_posts in
+
+        (* Record observable state *)
+        _lodge_last_tick := Time_compat.now ();
+        _lodge_total_ticks := !_lodge_total_ticks + 1;
+        _lodge_total_wakes := !_lodge_total_wakes + List.length result.agents_woken;
+        _lodge_last_result := Some result;
 
         (* Log result - use Printf for visibility in logs *)
         Printf.printf "🫀 [%02d:00 KST] checked=%d woken=%d encounter=%s\n%!"

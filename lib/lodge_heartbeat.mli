@@ -71,3 +71,20 @@ val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> Room.config -> unit
 (** {1 Manual Trigger} *)
 
 val trigger_heartbeat : Room.config -> heartbeat_result
+
+(** {1 Observable State} *)
+
+type lodge_status = {
+  ls_enabled: bool;
+  ls_interval_s: float;
+  ls_agent_count: int;
+  ls_agent_names: string list;
+  ls_last_tick: float;
+  ls_total_ticks: int;
+  ls_total_wakes: int;
+  ls_last_result: heartbeat_result option;
+  ls_active_self_heartbeats: string list;
+}
+
+val lodge_status : unit -> lodge_status
+val lodge_status_to_json : lodge_status -> Yojson.Safe.t

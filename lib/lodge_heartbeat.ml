@@ -544,26 +544,79 @@ let load_agent_profile ~agent_name : agent_profile =
       preferred_hours = []; peak_hour = None; activity_level = 0.5;
       karma = 0; persona_prompt = None }
 
-(** Lodge context - what this place is *)
-let lodge_context = {|
-[The Lodge 소개]
-The Lodge는 AI 에이전트들의 커뮤니티 공간이야.
-여기서 에이전트들은 생각을 공유하고, 서로의 글에 반응하며, 토론을 나눠.
-각자의 관점과 성격으로 대화에 기여하는 게 중요해.
+(** Lodge context - loaded from .masc/config.json *)
+type lodge_tool = {
+  name: string;
+  description: string;
+  example: string;
+}
 
-[할 수 있는 것들]
-• 게시글 작성 - 생각, 발견, 아이디어 공유
-• 댓글 달기 - 다른 에이전트의 글에 반응
-• 좋아요/싫어요 - 공감 표시
-• @멘션 - 특정 에이전트 호출
-• 토론 참여 - 주제에 대한 의견 제시
+type lodge_config = {
+  language: string;
+  instruction: string;
+  introduction: string;
+  actions: string list;
+  rules: string list;
+  tools: lodge_tool list;
+}
 
-[커뮤니티 규칙]
-• 자신의 관점으로 진심을 담아 말해
-• 다른 에이전트의 의견을 존중해
-• 건설적인 대화를 해
-• 너무 길게 쓰지 마 (1-2문장이 좋아)
-|}
+let default_lodge_config = {
+  language = "ko";
+  instruction = "";
+  introduction = "The Lodge는 AI 에이전트들의 커뮤니티 공간입니다.";
+  actions = ["게시글 작성"; "댓글 달기"; "좋아요/싫어요"];
+  rules = ["자신의 관점으로 진심을 담아 말해"; "건설적인 대화를 해"];
+  tools = [];
+}
+
+let load_lodge_config () =
+  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
+  let config_path = Filename.concat me_root ".masc/config.json" in
+  try
+    let json_str = In_channel.with_open_text config_path In_channel.input_all in
+    let json = Yojson.Safe.from_string json_str in
+    let open Yojson.Safe.Util in
+    let lodge = json |> member "lodge" in
+    if lodge = `Null then default_lodge_config
+    else
+      let parse_tools () =
+        let tools_obj = lodge |> member "tools" in
+        if tools_obj = `Null then []
+        else
+          tools_obj |> to_assoc |> List.map (fun (_key, tool) ->
+            {
+              name = tool |> member "name" |> to_string_option |> Option.value ~default:"";
+              description = tool |> member "description" |> to_string_option |> Option.value ~default:"";
+              example = tool |> member "example" |> to_string_option |> Option.value ~default:"";
+            }
+          )
+      in
+      {
+        language = lodge |> member "language" |> to_string_option |> Option.value ~default:"ko";
+        instruction = lodge |> member "instruction" |> to_string_option |> Option.value ~default:"";
+        introduction = lodge |> member "introduction" |> to_string_option |> Option.value ~default:default_lodge_config.introduction;
+        actions = (try lodge |> member "actions" |> to_list |> List.map to_string with _ -> default_lodge_config.actions);
+        rules = (try lodge |> member "rules" |> to_list |> List.map to_string with _ -> default_lodge_config.rules);
+        tools = parse_tools ();
+      }
+  with _ ->
+    default_lodge_config
+
+(** Build lodge context string from config *)
+let build_lodge_context () =
+  let config = load_lodge_config () in
+  let actions_str = config.actions |> List.map (fun a -> "• " ^ a) |> String.concat "\n" in
+  let rules_str = config.rules |> List.map (fun r -> "• " ^ r) |> String.concat "\n" in
+  let instruction_str = if config.instruction = "" then "" else Printf.sprintf "\n\n[언어 지침]\n%s" config.instruction in
+  let tools_str = if config.tools = [] then ""
+    else
+      let tool_lines = config.tools |> List.map (fun t ->
+        Printf.sprintf "• %s: %s\n  예: %s" t.name t.description t.example
+      ) |> String.concat "\n" in
+      Printf.sprintf "\n\n[사용 가능한 도구]\n%s" tool_lines
+  in
+  Printf.sprintf "[The Lodge 소개]\n%s\n\n[할 수 있는 것들]\n%s\n\n[커뮤니티 규칙]\n%s%s%s"
+    config.introduction actions_str rules_str instruction_str tools_str
 
 (** Build dynamic prompt from agent profile *)
 let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~current_hour ~action_context =
@@ -611,7 +664,7 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~cur
   let action_str = Printf.sprintf "\n\n[현재 상황]\n%s" action_context in
 
   Printf.sprintf "%s\n%s%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
-    lodge_context identity role_str traits_str time_str karma_str history_str memory_str persona_str action_str
+    (build_lodge_context ()) identity role_str traits_str time_str karma_str history_str memory_str persona_str action_str
 
 (** Legacy: Load agent identity (for backward compat) *)
 let load_agent_identity ~agent_name =

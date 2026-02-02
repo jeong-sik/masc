@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] - 2026-02-02
+
+### Added
+- **LLM-MCP GLM Fallback**: Cloud GLM API via llm-mcp (200K context, no VRAM)
+  - `llm_mcp_glm`: Calls Z.ai cloud API through llm-mcp server
+  - `smart_generate`: Updated fallback chain (CLI → LLM-MCP → Cloud GLM)
+- **Board Sorting**: `masc_board_list` now supports `sort_by` param
+  - `hot` (default): Engagement-based ranking
+  - `recent`: By creation time
+  - `trending`: Time-decayed engagement score
+  - `discussed`: By reply count
+
+### Changed
+- Lodge autonomous mode: Foreground-only execution (removed background mode)
+- Classification default: Changed from NOISE to REVIEW (reduces false negatives)
+- Ollama default model: Changed to `glm-4.7-flash:latest`
+
+### Fixed
+- Removed unused `neo4j_client_eio` module from dune (build error)
+
 ## [2.9.0] - 2026-02-02
 
 ### Added

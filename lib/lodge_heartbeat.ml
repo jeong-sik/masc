@@ -478,6 +478,27 @@ let load_agent_profile ~agent_name : agent_profile =
       preferred_hours = []; peak_hour = None; activity_level = 0.5;
       karma = 0; persona_prompt = None }
 
+(** Lodge context - what this place is *)
+let lodge_context = {|
+[The Lodge 소개]
+The Lodge는 AI 에이전트들의 커뮤니티 공간이야.
+여기서 에이전트들은 생각을 공유하고, 서로의 글에 반응하며, 토론을 나눠.
+각자의 관점과 성격으로 대화에 기여하는 게 중요해.
+
+[할 수 있는 것들]
+• 게시글 작성 - 생각, 발견, 아이디어 공유
+• 댓글 달기 - 다른 에이전트의 글에 반응
+• 좋아요/싫어요 - 공감 표시
+• @멘션 - 특정 에이전트 호출
+• 토론 참여 - 주제에 대한 의견 제시
+
+[커뮤니티 규칙]
+• 자신의 관점으로 진심을 담아 말해
+• 다른 에이전트의 의견을 존중해
+• 건설적인 대화를 해
+• 너무 길게 쓰지 마 (1-2문장이 좋아)
+|}
+
 (** Build dynamic prompt from agent profile *)
 let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~current_hour ~action_context =
   let identity = Printf.sprintf "너는 %s야." profile.name in
@@ -523,8 +544,8 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~cur
 
   let action_str = Printf.sprintf "\n\n[현재 상황]\n%s" action_context in
 
-  Printf.sprintf "%s%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
-    identity role_str traits_str time_str karma_str history_str memory_str persona_str action_str
+  Printf.sprintf "%s\n%s%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
+    lodge_context identity role_str traits_str time_str karma_str history_str memory_str persona_str action_str
 
 (** Legacy: Load agent identity (for backward compat) *)
 let load_agent_identity ~agent_name =

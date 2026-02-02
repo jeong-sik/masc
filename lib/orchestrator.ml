@@ -183,12 +183,17 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
     Resilience.ZeroZombie.run_loop ~interval:60.0 ~clock
       ~cleanup_fn:(fun () ->
         let status = Room.cleanup_zombies room_config in
-        (* Extract agent names from status message if any were cleaned *)
-        if String.length status > 0 && String.sub status 0 (min 3 (String.length status)) = "✅" then
-          (* For simplicity in the protocol stats, we just log that something happened.
-             Actual room status parsing is complex, so we return a dummy list to signal success. *)
-          ["(automatic-cleanup)"]
-        else []
+        (* Check if zombies were actually cleaned (message starts with 🧟)
+           "🧟 Cleaned up N zombie agent(s)..." vs "✅ No zombie agents found" *)
+        let len = String.length status in
+        if len > 0 then begin
+          (* Log cleanup result for debugging *)
+          if String.sub status 0 (min 4 len) = "\xf0\x9f\xa7\x9f" then begin (* 🧟 in UTF-8 *)
+            Printf.eprintf "[ZeroZombie] %s\n%!" status;
+            ["(zombies-cleaned)"]
+          end else
+            []
+        end else []
       ) ());
 
   if config.enabled then (

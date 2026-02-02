@@ -226,31 +226,21 @@
     </header>
 
     <div class="panel">
-      <h2>🤖 Agents</h2>
-      <div class="agent-list" id="agents"
-           hx-ext="sse"
-           sse-connect="http://127.0.0.1:8935/sse?room=me"
-           sse-swap="agent_update">
+      <h2>🤖 Agents <span id="sse-status" style="font-size:0.7em">⚪</span></h2>
+      <div class="agent-list" id="agents">
         <div class="agent"><span class="icon">🤖</span><span class="name">Loading...</span></div>
       </div>
     </div>
 
     <div class="panel">
       <h2>📡 Event Stream</h2>
-      <div class="event-stream" id="events"
-           hx-ext="sse"
-           sse-connect="http://127.0.0.1:8935/sse?room=me"
-           sse-swap="broadcast"
-           hx-swap="afterbegin">
+      <div class="event-stream" id="events">
       </div>
     </div>
 
     <div class="panel">
       <h2>📋 Tasks</h2>
-      <div class="task-list" id="tasks"
-           hx-ext="sse"
-           sse-connect="http://127.0.0.1:8935/sse?room=me"
-           sse-swap="task_update">
+      <div class="task-list" id="tasks">
         <div class="task">○ Loading...</div>
       </div>
     </div>
@@ -535,19 +525,65 @@
       loadTasks();
     }
 
-    // Connect to SSE for real-time updates
-    const evtSource = new EventSource('http://127.0.0.1:8935/sse?room=me');
-    evtSource.addEventListener('broadcast', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        addLocalEvent(`${data.agent || 'system'}: ${data.message || data}`);
-      } catch (err) {
-        addLocalEvent(e.data);
+    // Single SSE connection with reconnection logic
+    let evtSource = null;
+    let reconnectAttempts = 0;
+    const maxReconnectDelay = 30000;  // max 30s between retries
+
+    function updateSSEStatus(status) {
+      const el = document.getElementById('sse-status');
+      if (el) el.textContent = status;
+    }
+
+    function connectSSE() {
+      if (evtSource) {
+        evtSource.close();
+      }
+
+      updateSSEStatus('🟡');  // connecting
+      evtSource = new EventSource('http://127.0.0.1:8935/sse?room=me');
+
+      evtSource.onopen = () => {
+        reconnectAttempts = 0;
+        updateSSEStatus('🟢');  // connected
+        addLocalEvent('✅ SSE connected');
+      };
+
+      evtSource.addEventListener('broadcast', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          addLocalEvent(`${data.agent || 'system'}: ${data.message || data}`);
+        } catch (err) {
+          addLocalEvent(e.data);
+        }
+      });
+
+      evtSource.addEventListener('agent_update', () => loadStatus());
+      evtSource.addEventListener('task_update', () => loadStatus());
+      evtSource.addEventListener('heartbeat', () => {});  // keep-alive, ignore
+
+      evtSource.onerror = (err) => {
+        updateSSEStatus('🔴');  // disconnected
+        evtSource.close();
+
+        // Exponential backoff reconnect
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+        addLocalEvent(`⚠️ SSE disconnected, reconnecting in ${delay/1000}s...`);
+        setTimeout(connectSSE, delay);
+      };
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      if (evtSource) {
+        evtSource.close();
+        evtSource = null;
       }
     });
-    evtSource.addEventListener('agent_update', () => loadStatus());
-    evtSource.addEventListener('task_update', () => loadStatus());
-    evtSource.onerror = () => addLocalEvent('⚠️ SSE connection error');
+
+    // Start SSE connection
+    connectSSE();
 
     // Join room on startup (reuse existing identity if available)
     async function joinRoom() {

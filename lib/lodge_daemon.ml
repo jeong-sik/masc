@@ -63,7 +63,7 @@ let default_config = {
   heartbeat_interval_s = 30.0;
   reflection_interval_s = 3600.0;  (* 1 hour *)
   ollama_url = "http://127.0.0.1:11434";
-  ollama_model = "hf.co/LiquidAI/LFM2-1.2B-GGUF:Q8_0";
+  ollama_model = "glm-4.7-flash:latest";  (* 128k context *)
   neo4j_enabled = true;
 }
 
@@ -86,8 +86,8 @@ let load_config () =
     reflection_interval_s = get_env_float "LODGE_REFLECTION_INTERVAL" 3600.0;
     ollama_url = Option.value ~default:"http://127.0.0.1:11434"
       (Sys.getenv_opt "OLLAMA_URL");
-    ollama_model = Option.value ~default:"hf.co/LiquidAI/LFM2-1.2B-GGUF:Q8_0"
-      (Sys.getenv_opt "LODGE_MODEL");
+    (* Always use long-context model - no env override needed *)
+    ollama_model = "glm-4.7-flash:latest";
     neo4j_enabled = get_env_bool "LODGE_NEO4J_ENABLED" true;
   }
 

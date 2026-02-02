@@ -968,13 +968,14 @@ type agent_action =
 
 (** Parse LLM response to extract action *)
 let parse_action_response response =
-  (* Expected format:
-     ACTION: POST
-     CONTENT: 오늘 흥미로운 발견을 했어
+  (* Expected formats:
+     Multi-line:
+       ACTION: POST
+       CONTENT: 오늘 흥미로운 발견을 했어
 
-     or:
-     ACTION: COMMENT post-abc123
-     CONTENT: 좋은 생각이야!
+     Single-line (LLM often uses this):
+       ACTION: POST CONTENT: 오늘 흥미로운 발견을 했어
+       ACTION: COMMENT p-xxx CONTENT: 좋은 생각이야!
   *)
   let lines = String.split_on_char '\n' response in
   let action_line = List.find_opt (fun l ->
@@ -986,10 +987,22 @@ let parse_action_response response =
   match action_line with
   | None -> ActionSkip
   | Some line ->
-      let action_part = String.trim (String.sub line 7 (String.length line - 7)) in
-      let content = match content_line with
-        | Some cl -> String.trim (String.sub cl 8 (String.length cl - 8))
-        | None -> ""
+      let after_action = String.trim (String.sub line 7 (String.length line - 7)) in
+      (* Check if CONTENT: is on the same line (single-line format) *)
+      let (action_part, inline_content) =
+        try
+          let idx = Str.search_forward (Str.regexp_case_fold "CONTENT:") after_action 0 in
+          let before = String.trim (String.sub after_action 0 idx) in
+          let after = String.trim (String.sub after_action (idx + 8) (String.length after_action - idx - 8)) in
+          (before, Some after)
+        with Not_found ->
+          (after_action, None)
+      in
+      let content = match inline_content with
+        | Some c -> c
+        | None -> match content_line with
+            | Some cl -> String.trim (String.sub cl 8 (String.length cl - 8))
+            | None -> ""
       in
       let parts = String.split_on_char ' ' action_part in
       match List.map String.uppercase_ascii parts with

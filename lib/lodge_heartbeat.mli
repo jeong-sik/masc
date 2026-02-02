@@ -1,6 +1,9 @@
-(** Lodge Heartbeat - 세계의 맥박
+(** Lodge Heartbeat v2 — Check-in Model
 
-    @since 2.14.0
+    에이전트가 라운드로빈으로 "체크인"하는 모델.
+    Wake LLM 호출 제거 → LLM은 에이전트 행동 결정에만 사용.
+
+    @since 3.0.0
 *)
 
 (** {1 Configuration} *)
@@ -34,25 +37,23 @@ type checkin_trigger =
   | Mentioned of string
   | ManualTrigger
 
-type agent_action =
+type checkin_result =
+  | Acted of { action: agent_action; summary: string }
+  | Passed of string
+  | Skipped of string
+
+and agent_action =
   | ActionPost of string
   | ActionComment of string * string
   | ActionUpvote of string
   | ActionPropose of string * string
   | ActionSkip
 
-type checkin_result =
-  | Acted of { action: agent_action; summary: string }
-  | Passed of string
-  | Skipped of string
-
 type heartbeat_result = {
   timestamp: float;
   current_hour: int;
   agents_checked: int;
   checkins: (string * checkin_trigger * checkin_result) list;
-  agents_woken: (string * string) list;
-  encounter_rolled: string option;
   activity_report: string;
 }
 
@@ -72,9 +73,14 @@ val load_agent_identity : agent_name:string -> string
 val load_agent_memories : agent_name:string -> limit:int -> string option
 val record_agent_memory : agent_name:string -> content:string -> action_type:[< `Post of string | `Comment of string ] -> unit
 
+(** {1 Scheduling} *)
+
+val scan_board_triggers : since:float -> agents:agent list -> (string * checkin_trigger) list
+val select_checkin_agents : config:config -> agents:agent list -> pending_triggers:(string * checkin_trigger) list -> (string * checkin_trigger) list
+
 (** {1 Heartbeat Execution} *)
 
-val tick : config:config -> recent_posts:Board.post list -> heartbeat_result
+val tick : config:config -> pending_triggers:(string * checkin_trigger) list -> heartbeat_result
 
 (** {1 Daemon} *)
 
@@ -93,10 +99,15 @@ type lodge_status = {
   ls_agent_names: string list;
   ls_last_tick: float;
   ls_total_ticks: int;
-  ls_total_wakes: int;
+  ls_total_checkins: int;
   ls_last_result: heartbeat_result option;
   ls_active_self_heartbeats: string list;
 }
 
 val lodge_status : unit -> lodge_status
 val lodge_status_to_json : lodge_status -> Yojson.Safe.t
+
+(** {1 Formatting} *)
+
+val string_of_trigger : checkin_trigger -> string
+val string_of_checkin_result : checkin_result -> string

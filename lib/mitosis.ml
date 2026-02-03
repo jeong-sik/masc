@@ -797,7 +797,9 @@ let write_status_with_backend ~room_config ~cell ~config =
 
   (* 2. Write to backend (for cross-machine collaboration) *)
   let key = Printf.sprintf "mitosis:%s" node_id in
-  ignore (backend_set room_config ~key ~value:json_str)
+  (match backend_set room_config ~key ~value:json_str with
+   | Ok () -> ()
+   | Error e -> Printf.eprintf "[WARN] mitosis: backend_set failed for %s: %s\n%!" node_id (Backend.show_error e))
 
 (** Get all mitosis statuses from backend (for monitoring other agents) *)
 let get_all_statuses ~room_config =

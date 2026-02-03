@@ -707,7 +707,10 @@ let write_json_root config path json =
 
 let delete_path_root config path =
   match root_key_of_path config path with
-  | Some key -> ignore (backend_delete config ~key)
+  | Some key ->
+    (match backend_delete config ~key with
+     | Ok _ -> ()
+     | Error e -> Printf.eprintf "[WARN] delete_path_root: backend_delete failed for %s: %s\n%!" key (Backend.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists_root config path =
@@ -740,7 +743,10 @@ let write_json config path json =
 
 let delete_path config path =
   match key_of_path config path with
-  | Some key -> ignore (backend_delete config ~key)
+  | Some key ->
+    (match backend_delete config ~key with
+     | Ok _ -> ()
+     | Error e -> Printf.eprintf "[WARN] delete_path: backend_delete failed for %s: %s\n%!" key (Backend.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists config path =

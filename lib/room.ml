@@ -2512,7 +2512,8 @@ let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
       in
       (match previous_room with
        | Some prev when prev <> room_id && should_auto_leave ->
-           ignore (leave config ~agent_name:effective_agent_name)
+           (try ignore (leave config ~agent_name:effective_agent_name)
+            with e -> Printf.eprintf "[WARN] room: auto-leave from %s failed: %s\n%!" prev (Printexc.to_string e))
        | _ -> ());
 
       (* Update current room *)
@@ -2520,7 +2521,8 @@ let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
 
       (* Initialize the room on first entry (no auto-join). *)
       if not (is_initialized config) then
-        ignore (init config ~agent_name:None);
+        (try ignore (init config ~agent_name:None)
+         with e -> Printf.eprintf "[WARN] room: init failed for %s: %s\n%!" room_id (Printexc.to_string e));
 
       (* Join the new room *)
       let join_result = join config ~agent_name:effective_agent_name ~capabilities:[] () in

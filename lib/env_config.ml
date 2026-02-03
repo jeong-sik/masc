@@ -215,6 +215,40 @@ module LodgeV2 = struct
     get_float ~default:1800.0 "MASC_LODGE_MIN_CHECKIN_GAP"
 end
 
+(** {1 Lodge Selection — Thompson Sampling Configuration} *)
+
+module LodgeSelection = struct
+  (** Max ticks without selection before forced inclusion (starvation rescue).
+      With 4h ticks, 12 ticks = 48 hours max inactivity. *)
+  let max_starvation_ticks =
+    get_int ~default:12 "MASC_LODGE_MAX_STARVATION_TICKS"
+
+  (** Coefficient for logarithmic starvation bonus.
+      bonus = coefficient * ln(1 + ticks_since_selection) *)
+  let starvation_bonus_coefficient =
+    get_float ~default:0.15 "MASC_LODGE_STARVATION_BONUS_COEF"
+
+  (** Weight for Thompson score in final selection (0-1).
+      Remaining weight goes to starvation bonus.
+      Higher = more quality-driven, lower = more fairness-driven. *)
+  let thompson_weight =
+    get_float ~default:0.7 "MASC_LODGE_THOMPSON_WEIGHT"
+
+  (** Use LLM for final selection decision (experimental) *)
+  let use_llm_selection =
+    get_bool ~default:false "MASC_LODGE_LLM_SELECTION"
+
+  (** Stats persistence interval (seconds) *)
+  let stats_persist_interval_s =
+    get_float ~default:300.0 "MASC_LODGE_STATS_PERSIST_INTERVAL"
+
+  (** Vote decay factor for Beta prior updates.
+      Applied to existing priors before adding new evidence.
+      0.95 decay ~ 7-day half-life (0.95^168 = 0.0002). *)
+  let vote_decay_factor =
+    get_float ~default:0.95 "MASC_LODGE_VOTE_DECAY_FACTOR"
+end
+
 (** {1 Endpoint Configuration} *)
 
 module Endpoints = struct
@@ -251,4 +285,7 @@ let print_summary () =
     RateLimit.cleanup_interval_seconds RateLimit.entry_max_age_seconds;
   Printf.eprintf "[env_config] LodgeV2: tick=%.0fs agents_per_tick=%d planner=%b reflection_thresh=%d\n%!"
     LodgeV2.tick_interval_seconds LodgeV2.agents_per_tick
-    LodgeV2.use_planner LodgeV2.reflection_threshold
+    LodgeV2.use_planner LodgeV2.reflection_threshold;
+  Printf.eprintf "[env_config] LodgeSelection: max_starvation=%d thompson_weight=%.2f decay=%.2f\n%!"
+    LodgeSelection.max_starvation_ticks LodgeSelection.thompson_weight
+    LodgeSelection.vote_decay_factor

@@ -636,6 +636,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     <div class="main-tab-bar">
       <button class="main-tab-btn active" onclick="switchMainTab('overview')">🏠 Overview</button>
       <button class="main-tab-btn" onclick="switchMainTab('board')">💬 Board</button>
+      <button class="main-tab-btn" onclick="switchMainTab('activity')">📊 Activity</button>
       <button class="main-tab-btn" onclick="switchMainTab('agents')">🤖 Agents</button>
       <button class="main-tab-btn" onclick="switchMainTab('tasks')">📋 Tasks</button>
       <button class="main-tab-btn" onclick="switchMainTab('journal')">📓 Journal</button>
@@ -706,6 +707,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <label class="auto-scroll-toggle">
             <input type="checkbox" id="auto-scroll" checked onchange="toggleAutoScroll(this.checked)">
             <span>📜 Auto-scroll</span>
+          </label>
+          <label class="auto-scroll-toggle">
+            <input type="checkbox" id="hide-system" onchange="toggleHideSystem(this.checked)">
+            <span>🚫 Hide System</span>
           </label>
           <label>Author:</label>
           <select class="sort-select" id="author-filter" onchange="filterByAuthor(this.value)">
@@ -795,6 +800,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
             <h3>✅ Done <span class="count" id="done-count">0</span></h3>
             <div class="task-list" id="done-list"></div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity Tab (Lodge Activity Reports only) -->
+    <div id="main-tab-activity" class="main-tab-content" style="display:none;">
+      <div class="section">
+        <h2>📊 Lodge Activity Reports</h2>
+        <div class="board-list" id="activity-list">
+          <div class="empty">Loading activity...</div>
         </div>
       </div>
     </div>
@@ -1065,6 +1080,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     // === Main Tab switching ===
     let currentMainTab = 'overview';
+    let hideSystemPosts = false;
     function switchMainTab(tab) {
       currentMainTab = tab;
       document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.remove('active'));
@@ -1073,8 +1089,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
       event.target.classList.add('active');
       if (tab === 'journal') fetchJournal();
       if (tab === 'board') fetchBoard();
+      if (tab === 'activity') fetchActivity();
       if (tab === 'overview') fetchServerHealth();
       if (tab === 'agents') fetchLodgeAgents();
+    }
+
+    function toggleHideSystem(checked) {
+      hideSystemPosts = checked;
+      renderFromCache();
     }
 
     // Legacy tab function (kept for compatibility)
@@ -1243,7 +1265,34 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (currentAuthorFilter) {
         posts = posts.filter(p => p.author === currentAuthorFilter);
       }
+      if (hideSystemPosts) {
+        posts = posts.filter(p => p.author !== 'lodge-system');
+      }
       renderBoardList(posts);
+    }
+
+    async function fetchActivity() {
+      try {
+        const res = await fetch('/api/v1/board');
+        const data = await res.json();
+        const systemPosts = (data.posts || []).filter(p => p.author === 'lodge-system');
+        renderActivityList(systemPosts);
+      } catch(e) { console.error('Activity fetch error:', e); }
+    }
+
+    function renderActivityList(posts) {
+      const el = document.getElementById('activity-list');
+      if (!posts.length) {
+        el.innerHTML = '<div class="empty">No activity reports yet</div>';
+        return;
+      }
+      el.innerHTML = posts.map(p => {
+        const time = timeAgo(p.created_at);
+        return '<div class="board-item">' +
+          '<div class="board-meta">' + time + '</div>' +
+          '<div class="board-content">' + escapeHtml(p.content).replace(/\\n/g, '<br>') + '</div>' +
+        '</div>';
+      }).join('');
     }
 
     async function fetchHearths() {

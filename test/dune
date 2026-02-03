@@ -51,6 +51,12 @@
  (modules test_planning_eio)
  (libraries masc_mcp alcotest str yojson))
 
+; Lodge_selection module tests (Thompson Sampling)
+(test
+ (name test_lodge_selection)
+ (modules test_lodge_selection)
+ (libraries masc_mcp alcotest str yojson))
+
 ; Safe_ops module tests (safe exception handling)
 (test
  (name test_safe_ops)

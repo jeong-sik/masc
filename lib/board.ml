@@ -177,7 +177,11 @@ type store = {
   mutable last_flush: float;                               (** Last deferred flush time *)
 }
 
-let flush_interval_sec = 30.0
+(** Flush interval in seconds - configurable via MASC_BOARD_FLUSH_INTERVAL_SEC env var *)
+let flush_interval_sec =
+  match Sys.getenv_opt "MASC_BOARD_FLUSH_INTERVAL_SEC" with
+  | Some s -> (try float_of_string s with _ -> 30.0)
+  | None -> 30.0
 
 let create_store () = {
   posts = Hashtbl.create 1024;
@@ -260,7 +264,14 @@ let sweep store =
   )
 
 (** Deferred flush callback — set after rewrite helpers are defined.
-    Avoids forward-reference issue (maybe_sweep is defined before rewrite_posts). *)
+    Avoids forward-reference issue (maybe_sweep is defined before rewrite_posts).
+
+    Thread-safety note: This ref is safe in Eio because:
+    - OCaml 5.x domains cannot share mutable state without explicit synchronization
+    - Eio runs all fibers within a single domain (structured concurrency)
+    - All board operations execute sequentially within the same domain
+    - The ref is written exactly once at module load time (line ~939)
+    If multi-domain becomes needed, replace with Domain.DLS or atomic ref. *)
 let deferred_flush_fn : (store -> unit) ref = ref (fun _ -> ())
 
 (** Auto-sweep if needed, also triggers deferred flush via callback *)

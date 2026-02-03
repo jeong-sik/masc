@@ -240,7 +240,9 @@ let respond_auth_error request reqd err =
   Httpun.Reqd.respond_with_string reqd response body
 
 
-(** Admin-only access - requires MASC_ADMIN_TOKEN *)
+(** Admin-only access - requires MASC_ADMIN_TOKEN.
+    Uses timing-safe comparison (XOR-based constant-time) to prevent
+    timing side-channel attacks that could leak token bytes. *)
 let with_admin_auth handler request reqd =
   match !server_state with
   | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
@@ -255,6 +257,8 @@ let with_admin_auth handler request reqd =
           Http.Response.json ~status:`Unauthorized
             {|{"error":"Admin token required"}|} reqd
       | Some expected, Some given ->
+          (* Timing-safe comparison: XOR all bytes, accumulate differences.
+             Runs in constant time regardless of where mismatch occurs. *)
           let len_eq = String.length expected = String.length given in
           let content_eq =
             if not len_eq then false

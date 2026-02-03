@@ -1083,6 +1083,13 @@ let make_routes ~port ~host =
        with_public_read (fun _state _req reqd ->
          Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd
        ) request reqd)
+  |> Http.Router.get "/dashboard/lodge" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Response.html_cached
+           ~etag:(Masc_mcp.Lodge_dashboard.etag ())
+           ~request:req
+           (Masc_mcp.Lodge_dashboard.html ()) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd
@@ -1881,6 +1888,22 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/dashboard/credits" ->
           h2_respond_html h2_reqd (Masc_mcp.Credits_dashboard.html ()) ~extra_headers:cors
+
+      | `GET, "/dashboard/lodge" ->
+          let etag_value = "\"" ^ Masc_mcp.Lodge_dashboard.etag () ^ "\"" in
+          let if_none_match = H2.Headers.get h2_headers "if-none-match" in
+          (match if_none_match with
+           | Some inm when String.equal inm etag_value ->
+               let resp_headers = H2.Headers.of_list ([
+                 ("etag", etag_value); ("cache-control", "no-cache");
+               ] @ cors) in
+               let response = H2.Response.create ~headers:resp_headers `Not_modified in
+               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+               H2.Body.Writer.close writer
+           | _ ->
+               let body = Masc_mcp.Lodge_dashboard.html () in
+               let extra = [("etag", etag_value); ("cache-control", "no-cache")] @ cors in
+               h2_respond_html h2_reqd body ~extra_headers:extra)
 
       (* ─────────────────────────────────────────────────────────────────────
          GraphQL

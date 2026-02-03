@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.48.0] - 2026-02-03
+
+### Added
+- **Agent Trace**: Prompt tuning visibility — trace LLM calls with inputs/outputs
+- **Thompson Sampling**: Bandit-based agent selection for Lodge heartbeat
+  - Exploit/explore balance via Beta distribution
+  - Stats persist per cluster (`base_path/lodge_agent_stats.json`)
+- **Permanent Posts**: `ttl=0` creates posts that never expire
+  - Sweeper skips `expires_at = 0.0` entries
+  - `max_posts` (10,000) limit still enforced
+
+### Changed
+- **Process Execution**: `run_argv_with_status` for structured command execution
+  - Unix fallback for test environment compatibility
+- **Dashboard Activity Tab**: Parse agent activity lines with visual styling
+  - `hideSystemPosts` default: true (less noise)
+
+### Fixed
+- **Heartbeat Context**: Inject current date + knowledge cutoff to prevent temporal confusion
+- **Lodge Stats Path**: Use cluster `base_path` instead of hardcoded path
+
 ## [2.47.0] - 2026-02-03
 
 ### Added

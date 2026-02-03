@@ -279,6 +279,19 @@ let resources : mcp_resource list = [
     description = "Institutional knowledge as JSON for agent onboarding";
     mime_type = "application/json";
   };
+  (* Library - curated knowledge from direct research *)
+  {
+    uri = "masc://library";
+    name = "Library Index";
+    description = "List of curated library documents (direct research only)";
+    mime_type = "text/markdown";
+  };
+  {
+    uri = "masc://library.json";
+    name = "Library Index (JSON)";
+    description = "List of curated library documents as JSON with full metadata";
+    mime_type = "application/json";
+  };
 ]
 
 let resource_templates : mcp_resource_template list = [
@@ -304,6 +317,18 @@ let resource_templates : mcp_resource_template list = [
     uri_template = "masc://events.json{?limit}";
     name = "Events (range, JSON)";
     description = "Read recent event log entries as JSON with optional limit";
+    mime_type = "application/json";
+  };
+  {
+    uri_template = "masc://library/{topic}";
+    name = "Library Document";
+    description = "Read a specific library document by topic name";
+    mime_type = "text/markdown";
+  };
+  {
+    uri_template = "masc://library/{topic}.json";
+    name = "Library Document (JSON)";
+    description = "Read a specific library document as JSON with metadata";
     mime_type = "application/json";
   };
 ]

@@ -283,6 +283,59 @@ let handle_read_resource_eio state id params =
                 ("application/json", Some content)
               else
                 ("application/json", Some "{\"error\": \"No institution memory found\"}")
+          (* Library - curated knowledge from direct research *)
+          | s when String.length s >= 7 && String.sub s 0 7 = "library" ->
+              let library_dir = Filename.concat config.base_path "docs/library" in
+              if not (Sys.file_exists library_dir) then
+                ("text/markdown", Some "Library directory not found. Create docs/library/ first.")
+              else begin
+                let topic = if s = "library" then ""
+                  else if String.length s > 8 then String.sub s 8 (String.length s - 8)
+                  else ""
+                in
+                if topic = "" then begin
+                  (* List all library documents *)
+                  let files = Sys.readdir library_dir |> Array.to_list
+                    |> List.filter (fun f -> Filename.check_suffix f ".md" && f <> "README.md")
+                    |> List.sort String.compare
+                  in
+                  let entries = List.map (fun f ->
+                    let name = Filename.chop_suffix f ".md" in
+                    let path = Filename.concat library_dir f in
+                    let title = try
+                      In_channel.with_open_text path (fun ic ->
+                        match In_channel.input_line ic with
+                        | Some "---" ->
+                            let title_ref = ref name in
+                            let rec scan () =
+                              match In_channel.input_line ic with
+                              | Some line when String.length line > 7
+                                  && String.sub line 0 7 = "title: " ->
+                                  title_ref := String.sub line 7 (String.length line - 7)
+                              | Some "---" -> ()
+                              | Some _ -> scan ()
+                              | None -> ()
+                            in
+                            scan (); !title_ref
+                        | _ -> name)
+                    with Sys_error _ -> name
+                    in
+                    Printf.sprintf "- **%s** — `masc://library/%s`" title name
+                  ) files in
+                  let body = if entries = [] then "Library is empty."
+                    else "# Library Index\n\n" ^ String.concat "\n" entries ^ "\n"
+                  in
+                  ("text/markdown", Some body)
+                end else begin
+                  (* Read specific library document *)
+                  let path = Filename.concat library_dir (topic ^ ".md") in
+                  if Sys.file_exists path then
+                    let content = In_channel.with_open_text path In_channel.input_all in
+                    ("text/markdown", Some content)
+                  else
+                    ("text/markdown", Some (Printf.sprintf "Library document '%s' not found." topic))
+                end
+              end
           | _ -> ("text/plain", None)
         in
 

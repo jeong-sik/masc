@@ -437,21 +437,7 @@ let () =
             history
           in
 
-          let json_payload = Yojson.Safe.to_string (`Assoc [
-            ("jsonrpc", `String "2.0"); ("id", `Int 1);
-            ("method", `String "tools/call");
-            ("params", `Assoc [
-              ("name", `String "glm");
-              ("arguments", `Assoc [("prompt", `String summary_prompt)])
-            ])
-          ]) in
-          let tmp = Printf.sprintf "/tmp/rewrite_%s.json" name in
-          let oc = open_out tmp in output_string oc json_payload; close_out oc;
-          let cmd = Printf.sprintf
-            "curl -s --max-time 60 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 2000; rm -f %s"
-            tmp tmp
-          in
-          let summary = run_shell_nonblocking cmd in
+          let summary = Llm_direct.call_glm ~model:"glm-4.7" ~prompt:summary_prompt ~timeout_sec:60 ~max_chars:2000 () in
 
           if String.length summary > 50 then begin
             let old_tokens = ctx.token_count in
@@ -728,22 +714,7 @@ let generate_agent_traits ~topic ~reason =
 }|}
     topic reason
   in
-  let json_payload = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 1);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "glm");
-      ("arguments", `Assoc [("prompt", `String prompt)])
-    ])
-  ]) in
-  let tmp = Printf.sprintf "/tmp/traits_%s.json" topic in
-  let oc = open_out tmp in output_string oc json_payload; close_out oc;
-  let cmd = Printf.sprintf
-    "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 500; rm -f %s"
-    tmp tmp
-  in
-  let response = run_shell_nonblocking cmd in
+  let response = Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:15 ~max_chars:500 () in
   (* Extract JSON from response *)
   try
     let start = String.index response '{' in
@@ -754,8 +725,8 @@ let generate_agent_traits ~topic ~reason =
     let description = Yojson.Safe.Util.(json |> member "description" |> to_string) in
     let preferred_hours = Yojson.Safe.Util.(json |> member "preferred_hours" |> to_list |> List.map to_int) in
     Some (traits, description, preferred_hours)
-  with _ ->
-    Eio.traceln "   ⚠️ Failed to parse LLM traits response";
+  with exn ->
+    Eio.traceln "   ⚠️ Failed to parse LLM traits response: %s" (Printexc.to_string exn);
     None
 
 (** Escape single quotes for Cypher query strings *)
@@ -1349,27 +1320,8 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   let (tokens, max_tokens, msg_count) = get_context_stats ~name:agent_name in
   Eio.traceln "   📊 [%s] Context: %d/%d tokens (%d msgs)" agent_name tokens max_tokens msg_count;
 
-  (* Use llm-mcp GLM tool for content generation *)
-  let json_payload = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 1);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "glm");
-      ("arguments", `Assoc [
-        ("prompt", `String full_prompt)
-      ])
-    ])
-  ]) in
-  let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Time_compat.now () *. 1000.0)) in
-  let oc = open_out tmp_file in
-  output_string oc json_payload;
-  close_out oc;
-  let cmd = Printf.sprintf
-    "curl -s --max-time 30 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c 300; rm -f %s"
-    tmp_file tmp_file
-  in
-  let raw_response = run_shell_line cmd in
+  (* Direct GLM call for content generation (no llm-mcp dependency) *)
+  let raw_response = Llm_direct.call_glm ~model:"glm-4.7" ~prompt:full_prompt ~timeout_sec:30 ~max_chars:300 () in
 
   (* Strip [Extra] metadata and CLI hook outputs from LLM response *)
   let strip_extra_metadata s =
@@ -1840,45 +1792,6 @@ ACTION: SKIP
   in
 
   (* Call LLM with cascade fallback: GLM-4.7 → GLM-4.7-flash (Ollama) → skip *)
-  let strip_extra s =
-    (* First strip [Extra] metadata *)
-    let s = match String.index_opt s '[' with
-      | Some idx when idx > 0 && String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" ->
-          String.trim (String.sub s 0 idx)
-      | _ -> s
-    in
-    (* Then strip Gemini CLI hook outputs that leak into responses *)
-    let hook_patterns = [
-      "Created execution plan for";
-      "Expanding hook command:";
-      "Hook execution for";
-      "(cwd: /Users/";
-      "hooks executed successfully";
-    ] in
-    let _contains_hook_output line =
-      List.exists (fun p ->
-        String.length line >= String.length p &&
-        try
-          let rec find start =
-            if start + String.length p > String.length line then false
-            else if String.sub line start (String.length p) = p then true
-            else find (start + 1)
-          in find 0
-        with _ -> false
-      ) hook_patterns
-    in
-    (* Split, filter, rejoin - crude but effective *)
-    let rec find_hook_start str idx =
-      if idx >= String.length str then None
-      else if String.length str - idx >= 20 &&
-              String.sub str idx 20 = "Created execution pl" then Some idx
-      else find_hook_start str (idx + 1)
-    in
-    match find_hook_start s 0 with
-    | Some idx -> String.trim (String.sub s 0 idx)
-    | None -> s
-  in
-
   let is_valid_response s =
     let len = String.length s in
     len > 10 &&
@@ -1887,28 +1800,16 @@ ACTION: SKIP
   in
 
   let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
-    let args = ("prompt", `String p) :: extra_args in
-    let json_payload = Yojson.Safe.to_string (`Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", `Int 1);
-      ("method", `String "tools/call");
-      ("params", `Assoc [
-        ("name", `String tool_name);
-        ("arguments", `Assoc args)
-      ])
-    ]) in
-    let tmp_file = Printf.sprintf "/tmp/lodge_decide_%s_%d.json" agent_name (int_of_float (Time_compat.now () *. 1000.0)) in
-    let oc = open_out tmp_file in
-    output_string oc json_payload;
-    close_out oc;
-    let cmd = Printf.sprintf
-      "curl -s --max-time %d -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c %d; rm -f %s"
-      timeout_sec tmp_file max_chars tmp_file
-    in
-    strip_extra (run_shell_line cmd)
+    let model = List.assoc_opt "model" extra_args
+      |> Option.map Yojson.Safe.Util.to_string
+      |> Option.value ~default:"glm-4.7" in
+    let api_key = List.assoc_opt "api_key" extra_args
+      |> Option.map Yojson.Safe.Util.to_string
+      |> Option.value ~default:"" in
+    Llm_direct.dispatch ~tool_name ~api_key ~model ~prompt:p ~timeout_sec ~max_chars ()
   in
 
-  (* LLM cascade: config-driven via Lodge_cascade *)
+  (* LLM cascade: config-driven via Lodge_cascade (direct API, no llm-mcp) *)
   let action_slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
   let response =
     if List.length action_slots > 0 then
@@ -1920,7 +1821,7 @@ ACTION: SKIP
     else begin
       (* Fallback: no config file, try GLM directly *)
       Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
-      cascade_call_llm ~tool_name:"glm" ~extra_args:[] ~prompt ~timeout_sec:60 ~max_chars:4000
+      Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 ()
     end
   in
 
@@ -2072,14 +1973,6 @@ let rec execute_agent_action ~agent_name ~action =
     Wraps the llm-mcp cascade in a simple (prompt -> string) signature. *)
 let make_call_llm ~agent_name : (prompt:string -> string) =
   fun ~prompt ->
-    let strip_extra s =
-      let s = match String.index_opt s '[' with
-        | Some idx when idx > 0 && String.length s > idx + 6 && String.sub s idx 7 = "[Extra]" ->
-            String.trim (String.sub s 0 idx)
-        | _ -> s
-      in
-      s
-    in
     let is_valid_response s =
       let len = String.length s in
       len > 10 &&
@@ -2087,25 +1980,13 @@ let make_call_llm ~agent_name : (prompt:string -> string) =
       not (len >= 14 && String.sub s 0 14 = "Empty response")
     in
     let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
-      let args = ("prompt", `String p) :: extra_args in
-      let json_payload = Yojson.Safe.to_string (`Assoc [
-        ("jsonrpc", `String "2.0");
-        ("id", `Int 1);
-        ("method", `String "tools/call");
-        ("params", `Assoc [
-          ("name", `String tool_name);
-          ("arguments", `Assoc args)
-        ])
-      ]) in
-      let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Time_compat.now () *. 1000.0)) in
-      let oc = open_out tmp_file in
-      output_string oc json_payload;
-      close_out oc;
-      let cmd = Printf.sprintf
-        "curl -s --max-time %d -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty' | head -c %d; rm -f %s"
-        timeout_sec tmp_file max_chars tmp_file
-      in
-      strip_extra (run_shell_line cmd)
+      let model = List.assoc_opt "model" extra_args
+        |> Option.map Yojson.Safe.Util.to_string
+        |> Option.value ~default:"glm-4.7" in
+      let api_key = List.assoc_opt "api_key" extra_args
+        |> Option.map Yojson.Safe.Util.to_string
+        |> Option.value ~default:"" in
+      Llm_direct.dispatch ~tool_name ~api_key ~model ~prompt:p ~timeout_sec ~max_chars ()
     in
     let slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
     if List.length slots > 0 then
@@ -2116,7 +1997,7 @@ let make_call_llm ~agent_name : (prompt:string -> string) =
         ~agent_name
     else begin
       Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
-      cascade_call_llm ~tool_name:"glm" ~extra_args:[] ~prompt ~timeout_sec:60 ~max_chars:4000
+      Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 ()
     end
 
 (** {1 Plan-based Agent Selection} *)
@@ -2458,26 +2339,7 @@ let analyze_broadcast_relevance_llm ~content ~available_agents =
      예: dreamer, historian"
     content agents_str
   in
-  let json_payload = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 1);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "glm");
-      ("arguments", `Assoc [
-        ("prompt", `String prompt)
-      ])
-    ])
-  ]) in
-  let tmp_file = Printf.sprintf "/tmp/broadcast_analyze_%d.json" (int_of_float (Time_compat.now () *. 1000.0)) in
-  let oc = open_out tmp_file in
-  output_string oc json_payload;
-  close_out oc;
-  let cmd = Printf.sprintf
-    "curl -s --max-time 15 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -d @%s 2>/dev/null | jq -r '.result.content[0].text // empty'; rm -f %s"
-    tmp_file tmp_file
-  in
-  let response = run_shell_line cmd in
+  let response = Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:15 ~max_chars:500 () in
   (* Parse response to get agent names *)
   if String.length response < 3 || response = "none" then []
   else begin

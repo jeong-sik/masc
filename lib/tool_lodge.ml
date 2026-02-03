@@ -244,44 +244,16 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
   end else
     Error "prefer_fast=false not implemented yet"
 
-(** Call llm-mcp's glm tool — Z.ai cloud API, 200K context, no VRAM *)
-let llm_mcp_glm ~net:_ ?(temperature = 0.7) ?(max_tokens = 500) ~system prompt =
+(** Call GLM API directly — Z.ai cloud API, 200K context, no VRAM.
+    No llm-mcp dependency. *)
+let llm_mcp_glm ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system prompt =
+  ignore _temp;
   try
     let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
-    let body = Yojson.Safe.to_string (`Assoc [
-      ("jsonrpc", `String "2.0");
-      ("id", `Int 1);
-      ("method", `String "tools/call");
-      ("params", `Assoc [
-        ("name", `String "glm");
-        ("arguments", `Assoc [
-          ("prompt", `String full_prompt);
-          ("max_tokens", `Int max_tokens);
-          ("temperature", `Float temperature);
-          ("stream", `Bool false);
-        ]);
-      ]);
-    ]) in
-    let escaped_body = Str.global_replace (Str.regexp "'") "'\\''" body in
-    let cmd = Printf.sprintf "curl -sf --max-time 120 -X POST http://127.0.0.1:8932/mcp -H 'Content-Type: application/json' -H 'Accept: application/json' -d '%s'" escaped_body in
-    let (status, content) = run_shell_nonblocking cmd in
-    match status with
-    | Unix.WEXITED 0 ->
-        let json = Yojson.Safe.from_string content in
-        let text = json |> member "result" |> member "content" |> to_list |> List.hd |> member "text" |> to_string in
-        (* Strip [Extra] metadata if present *)
-        let text = try
-          let idx = String.rindex text '\n' in
-          if String.length text > idx + 7 && String.sub text (idx + 1) 7 = "[Extra]" then
-            String.sub text 0 idx
-          else text
-        with Not_found -> text in
-        Ok (String.trim text)
-    | Unix.WEXITED n -> Error (Printf.sprintf "llm-mcp curl exit %d" n)
-    | _ -> Error "llm-mcp curl signaled"
-  with
-  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse: %s" msg)
-  | exn -> Error (Printf.sprintf "llm-mcp exception: %s" (Printexc.to_string exn))
+    let result = Llm_direct.call_glm ~model:"glm-4.7" ~prompt:full_prompt ~timeout_sec:120 ~max_chars:max_tokens () in
+    if String.length result > 0 then Ok result
+    else Error "GLM returned empty response"
+  with exn -> Error (Printf.sprintf "GLM direct exception: %s" (Printexc.to_string exn))
 
 (** Call local ollama API — DEPRECATED, use llm_mcp_glm instead *)
 let ollama_generate ~net:_ ?(model = Env_config.Ollama.default_model) ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =

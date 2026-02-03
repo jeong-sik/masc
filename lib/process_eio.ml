@@ -178,6 +178,32 @@ let run_argv_with_stdin ?(timeout_sec=60.0) ~stdin_content argv =
   | exn ->
     Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn); ""
 
+(** Run a command with explicit argv, return (Unix.process_status, stdout).
+    Uses Eio.Process.spawn + await to get exit status without raising.
+    @since 2.45.0 *)
+let run_argv_with_status ?(timeout_sec=60.0) argv =
+  let pm = get_proc_mgr () and clk = get_clock () in
+  let buf = Buffer.create 1024 in
+  let label = String.concat " " (List.map Filename.quote argv) in
+  try
+    Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+      Eio.Switch.run (fun sw ->
+        let proc = Eio.Process.spawn ~sw pm
+          ~stdout:(Eio.Flow.buffer_sink buf)
+          argv in
+        let status = Eio.Process.await proc in
+        let unix_status = match status with
+          | `Exited n -> Unix.WEXITED n
+          | `Signaled n -> Unix.WSIGNALED n in
+        (unix_status, Buffer.contents buf)))
+  with
+  | Eio.Time.Timeout ->
+    Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec label;
+    (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
+  | exn ->
+    Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn);
+    (Unix.WEXITED 1, "")
+
 (** Run a shell command, return (Unix.process_status, stdout).
     Uses Eio.Process.spawn + await to get exit status without raising. *)
 let run_with_status ?(timeout_sec=60.0) cmd =

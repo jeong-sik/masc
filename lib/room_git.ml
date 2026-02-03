@@ -10,35 +10,25 @@ open Types
 (* Non-blocking Shell Execution                 *)
 (* ============================================ *)
 
-(** Run shell command and get single line (non-blocking for Eio) *)
+(** Run shell command and get single line (Eio-native) *)
 let run_shell_line cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-      try Some (input_line ic) with End_of_file -> None
-    )
-  )
+  let output = Process_eio.run ~timeout_sec:30.0 cmd in
+  match String.split_on_char '\n' output |> List.filter (fun s -> s <> "") with
+  | [] -> None
+  | h :: _ -> Some h
 
-(** Run shell command and get exit code (non-blocking for Eio) *)
+(** Run shell command and get exit code (Eio-native) *)
 let run_shell_exit cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    Sys.command cmd
-  )
+  match Process_eio.run_with_status ~timeout_sec:30.0 cmd with
+  | Unix.WEXITED n, _ -> n
+  | Unix.WSIGNALED _, _ -> 128
+  | Unix.WSTOPPED _, _ -> 128
 
-(** Run shell command and get all lines (non-blocking for Eio) *)
+(** Run shell command and get all lines (Eio-native) *)
 let run_shell_lines cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-      let rec read_lines acc =
-        try
-          let line = input_line ic in
-          read_lines (line :: acc)
-        with End_of_file -> List.rev acc
-      in
-      read_lines []
-    )
-  )
+  Process_eio.run ~timeout_sec:30.0 cmd
+  |> String.split_on_char '\n'
+  |> List.filter (fun s -> s <> "")
 
 (* ============================================ *)
 (* Input Validation                             *)

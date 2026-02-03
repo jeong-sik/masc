@@ -74,6 +74,12 @@ val run_argv : ?timeout_sec:float -> string list -> string
     @since 2.45.0 *)
 val run_argv_with_stdin : ?timeout_sec:float -> stdin_content:string -> string list -> string
 
+(** Run command with explicit argv, return (Unix.process_status, stdout).
+    Uses spawn + await to get exit status without raising.
+    @param timeout_sec Timeout in seconds (default: 60.0)
+    @since 2.45.0 *)
+val run_argv_with_status : ?timeout_sec:float -> string list -> (Unix.process_status * string)
+
 (** Run shell command, return (Unix.process_status, stdout).
     On timeout returns (WSIGNALED sigterm, partial_output).
     @param timeout_sec Timeout in seconds (default: 60.0) *)

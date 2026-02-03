@@ -293,7 +293,7 @@ let wait_for_message registry ~agent_name ~timeout =
       | Some msg ->
           Some msg
       | None ->
-          Eio_unix.run_in_systhread (fun () -> Unix.sleepf check_interval);
+          Eio.Time.sleep (Process_eio.get_clock ()) check_interval;
           wait_loop ()
     end
   in

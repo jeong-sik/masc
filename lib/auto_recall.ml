@@ -141,22 +141,12 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
 
 (** {1 Non-blocking Shell Execution} *)
 
-(** Run shell command and read lines (non-blocking for Eio) *)
+(** Run shell command and read lines (Eio-native) *)
 let run_shell_lines cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    try
-      let ic = Unix.open_process_in cmd in
-      Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-        let rec read_lines acc =
-          try
-            let line = input_line ic in
-            read_lines (String.trim line :: acc)
-          with End_of_file -> List.rev acc
-        in
-        read_lines []
-      )
-    with Unix.Unix_error _ | Sys_error _ -> []
-  )
+  Process_eio.run ~timeout_sec:30.0 cmd
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.filter (fun s -> s <> "")
 
 (** Fetch recently modified files from working directory *)
 let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_config) ~query =

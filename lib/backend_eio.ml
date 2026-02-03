@@ -575,7 +575,7 @@ module FileSystem = struct
                 true
               with Unix.Unix_error (Unix.EAGAIN, _, _)
                  | Unix.Unix_error (Unix.EACCES, _, _) ->
-                Eio_unix.run_in_systhread (fun () -> Unix.sleepf 0.001);
+                Eio.Time.sleep (Process_eio.get_clock ()) 0.001;
                 try_lock (retries - 1)
           in
           let _ = try_lock max_retries in

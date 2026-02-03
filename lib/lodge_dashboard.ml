@@ -13,6 +13,19 @@ let etag () =
   let hash = Digest.string ("lodge-" ^ v) |> Digest.to_hex in
   String.sub hash 0 12
 
+(** Get agent emoji map from Neo4j via Lodge_heartbeat *)
+let get_emoji_map () =
+  match Lodge_heartbeat.load_lodge_agents_full () with
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    let agents = member "agents" json |> to_list in
+    List.fold_left (fun acc agent ->
+      let name = member "name" agent |> to_string in
+      let emoji = match member "emoji" agent with `String s -> s | _ -> "🤖" in
+      (name, emoji) :: acc
+    ) [] agents
+  | Error _ -> []
+
 (** Calculate entropy as percentage of maximum *)
 let entropy_percentage () =
   let stats = Lodge_selection.get_all_stats () in
@@ -25,6 +38,13 @@ let entropy_percentage () =
     else 100.0 *. entropy /. max_entropy
   end
 
+(** Format time ago string *)
+let format_time_ago secs =
+  if secs < 60.0 then "just now"
+  else if secs < 3600.0 then Printf.sprintf "%.0fm ago" (secs /. 60.0)
+  else if secs < 86400.0 then Printf.sprintf "%.0fh ago" (secs /. 3600.0)
+  else Printf.sprintf "%.0fd ago" (secs /. 86400.0)
+
 (** Generate agent list items *)
 let agent_list_items () =
   let stats = Lodge_selection.get_all_stats () in
@@ -32,6 +52,9 @@ let agent_list_items () =
     Int.compare b.Lodge_selection.selections a.Lodge_selection.selections
   ) stats in
   let tick_interval = Env_config.LodgeV2.tick_interval_seconds in
+  let emoji_map = get_emoji_map () in
+  let max_selections = List.fold_left (fun acc s -> max acc s.Lodge_selection.selections) 1 stats in
+  let now = Time_compat.now () in
 
   String.concat "\n" (List.map (fun (s : Lodge_selection.agent_stats) ->
     let ticks = Lodge_selection.ticks_since_selection ~stats:s ~tick_interval_s:tick_interval in
@@ -39,12 +62,21 @@ let agent_list_items () =
       if ticks >= 10 then "status-danger"
       else if ticks >= 6 then "status-warning"
       else "status-ok" in
+    let selection_text = if s.selections = 1 then "1 selection" else Printf.sprintf "%d selections" s.selections in
+    let emoji = try List.assoc s.name emoji_map with Not_found -> "🤖" in
+    let bar_width = int_of_float (100.0 *. float s.selections /. float max_selections) in
+    let last_selected =
+      if s.last_selected_at > 0.0 then format_time_ago (now -. s.last_selected_at)
+      else "never" in
     Printf.sprintf {|<div class="agent-item">
+  <div class="agent-bar" style="width: %d%%"></div>
   <span class="agent-dot %s"></span>
+  <span class="agent-emoji">%s</span>
   <span class="agent-name">%s</span>
-  <span class="agent-stat">%d selections</span>
+  <span class="agent-time">%s</span>
+  <span class="agent-stat">%s</span>
 </div>|}
-      status_class s.name s.selections
+      bar_width status_class emoji s.name last_selected selection_text
   ) sorted)
 
 (** Total selections across all agents *)
@@ -143,36 +175,63 @@ let html () = Printf.sprintf {|<!DOCTYPE html>
     }
 
     .agent-item {
+      position: relative;
       display: flex;
       align-items: center;
       padding: 12px 15px;
       background: rgba(255,255,255,0.03);
       border-radius: 8px;
       margin-bottom: 8px;
-      transition: background 0.2s;
+      overflow: hidden;
     }
-    .agent-item:hover { background: rgba(255,255,255,0.08); }
+    .agent-item:hover { background: rgba(255,255,255,0.06); }
     .agent-item:last-child { margin-bottom: 0; }
 
+    .agent-bar {
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%%;
+      background: rgba(74, 222, 128, 0.1);
+      border-radius: 8px;
+      transition: width 0.3s ease;
+    }
+
     .agent-dot {
+      position: relative;
       width: 10px;
       height: 10px;
       border-radius: 50%%;
-      margin-right: 12px;
+      margin-right: 10px;
       flex-shrink: 0;
     }
     .agent-dot.status-ok { background: #4ade80; }
     .agent-dot.status-warning { background: #f59e0b; }
     .agent-dot.status-danger { background: #ef4444; }
 
+    .agent-emoji {
+      position: relative;
+      font-size: 18px;
+      margin-right: 10px;
+    }
+
     .agent-name {
+      position: relative;
       flex: 1;
       font-weight: 500;
       color: #e0e0e0;
     }
+    .agent-time {
+      position: relative;
+      font-size: 12px;
+      color: #555;
+      margin-right: 15px;
+      min-width: 60px;
+    }
     .agent-stat {
+      position: relative;
       font-size: 13px;
-      color: #666;
+      color: #888;
       font-family: 'SF Mono', Monaco, monospace;
     }
 

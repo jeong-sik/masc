@@ -148,13 +148,10 @@ let get_tty () =
     match Sys.getenv_opt "TTY" with
     | Some tty -> Some tty
     | None ->
-        (* Try to read from /dev/tty symlink - non-blocking *)
-        Eio_unix.run_in_systhread (fun () ->
-          let ic = Unix.open_process_in "tty 2>/dev/null" in
-          Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-            try Some (input_line ic) with End_of_file -> None
-          )
-        )
+        (* Try to read from tty command — Eio-native *)
+        let output = Process_eio.run ~timeout_sec:5.0 "tty 2>/dev/null" in
+        let trimmed = String.trim output in
+        if String.length trimmed > 0 then Some trimmed else None
   with e ->
     Printf.eprintf "[WARN] get_tty failed: %s\n%!" (Printexc.to_string e);
     None

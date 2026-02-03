@@ -52,6 +52,7 @@ and agent_action =
   | ActionComment of string * string
   | ActionUpvote of string
   | ActionPropose of string * string
+  | ActionCode of string * string * string  (** filename, lang, code *)
   | ActionSkip
 
 type heartbeat_result = {

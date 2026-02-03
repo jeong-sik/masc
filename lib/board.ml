@@ -304,7 +304,11 @@ let rotate_if_needed path =
       Sys.rename path backup;
       Printf.eprintf "[Board] Rotated %s (was %d bytes)\n%!" path st.Unix.st_size
     end
-  with Unix.Unix_error _ | Sys_error _ -> ()
+  with
+  | Unix.Unix_error (e, fn, arg) ->
+      Printf.eprintf "[Board] rotate error: %s(%s): %s\n%!" fn arg (Unix.error_message e)
+  | Sys_error msg ->
+      Printf.eprintf "[Board] rotate error: %s\n%!" msg
 
 (** {1 JSON Serialization} *)
 
@@ -321,6 +325,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);
+    ("updated_at", `Float p.updated_at);
     ("expires_at", `Float p.expires_at);
     ("votes_up", `Int p.votes_up);
     ("votes_down", `Int p.votes_down);
@@ -356,7 +361,7 @@ let rewrite_posts store =
         output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
       ) store.posts);
     Sys.rename tmp_path path
-  with Sys_error _ -> ()
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (rewrite_posts): %s\n%!" msg
 
 let rewrite_comments store =
   try
@@ -369,7 +374,29 @@ let rewrite_comments store =
         output_string oc (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
       ) store.comments);
     Sys.rename tmp_path path
-  with Sys_error _ -> ()
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (rewrite_comments): %s\n%!" msg
+
+(** {1 Append Helpers} *)
+
+let append_post (p : post) =
+  try
+    ensure_masc_dir ();
+    let path = persist_path () in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.to_string (post_to_yojson p) ^ "\n"));
+    rotate_if_needed path
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_post): %s\n%!" msg
+
+let append_comment (c : comment) =
+  try
+    ensure_masc_dir ();
+    let path = comments_path () in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n"));
+    rotate_if_needed path
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_comment): %s\n%!" msg
 
 (** {1 Post Operations} *)
 
@@ -419,30 +446,7 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
       Hashtbl.add store.posts (Post_id.to_string post.id) post;
       incr store.post_count;
       invalidate_post_caches store;
-      (* Persist post - inline to avoid forward reference *)
-      (try
-        let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
-        let path = Filename.concat base ".masc/board_posts.jsonl" in
-        let dir = Filename.dirname path in
-        if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
-        let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-        Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-          let json = `Assoc ([
-            ("id", `String (Post_id.to_string post.id));
-            ("author", `String (Agent_id.to_string post.author));
-            ("content", `String post.content);
-            ("visibility", `String (match post.visibility with Public->"public"|Unlisted->"unlisted"|Internal->"internal"|Direct->"direct"));
-            ("created_at", `Float post.created_at);
-            ("updated_at", `Float post.updated_at);
-            ("expires_at", `Float post.expires_at);
-            ("votes_up", `Int post.votes_up);
-            ("votes_down", `Int post.votes_down);
-            ("reply_count", `Int post.reply_count);
-          ] @ (match post.hearth with Some h -> [("hearth", `String h)] | None -> [])
-            @ (match post.thread_id with Some t -> [("thread_id", `String t)] | None -> [])) in
-          output_string oc (Yojson.Safe.to_string json ^ "\n"));
-        rotate_if_needed path
-      with Sys_error _ -> ());
+      append_post post;
       Ok post
     end
   )
@@ -564,28 +568,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
             { post with reply_count = post.reply_count + 1; updated_at = now };
           invalidate_post_caches store;
           invalidate_comment_caches store;
-          (* Persist comment - inline *)
-          (try
-            let base = match Sys.getenv_opt "ME_ROOT" with Some pp -> pp | None -> Sys.getcwd () in
-            let cpath = Filename.concat base ".masc/board_comments.jsonl" in
-            let cdir = Filename.dirname cpath in
-            if not (Sys.file_exists cdir) then Unix.mkdir cdir 0o755;
-            let oc = open_out_gen [Open_append; Open_creat] 0o644 cpath in
-            Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-              let json = `Assoc [
-                ("id", `String (Comment_id.to_string comment.id));
-                ("post_id", `String (Post_id.to_string comment.post_id));
-                ("parent_id", match comment.parent_id with Some cp -> `String (Comment_id.to_string cp) | None -> `Null);
-                ("author", `String (Agent_id.to_string comment.author));
-                ("content", `String comment.content);
-                ("created_at", `Float comment.created_at);
-                ("expires_at", `Float comment.expires_at);
-                ("votes_up", `Int comment.votes_up);
-                ("votes_down", `Int comment.votes_down);
-              ] in
-              output_string oc (Yojson.Safe.to_string json ^ "\n"));
-            rotate_if_needed cpath
-          with Sys_error _ -> ());
+          append_comment comment;
           Ok comment
         end
   )
@@ -637,7 +620,7 @@ let append_vote_log ~target ~voter ~direction =
       ] in
       output_string oc (Yojson.Safe.to_string json ^ "\n"));
     rotate_if_needed path
-  with Sys_error _ -> ()
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_vote_log): %s\n%!" msg
 
 let vote store ~voter ~post_id ~direction : (int, board_error) result =
   match Agent_id.of_string voter with
@@ -948,21 +931,12 @@ let flush_dirty store =
     if store.dirty_comments then begin
       rewrite_comments store;
       store.dirty_comments <- false
-    end
+    end;
+    store.last_flush <- Time_compat.now ()
   )
 
 (** Register deferred flush now that rewrite helpers are available *)
-let () = deferred_flush_fn := (fun store ->
-  if store.dirty_posts then begin
-    rewrite_posts store;
-    store.dirty_posts <- false
-  end;
-  if store.dirty_comments then begin
-    rewrite_comments store;
-    store.dirty_comments <- false
-  end;
-  store.last_flush <- Time_compat.now ()
-)
+let () = deferred_flush_fn := flush_dirty
 
 (** {1 Karma & Flair - Reddit-style} *)
 

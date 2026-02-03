@@ -126,6 +126,8 @@ type post = {
   votes_up: int;
   votes_down: int;
   reply_count: int;
+  hearth: string option;     (* Topic category within the Lodge *)
+  thread_id: string option;  (* Linked Conversation thread *)
 }
 
 type comment = {
@@ -217,7 +219,7 @@ let maybe_sweep store =
 
 (** {1 Post Operations} *)
 
-let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ()
+let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id ()
   : (post, board_error) result =
   maybe_sweep store;
 
@@ -254,6 +256,8 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
         votes_up = 0;
         votes_down = 0;
         reply_count = 0;
+        hearth;
+        thread_id;
       } in
       Hashtbl.add store.posts (Post_id.to_string post.id) post;
       incr store.post_count;
@@ -265,7 +269,7 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
         if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
         let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
         Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-          let json = `Assoc [
+          let json = `Assoc ([
             ("id", `String (Post_id.to_string post.id));
             ("author", `String (Agent_id.to_string post.author));
             ("content", `String post.content);
@@ -276,7 +280,8 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
             ("votes_up", `Int post.votes_up);
             ("votes_down", `Int post.votes_down);
             ("reply_count", `Int post.reply_count);
-          ] in
+          ] @ (match post.hearth with Some h -> [("hearth", `String h)] | None -> [])
+            @ (match post.thread_id with Some t -> [("thread_id", `String t)] | None -> [])) in
           output_string oc (Yojson.Safe.to_string json ^ "\n"))
       with _ -> ());
       Ok post
@@ -294,13 +299,17 @@ let get_post store ~post_id : (post, board_error) result =
         | None -> Error (Post_not_found post_id)
       )
 
-let list_posts store ?(visibility_filter=None) ?(limit=50) () : post list =
+let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post list =
   maybe_sweep store;
   with_lock store (fun () ->
     let all = Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts [] in
     let filtered = match visibility_filter with
       | None -> all
       | Some v -> List.filter (fun (p : post) -> p.visibility = v) all
+    in
+    let filtered = match hearth with
+      | None -> filtered
+      | Some h -> List.filter (fun (p : post) -> p.hearth = Some h) filtered
     in
     (* Sort by score desc, then created_at desc *)
     let sorted = List.sort (fun (a : post) (b : post) ->
@@ -459,7 +468,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
               let oc = open_out tmp_path in
               Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
                 Hashtbl.iter (fun _ (pst : post) ->
-                  let json = `Assoc [
+                  let json = `Assoc ([
                     ("id", `String (Post_id.to_string pst.id));
                     ("author", `String (Agent_id.to_string pst.author));
                     ("content", `String pst.content);
@@ -470,7 +479,8 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                     ("votes_up", `Int pst.votes_up);
                     ("votes_down", `Int pst.votes_down);
                     ("reply_count", `Int pst.reply_count);
-                  ] in
+                  ] @ (match pst.hearth with Some h -> [("hearth", `String h)] | None -> [])
+                    @ (match pst.thread_id with Some t -> [("thread_id", `String t)] | None -> [])) in
                   output_string oc (Yojson.Safe.to_string json ^ "\n")
                 ) store.posts);
               Sys.rename tmp_path vpath
@@ -525,7 +535,7 @@ let visibility_to_string = function
   | Direct -> "direct"
 
 let post_to_yojson (p : post) : Yojson.Safe.t =
-  `Assoc [
+  `Assoc ([
     ("id", `String (Post_id.to_string p.id));
     ("author", `String (Agent_id.to_string p.author));
     ("content", `String p.content);
@@ -536,7 +546,8 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("votes_down", `Int p.votes_down);
     ("score", `Int (p.votes_up - p.votes_down));
     ("reply_count", `Int p.reply_count);
-  ]
+  ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
+    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> []))
 
 let comment_to_yojson (c : comment) : Yojson.Safe.t =
   `Assoc [
@@ -588,9 +599,11 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     let votes_up = json |> member "votes_up" |> to_int in
     let votes_down = json |> member "votes_down" |> to_int in
     let reply_count = json |> member "reply_count" |> to_int_option |> Option.value ~default:0 in
+    let hearth = json |> member "hearth" |> to_string_option in
+    let thread_id = json |> member "thread_id" |> to_string_option in
     match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
     | Ok id, Ok author, Some visibility ->
-        Some { id; author; content; visibility; created_at; updated_at; expires_at; votes_up; votes_down; reply_count }
+        Some { id; author; content; visibility; created_at; updated_at; expires_at; votes_up; votes_down; reply_count; hearth; thread_id }
     | _ -> None
   with _ -> None
 
@@ -682,6 +695,37 @@ let recalculate_reply_counts store =
   ) store.comments;
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
   Printf.eprintf "[Board] Recalculated reply_counts: %d total comments across posts\n%!" total
+
+(** {1 Hearth (topic) operations} *)
+
+(** List active hearths with post counts *)
+let list_hearths store : (string * int) list =
+  with_lock store (fun () ->
+    let counts = Hashtbl.create 16 in
+    Hashtbl.iter (fun _ (p : post) ->
+      match p.hearth with
+      | Some h ->
+          let c = try Hashtbl.find counts h with Not_found -> 0 in
+          Hashtbl.replace counts h (c + 1)
+      | None -> ()
+    ) store.posts;
+    Hashtbl.fold (fun k v acc -> (k, v) :: acc) counts []
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+  )
+
+(** Update a post's thread_id (for linking Board post → Conversation thread) *)
+let set_thread_id store ~post_id ~thread_id : (unit, board_error) result =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      with_lock store (fun () ->
+        match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+        | None -> Error (Post_not_found post_id)
+        | Some post ->
+            let updated = { post with thread_id = Some thread_id } in
+            Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+            Ok ()
+      )
 
 (** {1 Global Store} *)
 
@@ -791,7 +835,7 @@ let flair_to_yojson (name, emoji, label) =
 let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
   let flair = extract_flair p.content in
   let flair_json = match flair with Some f -> flair_to_yojson f | None -> `Null in
-  `Assoc [
+  `Assoc ([
     ("id", `String (Post_id.to_string p.id));
     ("author", `String (Agent_id.to_string p.author));
     ("author_karma", `Int author_karma);
@@ -804,4 +848,5 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("votes_down", `Int p.votes_down);
     ("score", `Int (p.votes_up - p.votes_down));
     ("reply_count", `Int p.reply_count);
-  ]
+  ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
+    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> []))

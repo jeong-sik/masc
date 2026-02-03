@@ -14,3 +14,4 @@ val start : agent_name:string -> interval:int -> message:string -> string
 val stop : string -> bool
 val list : unit -> t list
 val get : string -> t option
+val stop_by_agent : agent_name:string -> int

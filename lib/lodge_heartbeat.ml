@@ -577,7 +577,7 @@ let load_agents_from_neo4j () =
   let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits interests personalityHint activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null"
+    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
     api_key gql_query
   in
   Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
@@ -783,10 +783,7 @@ let create_agent_in_neo4j ~name ~traits ~description ~preferred_hours =
     "MERGE (a:Agent {name: '%s'}) SET a.traits = [%s], a.description = '%s', a.preferred_hours = [%s], a.activity_level = 0.7, a.created_at = datetime(), a.created_by = 'ecosystem_evolution' RETURN a.name"
     (esc name) traits_str (esc description) hours_str
   in
-  let cmd = Printf.sprintf
-    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
-    (String.escaped query)
-  in
+  let cmd = Lodge_memory.neo4j_query_cmd query in
   let result = run_shell_nonblocking cmd in
   if String.length result > 0 && not (String.sub result 0 (min 5 (String.length result)) = "Error") then begin
     Eio.traceln "   ✅ [Neo4j] Agent '%s' created successfully" name;
@@ -2382,9 +2379,7 @@ let trigger_heartbeat room_config =
 (** Load agent specialties dynamically from Neo4j *)
 let load_agent_specialties_from_neo4j () =
   let query = "MATCH (a:Agent) WHERE a.traits IS NOT NULL RETURN a.name, a.traits, a.description" in
-  let cmd = Printf.sprintf
-    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
-    query
+  let cmd = Lodge_memory.neo4j_query_cmd query
   in
   let json_str = run_shell_nonblocking cmd in
   try

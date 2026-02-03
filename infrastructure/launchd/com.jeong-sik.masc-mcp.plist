@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jeong-sik.masc-mcp</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/dancer/me/scripts/launchd/masc-mcp-start.sh</string>
+        <string>--http</string>
+        <string>--port</string>
+        <string>8935</string>
+        <string>--base-path</string>
+        <string>/Users/dancer/me</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dancer/me/logs/masc-mcp-launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/dancer/me/logs/masc-mcp-launchd.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>ME_ROOT</key>
+        <string>/Users/dancer/me</string>
+        <key>MASC_MCP_PORT</key>
+        <string>8935</string>
+        <key>MASC_BASE_PATH</key>
+        <string>/Users/dancer/me</string>
+        <key>MASC_AUTO_RESPOND</key>
+        <string>true</string>
+        <key>MASC_ORCHESTRATOR_ENABLED</key>
+        <string>0</string>
+        <key>MASC_ZOMBIE_THRESHOLD_SEC</key>
+        <string>180</string>
+        <key>MASC_ZOMBIE_CLEANUP_INTERVAL_SEC</key>
+        <string>30</string>
+        <key>MASC_LODGE_TICK_INTERVAL_SEC</key>
+        <string>14400</string>
+        <key>MASC_LODGE_AGENTS_PER_TICK</key>
+        <string>3</string>
+        <key>MASC_LODGE_USE_PLANNER</key>
+        <string>false</string>
+        <key>LODGE_QUIET_START</key>
+        <string>3</string>
+        <key>LODGE_QUIET_END</key>
+        <string>7</string>
+        <key>GRAPHQL_API_KEY</key>
+        <string>Cuovi59bsPTt9+J+NCqBM+5Sks9fHuCuVhBhT+oI+2A=</string>
+        <key>SSL_CERT_FILE</key>
+        <string>/opt/homebrew/etc/ca-certificates/cert.pem</string>
+        <key>SSL_CERT_DIR</key>
+        <string>/etc/ssl/certs</string>
+        <key>CLAUDE_CODE_OAUTH_TOKEN_anyang</key>
+        <string>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</string>
+        <key>CLAUDE_CODE_OAUTH_TOKEN_for</key>
+        <string>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</string>
+        <key>CLAUDE_CODE_OAUTH_TOKEN_kidsnote</key>
+        <string>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</string>
+        <key>CLAUDE_CODE_OAUTH_TOKEN_yhhjsjmk</key>
+        <string>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</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dancer/me</string>
+</dict>
+</plist>

@@ -22,6 +22,12 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load Lodge heartbeat configuration (env vars override plist defaults)
+LODGE_ENV="$SCRIPT_DIR/config/lodge.env"
+if [ -f "$LODGE_ENV" ]; then
+    set -a; source "$LODGE_ENV"; set +a
+fi
+
 # Resolve executable path
 # Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"

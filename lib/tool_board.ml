@@ -169,7 +169,7 @@ let sort_order_of_string = function
 
 let handle_post_list args =
   let store = Board.global () in
-  let limit = get_int args "limit" 20 in
+  let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let visibility_str = get_string_opt args "visibility" in
   let hearth = get_string_opt args "hearth" in
   let random = get_bool args "random" false in
@@ -228,8 +228,10 @@ let handle_post_list args =
 
   let posts =
     if random then
-      (* Shuffle and take limit *)
-      let shuffled = List.sort (fun _ _ -> Random.int 3 - 1) sorted_posts in
+      (* Shuffle via random-key sort (unbiased, unlike comparator trick) *)
+      let shuffled = List.map (fun p -> (Random.bits (), p)) sorted_posts
+        |> List.sort (fun (a, _) (b, _) -> compare a b)
+        |> List.map snd in
       List.filteri (fun i _ -> i < limit) shuffled
     else if offset > 0 then
       (* Skip offset, take limit *)
@@ -360,10 +362,11 @@ let handle_stats _args =
 let handle_search args =
   let store = Board.global () in
   let query = get_string args "query" "" in
-  let limit = get_int args "limit" 20 in
+  let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   if query = "" then (false, "❌ query required")
   else
-    let all_posts : Board.post list = Board.list_posts store ~limit:100 () in
+    (* Load more than limit to filter from a larger pool *)
+    let all_posts : Board.post list = Board.list_posts store ~limit:(max limit 100) () in
     let query_lower = String.lowercase_ascii query in
     let pattern = Str.regexp_string query_lower in
     let matches_str s =

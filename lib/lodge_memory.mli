@@ -36,3 +36,13 @@ val format_for_prompt : (string * float) list -> string
     Writes to Council thread (short-term), Memory Stream (scored),
     and optionally to Neo4j (long-term, skips "skip" actions). *)
 val store : experience -> unit
+
+(** {1 Utilities — shared across Lodge modules} *)
+
+(** Escape string for Cypher single-quoted literals.
+    Handles all Neo4j Cypher escape sequences per specification. *)
+val cypher_escape : string -> string
+
+(** Build a shell command to run a Neo4j Cypher query via sb CLI.
+    Uses Filename.quote to prevent shell injection. *)
+val neo4j_query_cmd : string -> string

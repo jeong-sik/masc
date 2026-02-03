@@ -151,9 +151,9 @@ let get_tty () =
         (* Try to read from /dev/tty symlink - non-blocking *)
         Eio_unix.run_in_systhread (fun () ->
           let ic = Unix.open_process_in "tty 2>/dev/null" in
-          let result = try Some (input_line ic) with End_of_file -> None in
-          ignore (Unix.close_process_in ic);
-          result
+          Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+            try Some (input_line ic) with End_of_file -> None
+          )
         )
   with e ->
     Printf.eprintf "[WARN] get_tty failed: %s\n%!" (Printexc.to_string e);

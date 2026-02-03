@@ -92,7 +92,8 @@ let run_shell_nonblocking cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 1024 in
-    (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done with End_of_file -> ());
+    (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done
+     with End_of_file | Sys_error _ -> ());
     let status = Unix.close_process_in ic in
     (status, Buffer.contents buf)
   )
@@ -101,9 +102,9 @@ let run_shell_nonblocking cmd =
 let run_shell_line cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let response = try input_line ic with End_of_file -> "" in
-    ignore (Unix.close_process_in ic);
-    response
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+      try input_line ic with End_of_file -> ""
+    )
   )
 
 (** Run Unix.system in system thread (non-blocking) *)

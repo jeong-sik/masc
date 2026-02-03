@@ -93,16 +93,19 @@ let extract_number text =
 let execute_shell cmd =
   try
     let ic = Unix.open_process_in cmd in
-    let output = In_channel.input_all ic in
+    let output =
+      try In_channel.input_all ic
+      with Sys_error _ -> ""
+    in
     let status = Unix.close_process_in ic in
     match status with
-    | Unix.WEXITED 0 -> 
+    | Unix.WEXITED 0 ->
       { success = true; output; timestamp = Unix.gettimeofday () }
-    | _ -> 
+    | _ ->
       { success = false; output; timestamp = Unix.gettimeofday () }
   with e ->
-    { success = false; 
-      output = Printexc.to_string e; 
+    { success = false;
+      output = Printexc.to_string e;
       timestamp = Unix.gettimeofday () }
 
 let execute_github action =

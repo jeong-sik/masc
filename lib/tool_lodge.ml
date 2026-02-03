@@ -130,11 +130,8 @@ let run_shell_nonblocking cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
     let buf = Buffer.create 4096 in
-    (try
-      while true do
-        Buffer.add_channel buf ic 1024
-      done
-    with End_of_file -> ());
+    (try while true do Buffer.add_channel buf ic 1024 done
+     with End_of_file | Sys_error _ -> ());
     let status = Unix.close_process_in ic in
     (status, Buffer.contents buf)
   )
@@ -143,9 +140,9 @@ let run_shell_nonblocking cmd =
 let run_shell_line cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let result = try input_line ic with End_of_file -> "" in
-    let _ = Unix.close_process_in ic in
-    result
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+      try input_line ic with End_of_file -> ""
+    )
   )
 
 (** HTTP GET via curl subprocess — supports both HTTP and HTTPS *)
@@ -533,14 +530,14 @@ let load_agents_config () =
   let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
   try
     let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 4096 in
-    (try
-      while true do
-        Buffer.add_char buf (input_char ic)
-      done
-    with End_of_file -> ());
-    let _ = Unix.close_process_in ic in
-    let json_str = Buffer.contents buf in
+    let json_str = Fun.protect ~finally:(fun () ->
+      ignore (Unix.close_process_in ic)
+    ) (fun () ->
+      let buf = Buffer.create 4096 in
+      (try while true do Buffer.add_char buf (input_char ic) done
+       with End_of_file -> ());
+      Buffer.contents buf
+    ) in
     Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
     (* Parse JSON response *)
     let json = Yojson.Safe.from_string json_str in

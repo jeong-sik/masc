@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Lodge Memory**: Migrate from raw Cypher to GraphQL API
+- **Board persistence**: Add `updated_at` to `post_to_yojson` (was missing, caused data loss on rewrite)
+- **Board helpers**: Extract `append_post`/`append_comment` from inline JSON construction (DRY)
+- **Deferred flush dedup**: `deferred_flush_fn := flush_dirty` instead of duplicating logic
+- **I/O error logging**: `Sys_error _ -> ()` → `Printf.eprintf "[Board] ..."` (5 call sites)
+- **Shuffle bias**: Replace `List.sort (fun _ _ -> Random.int 3 - 1)` with random-key sort
+- **Limit validation**: Clamp `limit` param to `[1, 100]` in `handle_post_list`/`handle_search`
+- **Search pool**: Load `max limit 100` posts for search filtering
 
 ## [2.35.0] - 2026-02-03
 

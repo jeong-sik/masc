@@ -30,7 +30,7 @@ let read_lodge_config () =
     let lang = Yojson.Safe.Util.(member "language" lodge |> to_string_option) in
     let inst = Yojson.Safe.Util.(member "instruction" lodge |> to_string_option) in
     (lang, inst)
-  with _ -> (None, None)
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ | Sys_error _ -> (None, None)
 
 let (config_language, config_instruction) = read_lodge_config ()
 
@@ -196,7 +196,7 @@ let ollama_is_light () =
       (* Consider models with "1.7b", "3b", "1.5b" as light *)
       Str.string_match (Str.regexp ".*\\(1\\.[0-9]b\\|3b\\|mini\\|small\\).*") name 0
     ) models
-  with _ -> false  (* On error, assume busy *)
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> false  (* On error, assume busy *)
 
 (** Call CLI tool with prompt - uses stdin to avoid shell escaping issues *)
 let cli_generate provider ~system prompt =
@@ -406,7 +406,7 @@ let classify_content ~net content =
       let cat = json |> member "category" |> to_string |> category_of_string in
       let details = json |> member "details" |> to_string_option |> Option.value ~default:"" in
       { category = cat; details }
-    with _ -> { category = Review; details = "JSON parse failed, defaulting to REVIEW" }
+    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> { category = Review; details = "JSON parse failed, defaulting to REVIEW" }
 
 (** {1 EVOLVE: Agent growth through learning} *)
 
@@ -423,7 +423,7 @@ let extract_interests ~net content =
   | Ok raw ->
     try
       Yojson.Safe.from_string raw |> to_list |> List.map to_string
-    with _ -> []
+    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
 
 (** Save agent's new interests to Neo4j via sb CLI *)
 let save_interests_to_neo4j ~agent_name interests =
@@ -479,8 +479,8 @@ let get_agent_interests ~agent_name =
            | _ -> "")
         | _ -> ""
       ) records |> List.filter (fun s -> s <> "")
-    with _ -> []
-  with _ -> []
+    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+  with Unix.Unix_error _ | Sys_error _ -> []
 
 (** Record agent visit to Lodge *)
 let record_lodge_visit ~agent_name ~article_title =
@@ -498,7 +498,7 @@ let record_lodge_visit ~agent_name ~article_title =
   try
     let _ = run_shell_nonblocking cmd in
     ()
-  with _ -> ()
+  with Unix.Unix_error _ | Sys_error _ -> ()
 
 (** {1 Dynamic Agent Loading from Neo4j (SOUL Layer - Tier 3)} *)
 
@@ -569,7 +569,7 @@ let load_agents_config () =
           interests;
         } in
         Hashtbl.replace agent_cache config.name config
-      with _ -> ()
+      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
     ) edges;
     Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" (Hashtbl.length agent_cache)
   with e ->
@@ -612,7 +612,7 @@ let parse_value_weights json_str =
         | _ -> None
       ) pairs
     | _ -> []
-  with _ -> []
+  with Yojson.Json_error _ -> []
 
 (** Serialize value_weights back to JSON string *)
 let serialize_value_weights weights =
@@ -803,7 +803,7 @@ let extract_post_content formatted =
     ) content_lines in
     let result = String.trim (String.concat "\n" content_lines) in
     if result = "" then formatted else result  (* fallback to original if extraction fails *)
-  with _ -> formatted
+  with Invalid_argument _ | Not_found -> formatted
 
 (** Translate text to Korean using CLI rotation.
     If translation fails or text is already Korean, returns original. *)
@@ -1251,8 +1251,8 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
 (** Auto-chain: run orchestrator with probability continuation *)
 let lodge_auto_chain ~net (args : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
-  let chain_prob = try to_float (member "chain_probability" args) with _ -> 0.5 in
-  let max_chain = try to_int (member "max_chain" args) with _ -> 3 in
+  let chain_prob = try to_float (member "chain_probability" args) with Yojson.Safe.Util.Type_error _ -> 0.5 in
+  let max_chain = try to_int (member "max_chain" args) with Yojson.Safe.Util.Type_error _ -> 3 in
 
   let buf = Buffer.create 512 in
   let add msg = Buffer.add_string buf (msg ^ "\n") in
@@ -1323,17 +1323,17 @@ let get_all_agents () =
           let name = node |> member "name" |> to_string in
           (* Only include core Lodge agents *)
           if List.mem name (core_lodge_agents ()) then
-            let primary_value = (try node |> member "primaryValue" |> to_string with _ -> "unknown") in
-            let prompt = (try node |> member "promptTemplate" |> to_string with _ -> "") in
-            let status = (try node |> member "status" |> to_string with _ -> "active") in
+            let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
+            let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
+            let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
             if status = "active" then
               Some (name, primary_value, prompt, "system", 0)
             else None
           else None
-        with _ -> None
+        with Yojson.Safe.Util.Type_error _ -> None
       ) edges
-    with _ -> []
-  with _ -> []
+    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+  with Unix.Unix_error _ | Sys_error _ -> []
 
 (** Spawn a new agent — can be called by another agent *)
 let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
@@ -1412,7 +1412,7 @@ let should_spawn ~net agent_name interests =
           let prompt = json |> member "prompt" |> to_string in
           Some (name, role_str, prompt)
         else None
-      with _ -> None
+      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 (** lodge_spawn tool handler *)
 let spawn ~net (args : Yojson.Safe.t) =
@@ -1473,14 +1473,14 @@ let get_all_agent_interests () =
           | agent_json :: topics_json :: _ ->
             let agent = to_string agent_json in
             let topics = to_list topics_json |> List.filter_map (fun t ->
-              try Some (to_string t) with _ -> None
+              try Some (to_string t) with Yojson.Safe.Util.Type_error _ -> None
             ) in
             if agent <> "" then Some (agent, topics) else None
           | _ -> None
-        with _ -> None
+        with Yojson.Safe.Util.Type_error _ -> None
       ) records
-    with _ -> []
-  with _ -> []
+    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+  with Unix.Unix_error _ | Sys_error _ -> []
 
 let evolve ~net:_ (args : Yojson.Safe.t) =
   let filter_name = Safe_ops.json_string ~default:"" "agent" args in
@@ -1816,7 +1816,7 @@ let get_profile ~net:_ args =
       try
         let (_, content) = run_shell_nonblocking cmd in
         content
-      with _ -> "Neo4j unavailable"
+      with Unix.Unix_error _ | Sys_error _ -> "Neo4j unavailable"
     in
 
     let profile = Printf.sprintf "👤 **Agent Profile: %s**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📊 Neo4j Info:\n%s\n\n📝 Recent Posts:\n%s"
@@ -1849,7 +1849,7 @@ let lodge_search ~net:_ args =
         if String.length output > 10 then
           Printf.sprintf "\n\n👥 **에이전트 검색 결과:**\n%s" output
         else ""
-      with _ -> ""
+      with Unix.Unix_error _ | Sys_error _ -> ""
     in
 
     (board_ok, Printf.sprintf "🔍 **Lodge 검색: \"%s\"**\n%s%s" query board_result agent_results)
@@ -1899,16 +1899,16 @@ let lodge_progress ~net:_ _args =
             match row with
             | agent :: agent_role :: visits :: interests :: _ ->
               let name = Yojson.Safe.Util.to_string agent in
-              let p = (try Yojson.Safe.Util.to_string agent_role with _ -> "unknown") in
-              let v = (try Yojson.Safe.Util.to_int visits with _ -> 0) in
-              let i = (try Yojson.Safe.Util.to_int interests with _ -> 0) in
+              let p = (try Yojson.Safe.Util.to_string agent_role with Yojson.Safe.Util.Type_error _ -> "unknown") in
+              let v = (try Yojson.Safe.Util.to_int visits with Yojson.Safe.Util.Type_error _ -> 0) in
+              let i = (try Yojson.Safe.Util.to_int interests with Yojson.Safe.Util.Type_error _ -> 0) in
               let emoji = emoji_of_agent p in
               Some (Printf.sprintf "   %s %s: %d visits, %d topics" emoji name v i)
             | _ -> None
-          with _ -> None
+          with Yojson.Safe.Util.Type_error _ -> None
         ) records
-      with _ -> []
-    with _ -> []
+      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+    with Unix.Unix_error _ | Sys_error _ -> []
   in
 
   let progress_report =

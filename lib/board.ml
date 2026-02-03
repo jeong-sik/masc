@@ -283,7 +283,7 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
           ] @ (match post.hearth with Some h -> [("hearth", `String h)] | None -> [])
             @ (match post.thread_id with Some t -> [("thread_id", `String t)] | None -> [])) in
           output_string oc (Yojson.Safe.to_string json ^ "\n"))
-      with _ -> ());
+      with Sys_error _ -> ());
       Ok post
     end
   )
@@ -408,7 +408,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
                 ("votes_down", `Int comment.votes_down);
               ] in
               output_string oc (Yojson.Safe.to_string json ^ "\n"))
-          with _ -> ());
+          with Sys_error _ -> ());
           Ok comment
         end
   )
@@ -484,7 +484,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                   output_string oc (Yojson.Safe.to_string json ^ "\n")
                 ) store.posts);
               Sys.rename tmp_path vpath
-            with _ -> ());
+            with Sys_error _ -> ());
             Ok (updated.votes_up - updated.votes_down)
       )
 
@@ -605,7 +605,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     | Ok id, Ok author, Some visibility ->
         Some { id; author; content; visibility; created_at; updated_at; expires_at; votes_up; votes_down; reply_count; hearth; thread_id }
     | _ -> None
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 let comment_of_yojson (json : Yojson.Safe.t) : comment option =
   try
@@ -627,7 +627,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
         in
         Some { id; post_id; parent_id; author; content; created_at; expires_at; votes_up; votes_down }
     | _ -> None
-  with _ -> None
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 let load_persisted_posts store =
   let path = persist_path () in
@@ -748,7 +748,7 @@ let persist_post (p : post) =
     let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc (Yojson.Safe.to_string (post_to_yojson p) ^ "\n"))
-  with _ -> ()
+  with Sys_error _ -> ()
 
 let persist_comment (c : comment) =
   try
@@ -757,7 +757,7 @@ let persist_comment (c : comment) =
     let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n"))
-  with _ -> ()
+  with Sys_error _ -> ()
 
 let rewrite_posts store =
   try
@@ -770,7 +770,7 @@ let rewrite_posts store =
         output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
       ) store.posts);
     Sys.rename tmp_path path
-  with _ -> ()
+  with Sys_error _ -> ()
 
 (** {1 Karma & Flair - Reddit-style} *)
 

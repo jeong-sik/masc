@@ -75,6 +75,7 @@
    notify
    orchestrator
    planning_eio
+   process_eio
    progress
    relay
    resilience

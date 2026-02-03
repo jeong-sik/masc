@@ -87,16 +87,10 @@ let is_spawnable = Mention.is_spawnable
 
 (** {1 Non-blocking Shell Execution} *)
 
-(** Run shell command in system thread (non-blocking for Eio) *)
+(** Run shell command in system thread (non-blocking for Eio).
+    Delegates to Process_eio.run_in_systhread_with_status (centralized, with timeout). *)
 let run_shell_nonblocking cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 1024 in
-    (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done
-     with End_of_file | Sys_error _ -> ());
-    let status = Unix.close_process_in ic in
-    (status, Buffer.contents buf)
-  )
+  Process_eio.run_in_systhread_with_status ~timeout_sec:60.0 cmd
 
 (** Run shell command and get single line (non-blocking) *)
 let run_shell_line cmd =

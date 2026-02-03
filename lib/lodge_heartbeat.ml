@@ -361,20 +361,9 @@ let cleanup_inactive_lodge_agents () =
 (** {1 Non-blocking Shell Execution} *)
 
 (** Run shell command in a separate system thread to avoid blocking Eio event loop.
-    Uses Fun.protect to guarantee process cleanup even on exceptions. *)
+    Delegates to Process_eio.run_in_systhread (centralized, with timeout). *)
 let run_shell_nonblocking cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic))
-      (fun () ->
-        let buf = Buffer.create 1024 in
-        (try while true do
-          Buffer.add_string buf (input_line ic);
-          Buffer.add_char buf '\n'
-        done with End_of_file -> ());
-        Buffer.contents buf
-      )
-  )
+  Process_eio.run_in_systhread ~timeout_sec:60.0 cmd
 
 (** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes.
     Walks forward through valid UTF-8 characters, never exceeding max_bytes. *)

@@ -130,7 +130,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
               worktree_path branch_name repo_name link_note worktree_path)
         end else begin
           (* Fetch origin first *)
-          let fetch_cmd = Printf.sprintf "cd %s && git fetch origin 2>&1" root in
+          let fetch_cmd = Printf.sprintf "cd %s && git fetch origin 2>&1" (Filename.quote root) in
           let _ = run_shell_exit fetch_cmd in
 
           match Room_git.resolve_base_branch root base_branch with
@@ -144,7 +144,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
               (* Create worktree with new branch from base *)
               let cmd = Printf.sprintf
                 "cd %s && git worktree add %s -b %s origin/%s 2>&1"
-                root worktree_path branch_name resolved_base in
+                (Filename.quote root) (Filename.quote worktree_path) (Filename.quote branch_name) (Filename.quote resolved_base) in
               let exit_code = run_shell_exit cmd in
 
               if exit_code = 0 then begin
@@ -194,16 +194,16 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
           Error (IoError (Printf.sprintf "Worktree not found: %s" worktree_path))
         else begin
           (* Remove worktree *)
-          let remove_cmd = Printf.sprintf "cd %s && git worktree remove %s 2>&1" root worktree_path in
+          let remove_cmd = Printf.sprintf "cd %s && git worktree remove %s 2>&1" (Filename.quote root) (Filename.quote worktree_path) in
           let exit_code = run_shell_exit remove_cmd in
 
           if exit_code = 0 then begin
             (* Try to delete the branch (may fail if not merged, which is ok) *)
-            let branch_cmd = Printf.sprintf "cd %s && git branch -d %s 2>&1" root branch_name in
+            let branch_cmd = Printf.sprintf "cd %s && git branch -d %s 2>&1" (Filename.quote root) (Filename.quote branch_name) in
             let _ = run_shell_exit branch_cmd in
 
             (* Prune stale worktrees *)
-            let prune_cmd = Printf.sprintf "cd %s && git worktree prune 2>&1" root in
+            let prune_cmd = Printf.sprintf "cd %s && git worktree prune 2>&1" (Filename.quote root) in
             let _ = run_shell_exit prune_cmd in
 
             (* Log event *)
@@ -234,7 +234,7 @@ let worktree_list config =
     match git_root config with
     | None -> `Assoc [("error", `String "Not a git repository")]
     | Some root ->
-        let cmd = Printf.sprintf "cd %s && git worktree list --porcelain 2>/dev/null" root in
+        let cmd = Printf.sprintf "cd %s && git worktree list --porcelain 2>/dev/null" (Filename.quote root) in
         let lines = run_shell_lines cmd in
 
         (* Parse porcelain output into worktree info *)

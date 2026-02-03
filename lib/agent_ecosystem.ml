@@ -114,11 +114,11 @@ let from_mcp_params params =
   let open Yojson.Safe.Util in
   let get_opt key =
     try Some (params |> member key |> to_string)
-    with _ -> None
+    with Yojson.Safe.Util.Type_error _ | Not_found -> None
   in
   let get_list key =
     try params |> member key |> to_list |> List.map to_string
-    with _ -> []
+    with Yojson.Safe.Util.Type_error _ | Not_found -> []
   in
   let base = Agent_identity.from_mcp_params params in
   let hash = hash_of_session_key base.session_key in
@@ -133,7 +133,7 @@ let from_mcp_params params =
     avatar = get_opt "_agent_avatar";
   } in
   let lineage = {
-    generation = (try params |> member "_generation" |> to_int with _ -> 0);
+    generation = (try params |> member "_generation" |> to_int with Yojson.Safe.Util.Type_error _ | Not_found -> 0);
     parent_hash = get_opt "_parent_hash";
     ancestors = get_list "_ancestors";
     mutations = get_list "_mutations";
@@ -302,7 +302,7 @@ let from_base_with_metadata (base : Agent_identity.t) =
   } in
   let lineage = {
     generation = (match get "_generation" with
-      | Some g -> (try int_of_string g with _ -> 0)
+      | Some g -> (try int_of_string g with Failure _ -> 0)
       | None -> 0);
     parent_hash = get "_parent_hash";
     ancestors = get_indexed "_ancestor";

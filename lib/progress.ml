@@ -145,9 +145,7 @@ module State = struct
   (** Thread-safe operation wrapper *)
   let with_lock f =
     Mutex.lock global.mutex;
-    let result = try f () with e -> Mutex.unlock global.mutex; raise e in
-    Mutex.unlock global.mutex;
-    result
+    Fun.protect ~finally:(fun () -> Mutex.unlock global.mutex) f
 
   (** Reset for testing only *)
   let reset () =

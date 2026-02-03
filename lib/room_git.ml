@@ -41,12 +41,23 @@ let run_shell_lines cmd =
   )
 
 (* ============================================ *)
+(* Input Validation                             *)
+(* ============================================ *)
+
+(** Validate branch/path components — alphanumeric + /_-. only *)
+let is_valid_branch_name s =
+  String.length s > 0 && String.length s < 256 &&
+  s |> String.to_seq |> Seq.for_all (fun c ->
+    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+    (c >= '0' && c <= '9') || c = '/' || c = '_' || c = '-' || c = '.')
+
+(* ============================================ *)
 (* Git Repository Utilities                     *)
 (* ============================================ *)
 
 (** Get git root directory *)
 let git_root ~base_path =
-  let cmd = Printf.sprintf "cd %s && git rev-parse --show-toplevel 2>/dev/null" base_path in
+  let cmd = Printf.sprintf "cd %s && git rev-parse --show-toplevel 2>/dev/null" (Filename.quote base_path) in
   run_shell_line cmd
 
 (** Check if directory is a git repository *)
@@ -56,14 +67,16 @@ let is_git_repo ~base_path =
   | None -> false
 
 let remote_branch_exists root branch =
-  let cmd = Printf.sprintf
-    "cd %s && git show-ref --verify --quiet refs/remotes/origin/%s" root branch
-  in
-  run_shell_exit cmd = 0
+  if not (is_valid_branch_name branch) then false
+  else
+    let cmd = Printf.sprintf
+      "cd %s && git show-ref --verify --quiet refs/remotes/origin/%s" (Filename.quote root) (Filename.quote branch)
+    in
+    run_shell_exit cmd = 0
 
 let origin_head_branch root =
   let cmd = Printf.sprintf
-    "cd %s && git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null" root
+    "cd %s && git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null" (Filename.quote root)
   in
   let line = run_shell_line cmd in
   match line with
@@ -121,7 +134,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               worktree_path branch_name worktree_path)
         else begin
           (* Fetch origin first *)
-          let fetch_cmd = Printf.sprintf "cd %s && git fetch origin 2>&1" root in
+          let fetch_cmd = Printf.sprintf "cd %s && git fetch origin 2>&1" (Filename.quote root) in
           let _ = run_shell_exit fetch_cmd in
           match resolve_base_branch root base_branch with
           | Error e -> Error e
@@ -134,7 +147,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               (* Create worktree with new branch from base *)
               let cmd = Printf.sprintf
                 "cd %s && git worktree add %s -b %s origin/%s 2>&1"
-                root worktree_path branch_name resolved_base in
+                (Filename.quote root) (Filename.quote worktree_path) (Filename.quote branch_name) (Filename.quote resolved_base) in
               let exit_code = run_shell_exit cmd in
 
               if exit_code = 0 then begin
@@ -165,16 +178,16 @@ let remove ~base_path ~agent_name ~task_id : string masc_result =
         Error (IoError (Printf.sprintf "Worktree not found: %s" worktree_path))
       else begin
         (* Remove worktree *)
-        let remove_cmd = Printf.sprintf "cd %s && git worktree remove %s 2>&1" root worktree_path in
+        let remove_cmd = Printf.sprintf "cd %s && git worktree remove %s 2>&1" (Filename.quote root) (Filename.quote worktree_path) in
         let exit_code = run_shell_exit remove_cmd in
 
         if exit_code = 0 then begin
           (* Try to delete the branch (may fail if not merged, which is ok) *)
-          let branch_cmd = Printf.sprintf "cd %s && git branch -d %s 2>&1" root branch_name in
+          let branch_cmd = Printf.sprintf "cd %s && git branch -d %s 2>&1" (Filename.quote root) (Filename.quote branch_name) in
           let _ = run_shell_exit branch_cmd in
 
           (* Prune stale worktrees *)
-          let prune_cmd = Printf.sprintf "cd %s && git worktree prune 2>&1" root in
+          let prune_cmd = Printf.sprintf "cd %s && git worktree prune 2>&1" (Filename.quote root) in
           let _ = run_shell_exit prune_cmd in
 
           Ok (Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s" worktree_path branch_name)
@@ -188,7 +201,7 @@ let list ~base_path =
   match git_root ~base_path with
   | None -> `Assoc [("error", `String "Not a git repository")]
   | Some root ->
-      let cmd = Printf.sprintf "cd %s && git worktree list --porcelain 2>/dev/null" root in
+      let cmd = Printf.sprintf "cd %s && git worktree list --porcelain 2>/dev/null" (Filename.quote root) in
       let lines = run_shell_lines cmd in
 
       (* Parse porcelain output into worktree info *)

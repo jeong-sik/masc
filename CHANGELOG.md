@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.45.0] - 2026-02-03
+
+### Changed
+- **Eio-native process execution**: Replace `run_in_systhread` / `run_in_systhread_with_status` with `Process_eio.run` / `run_with_status` using global `proc_mgr`/`clock` refs
+  - `lodge_heartbeat`, `tool_lodge`, `auto_responder`, `lodge_memory`, `llm_direct` migrated
+  - Sleep calls in `tool_lodge` migrated from `Eio_unix.run_in_systhread (Unix.sleepf)` to `Eio.Time.sleep`
+  - Removed: `read_fd_with_timeout`, `reap_child`, `run_in_systhread`, `run_in_systhread_with_status` (~90 lines)
+  - `Process_eio.init ~proc_mgr ~clock` called from `main_eio.ml` at startup
+
+### Fixed
+- **Lodge Memory**: Migrate from raw Cypher to GraphQL API
+
 ## [2.35.0] - 2026-02-03
 
 ### Fixed

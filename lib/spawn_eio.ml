@@ -278,7 +278,9 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
           let json = Yojson.Safe.from_string content in
           let inst = Institution_eio.institution_of_json json in
           Institution_eio.format_for_injection inst
-        with _ -> ""
+        with exn ->
+          Eio.traceln "[spawn_eio] Institution load failed: %s" (Printexc.to_string exn);
+          ""
       else ""
     in
     match room_config with

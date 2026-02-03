@@ -25,6 +25,7 @@ type board_error =
   | Capacity_exceeded of { current: int; max: int }
   | Io_error of string
   | Validation_error of string
+  | Already_voted of string
   [@@deriving show]
 
 (** {1 Safe ID Module - Parse Don't Validate} *)
@@ -154,11 +155,16 @@ module Limits = struct
   let sweeper_batch_size = 100   (* Backpressure: don't delete too many at once *)
 end
 
+(** {1 Vote Direction} *)
+
+type vote_direction = Up | Down
+
 (** {1 In-Memory Store with Enforced Limits} *)
 
 type store = {
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
+  vote_log: (string, vote_direction) Hashtbl.t;
   post_count: int ref;
   mutable last_sweep: float;
   mutex: Eio.Mutex.t;
@@ -167,6 +173,7 @@ type store = {
 let create_store () = {
   posts = Hashtbl.create 1024;
   comments = Hashtbl.create 4096;
+  vote_log = Hashtbl.create 2048;
   post_count = ref 0;
   last_sweep = Time_compat.now ();
   mutex = Eio.Mutex.create ();
@@ -217,6 +224,106 @@ let maybe_sweep store =
   if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
     ignore (sweep store)
 
+(** {1 Persistence Paths} *)
+
+let persist_path () =
+  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  Filename.concat base ".masc/board_posts.jsonl"
+
+let comments_path () =
+  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  Filename.concat base ".masc/board_comments.jsonl"
+
+let ensure_masc_dir () =
+  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  let dir = Filename.concat base ".masc" in
+  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
+
+(** {1 JSONL File Rotation} *)
+
+(** Max JSONL file size before rotation (10 MB).
+    Prevents unbounded disk growth from agent feedback loops. *)
+let max_jsonl_bytes = 10 * 1024 * 1024
+
+(** Rotate a JSONL file if it exceeds [max_jsonl_bytes].
+    Keeps one backup (.1) and truncates the active file.
+    Safe: uses rename (atomic on same filesystem). *)
+let rotate_if_needed path =
+  try
+    let st = Unix.stat path in
+    if st.Unix.st_size > max_jsonl_bytes then begin
+      let backup = path ^ ".1" in
+      (try Sys.rename backup (path ^ ".2") with Sys_error _ -> ());
+      Sys.rename path backup;
+      Printf.eprintf "[Board] Rotated %s (was %d bytes)\n%!" path st.Unix.st_size
+    end
+  with Unix.Unix_error _ | Sys_error _ -> ()
+
+(** {1 JSON Serialization} *)
+
+let visibility_to_string = function
+  | Public -> "public"
+  | Unlisted -> "unlisted"
+  | Internal -> "internal"
+  | Direct -> "direct"
+
+let post_to_yojson (p : post) : Yojson.Safe.t =
+  `Assoc ([
+    ("id", `String (Post_id.to_string p.id));
+    ("author", `String (Agent_id.to_string p.author));
+    ("content", `String p.content);
+    ("visibility", `String (visibility_to_string p.visibility));
+    ("created_at", `Float p.created_at);
+    ("expires_at", `Float p.expires_at);
+    ("votes_up", `Int p.votes_up);
+    ("votes_down", `Int p.votes_down);
+    ("score", `Int (p.votes_up - p.votes_down));
+    ("reply_count", `Int p.reply_count);
+  ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
+    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> []))
+
+let comment_to_yojson (c : comment) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String (Comment_id.to_string c.id));
+    ("post_id", `String (Post_id.to_string c.post_id));
+    ("parent_id", match c.parent_id with Some p -> `String (Comment_id.to_string p) | None -> `Null);
+    ("author", `String (Agent_id.to_string c.author));
+    ("content", `String c.content);
+    ("created_at", `Float c.created_at);
+    ("expires_at", `Float c.expires_at);
+    ("votes_up", `Int c.votes_up);
+    ("votes_down", `Int c.votes_down);
+    ("score", `Int (c.votes_up - c.votes_down));
+  ]
+
+(** {1 Rewrite Helpers} *)
+
+let rewrite_posts store =
+  try
+    ensure_masc_dir ();
+    let path = persist_path () in
+    let tmp_path = path ^ ".tmp" in
+    let oc = open_out tmp_path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      Hashtbl.iter (fun _ (pst : post) ->
+        output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
+      ) store.posts);
+    Sys.rename tmp_path path
+  with Sys_error _ -> ()
+
+let rewrite_comments store =
+  try
+    ensure_masc_dir ();
+    let path = comments_path () in
+    let tmp_path = path ^ ".tmp" in
+    let oc = open_out tmp_path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      Hashtbl.iter (fun _ (cmt : comment) ->
+        output_string oc (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
+      ) store.comments);
+    Sys.rename tmp_path path
+  with Sys_error _ -> ()
+
 (** {1 Post Operations} *)
 
 let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id ()
@@ -238,6 +345,9 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
 
   (* Validate TTL *)
   let ttl = min ttl_hours Limits.max_ttl_hours in
+
+  (* Normalize hearth: lowercase + trim *)
+  let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
 
   with_lock store (fun () ->
     (* Check capacity *)
@@ -282,7 +392,8 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
             ("reply_count", `Int post.reply_count);
           ] @ (match post.hearth with Some h -> [("hearth", `String h)] | None -> [])
             @ (match post.thread_id with Some t -> [("thread_id", `String t)] | None -> [])) in
-          output_string oc (Yojson.Safe.to_string json ^ "\n"))
+          output_string oc (Yojson.Safe.to_string json ^ "\n"));
+        rotate_if_needed path
       with Sys_error _ -> ());
       Ok post
     end
@@ -309,7 +420,9 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
     in
     let filtered = match hearth with
       | None -> filtered
-      | Some h -> List.filter (fun (p : post) -> p.hearth = Some h) filtered
+      | Some h ->
+          let h_norm = String.lowercase_ascii (String.trim h) in
+          List.filter (fun (p : post) -> p.hearth = Some h_norm) filtered
     in
     (* Sort by score desc, then created_at desc *)
     let sorted = List.sort (fun (a : post) (b : post) ->
@@ -407,7 +520,8 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
                 ("votes_up", `Int comment.votes_up);
                 ("votes_down", `Int comment.votes_down);
               ] in
-              output_string oc (Yojson.Safe.to_string json ^ "\n"))
+              output_string oc (Yojson.Safe.to_string json ^ "\n"));
+            rotate_if_needed cpath
           with Sys_error _ -> ());
           Ok comment
         end
@@ -437,9 +551,29 @@ let list_comments store ?(limit=1000) () : comment list =
     List.filteri (fun i _ -> i < limit) sorted
   )
 
-(** {1 Voting - Idempotent} *)
+(** {1 Voting - Deduplicated} *)
 
-type vote_direction = Up | Down
+let vote_direction_to_string = function Up -> "up" | Down -> "down"
+
+let vote_log_path () =
+  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
+  Filename.concat base ".masc/board_votes.jsonl"
+
+let append_vote_log ~target ~voter ~direction =
+  try
+    ensure_masc_dir ();
+    let path = vote_log_path () in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      let json = `Assoc [
+        ("target", `String target);
+        ("voter", `String voter);
+        ("direction", `String (vote_direction_to_string direction));
+        ("ts", `Float (Time_compat.now ()));
+      ] in
+      output_string oc (Yojson.Safe.to_string json ^ "\n"));
+    rotate_if_needed path
+  with Sys_error _ -> ()
 
 let vote store ~voter ~post_id ~direction : (int, board_error) result =
   match Agent_id.of_string voter with
@@ -452,40 +586,37 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
         match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
         | None -> Error (Post_not_found post_id)
         | Some post ->
+            let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
             let now = Time_compat.now () in
-            let updated = match direction with
-              | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
-              | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
-            in
-            Hashtbl.replace store.posts (Post_id.to_string pid) updated;
-            (* Persist vote by rewriting posts file - inline *)
-            (try
-              let base = match Sys.getenv_opt "ME_ROOT" with Some vp -> vp | None -> Sys.getcwd () in
-              let vdir = Filename.concat base ".masc" in
-              if not (Sys.file_exists vdir) then Unix.mkdir vdir 0o755;
-              let vpath = Filename.concat base ".masc/board_posts.jsonl" in
-              let tmp_path = vpath ^ ".tmp" in
-              let oc = open_out tmp_path in
-              Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-                Hashtbl.iter (fun _ (pst : post) ->
-                  let json = `Assoc ([
-                    ("id", `String (Post_id.to_string pst.id));
-                    ("author", `String (Agent_id.to_string pst.author));
-                    ("content", `String pst.content);
-                    ("visibility", `String (match pst.visibility with Public->"public"|Unlisted->"unlisted"|Internal->"internal"|Direct->"direct"));
-                    ("created_at", `Float pst.created_at);
-                    ("updated_at", `Float pst.updated_at);
-                    ("expires_at", `Float pst.expires_at);
-                    ("votes_up", `Int pst.votes_up);
-                    ("votes_down", `Int pst.votes_down);
-                    ("reply_count", `Int pst.reply_count);
-                  ] @ (match pst.hearth with Some h -> [("hearth", `String h)] | None -> [])
-                    @ (match pst.thread_id with Some t -> [("thread_id", `String t)] | None -> [])) in
-                  output_string oc (Yojson.Safe.to_string json ^ "\n")
-                ) store.posts);
-              Sys.rename tmp_path vpath
-            with Sys_error _ -> ());
-            Ok (updated.votes_up - updated.votes_down)
+            match Hashtbl.find_opt store.vote_log vote_key with
+            | Some prev when prev = direction ->
+                Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
+                  voter (vote_direction_to_string direction) post_id))
+            | Some _opposite ->
+                (* Flip: undo previous vote, apply new one *)
+                let flipped = match direction with
+                  | Up -> { post with votes_up = post.votes_up + 1;
+                                      votes_down = max 0 (post.votes_down - 1);
+                                      updated_at = now }
+                  | Down -> { post with votes_down = post.votes_down + 1;
+                                        votes_up = max 0 (post.votes_up - 1);
+                                        updated_at = now }
+                in
+                Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
+                Hashtbl.replace store.vote_log vote_key direction;
+                rewrite_posts store;
+                append_vote_log ~target:vote_key ~voter ~direction;
+                Ok (flipped.votes_up - flipped.votes_down)
+            | None ->
+                let updated = match direction with
+                  | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
+                  | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
+                in
+                Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+                Hashtbl.replace store.vote_log vote_key direction;
+                rewrite_posts store;
+                append_vote_log ~target:vote_key ~voter ~direction;
+                Ok (updated.votes_up - updated.votes_down)
       )
 
 (** Vote on a comment *)
@@ -500,12 +631,33 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
         match Hashtbl.find_opt store.comments (Comment_id.to_string cid) with
         | None -> Error (Comment_not_found comment_id)
         | Some cmt ->
-            let updated = match direction with
-              | Up -> { cmt with votes_up = cmt.votes_up + 1 }
-              | Down -> { cmt with votes_down = cmt.votes_down + 1 }
-            in
-            Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
-            Ok (updated.votes_up - updated.votes_down)
+            let vote_key = "comment:" ^ Comment_id.to_string cid ^ ":" ^ voter in
+            match Hashtbl.find_opt store.vote_log vote_key with
+            | Some prev when prev = direction ->
+                Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
+                  voter (vote_direction_to_string direction) comment_id))
+            | Some _opposite ->
+                let flipped = match direction with
+                  | Up -> { cmt with votes_up = cmt.votes_up + 1;
+                                     votes_down = max 0 (cmt.votes_down - 1) }
+                  | Down -> { cmt with votes_down = cmt.votes_down + 1;
+                                       votes_up = max 0 (cmt.votes_up - 1) }
+                in
+                Hashtbl.replace store.comments (Comment_id.to_string cid) flipped;
+                Hashtbl.replace store.vote_log vote_key direction;
+                rewrite_comments store;
+                append_vote_log ~target:vote_key ~voter ~direction;
+                Ok (flipped.votes_up - flipped.votes_down)
+            | None ->
+                let updated = match direction with
+                  | Up -> { cmt with votes_up = cmt.votes_up + 1 }
+                  | Down -> { cmt with votes_down = cmt.votes_down + 1 }
+                in
+                Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
+                Hashtbl.replace store.vote_log vote_key direction;
+                rewrite_comments store;
+                append_vote_log ~target:vote_key ~voter ~direction;
+                Ok (updated.votes_up - updated.votes_down)
       )
 
 (** {1 Stats} *)
@@ -525,58 +677,6 @@ let stats store =
       ("last_sweep", `Float store.last_sweep);
     ]
   )
-
-(** {1 JSON Serialization} *)
-
-let visibility_to_string = function
-  | Public -> "public"
-  | Unlisted -> "unlisted"
-  | Internal -> "internal"
-  | Direct -> "direct"
-
-let post_to_yojson (p : post) : Yojson.Safe.t =
-  `Assoc ([
-    ("id", `String (Post_id.to_string p.id));
-    ("author", `String (Agent_id.to_string p.author));
-    ("content", `String p.content);
-    ("visibility", `String (visibility_to_string p.visibility));
-    ("created_at", `Float p.created_at);
-    ("expires_at", `Float p.expires_at);
-    ("votes_up", `Int p.votes_up);
-    ("votes_down", `Int p.votes_down);
-    ("score", `Int (p.votes_up - p.votes_down));
-    ("reply_count", `Int p.reply_count);
-  ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
-    @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> []))
-
-let comment_to_yojson (c : comment) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String (Comment_id.to_string c.id));
-    ("post_id", `String (Post_id.to_string c.post_id));
-    ("parent_id", match c.parent_id with Some p -> `String (Comment_id.to_string p) | None -> `Null);
-    ("author", `String (Agent_id.to_string c.author));
-    ("content", `String c.content);
-    ("created_at", `Float c.created_at);
-    ("expires_at", `Float c.expires_at);
-    ("votes_up", `Int c.votes_up);
-    ("votes_down", `Int c.votes_down);
-    ("score", `Int (c.votes_up - c.votes_down));
-  ]
-
-(** {1 Persistence - JSONL File-based} *)
-
-let persist_path () =
-  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
-  Filename.concat base ".masc/board_posts.jsonl"
-
-let comments_path () =
-  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
-  Filename.concat base ".masc/board_comments.jsonl"
-
-let ensure_masc_dir () =
-  let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
-  let dir = Filename.concat base ".masc" in
-  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
 
 let visibility_of_string = function
   | "public" -> Some Public
@@ -696,6 +796,32 @@ let recalculate_reply_counts store =
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
   Printf.eprintf "[Board] Recalculated reply_counts: %d total comments across posts\n%!" total
 
+let load_persisted_votes store =
+  let path = vote_log_path () in
+  if Sys.file_exists path then begin
+    try
+      let ic = open_in path in
+      let loaded = ref 0 in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        (try
+          while true do
+            let line = input_line ic in
+            if String.length line > 0 then begin
+              let open Yojson.Safe.Util in
+              let json = Yojson.Safe.from_string line in
+              let target = json |> member "target" |> to_string in
+              let dir_str = json |> member "direction" |> to_string in
+              let direction = if dir_str = "down" then Down else Up in
+              Hashtbl.replace store.vote_log target direction;
+              incr loaded
+            end
+          done
+        with End_of_file | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()));
+      Printf.eprintf "[Board] Loaded %d vote entries from %s\n%!" !loaded path
+    with e ->
+      Printf.eprintf "[Board] Load votes failed: %s\n%!" (Printexc.to_string e)
+  end
+
 (** {1 Hearth (topic) operations} *)
 
 (** List active hearths with post counts *)
@@ -733,44 +859,12 @@ let global_store = lazy (
   let store = create_store () in
   load_persisted_posts store;
   load_persisted_comments store;
-  recalculate_reply_counts store;  (* Derive reply_count from actual comments *)
+  recalculate_reply_counts store;
+  load_persisted_votes store;
   store
 )
 
 let global () = Lazy.force global_store
-
-(** {1 Persistence Helpers - Called after operations} *)
-
-let persist_post (p : post) =
-  try
-    ensure_masc_dir ();
-    let path = persist_path () in
-    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.to_string (post_to_yojson p) ^ "\n"))
-  with Sys_error _ -> ()
-
-let persist_comment (c : comment) =
-  try
-    ensure_masc_dir ();
-    let path = comments_path () in
-    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n"))
-  with Sys_error _ -> ()
-
-let rewrite_posts store =
-  try
-    ensure_masc_dir ();
-    let path = persist_path () in
-    let tmp_path = path ^ ".tmp" in
-    let oc = open_out tmp_path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      Hashtbl.iter (fun _ (pst : post) ->
-        output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
-      ) store.posts);
-    Sys.rename tmp_path path
-  with Sys_error _ -> ()
 
 (** {1 Karma & Flair - Reddit-style} *)
 

@@ -7,13 +7,14 @@ open Printf
 
 (* ---------- Helpers ---------- *)
 
-(** Write string to tmp file, return path.
-    Uses Filename.temp_file for uniqueness (PID + counter). *)
+(** Write string to tmp file with restricted permissions, return path.
+    Uses Filename.temp_file for uniqueness (PID + counter).
+    Permissions: 0o600 (owner-only) to prevent credential leakage. *)
 let write_tmp ~prefix content =
   let path = Filename.temp_file prefix ".json" in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc content);
+  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_TRUNC] 0o600 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let _ = Unix.write_substring fd content 0 (String.length content) in ());
   path
 
 (** Run shell command with guaranteed tmp file cleanup. *)
@@ -22,7 +23,7 @@ let run_with_cleanup ~tmp_files ~timeout_sec cmd =
     try Sys.remove f with Sys_error _ -> ()
   ) tmp_files in
   Fun.protect ~finally:cleanup (fun () ->
-    Process_eio.run_in_systhread ~timeout_sec cmd)
+    Process_eio.run ~timeout_sec cmd)
 
 (** Strip [Extra] metadata and hook outputs from LLM responses. *)
 let strip_extra s =
@@ -68,19 +69,27 @@ let call_glm ?(api_key="") ~model ~prompt ~timeout_sec ~max_chars () =
       ]);
       ("stream", `Bool false);
     ]) in
-    let tmp = write_tmp ~prefix:"llm_direct_glm" body in
-    let cmd = sprintf
-      "curl -s --max-time %d -X POST 'https://api.z.ai/api/coding/paas/v4/chat/completions' \
-       -H 'Content-Type: application/json' \
-       -H 'Authorization: Bearer %s' \
-       -d @%s 2>/dev/null \
-       | jq -r '.choices[0].message.content // empty' \
-       | head -c %d"
-      timeout_sec (Filename.quote key) tmp max_chars
-    in
-    let result = run_with_cleanup ~tmp_files:[tmp]
-      ~timeout_sec:(Float.of_int timeout_sec +. 5.0) cmd in
-    strip_extra result
+    (* Use argv + stdin: no shell, no API key in process list *)
+    let raw = Process_eio.run_argv_with_stdin
+      ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
+      ~stdin_content:body
+      ["curl"; "-s"; "--max-time"; string_of_int timeout_sec;
+       "-X"; "POST"; "https://api.z.ai/api/coding/paas/v4/chat/completions";
+       "-H"; "Content-Type: application/json";
+       "-H"; sprintf "Authorization: Bearer %s" key;
+       "-d"; "@-"] in
+    (* Extract .choices[0].message.content in OCaml instead of piping to jq *)
+    let result = try
+      let json = Yojson.Safe.from_string raw in
+      json |> Yojson.Safe.Util.member "choices"
+           |> Yojson.Safe.Util.index 0
+           |> Yojson.Safe.Util.member "message"
+           |> Yojson.Safe.Util.member "content"
+           |> Yojson.Safe.Util.to_string
+    with _ -> raw in
+    let truncated = if String.length result > max_chars
+      then String.sub result 0 max_chars else result in
+    strip_extra truncated
   end
 
 (* ---------- Claude CLI ---------- *)
@@ -113,18 +122,23 @@ let call_ollama ~model ~prompt ~timeout_sec ~max_chars () =
     ("prompt", `String prompt);
     ("stream", `Bool false);
   ]) in
-  let tmp = write_tmp ~prefix:"llm_direct_ollama" body in
-  let cmd = sprintf
-    "curl -s --max-time %d -X POST 'http://127.0.0.1:11434/api/generate' \
-     -H 'Content-Type: application/json' \
-     -d @%s 2>/dev/null \
-     | jq -r '.response // empty' \
-     | head -c %d"
-    timeout_sec tmp max_chars
-  in
-  let result = run_with_cleanup ~tmp_files:[tmp]
-    ~timeout_sec:(Float.of_int timeout_sec +. 5.0) cmd in
-  strip_extra result
+  (* Use argv + stdin: no shell *)
+  let raw = Process_eio.run_argv_with_stdin
+    ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
+    ~stdin_content:body
+    ["curl"; "-s"; "--max-time"; string_of_int timeout_sec;
+     "-X"; "POST"; "http://127.0.0.1:11434/api/generate";
+     "-H"; "Content-Type: application/json";
+     "-d"; "@-"] in
+  (* Extract .response in OCaml instead of piping to jq *)
+  let result = try
+    let json = Yojson.Safe.from_string raw in
+    json |> Yojson.Safe.Util.member "response"
+         |> Yojson.Safe.Util.to_string
+  with _ -> raw in
+  let truncated = if String.length result > max_chars
+    then String.sub result 0 max_chars else result in
+  strip_extra truncated
 
 (* ---------- Dispatch ---------- *)
 

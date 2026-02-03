@@ -168,7 +168,16 @@ type store = {
   post_count: int ref;
   mutable last_sweep: float;
   mutex: Eio.Mutex.t;
+  (* Phase 2 caches *)
+  mutable karma_cache: (string * int) list option;       (** None = stale *)
+  mutable sorted_posts_cache: post list option;           (** None = stale *)
+  comments_by_post: (string, string list) Hashtbl.t;      (** post_id -> comment_id list *)
+  mutable dirty_posts: bool;                               (** Deferred flush flag *)
+  mutable dirty_comments: bool;                            (** Deferred flush flag *)
+  mutable last_flush: float;                               (** Last deferred flush time *)
 }
+
+let flush_interval_sec = 30.0
 
 let create_store () = {
   posts = Hashtbl.create 1024;
@@ -177,7 +186,22 @@ let create_store () = {
   post_count = ref 0;
   last_sweep = Time_compat.now ();
   mutex = Eio.Mutex.create ();
+  karma_cache = None;
+  sorted_posts_cache = None;
+  comments_by_post = Hashtbl.create 1024;
+  dirty_posts = false;
+  dirty_comments = false;
+  last_flush = Time_compat.now ();
 }
+
+(** Invalidate caches that depend on post data *)
+let invalidate_post_caches store =
+  store.karma_cache <- None;
+  store.sorted_posts_cache <- None
+
+(** Invalidate caches that depend on comment data *)
+let invalidate_comment_caches store =
+  store.karma_cache <- None
 
 (** {1 Eio-style Locking with Switch.on_release} *)
 
@@ -202,6 +226,7 @@ let sweep store =
     ) store.posts [] in
     List.iter (fun id ->
       Hashtbl.remove store.posts id;
+      Hashtbl.remove store.comments_by_post id;
       decr store.post_count
     ) expired_posts;
 
@@ -212,17 +237,39 @@ let sweep store =
         id :: acc
       end else acc
     ) store.comments [] in
-    List.iter (Hashtbl.remove store.comments) expired_comments;
+    List.iter (fun cid ->
+      (match Hashtbl.find_opt store.comments cid with
+       | Some c ->
+           let post_key = Post_id.to_string c.post_id in
+           (match Hashtbl.find_opt store.comments_by_post post_key with
+            | Some ids ->
+                let filtered = List.filter (fun id -> not (String.equal id cid)) ids in
+                if filtered = [] then Hashtbl.remove store.comments_by_post post_key
+                else Hashtbl.replace store.comments_by_post post_key filtered
+            | None -> ())
+       | None -> ());
+      Hashtbl.remove store.comments cid
+    ) expired_comments;
+
+    (* Invalidate caches if anything was swept *)
+    if !removed_posts > 0 then invalidate_post_caches store;
+    if !removed_comments > 0 then invalidate_comment_caches store;
 
     store.last_sweep <- now;
     (!removed_posts, !removed_comments)
   )
 
-(** Auto-sweep if needed *)
+(** Deferred flush callback — set after rewrite helpers are defined.
+    Avoids forward-reference issue (maybe_sweep is defined before rewrite_posts). *)
+let deferred_flush_fn : (store -> unit) ref = ref (fun _ -> ())
+
+(** Auto-sweep if needed, also triggers deferred flush via callback *)
 let maybe_sweep store =
   let now = Time_compat.now () in
   if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
-    ignore (sweep store)
+    ignore (sweep store);
+  if now -. store.last_flush > flush_interval_sec then
+    !deferred_flush_fn store
 
 (** {1 Persistence Paths} *)
 
@@ -257,7 +304,11 @@ let rotate_if_needed path =
       Sys.rename path backup;
       Printf.eprintf "[Board] Rotated %s (was %d bytes)\n%!" path st.Unix.st_size
     end
-  with Unix.Unix_error _ | Sys_error _ -> ()
+  with
+  | Unix.Unix_error (e, fn, arg) ->
+      Printf.eprintf "[Board] rotate error: %s(%s): %s\n%!" fn arg (Unix.error_message e)
+  | Sys_error msg ->
+      Printf.eprintf "[Board] rotate error: %s\n%!" msg
 
 (** {1 JSON Serialization} *)
 
@@ -274,6 +325,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);
+    ("updated_at", `Float p.updated_at);
     ("expires_at", `Float p.expires_at);
     ("votes_up", `Int p.votes_up);
     ("votes_down", `Int p.votes_down);
@@ -309,7 +361,7 @@ let rewrite_posts store =
         output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
       ) store.posts);
     Sys.rename tmp_path path
-  with Sys_error _ -> ()
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (rewrite_posts): %s\n%!" msg
 
 let rewrite_comments store =
   try
@@ -322,7 +374,29 @@ let rewrite_comments store =
         output_string oc (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
       ) store.comments);
     Sys.rename tmp_path path
-  with Sys_error _ -> ()
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (rewrite_comments): %s\n%!" msg
+
+(** {1 Append Helpers} *)
+
+let append_post (p : post) =
+  try
+    ensure_masc_dir ();
+    let path = persist_path () in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.to_string (post_to_yojson p) ^ "\n"));
+    rotate_if_needed path
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_post): %s\n%!" msg
+
+let append_comment (c : comment) =
+  try
+    ensure_masc_dir ();
+    let path = comments_path () in
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n"));
+    rotate_if_needed path
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_comment): %s\n%!" msg
 
 (** {1 Post Operations} *)
 
@@ -371,30 +445,8 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
       } in
       Hashtbl.add store.posts (Post_id.to_string post.id) post;
       incr store.post_count;
-      (* Persist post - inline to avoid forward reference *)
-      (try
-        let base = match Sys.getenv_opt "ME_ROOT" with Some p -> p | None -> Sys.getcwd () in
-        let path = Filename.concat base ".masc/board_posts.jsonl" in
-        let dir = Filename.dirname path in
-        if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
-        let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-        Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-          let json = `Assoc ([
-            ("id", `String (Post_id.to_string post.id));
-            ("author", `String (Agent_id.to_string post.author));
-            ("content", `String post.content);
-            ("visibility", `String (match post.visibility with Public->"public"|Unlisted->"unlisted"|Internal->"internal"|Direct->"direct"));
-            ("created_at", `Float post.created_at);
-            ("updated_at", `Float post.updated_at);
-            ("expires_at", `Float post.expires_at);
-            ("votes_up", `Int post.votes_up);
-            ("votes_down", `Int post.votes_down);
-            ("reply_count", `Int post.reply_count);
-          ] @ (match post.hearth with Some h -> [("hearth", `String h)] | None -> [])
-            @ (match post.thread_id with Some t -> [("thread_id", `String t)] | None -> [])) in
-          output_string oc (Yojson.Safe.to_string json ^ "\n"));
-        rotate_if_needed path
-      with Sys_error _ -> ());
+      invalidate_post_caches store;
+      append_post post;
       Ok post
     end
   )
@@ -413,10 +465,25 @@ let get_post store ~post_id : (post, board_error) result =
 let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post list =
   maybe_sweep store;
   with_lock store (fun () ->
-    let all = Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts [] in
+    (* Use cached sorted list if available (cache hit = skip sort) *)
+    let sorted_all = match store.sorted_posts_cache with
+      | Some cached -> cached
+      | None ->
+          let all = Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts [] in
+          let sorted = List.sort (fun (a : post) (b : post) ->
+            let score_a = a.votes_up - a.votes_down in
+            let score_b = b.votes_up - b.votes_down in
+            let cmp = compare score_b score_a in
+            if cmp <> 0 then cmp
+            else compare b.created_at a.created_at
+          ) all in
+          store.sorted_posts_cache <- Some sorted;
+          sorted
+    in
+    (* Apply filters on the pre-sorted list *)
     let filtered = match visibility_filter with
-      | None -> all
-      | Some v -> List.filter (fun (p : post) -> p.visibility = v) all
+      | None -> sorted_all
+      | Some v -> List.filter (fun (p : post) -> p.visibility = v) sorted_all
     in
     let filtered = match hearth with
       | None -> filtered
@@ -424,20 +491,12 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
           let h_norm = String.lowercase_ascii (String.trim h) in
           List.filter (fun (p : post) -> p.hearth = Some h_norm) filtered
     in
-    (* Sort by score desc, then created_at desc *)
-    let sorted = List.sort (fun (a : post) (b : post) ->
-      let score_a = a.votes_up - a.votes_down in
-      let score_b = b.votes_up - b.votes_down in
-      let cmp = compare score_b score_a in
-      if cmp <> 0 then cmp
-      else compare b.created_at a.created_at
-    ) filtered in
     (* Take first N *)
     let rec take n lst = match n, lst with
       | 0, _ | _, [] -> []
       | n, x :: xs -> x :: take (n-1) xs
     in
-    take (min limit 100) sorted  (* Hard cap at 100 *)
+    take (min limit 100) filtered  (* Hard cap at 100 *)
   )
 
 (** {1 Comment Operations} *)
@@ -477,10 +536,12 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
     match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
     | None -> Error (Post_not_found post_id)
     | Some post ->
-        (* Check comment count *)
-        let post_comment_count = Hashtbl.fold (fun _ (c : comment) acc ->
-          if Post_id.to_string c.post_id = Post_id.to_string pid then acc + 1 else acc
-        ) store.comments 0 in
+        (* Check comment count using index *)
+        let post_key = Post_id.to_string pid in
+        let post_comment_count =
+          try List.length (Hashtbl.find store.comments_by_post post_key)
+          with Not_found -> 0
+        in
         if post_comment_count >= Limits.max_comments_per_post then
           Error (Capacity_exceeded { current = post_comment_count; max = Limits.max_comments_per_post })
         else begin
@@ -498,31 +559,16 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
             votes_down = 0;
           } in
           Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
+          (* Update comments_by_post index *)
+          let post_key = Post_id.to_string pid in
+          let existing = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
+          Hashtbl.replace store.comments_by_post post_key (Comment_id.to_string comment.id :: existing);
           (* Update post reply count and updated_at *)
-          Hashtbl.replace store.posts (Post_id.to_string pid)
+          Hashtbl.replace store.posts post_key
             { post with reply_count = post.reply_count + 1; updated_at = now };
-          (* Persist comment - inline *)
-          (try
-            let base = match Sys.getenv_opt "ME_ROOT" with Some pp -> pp | None -> Sys.getcwd () in
-            let cpath = Filename.concat base ".masc/board_comments.jsonl" in
-            let cdir = Filename.dirname cpath in
-            if not (Sys.file_exists cdir) then Unix.mkdir cdir 0o755;
-            let oc = open_out_gen [Open_append; Open_creat] 0o644 cpath in
-            Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-              let json = `Assoc [
-                ("id", `String (Comment_id.to_string comment.id));
-                ("post_id", `String (Post_id.to_string comment.post_id));
-                ("parent_id", match comment.parent_id with Some cp -> `String (Comment_id.to_string cp) | None -> `Null);
-                ("author", `String (Agent_id.to_string comment.author));
-                ("content", `String comment.content);
-                ("created_at", `Float comment.created_at);
-                ("expires_at", `Float comment.expires_at);
-                ("votes_up", `Int comment.votes_up);
-                ("votes_down", `Int comment.votes_down);
-              ] in
-              output_string oc (Yojson.Safe.to_string json ^ "\n"));
-            rotate_if_needed cpath
-          with Sys_error _ -> ());
+          invalidate_post_caches store;
+          invalidate_comment_caches store;
+          append_comment comment;
           Ok comment
         end
   )
@@ -533,10 +579,11 @@ let get_comments store ~post_id : (comment list, board_error) result =
   | Error e -> Error e
   | Ok pid ->
       with_lock store (fun () ->
-        let comments = Hashtbl.fold (fun _ (c : comment) acc ->
-          if Post_id.to_string c.post_id = Post_id.to_string pid then c :: acc
-          else acc
-        ) store.comments [] in
+        let post_key = Post_id.to_string pid in
+        let comment_ids = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
+        let comments = List.filter_map (fun cid ->
+          Hashtbl.find_opt store.comments cid
+        ) comment_ids in
         Ok (List.sort (fun (a : comment) (b : comment) -> compare a.created_at b.created_at) comments)
       )
 
@@ -573,7 +620,7 @@ let append_vote_log ~target ~voter ~direction =
       ] in
       output_string oc (Yojson.Safe.to_string json ^ "\n"));
     rotate_if_needed path
-  with Sys_error _ -> ()
+  with Sys_error msg -> Printf.eprintf "[Board] persist error (append_vote_log): %s\n%!" msg
 
 let vote store ~voter ~post_id ~direction : (int, board_error) result =
   match Agent_id.of_string voter with
@@ -593,7 +640,6 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                   voter (vote_direction_to_string direction) post_id))
             | Some _opposite ->
-                (* Flip: undo previous vote, apply new one *)
                 let flipped = match direction with
                   | Up -> { post with votes_up = post.votes_up + 1;
                                       votes_down = max 0 (post.votes_down - 1);
@@ -604,7 +650,8 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 in
                 Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
                 Hashtbl.replace store.vote_log vote_key direction;
-                rewrite_posts store;
+                store.dirty_posts <- true;  (* Deferred flush *)
+                invalidate_post_caches store;
                 append_vote_log ~target:vote_key ~voter ~direction;
                 Ok (flipped.votes_up - flipped.votes_down)
             | None ->
@@ -614,7 +661,8 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 in
                 Hashtbl.replace store.posts (Post_id.to_string pid) updated;
                 Hashtbl.replace store.vote_log vote_key direction;
-                rewrite_posts store;
+                store.dirty_posts <- true;  (* Deferred flush *)
+                invalidate_post_caches store;
                 append_vote_log ~target:vote_key ~voter ~direction;
                 Ok (updated.votes_up - updated.votes_down)
       )
@@ -645,7 +693,8 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                 in
                 Hashtbl.replace store.comments (Comment_id.to_string cid) flipped;
                 Hashtbl.replace store.vote_log vote_key direction;
-                rewrite_comments store;
+                store.dirty_comments <- true;  (* Deferred flush *)
+                invalidate_comment_caches store;
                 append_vote_log ~target:vote_key ~voter ~direction;
                 Ok (flipped.votes_up - flipped.votes_down)
             | None ->
@@ -655,7 +704,8 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                 in
                 Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
                 Hashtbl.replace store.vote_log vote_key direction;
-                rewrite_comments store;
+                store.dirty_comments <- true;  (* Deferred flush *)
+                invalidate_comment_caches store;
                 append_vote_log ~target:vote_key ~voter ~direction;
                 Ok (updated.votes_up - updated.votes_down)
       )
@@ -768,7 +818,12 @@ let load_persisted_comments store =
             if String.length line > 0 then
               match Yojson.Safe.from_string line |> comment_of_yojson with
               | Some c when c.expires_at > now ->
-                  Hashtbl.replace store.comments (Comment_id.to_string c.id) c;
+                  let cid = Comment_id.to_string c.id in
+                  Hashtbl.replace store.comments cid c;
+                  (* Build comments_by_post index *)
+                  let post_key = Post_id.to_string c.post_id in
+                  let existing = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
+                  Hashtbl.replace store.comments_by_post post_key (cid :: existing);
                   incr loaded
               | _ -> ()
           done
@@ -866,6 +921,23 @@ let global_store = lazy (
 
 let global () = Lazy.force global_store
 
+(** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)
+let flush_dirty store =
+  with_lock store (fun () ->
+    if store.dirty_posts then begin
+      rewrite_posts store;
+      store.dirty_posts <- false
+    end;
+    if store.dirty_comments then begin
+      rewrite_comments store;
+      store.dirty_comments <- false
+    end;
+    store.last_flush <- Time_compat.now ()
+  )
+
+(** Register deferred flush now that rewrite helpers are available *)
+let () = deferred_flush_fn := flush_dirty
+
 (** {1 Karma & Flair - Reddit-style} *)
 
 (** Calculate karma (total upvotes) for an agent *)
@@ -885,20 +957,25 @@ let get_agent_karma store ~agent_name =
   in
   post_karma + comment_karma
 
-(** Get karma for all agents *)
+(** Get karma for all agents (cached) *)
 let get_all_karma store =
-  let karma_map = Hashtbl.create 64 in
-  Hashtbl.iter (fun _ (p : post) ->
-    let author = Agent_id.to_string p.author in
-    let current = try Hashtbl.find karma_map author with Not_found -> 0 in
-    Hashtbl.replace karma_map author (current + p.votes_up)
-  ) store.posts;
-  Hashtbl.iter (fun _ (c : comment) ->
-    let author = Agent_id.to_string c.author in
-    let current = try Hashtbl.find karma_map author with Not_found -> 0 in
-    Hashtbl.replace karma_map author (current + c.votes_up)
-  ) store.comments;
-  Hashtbl.fold (fun k v acc -> (k, v) :: acc) karma_map []
+  match store.karma_cache with
+  | Some cached -> cached
+  | None ->
+      let karma_map = Hashtbl.create 64 in
+      Hashtbl.iter (fun _ (p : post) ->
+        let author = Agent_id.to_string p.author in
+        let current = try Hashtbl.find karma_map author with Not_found -> 0 in
+        Hashtbl.replace karma_map author (current + p.votes_up)
+      ) store.posts;
+      Hashtbl.iter (fun _ (c : comment) ->
+        let author = Agent_id.to_string c.author in
+        let current = try Hashtbl.find karma_map author with Not_found -> 0 in
+        Hashtbl.replace karma_map author (current + c.votes_up)
+      ) store.comments;
+      let result = Hashtbl.fold (fun k v acc -> (k, v) :: acc) karma_map [] in
+      store.karma_cache <- Some result;
+      result
 
 (** Available flairs *)
 let available_flairs = [

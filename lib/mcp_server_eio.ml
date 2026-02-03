@@ -289,45 +289,153 @@ let handle_read_resource_eio state id params =
               if not (Sys.file_exists library_dir) then
                 ("text/markdown", Some "Library directory not found. Create docs/library/ first.")
               else begin
-                let topic = if s = "library" then ""
-                  else if String.length s > 8 then String.sub s 8 (String.length s - 8)
-                  else ""
+                (* Parse frontmatter from a .md file *)
+                let parse_frontmatter path fallback_name =
+                  try
+                    In_channel.with_open_text path (fun ic ->
+                      match In_channel.input_line ic with
+                      | Some "---" ->
+                          let title = ref fallback_name in
+                          let source = ref "" in
+                          let verified_by = ref "" in
+                          let date = ref "" in
+                          let tags = ref [] in
+                          let rec scan () =
+                            match In_channel.input_line ic with
+                            | Some "---" -> ()
+                            | Some line ->
+                                let try_field prefix r =
+                                  let plen = String.length prefix in
+                                  if String.length line > plen
+                                     && String.sub line 0 plen = prefix then
+                                    r := String.trim (String.sub line plen (String.length line - plen))
+                                in
+                                try_field "title: " title;
+                                try_field "source: " source;
+                                try_field "verified_by: " verified_by;
+                                try_field "date: " date;
+                                (* tags: [a, b, c] *)
+                                let tp = "tags: " in
+                                let tplen = String.length tp in
+                                if String.length line > tplen
+                                   && String.sub line 0 tplen = tp then begin
+                                  let raw = String.trim (String.sub line tplen (String.length line - tplen)) in
+                                  (* Strip surrounding brackets *)
+                                  let inner =
+                                    if String.length raw >= 2
+                                       && raw.[0] = '[' && raw.[String.length raw - 1] = ']' then
+                                      String.sub raw 1 (String.length raw - 2)
+                                    else raw
+                                  in
+                                  tags := String.split_on_char ',' inner
+                                    |> List.map String.trim
+                                    |> List.filter (fun s -> s <> "")
+                                end;
+                                scan ()
+                            | None -> ()
+                          in
+                          scan ();
+                          (!title, !source, !verified_by, !date, !tags)
+                      | _ -> (fallback_name, "", "", "", []))
+                  with Sys_error _ -> (fallback_name, "", "", "", [])
                 in
-                if topic = "" then begin
-                  (* List all library documents *)
-                  let files = Sys.readdir library_dir |> Array.to_list
+                (* Strip frontmatter from content, return body only *)
+                let strip_frontmatter content =
+                  if String.length content >= 3 && String.sub content 0 3 = "---" then
+                    (* Find second --- *)
+                    match String.index_from_opt content 3 '\n' with
+                    | None -> content
+                    | Some first_nl ->
+                        let rec find_end pos =
+                          match String.index_from_opt content pos '\n' with
+                          | None -> content
+                          | Some nl ->
+                              let line_start = pos in
+                              let line = String.sub content line_start (nl - line_start) in
+                              if line = "---" then
+                                let rest_start = nl + 1 in
+                                if rest_start < String.length content then
+                                  String.trim (String.sub content rest_start (String.length content - rest_start))
+                                else ""
+                              else find_end (nl + 1)
+                        in
+                        find_end (first_nl + 1)
+                  else content
+                in
+                (* Determine format and topic *)
+                let is_json, topic =
+                  if s = "library.json" then (true, "")
+                  else if s = "library" then (false, "")
+                  else
+                    let rest = if String.length s > 8 then String.sub s 8 (String.length s - 8) else "" in
+                    if Filename.check_suffix rest ".json" then
+                      (true, Filename.chop_suffix rest ".json")
+                    else (false, rest)
+                in
+                let library_files () =
+                  Sys.readdir library_dir |> Array.to_list
                     |> List.filter (fun f -> Filename.check_suffix f ".md" && f <> "README.md")
                     |> List.sort String.compare
-                  in
+                in
+                if topic = "" && not is_json then begin
+                  (* Markdown index *)
+                  let files = library_files () in
                   let entries = List.map (fun f ->
                     let name = Filename.chop_suffix f ".md" in
                     let path = Filename.concat library_dir f in
-                    let title = try
-                      In_channel.with_open_text path (fun ic ->
-                        match In_channel.input_line ic with
-                        | Some "---" ->
-                            let title_ref = ref name in
-                            let rec scan () =
-                              match In_channel.input_line ic with
-                              | Some line when String.length line > 7
-                                  && String.sub line 0 7 = "title: " ->
-                                  title_ref := String.sub line 7 (String.length line - 7)
-                              | Some "---" -> ()
-                              | Some _ -> scan ()
-                              | None -> ()
-                            in
-                            scan (); !title_ref
-                        | _ -> name)
-                    with Sys_error _ -> name
-                    in
-                    Printf.sprintf "- **%s** — `masc://library/%s`" title name
+                    let (title, source, _verified, _date, tags) = parse_frontmatter path name in
+                    let tag_str = if tags = [] then ""
+                      else " — " ^ String.concat ", " (List.map (fun t -> "`" ^ t ^ "`") tags) in
+                    let src_str = if source = "" then "" else " ([source](" ^ source ^ "))" in
+                    Printf.sprintf "- **%s** — `masc://library/%s`%s%s" title name src_str tag_str
                   ) files in
                   let body = if entries = [] then "Library is empty."
                     else "# Library Index\n\n" ^ String.concat "\n" entries ^ "\n"
                   in
                   ("text/markdown", Some body)
+                end else if topic = "" && is_json then begin
+                  (* JSON index *)
+                  let files = library_files () in
+                  let docs = List.map (fun f ->
+                    let name = Filename.chop_suffix f ".md" in
+                    let path = Filename.concat library_dir f in
+                    let (title, source, verified_by, date, tags) = parse_frontmatter path name in
+                    `Assoc [
+                      ("topic", `String name);
+                      ("title", `String title);
+                      ("source", `String source);
+                      ("verified_by", `String verified_by);
+                      ("date", `String date);
+                      ("tags", `List (List.map (fun t -> `String t) tags));
+                      ("uri", `String ("masc://library/" ^ name));
+                    ]
+                  ) files in
+                  let json = `Assoc [
+                    ("documents", `List docs);
+                    ("count", `Int (List.length docs));
+                  ] in
+                  ("application/json", Some (Yojson.Safe.to_string json))
+                end else if is_json then begin
+                  (* JSON single document *)
+                  let path = Filename.concat library_dir (topic ^ ".md") in
+                  if Sys.file_exists path then begin
+                    let raw = In_channel.with_open_text path In_channel.input_all in
+                    let (title, source, verified_by, date, tags) = parse_frontmatter path topic in
+                    let body = strip_frontmatter raw in
+                    let json = `Assoc [
+                      ("topic", `String topic);
+                      ("title", `String title);
+                      ("source", `String source);
+                      ("verified_by", `String verified_by);
+                      ("date", `String date);
+                      ("tags", `List (List.map (fun t -> `String t) tags));
+                      ("content", `String body);
+                    ] in
+                    ("application/json", Some (Yojson.Safe.to_string json))
+                  end else
+                    ("application/json", Some (Printf.sprintf "{\"error\":\"Library document '%s' not found\"}" topic))
                 end else begin
-                  (* Read specific library document *)
+                  (* Markdown single document *)
                   let path = Filename.concat library_dir (topic ^ ".md") in
                   if Sys.file_exists path then
                     let content = In_channel.with_open_text path In_channel.input_all in

@@ -144,15 +144,22 @@ let run_in_systhread ?(timeout_sec=60.0) cmd =
         Unix.stdin wr Unix.stderr
     in
     Unix.close wr;
+    let reaped = ref false in
     Fun.protect ~finally:(fun () ->
       (try Unix.close rd with Unix.Unix_error _ -> ());
-      match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
-      | (0, _) -> kill_and_reap pid
-      | _ -> ()
+      if not !reaped then
+        (match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
+         | (0, _) -> kill_and_reap pid
+         | _ -> ())
     ) (fun () ->
       let (timed_out, content) = read_fd_with_timeout rd timeout_sec in
       if timed_out then
-        Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd;
+        Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd
+      else begin
+        (* Reap child in normal path to avoid zombie *)
+        (try ignore (Unix.waitpid [] pid); reaped := true
+         with Unix.Unix_error _ -> ())
+      end;
       content
     )
   )
@@ -169,24 +176,25 @@ let run_in_systhread_with_status ?(timeout_sec=60.0) cmd =
         Unix.stdin wr Unix.stderr
     in
     Unix.close wr;
-    let result = ref (Unix.WSIGNALED Sys.sigterm, "") in
+    let reaped = ref false in
     Fun.protect ~finally:(fun () ->
       (try Unix.close rd with Unix.Unix_error _ -> ());
-      match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
-      | (0, _) -> kill_and_reap pid
-      | _ -> ()
+      if not !reaped then
+        (match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
+         | (0, _) -> kill_and_reap pid
+         | _ -> ())
     ) (fun () ->
       let (timed_out, content) = read_fd_with_timeout rd timeout_sec in
       if timed_out then begin
         Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd;
-        result := (Unix.WSIGNALED Sys.sigterm, content)
+        (Unix.WSIGNALED Sys.sigterm, content)
       end else begin
         let (_, status) =
           try Unix.waitpid [] pid
           with Unix.Unix_error _ -> (pid, Unix.WEXITED 1)
         in
-        result := (status, content)
+        reaped := true;
+        (status, content)
       end
-    );
-    !result
+    )
   )

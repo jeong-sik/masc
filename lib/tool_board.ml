@@ -76,15 +76,19 @@ let format_post (p : Board.post) =
   let time_str = format_timestamp_relative p.created_at in
   let ttl_str = format_ttl_remaining p.expires_at in
   let score = p.votes_up - p.votes_down in
-  Printf.sprintf "**%s** [%s] (by %s, %s, TTL: %s)\n%s\n[↑%d ↓%d = %+d] [%d replies]"
+  let hearth_str = match p.hearth with Some h -> Printf.sprintf " [🔥%s]" h | None -> "" in
+  let thread_str = match p.thread_id with Some t -> Printf.sprintf " [→ Thread: %s]" t | None -> "" in
+  Printf.sprintf "**%s** [%s]%s (by %s, %s, TTL: %s)\n%s\n[↑%d ↓%d = %+d] [%d replies]%s"
     (Board.Post_id.to_string p.id)
     vis_str
+    hearth_str
     (Board.Agent_id.to_string p.author)
     time_str
     ttl_str
     p.content
     p.votes_up p.votes_down score
     p.reply_count
+    thread_str
 
 let format_comment ?(indent=0) (c : Board.comment) =
   let prefix = String.make indent ' ' in
@@ -112,13 +116,15 @@ let handle_post_create args =
   let author = get_string args "author" "anonymous" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   let visibility_str = get_string args "visibility" "internal" in
+  let hearth = get_string_opt args "hearth" in
+  let thread_id = get_string_opt args "thread_id" in
 
   let visibility = match visibility_of_string visibility_str with
     | Some v -> v
     | None -> Board.Internal
   in
 
-  match Board.create_post store ~author ~content ~visibility ~ttl_hours () with
+  match Board.create_post store ~author ~content ~visibility ~ttl_hours ?hearth ?thread_id () with
   | Ok post ->
       let json = Board.post_to_yojson post in
       (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
@@ -140,6 +146,7 @@ let handle_post_list args =
   let store = Board.global () in
   let limit = get_int args "limit" 20 in
   let visibility_str = get_string_opt args "visibility" in
+  let hearth = get_string_opt args "hearth" in
   let random = get_bool args "random" false in
   let offset = get_int args "offset" 0 in
   let sort_by = get_string args "sort_by" "hot" |> sort_order_of_string in
@@ -149,7 +156,7 @@ let handle_post_list args =
     | None -> None
   in
 
-  let all_posts = Board.list_posts store ~visibility_filter ~limit:(limit + offset + 100) () in
+  let all_posts = Board.list_posts store ~visibility_filter ?hearth ~limit:(limit + offset + 100) () in
 
   (* Apply sorting based on sort_by *)
   let sorted_posts = match sort_by with
@@ -350,6 +357,17 @@ let handle_profile args =
     (true, Printf.sprintf "📊 **%s** 프로필\n📝 게시물: %d개 (%+d점)\n💬 코멘트: %d개 (%+d점)\n⭐ 총: %+d점"
       agent (List.length agent_posts) post_votes (List.length agent_comments) comment_votes (post_votes + comment_votes))
 
+(** Hearth list *)
+let handle_hearth_list _args =
+  let store = Board.global () in
+  let hearths = Board.list_hearths store in
+  if hearths = [] then (true, "🔥 No active hearths.")
+  else
+    let formatted = List.map (fun (name, count) ->
+      Printf.sprintf "🔥 **%s** (%d posts)" name count
+    ) hearths in
+    (true, Printf.sprintf "🔥 Active Hearths:\n%s" (String.concat "\n" formatted))
+
 (** {1 Tool Definitions} *)
 
 let tool_post_create : Types.tool_schema = {
@@ -362,6 +380,8 @@ let tool_post_create : Types.tool_schema = {
       ("author", `Assoc [("type", `String "string"); ("description", `String "Author name")]);
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "public|unlisted|internal|direct (default: internal)")]);
       ("ttl_hours", `Assoc [("type", `String "integer"); ("description", `String "Time-to-live in hours (default: 168, max: 720)")]);
+      ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. webrtc, code-review)")]);
+      ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID")]);
     ]);
     ("required", `List [`String "content"]);
   ];
@@ -375,6 +395,7 @@ let tool_post_list : Types.tool_schema = {
     ("properties", `Assoc [
       ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 100)")]);
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "Filter by visibility: public|unlisted|internal|direct")]);
+      ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
       ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
@@ -472,6 +493,15 @@ let tool_profile : Types.tool_schema = {
   ];
 }
 
+let tool_hearth_list : Types.tool_schema = {
+  name = "masc_board_hearths";
+  description = "List active hearths (topic categories) with post counts";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
+  ];
+}
+
 (** All board tools *)
 let tools = [
   tool_post_create;
@@ -483,6 +513,7 @@ let tools = [
   tool_search;
   tool_comment_vote;
   tool_profile;
+  tool_hearth_list;
 ]
 
 (** Tool dispatcher *)
@@ -497,4 +528,5 @@ let handle_tool name args =
   | "masc_board_search" -> handle_search args
   | "masc_board_comment_vote" -> handle_comment_vote args
   | "masc_board_profile" -> handle_profile args
+  | "masc_board_hearths" -> handle_hearth_list args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)

@@ -37,3 +37,17 @@ let list () =
   Hashtbl.fold (fun _ hb acc -> hb :: acc) heartbeats []
 
 let get id = Hashtbl.find_opt heartbeats id
+
+let stop_by_agent ~agent_name =
+  let ids_to_remove =
+    Hashtbl.fold (fun id hb acc ->
+      if hb.agent_name = agent_name then id :: acc else acc
+    ) heartbeats []
+  in
+  List.iter (fun id ->
+    (match Hashtbl.find_opt heartbeats id with
+     | Some hb -> hb.active <- false
+     | None -> ());
+    Hashtbl.remove heartbeats id
+  ) ids_to_remove;
+  List.length ids_to_remove

@@ -26,14 +26,19 @@ type experience = {
 
 (** {1 Utilities} *)
 
-(** Escape single quotes for Cypher string literals.
-    Cypher uses backslash-escaped single quotes inside single-quoted strings. *)
+(** Escape string for Cypher single-quoted literals.
+    Handles all Neo4j Cypher escape sequences per specification. *)
 let cypher_escape s =
-  let buf = Buffer.create (String.length s) in
+  let buf = Buffer.create (String.length s * 2) in
   String.iter (fun c ->
     match c with
     | '\'' -> Buffer.add_string buf "\\'"
     | '\\' -> Buffer.add_string buf "\\\\"
+    | '\n' -> Buffer.add_string buf "\\n"
+    | '\r' -> Buffer.add_string buf "\\r"
+    | '\t' -> Buffer.add_string buf "\\t"
+    | '\b' -> Buffer.add_string buf "\\b"
+    | c when Char.code c < 0x20 -> ()  (* strip other control chars *)
     | _ -> Buffer.add_char buf c
   ) s;
   Buffer.contents buf
@@ -55,22 +60,35 @@ let truncate s n =
 let run_shell_nonblocking cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 1024 in
-    (try
-      while true do
-        Buffer.add_string buf (input_line ic);
-        Buffer.add_char buf '\n'
-      done
-    with End_of_file -> ());
-    let _ = Unix.close_process_in ic in
-    Buffer.contents buf
+    Fun.protect ~finally:(fun () ->
+      ignore (Unix.close_process_in ic)
+    ) (fun () ->
+      let buf = Buffer.create 1024 in
+      (try
+        while true do
+          Buffer.add_string buf (input_line ic);
+          Buffer.add_char buf '\n'
+        done
+      with End_of_file -> ());
+      Buffer.contents buf
+    )
   )
+
+(** Resolve ME_ROOT consistently *)
+let me_root () =
+  Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me"
+
+(** Build a shell command to run a Neo4j Cypher query via sb CLI.
+    Uses Filename.quote to prevent shell injection from the query string. *)
+let neo4j_query_cmd cypher =
+  Printf.sprintf "cd %s && sb neo4j query %s 2>/dev/null"
+    (Filename.quote (me_root ()))
+    (Filename.quote cypher)
 
 (** {1 Council Thread Access (direct, no Lodge_heartbeat dependency)} *)
 
 let agent_thread_config () : Council.Conversation.config =
-  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
-  { base_path = me_root; room = "lodge" }
+  { base_path = me_root (); room = "lodge" }
 
 let find_agent_thread ~agent_name : Council.Conversation.thread option =
   let config = agent_thread_config () in
@@ -132,10 +150,7 @@ let recall_from_neo4j ~agent_name ~limit : (string * float) list =
      ORDER BY act.timestamp DESC LIMIT %d"
     (cypher_escape agent_name) limit
   in
-  let cmd = Printf.sprintf
-    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
-    (String.escaped query)
-  in
+  let cmd = neo4j_query_cmd query in
   try
     let result = run_shell_nonblocking cmd in
     if String.length result < 5 then []
@@ -242,10 +257,7 @@ let store_to_neo4j (exp : experience) =
     (cypher_escape (truncate exp.context 100))
     (cypher_escape board_id_str)
   in
-  let cmd = Printf.sprintf
-    "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
-    (String.escaped query)
-  in
+  let cmd = neo4j_query_cmd query in
   let result = run_shell_nonblocking cmd in
   if String.length result > 0 && String.length result < 5 then
     Eio.traceln "   ⚠️ [Lodge_memory] Neo4j store may have failed for %s" exp.agent_name

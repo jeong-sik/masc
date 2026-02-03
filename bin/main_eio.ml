@@ -1255,9 +1255,10 @@ let make_routes ~port ~host =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+       with_public_read (fun _state req reqd ->
          let store = Board.global () in
-         let posts = Board.list_posts store () in
+         let hearth = query_param req "hearth" in
+         let posts = Board.list_posts store ?hearth () in
          let karma_map = Board.get_all_karma store in
          let get_karma author =
            try List.assoc author karma_map with Not_found -> 0
@@ -1269,6 +1270,18 @@ let make_routes ~port ~host =
          let json = `Assoc [
            ("posts", `List posts_json);
            ("count", `Int (List.length posts));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let store = Board.global () in
+         let hearths = Board.list_hearths store in
+         let json = `Assoc [
+           ("hearths", `List (List.map (fun (name, count) ->
+             `Assoc [("name", `String name); ("count", `Int count)]
+           ) hearths));
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -1332,6 +1345,15 @@ let make_extended_handler routes =
         | `GET, "/api/v1/board/flairs" ->
             let flairs = List.map Board.flair_to_yojson Board.available_flairs in
             let json = `Assoc [("flairs", `List flairs)] in
+            Http.Response.json (Yojson.Safe.to_string json) reqd
+        | `GET, "/api/v1/board/hearths" ->
+            let store = Board.global () in
+            let hearths = Board.list_hearths store in
+            let json = `Assoc [
+              ("hearths", `List (List.map (fun (name, count) ->
+                `Assoc [("name", `String name); ("count", `Int count)]
+              ) hearths));
+            ] in
             Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
@@ -1687,7 +1709,8 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/api/v1/board" ->
           let store = Board.global () in
-          let posts = Board.list_posts store () in
+          let hearth = query_param httpun_request "hearth" in
+          let posts = Board.list_posts store ?hearth () in
           let karma_map = Board.get_all_karma store in
           let get_karma author =
             try List.assoc author karma_map with Not_found -> 0
@@ -1696,6 +1719,16 @@ let run_server ~sw ~env ~port ~base_path =
             Board.post_to_yojson_with_karma p ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
           ) posts in
           let json = `Assoc [("posts", `List posts_json); ("count", `Int (List.length posts))] in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/board/hearths" ->
+          let store = Board.global () in
+          let hearths = Board.list_hearths store in
+          let json = `Assoc [
+            ("hearths", `List (List.map (fun (name, count) ->
+              `Assoc [("name", `String name); ("count", `Int count)]
+            ) hearths));
+          ] in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/board/flairs" ->

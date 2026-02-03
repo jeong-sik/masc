@@ -39,7 +39,7 @@ let lodge_language =
   match config_language with
   | Some lang -> lang
   | None ->
-    match Sys.getenv_opt "LODGE_LANGUAGE" with
+    match Sys.getenv_opt "MASC_LODGE_LANGUAGE" with
     | Some "en" -> "en"
     | Some "auto" -> "auto"
     | _ -> "ko"
@@ -889,8 +889,8 @@ let heartbeat ~net (args : Yojson.Safe.t) =
       ] in
       let (success, msg) = Tool_board.handle_tool "masc_board_post" post_args in
       if success then begin
-        (* Auto-react: enabled by default, disable with LODGE_AUTO_REACT=0 *)
-        let auto_react_enabled = Sys.getenv_opt "LODGE_AUTO_REACT" |> Option.value ~default:"1" = "1" in
+        (* Auto-react: enabled by default, disable with MASC_LODGE_AUTO_REACT=0 *)
+        let auto_react_enabled = Sys.getenv_opt "MASC_LODGE_AUTO_REACT" |> Option.value ~default:"1" = "1" in
         let summary = if auto_react_enabled then begin
           (* Extract post_id for auto-react *)
           let post_id = try

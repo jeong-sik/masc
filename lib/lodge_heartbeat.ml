@@ -2273,7 +2273,7 @@ let start ~sw ~clock room_config =
   init_core_agents ();
 
   if not config.enabled then begin
-    Printf.printf "+💤 Lodge Heartbeat: disabled (set LODGE_ENABLED=1 to enable)\n%!";
+    Printf.printf "+💤 Lodge Heartbeat: disabled (set MASC_LODGE_ENABLED=1 to enable)\n%!";
     _lodge_enabled := false;
     ()
   end else begin

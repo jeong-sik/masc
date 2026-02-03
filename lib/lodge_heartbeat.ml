@@ -203,6 +203,59 @@ let record_agent_comment ~agent_name ~post_id =
   in
   Hashtbl.replace agent_comment_counts key (count + 1)
 
+(** {1 Agent Trace — Prompt/Response Logging for Tuning} *)
+
+(** Trace entry: captures full prompt, response, timing, and action *)
+type trace_entry = {
+  tick_id : string;         (* Unique tick identifier *)
+  agent_name : string;
+  phase : string;           (* "decide_action", "auto_respond", etc. *)
+  prompt : string;          (* Full prompt sent to LLM *)
+  response : string;        (* LLM response *)
+  llm_used : string;        (* Which LLM was used, e.g. "glm(glm-4.7)" *)
+  action : string;          (* Parsed action: "POST", "COMMENT:id", "SKIP" *)
+  duration_ms : int;        (* Time taken in milliseconds *)
+  timestamp : float;        (* Unix timestamp *)
+}
+
+(** Ensure directory exists *)
+let ensure_trace_dir ~agent_name =
+  let me_root = Sys.getenv_opt "ME_ROOT"
+    |> Option.value ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") in
+  let trace_dir = Filename.concat me_root (Printf.sprintf ".masc/traces/%s" agent_name) in
+  if not (Sys.file_exists trace_dir) then begin
+    let parent = Filename.concat me_root ".masc/traces" in
+    if not (Sys.file_exists parent) then
+      Unix.mkdir parent 0o755;
+    Unix.mkdir trace_dir 0o755
+  end;
+  trace_dir
+
+(** Save a trace entry to JSONL file *)
+let save_trace (entry : trace_entry) =
+  let trace_dir = ensure_trace_dir ~agent_name:entry.agent_name in
+  let date_str =
+    let tm = Unix.gmtime entry.timestamp in
+    Printf.sprintf "%04d-%02d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+  in
+  let trace_file = Filename.concat trace_dir (date_str ^ ".jsonl") in
+  let json = `Assoc [
+    ("tick_id", `String entry.tick_id);
+    ("agent_name", `String entry.agent_name);
+    ("phase", `String entry.phase);
+    ("prompt", `String entry.prompt);
+    ("response", `String entry.response);
+    ("llm_used", `String entry.llm_used);
+    ("action", `String entry.action);
+    ("duration_ms", `Int entry.duration_ms);
+    ("timestamp", `Float entry.timestamp);
+  ] in
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 trace_file in
+  output_string oc line;
+  close_out oc;
+  Printf.printf "   📝 [%s] Trace saved: %s (%dms, %s)\n%!" entry.agent_name trace_file entry.duration_ms entry.llm_used
+
 (** Start agent's own heartbeat loop *)
 let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
   let state = {
@@ -1933,9 +1986,10 @@ ACTION: SKIP
 
   (* LLM cascade: config-driven via Lodge_cascade (direct API, no llm-mcp) *)
   let action_slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
-  let response =
+  let tick_id = Printf.sprintf "%s-%d" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000) in
+  let cascade_result =
     if List.length action_slots > 0 then
-      Lodge_cascade.run_cascade
+      Lodge_cascade.run_cascade_traced
         ~slots:action_slots ~prompt ~timeout_sec:60 ~max_chars:4000
         ~call_llm:cascade_call_llm
         ~is_valid:is_valid_response
@@ -1943,9 +1997,13 @@ ACTION: SKIP
     else begin
       (* Fallback: no config file, try GLM directly *)
       Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
-      Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 ()
+      let start_t = Unix.gettimeofday () in
+      let r = Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 () in
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start_t) *. 1000.0) in
+      Lodge_cascade.{ response = r; llm_used = "glm(glm-4.7)"; duration_ms }
     end
   in
+  let response = cascade_result.Lodge_cascade.response in
 
   (* Filter: only block the worst offenders, not useful words *)
   let banned_words = [
@@ -1962,6 +2020,25 @@ ACTION: SKIP
     ) banned_words
   in
   let action = parse_action_response response in
+  (* Save trace for prompt tuning *)
+  let action_str = match action with
+    | ActionSkip -> "SKIP"
+    | ActionPost _ -> "POST"
+    | ActionComment (id, _) -> Printf.sprintf "COMMENT:%s" id
+    | ActionUpvote id -> Printf.sprintf "UPVOTE:%s" id
+    | ActionPropose (topic, _) -> Printf.sprintf "PROPOSE:%s" topic
+  in
+  save_trace {
+    tick_id;
+    agent_name;
+    phase = "decide_action";
+    prompt;
+    response;
+    llm_used = cascade_result.Lodge_cascade.llm_used;
+    action = action_str;
+    duration_ms = cascade_result.Lodge_cascade.duration_ms;
+    timestamp = Unix.gettimeofday ();
+  };
   (* Convert index to actual post_id for COMMENT action *)
   let action = match action with
     | ActionComment (index_str, content) ->

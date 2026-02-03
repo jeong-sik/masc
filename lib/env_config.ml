@@ -170,9 +170,9 @@ end
 (** {1 Lodge Heartbeat v2 — Generative Agent Configuration} *)
 
 module LodgeV2 = struct
-  (** Tick interval: 4 hours default (was 60-120s in v1) *)
+  (** Tick interval: 45 min default (configurable via MASC_LODGE_TICK_INTERVAL_SEC) *)
   let tick_interval_seconds =
-    get_float ~default:14400.0 "MASC_LODGE_TICK_INTERVAL_SEC"
+    get_float ~default:2700.0 "MASC_LODGE_TICK_INTERVAL_SEC"
 
   (** How many agents to activate per tick *)
   let agents_per_tick =

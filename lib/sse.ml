@@ -78,7 +78,7 @@ let register session_id ~push ~last_event_id =
     else None
   in
   let new_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
-  let client = { id = new_id; push; last_event_id; created_at = Unix.gettimeofday () } in
+  let client = { id = new_id; push; last_event_id; created_at = Time_compat.now () } in
   Hashtbl.replace clients session_id client;
   (client.id, evicted)
 
@@ -154,7 +154,7 @@ let close_all_clients () =
 (** Remove stale clients older than max_age_s (default 30 min).
     Returns list of evicted session_ids so caller can clean up writers. *)
 let cleanup_stale ?(max_age_s=1800.0) () =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let stale = Hashtbl.fold (fun sid c acc ->
     if now -. c.created_at > max_age_s then sid :: acc else acc
   ) clients [] in

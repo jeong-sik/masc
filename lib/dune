@@ -2,8 +2,6 @@
  (name masc_mcp)
  (public_name masc_mcp)
  (modules
-   ; Time compatibility (Eio-native with Unix fallback)
-   time_compat
    a2a_tools
    agent_card
    agent_ecosystem
@@ -51,6 +49,9 @@
    lodge_cascade
    lodge_heartbeat
    lodge_memory
+   memory_stream
+   agent_planner
+   reflection
    memory_stream
    agent_planner
    reflection
@@ -206,6 +207,8 @@
    zstd
    ;; Version auto-sync from dune-project
    dune-build-info
+   ;; Time compatibility (Eio-native with Unix fallback)
+   time_compat
    ;; Council - multi-agent governance
    council
    ;; Jiphyeon - Episode storage for Agent Being Protocol

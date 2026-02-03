@@ -49,7 +49,7 @@ let active_agents : (string, string * float) Hashtbl.t = Hashtbl.create 10
 (** Generate UUID for agent instance *)
 let generate_agent_uuid () =
   Printf.sprintf "%s-%08x"
-    (String.sub (Digest.to_hex (Digest.string (string_of_float (Unix.gettimeofday ())))) 0 8)
+    (String.sub (Digest.to_hex (Digest.string (string_of_float (Time_compat.now ())))) 0 8)
     (Random.int 0xFFFFFF)
 
 (** Check if agent is currently active (with 120s timeout for crash recovery).
@@ -57,7 +57,7 @@ let generate_agent_uuid () =
 let is_agent_active_unlocked ~name =
   match Hashtbl.find_opt active_agents name with
   | Some (_uuid, started_at) ->
-      let elapsed = Unix.gettimeofday () -. started_at in
+      let elapsed = Time_compat.now () -. started_at in
       if elapsed < 120.0 then true
       else begin
         Hashtbl.remove active_agents name;
@@ -77,7 +77,7 @@ let try_activate_agent ~name : string option =
       None
     end else begin
       let uuid = generate_agent_uuid () in
-      Hashtbl.replace active_agents name (uuid, Unix.gettimeofday ());
+      Hashtbl.replace active_agents name (uuid, Time_compat.now ());
       Printf.printf "   🆔 [%s] Activated: %s\n%!" name uuid;
       Some uuid
     end)
@@ -136,7 +136,7 @@ let max_comments_per_day = 20
 
 (** Get or create rate state for agent *)
 let get_rate_state ~agent_name =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let day_start = Float.of_int (int_of_float now / 86400 * 86400) in
   match Hashtbl.find_opt rate_states agent_name with
   | Some rs ->
@@ -155,7 +155,7 @@ let get_rate_state ~agent_name =
 
 (** Check if agent can perform the given action *)
 let check_rate_limit ~agent_name action_type =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let rs = get_rate_state ~agent_name in
   match action_type with
   | `Post ->
@@ -166,7 +166,7 @@ let check_rate_limit ~agent_name action_type =
 
 (** Record that agent performed an action (update rate state) *)
 let record_rate_action ~agent_name action_type =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let rs = get_rate_state ~agent_name in
   match action_type with
   | `Post -> rs.last_post <- now; rs.posts_today <- rs.posts_today + 1
@@ -175,11 +175,11 @@ let record_rate_action ~agent_name action_type =
 
 (** Record a check-in timestamp *)
 let record_checkin ~agent_name =
-  Hashtbl.replace last_checkin agent_name (Unix.gettimeofday ())
+  Hashtbl.replace last_checkin agent_name (Time_compat.now ())
 
 (** Check if enough time passed since last check-in *)
 let can_checkin ~agent_name ~min_gap_s =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   match Hashtbl.find_opt last_checkin agent_name with
   | None -> true
   | Some last -> now -. last >= min_gap_s
@@ -206,7 +206,7 @@ let record_agent_comment ~agent_name ~post_id =
 (** Start agent's own heartbeat loop *)
 let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
   let state = {
-    last_activity = Unix.gettimeofday ();
+    last_activity = Time_compat.now ();
     action_count = 0;
     should_stop = false;
   } in
@@ -217,7 +217,7 @@ let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
     while not state.should_stop do
       Eio.Time.sleep clock agent_heartbeat_interval;
 
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       let idle_time = now -. state.last_activity in
 
       if idle_time > agent_idle_timeout then begin
@@ -244,7 +244,7 @@ let start_agent_heartbeat ~sw ~clock ~name ~on_tick =
 (** Record agent activity (resets idle timer) *)
 let record_agent_activity ~name =
   match Hashtbl.find_opt agent_states name with
-  | Some state -> state.last_activity <- Unix.gettimeofday ()
+  | Some state -> state.last_activity <- Time_compat.now ()
   | None -> ()
 
 (** Stop agent's heartbeat *)
@@ -302,7 +302,7 @@ let get_agent_context ~name ~max_tokens =
 (** Add message to agent context *)
 let add_to_context ~name ~role ~content =
   let ctx = get_agent_context ~name ~max_tokens:130000 in
-  let msg = { role; content; timestamp = Unix.gettimeofday () } in
+  let msg = { role; content; timestamp = Time_compat.now () } in
   let tokens = estimate_tokens content in
   ctx.messages <- ctx.messages @ [msg];
   ctx.token_count <- ctx.token_count + tokens;
@@ -468,10 +468,10 @@ let () =
             ctx.messages <- [{
               role = System;
               content = Printf.sprintf "[컨텍스트 요약] %s" summary;
-              timestamp = Unix.gettimeofday ();
+              timestamp = Time_compat.now ();
             }];
             ctx.token_count <- estimate_tokens summary;
-            ctx.last_rewrite <- Unix.gettimeofday ();
+            ctx.last_rewrite <- Time_compat.now ();
             Eio.traceln "   ✅ [%s] Rewritten: %d → %d tokens (%.0f%% saved)"
               name old_tokens ctx.token_count
               (100.0 *. (1.0 -. float_of_int ctx.token_count /. float_of_int old_tokens))
@@ -1008,7 +1008,7 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
     | `Comment -> "COMMENT"
     | `Upvote -> "UPVOTE"
   in
-  let timestamp = Unix.gettimeofday () |> int_of_float in
+  let timestamp = Time_compat.now () |> int_of_float in
   let mutation = Printf.sprintf
     {|mutation { createLodgeActivities(input: [{ agent: "%s", action: "%s", content: "%s", targetId: "%s", timestamp: %d }]) { lodgeActivities { id } } }|}
     agent_name action_str
@@ -1148,7 +1148,7 @@ let profile_cache_ttl = 300.0  (* 5 minutes *)
 
 (** Load full agent profile from Neo4j via GraphQL - cached (5 min TTL) *)
 let load_agent_profile ~agent_name : agent_profile =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let fallback = { name = agent_name; role = None; description = None; traits = [];
     interests = []; preferred_hours = []; peak_hour = None; activity_level = 0.5;
     karma = 0; agent_prompt = None; personality_hint = None } in
@@ -1366,7 +1366,7 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
       ])
     ])
   ]) in
-  let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Time_compat.now () *. 1000.0)) in
   let oc = open_out tmp_file in
   output_string oc json_payload;
   close_out oc;
@@ -1456,7 +1456,7 @@ let detect_gap_signal ~agent_name ~content =
         gs_topic = topic;
         gs_detected_by = agent_name;
         gs_context = utf8_truncate content 100;
-        gs_timestamp = Unix.gettimeofday ();
+        gs_timestamp = Time_compat.now ();
       } in
       gap_signals := signal :: !gap_signals;
       Eio.traceln "   🔍 [%s] Gap signal detected: %s" agent_name topic;
@@ -1627,28 +1627,37 @@ let is_duplicate_post ~agent_name ~content =
     content_similarity content p.content > 0.3
   ) recent
 
-(** {2 Psychological Decay Model}
+(** {2 Content Decay Model}
 
-    Based on cognitive science:
-    - Ebbinghaus forgetting curve: salience decays as e^(-λt)
-    - Retrieval resets the clock: comments/votes refresh updated_at
-    - Zeigarnik effect: unanswered posts (open questions) linger longer
-    - Social proof: engagement sustains attention
-    - Habituation: own posts feel "done" *)
+    Evidence-based post salience scoring:
+
+    Decay function: Power law  t^(-b)
+    - Murre & Dros (2015, PLOS ONE): power function R² = 98.7% on Ebbinghaus data,
+      simple exponential "poor fit". Wixted & Carpenter (2007): P = m·(1+bt)^(-f).
+    - Reddit algorithmic half-life ~12.5h (Signals Agency, 2024 analysis).
+    - 70% of Reddit engagement occurs within first 4 hours (measured).
+
+    Engagement boost: log-scaled
+    - Graffius (2025, ResearchGate, 5M+ posts): engagement extends content lifespan.
+    - Early engagement 8x more predictive of reach than late engagement (Reddit data).
+
+    Retrieval resets clock: updated_at not created_at
+    - Interaction (comment/vote) refreshes salience, consistent with spaced retrieval
+      extending retention (Karpicke & Roediger, 2008, Science). *)
 
 let post_freshness (post : Board.post) =
   let now = Time_compat.now () in
-  (* Use updated_at (last interaction), not created_at — retrieval resets the curve *)
-  let hours_since = (now -. post.updated_at) /. 3600.0 in
-  (* Half-life 12h: a post is half as salient after 12 hours of silence *)
-  let lambda = 0.693 /. 12.0 in
-  let decay = exp (-. lambda *. hours_since) in
-  (* Social proof: engagement slows decay *)
+  (* Use updated_at: interaction resets the decay clock (retrieval effect) *)
+  let hours_since = max 0.1 ((now -. post.updated_at) /. 3600.0) in
+  (* Power law decay: R = (1 + t/h)^(-b)
+     h = 12.5 (Reddit measured half-life in hours)
+     b = 1.0 (yields 50% at t=h, ~25% at t=3h, ~10% at t=9h) *)
+  let decay = (1.0 +. hours_since /. 12.5) ** (-1.0) in
+  (* Engagement boost: log-scaled. Reddit data shows early engagement
+     extends visibility. log(1 + n) gives diminishing returns. *)
   let engagement = float_of_int (post.votes_up + post.reply_count) in
   let engagement_boost = 1.0 +. (log (1.0 +. engagement) *. 0.3) in
-  (* Zeigarnik: unanswered posts feel unfinished → linger 40% longer *)
-  let zeigarnik = if post.reply_count = 0 then 1.4 else 1.0 in
-  decay *. engagement_boost *. zeigarnik
+  decay *. engagement_boost
 
 (** Personality-based post relevance scoring (with psychological decay) *)
 let post_relevance_for_agent ~agent_name ~agent_traits (post : Board.post) =
@@ -1893,7 +1902,7 @@ ACTION: SKIP
         ("arguments", `Assoc args)
       ])
     ]) in
-    let tmp_file = Printf.sprintf "/tmp/lodge_decide_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+    let tmp_file = Printf.sprintf "/tmp/lodge_decide_%s_%d.json" agent_name (int_of_float (Time_compat.now () *. 1000.0)) in
     let oc = open_out tmp_file in
     output_string oc json_payload;
     close_out oc;
@@ -1970,7 +1979,7 @@ let rec execute_agent_action ~agent_name ~action =
       Eio.traceln "   ⏭️ [%s] Decided to skip" agent_name;
       Lodge_memory.store {
         agent_name; action_type = "skip"; content = ""; context = "no action";
-        board_id = None; timestamp = Unix.gettimeofday ();
+        board_id = None; timestamp = Time_compat.now ();
       }
   | ActionPost content ->
       if String.length content < 5 then
@@ -1999,7 +2008,7 @@ let rec execute_agent_action ~agent_name ~action =
             record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
             Lodge_memory.store {
               agent_name; action_type = "post"; content; context = "LLM decision";
-              board_id = Some post_id; timestamp = Unix.gettimeofday ();
+              board_id = Some post_id; timestamp = Time_compat.now ();
             }
         | Error e ->
             Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
@@ -2021,7 +2030,7 @@ let rec execute_agent_action ~agent_name ~action =
             record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
             Lodge_memory.store {
               agent_name; action_type = "comment"; content; context = post_id;
-              board_id = Some post_id; timestamp = Unix.gettimeofday ();
+              board_id = Some post_id; timestamp = Time_compat.now ();
             }
         | Error e ->
             Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
@@ -2034,7 +2043,7 @@ let rec execute_agent_action ~agent_name ~action =
            record_to_neo4j ~agent_name ~action_type:`Upvote ~content:"upvote" ~target_id:post_id;
            Lodge_memory.store {
              agent_name; action_type = "upvote"; content = "upvote"; context = post_id;
-             board_id = Some post_id; timestamp = Unix.gettimeofday ();
+             board_id = Some post_id; timestamp = Time_compat.now ();
            }
        | Error e ->
            Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name (Board.show_board_error e))
@@ -2047,7 +2056,7 @@ let rec execute_agent_action ~agent_name ~action =
         gs_topic = proposed_name;
         gs_detected_by = agent_name;
         gs_context = reason;
-        gs_timestamp = Unix.gettimeofday ();
+        gs_timestamp = Time_compat.now ();
       } in
       gap_signals := signal :: !gap_signals;
       (* Check if threshold met for any topic *)
@@ -2093,7 +2102,7 @@ let make_call_llm ~agent_name : (prompt:string -> string) =
           ("arguments", `Assoc args)
         ])
       ]) in
-      let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+      let tmp_file = Printf.sprintf "/tmp/lodge_%s_%d.json" agent_name (int_of_float (Time_compat.now () *. 1000.0)) in
       let oc = open_out tmp_file in
       output_string oc json_payload;
       close_out oc;
@@ -2460,7 +2469,7 @@ let analyze_broadcast_relevance_llm ~content ~available_agents =
       ])
     ])
   ]) in
-  let tmp_file = Printf.sprintf "/tmp/broadcast_analyze_%d.json" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let tmp_file = Printf.sprintf "/tmp/broadcast_analyze_%d.json" (int_of_float (Time_compat.now () *. 1000.0)) in
   let oc = open_out tmp_file in
   output_string oc json_payload;
   close_out oc;

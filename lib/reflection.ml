@@ -80,7 +80,7 @@ let last_reflection_time ~agent_name =
     t
 
 let mark_reflected ~agent_name =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   Hashtbl.replace last_reflections agent_name now;
   save_meta ~agent_name ~timestamp:now
 

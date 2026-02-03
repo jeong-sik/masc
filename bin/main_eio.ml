@@ -106,7 +106,7 @@ let protocol_version_from_body body_str =
         in
         Some version
     | _ -> None
-  with _ -> None
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 (** Get session_id from query string *)
 let get_session_id_query target =
@@ -163,7 +163,7 @@ let query_param request key =
 let int_query_param request key ~default =
   match query_param request key with
   | None -> default
-  | Some s -> (try int_of_string s with _ -> default)
+  | Some s -> (try int_of_string s with Failure _ -> default)
 
 let bool_query_param request key ~default =
   match query_param request key with
@@ -221,7 +221,7 @@ let cors_headers origin = [
   ("access-control-allow-origin", origin);
   ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
   ("access-control-allow-headers",
-   "Content-Type, Accept, Origin, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+   "Content-Type, Accept, Origin, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
   ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ("access-control-allow-credentials", "true");
 ]
@@ -239,6 +239,37 @@ let respond_auth_error request reqd err =
   let response = Httpun.Response.create ~headers status in
   Httpun.Reqd.respond_with_string reqd response body
 
+
+(** Admin-only access - requires MASC_ADMIN_TOKEN *)
+let with_admin_auth handler request reqd =
+  match !server_state with
+  | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+      let admin_token = Sys.getenv_opt "MASC_ADMIN_TOKEN" in
+      let provided = auth_token_from_request request in
+      match admin_token, provided with
+      | None, _ ->
+          Http.Response.json ~status:`Forbidden
+            {|{"error":"MASC_ADMIN_TOKEN not configured"}|} reqd
+      | Some _, None ->
+          Http.Response.json ~status:`Unauthorized
+            {|{"error":"Admin token required"}|} reqd
+      | Some expected, Some given ->
+          let len_eq = String.length expected = String.length given in
+          let content_eq =
+            if not len_eq then false
+            else
+              let diff = ref 0 in
+              for i = 0 to String.length expected - 1 do
+                diff := !diff lor (Char.code expected.[i] lxor Char.code given.[i])
+              done;
+              !diff = 0
+          in
+          if len_eq && content_eq then
+            handler state request reqd
+          else
+            Http.Response.json ~status:`Forbidden
+              {|{"error":"Invalid admin token"}|} reqd
 
 (** Public read access - no auth required (dashboard, health) *)
 let with_public_read handler request reqd =
@@ -270,7 +301,7 @@ let parse_host_port host_header default_host default_port =
       (match String.split_on_char ':' host_value with
        | [host] -> (host, default_port)
        | host :: port_str :: _ ->
-           let port = try int_of_string port_str with _ -> default_port in
+           let port = try int_of_string port_str with Failure _ -> default_port in
            (host, port)
        | _ -> (default_host, default_port))
 
@@ -329,7 +360,7 @@ let sse_ping_interval_s = 30.0
 (** Get Last-Event-ID from headers for resumability *)
 let get_last_event_id (request : Httpun.Request.t) =
   match Httpun.Headers.get request.headers "last-event-id" with
-  | Some id -> (try Some (int_of_string id) with _ -> None)
+  | Some id -> (try Some (int_of_string id) with Failure _ -> None)
   | None -> None
 
 
@@ -1304,6 +1335,117 @@ let make_routes ~port ~host =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  (* Lodge Agents REST API — GET public, POST admin *)
+  |> Http.Router.add ~path:"/api/v1/lodge/agents" ~methods:[`GET; `POST]
+       ~handler:(fun request reqd ->
+         match request.Httpun.Request.meth with
+         | `GET ->
+           with_public_read (fun _state _req reqd ->
+             match Masc_mcp.Lodge_heartbeat.load_lodge_agents_full () with
+             | Ok json ->
+                 Http.Response.json (Yojson.Safe.to_string json) reqd
+             | Error msg ->
+                 Http.Response.json ~status:`Internal_server_error
+                   (Printf.sprintf {|{"error":"%s"}|} msg) reqd
+           ) request reqd
+         | `POST ->
+           with_admin_auth (fun _state _req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               try
+                 let json = Yojson.Safe.from_string body_str in
+                 let open Yojson.Safe.Util in
+                 let name = json |> member "name" |> to_string in
+                 let emoji = json |> member "emoji" |> to_string in
+                 let korean_name =
+                   match json |> member "koreanName" with
+                   | `String s -> Some s | _ -> None
+                 in
+                 let traits =
+                   json |> member "traits" |> to_list |> List.map to_string
+                 in
+                 let interests =
+                   try json |> member "interests" |> to_list
+                       |> List.map to_string
+                   with Yojson.Safe.Util.Type_error _ | Not_found -> []
+                 in
+                 let activity_level =
+                   match json |> member "activityLevel" with
+                   | `Float f -> f | `Int i -> float_of_int i | _ -> 0.7
+                 in
+                 let preferred_hours =
+                   json |> member "preferredHours" |> to_list
+                   |> List.map to_int
+                 in
+                 let peak_hour =
+                   match json |> member "peakHour" with
+                   | `Int i -> Some i | _ -> None
+                 in
+                 let model =
+                   match json |> member "model" with
+                   | `String s -> s | _ -> "glm-4.7-flash:latest"
+                 in
+                 let personality_hint =
+                   match json |> member "personalityHint" with
+                   | `String s -> Some s | _ -> None
+                 in
+                 let primary_value =
+                   match json |> member "primaryValue" with
+                   | `String s -> Some s | _ -> None
+                 in
+                 let name_re = Str.regexp "^[a-z][a-z0-9-]*$" in
+                 let name_len = String.length name in
+                 if name_len < 2 || name_len > 20
+                    || not (Str.string_match name_re name 0) then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"name: 2-20 lowercase + hyphens"}|} reqd
+                 else if String.length emoji = 0 then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"emoji is required"}|} reqd
+                 else if traits = [] then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"at least one trait required"}|} reqd
+                 else if preferred_hours = [] then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"at least one preferredHour"}|} reqd
+                 else if activity_level < 0.1 || activity_level > 1.0 then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"activityLevel: 0.1-1.0"}|} reqd
+                 else if List.exists (fun h -> h < 0 || h > 23)
+                           preferred_hours then
+                   Http.Response.json ~status:`Bad_request
+                     {|{"error":"hours: 0-23"}|} reqd
+                 else begin
+                   match Masc_mcp.Lodge_heartbeat.create_agent_graphql
+                           ~name ~emoji ~korean_name ~traits ~interests
+                           ~activity_level ~preferred_hours ~peak_hour
+                           ~model ~personality_hint ~primary_value () with
+                   | Ok agent_json ->
+                       Http.Response.json ~status:`Created
+                         (Yojson.Safe.to_string (`Assoc [
+                           ("ok", `Bool true);
+                           ("agent", agent_json);
+                         ])) reqd
+                   | Error msg ->
+                       Http.Response.json ~status:`Internal_server_error
+                         (Printf.sprintf {|{"error":"%s"}|} msg) reqd
+                 end
+               with
+               | Yojson.Safe.Util.Type_error (msg, _) ->
+                   Http.Response.json ~status:`Bad_request
+                     (Printf.sprintf {|{"error":"Invalid: %s"}|} msg)
+                     reqd
+               | Yojson.Json_error msg ->
+                   Http.Response.json ~status:`Bad_request
+                     (Printf.sprintf {|{"error":"Bad JSON: %s"}|} msg)
+                     reqd
+               | e ->
+                   Http.Response.json ~status:`Internal_server_error
+                     (Printf.sprintf {|{"error":"%s"}|}
+                       (Printexc.to_string e)) reqd
+             )
+           ) request reqd
+         | _ -> Http.Response.method_not_allowed reqd)
+
 (** Extended router to handle OPTIONS *)
 let make_extended_handler routes =
   fun _client_addr gluten_reqd ->
@@ -1393,6 +1535,7 @@ let run_server ~sw ~env ~port ~base_path =
   (* Set net and clock references in Mcp_eio for async operations *)
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
+  Masc_mcp.Process_eio.init ~proc_mgr ~clock;
 
   (* Create Caqti-compatible stdenv adapter
      Note: net type coercion from [Generic|Unix] to [Generic] is safe

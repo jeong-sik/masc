@@ -182,7 +182,7 @@ let send_via_osascript ~title ~subtitle ~message =
     "display notification \"%s\" with title \"%s\" subtitle \"%s\""
     message title subtitle
   in
-  let cmd = Printf.sprintf "osascript -e '%s' 2>/dev/null &" script in
+  let cmd = Printf.sprintf "osascript -e %s 2>/dev/null &" (Filename.quote script) in
   run_system_nonblocking cmd;
   ()
 

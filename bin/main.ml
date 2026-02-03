@@ -62,7 +62,7 @@ let legacy_messages_endpoint_url req session_id =
 (** Get Last-Event-ID from headers for resumability *)
 let get_last_event_id req =
   match Cohttp.Header.get (Cohttp.Request.headers req) "last-event-id" with
-  | Some id -> (try Some (int_of_string id) with _ -> None)
+  | Some id -> (try Some (int_of_string id) with Failure _ -> None)
   | None -> None
 
 (** Get MCP-Protocol-Version from headers *)
@@ -98,7 +98,7 @@ let protocol_version_from_initialize body_str =
         in
         Some version
     | _ -> None
-  with _ -> None
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let remember_protocol_version_from_body session_id body_str =
   match protocol_version_from_initialize body_str with
@@ -695,7 +695,7 @@ let run_http ~port ~base_path =
 
     | `POST, "/api/v1/tasks" ->
         let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
         let* result = Masc_mcp.Mcp_server.rest_execute state ~name:"masc_add_task" ~arguments:params in
         let headers = Cohttp.Header.of_list [
           ("Content-Type", "application/json");
@@ -727,7 +727,7 @@ let run_http ~port ~base_path =
 
     | `POST, "/api/v1/agents" ->
         let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
         let* result = Masc_mcp.Mcp_server.rest_execute state ~name:"masc_join" ~arguments:params in
         let headers = Cohttp.Header.of_list [
           ("Content-Type", "application/json");
@@ -739,7 +739,7 @@ let run_http ~port ~base_path =
 
     | `GET, "/api/v1/messages" ->
         let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
         let* result = Masc_mcp.Mcp_server.rest_execute state ~name:"masc_messages" ~arguments:params in
         let headers = Cohttp.Header.of_list [
           ("Content-Type", "application/json");
@@ -751,7 +751,7 @@ let run_http ~port ~base_path =
 
     | `POST, "/api/v1/messages" ->
         let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
         let* result = Masc_mcp.Mcp_server.rest_execute state ~name:"masc_broadcast" ~arguments:params in
         let headers = Cohttp.Header.of_list [
           ("Content-Type", "application/json");
@@ -773,7 +773,7 @@ let run_http ~port ~base_path =
 
     | `POST, "/api/v1/votes" ->
         let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
         let* result = Masc_mcp.Mcp_server.rest_execute state ~name:"masc_vote_create" ~arguments:params in
         let headers = Cohttp.Header.of_list [
           ("Content-Type", "application/json");
@@ -795,7 +795,7 @@ let run_http ~port ~base_path =
 
     | `POST, "/api/v1/worktrees" ->
         let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
         let* result = Masc_mcp.Mcp_server.rest_execute state ~name:"masc_worktree_create" ~arguments:params in
         let headers = Cohttp.Header.of_list [
           ("Content-Type", "application/json");
@@ -811,7 +811,7 @@ let run_http ~port ~base_path =
         (match meth, String.split_on_char '/' rest with
         | `POST, [task_id; "claim"] ->
             let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
             let params = match params with
               | `Assoc l -> `Assoc (("task_id", `String task_id) :: l)
               | _ -> `Assoc [("task_id", `String task_id)]
@@ -826,7 +826,7 @@ let run_http ~port ~base_path =
             Lwt.return (`Response rsp)
         | `POST, [task_id; "done"] ->
             let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
             let params = match params with
               | `Assoc l -> `Assoc (("task_id", `String task_id) :: l)
               | _ -> `Assoc [("task_id", `String task_id)]
@@ -841,7 +841,7 @@ let run_http ~port ~base_path =
             Lwt.return (`Response rsp)
         | `POST, [task_id; "cancel"] ->
             let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
             let params = match params with
               | `Assoc l -> `Assoc (("task_id", `String task_id) :: l)
               | _ -> `Assoc [("task_id", `String task_id)]
@@ -890,7 +890,7 @@ let run_http ~port ~base_path =
             Lwt.return (`Response rsp)
         | `POST, [vote_id; "cast"] ->
             let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
             let params = match params with
               | `Assoc l -> `Assoc (("vote_id", `String vote_id) :: l)
               | _ -> `Assoc [("vote_id", `String vote_id)]
@@ -932,7 +932,7 @@ let run_http ~port ~base_path =
             Lwt.return (`Response rsp)
         | `PUT, [task_id; "plan"] ->
             let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
             let params = match params with
               | `Assoc l -> `Assoc (("task_id", `String task_id) :: l)
               | _ -> `Assoc [("task_id", `String task_id)]
@@ -947,7 +947,7 @@ let run_http ~port ~base_path =
             Lwt.return (`Response rsp)
         | `POST, [task_id; "notes"] ->
             let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
             let params = match params with
               | `Assoc l -> `Assoc (("task_id", `String task_id) :: l)
               | _ -> `Assoc [("task_id", `String task_id)]
@@ -962,7 +962,7 @@ let run_http ~port ~base_path =
             Lwt.return (`Response rsp)
         | `PUT, [task_id; "deliverable"] ->
             let* body_str = Cohttp_lwt.Body.to_string body in
-        let params = try Yojson.Safe.from_string body_str with _ -> `Assoc [] in
+        let params = try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `Assoc [] in
             let params = match params with
               | `Assoc l -> `Assoc (("task_id", `String task_id) :: l)
               | _ -> `Assoc [("task_id", `String task_id)]

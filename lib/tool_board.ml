@@ -39,6 +39,7 @@ let board_error_to_string = function
   | Board.Capacity_exceeded { current; max } -> Printf.sprintf "Capacity exceeded: %d/%d" current max
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
+  | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
 
 let visibility_of_string = function
   | "public" -> Some Board.Public
@@ -111,8 +112,9 @@ let format_comment ?(indent=0) (c : Board.comment) =
     time_str
     vote_str
 
-(** Format comments as a tree structure, grouping replies under parents *)
-let format_comment_tree (comments : Board.comment list) =
+(** Format comments as a tree structure, grouping replies under parents.
+    max_depth limits nesting (default 5). Beyond that, comments render flat. *)
+let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
   let roots = List.filter (fun (c : Board.comment) -> c.parent_id = None) comments in
   let children_of parent_id =
     List.filter (fun (c : Board.comment) ->
@@ -121,12 +123,15 @@ let format_comment_tree (comments : Board.comment list) =
       | None -> false
     ) comments
   in
-  let rec render indent (c : Board.comment) =
+  let rec render depth indent (c : Board.comment) =
     let self = format_comment ~indent c in
-    let kids = children_of c.id in
-    self :: List.concat_map (render (indent + 4)) kids
+    if depth >= max_depth then
+      [self]  (* Stop recursing; children rendered flat at next level *)
+    else
+      let kids = children_of c.id in
+      self :: List.concat_map (render (depth + 1) (indent + 4)) kids
   in
-  List.concat_map (render 0) roots
+  List.concat_map (render 0 0) roots
 
 (** {1 Handlers} *)
 
@@ -360,10 +365,15 @@ let handle_search args =
   else
     let all_posts : Board.post list = Board.list_posts store ~limit:100 () in
     let query_lower = String.lowercase_ascii query in
-    let matched = List.filter (fun (p : Board.post) ->
-      let content_lower = String.lowercase_ascii p.content in
-      try ignore (Str.search_forward (Str.regexp_string query_lower) content_lower 0); true
+    let pattern = Str.regexp_string query_lower in
+    let matches_str s =
+      try ignore (Str.search_forward pattern (String.lowercase_ascii s) 0); true
       with Not_found -> false
+    in
+    let matched = List.filter (fun (p : Board.post) ->
+      matches_str p.content
+      || matches_str (Board.Agent_id.to_string p.author)
+      || (match p.hearth with Some h -> matches_str h | None -> false)
     ) all_posts in
     let results = List.filteri (fun i _ -> i < limit) matched in
     if results = [] then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)

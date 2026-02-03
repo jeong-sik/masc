@@ -215,6 +215,26 @@ module LodgeV2 = struct
     get_float ~default:1800.0 "MASC_LODGE_MIN_CHECKIN_GAP"
 end
 
+(** {1 Endpoint Configuration} *)
+
+module Endpoints = struct
+  (** LLM-MCP server URL *)
+  let llm_mcp_url =
+    get_string ~default:"http://127.0.0.1:8932/mcp" "LLM_MCP_URL"
+
+  (** MASC server host *)
+  let masc_host =
+    get_string ~default:"127.0.0.1" "MASC_HOST"
+
+  (** MASC server port *)
+  let masc_port =
+    get_int ~default:8935 "MASC_MCP_PORT"
+
+  (** MASC SSE URL (derived) *)
+  let masc_sse_url =
+    Printf.sprintf "http://%s:%d/sse" masc_host masc_port
+end
+
 (** Print configuration summary for debugging *)
 let print_summary () =
   Printf.eprintf "[env_config] Zombie: threshold=%.0fs cleanup_interval=%.0fs\n%!"

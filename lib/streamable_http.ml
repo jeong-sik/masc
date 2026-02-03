@@ -48,49 +48,44 @@ module Session = struct
       (String.sub hex 16 4)
       (String.sub hex 20 12)
 
-  let create ~transport =
+  let with_lock f =
     Mutex.lock mutex;
-    let session = {
-      id = generate_id ();
-      created_at = Time_compat.now ();
-      last_seen = Time_compat.now ();
-      transport;
-      subscriptions = [];
-    } in
-    Hashtbl.replace sessions session.id session;
-    Mutex.unlock mutex;
-    session
+    Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+
+  let create ~transport =
+    with_lock (fun () ->
+      let session = {
+        id = generate_id ();
+        created_at = Time_compat.now ();
+        last_seen = Time_compat.now ();
+        transport;
+        subscriptions = [];
+      } in
+      Hashtbl.replace sessions session.id session;
+      session)
 
   let find id =
-    Mutex.lock mutex;
-    let result = Hashtbl.find_opt sessions id in
-    Mutex.unlock mutex;
-    result
+    with_lock (fun () -> Hashtbl.find_opt sessions id)
 
   let touch session =
     session.last_seen <- Time_compat.now ()
 
   let remove id =
-    Mutex.lock mutex;
-    Hashtbl.remove sessions id;
-    Mutex.unlock mutex
+    with_lock (fun () -> Hashtbl.remove sessions id)
 
   let list_all () =
-    Mutex.lock mutex;
-    let result = Hashtbl.fold (fun _ v acc -> v :: acc) sessions [] in
-    Mutex.unlock mutex;
-    result
+    with_lock (fun () ->
+      Hashtbl.fold (fun _ v acc -> v :: acc) sessions [])
 
   let cleanup ~ttl_seconds =
     let now = Time_compat.now () in
     let cutoff = now -. ttl_seconds in
-    Mutex.lock mutex;
-    let to_remove = Hashtbl.fold (fun id session acc ->
-      if session.last_seen < cutoff then id :: acc else acc
-    ) sessions [] in
-    List.iter (Hashtbl.remove sessions) to_remove;
-    Mutex.unlock mutex;
-    List.length to_remove
+    with_lock (fun () ->
+      let to_remove = Hashtbl.fold (fun id session acc ->
+        if session.last_seen < cutoff then id :: acc else acc
+      ) sessions [] in
+      List.iter (Hashtbl.remove sessions) to_remove;
+      List.length to_remove)
 end
 
 (** JSON-RPC helpers *)

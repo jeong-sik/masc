@@ -97,93 +97,107 @@ let run_detached ~sw ~proc_mgr cmd : unit =
     with _ -> ()
   )
 
-(* ── Systhread variants (no proc_mgr needed) ──────────────────── *)
+(* ── Global state (initialized once from main_eio.ml) ──────────── *)
 
-(** Internal: read from file descriptor with deadline.
-    Returns (timed_out, accumulated_content). *)
-let read_fd_with_timeout fd timeout_sec =
+let _proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option ref = ref None
+let _clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+
+let init ~proc_mgr ~clock =
+  _proc_mgr := Some proc_mgr;
+  _clock := Some clock
+
+let get_proc_mgr () = match !_proc_mgr with
+  | Some pm -> pm
+  | None -> failwith "Process_eio.init not called"
+
+let get_clock () = match !_clock with
+  | Some c -> c
+  | None -> failwith "Process_eio.init not called"
+
+(* ── Eio-native replacements for run_in_systhread ──────────────── *)
+
+(** Run a shell command, capture stdout. Empty on timeout/error.
+    Uses Eio.Process.run (raises on non-zero exit → caught). *)
+let run ?(timeout_sec=60.0) cmd =
+  let pm = get_proc_mgr () and clk = get_clock () in
   let buf = Buffer.create 1024 in
-  let deadline = Unix.gettimeofday () +. timeout_sec in
-  let tmp = Bytes.create 4096 in
-  let timed_out = ref false in
-  (try
-    let continue = ref true in
-    while !continue do
-      let remaining = deadline -. Unix.gettimeofday () in
-      if remaining <= 0.0 then
-        (timed_out := true; continue := false)
-      else
-        match Unix.select [fd] [] [] (min remaining 1.0) with
-        | ([], _, _) -> ()
-        | _ ->
-          let n = Unix.read fd tmp 0 4096 in
-          if n = 0 then continue := false
-          else Buffer.add_subbytes buf tmp 0 n
-    done
-  with Unix.Unix_error _ -> ());
-  (!timed_out, Buffer.contents buf)
+  try
+    Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+      Eio.Process.run pm
+        ~stdout:(Eio.Flow.buffer_sink buf)
+        ["sh"; "-c"; cmd];
+      Buffer.contents buf)
+  with
+  | Eio.Time.Timeout ->
+    Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec cmd; ""
+  | exn ->
+    Eio.traceln "[Process_eio] Error: %s — %s" cmd (Printexc.to_string exn); ""
 
-(** Internal: reap child process. Kill if still running.
-    SOLE reap point — no other code should call waitpid on the same pid.
-    Returns the process status. *)
-let reap_child pid =
-  match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
-  | (0, _) ->
-    (* Still running — escalate: SIGTERM -> 100ms -> SIGKILL *)
-    (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
-    Unix.sleepf 0.1;
-    (match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
-     | (0, _) ->
-       (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-       let (_, status) = try Unix.waitpid [] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) in
-       status
-     | (_, status) -> status)
-  | (_, status) -> status
+(** Run a command with explicit argv (NO shell). Safe from injection.
+    Use this instead of [run] when the command doesn't need pipes/redirects.
 
-(** Run shell command in a system thread with timeout (non-blocking to Eio).
-    Returns stdout as string. Empty string on timeout or error.
-    Default timeout: 60s.
-    Lifecycle: create_process -> read stdout -> reap_child (single reap point). *)
-let run_in_systhread ?(timeout_sec=60.0) cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let (rd, wr) = Unix.pipe () in
-    let pid =
-      Unix.create_process "/bin/sh" [|"/bin/sh"; "-c"; cmd|]
-        Unix.stdin wr Unix.stderr
-    in
-    Unix.close wr;
-    (* finally: fd cleanup only. reap_child is called in the body. *)
-    Fun.protect ~finally:(fun () ->
-      (try Unix.close rd with Unix.Unix_error _ -> ())
-    ) (fun () ->
-      let (timed_out, content) = read_fd_with_timeout rd timeout_sec in
-      if timed_out then
-        Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd;
-      ignore (reap_child pid);
-      content
-    )
-  )
+    Example: [run_argv ~timeout_sec:10.0 ["curl"; "-s"; url]]
 
-(** Run shell command in a system thread with timeout (non-blocking to Eio).
-    Returns (Unix.process_status, stdout).
-    On timeout, status reflects the kill signal used during reap.
-    Default timeout: 60s.
-    Lifecycle: create_process -> read stdout -> reap_child (single reap point). *)
-let run_in_systhread_with_status ?(timeout_sec=60.0) cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let (rd, wr) = Unix.pipe () in
-    let pid =
-      Unix.create_process "/bin/sh" [|"/bin/sh"; "-c"; cmd|]
-        Unix.stdin wr Unix.stderr
-    in
-    Unix.close wr;
-    Fun.protect ~finally:(fun () ->
-      (try Unix.close rd with Unix.Unix_error _ -> ())
-    ) (fun () ->
-      let (timed_out, content) = read_fd_with_timeout rd timeout_sec in
-      if timed_out then
-        Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd;
-      let status = reap_child pid in
-      (status, content)
-    )
-  )
+    @since 2.45.0 *)
+let run_argv ?(timeout_sec=60.0) argv =
+  let pm = get_proc_mgr () and clk = get_clock () in
+  let buf = Buffer.create 1024 in
+  let label = String.concat " " (List.map Filename.quote argv) in
+  try
+    Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+      Eio.Process.run pm
+        ~stdout:(Eio.Flow.buffer_sink buf)
+        argv;
+      Buffer.contents buf)
+  with
+  | Eio.Time.Timeout ->
+    Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec label; ""
+  | exn ->
+    Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn); ""
+
+(** Run a command with explicit argv and stdin input (NO shell).
+    Body is piped to the process's stdin.
+
+    Example: [run_argv_with_stdin ~stdin_content:json_body ["curl"; "-s"; "-d"; "@-"; url]]
+
+    @since 2.45.0 *)
+let run_argv_with_stdin ?(timeout_sec=60.0) ~stdin_content argv =
+  let pm = get_proc_mgr () and clk = get_clock () in
+  let buf = Buffer.create 1024 in
+  let label = String.concat " " (List.map Filename.quote argv) in
+  try
+    Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+      Eio.Process.run pm
+        ~stdin:(Eio.Flow.string_source stdin_content)
+        ~stdout:(Eio.Flow.buffer_sink buf)
+        argv;
+      Buffer.contents buf)
+  with
+  | Eio.Time.Timeout ->
+    Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec label; ""
+  | exn ->
+    Eio.traceln "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn); ""
+
+(** Run a shell command, return (Unix.process_status, stdout).
+    Uses Eio.Process.spawn + await to get exit status without raising. *)
+let run_with_status ?(timeout_sec=60.0) cmd =
+  let pm = get_proc_mgr () and clk = get_clock () in
+  let buf = Buffer.create 1024 in
+  try
+    Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+      Eio.Switch.run (fun sw ->
+        let proc = Eio.Process.spawn ~sw pm
+          ~stdout:(Eio.Flow.buffer_sink buf)
+          ["sh"; "-c"; cmd] in
+        let status = Eio.Process.await proc in
+        let unix_status = match status with
+          | `Exited n -> Unix.WEXITED n
+          | `Signaled n -> Unix.WSIGNALED n in
+        (unix_status, Buffer.contents buf)))
+  with
+  | Eio.Time.Timeout ->
+    Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec cmd;
+    (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
+  | exn ->
+    Eio.traceln "[Process_eio] Error: %s — %s" cmd (Printexc.to_string exn);
+    (Unix.WEXITED 1, "")

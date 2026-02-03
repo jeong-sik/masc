@@ -67,6 +67,7 @@ module Mind_eio = Mind_eio
 module Noosphere_eio = Noosphere_eio
 module Metrics_store_eio = Metrics_store_eio
 module Planning_eio = Planning_eio
+module Process_eio = Process_eio
 module Run_eio = Run_eio
 module Hebbian_eio = Hebbian_eio
 module Spawn = Spawn

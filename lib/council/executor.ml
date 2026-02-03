@@ -117,8 +117,8 @@ let execute_github action =
   | ApproveReview pr_num ->
     execute_shell (Printf.sprintf "gh pr review %d --approve" pr_num)
   | CreateIssue (title, body) ->
-    execute_shell (Printf.sprintf "gh issue create --title '%s' --body '%s'" 
-      (String.escaped title) (String.escaped body))
+    execute_shell (Printf.sprintf "gh issue create --title %s --body %s"
+      (Filename.quote title) (Filename.quote body))
 
 let rec ensure_dir path =
   if not (Sys.file_exists path) then begin

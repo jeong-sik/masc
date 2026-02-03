@@ -74,11 +74,8 @@ let should_throttle ~agent_type =
     false
   end
 
-(** LLM-MCP endpoint (default: 8932) *)
-let llm_mcp_url () =
-  match Sys.getenv_opt "LLM_MCP_URL" with
-  | Some url -> url
-  | None -> "http://127.0.0.1:8932/mcp"
+(** LLM-MCP endpoint — delegates to Env_config *)
+let llm_mcp_url () = Env_config.Endpoints.llm_mcp_url
 
 (** Re-export from Mention module for convenience *)
 let spawnable_agents = Mention.spawnable_agents
@@ -87,23 +84,22 @@ let is_spawnable = Mention.is_spawnable
 
 (** {1 Non-blocking Shell Execution} *)
 
-(** Run shell command in system thread (non-blocking for Eio).
-    Delegates to Process_eio.run_in_systhread_with_status (centralized, with timeout). *)
+(** Run shell command (Eio-native).
+    Delegates to Process_eio.run_with_status (global proc_mgr/clock). *)
 let run_shell_nonblocking cmd =
-  Process_eio.run_in_systhread_with_status ~timeout_sec:60.0 cmd
+  Process_eio.run_with_status ~timeout_sec:60.0 cmd
 
-(** Run shell command and get single line (non-blocking) *)
+(** Run shell command and get single line (Eio-native) *)
 let run_shell_line cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-      try input_line ic with End_of_file -> ""
-    )
-  )
+  let output = Process_eio.run ~timeout_sec:10.0 cmd in
+  match String.split_on_char '\n' (String.trim output) with
+  | first :: _ -> first
+  | [] -> ""
 
-(** Run Unix.system in system thread (non-blocking) *)
+(** Run command, ignore result (Eio-native) *)
 let run_system_nonblocking cmd =
-  Eio_unix.run_in_systhread (fun () -> Unix.system cmd)
+  let (status, _) = Process_eio.run_with_status ~timeout_sec:60.0 cmd in
+  status
 
 (** Build shell command for spawning an agent *)
 let build_spawn_command ~agent_type ~prompt ~working_dir =

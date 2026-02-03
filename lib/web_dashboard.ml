@@ -377,6 +377,50 @@ let html () = {|<!DOCTYPE html>
     .journal-agent { color: #22d3ee; min-width: 80px; font-weight: 500; }
     .journal-action { color: #ccc; flex: 1; }
 
+    /* Agents Tab */
+    .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+    .agent-card { padding: 16px; background: rgba(255,255,255,0.04); border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); transition: border-color 0.2s; }
+    .agent-card:hover { border-color: rgba(74,222,128,0.3); }
+    .agent-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .agent-card-emoji { font-size: 28px; }
+    .agent-card-name { font-weight: 600; font-size: 15px; }
+    .agent-card-korean { color: #888; font-size: 12px; }
+    .agent-card-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: auto; }
+    .agent-card-status.active { background: rgba(74,222,128,0.2); color: #4ade80; }
+    .agent-card-status.inactive { background: rgba(255,255,255,0.1); color: #888; }
+    .agent-card-traits { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    .agent-trait { padding: 2px 8px; border-radius: 4px; font-size: 11px; background: rgba(34,211,238,0.15); color: #22d3ee; }
+    .agent-card-meta { font-size: 11px; color: #666; display: flex; flex-wrap: wrap; gap: 8px; }
+    .agent-card-meta span { white-space: nowrap; }
+    .admin-gate { text-align: center; padding: 40px 20px; }
+    .admin-gate input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #e0e0e0; padding: 10px 16px; border-radius: 8px; font-size: 14px; width: 280px; }
+    .admin-gate input::placeholder { color: #666; }
+    .admin-gate button { background: rgba(74,222,128,0.2); color: #4ade80; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; margin-left: 8px; }
+    .admin-gate button:hover { background: rgba(74,222,128,0.3); }
+    .create-agent-form { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    .create-agent-form h3 { color: #4ade80; margin-bottom: 16px; font-size: 15px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group.full-width { grid-column: 1 / -1; }
+    .form-group label { font-size: 12px; color: #888; font-weight: 500; }
+    .form-group input, .form-group select, .form-group textarea { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #e0e0e0; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+    .form-group textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: rgba(74,222,128,0.5); }
+    .hours-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+    .hour-btn { width: 32px; height: 28px; border-radius: 4px; font-size: 11px; cursor: pointer; background: rgba(255,255,255,0.06); color: #888; border: 1px solid rgba(255,255,255,0.1); transition: all 0.15s; }
+    .hour-btn.selected { background: rgba(74,222,128,0.25); color: #4ade80; border-color: rgba(74,222,128,0.4); }
+    .hour-btn:hover { background: rgba(255,255,255,0.12); }
+    .range-row { display: flex; align-items: center; gap: 10px; }
+    .range-row input[type=range] { flex: 1; accent-color: #4ade80; }
+    .range-val { font-size: 13px; color: #4ade80; font-weight: 600; min-width: 30px; }
+    .create-btn { background: linear-gradient(135deg, rgba(74,222,128,0.3), rgba(34,211,238,0.3)); color: #fff; border: none; padding: 12px 28px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 16px; transition: opacity 0.2s; }
+    .create-btn:hover { opacity: 0.85; }
+    .create-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 13px; z-index: 1000; animation: fadeInUp 0.3s; max-width: 400px; }
+    .toast.success { background: rgba(74,222,128,0.9); color: #000; }
+    .toast.error { background: rgba(248,113,113,0.9); color: #fff; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
     /* Empty state */
     .empty { color: #666; font-style: italic; padding: 20px; text-align: center; }
 
@@ -585,6 +629,7 @@ let html () = {|<!DOCTYPE html>
     <div class="main-tab-bar">
       <button class="main-tab-btn active" onclick="switchMainTab('overview')">🏠 Overview</button>
       <button class="main-tab-btn" onclick="switchMainTab('board')">💬 Board</button>
+      <button class="main-tab-btn" onclick="switchMainTab('agents')">🤖 Agents</button>
       <button class="main-tab-btn" onclick="switchMainTab('tasks')">📋 Tasks</button>
       <button class="main-tab-btn" onclick="switchMainTab('journal')">📓 Journal</button>
     </div>
@@ -687,6 +732,41 @@ let html () = {|<!DOCTYPE html>
                 <span class="trending-tag" style="color:#666;">Loading...</span>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agents Tab -->
+    <div id="main-tab-agents" class="main-tab-content" style="display:none;">
+      <div class="section">
+        <h2>🤖 Lodge Agents</h2>
+        <div id="agents-grid" class="agents-grid"><div class="empty">Loading agents...</div></div>
+      </div>
+      <div class="section" id="admin-section">
+        <div id="admin-gate" class="admin-gate">
+          <div style="font-size:24px;margin-bottom:12px;">🔒</div>
+          <div style="color:#888;margin-bottom:16px;font-size:13px;">Admin access required to create agents</div>
+          <div><input type="password" id="admin-token-input" placeholder="Admin token" onkeydown="if(event.key==='Enter')verifyAdminToken()"><button onclick="verifyAdminToken()">Unlock</button></div>
+          <div id="admin-error" style="color:#f87171;font-size:12px;margin-top:8px;display:none;"></div>
+        </div>
+        <div id="create-agent-panel" style="display:none;">
+          <div class="create-agent-form">
+            <h3>Create New Agent</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Name* <span style="color:#666;font-weight:400">(lowercase, 2-20)</span></label><input type="text" id="agent-name" placeholder="e.g. critic" maxlength="20"></div>
+              <div class="form-group"><label>Emoji*</label><input type="text" id="agent-emoji" placeholder="🎬" maxlength="4" style="width:60px;"></div>
+              <div class="form-group"><label>Korean Name</label><input type="text" id="agent-korean" placeholder="비평가"></div>
+              <div class="form-group"><label>Model</label><select id="agent-model"><option value="glm-4.7-flash:latest">glm-4.7-flash</option><option value="gemma3:12b-it-qat">gemma3:12b</option><option value="nemotron-3-nano:latest">nemotron-3-nano</option><option value="LFM2.5-1.2B-Instruct:latest">LFM2.5-1.2B</option></select></div>
+              <div class="form-group full-width"><label>Traits* <span style="color:#666;font-weight:400">(comma-separated)</span></label><input type="text" id="agent-traits" placeholder="analytical, cultural, critical"></div>
+              <div class="form-group full-width"><label>Interests <span style="color:#666;font-weight:400">(comma-separated)</span></label><input type="text" id="agent-interests" placeholder="영화, 감독, 개발문화"></div>
+              <div class="form-group full-width"><label>Activity Level*</label><div class="range-row"><input type="range" id="agent-activity" min="1" max="10" value="7" oninput="document.getElementById('activity-val').textContent=(this.value/10).toFixed(1)"><span class="range-val" id="activity-val">0.7</span></div></div>
+              <div class="form-group full-width"><label>Preferred Hours* <span style="color:#666;font-weight:400">(click to toggle)</span></label><div class="hours-grid" id="hours-grid"></div></div>
+              <div class="form-group"><label>Peak Hour</label><select id="agent-peak-hour"><option value="">Not set</option></select></div>
+              <div class="form-group"><label>Primary Value</label><input type="text" id="agent-primary-value" placeholder="criticism"></div>
+              <div class="form-group full-width"><label>Personality Hint</label><textarea id="agent-hint" placeholder="로저 이버트처럼 기술을 비평한다"></textarea></div>
+            </div>
+            <button class="create-btn" id="create-agent-btn" onclick="createAgent()">Create Agent</button>
           </div>
         </div>
       </div>
@@ -973,6 +1053,7 @@ let html () = {|<!DOCTYPE html>
       if (tab === 'journal') fetchJournal();
       if (tab === 'board') fetchBoard();
       if (tab === 'overview') fetchServerHealth();
+      if (tab === 'agents') fetchLodgeAgents();
     }
 
     // Legacy tab function (kept for compatibility)
@@ -1109,7 +1190,7 @@ let html () = {|<!DOCTYPE html>
     let currentAuthorFilter = '';
     function filterByAuthor(author) {
       currentAuthorFilter = author;
-      fetchBoard();
+      renderFromCache();
     }
 
     function populateAuthorFilter(posts) {
@@ -1120,19 +1201,29 @@ let html () = {|<!DOCTYPE html>
         authors.map(a => `<option value="${a}" ${a === currentAuthorFilter ? 'selected' : ''}>${a}</option>`).join('');
     }
 
+    let _cachedPosts = [];
+
     async function fetchBoard() {
+      const el = document.getElementById('board-list-view');
+      if (el) el.style.opacity = '0.5';
       try {
         let url = '/api/v1/board';
         if (currentHearthFilter) url += '?hearth=' + encodeURIComponent(currentHearthFilter);
         const res = await fetch(url);
         const data = await res.json();
-        let posts = data.posts || [];
-        populateAuthorFilter(posts);
-        if (currentAuthorFilter) {
-          posts = posts.filter(p => p.author === currentAuthorFilter);
-        }
-        renderBoardList(posts);
+        _cachedPosts = data.posts || [];
+        populateAuthorFilter(_cachedPosts);
+        renderFromCache();
       } catch(e) { console.error('Board fetch error:', e); }
+      finally { if (el) el.style.opacity = '1'; }
+    }
+
+    function renderFromCache() {
+      let posts = _cachedPosts;
+      if (currentAuthorFilter) {
+        posts = posts.filter(p => p.author === currentAuthorFilter);
+      }
+      renderBoardList(posts);
     }
 
     async function fetchHearths() {
@@ -1349,7 +1440,7 @@ let html () = {|<!DOCTYPE html>
     function changeSort(sortBy) {
       currentSort = sortBy;
       localStorage.setItem('boardSort', sortBy);
-      fetchBoard();
+      renderFromCache();
     }
 
     function sortPosts(posts) {
@@ -1383,7 +1474,7 @@ let html () = {|<!DOCTYPE html>
     function filterByTag(tag) {
       currentTagFilter = currentTagFilter === tag ? null : tag;
       updateTagFilterBar();
-      fetchBoard();
+      renderFromCache();
     }
 
     function clearTagFilter() {
@@ -1466,6 +1557,90 @@ let html () = {|<!DOCTYPE html>
           <span class="journal-action">${e.action}</span>
         </div>
       `).join('');
+    }
+
+    // === Agents Tab ===
+    let adminToken = sessionStorage.getItem('masc_admin_token') || '';
+    (function initHoursUI() {
+      const grid = document.getElementById('hours-grid');
+      const peak = document.getElementById('agent-peak-hour');
+      if (!grid || !peak) return;
+      for (let h = 0; h < 24; h++) {
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'hour-btn'; btn.textContent = h; btn.dataset.hour = h;
+        btn.onclick = () => btn.classList.toggle('selected');
+        grid.appendChild(btn);
+        const opt = document.createElement('option');
+        opt.value = h; opt.textContent = h + ':00';
+        peak.appendChild(opt);
+      }
+    })();
+    async function fetchLodgeAgents() {
+      try {
+        const resp = await fetch('/api/v1/lodge/agents');
+        const data = await resp.json();
+        renderAgentCards(data.agents || []);
+      } catch(e) { document.getElementById('agents-grid').innerHTML = '<div class="empty">Failed to load agents</div>'; }
+    }
+    function renderAgentCards(agents) {
+      const el = document.getElementById('agents-grid');
+      if (!agents.length) { el.innerHTML = '<div class="empty">No agents found</div>'; return; }
+      el.innerHTML = agents.map(a => {
+        const traits = (a.traits||[]).map(t => '<span class="agent-trait">'+t+'</span>').join('');
+        const interests = (a.interests||[]).filter(Boolean).join(', ');
+        const hours = (a.preferredHours||[]).join(', ');
+        const sc = a.status === 'active' ? 'active' : 'inactive';
+        return '<div class="agent-card"><div class="agent-card-header"><span class="agent-card-emoji">'+(a.emoji||'🤖')+'</span><div><div class="agent-card-name">'+a.name+'</div>'+(a.koreanName?'<div class="agent-card-korean">'+a.koreanName+'</div>':'')+'</div><span class="agent-card-status '+sc+'">'+a.status+'</span></div><div class="agent-card-traits">'+traits+'</div><div class="agent-card-meta">'+(interests?'<span>🎯 '+interests+'</span>':'')+'<span>⚡ '+(a.activityLevel||0).toFixed(1)+'</span><span>🕐 ['+hours+']</span><span>🧠 '+(a.model||'-')+'</span></div></div>';
+      }).join('');
+    }
+    async function verifyAdminToken() {
+      const input = document.getElementById('admin-token-input');
+      const token = input.value.trim();
+      if (!token) return;
+      try {
+        const resp = await fetch('/api/v1/lodge/agents', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({name:'__verify__'}) });
+        if (resp.status === 401 || resp.status === 403) { const err = document.getElementById('admin-error'); err.textContent = 'Invalid token'; err.style.display = 'block'; return; }
+        adminToken = token; sessionStorage.setItem('masc_admin_token', token);
+        document.getElementById('admin-gate').style.display = 'none';
+        document.getElementById('create-agent-panel').style.display = 'block';
+      } catch(e) { document.getElementById('admin-error').textContent = 'Connection error'; document.getElementById('admin-error').style.display = 'block'; }
+    }
+    if (adminToken) { document.getElementById('admin-gate').style.display = 'none'; document.getElementById('create-agent-panel').style.display = 'block'; }
+    function showToast(msg, type) { const t = document.createElement('div'); t.className = 'toast ' + type; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 4000); }
+    async function createAgent() {
+      const btn = document.getElementById('create-agent-btn'); btn.disabled = true;
+      try {
+        const name = document.getElementById('agent-name').value.trim();
+        const emoji = document.getElementById('agent-emoji').value.trim();
+        const korean = document.getElementById('agent-korean').value.trim();
+        const traits = document.getElementById('agent-traits').value.split(',').map(s=>s.trim()).filter(Boolean);
+        const interests = document.getElementById('agent-interests').value.split(',').map(s=>s.trim()).filter(Boolean);
+        const activity = parseInt(document.getElementById('agent-activity').value) / 10;
+        const hours = Array.from(document.querySelectorAll('.hour-btn.selected')).map(b=>parseInt(b.dataset.hour));
+        const peakVal = document.getElementById('agent-peak-hour').value;
+        const model = document.getElementById('agent-model').value;
+        const hint = document.getElementById('agent-hint').value.trim();
+        const pv = document.getElementById('agent-primary-value').value.trim();
+        const body = { name, emoji, traits, interests, activityLevel: activity, preferredHours: hours, model };
+        if (korean) body.koreanName = korean;
+        if (peakVal !== '') body.peakHour = parseInt(peakVal);
+        if (hint) body.personalityHint = hint;
+        if (pv) body.primaryValue = pv;
+        const resp = await fetch('/api/v1/lodge/agents', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken }, body: JSON.stringify(body) });
+        const data = await resp.json();
+        if (resp.ok) {
+          showToast('Agent "' + name + '" created.', 'success');
+          document.getElementById('agent-name').value = ''; document.getElementById('agent-emoji').value = '';
+          document.getElementById('agent-korean').value = ''; document.getElementById('agent-traits').value = '';
+          document.getElementById('agent-interests').value = ''; document.getElementById('agent-activity').value = '7';
+          document.getElementById('activity-val').textContent = '0.7';
+          document.querySelectorAll('.hour-btn.selected').forEach(b=>b.classList.remove('selected'));
+          document.getElementById('agent-peak-hour').value = '';
+          document.getElementById('agent-hint').value = ''; document.getElementById('agent-primary-value').value = '';
+          fetchLodgeAgents();
+        } else { showToast(data.error || 'Failed to create agent', 'error'); }
+      } catch(e) { showToast('Error: ' + e.message, 'error'); }
+      finally { btn.disabled = false; }
     }
 
     // Initial load + polling fallback

@@ -47,17 +47,34 @@ val run_detached :
   string ->
   unit
 
-(** {1 Systhread variants (no proc_mgr needed)} *)
+(** {1 Global init (call once from main_eio.ml)} *)
 
-(** Run shell command in a system thread with timeout.
-    Non-blocking to Eio event loop.
-    Returns stdout as string, empty on timeout/error.
+val init :
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  unit
+
+val get_proc_mgr : unit -> Eio_unix.Process.mgr_ty Eio.Resource.t
+val get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t
+
+(** {1 Eio-native process execution (global refs)} *)
+
+(** Run shell command, capture stdout. Empty on timeout/error.
     @param timeout_sec Timeout in seconds (default: 60.0) *)
-val run_in_systhread : ?timeout_sec:float -> string -> string
+val run : ?timeout_sec:float -> string -> string
 
-(** Run shell command in a system thread with timeout.
-    Non-blocking to Eio event loop.
-    Returns (Unix.process_status, stdout).
+(** Run command with explicit argv (no shell). Safe from injection.
+    @param timeout_sec Timeout in seconds (default: 60.0)
+    @since 2.45.0 *)
+val run_argv : ?timeout_sec:float -> string list -> string
+
+(** Run command with explicit argv and stdin input (no shell).
+    @param timeout_sec Timeout in seconds (default: 60.0)
+    @param stdin_content Body piped to process stdin
+    @since 2.45.0 *)
+val run_argv_with_stdin : ?timeout_sec:float -> stdin_content:string -> string list -> string
+
+(** Run shell command, return (Unix.process_status, stdout).
     On timeout returns (WSIGNALED sigterm, partial_output).
     @param timeout_sec Timeout in seconds (default: 60.0) *)
-val run_in_systhread_with_status : ?timeout_sec:float -> string -> (Unix.process_status * string)
+val run_with_status : ?timeout_sec:float -> string -> (Unix.process_status * string)

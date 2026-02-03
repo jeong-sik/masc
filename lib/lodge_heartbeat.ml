@@ -360,10 +360,10 @@ let cleanup_inactive_lodge_agents () =
 
 (** {1 Non-blocking Shell Execution} *)
 
-(** Run shell command in a separate system thread to avoid blocking Eio event loop.
-    Delegates to Process_eio.run_in_systhread (centralized, with timeout). *)
+(** Run shell command via Eio-native process execution.
+    Delegates to Process_eio.run (global proc_mgr/clock). *)
 let run_shell_nonblocking cmd =
-  Process_eio.run_in_systhread ~timeout_sec:60.0 cmd
+  Process_eio.run ~timeout_sec:60.0 cmd
 
 (** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes.
     Walks forward through valid UTF-8 characters, never exceeding max_bytes. *)
@@ -392,23 +392,9 @@ let utf8_truncate s max_bytes =
 
 (** Run shell command and get all output (up to 500 chars) *)
 let run_shell_line cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic))
-      (fun () ->
-        let buf = Buffer.create 2048 in
-        let rec read_all () =
-          match input_line ic with
-          | line ->
-              if Buffer.length buf > 0 then Buffer.add_char buf '\n';
-              Buffer.add_string buf line;
-              if Buffer.length buf < 4000 then read_all ()
-          | exception End_of_file -> ()
-        in
-        read_all ();
-        Buffer.contents buf
-      )
-  )
+  let output = Process_eio.run ~timeout_sec:10.0 cmd in
+  let s = String.trim output in
+  if String.length s > 4000 then String.sub s 0 4000 else s
 
 (** Initialize rewrite_context implementation (now that run_shell_nonblocking is available) *)
 let () =
@@ -807,7 +793,8 @@ let get_agents () =
 
 (** Load all agents with full identity fields for REST API *)
 let load_lodge_agents_full () =
-  let gql_query = "{\"query\": \"{ agents(first: 30) { edges { node { name emoji koreanName traits interests activityLevel preferredHours peakHour model status primaryValue personalityHint } } } }\"}" in
+  (* first:15 — GRAPHQL_MAX_COST=2000, more fields = higher cost per item *)
+  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name emoji koreanName traits interests activityLevel preferredHours peakHour model status primaryValue personalityHint } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
@@ -892,7 +879,7 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
   let interests_str = interests |> List.map (fun t -> Printf.sprintf {|"%s"|} (esc t)) |> String.concat ", " in
   let hours_str = preferred_hours |> List.map string_of_int |> String.concat ", " in
   let mutation = Printf.sprintf
-    {|mutation { createAgents(input: [{ name: "%s", emoji: "%s"%s, traits: [%s], interests: [%s], activityLevel: %f, preferredHours: [%s]%s, model: "%s"%s%s, status: "active" }]) { agents { name emoji koreanName } } }|}
+    {|mutation { createAgent(name: "%s", emoji: "%s"%s, traits: [%s], interests: [%s], activityLevel: %f, preferredHours: [%s]%s, model: "%s"%s%s, status: "active") { success message agent { name emoji koreanName } } }|}
     (esc name) (esc emoji) (opt_str "koreanName" korean_name)
     traits_str interests_str activity_level hours_str
     (opt_int "peakHour" peak_hour) (esc model)
@@ -917,18 +904,21 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
        Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
        Error msg
      | _ ->
-       (* Invalidate heartbeat cache *)
-       agents_cache_time := 0.0;
-       Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
-       let created = json
-         |> Yojson.Safe.Util.member "data"
-         |> Yojson.Safe.Util.member "createAgents"
-         |> Yojson.Safe.Util.member "agents"
-         |> Yojson.Safe.Util.to_list
-       in
-       match created with
-       | agent :: _ -> Ok agent
-       | [] -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)]))
+       let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
+       let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
+       if not success then begin
+         let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in
+         Printf.eprintf "[Admin] GraphQL mutation failed: %s\n%!" msg;
+         Error msg
+       end else begin
+         (* Invalidate heartbeat cache *)
+         agents_cache_time := 0.0;
+         Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
+         let agent = result |> Yojson.Safe.Util.member "agent" in
+         match agent with
+         | `Null -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)])
+         | a -> Ok a
+       end)
   with e ->
     let msg = Printexc.to_string e in
     Printf.eprintf "[Admin] Failed to create agent: %s\n%!" msg;

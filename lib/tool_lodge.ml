@@ -121,23 +121,21 @@ let shell_escape s = Str.global_replace (Str.regexp "'") "'\\''" s
 
 (** {1 Non-blocking Shell Execution}
 
-    All shell commands run in a separate system thread via Eio_unix.run_in_systhread
-    to avoid blocking the Eio event loop and HTTP server.
+    All shell commands use Eio-native process execution via Process_eio
+    (global proc_mgr/clock initialized from main_eio.ml).
 *)
 
-(** Run shell command and capture all output (non-blocking).
-    Delegates to Process_eio.run_in_systhread_with_status (centralized, with timeout). *)
+(** Run shell command and capture all output (Eio-native).
+    Delegates to Process_eio.run_with_status (global proc_mgr/clock). *)
 let run_shell_nonblocking cmd =
-  Process_eio.run_in_systhread_with_status ~timeout_sec:60.0 cmd
+  Process_eio.run_with_status ~timeout_sec:60.0 cmd
 
-(** Run shell command and get single line result (non-blocking) *)
+(** Run shell command and get single line result (Eio-native) *)
 let run_shell_line cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-      try input_line ic with End_of_file -> ""
-    )
-  )
+  let output = Process_eio.run ~timeout_sec:10.0 cmd in
+  match String.split_on_char '\n' (String.trim output) with
+  | first :: _ -> first
+  | [] -> ""
 
 (** HTTP GET via curl subprocess — supports both HTTP and HTTPS *)
 let http_get_json ~net:_ url =
@@ -1247,7 +1245,7 @@ let lodge_auto_chain ~net (args : Yojson.Safe.t) =
       (* Continue with probability *)
       if Random.float 1.0 < chain_prob then begin
         add (Printf.sprintf "🎲 Continuing (roll < %.2f)..." chain_prob);
-        Eio_unix.run_in_systhread (fun () -> Unix.sleepf 0.5);
+        Eio.Time.sleep (Process_eio.get_clock ()) 0.5;
         loop (count + 1)
       end else begin
         add (Printf.sprintf "🎲 Stopping (roll >= %.2f)" chain_prob);
@@ -1981,7 +1979,7 @@ let autonomous_loop ~net args =
       results := Printf.sprintf "───── 진행: %d/%d (%.0f%%) ─────" i iterations (100.0 *. float_of_int i /. float_of_int iterations) :: !results;
 
     (* Delay between iterations - minimum 1s to prevent spam *)
-    if i < iterations then Eio_unix.run_in_systhread (fun () -> Unix.sleepf (max 1.0 (float_of_int delay_ms /. 1000.0)))
+    if i < iterations then Eio.Time.sleep (Process_eio.get_clock ()) (max 1.0 (float_of_int delay_ms /. 1000.0))
   done;
 
   loop_status := None;

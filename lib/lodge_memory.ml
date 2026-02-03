@@ -40,10 +40,19 @@ let truncate s n =
     in
     String.sub s 0 (find_boundary n)
 
-(** Run shell command in system thread (non-blocking for Eio).
-    Delegates to Process_eio.run_in_systhread (centralized, with timeout). *)
-let run_shell_nonblocking cmd =
-  Process_eio.run_in_systhread ~timeout_sec:60.0 cmd
+(** Run curl GraphQL request via argv (NO shell, safe from injection).
+    Body is piped via stdin, API key passed as header arg (not shell-interpolated).
+    Fixes: shell injection + API key exposure in process list. *)
+let graphql_request ?(timeout_sec=5.0) body =
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  Process_eio.run_argv_with_stdin ~timeout_sec ~stdin_content:body
+    ["curl"; "-s"; "--connect-timeout"; "3";
+     "--max-time"; string_of_int (int_of_float timeout_sec);
+     url;
+     "-H"; "Content-Type: application/json";
+     "-H"; Printf.sprintf "Authorization: Bearer %s" api_key;
+     "-d"; "@-"]
 
 (** Resolve ME_ROOT consistently *)
 let me_root () =
@@ -105,24 +114,17 @@ let recall_from_stream ~agent_name ~query ~limit : (string * float) list =
     (e.content, 0.4 +. float_of_int e.importance *. 0.06)  (* 0.4 - 1.0 range *)
   ) entries
 
-(** GraphQL endpoint and auth for Lodge activity queries *)
-let graphql_url = "https://second-brain-graphql-production.up.railway.app/graphql"
-let graphql_api_key () =
-  Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:""
-
 (** Recall from Neo4j via GraphQL API.
-    Fetches agent's recent LodgeActivity records through the GraphQL layer. *)
+    Fetches agent's recent LodgeActivity records through the GraphQL layer.
+    Uses structured JSON construction (no string interpolation → no injection). *)
 let recall_from_neo4j ~agent_name ~limit : (string * float) list =
-  let gql = Printf.sprintf
-    "{\"query\": \"{ agentActivities(agentName: \\\"%s\\\", first: %d) { edges { node { content } } } }\"}"
-    agent_name limit
+  let query = Printf.sprintf
+    "{ agentActivities(agentName: %s, first: %d) { edges { node { content } } } }"
+    (Yojson.Safe.to_string (`String agent_name)) limit
   in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 %s -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    graphql_url (graphql_api_key ()) gql
-  in
+  let body = Yojson.Safe.to_string (`Assoc [("query", `String query)]) in
   try
-    let result = run_shell_nonblocking cmd in
+    let result = graphql_request body in
     if String.length result < 5 then []
     else begin
       let json = Yojson.Safe.from_string result in
@@ -211,28 +213,26 @@ let store_to_stream (exp : experience) =
   Memory_stream.add_memory ~agent_name:exp.agent_name ~content:exp.content ~importance:5 mem_type;
   Memory_stream.rotate_if_needed ~agent_name:exp.agent_name
 
-(** Record experience to Neo4j graph via GraphQL mutation (long-term) *)
+(** Record experience to Neo4j graph via GraphQL mutation (long-term).
+    Uses Yojson for JSON construction (no manual escaping → no injection). *)
 let store_to_neo4j (exp : experience) =
-  let escape_json s =
-    s |> String.split_on_char '"' |> String.concat "\\\""
-      |> String.split_on_char '\n' |> String.concat "\\n"
-  in
-  let content = escape_json (truncate exp.content 200) in
-  let context = escape_json (truncate exp.context 100) in
+  let content = truncate exp.content 200 in
+  let context = truncate exp.context 100 in
   let board_id_part = match exp.board_id with
-    | Some b -> Printf.sprintf ", boardId: \\\"%s\\\"" (escape_json b)
+    | Some b -> Printf.sprintf ", boardId: %s" (Yojson.Safe.to_string (`String b))
     | None -> ""
   in
-  let gql = Printf.sprintf
-    "{\"query\": \"mutation { createLodgeActivity(agentName: \\\"%s\\\", content: \\\"%s\\\", actionType: \\\"%s\\\", context: \\\"%s\\\"%s) { success message } }\"}"
-    (escape_json exp.agent_name) content (escape_json exp.action_type) context board_id_part
+  let query = Printf.sprintf
+    "mutation { createLodgeActivity(agentName: %s, content: %s, actionType: %s, context: %s%s) { success message } }"
+    (Yojson.Safe.to_string (`String exp.agent_name))
+    (Yojson.Safe.to_string (`String content))
+    (Yojson.Safe.to_string (`String exp.action_type))
+    (Yojson.Safe.to_string (`String context))
+    board_id_part
   in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 %s -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    graphql_url (graphql_api_key ()) gql
-  in
+  let body = Yojson.Safe.to_string (`Assoc [("query", `String query)]) in
   try
-    let result = run_shell_nonblocking cmd in
+    let result = graphql_request body in
     if String.length result < 5 then
       Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store empty response for %s" exp.agent_name
     else begin

@@ -18,18 +18,16 @@ type focus_payload = {
 
 (** {1 Non-blocking Shell Execution} *)
 
-(** Run shell command and get single line (non-blocking) *)
+(** Run shell command and get single line (Eio-native) *)
 let run_shell_line cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-      try input_line ic with End_of_file -> ""
-    )
-  )
+  let output = Process_eio.run ~timeout_sec:10.0 cmd in
+  match String.split_on_char '\n' output with
+  | [] -> ""
+  | h :: _ -> h
 
-(** Run system command in background (non-blocking) *)
+(** Run system command in background (Eio-native) *)
 let run_system_nonblocking cmd =
-  Eio_unix.run_in_systhread (fun () -> ignore (Unix.system cmd))
+  ignore (Process_eio.run ~timeout_sec:60.0 cmd)
 
 (** Get non-empty environment variable *)
 let getenv_nonempty name =

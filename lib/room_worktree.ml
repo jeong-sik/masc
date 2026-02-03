@@ -9,26 +9,18 @@
 open Types
 open Room_utils
 
-(** Run shell command and get lines (non-blocking) *)
+(** Run shell command and get lines (Eio-native) *)
 let run_shell_lines cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
-      let rec read_lines acc =
-        try
-          let line = input_line ic in
-          read_lines (line :: acc)
-        with End_of_file -> List.rev acc
-      in
-      read_lines []
-    )
-  )
+  Process_eio.run ~timeout_sec:30.0 cmd
+  |> String.split_on_char '\n'
+  |> List.filter (fun s -> s <> "")
 
-(** Run shell command and get exit code (non-blocking for Eio) *)
+(** Run shell command and get exit code (Eio-native) *)
 let run_shell_exit cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    Sys.command cmd
-  )
+  match Process_eio.run_with_status ~timeout_sec:30.0 cmd with
+  | Unix.WEXITED n, _ -> n
+  | Unix.WSIGNALED _, _ -> 128
+  | Unix.WSTOPPED _, _ -> 128
 
 (** Get git root directory - delegates to Room_git *)
 let git_root config =

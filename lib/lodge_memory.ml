@@ -24,7 +24,33 @@ type experience = {
   timestamp: float;
 }
 
-(** {1 Non-blocking Shell Execution} *)
+(** {1 Utilities} *)
+
+(** Escape single quotes for Cypher string literals.
+    Cypher uses backslash-escaped single quotes inside single-quoted strings. *)
+let cypher_escape s =
+  let buf = Buffer.create (String.length s) in
+  String.iter (fun c ->
+    match c with
+    | '\'' -> Buffer.add_string buf "\\'"
+    | '\\' -> Buffer.add_string buf "\\\\"
+    | _ -> Buffer.add_char buf c
+  ) s;
+  Buffer.contents buf
+
+(** Truncate string to max [n] bytes, UTF-8 safe (cuts at char boundary). *)
+let truncate s n =
+  if String.length s <= n then s
+  else
+    (* Find last valid UTF-8 char boundary before n *)
+    let rec find_boundary i =
+      if i <= 0 then 0
+      else
+        let byte = Char.code s.[i] in
+        if byte land 0xC0 <> 0x80 then i  (* start of UTF-8 char *)
+        else find_boundary (i - 1)
+    in
+    String.sub s 0 (find_boundary n)
 
 let run_shell_nonblocking cmd =
   Eio_unix.run_in_systhread (fun () ->
@@ -104,7 +130,7 @@ let recall_from_neo4j ~agent_name ~limit : (string * float) list =
     "MATCH (a:Agent {name: '%s'})-[r:PERFORMED]->(act:LodgeActivity) \
      RETURN act.content, act.action_type, act.timestamp \
      ORDER BY act.timestamp DESC LIMIT %d"
-    (String.escaped agent_name) limit
+    (cypher_escape agent_name) limit
   in
   let cmd = Printf.sprintf
     "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
@@ -121,11 +147,17 @@ let recall_from_neo4j ~agent_name ~limit : (string * float) list =
           let arr = Yojson.Safe.Util.to_list record in
           let inner = Yojson.Safe.Util.to_list (List.hd arr) in
           let content = Yojson.Safe.Util.to_string (List.nth inner 0) in
-          Some (content, 0.6)  (* Fixed relevance for graph-based recall *)
-        with _ -> None
+          Some (content, 0.6)
+        with Yojson.Safe.Util.Type_error _ | Failure _ -> None
       ) records
     end
-  with _ -> []
+  with
+  | Yojson.Json_error msg ->
+      Eio.traceln "   ⚠️ [Lodge_memory] Neo4j recall JSON parse error: %s" msg;
+      []
+  | exn ->
+      Eio.traceln "   ⚠️ [Lodge_memory] Neo4j recall error: %s" (Printexc.to_string exn);
+      []
 
 (** Recall relevant memories for an agent.
     Combines thread + Memory Stream + Neo4j activity. Sorted by relevance. *)
@@ -204,22 +236,27 @@ let store_to_neo4j (exp : experience) =
      }) \
      CREATE (a)-[:PERFORMED]->(act) \
      RETURN act"
-    (String.escaped exp.agent_name)
-    (String.escaped (String.sub exp.content 0 (min 200 (String.length exp.content))))
-    (String.escaped exp.action_type)
-    (String.escaped (String.sub exp.context 0 (min 100 (String.length exp.context))))
-    (String.escaped board_id_str)
+    (cypher_escape exp.agent_name)
+    (cypher_escape (truncate exp.content 200))
+    (cypher_escape exp.action_type)
+    (cypher_escape (truncate exp.context 100))
+    (cypher_escape board_id_str)
   in
   let cmd = Printf.sprintf
     "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
     (String.escaped query)
   in
-  ignore (run_shell_nonblocking cmd)
+  let result = run_shell_nonblocking cmd in
+  if String.length result > 0 && String.length result < 5 then
+    Eio.traceln "   ⚠️ [Lodge_memory] Neo4j store may have failed for %s" exp.agent_name
 
 (** Record an agent's experience to all memory stores *)
 let store exp =
-  store_to_thread exp;
-  store_to_stream exp;
+  (* Skip empty content (e.g. ActionSkip) for thread/stream to avoid noise *)
+  if String.length exp.content > 0 then begin
+    store_to_thread exp;
+    store_to_stream exp
+  end;
   (* Only store non-skip actions to Neo4j *)
   if exp.action_type <> "skip" then
     store_to_neo4j exp

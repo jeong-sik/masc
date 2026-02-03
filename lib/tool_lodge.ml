@@ -517,8 +517,9 @@ type agent_config = {
   interests: string list;
 }
 
-(** In-memory cache for dynamic agents *)
+(** In-memory cache for dynamic agents (protected by mutex for concurrent access) *)
 let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
+let agent_cache_mu = Mutex.create ()
 
 (** Load agents from Neo4j via GraphQL API (reliable JSON parsing) *)
 let load_agents_config () =
@@ -527,7 +528,7 @@ let load_agents_config () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
+  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("X-API-Key: " ^ api_key)) query in
   try
     let ic = Unix.open_process_in cmd in
     let json_str = Fun.protect ~finally:(fun () ->
@@ -568,16 +569,24 @@ let load_agents_config () =
           model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
           interests;
         } in
-        Hashtbl.replace agent_cache config.name config
+        Mutex.lock agent_cache_mu;
+        Hashtbl.replace agent_cache config.name config;
+        Mutex.unlock agent_cache_mu
       with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
     ) edges;
-    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" (Hashtbl.length agent_cache)
+    Mutex.lock agent_cache_mu;
+    let n = Hashtbl.length agent_cache in
+    Mutex.unlock agent_cache_mu;
+    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n
   with e ->
     Printf.eprintf "[Lodge] ❌ Failed to load agents: %s\n%!" (Printexc.to_string e)
 
 (** Get cached agent config, or None if not loaded *)
 let get_cached_agent name =
-  Hashtbl.find_opt agent_cache name
+  Mutex.lock agent_cache_mu;
+  let r = Hashtbl.find_opt agent_cache name in
+  Mutex.unlock agent_cache_mu;
+  r
 
 (** Get primary value from cached agent (for SOUL-based decisions) *)
 let get_agent_primary_value name =
@@ -667,19 +676,18 @@ let evolve_agent ~name ~dimension ~outcome =
       in
       let neo4j_uri = Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"" in
       let neo4j_pw = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
-      let cmd = Printf.sprintf "cypher-shell -a \"%s\" -u neo4j -p \"%s\" --format plain \"%s\" 2>/dev/null" neo4j_uri neo4j_pw cypher in
+      let cmd = Printf.sprintf "cypher-shell -a %s -u neo4j -p %s --format plain %s 2>/dev/null"
+        (Filename.quote neo4j_uri) (Filename.quote neo4j_pw) (Filename.quote cypher) in
       try
-        let _ = Unix.open_process_in cmd |> fun ic ->
-          let result = try input_line ic with End_of_file -> "" in
-          ignore (Unix.close_process_in ic);
-          result
-        in
+        let _ = Safe_ops.read_process_safe cmd in
         (* Update cache *)
+        Mutex.lock agent_cache_mu;
         Hashtbl.replace agent_cache name {
           config with
           value_weights = Some new_weights_json;
           generation = new_gen;
         };
+        Mutex.unlock agent_cache_mu;
         Printf.eprintf "[Evolution] %s evolved: %s %s%.2f -> gen %d\n%!"
           name dimension
           (if delta >= 0.0 then "+" else "") delta new_gen;
@@ -714,7 +722,10 @@ let () =
 
 (** Get all cached agent names *)
 let get_all_agent_names () =
-  Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache []
+  Mutex.lock agent_cache_mu;
+  let r = Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache [] in
+  Mutex.unlock agent_cache_mu;
+  r
 
 (** Pick a random agent name from cache *)
 let random_agent_name () =
@@ -729,10 +740,12 @@ let validate_agent_name name =
     | Some _ -> Some name
     | None ->
       (* Try Korean name lookup *)
+      Mutex.lock agent_cache_mu;
       let found = Hashtbl.fold (fun k v acc ->
         match acc with Some _ -> acc | None ->
         if v.korean_name = name then Some k else None
       ) agent_cache None in
+      Mutex.unlock agent_cache_mu;
       found
 
 (** Get model for agent (from Neo4j cache) *)
@@ -1311,7 +1324,7 @@ let get_all_agents () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'X-API-Key: %s' -d '%s' 2>/dev/null" api_key query in
+  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("X-API-Key: " ^ api_key)) query in
   try
     let (_, output) = run_shell_nonblocking cmd in
     try

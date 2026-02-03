@@ -360,33 +360,31 @@ let cleanup_inactive_lodge_agents () =
 
 (** {1 Non-blocking Shell Execution} *)
 
-(** Run shell command in a separate system thread to avoid blocking Eio event loop *)
+(** Run shell command in a separate system thread to avoid blocking Eio event loop.
+    Uses Fun.protect to guarantee process cleanup even on exceptions. *)
 let run_shell_nonblocking cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 1024 in
-    (try
-      while true do
-        Buffer.add_string buf (input_line ic);
-        Buffer.add_char buf '\n'
-      done
-    with End_of_file -> ());
-    let _ = Unix.close_process_in ic in
-    Buffer.contents buf
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic))
+      (fun () ->
+        let buf = Buffer.create 1024 in
+        (try while true do
+          Buffer.add_string buf (input_line ic);
+          Buffer.add_char buf '\n'
+        done with End_of_file -> ());
+        Buffer.contents buf
+      )
   )
 
-(** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes *)
+(** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes.
+    Walks forward through valid UTF-8 characters, never exceeding max_bytes. *)
 let utf8_truncate s max_bytes =
   let len = String.length s in
   if len <= max_bytes then s
   else begin
-    (* Walk backwards from max_bytes to find a valid UTF-8 char boundary *)
-    let pos = ref max_bytes in
-    while !pos > 0 && let b = Char.code s.[!pos] in b >= 0x80 && b < 0xC0 do
-      decr pos  (* skip continuation bytes *)
-    done;
-    (* If we're at a multi-byte start, check if the full char fits *)
-    if !pos > 0 then begin
+    (* Walk forward, tracking the last valid character boundary *)
+    let pos = ref 0 in
+    while !pos < max_bytes && !pos < len do
       let b = Char.code s.[!pos] in
       let char_len =
         if b < 0x80 then 1
@@ -395,29 +393,32 @@ let utf8_truncate s max_bytes =
         else 4
       in
       if !pos + char_len > max_bytes then
-        String.sub s 0 !pos  (* char doesn't fit, cut before it *)
+        pos := max_bytes + 1  (* would exceed limit, stop *)
       else
-        String.sub s 0 (!pos + char_len)
-    end else
-      String.sub s 0 max_bytes
+        pos := !pos + char_len
+    done;
+    let end_pos = min !pos max_bytes in
+    String.sub s 0 end_pos
   end
 
 (** Run shell command and get all output (up to 500 chars) *)
 let run_shell_line cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 2048 in
-    let rec read_all () =
-      match input_line ic with
-      | line ->
-          if Buffer.length buf > 0 then Buffer.add_char buf '\n';
-          Buffer.add_string buf line;
-          if Buffer.length buf < 4000 then read_all ()
-      | exception End_of_file -> ()
-    in
-    read_all ();
-    let _ = Unix.close_process_in ic in
-    Buffer.contents buf
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic))
+      (fun () ->
+        let buf = Buffer.create 2048 in
+        let rec read_all () =
+          match input_line ic with
+          | line ->
+              if Buffer.length buf > 0 then Buffer.add_char buf '\n';
+              Buffer.add_string buf line;
+              if Buffer.length buf < 4000 then read_all ()
+          | exception End_of_file -> ()
+        in
+        read_all ();
+        Buffer.contents buf
+      )
   )
 
 (** Initialize rewrite_context implementation (now that run_shell_nonblocking is available) *)

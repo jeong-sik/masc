@@ -170,3 +170,28 @@ let json_float_opt key json =
     | `Int i -> Some (float_of_int i)
     | j -> Some (to_float j)
   with Type_error _ -> None
+
+(** {1 Safe Process Execution} *)
+
+(** Read all stdout from a process, guaranteeing close_process_in is called.
+    Returns (exit_ok, output) where exit_ok is true for WEXITED 0. *)
+let read_process_safe cmd : bool * string =
+  let ic = Unix.open_process_in cmd in
+  let closed = ref false in
+  let close () =
+    if not !closed then begin
+      closed := true;
+      ignore (Unix.close_process_in ic)
+    end
+  in
+  Fun.protect ~finally:close
+    (fun () ->
+      let buf = Buffer.create 4096 in
+      (try while true do Buffer.add_char buf (input_char ic) done
+       with End_of_file -> ());
+      let output = Buffer.contents buf in
+      closed := true;
+      let status = Unix.close_process_in ic in
+      let ok = match status with Unix.WEXITED 0 -> true | _ -> false in
+      (ok, output)
+    )

@@ -26,6 +26,7 @@
    dashboard
    web_dashboard
    credits_dashboard
+   lodge_dashboard
    datachannel
    datachannel_eio
    dtls

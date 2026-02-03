@@ -53,6 +53,12 @@ type selection_result = {
   ticks_since_selection : int;
 }
 
+(** {1 Configuration} *)
+
+(** Set base path for stats storage (cluster root, e.g. ~/me).
+    Call during server initialization before any stats operations. *)
+val set_base_path : string -> unit
+
 (** {1 Statistics Management} *)
 
 (** Get stats for an agent, creating default if not exists *)

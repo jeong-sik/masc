@@ -52,9 +52,22 @@ let stats_table : (string, agent_stats) Hashtbl.t = Hashtbl.create 16
 (** Pending votes for batch update at tick end *)
 let pending_votes : (string, int * int) Hashtbl.t = Hashtbl.create 16
 
-(** Stats file path *)
+(** Base path for stats storage (cluster root, e.g. ~/me) *)
+let base_path_ref : string option ref = ref None
+
+(** Set base path for stats storage. Call during server init. *)
+let set_base_path path =
+  base_path_ref := Some path
+
+(** Stats file path — uses cluster base_path, not execution directory *)
 let stats_path () =
-  let masc_dir = ".masc" in
+  let base = match !base_path_ref with
+    | Some p -> p
+    | None ->
+        (* Fallback: try to get from environment or use current dir *)
+        Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"."
+  in
+  let masc_dir = Filename.concat base ".masc" in
   if not (Sys.file_exists masc_dir) then
     Unix.mkdir masc_dir 0o755;
   Filename.concat masc_dir "lodge_stats.jsonl"

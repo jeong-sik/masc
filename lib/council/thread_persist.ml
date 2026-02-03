@@ -221,7 +221,7 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
       endpoint user password tmp_file
     in
     let ic = Unix.open_process_in cmd in
-    let response = read_all_from_ic ic in
+    let response = try read_all_from_ic ic with Sys_error _ -> "" in
     let status = Unix.close_process_in ic in
     match status with
     | Unix.WEXITED 0 ->

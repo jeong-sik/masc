@@ -14,9 +14,9 @@ open Types
 let run_shell_line cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let result = try Some (input_line ic) with End_of_file -> None in
-    let _ = Unix.close_process_in ic in
-    result
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+      try Some (input_line ic) with End_of_file -> None
+    )
   )
 
 (** Run shell command and get exit code (non-blocking for Eio) *)
@@ -29,15 +29,15 @@ let run_shell_exit cmd =
 let run_shell_lines cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let rec read_lines acc =
-      try
-        let line = input_line ic in
-        read_lines (line :: acc)
-      with End_of_file ->
-        ignore (Unix.close_process_in ic);
-        List.rev acc
-    in
-    read_lines []
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+      let rec read_lines acc =
+        try
+          let line = input_line ic in
+          read_lines (line :: acc)
+        with End_of_file -> List.rev acc
+      in
+      read_lines []
+    )
   )
 
 (* ============================================ *)

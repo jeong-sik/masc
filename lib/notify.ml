@@ -22,9 +22,9 @@ type focus_payload = {
 let run_shell_line cmd =
   Eio_unix.run_in_systhread (fun () ->
     let ic = Unix.open_process_in cmd in
-    let result = try input_line ic with End_of_file -> "" in
-    let _ = Unix.close_process_in ic in
-    result
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+      try input_line ic with End_of_file -> ""
+    )
   )
 
 (** Run system command in background (non-blocking) *)

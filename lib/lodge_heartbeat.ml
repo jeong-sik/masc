@@ -590,7 +590,7 @@ let load_agents_from_neo4j () =
      | `List errors when errors <> [] ->
        let msg = try
          List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-       with _ -> "unknown error" in
+       with Yojson.Safe.Util.Type_error _ | Failure _ -> "unknown error" in
        Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
        []
      | _ ->
@@ -615,14 +615,16 @@ let load_agents_from_neo4j () =
         (* Client-side filter: only agents with preferredHours *)
         let interests =
           try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
-          with _ -> []
+          with Yojson.Safe.Util.Type_error _ | Failure _ -> []
         in
         if preferred_hours <> [] then
           Some { name; preferred_hours; peak_hour; traits; interests;
                  personality_hint = None; activity_level }
         else
           None
-      with _ -> None
+      with Yojson.Safe.Util.Type_error (msg, _) ->
+        Eio.traceln "⚠️ Agent parse error: %s" msg;
+        None
     ) edges)
   with e ->
     Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
@@ -766,13 +768,20 @@ let generate_agent_traits ~topic ~reason =
     Eio.traceln "   ⚠️ Failed to parse LLM traits response";
     None
 
+(** Escape single quotes for Cypher query strings *)
+let cypher_escape s =
+  let buf = Buffer.create (String.length s) in
+  String.iter (fun c -> if c = '\'' then Buffer.add_string buf "\\'" else Buffer.add_char buf c) s;
+  Buffer.contents buf
+
 (** Create a new agent in Neo4j *)
 let create_agent_in_neo4j ~name ~traits ~description ~preferred_hours =
-  let traits_str = traits |> List.map (Printf.sprintf "'%s'") |> String.concat ", " in
+  let esc = cypher_escape in
+  let traits_str = traits |> List.map (fun t -> Printf.sprintf "'%s'" (esc t)) |> String.concat ", " in
   let hours_str = preferred_hours |> List.map string_of_int |> String.concat ", " in
   let query = Printf.sprintf
     "MERGE (a:Agent {name: '%s'}) SET a.traits = [%s], a.description = '%s', a.preferred_hours = [%s], a.activity_level = 0.7, a.created_at = datetime(), a.created_by = 'ecosystem_evolution' RETURN a.name"
-    name traits_str (String.escaped description) hours_str
+    (esc name) traits_str (esc description) hours_str
   in
   let cmd = Printf.sprintf
     "cd /Users/dancer/me && sb neo4j query \"%s\" 2>/dev/null"
@@ -1004,9 +1013,10 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
     "curl -s --max-time 3 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null | head -c 100"
     api_key json_payload
   in
-  (* Fire and forget - don't block the main loop *)
-  ignore (run_shell_line cmd);
-  ()
+  (* Fire and forget - don't block the main loop, but log failures *)
+  let result = run_shell_line cmd in
+  if String.length result > 0 && String.length result < 5 then
+    Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
 
 (* record_agent_memory and load_agent_memories are defined after
    add_turn_to_thread and get_recent_turns (OCaml requires definition before use) *)
@@ -1158,17 +1168,24 @@ let load_agent_profile ~agent_name : agent_profile =
             name = agent |> member "name" |> to_string_option |> Option.value ~default:agent_name;
             role = get_string_opt "role";
             description = get_string_opt "description";
-            traits = (try agent |> member "traits" |> to_list |> List.map to_string with _ -> []);
-            interests = (try agent |> member "interests" |> to_list |> List.map to_string with _ -> []);
-            preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with _ -> []);
+            traits = (try agent |> member "traits" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> []);
+            interests = (try agent |> member "interests" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> []);
+            preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with Yojson.Safe.Util.Type_error _ -> []);
             peak_hour = get_int_opt "peakHour";
-            activity_level = (try agent |> member "activityLevel" |> to_float with _ -> 0.5);
-            karma = (try agent |> member "karma" |> to_int with _ -> 0);
+            activity_level = (try agent |> member "activityLevel" |> to_float with Yojson.Safe.Util.Type_error _ -> 0.5);
+            karma = (try agent |> member "karma" |> to_int with Yojson.Safe.Util.Type_error _ -> 0);
             agent_prompt = get_string_opt "agentPrompt";
             personality_hint = get_string_opt "personalityHint";
           }
-      with _ ->
-        Eio.traceln "⚠️ Failed to load profile for %s" agent_name;
+      with
+      | Yojson.Safe.Util.Type_error (msg, _) ->
+        Eio.traceln "⚠️ Failed to load profile for %s: %s" agent_name msg;
+        fallback
+      | Yojson.Json_error msg ->
+        Eio.traceln "⚠️ Profile JSON parse error for %s: %s" agent_name msg;
+        fallback
+      | exn ->
+        Eio.traceln "⚠️ Unexpected error loading profile for %s: %s" agent_name (Printexc.to_string exn);
         fallback
     in
     Hashtbl.replace profile_cache agent_name (profile, now);
@@ -1225,11 +1242,19 @@ let load_lodge_config () =
         language = lodge |> member "language" |> to_string_option |> Option.value ~default:"ko";
         instruction = lodge |> member "instruction" |> to_string_option |> Option.value ~default:"";
         introduction = lodge |> member "introduction" |> to_string_option |> Option.value ~default:default_lodge_config.introduction;
-        actions = (try lodge |> member "actions" |> to_list |> List.map to_string with _ -> default_lodge_config.actions);
-        rules = (try lodge |> member "rules" |> to_list |> List.map to_string with _ -> default_lodge_config.rules);
+        actions = (try lodge |> member "actions" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> default_lodge_config.actions);
+        rules = (try lodge |> member "rules" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> default_lodge_config.rules);
         tools = parse_tools ();
       }
-  with _ ->
+  with
+  | Sys_error msg ->
+    Eio.traceln "   ⚠️ [Lodge] Config file not found: %s" msg;
+    default_lodge_config
+  | Yojson.Json_error msg ->
+    Eio.traceln "   ⚠️ [Lodge] Config JSON parse error: %s" msg;
+    default_lodge_config
+  | exn ->
+    Eio.traceln "   ⚠️ [Lodge] Config load error: %s" (Printexc.to_string exn);
     default_lodge_config
 
 (** Build lodge context string from config *)
@@ -2383,10 +2408,17 @@ let load_agent_specialties_from_neo4j () =
           |> List.filter (fun w -> String.length w > 3)
         in
         Some (name, traits @ desc_words)
-      with _ -> None
+      with Yojson.Safe.Util.Type_error _ | Failure _ -> None
     ) records
-  with _ ->
-    Eio.traceln "⚠️ Failed to load agent specialties from Neo4j";
+  with
+  | Yojson.Json_error msg ->
+    Eio.traceln "⚠️ Failed to parse Neo4j specialties JSON: %s" msg;
+    []
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+    Eio.traceln "⚠️ Neo4j specialties structure mismatch: %s" msg;
+    []
+  | exn ->
+    Eio.traceln "⚠️ Failed to load agent specialties: %s" (Printexc.to_string exn);
     []
 
 (** Cached agent specialties - refreshed every 5 minutes *)

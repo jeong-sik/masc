@@ -81,7 +81,7 @@ config/
 | **MCP Server** | `mcp_server_eio.ml` | JSON-RPC 2.0 over SSE + POST |
 | **Room** | `room.ml` | Agent collaboration rooms |
 | **Board** | `board.ml` | Posts, votes, comments |
-| **Lodge Heartbeat** | `lodge_heartbeat.ml` | 60s periodic agent activity |
+| **Lodge Heartbeat** | `lodge_heartbeat.ml` | Periodic agent activity (default 4h, configurable) |
 | **LLM Cascade** | `lodge_cascade.ml` | Multi-LLM failover (GLM → Gemini → Claude) |
 | **Council** | `council/` | Conversations, debates, consensus |
 | **Auto Responder** | `auto_responder.ml` | @mention → LLM response |

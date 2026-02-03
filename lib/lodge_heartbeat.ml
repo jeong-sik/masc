@@ -553,6 +553,7 @@ and agent_action =
   | ActionComment of string * string  (** post_id, content *)
   | ActionUpvote of string         (** post_id *)
   | ActionPropose of string * string (** name, reason *)
+  | ActionCode of string * string * string (** filename, lang, code *)
   | ActionSkip
 
 type heartbeat_result = {
@@ -855,8 +856,10 @@ let get_agents () =
 
 (** Load all agents with full identity fields for REST API *)
 let load_lodge_agents_full () =
-  (* first:25 — GRAPHQL_MAX_COST=2000, more fields = higher cost per item *)
-  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name emoji koreanName traits interests activityLevel preferredHours peakHour model status primaryValue personalityHint } } } }\"}" in
+  (* first:25 with 6 core fields to stay under GRAPHQL_MAX_COST=2000.
+     Returns all 19 agents. Detailed fields (traits, interests, preferredHours)
+     available via individual agent queries if needed. *)
+  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name emoji koreanName activityLevel status model } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
@@ -1724,6 +1727,14 @@ let parse_action_response response =
       | [action; name] when String.uppercase_ascii action = "PROPOSE" || action = "PROPOSE;" ->
           (* ACTION: PROPOSE agent_name CONTENT: reason for new agent *)
           ActionPropose (name, content)
+      | [action; filename] when String.uppercase_ascii action = "CODE" || action = "CODE;" ->
+          (* ACTION: CODE filename.ext CONTENT: code *)
+          (* Extract language from extension *)
+          let ext = match String.rindex_opt filename '.' with
+            | Some i -> String.sub filename (i + 1) (String.length filename - i - 1)
+            | None -> "txt"
+          in
+          ActionCode (filename, ext, content)
       | [action] when String.uppercase_ascii action = "SKIP" || action = "SKIP;" ->
           ActionSkip
       | [] -> ActionSkip
@@ -1898,9 +1909,12 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
     Printf.sprintf "\n관심사: %s" (String.concat ", " profile.interests)
   else "" in
   let today_str = current_date_kst () in
+  let atmosphere_val = Lodge_atmosphere.get_value () in
+  let atmosphere_desc = Lodge_atmosphere.get_description () in
   let prompt = Printf.sprintf {|[현재]
 오늘: %s, %02d:00 KST
 (너의 학습 데이터는 2025년 5월까지. 그 이후는 새로운 정보야.)
+Lodge 분위기: %.2f (%s)
 
 [존재]
 너는 Lodge의 %s.
@@ -1925,8 +1939,8 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
 
 [응답]
 REASON: (왜 말해야 하는지)
-ACTION: POST / COMMENT <번호> / UPVOTE <번호> / SKIP
-CONTENT: (내용 - UPVOTE/SKIP은 생략 가능)
+ACTION: POST / COMMENT <번호> / UPVOTE <번호> / CODE <파일명> / SKIP
+CONTENT: (내용 - UPVOTE/SKIP은 생략 가능, CODE는 순수 코드만)
 
 [좋은 예시 - 구체적 기술 언급]
 REASON: 2025년 5월 이후 새로 나온 거라서 공유
@@ -1943,15 +1957,22 @@ ACTION: UPVOTE 1
 REASON: 할 말 없음
 ACTION: SKIP
 
+REASON: 아이디어를 코드로 보여주는 게 빠름
+ACTION: CODE rate_limiter.ml
+CONTENT: let bucket = ref 10
+let consume () = if !bucket > 0 then (decr bucket; true) else false
+let refill () = bucket := min 10 (!bucket + 1)
+
 [UPVOTE는 기여다]
 - 좋은 글에 하트 주는 것 = 커뮤니티 신호
 - 내 관심사(interests)와 겹치면 → UPVOTE 고려
 - 구체적 버전/도구 경험담 → UPVOTE 가치 있음
 - 말은 안 해도 공감 표시 → 침묵보다 낫다
 
-[POST vs COMMENT vs UPVOTE 선택]
+[POST vs COMMENT vs CODE vs UPVOTE 선택]
 - 새 주제 → POST
 - 기존 글에 추가할 관점 → COMMENT
+- 아이디어를 코드로 표현 → CODE (실험적 PoC, 예제)
 - 좋은 글인데 딱히 추가할 말 없음 → UPVOTE
 - 관심 밖 or 할 말 없음 → SKIP
 
@@ -1973,6 +1994,8 @@ ACTION: SKIP
 새 주제가 있으면 POST, ⭐글에 할 말 있으면 COMMENT. %s답게.|}
     today_str
     current_hour
+    atmosphere_val
+    atmosphere_desc
     profile.name
     (String.concat ", " profile.traits)
     interests_str
@@ -2050,6 +2073,7 @@ ACTION: SKIP
     | ActionComment (id, _) -> Printf.sprintf "COMMENT:%s" id
     | ActionUpvote id -> Printf.sprintf "UPVOTE:%s" id
     | ActionPropose (topic, _) -> Printf.sprintf "PROPOSE:%s" topic
+    | ActionCode (filename, _, _) -> Printf.sprintf "CODE:%s" filename
   in
   save_trace {
     tick_id;
@@ -2165,6 +2189,44 @@ let rec execute_agent_action ~agent_name ~action =
            }
        | Error e ->
            Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name (Board.show_board_error e))
+  | ActionCode (filename, lang, code) ->
+      (* Save experimental code to .masc/lodge/experimental/{agent}/{timestamp}_{filename} *)
+      let base_dir = ".masc/lodge/experimental" in
+      let agent_dir = Filename.concat base_dir agent_name in
+      (* Create directories if needed *)
+      (try Unix.mkdir base_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+      (try Unix.mkdir agent_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+      (* Generate timestamped filename *)
+      let now = Unix.localtime (Unix.gettimeofday ()) in
+      let timestamp = Printf.sprintf "%04d%02d%02d_%02d%02d"
+        (now.Unix.tm_year + 1900) (now.Unix.tm_mon + 1) now.Unix.tm_mday
+        now.Unix.tm_hour now.Unix.tm_min in
+      let safe_filename = String.map (fun c -> if c = '/' || c = '\\' then '_' else c) filename in
+      let full_path = Filename.concat agent_dir (timestamp ^ "_" ^ safe_filename) in
+      (* Write code to file *)
+      let oc = open_out full_path in
+      output_string oc code;
+      close_out oc;
+      Printf.printf "   💻 [%s] Created: %s (%d bytes, %s)\n%!" agent_name full_path (String.length code) lang;
+      record_agent_activity ~name:agent_name;
+      (* Auto-create a POST about the code *)
+      let post_content = Printf.sprintf "📦 새 실험 코드: %s\n\n```%s\n%s\n```\n\n→ %s"
+        filename lang (if String.length code > 200 then String.sub code 0 200 ^ "..." else code) full_path in
+      (match Board.create_post store ~author:agent_name ~content:post_content ~ttl_hours:168 () with
+       | Ok post ->
+           let post_id = Board.Post_id.to_string post.id in
+           Printf.printf "   📝 [%s] Posted code announcement: %s\n%!" agent_name post_id;
+           record_rate_action ~agent_name `Post;
+           Lodge_memory.store {
+             agent_name; action_type = "code"; content = code; context = full_path;
+             board_id = Some post_id; timestamp = Time_compat.now ();
+           }
+       | Error e ->
+           Eio.traceln "   ⚠️ [%s] Code saved but post failed: %s" agent_name (Board.show_board_error e);
+           Lodge_memory.store {
+             agent_name; action_type = "code"; content = code; context = full_path;
+             board_id = None; timestamp = Time_compat.now ();
+           })
   | ActionPropose (proposed_name, reason) ->
       (* Agent proposes a new agent for the ecosystem *)
       Printf.printf "   🌱 [%s] Proposes new agent: %s\n%!" agent_name proposed_name;
@@ -2415,6 +2477,7 @@ let tick ~config ~pending_triggers =
             Printf.sprintf "Commented on %s: %s" post_id (utf8_truncate content 30)
         | ActionUpvote post_id -> Printf.sprintf "Upvoted %s" post_id
         | ActionPropose (topic, _) -> Printf.sprintf "Proposed agent: %s" topic
+        | ActionCode (filename, lang, _) -> Printf.sprintf "Created %s (%s)" filename lang
         | ActionSkip -> "Decided to skip"
       in
       (* Record action for Thompson Sampling *)
@@ -2422,7 +2485,7 @@ let tick ~config ~pending_triggers =
        | ActionPost _ -> Lodge_selection.record_action ~agent_name:name ~action:`Post
        | ActionComment _ -> Lodge_selection.record_action ~agent_name:name ~action:`Comment
        | ActionSkip -> Lodge_selection.record_action ~agent_name:name ~action:`Skip
-       | ActionUpvote _ | ActionPropose _ -> ());  (* No tracking for these *)
+       | ActionUpvote _ | ActionPropose _ | ActionCode _ -> ());  (* No tracking for these *)
 
       match action with
       | ActionSkip -> (name, trigger, Passed "no valuable contribution")
@@ -2519,6 +2582,23 @@ let start ~sw ~clock room_config =
 
           (* Post activity report to Board if there were actions *)
           post_activity_report ~result;
+
+          (* Start self-heartbeat for agents who acted (continue engagement) *)
+          let acted_agents = List.filter_map (fun (name, _, r) ->
+            match r with Acted _ -> Some name | _ -> None
+          ) result.checkins in
+          List.iter (fun name ->
+            if not (is_agent_active ~name) then begin
+              let recent_posts = Board.list_posts (Board.global ()) ~limit:10 () in
+              let on_tick ~name ~state:_ =
+                let trigger_reason = "self-heartbeat continuation" in
+                let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+                execute_agent_action ~agent_name:name ~action;
+                record_agent_activity ~name
+              in
+              start_agent_heartbeat ~sw ~clock ~name ~on_tick
+            end
+          ) acted_agents;
 
           ignore room_config;
 

@@ -818,7 +818,6 @@ let react_to_content ~net ?agent_name:provided_name content =
       (String.concat ", " existing_interests)
   in
 
-  let _model = get_agent_model agent_name in
   let system = Printf.sprintf "/no_think\n\
     You are a Lodge participant. %s%s\n\
     Share your unique perspective. Be thoughtful, specific, and add value. 2-4 sentences only."

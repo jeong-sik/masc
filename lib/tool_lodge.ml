@@ -125,16 +125,10 @@ let shell_escape s = Str.global_replace (Str.regexp "'") "'\\''" s
     to avoid blocking the Eio event loop and HTTP server.
 *)
 
-(** Run shell command and capture all output (non-blocking) *)
+(** Run shell command and capture all output (non-blocking).
+    Delegates to Process_eio.run_in_systhread_with_status (centralized, with timeout). *)
 let run_shell_nonblocking cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    let buf = Buffer.create 4096 in
-    (try while true do Buffer.add_channel buf ic 1024 done
-     with End_of_file | Sys_error _ -> ());
-    let status = Unix.close_process_in ic in
-    (status, Buffer.contents buf)
-  )
+  Process_eio.run_in_systhread_with_status ~timeout_sec:60.0 cmd
 
 (** Run shell command and get single line result (non-blocking) *)
 let run_shell_line cmd =

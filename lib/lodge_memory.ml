@@ -57,22 +57,10 @@ let truncate s n =
     in
     String.sub s 0 (find_boundary n)
 
+(** Run shell command in system thread (non-blocking for Eio).
+    Delegates to Process_eio.run_in_systhread (centralized, with timeout). *)
 let run_shell_nonblocking cmd =
-  Eio_unix.run_in_systhread (fun () ->
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () ->
-      ignore (Unix.close_process_in ic)
-    ) (fun () ->
-      let buf = Buffer.create 1024 in
-      (try
-        while true do
-          Buffer.add_string buf (input_line ic);
-          Buffer.add_char buf '\n'
-        done
-      with End_of_file -> ());
-      Buffer.contents buf
-    )
-  )
+  Process_eio.run_in_systhread ~timeout_sec:60.0 cmd
 
 (** Resolve ME_ROOT consistently *)
 let me_root () =

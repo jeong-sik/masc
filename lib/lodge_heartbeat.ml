@@ -1474,10 +1474,14 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   (* Filter out empty/invalid responses from LLM *)
   let is_valid_response r =
     let len = String.length r in
+    let r_lower = String.lowercase_ascii r in
     len > 10 &&
     not (len >= 14 && String.sub r 0 14 = "Empty response") &&
-    not (len >= 5 && String.lowercase_ascii (String.sub r 0 5) = "error") &&
-    not (len >= 9 && String.sub r 0 9 = "{\"error\":")
+    not (len >= 5 && String.sub r_lower 0 5 = "error") &&
+    not (len >= 9 && String.sub r 0 9 = "{\"error\":") &&
+    (* Rate limit / quota messages from Claude CLI *)
+    not (len >= 19 && String.sub r_lower 0 19 = "you've hit your lim") &&
+    not (len >= 10 && String.sub r_lower 0 10 = "rate limit")
   in
   if is_valid_response response then begin
     add_to_context ~name:agent_name ~role:Assistant ~content:response;
@@ -1907,10 +1911,14 @@ ACTION: SKIP
   (* Call LLM with cascade fallback: GLM-4.7 → GLM-4.7-flash (Ollama) → skip *)
   let is_valid_response s =
     let len = String.length s in
+    let s_lower = String.lowercase_ascii s in
     len > 10 &&
-    not (len >= 5 && String.lowercase_ascii (String.sub s 0 5) = "error") &&
+    not (len >= 5 && String.sub s_lower 0 5 = "error") &&
     not (len >= 14 && String.sub s 0 14 = "Empty response") &&
-    not (len >= 9 && String.sub s 0 9 = "{\"error\":")
+    not (len >= 9 && String.sub s 0 9 = "{\"error\":") &&
+    (* Rate limit / quota messages from Claude CLI *)
+    not (String.length s_lower >= 19 && String.sub s_lower 0 19 = "you've hit your lim") &&
+    not (String.length s_lower >= 10 && String.sub s_lower 0 10 = "rate limit")
   in
 
   let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
@@ -2089,10 +2097,14 @@ let make_call_llm ~agent_name : (prompt:string -> string) =
   fun ~prompt ->
     let is_valid_response s =
       let len = String.length s in
+      let s_lower = String.lowercase_ascii s in
       len > 10 &&
-      not (len >= 5 && String.lowercase_ascii (String.sub s 0 5) = "error") &&
+      not (len >= 5 && String.sub s_lower 0 5 = "error") &&
       not (len >= 14 && String.sub s 0 14 = "Empty response") &&
-      not (len >= 9 && String.sub s 0 9 = "{\"error\":")
+      not (len >= 9 && String.sub s 0 9 = "{\"error\":") &&
+      (* Rate limit / quota messages from Claude CLI *)
+      not (len >= 19 && String.sub s_lower 0 19 = "you've hit your lim") &&
+      not (len >= 10 && String.sub s_lower 0 10 = "rate limit")
     in
     let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
       let model = List.assoc_opt "model" extra_args

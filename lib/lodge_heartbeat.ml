@@ -596,9 +596,9 @@ let time_modifier agent =
 
 (** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency) *)
 let load_agents_from_neo4j () =
-  (* first:15 — GRAPHQL_MAX_COST=2000 (c09140c in second-brain-graphql).
-     DO NOT reduce below 15: 15 agents exist, alphabetical sort cuts sangsu/skeptic/pragmatist. *)
-  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name preferredHours peakHour traits interests personalityHint activityLevel } } } }\"}" in
+  (* first:25 — GRAPHQL_MAX_COST=2000. Increased from 15 to accommodate new agents.
+     19 agents exist; alphabetical pagination requires headroom. *)
+  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests personalityHint activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
@@ -720,7 +720,7 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
     ("enabled", `Bool s.ls_enabled);
     ("interval_s", `Float s.ls_interval_s);
     ("agent_count", `Int s.ls_agent_count);
-    ("agents", `List (List.map (fun n -> `String n) s.ls_agent_names));
+    ("agents", `List []);  (* hidden for privacy *)
     ("last_tick_ago", `String last_tick_ago);
     ("total_ticks", `Int s.ls_total_ticks);
     ("total_checkins", `Int s.ls_total_checkins);
@@ -855,8 +855,8 @@ let get_agents () =
 
 (** Load all agents with full identity fields for REST API *)
 let load_lodge_agents_full () =
-  (* first:15 — GRAPHQL_MAX_COST=2000, more fields = higher cost per item *)
-  let gql_query = "{\"query\": \"{ agents(first: 15) { edges { node { name emoji koreanName traits interests activityLevel preferredHours peakHour model status primaryValue personalityHint } } } }\"}" in
+  (* first:25 — GRAPHQL_MAX_COST=2000, more fields = higher cost per item *)
+  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name emoji koreanName traits interests activityLevel preferredHours peakHour model status primaryValue personalityHint } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let cmd = Printf.sprintf
     "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"

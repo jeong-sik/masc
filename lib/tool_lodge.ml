@@ -522,7 +522,7 @@ let load_agents_config () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("X-API-Key: " ^ api_key)) query in
+  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
   try
     let ic = Unix.open_process_in cmd in
     let json_str = Fun.protect ~finally:(fun () ->
@@ -1318,7 +1318,7 @@ let get_all_agents () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("X-API-Key: " ^ api_key)) query in
+  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
   try
     let (_, output) = run_shell_nonblocking cmd in
     try

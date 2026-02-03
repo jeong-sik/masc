@@ -142,7 +142,7 @@ let fallback_plan ~agent_name =
     date;
     goals = ["게시판 참여"; "동료 의견에 반응"];
     hourly_blocks = blocks;
-    created_at = Unix.gettimeofday ();
+    created_at = Time_compat.now ();
   }
 
 (* ---------- LLM plan generation ---------- *)
@@ -223,7 +223,7 @@ let parse_plan_response ~agent_name ~response : daily_plan option =
       date;
       goals;
       hourly_blocks = blocks;
-      created_at = Unix.gettimeofday ();
+      created_at = Time_compat.now ();
     }
   with e ->
     eprintf "[planner] Failed to parse plan for %s: %s\n%!" agent_name (Printexc.to_string e);

@@ -194,14 +194,14 @@ let add_memory ~agent_name ~content ~importance entry_type =
   let importance = max 1 (min 10 importance) in
   let id = sprintf "%s-%d-%06d"
     agent_name
-    (int_of_float (Unix.gettimeofday ()))
+    (int_of_float (Time_compat.now ()))
     (Random.int 999999)
   in
   let entry = {
     id;
     agent_name;
     content;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
     importance;
     entry_type;
   } in
@@ -209,7 +209,7 @@ let add_memory ~agent_name ~content ~importance entry_type =
 
 let retrieve ~agent_name ~query ~limit =
   let entries = load_all_entries ~agent_name in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let scored = List.map (fun e ->
     (score_entry ~now ~query e, e)
   ) entries in
@@ -223,7 +223,7 @@ let retrieve ~agent_name ~query ~limit =
 
 let recent ~agent_name ~hours =
   let entries = load_all_entries ~agent_name in
-  let cutoff = Unix.gettimeofday () -. (hours *. 3600.0) in
+  let cutoff = Time_compat.now () -. (hours *. 3600.0) in
   List.filter (fun e -> e.timestamp >= cutoff) entries
 
 let importance_sum_since ~agent_name ~since =
@@ -246,7 +246,7 @@ let format_memories entries =
   else
     entries
     |> List.map (fun e ->
-      let age_h = (Unix.gettimeofday () -. e.timestamp) /. 3600.0 in
+      let age_h = (Time_compat.now () -. e.timestamp) /. 3600.0 in
       let age_str =
         if age_h < 1.0 then sprintf "%.0f분 전" (age_h *. 60.0)
         else if age_h < 24.0 then sprintf "%.1f시간 전" age_h
@@ -278,7 +278,7 @@ let rotate_if_needed ~agent_name =
       split 0 [] entries
     in
     (* Write archive *)
-    let arch_path = archive_path ~agent_name ~timestamp:(Unix.gettimeofday ()) in
+    let arch_path = archive_path ~agent_name ~timestamp:(Time_compat.now ()) in
     let oc = open_out arch_path in
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       List.iter (fun e ->

@@ -14,8 +14,15 @@
     @since 2026-01
 *)
 
-(** Generate the dashboard HTML page *)
-let html () = {|<!DOCTYPE html>
+(** ETag for dashboard HTML - based on build version.
+    Changes only when server is rebuilt, enabling 304 responses. *)
+let etag () =
+  let v = Version.version in
+  let hash = Digest.string v |> Digest.to_hex in
+  String.sub hash 0 12
+
+(** Cached dashboard HTML - computed once per process lifetime *)
+let cached_html = lazy ({|<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -825,24 +832,37 @@ let html () = {|<!DOCTYPE html>
       return res.json();
     }
 
-    // Fetch initial data via REST API
+    // Batch dashboard fetch - single request replaces 4 separate calls
+    let _dashboardCache = null;
+    let _dashboardCacheTime = 0;
+    const DASHBOARD_CACHE_TTL = 5000; // 5s TTL for tab switching
+
     async function fetchData() {
       try {
-        const [status, tasks, agents, msgs] = await Promise.all([
-          apiCall('status'),
-          apiCall('tasks'),
-          apiCall('agents'),
-          apiCall('messages')
-        ]);
+        const now = Date.now();
+        let data;
+        if (_dashboardCache && (now - _dashboardCacheTime) < DASHBOARD_CACHE_TTL) {
+          data = _dashboardCache;
+        } else {
+          const res = await fetch('/api/v1/dashboard', { headers: authHeaders() });
+          data = await res.json();
+          _dashboardCache = data;
+          _dashboardCacheTime = now;
+        }
 
-        updateStats(agents, tasks, status);
-        updateAgents(agents);
-        updateTasks(tasks);
-        updateMessages(msgs);
-        updateTempo(status);
+        updateStats(data.agents, data.tasks, data.status);
+        updateAgents(data.agents);
+        updateTasks(data.tasks);
+        updateMessages(data.messages);
+        updateTempo(data.status);
       } catch (e) {
         console.error('Fetch error:', e);
       }
+    }
+
+    function invalidateDashboardCache() {
+      _dashboardCache = null;
+      _dashboardCacheTime = 0;
     }
 
     function updateStats(agents, tasks, status) {
@@ -1010,6 +1030,7 @@ let html () = {|<!DOCTYPE html>
     function handleEvent(event) {
       const type = event.type || event.event;
       if (type) {
+        invalidateDashboardCache();
         debouncedFetchData(); // Debounced to prevent CPU spike
         // Journal logging
         const agent = event.agent || event.from || event.from_agent || '';
@@ -1175,14 +1196,13 @@ let html () = {|<!DOCTYPE html>
     // === Server Health ===
     async function fetchServerHealth() {
       try {
-        const [health, board] = await Promise.all([
-          fetch('/health').then(r => r.json()),
-          fetch('/api/v1/board').then(r => r.json())
-        ]);
+        const health = await fetch('/health', { headers: authHeaders() }).then(r => r.json());
         document.getElementById('health-uptime').textContent = health.uptime || 'N/A';
         document.getElementById('health-sse').textContent = health.sse_clients || '0';
-        document.getElementById('health-posts').textContent = (board.posts || []).length;
+        document.getElementById('health-posts').textContent = health.board_posts || '0';
         document.getElementById('health-memory').textContent = health.memory || 'N/A';
+        const badge = document.getElementById('version-badge');
+        if (badge && health.version) badge.textContent = 'v' + health.version;
       } catch(e) { console.error('Health fetch error:', e); }
     }
 
@@ -1416,11 +1436,8 @@ let html () = {|<!DOCTYPE html>
       if (sortSelect) sortSelect.value = currentSort;
       const autoScrollCheck = document.getElementById('auto-scroll');
       if (autoScrollCheck) autoScrollCheck.checked = autoScrollEnabled;
-      // Fetch server version
-      fetch('/health').then(r => r.json()).then(d => {
-        const badge = document.getElementById('version-badge');
-        if (badge && d.version) badge.textContent = 'v' + d.version;
-      }).catch(() => {});
+      // Version badge set via fetchServerHealth (avoids duplicate /health call)
+      fetchServerHealth().then(() => {}).catch(() => {});
       fetchHearths();
     });
 
@@ -1480,7 +1497,7 @@ let html () = {|<!DOCTYPE html>
     function clearTagFilter() {
       currentTagFilter = null;
       updateTagFilterBar();
-      fetchBoard();
+      renderFromCache();
     }
 
     function updateTagFilterBar() {
@@ -1644,11 +1661,15 @@ let html () = {|<!DOCTYPE html>
     }
 
     // Initial load + polling fallback
+    // Initial load: fetchData uses batch /api/v1/dashboard endpoint
+    // fetchServerHealth is called from DOMContentLoaded (version badge)
     fetchData();
-    fetchServerHealth();
     connectSSE();
 
 
   </script>
 </body>
-</html>|}
+</html>|})
+
+(** Generate the dashboard HTML page (cached after first call) *)
+let html () = Lazy.force cached_html

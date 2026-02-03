@@ -1069,8 +1069,11 @@ let make_routes ~port ~host =
          Http.Response.json json reqd
        ) request reqd)
   |> Http.Router.get "/dashboard" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
-         Http.Response.html (Masc_mcp.Web_dashboard.html ()) reqd
+       with_public_read (fun _state req reqd ->
+         Http.Response.html_cached
+           ~etag:(Masc_mcp.Web_dashboard.etag ())
+           ~request:req
+           (Masc_mcp.Web_dashboard.html ()) reqd
        ) request reqd)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
@@ -1283,6 +1286,60 @@ let make_routes ~port ~host =
                (Printf.sprintf {|{"ok":false,"error":"%s"}|} (Printexc.to_string e))
                reqd
          )
+       ) request reqd)
+
+  (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
+  |> Http.Router.get "/api/v1/dashboard" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let room_state = Room.read_state config in
+         let tempo = Tempo.get_tempo config in
+         let tasks = Room.get_tasks_raw config in
+         let agents = Room.get_agents_raw config in
+         let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+         let status_json = `Assoc [
+           ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+           ("project", `String room_state.project);
+           ("tempo_interval_s", `Float tempo.current_interval_s);
+           ("paused", `Bool room_state.paused);
+         ] in
+         let tasks_json = List.map (fun (t : Types.task) ->
+           `Assoc [
+             ("id", `String t.id);
+             ("title", `String t.title);
+             ("status", `String (Types.string_of_task_status t.task_status));
+             ("priority", `Int t.priority);
+             ("assignee", match t.task_status with
+               | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
+               | _ -> `Null);
+           ]
+         ) (List.filter (fun (t : Types.task) ->
+              match t.task_status with
+              | Types.Done _ | Types.Cancelled _ -> false
+              | _ -> true
+            ) tasks) in
+         let agents_json = List.map (fun (a : Types.agent) ->
+           `Assoc [
+             ("name", `String a.name);
+             ("status", `String (Types.string_of_agent_status a.status));
+             ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+           ]
+         ) agents in
+         let msgs_json = List.map (fun (m : Types.message) ->
+           `Assoc [
+             ("from", `String m.from_agent);
+             ("content", `String m.content);
+             ("timestamp", `String m.timestamp);
+             ("seq", `Int m.seq);
+           ]
+         ) (List.filteri (fun idx _ -> idx < 20) msgs) in
+         let json = `Assoc [
+           ("status", status_json);
+           ("tasks", `Assoc [("tasks", `List tasks_json); ("total", `Int (List.length tasks_json))]);
+           ("agents", `Assoc [("agents", `List agents_json); ("total", `Int (List.length agents_json))]);
+           ("messages", `Assoc [("messages", `List msgs_json); ("total", `Int (List.length msgs_json))]);
+         ] in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
@@ -1803,7 +1860,20 @@ let run_server ~sw ~env ~port ~base_path =
          Dashboard
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/dashboard" ->
-          h2_respond_html h2_reqd (Masc_mcp.Web_dashboard.html ()) ~extra_headers:cors
+          let etag_value = "\"" ^ Masc_mcp.Web_dashboard.etag () ^ "\"" in
+          let if_none_match = H2.Headers.get h2_headers "if-none-match" in
+          (match if_none_match with
+           | Some inm when String.equal inm etag_value ->
+               let resp_headers = H2.Headers.of_list ([
+                 ("etag", etag_value); ("cache-control", "no-cache");
+               ] @ cors) in
+               let response = H2.Response.create ~headers:resp_headers `Not_modified in
+               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+               H2.Body.Writer.close writer
+           | _ ->
+               let body = Masc_mcp.Web_dashboard.html () in
+               let extra = [("etag", etag_value); ("cache-control", "no-cache"); ("vary", "Accept-Encoding")] @ cors in
+               h2_respond_html h2_reqd body ~extra_headers:extra)
 
       | `GET, "/dashboard/credits" ->
           h2_respond_html h2_reqd (Masc_mcp.Credits_dashboard.html ()) ~extra_headers:cors
@@ -1834,6 +1904,58 @@ let run_server ~sw ~env ~port ~base_path =
       (* ─────────────────────────────────────────────────────────────────────
          REST API
          ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/api/v1/dashboard" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let config = state.Mcp_server.room_config in
+          let room_state = Masc_mcp.Room.read_state config in
+          let tempo = Masc_mcp.Tempo.get_tempo config in
+          let tasks = Masc_mcp.Room.get_tasks_raw config in
+          let agents = Masc_mcp.Room.get_agents_raw config in
+          let msgs = Masc_mcp.Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+          let status_json = `Assoc [
+            ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+            ("project", `String room_state.project);
+            ("tempo_interval_s", `Float tempo.current_interval_s);
+            ("paused", `Bool room_state.paused);
+          ] in
+          let tasks_json = List.map (fun (t : Masc_mcp.Types.task) ->
+            `Assoc [
+              ("id", `String t.id);
+              ("title", `String t.title);
+              ("status", `String (Masc_mcp.Types.string_of_task_status t.task_status));
+              ("priority", `Int t.priority);
+              ("assignee", match t.task_status with
+                | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
+                | _ -> `Null);
+            ]
+          ) (List.filter (fun (t : Masc_mcp.Types.task) ->
+               match t.task_status with
+               | Masc_mcp.Types.Done _ | Masc_mcp.Types.Cancelled _ -> false
+               | _ -> true
+             ) tasks) in
+          let agents_json = List.map (fun (a : Masc_mcp.Types.agent) ->
+            `Assoc [
+              ("name", `String a.name);
+              ("status", `String (Masc_mcp.Types.string_of_agent_status a.status));
+              ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+            ]
+          ) agents in
+          let msgs_json = List.map (fun (m : Masc_mcp.Types.message) ->
+            `Assoc [
+              ("from", `String m.from_agent);
+              ("content", `String m.content);
+              ("timestamp", `String m.timestamp);
+              ("seq", `Int m.seq);
+            ]
+          ) (List.filteri (fun idx _ -> idx < 20) msgs) in
+          let json = `Assoc [
+            ("status", status_json);
+            ("tasks", `Assoc [("tasks", `List tasks_json); ("total", `Int (List.length tasks_json))]);
+            ("agents", `Assoc [("agents", `List agents_json); ("total", `Int (List.length agents_json))]);
+            ("messages", `Assoc [("messages", `List msgs_json); ("total", `Int (List.length msgs_json))]);
+          ] in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/status" ->
           let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
           let config = state.Mcp_server.room_config in
@@ -2034,6 +2156,10 @@ let run_cmd port base_path =
 
       (* Run all shutdown hooks (cancel orchestrator, close SSE, etc.) *)
       Masc_mcp.Shutdown_hooks.run_all ();
+
+      (* Flush dirty board data to prevent data loss *)
+      (try Board.flush_dirty (Board.global ())
+       with _ -> Printf.eprintf "[Shutdown] Board flush skipped (not initialized)\n%!");
 
       (* Also close local SSE connections tracked in main_eio *)
       close_all_sse_connections ();

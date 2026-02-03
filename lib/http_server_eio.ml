@@ -159,6 +159,46 @@ module Response = struct
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
+  (** HTML response with ETag and conditional 304 support.
+      For static HTML that only changes on rebuild (e.g. dashboard).
+      Uses zstd compression when client accepts it.
+      @param etag ETag value (typically version hash)
+      @param request Request to check If-None-Match and Accept-Encoding *)
+  let html_cached ?(status = `OK) ~etag ~request body reqd =
+    let etag_value = "\"" ^ etag ^ "\"" in
+    (* Check If-None-Match for 304 *)
+    let if_none_match = Httpun.Headers.get request.Httpun.Request.headers "if-none-match" in
+    match if_none_match with
+    | Some inm when String.equal inm etag_value ->
+        let headers = Httpun.Headers.of_list [
+          ("etag", etag_value);
+          ("cache-control", "no-cache");
+        ] in
+        let response = Httpun.Response.create ~headers `Not_modified in
+        Httpun.Reqd.respond_with_string reqd response ""
+    | _ ->
+        (* Serve full response, with compression if possible *)
+        let accepts_zstd = Compression.accepts_zstd request in
+        let final_body, encoding =
+          if accepts_zstd then
+            let (compressed, did_compress) = Compression.compress_zstd ~level:3 body in
+            if did_compress then (compressed, Some "zstd") else (body, None)
+          else (body, None)
+        in
+        let base_headers = [
+          ("content-type", "text/html; charset=utf-8");
+          ("content-length", string_of_int (String.length final_body));
+          ("etag", etag_value);
+          ("cache-control", "no-cache");
+          ("vary", "Accept-Encoding");
+        ] in
+        let headers = match encoding with
+          | Some enc -> ("content-encoding", enc) :: base_headers
+          | None -> base_headers
+        in
+        let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
+        Httpun.Reqd.respond_with_string reqd response final_body
+
   let not_found reqd =
     text ~status:`Not_found "404 Not Found" reqd
 

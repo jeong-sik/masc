@@ -1476,7 +1476,8 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
     let len = String.length r in
     len > 10 &&
     not (len >= 14 && String.sub r 0 14 = "Empty response") &&
-    not (len >= 5 && String.lowercase_ascii (String.sub r 0 5) = "error")
+    not (len >= 5 && String.lowercase_ascii (String.sub r 0 5) = "error") &&
+    not (len >= 9 && String.sub r 0 9 = "{\"error\":")
   in
   if is_valid_response response then begin
     add_to_context ~name:agent_name ~role:Assistant ~content:response;
@@ -1908,7 +1909,8 @@ ACTION: SKIP
     let len = String.length s in
     len > 10 &&
     not (len >= 5 && String.lowercase_ascii (String.sub s 0 5) = "error") &&
-    not (len >= 14 && String.sub s 0 14 = "Empty response")
+    not (len >= 14 && String.sub s 0 14 = "Empty response") &&
+    not (len >= 9 && String.sub s 0 9 = "{\"error\":")
   in
 
   let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
@@ -2089,7 +2091,8 @@ let make_call_llm ~agent_name : (prompt:string -> string) =
       let len = String.length s in
       len > 10 &&
       not (len >= 5 && String.lowercase_ascii (String.sub s 0 5) = "error") &&
-      not (len >= 14 && String.sub s 0 14 = "Empty response")
+      not (len >= 14 && String.sub s 0 14 = "Empty response") &&
+      not (len >= 9 && String.sub s 0 9 = "{\"error\":")
     in
     let cascade_call_llm ~tool_name ~extra_args ~prompt:p ~timeout_sec ~max_chars =
       let model = List.assoc_opt "model" extra_args

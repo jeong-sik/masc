@@ -2461,11 +2461,13 @@ let start ~sw ~clock room_config =
   Printf.printf "+Lodge Heartbeat: enabled=%b interval=%.0fs agents_per_tick=%d planner=%b\n%!"
     config.enabled tick_interval Env_config.LodgeV2.agents_per_tick use_planner;
 
-  (* Load persistent selection stats for Thompson Sampling *)
+  (* Configure and load persistent selection stats for Thompson Sampling *)
+  Lodge_selection.set_base_path room_config.Room_utils.base_path;
   Lodge_selection.load_stats ();
-  Printf.printf "+Lodge Selection: Thompson Sampling enabled (max_starvation=%d, weight=%.2f)\n%!"
+  Printf.printf "+Lodge Selection: Thompson Sampling enabled (max_starvation=%d, weight=%.2f, path=%s)\n%!"
     Env_config.LodgeSelection.max_starvation_ticks
-    Env_config.LodgeSelection.thompson_weight;
+    Env_config.LodgeSelection.thompson_weight
+    room_config.Room_utils.base_path;
 
   (* Always initialize core agents (even if heartbeat disabled) *)
   init_core_agents ();

@@ -50,6 +50,7 @@
    lodge_cascade
    lodge_heartbeat
    lodge_memory
+   lodge_selection
    memory_stream
    agent_planner
    reflection

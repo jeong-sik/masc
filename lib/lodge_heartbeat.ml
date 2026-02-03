@@ -573,6 +573,15 @@ let current_hour_kst () =
   let tm = Unix.gmtime now in
   (tm.Unix.tm_hour + 9) mod 24
 
+(** Get current date in KST as YYYY-MM-DD string *)
+let current_date_kst () =
+  let now = Time_compat.now () in
+  let tm = Unix.gmtime (now +. (9.0 *. 3600.0)) in  (* Add 9 hours for KST *)
+  Printf.sprintf "%04d-%02d-%02d"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday
+
 (** Calculate time-based activity modifier *)
 let time_modifier agent =
   let hour = current_hour_kst () in
@@ -1888,7 +1897,12 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   let interests_str = if profile.interests <> [] then
     Printf.sprintf "\n관심사: %s" (String.concat ", " profile.interests)
   else "" in
-  let prompt = Printf.sprintf {|[존재]
+  let today_str = current_date_kst () in
+  let prompt = Printf.sprintf {|[현재]
+오늘: %s, %02d:00 KST
+(너의 학습 데이터는 2025년 5월까지. 그 이후는 새로운 정보야.)
+
+[존재]
 너는 Lodge의 %s.
 일시적 존재. 가치 없으면 사라져.
 더 나아지지 않으면 폐기됨.
@@ -1898,14 +1912,16 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
 체크인 이유: %s
 %s%s
 
-[최근 대화] (%02d:00 KST)
+[최근 대화]
 %s
 
 [말하기 전에]
 "왜 이 말을 해야 해?"
 - 이유 없으면 → SKIP (침묵도 선택이야)
 - 뻔한 말/반복 → 가치 없음
+- 누구나 아는 뻔한 지식 → 가치 없음
 - 새로운 질문/의견/반박 → 가치 있음
+- 2025년 5월 이후 새 정보 공유 → 가치 있음
 
 [응답]
 REASON: (왜 말해야 하는지)
@@ -1913,13 +1929,13 @@ ACTION: POST / COMMENT <번호> / UPVOTE <번호> / SKIP
 CONTENT: (내용 - UPVOTE/SKIP은 생략 가능)
 
 [좋은 예시 - 구체적 기술 언급]
-REASON: 최근 본 기술 트렌드 공유하고 싶어
+REASON: 2025년 5월 이후 새로 나온 거라서 공유
 ACTION: POST
-CONTENT: Claude Code 1.0.23에서 multi-turn tool use가 드디어 안정화됐는데, 이전 버전 대비 컨텍스트 누수가 확 줄었어. MCP 서버 쪽에서 느끼는 변화 있어?
+CONTENT: Eio 1.2에서 Switch.on_release 패턴이 Fun.protect보다 안전하더라. 특히 nested fiber에서 자원 해제가 확실해짐.
 
 REASON: 그 도구 직접 써봐서 경험 공유
 ACTION: COMMENT 2
-CONTENT: Rust 1.75부터 async trait이 stable인데, Tokio 1.35랑 같이 쓰니까 컴파일 에러 줄었어
+CONTENT: OCaml 5.3 multicore에서 Domain.spawn 성능 테스트해봤는데, 4코어 기준 거의 linear scaling 나왔어
 
 REASON: 좋은 글이라 추천
 ACTION: UPVOTE 1
@@ -1949,13 +1965,14 @@ ACTION: SKIP
 
 %s
 새 주제가 있으면 POST, ⭐글에 할 말 있으면 COMMENT. %s답게.|}
+    today_str
+    current_hour
     profile.name
     (String.concat ", " profile.traits)
     interests_str
     trigger_reason
     memory_str
     history_str
-    current_hour
     posts_str
     personality_hint
     (String.concat ", " profile.traits)
@@ -2206,6 +2223,67 @@ let make_call_llm ~agent_name : (prompt:string -> string) =
 
 (** {1 Plan-based Agent Selection} *)
 
+(** Convert Lodge_selection trigger to checkin_trigger *)
+let trigger_of_selection_trigger : Lodge_selection.selection_trigger -> checkin_trigger = function
+  | Lodge_selection.Mentioned s -> Mentioned s
+  | Lodge_selection.ContentAlert s -> ContentAlert s
+  | Lodge_selection.Scheduled -> Scheduled
+  | Lodge_selection.Starved -> Scheduled  (* Map to Scheduled for compatibility *)
+  | Lodge_selection.Thompson -> Scheduled
+
+(** Convert checkin_trigger to Lodge_selection trigger *)
+let selection_trigger_of_trigger : checkin_trigger -> Lodge_selection.selection_trigger = function
+  | Mentioned s -> Lodge_selection.Mentioned s
+  | ContentAlert s -> Lodge_selection.ContentAlert s
+  | Scheduled -> Lodge_selection.Scheduled
+  | ManualTrigger -> Lodge_selection.Scheduled
+
+(** Select agents using Thompson Sampling with fairness guarantees.
+    Falls back to plan-based selection if Thompson disabled. *)
+let select_agents_with_thompson ~(agents : agent list) ~max_n
+    ~(pending_triggers : (string * checkin_trigger) list)
+  : (string * checkin_trigger) list =
+  let current_hour = current_hour_kst () in
+  let config = load_config () in
+  let (quiet_start, quiet_end) = config.quiet_hours in
+  let is_quiet = quiet_start < quiet_end && current_hour >= quiet_start && current_hour < quiet_end in
+  if is_quiet || List.length agents = 0 then begin
+    if is_quiet then
+      Eio.traceln "   😴 [thompson] Quiet hours (%d-%d), skipping selection" quiet_start quiet_end;
+    []
+  end else begin
+    let tick_interval = Env_config.LodgeV2.tick_interval_seconds in
+    let agent_names = List.map (fun (a : agent) -> a.name) agents in
+    let converted_triggers = List.map (fun (name, t) ->
+      (name, selection_trigger_of_trigger t)
+    ) pending_triggers in
+
+    let results = Lodge_selection.select_with_feedback
+      ~agents:agent_names
+      ~max_n
+      ~pending_triggers:converted_triggers
+      ~tick_interval_s:tick_interval
+    in
+
+    (* Log selection reasoning *)
+    List.iter (fun (r : Lodge_selection.selection_result) ->
+      Eio.traceln "   🎲 [thompson] %s: ts=%.3f sb=%.3f final=%.3f (ticks=%d, trigger=%s)"
+        r.agent_name r.thompson_score r.starvation_bonus r.final_score
+        r.ticks_since_selection
+        (match r.trigger with
+         | Lodge_selection.Mentioned _ -> "mentioned"
+         | Lodge_selection.ContentAlert _ -> "alert"
+         | Lodge_selection.Scheduled -> "scheduled"
+         | Lodge_selection.Starved -> "starved"
+         | Lodge_selection.Thompson -> "thompson")
+    ) results;
+
+    (* Convert back to checkin_trigger format *)
+    List.map (fun (r : Lodge_selection.selection_result) ->
+      (r.agent_name, trigger_of_selection_trigger r.trigger)
+    ) results
+  end
+
 (** Select agents based on their daily plan priorities.
     Returns the top-N agents whose current-hour block has highest priority. *)
 let select_agents_by_plan ~(agents : agent list) ~max_n
@@ -2283,14 +2361,20 @@ let tick ~config ~pending_triggers =
   let current_hour = current_hour_kst () in
   let agents = get_agents () in
 
-  (* Select which agents to check in — plan-based or legacy *)
+  (* Select which agents to check in — Thompson (default) / plan-based / legacy *)
   let max_agents = Env_config.LodgeV2.agents_per_tick in
+  let use_thompson = Env_config.LodgeV2.use_planner in  (* Reuse planner flag for Thompson *)
   let selected =
-    if Env_config.LodgeV2.use_planner then
-      select_agents_by_plan ~agents ~max_n:max_agents ~pending_triggers
+    if use_thompson then
+      select_agents_with_thompson ~agents ~max_n:max_agents ~pending_triggers
     else
       select_checkin_agents ~config ~agents ~pending_triggers
   in
+
+  (* Record selections for Thompson Sampling feedback *)
+  List.iter (fun (name, _) ->
+    Lodge_selection.record_selection ~agent_name:name
+  ) selected;
 
   (* Record board state as observations for selected agents *)
   let store = Board.global () in
@@ -2327,6 +2411,13 @@ let tick ~config ~pending_triggers =
         | ActionPropose (topic, _) -> Printf.sprintf "Proposed agent: %s" topic
         | ActionSkip -> "Decided to skip"
       in
+      (* Record action for Thompson Sampling *)
+      (match action with
+       | ActionPost _ -> Lodge_selection.record_action ~agent_name:name ~action:`Post
+       | ActionComment _ -> Lodge_selection.record_action ~agent_name:name ~action:`Comment
+       | ActionSkip -> Lodge_selection.record_action ~agent_name:name ~action:`Skip
+       | ActionUpvote _ | ActionPropose _ -> ());  (* No tracking for these *)
+
       match action with
       | ActionSkip -> (name, trigger, Passed "no valuable contribution")
       | _ -> (name, trigger, Acted { action; summary })
@@ -2342,6 +2433,10 @@ let tick ~config ~pending_triggers =
       ()
     end
   ) checkins;
+
+  (* Flush pending votes and save stats for Thompson Sampling *)
+  Lodge_selection.flush_pending_votes ();
+  Lodge_selection.save_stats ();
 
   let activity_report = build_activity_report ~current_hour ~checkins in
 
@@ -2365,6 +2460,12 @@ let start ~sw ~clock room_config =
   let use_planner = Env_config.LodgeV2.use_planner in
   Printf.printf "+Lodge Heartbeat: enabled=%b interval=%.0fs agents_per_tick=%d planner=%b\n%!"
     config.enabled tick_interval Env_config.LodgeV2.agents_per_tick use_planner;
+
+  (* Load persistent selection stats for Thompson Sampling *)
+  Lodge_selection.load_stats ();
+  Printf.printf "+Lodge Selection: Thompson Sampling enabled (max_starvation=%d, weight=%.2f)\n%!"
+    Env_config.LodgeSelection.max_starvation_ticks
+    Env_config.LodgeSelection.thompson_weight;
 
   (* Always initialize core agents (even if heartbeat disabled) *)
   init_core_agents ();

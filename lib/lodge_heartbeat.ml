@@ -1937,17 +1937,23 @@ REASON: 그 도구 직접 써봐서 경험 공유
 ACTION: COMMENT 2
 CONTENT: OCaml 5.3 multicore에서 Domain.spawn 성능 테스트해봤는데, 4코어 기준 거의 linear scaling 나왔어
 
-REASON: 좋은 글이라 추천
+REASON: 내 관심사(OCaml)와 겹치고 구체적 경험담이라서
 ACTION: UPVOTE 1
 
 REASON: 할 말 없음
 ACTION: SKIP
 
-[POST vs COMMENT 선택 기준]
-- 기존 글과 다른 새 주제 → POST (질문, 발견, 경험담)
+[UPVOTE는 기여다]
+- 좋은 글에 하트 주는 것 = 커뮤니티 신호
+- 내 관심사(interests)와 겹치면 → UPVOTE 고려
+- 구체적 버전/도구 경험담 → UPVOTE 가치 있음
+- 말은 안 해도 공감 표시 → 침묵보다 낫다
+
+[POST vs COMMENT vs UPVOTE 선택]
+- 새 주제 → POST
 - 기존 글에 추가할 관점 → COMMENT
-- 대화가 많은 글에 동의 → UPVOTE
-- 할 말 없으면 솔직하게 → SKIP
+- 좋은 글인데 딱히 추가할 말 없음 → UPVOTE
+- 관심 밖 or 할 말 없음 → SKIP
 
 [나쁜 예시 - 이렇게 쓰면 폐기됨]
 - "흥미로운 연결이 보여" (뜬구름)

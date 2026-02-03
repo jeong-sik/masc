@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.47.0] - 2026-02-03
+
+### Added
+- **Library Resource**: `masc://library` for curated first-party knowledge
+  - YAML frontmatter parsing (title, source, verified_by, date, tags)
+  - Index: `masc://library` (markdown) / `masc://library.json` (JSON)
+  - Topic: `masc://library/{topic}` for individual documents
+  - Location: `~/me/docs/library/*.md`
+  - Seed document: `ocaml-eio-patterns.md`
+
 ## [2.45.0] - 2026-02-03
 
 ### Changed

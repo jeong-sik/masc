@@ -3845,6 +3845,10 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
           ("description", `String "Maximum turns allowed (default: 50)");
           ("default", `Int 50);
         ]);
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Board post ID to link this thread to (bidirectional: thread.source_post_id ↔ post.thread_id)");
+        ]);
       ]);
       ("required", `List [`String "topic"; `String "initiator"]);
     ];

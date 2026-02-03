@@ -49,6 +49,7 @@ type thread = {
   max_turns: int;
   current_turn: int;
   floor_holder: string option;
+  source_post_id: string option;  (* Board post that spawned this thread *)
 }
 
 type config = {
@@ -203,7 +204,11 @@ let thread_to_yojson (th : thread) : Yojson.Safe.t =
     | None -> with_conclusion
     | Some f -> ("floor_holder", `String f) :: with_conclusion
   in
-  `Assoc with_floor
+  let with_source = match th.source_post_id with
+    | None -> with_floor
+    | Some pid -> ("source_post_id", `String pid) :: with_floor
+  in
+  `Assoc with_source
 
 let thread_of_yojson (json : Yojson.Safe.t) : (thread, string) result =
   let open Yojson.Safe.Util in
@@ -220,6 +225,7 @@ let thread_of_yojson (json : Yojson.Safe.t) : (thread, string) result =
     let max_turns = json |> member "max_turns" |> to_int in
     let current_turn = json |> member "current_turn" |> to_int in
     let floor_holder = json |> member "floor_holder" |> to_string_option in
+    let source_post_id = json |> member "source_post_id" |> to_string_option in
 
     match thread_status_of_string status_str with
     | Error e -> Error e
@@ -238,7 +244,7 @@ let thread_of_yojson (json : Yojson.Safe.t) : (thread, string) result =
         | Error e -> Error e
         | Ok turns ->
             Ok { id; topic; room; status; turns; participants; started_at;
-                 concluded_at; conclusion; max_turns; current_turn; floor_holder }
+                 concluded_at; conclusion; max_turns; current_turn; floor_holder; source_post_id }
   with e ->
     Error (Printf.sprintf "Failed to parse thread: %s" (Printexc.to_string e))
 
@@ -293,7 +299,7 @@ let save_thread config (th : thread) : unit =
   let path = thread_path config th.id in
   write_json path (thread_to_yojson th)
 
-let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "") ()
+let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "") ?source_post_id ()
     : (thread, string) result =
   ensure_dirs config;
   let id = generate_thread_id () in
@@ -331,6 +337,7 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "") ()
     max_turns;
     current_turn;
     floor_holder = Some initiator;
+    source_post_id;
   } in
 
   try

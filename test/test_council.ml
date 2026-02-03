@@ -647,7 +647,7 @@ let make_test_thread ?(turns=[]) ?(max_turns=50) ?(floor_holder=None) () : Conve
     status = Conversation.Active; turns; participants = [];
     started_at = Unix.gettimeofday (); concluded_at = None;
     conclusion = None; max_turns; current_turn = List.length turns;
-    floor_holder }
+    floor_holder; source_post_id = None }
 
 let make_turn ~speaker ~content ~seq : Conversation.turn =
   { id = Printf.sprintf "turn-%d" seq; seq; speaker; content;

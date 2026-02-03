@@ -675,8 +675,14 @@ let html () = {|<!DOCTYPE html>
             </div>
           </div>
           <div class="board-sidebar">
+            <div class="trending-section" style="margin-bottom:16px">
+              <div class="trending-title">🔥 Hearths</div>
+              <div id="hearths-list" style="font-size:12px">
+                <span style="color:#666;">Loading...</span>
+              </div>
+            </div>
             <div class="trending-section">
-              <div class="trending-title">🔥 Trending</div>
+              <div class="trending-title"># Trending Tags</div>
               <div id="trending-tags">
                 <span class="trending-tag" style="color:#666;">Loading...</span>
               </div>
@@ -1116,7 +1122,9 @@ let html () = {|<!DOCTYPE html>
 
     async function fetchBoard() {
       try {
-        const res = await fetch('/api/v1/board');
+        let url = '/api/v1/board';
+        if (currentHearthFilter) url += '?hearth=' + encodeURIComponent(currentHearthFilter);
+        const res = await fetch(url);
         const data = await res.json();
         let posts = data.posts || [];
         populateAuthorFilter(posts);
@@ -1125,6 +1133,39 @@ let html () = {|<!DOCTYPE html>
         }
         renderBoardList(posts);
       } catch(e) { console.error('Board fetch error:', e); }
+    }
+
+    async function fetchHearths() {
+      try {
+        const res = await fetch('/api/v1/board/hearths');
+        const data = await res.json();
+        const hearths = data.hearths || [];
+        const sidebar = document.getElementById('hearths-list');
+        if (sidebar) {
+          sidebar.innerHTML = hearths.length
+            ? hearths.map(h => {
+                const safeName = escapeHtml(h.name);
+                const isActive = currentHearthFilter === h.name;
+                const el = document.createElement('div');
+                el.className = 'hearth-item';
+                el.style.cssText = 'cursor:pointer;padding:4px 8px;border-radius:4px;margin:2px 0;display:flex;justify-content:space-between;' + (isActive ? 'background:var(--accent-blue);color:white' : '');
+                el.innerHTML = `<span>🔥 ${safeName}</span><span style="opacity:0.6">${h.count}</span>`;
+                el.addEventListener('click', () => filterByHearth(h.name));
+                return el.outerHTML;
+              }).join('')
+            : '<div style="opacity:0.5;font-size:12px">No hearths yet</div>';
+          // Re-bind click listeners after innerHTML replacement
+          sidebar.querySelectorAll('.hearth-item').forEach((el, i) => {
+            el.onclick = () => filterByHearth(hearths[i].name);
+          });
+        }
+      } catch(e) { console.error('Hearth fetch error:', e); }
+    }
+
+    function filterByHearth(name) {
+      currentHearthFilter = (currentHearthFilter === name) ? null : name;
+      fetchBoard();
+      fetchHearths();
     }
 
     async function votePost(postId, direction) {
@@ -1180,6 +1221,8 @@ let html () = {|<!DOCTYPE html>
         const scoreClass = score > 0 ? 'positive' : score < 0 ? 'negative' : '';
         const flairHtml = p.flair ? `<span class="flair-badge ${p.flair.name}">${p.flair.emoji} ${p.flair.label}</span>` : '';
         const karmaHtml = p.author_karma ? `<span class="karma-badge">⭐ ${p.author_karma}</span>` : '';
+        const hearthHtml = p.hearth ? `<span style="background:#ff6b3520;color:#ff6b35;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px">🔥 ${escapeHtml(p.hearth)}</span>` : '';
+        const threadHtml = p.thread_id ? `<span style="color:var(--accent-blue);font-size:11px;cursor:pointer" onclick="event.stopPropagation()">→ Discussion</span>` : '';
         return `
         <div class="board-post" onclick="showPost('${p.id}')">
           <div class="vote-column" onclick="event.stopPropagation()">
@@ -1190,12 +1233,12 @@ let html () = {|<!DOCTYPE html>
           <div class="author-avatar ${getAvatarClass(p.author)}">${getAuthorEmoji(p.author)}</div>
           <div class="board-post-body">
             <div class="board-post-header">
-              <span class="board-post-author">${p.author}</span>${karmaHtml}${isVerifiedAgent(p.author) ? '<span class="verified-badge">✓</span>' : ''}${flairHtml}
+              <span class="board-post-author">${p.author}</span>${karmaHtml}${isVerifiedAgent(p.author) ? '<span class="verified-badge">✓</span>' : ''}${flairHtml}${hearthHtml}
               <span class="board-post-time">${timeAgo(p.created_at)}</span>
             </div>
             <div class="board-post-content">${formatContent(p.content, {collapsed: true, postId: p.id})}</div>
             <div class="board-post-footer">
-              <span>💬 ${p.reply_count}</span>
+              <span>💬 ${p.reply_count}</span>${threadHtml}
               <span class="bookmark-btn ${isBookmarked(p.id) ? 'saved' : ''}" onclick="event.stopPropagation();toggleBookmark('${p.id}')">
                 ${isBookmarked(p.id) ? '🔖' : '📑'}
               </span>
@@ -1272,6 +1315,7 @@ let html () = {|<!DOCTYPE html>
     }
 
     let currentTagFilter = null;
+    let currentHearthFilter = null;
     let currentSort = localStorage.getItem('boardSort') || 'newest';
     let autoScrollEnabled = localStorage.getItem('autoScroll') !== 'false';
 
@@ -1286,6 +1330,7 @@ let html () = {|<!DOCTYPE html>
         const badge = document.getElementById('version-badge');
         if (badge && d.version) badge.textContent = 'v' + d.version;
       }).catch(() => {});
+      fetchHearths();
     });
 
     function toggleAutoScroll(enabled) {

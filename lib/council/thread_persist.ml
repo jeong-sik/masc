@@ -50,7 +50,8 @@ let float_to_iso (t : float) =
       conclusion: STRING,
       max_turns: INT,
       current_turn: INT,
-      floor_holder: STRING
+      floor_holder: STRING,
+      source_post_id: STRING
     })
 
     (:Turn {
@@ -96,6 +97,10 @@ let thread_merge_cypher (th : Conversation.thread) =
     | None -> "null"
     | Some f -> Printf.sprintf "'%s'" (cypher_escape f)
   in
+  let source_post_str = match th.source_post_id with
+    | None -> "null"
+    | Some pid -> Printf.sprintf "'%s'" (cypher_escape pid)
+  in
   Printf.sprintf {|
     MERGE (t:Thread {id: '%s'})
     SET t.topic = '%s',
@@ -106,7 +111,8 @@ let thread_merge_cypher (th : Conversation.thread) =
         t.conclusion = %s,
         t.max_turns = %d,
         t.current_turn = %d,
-        t.floor_holder = %s
+        t.floor_holder = %s,
+        t.source_post_id = %s
     RETURN t.id as id
   |}
     (cypher_escape th.id)
@@ -119,6 +125,7 @@ let thread_merge_cypher (th : Conversation.thread) =
     th.max_turns
     th.current_turn
     floor_str
+    source_post_str
 
 let turn_merge_cypher ~thread_id (turn : Conversation.turn) =
   let created_at_iso = float_to_iso turn.created_at in

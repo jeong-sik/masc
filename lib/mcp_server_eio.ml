@@ -1929,6 +1929,7 @@ Time: %s
       let initiator = get_string "initiator" agent_name in
       let initial_content = get_string "initial_content" "" in
       let max_turns = get_int "max_turns" 50 in
+      let source_post_id = get_string_opt "post_id" in
       if topic = "" then (false, "❌ topic required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -1936,11 +1937,21 @@ Time: %s
           room = "default";
         } in
         match Council.Conversation.start ~config:convo_config ~topic ~initiator
-                ~max_turns ~initial_content () with
+                ~max_turns ~initial_content ?source_post_id () with
         | Ok thread ->
+            (* Link Board post back to this thread *)
+            let link_warning = match source_post_id with
+              | Some pid ->
+                  let store = Board.global () in
+                  (match Board.set_thread_id store
+                    ~post_id:pid ~thread_id:thread.Council.Conversation.id with
+                   | Ok () -> ""
+                   | Error e -> Printf.sprintf "\n⚠️ Board link failed: %s" (Board.show_board_error e))
+              | None -> ""
+            in
             let json = Council.Conversation.thread_to_yojson thread in
-            (true, Printf.sprintf "✅ Thread started: %s\n%s"
-              thread.Council.Conversation.id (Yojson.Safe.pretty_to_string json))
+            (true, Printf.sprintf "✅ Thread started: %s%s\n%s"
+              thread.Council.Conversation.id link_warning (Yojson.Safe.pretty_to_string json))
         | Error e -> (false, Printf.sprintf "❌ %s" e)
       end
 

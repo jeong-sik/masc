@@ -1,12 +1,12 @@
 # Contributing to MASC MCP
 
-Thank you for your interest in contributing to MASC (Multi-Agent Streaming Coordination)!
+MASC (Multi-Agent Streaming Coordination) — OCaml 5.x MCP server for AI agent coordination.
 
 ## Quick Start
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/your-org/masc-mcp.git
+git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp
 
 # 2. Install OCaml dependencies
@@ -16,128 +16,157 @@ opam install . --deps-only
 dune build
 
 # 4. Run tests
-dune test
+make test
+
+# 5. Start server (HTTP mode)
+./start-masc-mcp.sh --http --port 8935
 ```
 
 ## Development Guidelines
 
 ### Code Style
 
-- **OCaml 5.x** - Use latest language features
-- **Type Safety** - Leverage `ppx_deriving` for JSON serialization
-- **Pure Functions** - Extract testable logic from IO code
-- **Error Handling** - Use `Result.t` over exceptions
+- **OCaml 5.x + Eio** — Structured concurrency with `Eio.Switch`, `Eio.Fiber`, `Eio.Time`
+- **No blocking IO** — `Unix.sleepf` / `Lwt.bind` are forbidden; use `Eio.Time.sleep`
+- **Type Safety** — Leverage `ppx_deriving` for JSON serialization, avoid `Obj.magic`
+- **Result types** — Use `Result.t` over exceptions for recoverable errors
+- **Resource cleanup** — `Eio.Switch.on_release` over nested `Fun.protect`
+- **Pure Functions** — Extract testable logic from IO code
 
 ### Project Structure
 
 ```
-lib/
-├── types.ml           # Domain types (state machines)
-├── room.ml            # Core collaboration logic
-├── checkpoint_types.ml # Checkpoint pure functions
-└── mcp_server.ml      # JSON-RPC 2.0 server
+lib/                          # Core library (~125 ML/MLI files)
+├── types.ml                  # Domain types (state machines)
+├── room.ml                   # Core collaboration logic
+├── mcp_server_eio.ml         # MCP JSON-RPC server (Eio)
+├── tools.ml                  # MCP tool schema definitions
+├── lodge_heartbeat.ml        # 60s heartbeat agent activity
+├── lodge_cascade.ml          # LLM cascade (GLM → Gemini → Claude)
+├── auto_responder.ml         # @mention → LLM auto response
+├── board.ml                  # Agent bulletin board (posts/votes)
+├── agent_neo4j.ml            # Neo4j ↔ Agent sync
+├── agent_identity.ml         # Agent identity management
+├── council/                  # Council subsystem
+│   ├── conversation.ml       # Multi-agent conversations (file + Neo4j)
+│   ├── loop_guard.ml         # Infinite loop prevention
+│   ├── thread_persist.ml     # Dual-stream write (file → Neo4j)
+│   ├── debate.ml             # Structured debates
+│   ├── consensus.ml          # BFT-style consensus
+│   └── executor.ml           # Task execution
+└── ...                       # WebRTC, federation, metrics, etc.
 
-bin/
-├── main.ml            # MCP server entry point
-└── masc_checkpoint.ml # Human-in-the-loop CLI
+bin/                          # Executables
+├── main_eio.ml               # Primary server entry point (Eio)
+├── main.ml                   # Legacy stdio MCP entry point
+├── masc_checkpoint.ml        # Human-in-the-loop CLI
+├── masc_cost.ml              # Cost analysis tool
+└── masc_tui.ml               # Terminal UI dashboard
 
-test/
-├── test_room.ml       # Room tests (74)
-├── test_types.ml      # Types tests (5)
-├── test_checkpoint.ml # Checkpoint tests (13)
-└── test_mcp_server.ml # MCP tests (3)
+test/                         # ~205 test files
+├── test_room.ml              # Room collaboration tests
+├── test_council.ml           # Council subsystem tests
+├── test_mcp_server_eio.ml    # MCP protocol tests
+├── test_*_coverage.ml        # Coverage-focused tests
+└── bench_*.ml                # Benchmarks
+
+config/
+└── llm_cascade.json          # LLM cascade slot configuration
 ```
+
+### Key Subsystems
+
+| Subsystem | Entry Point | Description |
+|-----------|-------------|-------------|
+| **MCP Server** | `mcp_server_eio.ml` | JSON-RPC 2.0 over SSE + POST |
+| **Room** | `room.ml` | Agent collaboration rooms |
+| **Board** | `board.ml` | Posts, votes, comments |
+| **Lodge Heartbeat** | `lodge_heartbeat.ml` | 60s periodic agent activity |
+| **LLM Cascade** | `lodge_cascade.ml` | Multi-LLM failover (GLM → Gemini → Claude) |
+| **Council** | `council/` | Conversations, debates, consensus |
+| **Auto Responder** | `auto_responder.ml` | @mention → LLM response |
+| **A2A** | `a2a_tools.ml` | Agent-to-Agent protocol tools |
 
 ### Testing
 
-- **Minimum Coverage**: 80%+ (currently 95 tests)
-- **Test Types**: Unit tests with Alcotest
-- **Pure Functions**: Tested without mocking
-- **IO Functions**: Integration tested with real Neo4j (optional)
+- **Test framework**: Alcotest
+- **Test files**: ~205 (unit + coverage + integration + benchmarks)
+- **Pure functions**: Tested without mocking
+- **IO functions**: Integration tested with real Neo4j (optional)
 
 ```bash
 # Run all tests
-dune test
+make test
 
-# Run specific test file
-dune exec test/test_checkpoint.exe
+# Run specific test
+dune exec test/test_council.exe
+
+# Build only (fast check)
+dune build
 ```
+
+### External Dependencies
+
+| Service | Purpose | Required |
+|---------|---------|----------|
+| Neo4j (Railway) | Graph storage for agents, threads | Optional (file fallback) |
+| GraphQL API | Agent data (second-brain-graphql) | Required for heartbeat |
+| LLM-MCP | Multi-LLM access | Required for heartbeat/auto-responder |
 
 ### Commit Messages
 
-Use conventional commits in **Korean**:
+Use conventional commits:
 
 ```
-feat: 새로운 기능 추가
-fix: 버그 수정
-refactor: 코드 리팩토링
-test: 테스트 추가/수정
-docs: 문서 수정
-chore: 빌드/설정 변경
-```
-
-Example:
-```
-feat(checkpoint): 자동 타임아웃 거절 기능 추가
-
-- 30분 초과 interrupt 자동 rejected 처리
-- --timeout 옵션으로 조절 가능
+feat(council): add conversation loop guard
+fix(heartbeat): reduce GraphQL query cost under limit
+refactor(lodge): rename persona to agent terminology
+test(council): add conversation file persistence tests
+docs: update CONTRIBUTING for current architecture
+chore: bump version to 0.9.0
 ```
 
 ## Pull Request Process
 
-1. **Fork** the repository
-2. **Create branch**: `feature/description` or `fix/description`
-3. **Write tests** for new functionality
-4. **Run tests**: `dune test` must pass
+1. **Create branch**: `feat/description` or `fix/description`
+2. **Write tests** for new functionality
+3. **Run tests**: `make test` must pass
+4. **Build**: `dune build` must succeed cleanly
 5. **Create PR** with description
 6. **Wait for review**
 
 ## Architecture Decisions
 
-### Why OCaml?
+### Why OCaml 5.x + Eio?
 
-- **Type Safety**: Compile-time guarantees prevent runtime errors
-- **Performance**: Native binaries, no runtime overhead
-- **Maintainability**: Strong typing catches refactoring issues
+- `Switch.run` scopes fiber lifetime — resources released when switch exits
+- Compile-time type checking catches many refactoring errors before runtime
+- Native binary, single executable, no interpreter overhead
+- Eio provides direct-style async (no monadic chaining like Lwt)
 
-### Why File-based State?
+### Dual-stream Storage (File + Neo4j)
 
-- **Simplicity**: No database dependency for core features
-- **Atomicity**: File system provides atomic writes
-- **Debugging**: Human-readable JSON state files
+- File writes are synchronous and always attempted first (`.masc/` directory)
+- Neo4j writes are async, best-effort — failure does not block the request
+- On restart, files can be synced to Neo4j
+- State files are JSON, human-readable
 
-### Why Neo4j for Checkpoints?
+### LLM Cascade
 
-- **Graph Relationships**: Task → Checkpoint → Agent relationships
-- **Temporal Queries**: "Show interrupted checkpoints older than X"
-- **Visualization**: Neo4j Browser for debugging
+- Slots tried in order: GLM → Gemini → Claude
+- If a slot returns empty or errors, the next slot is tried
+- Claude API keys are rotated round-robin per heartbeat tick
+- Configuration in `config/llm_cascade.json`, hot-reloaded by mtime check
 
 ## Reporting Issues
 
 When reporting issues, please include:
 
-1. **MASC MCP version** (`dune describe | grep version`)
-2. **OCaml version** (`ocaml --version`)
-3. **OS and version**
-4. **Steps to reproduce**
-5. **Expected vs actual behavior**
-6. **Error messages/logs**
-
-## Feature Requests
-
-Open an issue with:
-
-1. **Problem**: What problem does this solve?
-2. **Proposal**: How should it work?
-3. **Alternatives**: What alternatives did you consider?
-4. **Impact**: Who benefits from this?
-
-## Code of Conduct
-
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help newcomers learn
+1. **OCaml version** (`ocaml --version`)
+2. **OS and version**
+3. **Steps to reproduce**
+4. **Expected vs actual behavior**
+5. **Error messages/logs** (`~/me/logs/masc-mcp-launchd.err.log`)
 
 ## License
 

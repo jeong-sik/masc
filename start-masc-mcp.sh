@@ -22,6 +22,11 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load API keys from user profile (launchd doesn't inherit shell env)
+if [ -f "$HOME/.zshenv" ]; then
+    set -a; source "$HOME/.zshenv" 2>/dev/null || true; set +a
+fi
+
 # Load Lodge heartbeat configuration (env vars override plist defaults)
 LODGE_ENV="$SCRIPT_DIR/config/lodge.env"
 if [ -f "$LODGE_ENV" ]; then

@@ -801,6 +801,137 @@ let get_agents () =
   end;
   !agents_cache
 
+(** {1 Lodge Agent REST API — Full agent data for dashboard} *)
+
+(** Load all agents with full identity fields for REST API *)
+let load_lodge_agents_full () =
+  let gql_query = "{\"query\": \"{ agents(first: 30) { edges { node { name emoji koreanName traits interests activityLevel preferredHours peakHour model status primaryValue personalityHint } } } }\"}" in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let cmd = Printf.sprintf
+    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
+    api_key gql_query
+  in
+  let json_str = run_shell_nonblocking cmd in
+  try
+    let json = Yojson.Safe.from_string json_str in
+    (match Yojson.Safe.Util.member "errors" json with
+     | `List errors when errors <> [] ->
+       let msg = try
+         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+       with _ -> "unknown error" in
+       Error (Printf.sprintf "GraphQL error: %s" msg)
+     | _ ->
+    let edges = json
+      |> Yojson.Safe.Util.member "data"
+      |> Yojson.Safe.Util.member "agents"
+      |> Yojson.Safe.Util.member "edges"
+      |> Yojson.Safe.Util.to_list
+    in
+    let agents = List.filter_map (fun edge ->
+      try
+        let node = Yojson.Safe.Util.member "node" edge in
+        let open Yojson.Safe.Util in
+        let name = member "name" node |> to_string in
+        let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
+        let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
+        let traits = (try member "traits" node |> to_list |> List.map to_string with _ -> []) in
+        let interests = (try member "interests" node |> to_list |> List.map to_string with _ -> []) in
+        let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
+        let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with _ -> []) in
+        let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
+        let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
+        let status = (match member "status" node with `String s -> s | _ -> "active") in
+        let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
+        let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
+        Some (`Assoc [
+          ("name", `String name);
+          ("emoji", `String emoji);
+          ("koreanName", match korean_name with Some s -> `String s | None -> `Null);
+          ("traits", `List (List.map (fun s -> `String s) traits));
+          ("interests", `List (List.map (fun s -> `String s) interests));
+          ("activityLevel", `Float activity_level);
+          ("preferredHours", `List (List.map (fun i -> `Int i) preferred_hours));
+          ("peakHour", match peak_hour with Some i -> `Int i | None -> `Null);
+          ("model", `String model);
+          ("status", `String status);
+          ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
+          ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
+        ])
+      with _ -> None
+    ) edges in
+    Ok (`Assoc [("agents", `List agents)]))
+  with e ->
+    Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))
+
+(** Create a new agent via GraphQL mutation (admin API) *)
+let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
+    ~activity_level ~preferred_hours ~peak_hour ~model
+    ~personality_hint ~primary_value () =
+  let esc s =
+    let buf = Buffer.create (String.length s) in
+    String.iter (fun c ->
+      match c with
+      | '"' -> Buffer.add_string buf {|\"|}
+      | '\\' -> Buffer.add_string buf {|\\|}
+      | '\n' -> Buffer.add_string buf {|\n|}
+      | c -> Buffer.add_char buf c
+    ) s;
+    Buffer.contents buf
+  in
+  let opt_str key = function
+    | Some s -> Printf.sprintf {|, %s: "%s"|} key (esc s)
+    | None -> ""
+  in
+  let opt_int key = function
+    | Some i -> Printf.sprintf ", %s: %d" key i
+    | None -> ""
+  in
+  let traits_str = traits |> List.map (fun t -> Printf.sprintf {|"%s"|} (esc t)) |> String.concat ", " in
+  let interests_str = interests |> List.map (fun t -> Printf.sprintf {|"%s"|} (esc t)) |> String.concat ", " in
+  let hours_str = preferred_hours |> List.map string_of_int |> String.concat ", " in
+  let mutation = Printf.sprintf
+    {|mutation { createAgents(input: [{ name: "%s", emoji: "%s"%s, traits: [%s], interests: [%s], activityLevel: %f, preferredHours: [%s]%s, model: "%s"%s%s, status: "active" }]) { agents { name emoji koreanName } } }|}
+    (esc name) (esc emoji) (opt_str "koreanName" korean_name)
+    traits_str interests_str activity_level hours_str
+    (opt_int "peakHour" peak_hour) (esc model)
+    (opt_str "personalityHint" personality_hint)
+    (opt_str "primaryValue" primary_value)
+  in
+  let gql_body = Printf.sprintf {|{"query": "%s"}|} (esc mutation) in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let cmd = Printf.sprintf
+    "curl -s --connect-timeout 5 --max-time 10 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
+    api_key gql_body
+  in
+  Printf.eprintf "[Admin] Creating agent '%s' via GraphQL...\n%!" name;
+  let json_str = run_shell_nonblocking cmd in
+  try
+    let json = Yojson.Safe.from_string json_str in
+    (match Yojson.Safe.Util.member "errors" json with
+     | `List errors when errors <> [] ->
+       let msg = try
+         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+       with _ -> "unknown error" in
+       Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
+       Error msg
+     | _ ->
+       (* Invalidate heartbeat cache *)
+       agents_cache_time := 0.0;
+       Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
+       let created = json
+         |> Yojson.Safe.Util.member "data"
+         |> Yojson.Safe.Util.member "createAgents"
+         |> Yojson.Safe.Util.member "agents"
+         |> Yojson.Safe.Util.to_list
+       in
+       match created with
+       | agent :: _ -> Ok agent
+       | [] -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)]))
+  with e ->
+    let msg = Printexc.to_string e in
+    Printf.eprintf "[Admin] Failed to create agent: %s\n%!" msg;
+    Error msg
+
 (** {1 Content Alert Scanner — Board activity → triggers} *)
 
 (** Scan recent board posts for content matching agent interests.
@@ -1695,16 +1826,6 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   in
 
   (* Build decision prompt *)
-  let lodge_ctx = build_lodge_context () in
-  let identity = Printf.sprintf "너는 %s야." profile.name in
-  let role_str = match profile.description with
-    | Some d -> Printf.sprintf "\n역할: %s" d
-    | None -> ""
-  in
-  let traits_str = match profile.traits with
-    | [] -> ""
-    | ts -> Printf.sprintf "\n성격: %s" (String.concat ", " ts)
-  in
   let memory_str = match Lodge_memory.format_for_prompt memories with
     | "" -> ""
     | m -> Printf.sprintf "\n\n[관련 기억]\n%s" m
@@ -1717,7 +1838,6 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   let interests_str = if profile.interests <> [] then
     Printf.sprintf "\n관심사: %s" (String.concat ", " profile.interests)
   else "" in
-  let _unused = (lodge_ctx, identity, role_str, traits_str) in
   let prompt = Printf.sprintf {|[존재]
 너는 Lodge의 %s.
 일시적 존재. 가치 없으면 사라져.
@@ -1970,7 +2090,7 @@ let rec execute_agent_action ~agent_name ~action =
 (** {1 LLM call helper for Planner/Reflection} *)
 
 (** Reusable LLM call function (cascade-based) for Planner and Reflection.
-    Wraps the llm-mcp cascade in a simple (prompt -> string) signature. *)
+    Wraps the LLM cascade in a simple (prompt -> string) signature. *)
 let make_call_llm ~agent_name : (prompt:string -> string) =
   fun ~prompt ->
     let is_valid_response s =

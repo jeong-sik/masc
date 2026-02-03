@@ -15,6 +15,13 @@ type cascade_slot = {
   key_env : string option; (* env var name for api_key, e.g. "CLAUDE_CODE_OAUTH_TOKEN_anyang" *)
 }
 
+(** Result of a cascade call, including which LLM was used *)
+type cascade_result = {
+  response : string;     (* LLM response text *)
+  llm_used : string;     (* e.g. "glm(glm-4.7)", "claude-cli(NG_TOKEN)" *)
+  duration_ms : int;     (* Time taken in milliseconds *)
+}
+
 (* ---------- Config Cache ---------- *)
 
 (* mtime-based cache: (path -> (mtime, parsed_json)) *)
@@ -100,7 +107,8 @@ let resolve_key (key_env : string option) : string option =
   | None -> None
   | Some env_name -> Sys.getenv_opt env_name
 
-(** Run cascade: try each slot in order until one succeeds.
+(** Run cascade with tracing: try each slot in order until one succeeds.
+    Returns cascade_result with response, LLM used, and duration.
     @param slots Ordered list of cascade slots
     @param prompt Prompt to send to LLM
     @param timeout_sec Curl --max-time
@@ -108,7 +116,7 @@ let resolve_key (key_env : string option) : string option =
     @param call_llm Function that actually invokes llm-mcp
     @param is_valid Predicate to check if response is usable
     @param agent_name For logging *)
-let run_cascade
+let run_cascade_traced
     ~(slots : cascade_slot list)
     ~(prompt : string)
     ~(timeout_sec : int)
@@ -116,12 +124,14 @@ let run_cascade
     ~(call_llm : tool_name:string -> extra_args:(string * Yojson.Safe.t) list -> prompt:string -> timeout_sec:int -> max_chars:int -> string)
     ~(is_valid : string -> bool)
     ~(agent_name : string)
-  : string =
+  : cascade_result =
+  let start_time = Unix.gettimeofday () in
   let rotated = rotate_claude_slots slots in
   let rec try_slots = function
     | [] ->
       printf "   ❌ [%s] All LLMs failed, skipping\n%!" agent_name;
-      ""
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
+      { response = ""; llm_used = "none"; duration_ms }
     | slot :: rest ->
       let extra_args =
         let base = [("model", `String slot.model)] in
@@ -146,13 +156,35 @@ let run_cascade
       if is_valid r then begin
         printf "   🧠 [%s] %s: %s\n%!" agent_name label
           (if String.length r > 80 then String.sub r 0 80 ^ "..." else r);
-        r
+        let duration_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
+        { response = r; llm_used = label; duration_ms }
       end else begin
         printf "   ⚠️ [%s] %s failed (%d chars), next...\n%!" agent_name label (String.length r);
         try_slots rest
       end
   in
   try_slots rotated
+
+(** Run cascade: try each slot in order until one succeeds.
+    Backward-compatible wrapper that returns only the response string.
+    @param slots Ordered list of cascade slots
+    @param prompt Prompt to send to LLM
+    @param timeout_sec Curl --max-time
+    @param max_chars Max response chars to keep
+    @param call_llm Function that actually invokes llm-mcp
+    @param is_valid Predicate to check if response is usable
+    @param agent_name For logging *)
+let run_cascade
+    ~(slots : cascade_slot list)
+    ~(prompt : string)
+    ~(timeout_sec : int)
+    ~(max_chars : int)
+    ~(call_llm : tool_name:string -> extra_args:(string * Yojson.Safe.t) list -> prompt:string -> timeout_sec:int -> max_chars:int -> string)
+    ~(is_valid : string -> bool)
+    ~(agent_name : string)
+  : string =
+  let result = run_cascade_traced ~slots ~prompt ~timeout_sec ~max_chars ~call_llm ~is_valid ~agent_name in
+  result.response
 
 (* ---------- Convenience: get_cascade (cached load + rotate) ---------- *)
 

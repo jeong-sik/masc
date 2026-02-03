@@ -123,19 +123,27 @@ let read_fd_with_timeout fd timeout_sec =
   with Unix.Unix_error _ -> ());
   (!timed_out, Buffer.contents buf)
 
-(** Internal: kill child process and reap. *)
-let kill_and_reap pid =
-  (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
-  Unix.sleepf 0.1;
-  (match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
-   | (0, _) ->
-     (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-     (try ignore (Unix.waitpid [] pid) with Unix.Unix_error _ -> ())
-   | _ -> ())
+(** Internal: reap child process. Kill if still running.
+    SOLE reap point — no other code should call waitpid on the same pid.
+    Returns the process status. *)
+let reap_child pid =
+  match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
+  | (0, _) ->
+    (* Still running — escalate: SIGTERM -> 100ms -> SIGKILL *)
+    (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
+    Unix.sleepf 0.1;
+    (match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
+     | (0, _) ->
+       (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+       let (_, status) = try Unix.waitpid [] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) in
+       status
+     | (_, status) -> status)
+  | (_, status) -> status
 
 (** Run shell command in a system thread with timeout (non-blocking to Eio).
     Returns stdout as string. Empty string on timeout or error.
-    Default timeout: 60s. *)
+    Default timeout: 60s.
+    Lifecycle: create_process -> read stdout -> reap_child (single reap point). *)
 let run_in_systhread ?(timeout_sec=60.0) cmd =
   Eio_unix.run_in_systhread (fun () ->
     let (rd, wr) = Unix.pipe () in
@@ -144,30 +152,23 @@ let run_in_systhread ?(timeout_sec=60.0) cmd =
         Unix.stdin wr Unix.stderr
     in
     Unix.close wr;
-    let reaped = ref false in
+    (* finally: fd cleanup only. reap_child is called in the body. *)
     Fun.protect ~finally:(fun () ->
-      (try Unix.close rd with Unix.Unix_error _ -> ());
-      if not !reaped then
-        (match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
-         | (0, _) -> kill_and_reap pid
-         | _ -> ())
+      (try Unix.close rd with Unix.Unix_error _ -> ())
     ) (fun () ->
       let (timed_out, content) = read_fd_with_timeout rd timeout_sec in
       if timed_out then
-        Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd
-      else begin
-        (* Reap child in normal path to avoid zombie *)
-        (try ignore (Unix.waitpid [] pid); reaped := true
-         with Unix.Unix_error _ -> ())
-      end;
+        Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd;
+      ignore (reap_child pid);
       content
     )
   )
 
 (** Run shell command in a system thread with timeout (non-blocking to Eio).
     Returns (Unix.process_status, stdout).
-    On timeout returns (WSIGNALED Sys.sigterm, partial_output).
-    Default timeout: 60s. *)
+    On timeout, status reflects the kill signal used during reap.
+    Default timeout: 60s.
+    Lifecycle: create_process -> read stdout -> reap_child (single reap point). *)
 let run_in_systhread_with_status ?(timeout_sec=60.0) cmd =
   Eio_unix.run_in_systhread (fun () ->
     let (rd, wr) = Unix.pipe () in
@@ -176,25 +177,13 @@ let run_in_systhread_with_status ?(timeout_sec=60.0) cmd =
         Unix.stdin wr Unix.stderr
     in
     Unix.close wr;
-    let reaped = ref false in
     Fun.protect ~finally:(fun () ->
-      (try Unix.close rd with Unix.Unix_error _ -> ());
-      if not !reaped then
-        (match try Unix.waitpid [Unix.WNOHANG] pid with Unix.Unix_error _ -> (pid, Unix.WEXITED 1) with
-         | (0, _) -> kill_and_reap pid
-         | _ -> ())
+      (try Unix.close rd with Unix.Unix_error _ -> ())
     ) (fun () ->
       let (timed_out, content) = read_fd_with_timeout rd timeout_sec in
-      if timed_out then begin
+      if timed_out then
         Printf.eprintf "[Process_eio] Timeout after %.0fs: %s\n%!" timeout_sec cmd;
-        (Unix.WSIGNALED Sys.sigterm, content)
-      end else begin
-        let (_, status) =
-          try Unix.waitpid [] pid
-          with Unix.Unix_error _ -> (pid, Unix.WEXITED 1)
-        in
-        reaped := true;
-        (status, content)
-      end
+      let status = reap_child pid in
+      (status, content)
     )
   )

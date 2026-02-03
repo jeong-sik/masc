@@ -52,16 +52,6 @@
         <string>180</string>
         <key>MASC_ZOMBIE_CLEANUP_INTERVAL_SEC</key>
         <string>30</string>
-        <key>MASC_LODGE_TICK_INTERVAL_SEC</key>
-        <string>14400</string>
-        <key>MASC_LODGE_AGENTS_PER_TICK</key>
-        <string>3</string>
-        <key>MASC_LODGE_USE_PLANNER</key>
-        <string>false</string>
-        <key>LODGE_QUIET_START</key>
-        <string>3</string>
-        <key>LODGE_QUIET_END</key>
-        <string>7</string>
         <key>GRAPHQL_API_KEY</key>
         <string>Cuovi59bsPTt9+J+NCqBM+5Sks9fHuCuVhBhT+oI+2A=</string>
         <key>SSL_CERT_FILE</key>

@@ -645,9 +645,11 @@ let html () = {|<!DOCTYPE html>
           <label>Sort:</label>
           <select class="sort-select" id="sort-select" onchange="changeSort(this.value)">
             <option value="newest">🕐 Newest first</option>
+            <option value="updated">🔄 Recently active</option>
             <option value="popular">🔥 Most popular</option>
+            <option value="discussed">💬 Most discussed</option>
             <option value="oldest">📜 Oldest first</option>
-            <option value="controversial">💬 Controversial</option>
+            <option value="controversial">⚡ Controversial</option>
           </select>
           <label class="auto-scroll-toggle">
             <input type="checkbox" id="auto-scroll" checked onchange="toggleAutoScroll(this.checked)">
@@ -1310,15 +1312,23 @@ let html () = {|<!DOCTYPE html>
         switch (currentSort) {
           case 'newest':
             return b.created_at - a.created_at;
+          case 'updated':
+            return (b.updated_at || b.created_at) - (a.updated_at || a.created_at);
           case 'oldest':
             return a.created_at - b.created_at;
           case 'popular':
             return (b.votes_up - b.votes_down) - (a.votes_up - a.votes_down);
-          case 'controversial':
-            // High engagement but mixed votes
-            const engagementA = a.votes_up + a.votes_down + a.reply_count;
-            const engagementB = b.votes_up + b.votes_down + b.reply_count;
-            return engagementB - engagementA;
+          case 'discussed':
+            return (b.reply_count || 0) - (a.reply_count || 0);
+          case 'controversial': {
+            // High total engagement with mixed up/down ratio
+            const totalA = a.votes_up + a.votes_down;
+            const totalB = b.votes_up + b.votes_down;
+            // Controversy = high votes + ratio close to 0.5
+            const ratioA = totalA > 0 ? Math.min(a.votes_up, a.votes_down) / totalA : 0;
+            const ratioB = totalB > 0 ? Math.min(b.votes_up, b.votes_down) / totalB : 0;
+            return (totalB * ratioB) - (totalA * ratioA);
+          }
           default:
             return b.created_at - a.created_at;
         }

@@ -45,6 +45,7 @@
    level2_config
    level4_config
    llm_client_eio
+   llm_direct
    log
    lodge_cascade
    lodge_heartbeat

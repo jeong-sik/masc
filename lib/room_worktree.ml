@@ -24,6 +24,12 @@ let run_shell_lines cmd =
     read_lines []
   )
 
+(** Run shell command and get exit code (non-blocking for Eio) *)
+let run_shell_exit cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    Sys.command cmd
+  )
+
 (** Get git root directory - delegates to Room_git *)
 let git_root config =
   Room_git.git_root ~base_path:config.base_path
@@ -125,7 +131,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
         end else begin
           (* Fetch origin first *)
           let fetch_cmd = Printf.sprintf "cd %s && git fetch origin 2>&1" root in
-          let _ = Sys.command fetch_cmd in
+          let _ = run_shell_exit fetch_cmd in
 
           match Room_git.resolve_base_branch root base_branch with
           | Error e -> Error e
@@ -139,7 +145,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
               let cmd = Printf.sprintf
                 "cd %s && git worktree add %s -b %s origin/%s 2>&1"
                 root worktree_path branch_name resolved_base in
-              let exit_code = Sys.command cmd in
+              let exit_code = run_shell_exit cmd in
 
               if exit_code = 0 then begin
                 (* Update agent's current_worktree in state *)
@@ -189,16 +195,16 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
         else begin
           (* Remove worktree *)
           let remove_cmd = Printf.sprintf "cd %s && git worktree remove %s 2>&1" root worktree_path in
-          let exit_code = Sys.command remove_cmd in
+          let exit_code = run_shell_exit remove_cmd in
 
           if exit_code = 0 then begin
             (* Try to delete the branch (may fail if not merged, which is ok) *)
             let branch_cmd = Printf.sprintf "cd %s && git branch -d %s 2>&1" root branch_name in
-            let _ = Sys.command branch_cmd in
+            let _ = run_shell_exit branch_cmd in
 
             (* Prune stale worktrees *)
             let prune_cmd = Printf.sprintf "cd %s && git worktree prune 2>&1" root in
-            let _ = Sys.command prune_cmd in
+            let _ = run_shell_exit prune_cmd in
 
             (* Log event *)
             let event = Printf.sprintf

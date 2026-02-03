@@ -497,30 +497,14 @@ let default_config = {
   quiet_hours = (1, 6);
 }
 
-(** Load config from environment *)
+(** Load config from Env_config.LodgeV2 (SSOT: MASC_LODGE_* env vars) *)
 let load_config () =
-  let get_float name default =
-    match Sys.getenv_opt name with
-    | Some v -> (try Float.of_string v with _ -> default)
-    | None -> default
-  in
-  let get_int name default =
-    match Sys.getenv_opt name with
-    | Some v -> (try int_of_string v with _ -> default)
-    | None -> default
-  in
-  let get_bool name default =
-    match Sys.getenv_opt name with
-    | Some "1" | Some "true" | Some "yes" -> true
-    | Some "0" | Some "false" | Some "no" -> false
-    | _ -> default
-  in
   {
-    interval_s = get_float "LODGE_INTERVAL" 120.0;
-    enabled = get_bool "LODGE_ENABLED" true;
-    agents_per_tick = get_int "LODGE_AGENTS_PER_TICK" 2;
-    min_checkin_gap_s = get_float "LODGE_MIN_CHECKIN_GAP" 1800.0;
-    quiet_hours = (get_int "LODGE_QUIET_START" 1, get_int "LODGE_QUIET_END" 6);
+    interval_s = Env_config.LodgeV2.tick_interval_seconds;
+    enabled = Env_config.LodgeV2.enabled;
+    agents_per_tick = Env_config.LodgeV2.agents_per_tick;
+    min_checkin_gap_s = Env_config.LodgeV2.min_checkin_gap_seconds;
+    quiet_hours = (Env_config.LodgeV2.quiet_start, Env_config.LodgeV2.quiet_end);
   }
 
 (** {1 Types — Check-in Model v2} *)
@@ -675,8 +659,7 @@ let lodge_status () : lodge_status =
   let agents = !agents_cache in
   {
     ls_enabled = !_lodge_enabled;
-    ls_interval_s = (let e = Sys.getenv_opt "LODGE_INTERVAL" in
-      match e with Some s -> (try float_of_string s with _ -> 120.0) | None -> 120.0);
+    ls_interval_s = Env_config.LodgeV2.tick_interval_seconds;
     ls_agent_count = List.length agents;
     ls_agent_names = List.map (fun a -> a.name) agents;
     ls_last_tick = !_lodge_last_tick;

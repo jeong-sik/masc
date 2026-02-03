@@ -19,6 +19,12 @@ let run_shell_line cmd =
     result
   )
 
+(** Run shell command and get exit code (non-blocking for Eio) *)
+let run_shell_exit cmd =
+  Eio_unix.run_in_systhread (fun () ->
+    Sys.command cmd
+  )
+
 (** Run shell command and get all lines (non-blocking for Eio) *)
 let run_shell_lines cmd =
   Eio_unix.run_in_systhread (fun () ->
@@ -53,7 +59,7 @@ let remote_branch_exists root branch =
   let cmd = Printf.sprintf
     "cd %s && git show-ref --verify --quiet refs/remotes/origin/%s" root branch
   in
-  Sys.command cmd = 0
+  run_shell_exit cmd = 0
 
 let origin_head_branch root =
   let cmd = Printf.sprintf
@@ -116,7 +122,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
         else begin
           (* Fetch origin first *)
           let fetch_cmd = Printf.sprintf "cd %s && git fetch origin 2>&1" root in
-          let _ = Sys.command fetch_cmd in
+          let _ = run_shell_exit fetch_cmd in
           match resolve_base_branch root base_branch with
           | Error e -> Error e
           | Ok (resolved_base, fallback_from) ->
@@ -129,7 +135,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               let cmd = Printf.sprintf
                 "cd %s && git worktree add %s -b %s origin/%s 2>&1"
                 root worktree_path branch_name resolved_base in
-              let exit_code = Sys.command cmd in
+              let exit_code = run_shell_exit cmd in
 
               if exit_code = 0 then begin
                 Ok (Printf.sprintf "✅ Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work && gh pr create --draft"
@@ -160,16 +166,16 @@ let remove ~base_path ~agent_name ~task_id : string masc_result =
       else begin
         (* Remove worktree *)
         let remove_cmd = Printf.sprintf "cd %s && git worktree remove %s 2>&1" root worktree_path in
-        let exit_code = Sys.command remove_cmd in
+        let exit_code = run_shell_exit remove_cmd in
 
         if exit_code = 0 then begin
           (* Try to delete the branch (may fail if not merged, which is ok) *)
           let branch_cmd = Printf.sprintf "cd %s && git branch -d %s 2>&1" root branch_name in
-          let _ = Sys.command branch_cmd in
+          let _ = run_shell_exit branch_cmd in
 
           (* Prune stale worktrees *)
           let prune_cmd = Printf.sprintf "cd %s && git worktree prune 2>&1" root in
-          let _ = Sys.command prune_cmd in
+          let _ = run_shell_exit prune_cmd in
 
           Ok (Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s" worktree_path branch_name)
         end

@@ -117,14 +117,22 @@ let execute_github action =
     execute_shell (Printf.sprintf "gh issue create --title '%s' --body '%s'" 
       (String.escaped title) (String.escaped body))
 
+let rec ensure_dir path =
+  if not (Sys.file_exists path) then begin
+    let parent = Filename.dirname path in
+    if parent <> path && not (Sys.file_exists parent) then
+      ensure_dir parent;
+    try Unix.mkdir path 0o755
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
 (** Write config to JSON file in .masc/config/ *)
 let execute_config_change key value =
   let config_dir = ".masc/config" in
   let config_file = Filename.concat config_dir (key ^ ".json") in
   try
     (* Ensure directory exists *)
-    if not (Sys.file_exists config_dir) then
-      ignore (Sys.command (Printf.sprintf "mkdir -p %s" config_dir));
+    ensure_dir config_dir;
     (* Write JSON config *)
     let json = `Assoc [("key", `String key); ("value", `String value); 
                        ("updated_at", `Float (Unix.gettimeofday ()))] in

@@ -197,6 +197,22 @@ module LodgeV2 = struct
   (** Use plan-based agent selection (vs legacy round-robin) *)
   let use_planner =
     get_bool ~default:true "MASC_LODGE_USE_PLANNER"
+
+  (** Enable heartbeat *)
+  let enabled =
+    get_bool ~default:true "MASC_LODGE_ENABLED"
+
+  (** Quiet hours start (KST, inclusive) *)
+  let quiet_start =
+    get_int ~default:3 "MASC_LODGE_QUIET_START"
+
+  (** Quiet hours end (KST, exclusive) *)
+  let quiet_end =
+    get_int ~default:7 "MASC_LODGE_QUIET_END"
+
+  (** Min gap between same agent check-ins (seconds) *)
+  let min_checkin_gap_seconds =
+    get_float ~default:1800.0 "MASC_LODGE_MIN_CHECKIN_GAP"
 end
 
 (** Print configuration summary for debugging *)

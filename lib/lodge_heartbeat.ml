@@ -1600,44 +1600,92 @@ let get_agent_recent_posts ~agent_name ~limit =
       Board.Agent_id.to_string p.author = agent_name)
   |> (fun posts -> List.filteri (fun i _ -> i < limit) posts)
 
-(** Simple keyword overlap for duplicate detection *)
+(** Hybrid duplicate detection: prefix match + keyword overlap.
+    Short Korean sentences ("⚡ 실행 방안을 고민해봅니다") are caught by prefix.
+    Longer paraphrases are caught by keyword overlap. *)
 let content_similarity s1 s2 =
-  let words1 = String.split_on_char ' ' (String.lowercase_ascii s1) in
-  let words2 = String.split_on_char ' ' (String.lowercase_ascii s2) in
-  let common = List.filter (fun w ->
-    String.length w > 3 && List.mem w words2
-  ) words1 in
-  if List.length words1 = 0 then 0.0
-  else float_of_int (List.length common) /. float_of_int (List.length words1)
+  let s1l = String.lowercase_ascii s1 in
+  let s2l = String.lowercase_ascii s2 in
+  (* 1. Prefix match: first 20 chars identical → very likely duplicate *)
+  let prefix_len = min 20 (min (String.length s1l) (String.length s2l)) in
+  if prefix_len > 8 && String.sub s1l 0 prefix_len = String.sub s2l 0 prefix_len then
+    0.9
+  else begin
+    (* 2. Keyword overlap (original logic, lowered word-length threshold for Korean) *)
+    let words1 = String.split_on_char ' ' s1l |> List.filter (fun w -> String.length w > 1) in
+    let words2 = String.split_on_char ' ' s2l |> List.filter (fun w -> String.length w > 1) in
+    let common = List.filter (fun w -> List.mem w words2) words1 in
+    if List.length words1 = 0 then 0.0
+    else float_of_int (List.length common) /. float_of_int (List.length words1)
+  end
 
-(** Check if content is too similar to agent's recent posts *)
+(** Check if content is too similar to agent's recent posts.
+    Looks at last 20 posts (was 5) with threshold 0.3 (was 0.4). *)
 let is_duplicate_post ~agent_name ~content =
-  let recent = get_agent_recent_posts ~agent_name ~limit:5 in
+  let recent = get_agent_recent_posts ~agent_name ~limit:20 in
   List.exists (fun (p : Board.post) ->
-    content_similarity content p.content > 0.4
+    content_similarity content p.content > 0.3
   ) recent
 
-(** Personality-based post relevance scoring *)
+(** {2 Psychological Decay Model}
+
+    Based on cognitive science:
+    - Ebbinghaus forgetting curve: salience decays as e^(-λt)
+    - Retrieval resets the clock: comments/votes refresh updated_at
+    - Zeigarnik effect: unanswered posts (open questions) linger longer
+    - Social proof: engagement sustains attention
+    - Habituation: own posts feel "done" *)
+
+let post_freshness (post : Board.post) =
+  let now = Time_compat.now () in
+  (* Use updated_at (last interaction), not created_at — retrieval resets the curve *)
+  let hours_since = (now -. post.updated_at) /. 3600.0 in
+  (* Half-life 12h: a post is half as salient after 12 hours of silence *)
+  let lambda = 0.693 /. 12.0 in
+  let decay = exp (-. lambda *. hours_since) in
+  (* Social proof: engagement slows decay *)
+  let engagement = float_of_int (post.votes_up + post.reply_count) in
+  let engagement_boost = 1.0 +. (log (1.0 +. engagement) *. 0.3) in
+  (* Zeigarnik: unanswered posts feel unfinished → linger 40% longer *)
+  let zeigarnik = if post.reply_count = 0 then 1.4 else 1.0 in
+  decay *. engagement_boost *. zeigarnik
+
+(** Personality-based post relevance scoring (with psychological decay) *)
 let post_relevance_for_agent ~agent_name ~agent_traits (post : Board.post) =
   let content_lower = String.lowercase_ascii post.content in
   let author = Board.Agent_id.to_string post.author in
-  (* Don't suggest own posts *)
+  (* Habituation: own posts feel "done" *)
   if author = agent_name then -100.0
   else begin
-    let base_score = 1.0 in
-    (* Trait-based relevance *)
+    let freshness = post_freshness post in
+
+    (* Direct keyword match from agent's traits + interests *)
+    let keyword_bonus = List.fold_left (fun acc kw ->
+      let kw_lower = String.lowercase_ascii kw in
+      let rec find s pattern start =
+        if start + String.length pattern > String.length s then false
+        else if String.sub s start (String.length pattern) = pattern then true
+        else find s pattern (start + 1)
+      in
+      if String.length kw_lower >= 2 && find content_lower kw_lower 0
+      then acc +. 0.4 else acc
+    ) 0.0 agent_traits in
+
+    (* Semantic relevance via trait categories *)
     let trait_bonus = List.fold_left (fun acc trait ->
       let keywords = match trait with
         | "creative" | "imaginative" | "visionary" ->
-            ["future"; "idea"; "possibility"; "imagine"; "dream"; "new"; "미래"; "아이디어"; "가능성"; "상상"]
+            ["future"; "idea"; "possibility"; "imagine"; "dream"; "미래"; "아이디어"; "가능성"; "상상"]
         | "analytical" | "critical" | "questioning" ->
-            ["problem"; "issue"; "flaw"; "question"; "why"; "risk"; "문제"; "질문"; "왜"; "리스크"; "의문"]
+            ["problem"; "issue"; "flaw"; "question"; "why"; "risk"; "문제"; "질문"; "왜"; "리스크"]
         | "reflective" | "archival" | "pattern-finding" ->
-            ["history"; "past"; "experience"; "lesson"; "역사"; "과거"; "경험"; "교훈"; "예전"]
+            ["history"; "past"; "experience"; "lesson"; "역사"; "과거"; "경험"; "교훈"]
         | "practical" | "efficient" | "action-oriented" ->
-            ["how"; "implement"; "build"; "ship"; "deploy"; "구현"; "배포"; "빌드"; "실행"; "방법"]
+            ["how"; "implement"; "build"; "ship"; "deploy"; "구현"; "배포"; "빌드"; "방법"]
         | "social" | "linking" | "bridge-building" ->
-            ["team"; "collaborate"; "connect"; "together"; "share"; "협업"; "함께"; "공유"; "같이"]
+            ["team"; "collaborate"; "connect"; "together"; "share"; "협업"; "함께"; "공유"]
+        | "contemplative" | "observant" ->
+            ["사람"; "일상"; "반복"; "관계"; "시간"; "왜"; "정말"; "human"; "daily"]
         | _ -> []
       in
       let matches = List.filter (fun kw ->
@@ -1647,11 +1695,11 @@ let post_relevance_for_agent ~agent_name ~agent_traits (post : Board.post) =
           else find s pattern (start + 1)
         in find content_lower kw 0
       ) keywords in
-      acc +. (float_of_int (List.length matches) *. 0.3)
+      acc +. (float_of_int (List.length matches) *. 0.2)
     ) 0.0 agent_traits in
-    (* Bonus for posts without many comments *)
-    let reply_bonus = if post.reply_count < 2 then 0.5 else 0.0 in
-    base_score +. trait_bonus +. reply_bonus
+
+    (* Final = freshness × (1 + relevance bonuses) *)
+    freshness *. (1.0 +. keyword_bonus +. trait_bonus)
   end
 
 (** Sort posts by relevance for agent *)

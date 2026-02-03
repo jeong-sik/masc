@@ -122,6 +122,28 @@ type lodge_status = {
 val lodge_status : unit -> lodge_status
 val lodge_status_to_json : lodge_status -> Yojson.Safe.t
 
+[@@@warning "-32"]
+(** {1 REST API — Lodge Agent management} *)
+
+val load_lodge_agents_full : unit -> (Yojson.Safe.t, string) result
+
+val create_agent_graphql :
+  name:string ->
+  emoji:string ->
+  korean_name:string option ->
+  traits:string list ->
+  interests:string list ->
+  activity_level:float ->
+  preferred_hours:int list ->
+  peak_hour:int option ->
+  model:string ->
+  personality_hint:string option ->
+  primary_value:string option ->
+  unit ->
+  (Yojson.Safe.t, string) result
+
+[@@@warning "+32"]
+
 (** {1 Formatting} *)
 
 val string_of_trigger : checkin_trigger -> string

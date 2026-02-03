@@ -3,7 +3,7 @@
     Combines multiple memory sources:
     - Council thread (short-term, per-agent conversation history)
     - Memory Stream (scored retrieval, long-term)
-    - Neo4j graph (agent activity relationships)
+    - Neo4j graph via GraphQL (agent activity relationships)
 
     Self-contained: accesses Council.Conversation and Memory_stream directly
     to avoid circular dependency with Lodge_heartbeat.
@@ -25,23 +25,6 @@ type experience = {
 }
 
 (** {1 Utilities} *)
-
-(** Escape string for Cypher single-quoted literals.
-    Handles all Neo4j Cypher escape sequences per specification. *)
-let cypher_escape s =
-  let buf = Buffer.create (String.length s * 2) in
-  String.iter (fun c ->
-    match c with
-    | '\'' -> Buffer.add_string buf "\\'"
-    | '\\' -> Buffer.add_string buf "\\\\"
-    | '\n' -> Buffer.add_string buf "\\n"
-    | '\r' -> Buffer.add_string buf "\\r"
-    | '\t' -> Buffer.add_string buf "\\t"
-    | '\b' -> Buffer.add_string buf "\\b"
-    | c when Char.code c < 0x20 -> ()  (* strip other control chars *)
-    | _ -> Buffer.add_char buf c
-  ) s;
-  Buffer.contents buf
 
 (** Truncate string to max [n] bytes, UTF-8 safe (cuts at char boundary). *)
 let truncate s n =
@@ -65,13 +48,6 @@ let run_shell_nonblocking cmd =
 (** Resolve ME_ROOT consistently *)
 let me_root () =
   Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me"
-
-(** Build a shell command to run a Neo4j Cypher query via sb CLI.
-    Uses Filename.quote to prevent shell injection from the query string. *)
-let neo4j_query_cmd cypher =
-  Printf.sprintf "cd %s && sb neo4j query %s 2>/dev/null"
-    (Filename.quote (me_root ()))
-    (Filename.quote cypher)
 
 (** {1 Council Thread Access (direct, no Lodge_heartbeat dependency)} *)
 
@@ -129,37 +105,47 @@ let recall_from_stream ~agent_name ~query ~limit : (string * float) list =
     (e.content, 0.4 +. float_of_int e.importance *. 0.06)  (* 0.4 - 1.0 range *)
   ) entries
 
-(** Recall from Neo4j agent interests.
-    Fetches agent's recent activity and interest topics from graph. *)
+(** GraphQL endpoint and auth for Lodge activity queries *)
+let graphql_url = "https://second-brain-graphql-production.up.railway.app/graphql"
+let graphql_api_key () =
+  Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:""
+
+(** Recall from Neo4j via GraphQL API.
+    Fetches agent's recent LodgeActivity records through the GraphQL layer. *)
 let recall_from_neo4j ~agent_name ~limit : (string * float) list =
-  let query = Printf.sprintf
-    "MATCH (a:Agent {name: '%s'})-[r:PERFORMED]->(act:LodgeActivity) \
-     RETURN act.content, act.action_type, act.timestamp \
-     ORDER BY act.timestamp DESC LIMIT %d"
-    (cypher_escape agent_name) limit
+  let gql = Printf.sprintf
+    "{\"query\": \"{ agentActivities(agentName: \\\"%s\\\", first: %d) { edges { node { content } } } }\"}"
+    agent_name limit
   in
-  let cmd = neo4j_query_cmd query in
+  let cmd = Printf.sprintf
+    "curl -s --connect-timeout 3 --max-time 5 %s -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
+    graphql_url (graphql_api_key ()) gql
+  in
   try
     let result = run_shell_nonblocking cmd in
     if String.length result < 5 then []
     else begin
       let json = Yojson.Safe.from_string result in
-      let records = Yojson.Safe.Util.(json |> member "records" |> to_list) in
-      List.filter_map (fun record ->
+      let edges = json
+        |> Yojson.Safe.Util.member "data"
+        |> Yojson.Safe.Util.member "agentActivities"
+        |> Yojson.Safe.Util.member "edges"
+        |> Yojson.Safe.Util.to_list
+      in
+      List.filter_map (fun edge ->
         try
-          let arr = Yojson.Safe.Util.to_list record in
-          let inner = Yojson.Safe.Util.to_list (List.hd arr) in
-          let content = Yojson.Safe.Util.to_string (List.nth inner 0) in
+          let node = Yojson.Safe.Util.member "node" edge in
+          let content = Yojson.Safe.Util.(member "content" node |> to_string) in
           Some (content, 0.6)
         with Yojson.Safe.Util.Type_error _ | Failure _ -> None
-      ) records
+      ) edges
     end
   with
   | Yojson.Json_error msg ->
-      Eio.traceln "   ⚠️ [Lodge_memory] Neo4j recall JSON parse error: %s" msg;
+      Eio.traceln "   ⚠️ [Lodge_memory] GraphQL recall JSON parse error: %s" msg;
       []
   | exn ->
-      Eio.traceln "   ⚠️ [Lodge_memory] Neo4j recall error: %s" (Printexc.to_string exn);
+      Eio.traceln "   ⚠️ [Lodge_memory] GraphQL recall error: %s" (Printexc.to_string exn);
       []
 
 (** Recall relevant memories for an agent.
@@ -225,30 +211,43 @@ let store_to_stream (exp : experience) =
   Memory_stream.add_memory ~agent_name:exp.agent_name ~content:exp.content ~importance:5 mem_type;
   Memory_stream.rotate_if_needed ~agent_name:exp.agent_name
 
-(** Record experience to Neo4j graph (long-term) *)
+(** Record experience to Neo4j graph via GraphQL mutation (long-term) *)
 let store_to_neo4j (exp : experience) =
-  let board_id_str = Option.value ~default:"" exp.board_id in
-  let query = Printf.sprintf
-    "MATCH (a:Agent {name: '%s'}) \
-     CREATE (act:LodgeActivity { \
-       content: '%s', \
-       action_type: '%s', \
-       context: '%s', \
-       board_id: '%s', \
-       timestamp: datetime() \
-     }) \
-     CREATE (a)-[:PERFORMED]->(act) \
-     RETURN act"
-    (cypher_escape exp.agent_name)
-    (cypher_escape (truncate exp.content 200))
-    (cypher_escape exp.action_type)
-    (cypher_escape (truncate exp.context 100))
-    (cypher_escape board_id_str)
+  let escape_json s =
+    s |> String.split_on_char '"' |> String.concat "\\\""
+      |> String.split_on_char '\n' |> String.concat "\\n"
   in
-  let cmd = neo4j_query_cmd query in
-  let result = run_shell_nonblocking cmd in
-  if String.length result > 0 && String.length result < 5 then
-    Eio.traceln "   ⚠️ [Lodge_memory] Neo4j store may have failed for %s" exp.agent_name
+  let content = escape_json (truncate exp.content 200) in
+  let context = escape_json (truncate exp.context 100) in
+  let board_id_part = match exp.board_id with
+    | Some b -> Printf.sprintf ", boardId: \\\"%s\\\"" (escape_json b)
+    | None -> ""
+  in
+  let gql = Printf.sprintf
+    "{\"query\": \"mutation { createLodgeActivity(agentName: \\\"%s\\\", content: \\\"%s\\\", actionType: \\\"%s\\\", context: \\\"%s\\\"%s) { success message } }\"}"
+    (escape_json exp.agent_name) content (escape_json exp.action_type) context board_id_part
+  in
+  let cmd = Printf.sprintf
+    "curl -s --connect-timeout 3 --max-time 5 %s -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
+    graphql_url (graphql_api_key ()) gql
+  in
+  try
+    let result = run_shell_nonblocking cmd in
+    if String.length result < 5 then
+      Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store empty response for %s" exp.agent_name
+    else begin
+      let json = Yojson.Safe.from_string result in
+      match Yojson.Safe.Util.member "errors" json with
+      | `List (_ :: _ as errors) ->
+        let msg = try
+          List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+        with _ -> "unknown" in
+        Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store error for %s: %s" exp.agent_name msg
+      | _ -> ()
+    end
+  with exn ->
+    Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store exception for %s: %s"
+      exp.agent_name (Printexc.to_string exn)
 
 (** Record an agent's experience to all memory stores *)
 let store exp =

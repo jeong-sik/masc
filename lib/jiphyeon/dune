@@ -15,7 +15,6 @@
    caqti-driver-postgresql
    eio
    eio_main
-   time_compat
    uuidm
    unix)
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

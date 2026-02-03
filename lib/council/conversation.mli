@@ -53,6 +53,7 @@ type thread = {
   max_turns: int;          (** Loop prevention limit *)
   current_turn: int;       (** Next turn sequence *)
   floor_holder: string option; (** Who has the floor (SSJ) *)
+  source_post_id: string option; (** Board post that spawned this thread *)
 }
 
 (** Configuration for conversation storage *)
@@ -89,6 +90,7 @@ val start :
   initiator:string ->
   ?max_turns:int ->
   ?initial_content:string ->
+  ?source_post_id:string ->
   unit ->
   (thread, string) result
 

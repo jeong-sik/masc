@@ -259,23 +259,17 @@ let sweep store =
     (!removed_posts, !removed_comments)
   )
 
-(** Auto-sweep if needed, also handles deferred flush *)
+(** Deferred flush callback — set after rewrite helpers are defined.
+    Avoids forward-reference issue (maybe_sweep is defined before rewrite_posts). *)
+let deferred_flush_fn : (store -> unit) ref = ref (fun _ -> ())
+
+(** Auto-sweep if needed, also triggers deferred flush via callback *)
 let maybe_sweep store =
   let now = Time_compat.now () in
   if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
     ignore (sweep store);
-  (* Deferred flush: batch-write dirty data *)
-  if now -. store.last_flush > flush_interval_sec then begin
-    if store.dirty_posts then begin
-      rewrite_posts store;
-      store.dirty_posts <- false
-    end;
-    if store.dirty_comments then begin
-      rewrite_comments store;
-      store.dirty_comments <- false
-    end;
-    store.last_flush <- now
-  end
+  if now -. store.last_flush > flush_interval_sec then
+    !deferred_flush_fn store
 
 (** {1 Persistence Paths} *)
 
@@ -956,6 +950,19 @@ let flush_dirty store =
       store.dirty_comments <- false
     end
   )
+
+(** Register deferred flush now that rewrite helpers are available *)
+let () = deferred_flush_fn := (fun store ->
+  if store.dirty_posts then begin
+    rewrite_posts store;
+    store.dirty_posts <- false
+  end;
+  if store.dirty_comments then begin
+    rewrite_comments store;
+    store.dirty_comments <- false
+  end;
+  store.last_flush <- Time_compat.now ()
+)
 
 (** {1 Karma & Flair - Reddit-style} *)
 

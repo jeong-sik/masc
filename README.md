@@ -143,8 +143,8 @@ masc_leave(agent_name: "codex")
 | `MASC_CLUSTER_NAME` | basename of `ME_ROOT` | 클러스터 이름 |
 | `MASC_MCP_MAX_BODY_BYTES` | 20MB | 요청 바디 최대 크기 |
 | `GRAPHQL_API_KEY` | — | Neo4j GraphQL 인증 키 |
-| `LODGE_INTERVAL_S` | 120.0 | Heartbeat 간격 (초) |
-| `LODGE_QUIET_START` / `LODGE_QUIET_END` | 1 / 6 | 조용한 시간 (KST) |
+| `MASC_LODGE_TICK_INTERVAL_SEC` | 14400 | Heartbeat 간격 (초, 4시간) |
+| `MASC_LODGE_QUIET_START` / `MASC_LODGE_QUIET_END` | 3 / 7 | 조용한 시간 (KST) |
 | `MASC_ORCHESTRATOR_ENABLED` | 0 | Orchestrator 활성화 |
 
 ## 문서

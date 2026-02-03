@@ -80,15 +80,15 @@ let load_config () =
     | _ -> default
   in
   {
-    enabled = get_env_bool "LODGE_DAEMON_ENABLED" false;
-    check_interval_s = get_env_float "LODGE_CHECK_INTERVAL" 60.0;
-    heartbeat_interval_s = get_env_float "LODGE_HEARTBEAT_INTERVAL" 30.0;
-    reflection_interval_s = get_env_float "LODGE_REFLECTION_INTERVAL" 3600.0;
+    enabled = get_env_bool "MASC_LODGE_DAEMON_ENABLED" false;
+    check_interval_s = get_env_float "MASC_LODGE_CHECK_INTERVAL" 60.0;
+    heartbeat_interval_s = get_env_float "MASC_LODGE_HEARTBEAT_INTERVAL" 30.0;
+    reflection_interval_s = get_env_float "MASC_LODGE_REFLECTION_INTERVAL" 3600.0;
     ollama_url = Option.value ~default:"http://127.0.0.1:11434"
       (Sys.getenv_opt "OLLAMA_URL");
     (* Always use long-context model - no env override needed *)
     ollama_model = "glm-4.7-flash:latest";
-    neo4j_enabled = get_env_bool "LODGE_NEO4J_ENABLED" true;
+    neo4j_enabled = get_env_bool "MASC_LODGE_NEO4J_ENABLED" true;
   }
 
 (** {1 Mood handling} *)

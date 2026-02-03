@@ -2,7 +2,7 @@
 
     Zero-tolerance implementation:
     - ID validation (no path traversal)
-    - TTL mandatory (no eternal posts)
+    - TTL optional (0 = permanent, default)
     - Max limits enforced (no OOM)
     - Cryptographic IDs (no prediction)
     - Atomic writes (no corruption)
@@ -149,8 +149,8 @@ module Limits = struct
   let max_posts = 10_000
   let max_comments_per_post = 1_000
   let max_content_length = 4_000
-  let default_ttl_hours = 168  (* 7 days *)
-  let max_ttl_hours = 720      (* 30 days max *)
+  let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
+  let max_ttl_hours = 720      (* 30 days max; ignored when ttl=0 *)
   let sweeper_interval_sec = 10  (* Much more aggressive than OpenClaw's 60s *)
   let sweeper_batch_size = 100   (* Backpressure: don't delete too many at once *)
 end
@@ -221,9 +221,9 @@ let sweep store =
     let removed_posts = ref 0 in
     let removed_comments = ref 0 in
 
-    (* Sweep posts - with batch limit *)
+    (* Sweep posts - with batch limit; skip permanent posts (expires_at = 0) *)
     let expired_posts = Hashtbl.fold (fun id (post : post) acc ->
-      if post.expires_at < now && !removed_posts < Limits.sweeper_batch_size then begin
+      if post.expires_at > 0.0 && post.expires_at < now && !removed_posts < Limits.sweeper_batch_size then begin
         incr removed_posts;
         id :: acc
       end else acc
@@ -234,9 +234,9 @@ let sweep store =
       decr store.post_count
     ) expired_posts;
 
-    (* Sweep comments *)
+    (* Sweep comments - skip permanent (expires_at = 0) *)
     let expired_comments = Hashtbl.fold (fun id (comment : comment) acc ->
-      if comment.expires_at < now && !removed_comments < Limits.sweeper_batch_size then begin
+      if comment.expires_at > 0.0 && comment.expires_at < now && !removed_comments < Limits.sweeper_batch_size then begin
         incr removed_comments;
         id :: acc
       end else acc
@@ -428,8 +428,8 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
     Error (Validation_error "Content cannot be empty")
   else
 
-  (* Validate TTL *)
-  let ttl = min ttl_hours Limits.max_ttl_hours in
+  (* Validate TTL: 0 = permanent, else cap at max_ttl_hours *)
+  let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
 
   (* Normalize hearth: lowercase + trim *)
   let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
@@ -447,7 +447,7 @@ let create_post store ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits
         visibility;
         created_at = now;
         updated_at = now;  (* Initially same as created_at *)
-        expires_at = now +. (float_of_int ttl *. 3600.0);
+        expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0);
         votes_up = 0;
         votes_down = 0;
         reply_count = 0;
@@ -557,7 +557,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
           Error (Capacity_exceeded { current = post_comment_count; max = Limits.max_comments_per_post })
         else begin
           let now = Time_compat.now () in
-          let ttl = min ttl_hours Limits.max_ttl_hours in
+          let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
           let comment = {
             id = Comment_id.generate ();
             post_id = pid;
@@ -565,7 +565,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
             author = author_id;
             content;
             created_at = now;
-            expires_at = now +. (float_of_int ttl *. 3600.0);
+            expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0);
             votes_up = 0;
             votes_down = 0;
           } in

@@ -614,6 +614,27 @@ let cached_html = lazy ({|<!DOCTYPE html>
       font-size: 11px;
       color: #888;
     }
+    /* Activity tab styles */
+    .activity-agents {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .activity-line {
+      background: rgba(34, 211, 238, 0.08);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      color: #e2e8f0;
+      border-left: 3px solid #22d3ee;
+    }
+    .board-title {
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 4px;
+    }
   </style>
 </head>
 <body>
@@ -709,7 +730,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             <span>📜 Auto-scroll</span>
           </label>
           <label class="auto-scroll-toggle">
-            <input type="checkbox" id="hide-system" onchange="toggleHideSystem(this.checked)">
+            <input type="checkbox" id="hide-system" checked onchange="toggleHideSystem(this.checked)">
             <span>🚫 Hide System</span>
           </label>
           <label>Author:</label>
@@ -1080,7 +1101,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     // === Main Tab switching ===
     let currentMainTab = 'overview';
-    let hideSystemPosts = false;
+    let hideSystemPosts = true;
     function switchMainTab(tab) {
       currentMainTab = tab;
       document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.remove('active'));
@@ -1288,9 +1309,19 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
       el.innerHTML = posts.map(p => {
         const time = timeAgo(p.created_at);
+        // Parse activity report into individual agent lines
+        const lines = p.content.split('\n').filter(l => l.trim());
+        const title = lines[0] || '';
+        const agentLines = lines.slice(1).filter(l => l.match(/^\[/));
+        const agentHtml = agentLines.length > 0
+          ? '<div class="activity-agents">' + agentLines.map(l =>
+              '<div class="activity-line">' + escapeHtml(l) + '</div>'
+            ).join('') + '</div>'
+          : '<div class="board-content">' + escapeHtml(p.content).replace(/\n/g, '<br>') + '</div>';
         return '<div class="board-item">' +
           '<div class="board-meta">' + time + '</div>' +
-          '<div class="board-content">' + escapeHtml(p.content).replace(/\\n/g, '<br>') + '</div>' +
+          '<div class="board-title">' + escapeHtml(title) + '</div>' +
+          agentHtml +
         '</div>';
       }).join('');
     }

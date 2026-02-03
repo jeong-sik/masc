@@ -69,6 +69,12 @@ let get_bool args key default =
   | `Bool b -> b
   | _ -> default
 
+let get_float_opt args key =
+  match args |> member key with
+  | `Float f -> Some f
+  | `Int i -> Some (float_of_int i)
+  | _ -> None
+
 (** {1 Formatters} *)
 
 let format_post (p : Board.post) =
@@ -92,21 +98,35 @@ let format_post (p : Board.post) =
 
 let format_comment ?(indent=0) (c : Board.comment) =
   let prefix = String.make indent ' ' in
+  let tree_prefix = if indent > 0 then "└─ " else "" in
   let time_str = format_timestamp_relative c.created_at in
-  let ttl_str = format_ttl_remaining c.expires_at in
-  let reply_str = match c.parent_id with
-    | Some pid -> Printf.sprintf " (reply to %s)" (Board.Comment_id.to_string pid)
-    | None -> ""
-  in
-  let score = c.votes_up - c.votes_down in
-  Printf.sprintf "%s%s: %s%s [%s, TTL: %s, ↑%d ↓%d = %+d]"
+  let vote_str = if c.votes_up > 0 || c.votes_down > 0 then
+    Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down
+  else "" in
+  Printf.sprintf "%s%s%s: %s [%s%s]"
     prefix
+    tree_prefix
     (Board.Agent_id.to_string c.author)
     c.content
-    reply_str
     time_str
-    ttl_str
-    c.votes_up c.votes_down score
+    vote_str
+
+(** Format comments as a tree structure, grouping replies under parents *)
+let format_comment_tree (comments : Board.comment list) =
+  let roots = List.filter (fun (c : Board.comment) -> c.parent_id = None) comments in
+  let children_of parent_id =
+    List.filter (fun (c : Board.comment) ->
+      match c.parent_id with
+      | Some pid -> Board.Comment_id.to_string pid = Board.Comment_id.to_string parent_id
+      | None -> false
+    ) comments
+  in
+  let rec render indent (c : Board.comment) =
+    let self = format_comment ~indent c in
+    let kids = children_of c.id in
+    self :: List.concat_map (render (indent + 4)) kids
+  in
+  List.concat_map (render 0) roots
 
 (** {1 Handlers} *)
 
@@ -150,6 +170,8 @@ let handle_post_list args =
   let random = get_bool args "random" false in
   let offset = get_int args "offset" 0 in
   let sort_by = get_string args "sort_by" "hot" |> sort_order_of_string in
+  let exclude_system = get_bool args "exclude_system" false in
+  let since = get_float_opt args "since" in
 
   let visibility_filter = match visibility_str with
     | Some s -> visibility_of_string s
@@ -157,6 +179,14 @@ let handle_post_list args =
   in
 
   let all_posts = Board.list_posts store ~visibility_filter ?hearth ~limit:(limit + offset + 100) () in
+
+  (* Filter out lodge-system posts when exclude_system is true *)
+  let all_posts = if exclude_system then
+    List.filter (fun (p : Board.post) ->
+      Board.Agent_id.to_string p.author <> "lodge-system"
+    ) all_posts
+  else all_posts
+  in
 
   (* Apply sorting based on sort_by *)
   let sorted_posts = match sort_by with
@@ -205,7 +235,19 @@ let handle_post_list args =
   if posts = [] then
     (true, "📭 No posts found.")
   else
-    let formatted = List.map format_post posts in
+    (* Check for new activity since timestamp *)
+    let has_new_activity (p : Board.post) =
+      match since with
+      | None -> false
+      | Some ts ->
+          (* Post itself is new *)
+          p.created_at > ts || p.updated_at > ts
+    in
+    let format_post_with_indicator p =
+      let indicator = if has_new_activity p then " 🔔" else "" in
+      format_post p ^ indicator
+    in
+    let formatted = List.map format_post_with_indicator posts in
     let sort_label = match sort_by with
       | Hot -> "🔥 Hot"
       | Trending -> "📈 Trending"
@@ -230,7 +272,7 @@ let handle_post_get args =
           let comments_str = if comments = [] then
             "\n\n💬 No comments."
           else
-            let formatted = List.map (format_comment ~indent:2) comments in
+            let formatted = format_comment_tree comments in
             Printf.sprintf "\n\n💬 **Comments (%d)**:\n%s"
               (List.length comments)
               (String.concat "\n" formatted)
@@ -399,6 +441,8 @@ let tool_post_list : Types.tool_schema = {
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
       ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
+      ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude lodge-system posts like Activity Reports (default: false)")]);
+      ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
     ]);
   ];
 }

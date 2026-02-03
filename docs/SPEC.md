@@ -393,6 +393,24 @@ masc_done --task_id task-001
 masc_handover_create --source claude --reason context_limit
 ```
 
+### Heartbeat & Persistence
+
+- Presence heartbeat: `masc_heartbeat` every 2-3 minutes while active to keep `last_seen` fresh and avoid zombie cleanup.
+- Background keepalive: `masc_heartbeat_start` (interval 5-300s). Use `smart=true` to skip when busy and slow down when idle.
+- Cleanup: call `masc_heartbeat_stop` on exit or before handover to avoid ghost heartbeats.
+- Persistence: agent metadata lives in `.masc/agents/*.json` (status/last_seen/capabilities). Execution memory persists in `.masc/runs/`, handovers in `.masc/handovers/`, cache in `.masc/cache/` (TTL), and broadcast history in `.masc/messages/`.
+
+```bash
+# Presence ping
+masc_heartbeat
+
+# Start background heartbeat (smart)
+masc_heartbeat_start --interval 30 --smart true --message "🏓 heartbeat"
+
+# Stop background heartbeat
+masc_heartbeat_stop --heartbeat_id hb-xxxx
+```
+
 ### Anti-Patterns
 
 | Anti-Pattern | Problem | Solution |

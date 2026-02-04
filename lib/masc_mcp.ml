@@ -64,6 +64,7 @@ module Backend_eio = Backend_eio
 module Cache_eio = Cache_eio
 module Prometheus = Prometheus
 module Rate_limit = Rate_limit
+module Circuit_breaker = Circuit_breaker
 module Mind_eio = Mind_eio
 module Noosphere_eio = Noosphere_eio
 module Metrics_store_eio = Metrics_store_eio

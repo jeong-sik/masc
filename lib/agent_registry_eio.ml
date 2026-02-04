@@ -15,13 +15,14 @@
 
 (** Global registry instance - must be initialized within Eio context *)
 let global_registry : Agent_identity.Registry.registry option ref = ref None
-let registry_lock = Mutex.create ()
+let registry_lock = Eio.Mutex.create ()
 let initialized = ref false
+
+let with_registry_lock f = Eio.Mutex.use_rw ~protect:true registry_lock (fun () -> f ())
 
 (** Initialize the global registry. Must be called within Eio context. *)
 let init () =
-  Mutex.lock registry_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock registry_lock) (fun () ->
+  with_registry_lock (fun () ->
     if not !initialized then begin
       global_registry := Some (Agent_identity.Registry.create ());
       initialized := true
@@ -41,8 +42,7 @@ let get_registry () =
 
 (** Reset registry for testing *)
 let reset_for_testing () =
-  Mutex.lock registry_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock registry_lock) (fun () ->
+  with_registry_lock (fun () ->
     global_registry := Some (Agent_identity.Registry.create ());
     initialized := true
   )
@@ -51,25 +51,27 @@ let reset_for_testing () =
 
 (** MCP session to identity mapping for fast lookup *)
 let session_identity_map : (string, string) Hashtbl.t = Hashtbl.create 64
-let session_map_lock = Mutex.create ()
+let session_map_lock = Eio.Mutex.create ()
+
+let with_session_lock f = Eio.Mutex.use_rw ~protect:true session_map_lock (fun () -> f ())
 
 (** {1 SSH Key Binding} *)
 
 (** SSH fingerprint to agent_id binding (one key = one agent) *)
 let ssh_key_bindings : (string, string) Hashtbl.t = Hashtbl.create 64
-let ssh_binding_lock = Mutex.create ()
+let ssh_binding_lock = Eio.Mutex.create ()
+
+let with_ssh_lock f = Eio.Mutex.use_rw ~protect:true ssh_binding_lock (fun () -> f ())
 
 (** Check if an SSH key is already bound to another agent *)
 let[@warning "-32"] is_key_bound fingerprint =
-  Mutex.lock ssh_binding_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"ssh_bind_check" ~finally:(fun () -> Mutex.unlock ssh_binding_lock) (fun () ->
+  with_ssh_lock (fun () ->
     Hashtbl.mem ssh_key_bindings fingerprint
   )
 
 (** Get the agent bound to an SSH key *)
 let[@warning "-32"] get_key_binding fingerprint =
-  Mutex.lock ssh_binding_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"ssh_get_bind" ~finally:(fun () -> Mutex.unlock ssh_binding_lock) (fun () ->
+  with_ssh_lock (fun () ->
     Hashtbl.find_opt ssh_key_bindings fingerprint
   )
 
@@ -80,8 +82,7 @@ let[@warning "-32"] get_key_binding fingerprint =
     @param fingerprint SSH key fingerprint (from MASC_AGENT_SSH_KEY env var)
 *)
 let bind_ssh_key ~agent_id ~fingerprint =
-  Mutex.lock ssh_binding_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"ssh_bind" ~finally:(fun () -> Mutex.unlock ssh_binding_lock) (fun () ->
+  with_ssh_lock (fun () ->
     match Hashtbl.find_opt ssh_key_bindings fingerprint with
     | Some existing when existing <> agent_id ->
         Error (Printf.sprintf "SSH key already bound to agent '%s'" existing)
@@ -109,8 +110,7 @@ let[@warning "-32"] try_bind_from_env ~agent_id =
 
 (** Remove SSH key binding (for cleanup) *)
 let[@warning "-32"] unbind_ssh_key ~agent_id =
-  Mutex.lock ssh_binding_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"ssh_unbind" ~finally:(fun () -> Mutex.unlock ssh_binding_lock) (fun () ->
+  with_ssh_lock (fun () ->
     let to_remove = Hashtbl.fold (fun fp aid acc ->
       if aid = agent_id then fp :: acc else acc
     ) ssh_key_bindings [] in
@@ -137,13 +137,11 @@ let get_or_create_identity ?mcp_session_id params =
     match mcp_session_id with
     | None -> None
     | Some sid ->
-        Mutex.lock session_map_lock;
-        let result = Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+        with_session_lock (fun () ->
           match Hashtbl.find_opt session_identity_map sid with
           | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
           | None -> None
-        ) in
-        result
+        )
   in
 
   match existing_by_session with
@@ -166,8 +164,7 @@ let get_or_create_identity ?mcp_session_id params =
       (* Link MCP session ID to identity session key *)
       (match mcp_session_id with
        | Some sid ->
-           Mutex.lock session_map_lock;
-           Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+           with_session_lock (fun () ->
              Hashtbl.replace session_identity_map sid registered.session_key
            )
        | None -> ());
@@ -211,8 +208,7 @@ let list_active ?(within_seconds = 300.0) () =
 (** Clean up stale session mappings *)
 let cleanup_stale_sessions () =
   let reg = get_registry () in
-  Mutex.lock session_map_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+  with_session_lock (fun () ->
     let to_remove = ref [] in
     Hashtbl.iter (fun sid session_key ->
       match Agent_identity.Registry.find_by_session reg session_key with
@@ -228,8 +224,7 @@ let unregister session_key =
   let reg = get_registry () in
   Agent_identity.Registry.unregister reg session_key;
   (* Also clean up session map *)
-  Mutex.lock session_map_lock;
-  Common.protect ~module_name:"agent_registry_eio" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock session_map_lock) (fun () ->
+  with_session_lock (fun () ->
     let to_remove = ref [] in
     Hashtbl.iter (fun sid sk ->
       if sk = session_key then to_remove := sid :: !to_remove

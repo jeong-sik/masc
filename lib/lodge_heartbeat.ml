@@ -861,10 +861,9 @@ let spawn_agent_from_gap ~topic ~(signals : gap_signal_t list) =
       let success = create_agent_in_neo4j ~name:topic ~traits ~description ~preferred_hours in
       if success then begin
         (* Post announcement to board *)
-        let store = Board.global () in
         let announcement = Printf.sprintf "🎉 새 에이전트 탄생: %s\n%s\n(제안: %s)"
           topic description (String.concat ", " proposers) in
-        ignore (Board.create_post store ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
+        ignore (Board_dispatch.create_post ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
       end;
       success
 
@@ -1010,8 +1009,7 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
 (** Scan recent board posts for content matching agent interests.
     Also parse @mentions → Mentioned triggers. *)
 let scan_board_triggers ~since ~(agents : agent list) : (string * checkin_trigger) list =
-  let store = Board.global () in
-  let recent = Board.list_posts store ~limit:20 () in
+  let recent = Board_dispatch.list_posts ~limit:20 () in
   let new_posts = List.filter (fun (p : Board.post) -> p.created_at > since) recent in
   let triggers = ref [] in
   List.iter (fun (p : Board.post) ->
@@ -1148,9 +1146,8 @@ let post_activity_report ~(result : heartbeat_result) =
       match r with Acted _ -> true | _ -> false
     ) result.checkins in
     if has_actions then begin
-      let store = Board.global () in
       let content = Printf.sprintf "🫀 **Lodge Activity Report**\n\n%s" result.activity_report in
-      ignore (Board.create_post store ~author:"lodge-system" ~content ~ttl_hours:24 ())
+      ignore (Board_dispatch.create_post ~author:"lodge-system" ~content ~ttl_hours:24 ())
     end
 
 (** {1 Daemon Loop} *)
@@ -1758,8 +1755,7 @@ let parse_action_response response =
 
 (** Get agent's recent posts to prevent duplicates *)
 let get_agent_recent_posts ~agent_name ~limit =
-  let store = Board.global () in
-  Board.list_posts store ~limit:(limit * 3) ()
+  Board_dispatch.list_posts ~limit:(limit * 3) ()
   |> List.filter (fun (p : Board.post) ->
       Board.Agent_id.to_string p.author = agent_name)
   |> (fun posts -> List.filteri (fun i _ -> i < limit) posts)
@@ -2131,7 +2127,6 @@ let refill () = bucket := min 10 (!bucket + 1)
 
 (** Execute the decided action *)
 let rec execute_agent_action ~agent_name ~action =
-  let store = Board.global () in
   match action with
   | ActionSkip ->
       Eio.traceln "   ⏭️ [%s] Decided to skip" agent_name;
@@ -2145,7 +2140,7 @@ let rec execute_agent_action ~agent_name ~action =
       else if not (check_rate_limit ~agent_name `Post) then begin
         Eio.traceln "   ⏳ [%s] POST rate-limited (30min gap / %d/day max), converting to COMMENT" agent_name max_posts_per_day;
         (* Fallback: convert POST → COMMENT on most recent post *)
-        let recent = Board.list_posts (Board.global ()) ~limit:3 () in
+        let recent = Board_dispatch.list_posts ~limit:3 () in
         (match List.find_opt (fun (p : Board.post) -> Board.Agent_id.to_string p.author <> agent_name) recent with
          | Some target ->
            let pid = Board.Post_id.to_string target.id in
@@ -2156,7 +2151,7 @@ let rec execute_agent_action ~agent_name ~action =
       else if is_duplicate_post ~agent_name ~content then
         Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
       else begin
-        match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
+        match Board_dispatch.create_post ~author:agent_name ~content ~ttl_hours:168 () with
         | Ok post ->
             let post_id = Board.Post_id.to_string post.id in
             Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
@@ -2177,7 +2172,7 @@ let rec execute_agent_action ~agent_name ~action =
       else if not (can_agent_comment ~agent_name ~post_id) then
         Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id
       else begin
-        match Board.add_comment store ~post_id ~author:agent_name ~content () with
+        match Board_dispatch.add_comment ~post_id ~author:agent_name ~content () with
         | Ok comment ->
             let comment_id = Board.Comment_id.to_string comment.id in
             Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
@@ -2194,7 +2189,7 @@ let rec execute_agent_action ~agent_name ~action =
             Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
       end
   | ActionUpvote post_id ->
-      (match Board.vote store ~voter:agent_name ~post_id ~direction:Board.Up with
+      (match Board_dispatch.vote ~voter:agent_name ~post_id ~direction:Board.Up with
        | Ok _ ->
            Printf.printf "   👍 [%s] Upvoted %s\n%!" agent_name post_id;
            record_agent_activity ~name:agent_name;
@@ -2228,7 +2223,7 @@ let rec execute_agent_action ~agent_name ~action =
       (* Auto-create a POST about the code *)
       let post_content = Printf.sprintf "📦 새 실험 코드: %s\n\n```%s\n%s\n```\n\n→ %s"
         filename lang (if String.length code > 200 then String.sub code 0 200 ^ "..." else code) full_path in
-      (match Board.create_post store ~author:agent_name ~content:post_content ~ttl_hours:168 () with
+      (match Board_dispatch.create_post ~author:agent_name ~content:post_content ~ttl_hours:168 () with
        | Ok post ->
            let post_id = Board.Post_id.to_string post.id in
            Printf.printf "   📝 [%s] Posted code announcement: %s\n%!" agent_name post_id;
@@ -2461,8 +2456,7 @@ let tick ~config ~pending_triggers =
   ) selected;
 
   (* Record board state as observations for selected agents *)
-  let store = Board.global () in
-  let recent_posts = Board.list_posts store ~limit:10 () in
+  let recent_posts = Board_dispatch.list_posts ~limit:10 () in
   List.iter (fun (name, _trigger) ->
     let post_summary = recent_posts
       |> List.filteri (fun i _ -> i < 3)
@@ -2606,7 +2600,7 @@ let start ~sw ~clock room_config =
           ) result.checkins in
           List.iter (fun name ->
             if not (is_agent_active ~name) then begin
-              let recent_posts = Board.list_posts (Board.global ()) ~limit:10 () in
+              let recent_posts = Board_dispatch.list_posts ~limit:10 () in
               let on_tick ~name ~state:_ =
                 let trigger_reason = "self-heartbeat continuation" in
                 let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
@@ -2806,9 +2800,8 @@ let handle_broadcast ~sender ~content =
       | Some response ->
           Eio.traceln "   💬 [%s] Responded: %s" agent_name response;
           (* Post as comment or broadcast reply *)
-          let store = Board.global () in
           let reply_content = Printf.sprintf "@%s %s" sender response in
-          (match Board.create_post store ~author:agent_name ~content:reply_content ~ttl_hours:168 () with
+          (match Board_dispatch.create_post ~author:agent_name ~content:reply_content ~ttl_hours:168 () with
           | Ok post ->
               Eio.traceln "   📝 [%s] Posted reply: %s" agent_name (Board.Post_id.to_string post.id);
               Some (agent_name, response)
@@ -2821,8 +2814,7 @@ let handle_broadcast ~sender ~content =
 (** Poll for recent broadcasts and handle them *)
 let poll_and_handle_broadcasts ~since_timestamp =
   (* Get recent posts that look like broadcasts (contain @all or start with 📢) *)
-  let store = Board.global () in
-  let recent_posts = Board.list_posts store ~limit:20 () in
+  let recent_posts = Board_dispatch.list_posts ~limit:20 () in
   let broadcasts = recent_posts |> List.filter (fun (post : Board.post) ->
     post.created_at > since_timestamp &&
     (String.length post.content >= 2 &&

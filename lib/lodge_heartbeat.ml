@@ -2524,6 +2524,7 @@ let tick ~config ~pending_triggers =
 (** Start heartbeat daemon fiber — Generative Agent Architecture *)
 let start ~sw ~clock room_config =
   Printf.printf "+Lodge Heartbeat v2 (Generative Agent): initializing...\n%!";
+  lodge_init_lock ();
   let config = load_config () in
   let tick_interval = Env_config.LodgeV2.tick_interval_seconds in
   let use_planner = Env_config.LodgeV2.use_planner in

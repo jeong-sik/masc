@@ -201,12 +201,13 @@ let post_count_q =
   (Printf.sprintf
     "SELECT COUNT(*)::int FROM masc_board_posts WHERE %s" ttl_where)
 
-(* Sort-order specific list queries. $1=visibility (NULL=any), $2=hearth (NULL=any), $3=limit *)
+(* Sort-order specific list queries. $1=visibility (NULL=any), $2=hearth (NULL=any), $3=limit.
+   NOTE: PostgreSQL cannot infer type from `$n IS NULL` alone, so explicit ::TEXT cast needed. *)
 let mk_list_q order_clause =
   (Caqti_type.(t3 (option string) (option string) int) ->* post_row_t)
   (Printf.sprintf
     "SELECT %s FROM masc_board_posts \
-     WHERE %s AND ($1 IS NULL OR visibility = $1) AND ($2 IS NULL OR hearth = $2) \
+     WHERE %s AND ($1::TEXT IS NULL OR visibility = $1) AND ($2::TEXT IS NULL OR hearth = $2) \
      ORDER BY %s LIMIT $3"
     post_columns ttl_where order_clause)
 
@@ -404,9 +405,11 @@ let sweep_comments_q =
 let board_channel = "masc_board"
 
 (** pg_notify sends real-time notification to all LISTEN clients
-    Payload limited to 8000 bytes by PostgreSQL — truncate if needed *)
+    Payload limited to 8000 bytes by PostgreSQL — truncate if needed.
+    NOTE: pg_notify() returns void but SELECT always produces one row.
+    Using ->! unit (expect one row, discard void value) avoids Caqti error. *)
 let notify_q =
-  (Caqti_type.(t2 string string) ->. Caqti_type.unit)
+  (Caqti_type.(t2 string string) ->! Caqti_type.unit)
   "SELECT pg_notify($1, $2)"
 
 (** Max payload size (safety margin below PostgreSQL 8000 limit) *)
@@ -449,7 +452,7 @@ let notify_event t event =
     then String.sub payload 0 max_notify_payload else payload in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    C.exec notify_q (board_channel, payload)
+    C.find notify_q (board_channel, payload)
   ) t.pool with
   | Ok () -> ()
   | Error err ->

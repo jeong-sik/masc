@@ -33,6 +33,11 @@ if [ -f "$LODGE_ENV" ]; then
     set -a; source "$LODGE_ENV"; set +a
 fi
 
+# Default: enable internal guardian unless explicitly disabled
+if [ -z "$MASC_GUARDIAN_ENABLED" ]; then
+    export MASC_GUARDIAN_ENABLED=true
+fi
+
 # Resolve executable path
 # Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"

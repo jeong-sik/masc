@@ -398,6 +398,63 @@ let sweep_comments_q =
      ) RETURNING 1 \
    ) SELECT COUNT(*)::int FROM deleted"
 
+(** {1 Pub/Sub Notification} *)
+
+(** PostgreSQL NOTIFY channel for Board events *)
+let board_channel = "masc_board"
+
+(** pg_notify sends real-time notification to all LISTEN clients
+    Payload limited to 8000 bytes by PostgreSQL — truncate if needed *)
+let notify_q =
+  (Caqti_type.(t2 string string) ->. Caqti_type.unit)
+  "SELECT pg_notify($1, $2)"
+
+(** Max payload size (safety margin below PostgreSQL 8000 limit) *)
+let max_notify_payload = 7900
+
+(** Event types for Board notifications *)
+type board_event =
+  | Post_created of { post_id: string; author: string; hearth: string option }
+  | Post_voted of { post_id: string; voter: string; direction: string; new_score: int }
+  | Comment_added of { post_id: string; comment_id: string; author: string }
+  | Comment_voted of { comment_id: string; voter: string; direction: string }
+
+(** Serialize event to JSON payload *)
+let event_to_json = function
+  | Post_created { post_id; author; hearth } ->
+      let base = [("type", `String "post_created"); ("post_id", `String post_id); ("author", `String author)] in
+      let with_hearth = match hearth with Some h -> ("hearth", `String h) :: base | None -> base in
+      Yojson.Safe.to_string (`Assoc with_hearth)
+  | Post_voted { post_id; voter; direction; new_score } ->
+      Yojson.Safe.to_string (`Assoc [
+        ("type", `String "post_voted"); ("post_id", `String post_id);
+        ("voter", `String voter); ("direction", `String direction); ("new_score", `Int new_score)
+      ])
+  | Comment_added { post_id; comment_id; author } ->
+      Yojson.Safe.to_string (`Assoc [
+        ("type", `String "comment_added"); ("post_id", `String post_id);
+        ("comment_id", `String comment_id); ("author", `String author)
+      ])
+  | Comment_voted { comment_id; voter; direction } ->
+      Yojson.Safe.to_string (`Assoc [
+        ("type", `String "comment_voted"); ("comment_id", `String comment_id);
+        ("voter", `String voter); ("direction", `String direction)
+      ])
+
+(** Send notification on Board change (fire-and-forget, errors logged) *)
+let notify_event t event =
+  let payload = event_to_json event in
+  (* Truncate if too large *)
+  let payload = if String.length payload > max_notify_payload
+    then String.sub payload 0 max_notify_payload else payload in
+  match Caqti_eio.Pool.use (fun conn ->
+    let module C = (val conn : Caqti_eio.CONNECTION) in
+    C.exec notify_q (board_channel, payload)
+  ) t.pool with
+  | Ok () -> ()
+  | Error err ->
+      Printf.eprintf "[Board_pg] notify_event error: %s\n%!" (Caqti_error.show err)
+
 (** {1 Operations} *)
 
 let create_post t ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours)
@@ -447,7 +504,14 @@ let create_post t ~author ~content ?(visibility=Internal) ?(ttl_hours=Limits.def
   ) t.pool in
   match result with
   | Error err -> Error (caqti_err err)
-  | Ok inner -> inner
+  | Ok (Error e) -> Error e
+  | Ok (Ok post) ->
+      notify_event t (Post_created {
+        post_id = Post_id.to_string post.id;
+        author = Agent_id.to_string post.author;
+        hearth = post.hearth
+      });
+      Ok post
 
 let get_post t ~post_id =
   match Post_id.of_string post_id with
@@ -543,7 +607,13 @@ let add_comment t ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.defaul
     Ok ()
   ) t.pool with
   | Error err -> Error (caqti_err err)
-  | Ok () -> Ok comment
+  | Ok () ->
+      notify_event t (Comment_added {
+        post_id = Post_id.to_string pid;
+        comment_id = Comment_id.to_string comment.id;
+        author = Agent_id.to_string author_id
+      });
+      Ok comment
 
 let get_comments t ~post_id =
   match Post_id.of_string post_id with
@@ -620,6 +690,13 @@ let vote_post t ~voter ~post_id ~direction =
                 Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir
             | None -> ())
        | None -> ());
+      (* Notify vote event *)
+      notify_event t (Post_voted {
+        post_id;
+        voter;
+        direction = vote_direction_to_string direction;
+        new_score = score
+      });
       Ok score
 
 let vote_comment t ~voter ~comment_id ~direction =
@@ -661,8 +738,15 @@ let vote_comment t ~voter ~comment_id ~direction =
         Ok (Ok score)
   ) t.pool in
   match result with
-  | Ok inner -> inner
   | Error err -> Error (caqti_err err)
+  | Ok (Error e) -> Error e
+  | Ok (Ok score) ->
+      notify_event t (Comment_voted {
+        comment_id;
+        voter;
+        direction = vote_direction_to_string direction
+      });
+      Ok score
 
 (** {1 Stats} *)
 

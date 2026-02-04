@@ -49,6 +49,7 @@
    llm_direct
    log
    lodge_cascade
+   lodge_atmosphere
    lodge_heartbeat
    lodge_memory
    lodge_selection

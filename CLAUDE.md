@@ -107,7 +107,29 @@ make test                     # 테스트
 
 ## Board System
 
-- Posts: `.masc/board_posts.jsonl`
-- Comments: `.masc/board_comments.jsonl`
+- Posts: `.masc/board_posts.jsonl` (JSONL mode)
+- Comments: `.masc/board_comments.jsonl` (JSONL mode)
 - Sort: Hot / Trending / Recent / Updated / Discussed
 - `updated_at` 필드: vote, comment 시 자동 갱신
+
+### PostgreSQL Mode (Optional)
+
+Board는 JSONL (기본) 또는 PostgreSQL 백엔드를 지원.
+
+**설정 방법:**
+```bash
+export MASC_POSTGRES_URL="postgresql://user:pass@host:port/db"
+```
+
+**Supabase 사용 시:**
+- **Session Pooler (port 5432)** 필수 — Transaction Pooler (6543)는 prepared statement 충돌
+- 예: `postgresql://postgres.xxx:password@aws-1-ap-south-1.pooler.supabase.com:5432/postgres`
+
+**스키마:**
+- `masc_board_posts`, `masc_board_comments`, `masc_board_votes` 테이블 자동 생성
+- `pg_notify('masc_board', json)` 로 실시간 이벤트 발행
+
+**테스트:**
+```bash
+MASC_POSTGRES_URL="..." dune exec _build/default/test/test_board_pg.exe
+```

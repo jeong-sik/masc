@@ -277,6 +277,10 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
   else
     let state = create_state constraints in
     let history = ref [] in
+    let sleep_s secs =
+      try Eio.Time.sleep (Process_eio.get_clock ()) secs
+      with Failure _ -> Unix.sleepf secs
+    in
 
     let rec loop () =
       (* 1. Hard limit check (failsafe) *)
@@ -322,7 +326,7 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
                 let err_msg = spawn_result.output in
                 if attempt < constraints.retry.max_retries && is_retryable_error err_msg then begin
                   let delay_ms = calc_backoff_delay constraints.retry attempt in
-                  Eio.Time.sleep (Process_eio.get_clock ()) (float_of_int delay_ms /. 1000.0);
+                  sleep_s (float_of_int delay_ms /. 1000.0);
                   state.total_retries <- state.total_retries + 1;
                   try_spawn (attempt + 1)
                 end else
@@ -331,7 +335,7 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
                 (* Exception during spawn *)
                 if attempt < constraints.retry.max_retries && is_retryable_error msg then begin
                   let delay_ms = calc_backoff_delay constraints.retry attempt in
-                  Eio.Time.sleep (Process_eio.get_clock ()) (float_of_int delay_ms /. 1000.0);
+                  sleep_s (float_of_int delay_ms /. 1000.0);
                   state.total_retries <- state.total_retries + 1;
                   try_spawn (attempt + 1)
                 end else

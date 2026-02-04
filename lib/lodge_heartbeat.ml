@@ -595,65 +595,100 @@ let time_modifier agent =
 
 (** {1 Agent Loading} *)
 
-(** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency) *)
-let load_agents_from_neo4j () =
-  (* first:25 — GRAPHQL_MAX_COST=2000. Increased from 15 to accommodate new agents.
-     19 agents exist; alphabetical pagination requires headroom. *)
-  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests personalityHint activityLevel } } } }\"}" in
+(** Paginated GraphQL fetch: fetches all edges using cursor-based pagination.
+    Uses first:10 per page to stay well under GRAPHQL_MAX_COST=2000.
+    [fields] is the GraphQL field selection inside node { ... }.
+    [type_name] is the root query field (e.g. "agents").
+    Returns accumulated edges as Yojson.Safe.t list. *)
+let fetch_all_edges_paginated ~type_name ~fields =
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    api_key gql_query
-  in
-  Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
-  let json_str = run_shell_nonblocking cmd in
-  Printf.eprintf "[Heartbeat] GraphQL response: %d bytes\n%!" (String.length json_str);
-  try
-    let json = Yojson.Safe.from_string json_str in
-    (* Check for GraphQL errors before parsing data *)
-    (match Yojson.Safe.Util.member "errors" json with
-     | `List errors when errors <> [] ->
-       let msg = try
-         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-       with Yojson.Safe.Util.Type_error _ | Failure _ -> "unknown error" in
-       Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
-       []
-     | _ ->
-    let edges = json
-      |> Yojson.Safe.Util.member "data"
-      |> Yojson.Safe.Util.member "agents"
-      |> Yojson.Safe.Util.member "edges"
-      |> Yojson.Safe.Util.to_list
-    in
-    List.filter_map (fun edge ->
+  let page_size = 10 in
+  let max_pages = 10 in (* safety: 100 agents max *)
+  let rec fetch_page ~after ~acc ~page =
+    if page >= max_pages then (
+      Eio.traceln "⚠️ Paginated fetch hit max pages (%d), returning partial results" max_pages;
+      acc
+    ) else
+      let after_clause = match after with
+        | None -> ""
+        | Some cursor ->
+          (* @neo4j/graphql cursors are Base64-encoded, safe for JSON embedding *)
+          Printf.sprintf ", after: \\\"%s\\\"" cursor
+      in
+      let gql_query = Printf.sprintf
+        "{\"query\": \"{ %s(first: %d%s) { edges { node { %s } } pageInfo { hasNextPage endCursor } } }\"}"
+        type_name page_size after_clause fields
+      in
+      let cmd = Printf.sprintf
+        "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
+        api_key gql_query
+      in
+      let json_str = run_shell_nonblocking cmd in
+      Printf.eprintf "[Heartbeat] GraphQL page %d: %d bytes\n%!" (page + 1) (String.length json_str);
       try
-        let node = Yojson.Safe.Util.member "node" edge in
-        let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-        let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
-        let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
-        let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
-        let activity_level =
-          match Yojson.Safe.Util.(member "activityLevel" node) with
-          | `Null -> 0.5
-          | v -> Yojson.Safe.Util.to_float v
-        in
-        (* Client-side filter: only agents with preferredHours *)
-        let interests =
-          try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
-          with Yojson.Safe.Util.Type_error _ | Failure _ -> []
-        in
-        if preferred_hours <> [] then
-          Some { name; preferred_hours; peak_hour; traits; interests;
-                 personality_hint = None; activity_level }
-        else
-          None
-      with Yojson.Safe.Util.Type_error (msg, _) ->
-        Eio.traceln "⚠️ Agent parse error: %s" msg;
+        let json = Yojson.Safe.from_string json_str in
+        (match Yojson.Safe.Util.member "errors" json with
+         | `List errors when errors <> [] ->
+           let msg = try
+             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with _ -> "unknown error" in
+           Eio.traceln "⚠️ GraphQL error on page %d: %s" (page + 1) msg;
+           acc
+         | _ ->
+           let data = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member type_name in
+           let edges = data |> Yojson.Safe.Util.member "edges" |> Yojson.Safe.Util.to_list in
+           let page_info = data |> Yojson.Safe.Util.member "pageInfo" in
+           let has_next = Yojson.Safe.Util.(member "hasNextPage" page_info |> to_bool) in
+           let end_cursor = match Yojson.Safe.Util.(member "endCursor" page_info) with
+             | `String s -> Some s
+             | _ -> None
+           in
+           let acc = acc @ edges in
+           if has_next then
+             fetch_page ~after:end_cursor ~acc ~page:(page + 1)
+           else
+             acc)
+      with e ->
+        Eio.traceln "⚠️ Paginated fetch error on page %d: %s" (page + 1) (Printexc.to_string e);
+        acc
+  in
+  fetch_page ~after:None ~acc:[] ~page:0
+
+(** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency).
+    Uses cursor-based pagination (first:10 per page) to avoid GRAPHQL_MAX_COST limit. *)
+let load_agents_from_neo4j () =
+  Printf.eprintf "[Heartbeat] Loading agents via paginated GraphQL...\n%!";
+  let edges = fetch_all_edges_paginated
+    ~type_name:"agents"
+    ~fields:"name preferredHours peakHour traits interests personalityHint activityLevel"
+  in
+  Printf.eprintf "[Heartbeat] Loaded %d agent edges total\n%!" (List.length edges);
+  List.filter_map (fun edge ->
+    try
+      let node = Yojson.Safe.Util.member "node" edge in
+      let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+      let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
+      let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
+      let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
+      let activity_level =
+        match Yojson.Safe.Util.(member "activityLevel" node) with
+        | `Null -> 0.5
+        | v -> Yojson.Safe.Util.to_float v
+      in
+      (* Client-side filter: only agents with preferredHours *)
+      let interests =
+        try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
+        with Yojson.Safe.Util.Type_error _ | Failure _ -> []
+      in
+      if preferred_hours <> [] then
+        Some { name; preferred_hours; peak_hour; traits; interests;
+               personality_hint = None; activity_level }
+      else
         None
-    ) edges)
-  with e ->
-    Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
-    []
+    with Yojson.Safe.Util.Type_error (msg, _) ->
+      Eio.traceln "⚠️ Agent parse error: %s" msg;
+      None
+  ) edges
 
 (** Cached agents - loaded once at startup, refreshed periodically *)
 let agents_cache = ref []
@@ -854,33 +889,14 @@ let get_agents () =
 
 (** {1 Lodge Agent REST API — Full agent data for dashboard} *)
 
-(** Load all agents with full identity fields for REST API *)
+(** Load all agents with full identity fields for REST API.
+    Uses cursor-based pagination (first:10 per page) to avoid GRAPHQL_MAX_COST limit. *)
 let load_lodge_agents_full () =
-  (* first:25 with 6 core fields to stay under GRAPHQL_MAX_COST=2000.
-     Returns all 19 agents. Detailed fields (traits, interests, preferredHours)
-     available via individual agent queries if needed. *)
-  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name emoji koreanName activityLevel status model } } } }\"}" in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    api_key gql_query
+  let edges = fetch_all_edges_paginated
+    ~type_name:"agents"
+    ~fields:"name emoji koreanName activityLevel status model"
   in
-  let json_str = run_shell_nonblocking cmd in
   try
-    let json = Yojson.Safe.from_string json_str in
-    (match Yojson.Safe.Util.member "errors" json with
-     | `List errors when errors <> [] ->
-       let msg = try
-         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-       with _ -> "unknown error" in
-       Error (Printf.sprintf "GraphQL error: %s" msg)
-     | _ ->
-    let edges = json
-      |> Yojson.Safe.Util.member "data"
-      |> Yojson.Safe.Util.member "agents"
-      |> Yojson.Safe.Util.member "edges"
-      |> Yojson.Safe.Util.to_list
-    in
     let agents = List.filter_map (fun edge ->
       try
         let node = Yojson.Safe.Util.member "node" edge in
@@ -913,7 +929,7 @@ let load_lodge_agents_full () =
         ])
       with _ -> None
     ) edges in
-    Ok (`Assoc [("agents", `List agents)]))
+    Ok (`Assoc [("agents", `List agents)])
   with e ->
     Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))
 

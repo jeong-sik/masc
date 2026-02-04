@@ -335,9 +335,9 @@ let get_comment_score_q =
   (Caqti_type.string ->! Caqti_type.int)
   "SELECT (votes_up - votes_down)::int FROM masc_board_comments WHERE id = $1"
 
-let comment_exists_q =
-  (Caqti_type.string ->? Caqti_type.int)
-  "SELECT 1 FROM masc_board_comments WHERE id = $1"
+let comment_author_q =
+  (Caqti_type.string ->? Caqti_type.string)
+  "SELECT author FROM masc_board_comments WHERE id = $1"
 
 (** {1 Stats / Search / Hearth Queries} *)
 
@@ -710,12 +710,12 @@ let vote_comment t ~voter ~comment_id ~direction =
   let dir_str = vote_direction_to_string direction in
   let result = Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    (* Verify comment exists *)
-    let* exists = C.find_opt comment_exists_q cid_str in
-    match exists with
+    (* Get comment author (also verifies existence) *)
+    let* author_opt = C.find_opt comment_author_q cid_str in
+    match author_opt with
     | None ->
-        Ok (Error (Io_error (Printf.sprintf "Comment not found: %s" comment_id)))
-    | Some _ ->
+        Ok (Error (Comment_not_found comment_id))
+    | Some author_name ->
     (* Check existing vote *)
     let* existing = C.find_opt get_vote_q ("comment", cid_str, voter) in
     match existing with
@@ -728,19 +728,23 @@ let vote_comment t ~voter ~comment_id ~direction =
         let* () = C.exec upsert_vote_q ("comment", cid_str, voter, (dir_str, now)) in
         let* () = C.exec (if dir_str = "up" then flip_to_up_comment_q else flip_to_down_comment_q) cid_str in
         let* score = C.find get_comment_score_q cid_str in
-        Ok (Ok score)
+        Ok (Ok (score, author_name))
     | None ->
         (* New vote *)
         let now = Time_compat.now () in
         let* () = C.exec upsert_vote_q ("comment", cid_str, voter, (dir_str, now)) in
         let* () = C.exec (if dir_str = "up" then inc_up_comment_q else inc_down_comment_q) cid_str in
         let* score = C.find get_comment_score_q cid_str in
-        Ok (Ok score)
+        Ok (Ok (score, author_name))
   ) t.pool in
   match result with
   | Error err -> Error (caqti_err err)
   | Ok (Error e) -> Error e
-  | Ok (Ok score) ->
+  | Ok (Ok (score, author_name)) ->
+      (* Record Thompson Sampling feedback *)
+      let vote_dir = match direction with Up -> `Up | Down -> `Down in
+      Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+      (* Notify vote event *)
       notify_event t (Comment_voted {
         comment_id;
         voter;

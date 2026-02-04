@@ -147,6 +147,16 @@ masc_leave(agent_name: "codex")
 | `MASC_LODGE_TICK_INTERVAL_SEC` | 2700 | Heartbeat 간격 (초, 45분) |
 | `MASC_LODGE_QUIET_START` / `MASC_LODGE_QUIET_END` | 3 / 7 | 조용한 시간 (KST) |
 | `MASC_ORCHESTRATOR_ENABLED` | 0 | Orchestrator 활성화 |
+| `MASC_GUARDIAN_ENABLED` | false | 내부 수호자 루프 활성화 |
+| `MASC_GUARDIAN_MODE` | masc | `masc` / `lodge` / `both` |
+| `MASC_GUARDIAN_ZOMBIE_INTERVAL_SEC` | 60 | 좀비 정리 주기 (초) |
+| `MASC_GUARDIAN_GC_INTERVAL_SEC` | 3600 | GC 주기 (초, 0=비활성) |
+| `MASC_GUARDIAN_GC_DAYS` | 7 | GC 기준 일수 |
+| `MASC_GUARDIAN_LODGE_INTERVAL_SEC` | 300 | Lodge 루프 주기 (초) |
+| `MASC_GUARDIAN_LODGE_ITERATIONS` | 10 | Lodge 루프 반복 횟수 |
+| `MASC_GUARDIAN_LODGE_DELAY_MS` | 10000 | Lodge 루프 액션 간 딜레이 (ms) |
+| `MASC_GUARDIAN_LODGE_VERBOSE` | false | Lodge 루프 상세 로그 |
+| `MASC_GUARDIAN_LODGE_RESPECT_QUIET_HOURS` | true | Quiet hours 존중 |
 
 ## 문서
 

@@ -42,11 +42,13 @@ let truncate s n =
 
 (** GraphQL request via Cohttp_eio.
     Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
-let graphql_request ?(timeout_sec=5.0) body =
+let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let max_response_bytes = 1_000_000 in
+  let truncate_for_log s = truncate s 200 in
   match Eio_context.get_net_opt () with
-  | None -> ""
+  | None -> Error "Eio net not initialized"
   | Some net ->
       let headers =
         if api_key = "" then
@@ -60,17 +62,31 @@ let graphql_request ?(timeout_sec=5.0) body =
       let uri = Uri.of_string url in
       let run () =
         Eio.Switch.run (fun sw ->
-          let client = Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net in
+          let client =
+            Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+          in
           let body_content = Eio.Flow.string_source body in
-          let _resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
-          Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int
+          let resp, resp_body =
+            Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
+          in
+          let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+          let body_str =
+            Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
+          in
+          if String.length body_str = 0 then
+            Error "empty response"
+          else if Cohttp.Code.is_success status then
+            Ok body_str
+          else
+            Error (Printf.sprintf "HTTP %d: %s" status (truncate_for_log body_str))
         )
       in
       match Eio_context.get_clock_opt () with
       | Some clock ->
-          (try Eio.Time.with_timeout_exn clock timeout_sec run with _ -> "")
+          (try Eio.Time.with_timeout_exn clock timeout_sec run
+           with exn -> Error (Printexc.to_string exn))
       | None ->
-          (try run () with _ -> "")
+          (try run () with exn -> Error (Printexc.to_string exn))
 
 (** Resolve ME_ROOT consistently *)
 let me_root () =
@@ -142,24 +158,25 @@ let recall_from_neo4j ~agent_name ~limit : (string * float) list =
   in
   let body = Yojson.Safe.to_string (`Assoc [("query", `String query)]) in
   try
-    let result = graphql_request body in
-    if String.length result < 5 then []
-    else begin
-      let json = Yojson.Safe.from_string result in
-      let edges = json
-        |> Yojson.Safe.Util.member "data"
-        |> Yojson.Safe.Util.member "agentActivities"
-        |> Yojson.Safe.Util.member "edges"
-        |> Yojson.Safe.Util.to_list
-      in
-      List.filter_map (fun edge ->
-        try
-          let node = Yojson.Safe.Util.member "node" edge in
-          let content = Yojson.Safe.Util.(member "content" node |> to_string) in
-          Some (content, 0.6)
-        with Yojson.Safe.Util.Type_error _ | Failure _ -> None
-      ) edges
-    end
+    match graphql_request body with
+    | Error err ->
+        Eio.traceln "   ⚠️ [Lodge_memory] GraphQL recall failed: %s" err;
+        []
+    | Ok result ->
+        let json = Yojson.Safe.from_string result in
+        let edges = json
+          |> Yojson.Safe.Util.member "data"
+          |> Yojson.Safe.Util.member "agentActivities"
+          |> Yojson.Safe.Util.member "edges"
+          |> Yojson.Safe.Util.to_list
+        in
+        List.filter_map (fun edge ->
+          try
+            let node = Yojson.Safe.Util.member "node" edge in
+            let content = Yojson.Safe.Util.(member "content" node |> to_string) in
+            Some (content, 0.6)
+          with Yojson.Safe.Util.Type_error _ | Failure _ -> None
+        ) edges
   with
   | Yojson.Json_error msg ->
       Eio.traceln "   ⚠️ [Lodge_memory] GraphQL recall JSON parse error: %s" msg;
@@ -250,19 +267,18 @@ let store_to_neo4j (exp : experience) =
   in
   let body = Yojson.Safe.to_string (`Assoc [("query", `String query)]) in
   try
-    let result = graphql_request body in
-    if String.length result < 5 then
-      Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store empty response for %s" exp.agent_name
-    else begin
-      let json = Yojson.Safe.from_string result in
-      match Yojson.Safe.Util.member "errors" json with
-      | `List (_ :: _ as errors) ->
-        let msg = try
-          List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-        with _ -> "unknown" in
-        Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store error for %s: %s" exp.agent_name msg
-      | _ -> ()
-    end
+    match graphql_request body with
+    | Error err ->
+        Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store failed for %s: %s" exp.agent_name err
+    | Ok result ->
+        let json = Yojson.Safe.from_string result in
+        match Yojson.Safe.Util.member "errors" json with
+        | `List (_ :: _ as errors) ->
+          let msg = try
+            List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+          with _ -> "unknown" in
+          Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store error for %s: %s" exp.agent_name msg
+        | _ -> ()
   with exn ->
     Eio.traceln "   ⚠️ [Lodge_memory] GraphQL store exception for %s: %s"
       exp.agent_name (Printexc.to_string exn)

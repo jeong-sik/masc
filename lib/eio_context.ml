@@ -30,27 +30,31 @@ let https_connector :
    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
    [> Eio.Flow.two_way_ty ] Eio.Resource.t) lazy_t =
   lazy (
-    let authenticator =
-      match Ca_certs.authenticator () with
-      | Ok a -> a
-      | Error _ -> (fun ?ip:_ ~host:_ _certs -> Ok None)
+    let fail_closed msg =
+      Printf.eprintf "[TLS] %s\n%!" msg;
+      (fun _uri _raw -> failwith msg)
     in
-    let tls_config =
-      match Tls.Config.client ~authenticator () with
-      | Ok cfg -> cfg
-      | Error (`Msg msg) -> failwith ("TLS config error: " ^ msg)
-    in
-    fun uri (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t) ->
-      let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
-      let host =
-        match Uri.host uri with
-        | None -> None
-        | Some h ->
-            (match Domain_name.of_string h with
-             | Ok d -> Some (Domain_name.host_exn d)
-             | Error _ -> None)
-      in
-      Tls_eio.client_of_flow tls_config ?host flow
+    match Ca_certs.authenticator () with
+    | Error (`Msg msg) ->
+        fail_closed ("CA certs unavailable: " ^ msg)
+    | Error _ ->
+        fail_closed "CA certs unavailable: unknown error"
+    | Ok authenticator ->
+        (match Tls.Config.client ~authenticator () with
+         | Error (`Msg msg) ->
+             fail_closed ("TLS config error: " ^ msg)
+         | Ok tls_config ->
+             fun uri (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t) ->
+               let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
+               let host =
+                 match Uri.host uri with
+                 | None -> None
+                 | Some h ->
+                     (match Domain_name.of_string h with
+                      | Ok d -> Some (Domain_name.host_exn d)
+                      | Error _ -> None)
+               in
+               Tls_eio.client_of_flow tls_config ?host flow)
   )
 
 let get_https_connector () =

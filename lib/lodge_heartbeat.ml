@@ -420,11 +420,16 @@ let run_shell_nonblocking cmd =
 
 (** GraphQL request via Cohttp_eio.
     Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
-let graphql_request ?(timeout_sec=5.0) body =
+let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let max_response_bytes = 1_000_000 in
+  let truncate_for_log s =
+    if String.length s > 200 then String.sub s 0 200 ^ "..."
+    else s
+  in
   match Eio_context.get_net_opt () with
-  | None -> ""
+  | None -> Error "Eio net not initialized"
   | Some net ->
       let headers =
         if api_key = "" then
@@ -438,17 +443,31 @@ let graphql_request ?(timeout_sec=5.0) body =
       let uri = Uri.of_string url in
       let run () =
         Eio.Switch.run (fun sw ->
-          let client = Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net in
+          let client =
+            Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+          in
           let body_content = Eio.Flow.string_source body in
-          let _resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
-          Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int
+          let resp, resp_body =
+            Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
+          in
+          let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+          let body_str =
+            Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
+          in
+          if String.length body_str = 0 then
+            Error "empty response"
+          else if Cohttp.Code.is_success status then
+            Ok body_str
+          else
+            Error (Printf.sprintf "HTTP %d: %s" status (truncate_for_log body_str))
         )
       in
       match Eio_context.get_clock_opt () with
       | Some clock ->
-          (try Eio.Time.with_timeout_exn clock timeout_sec run with _ -> "")
+          (try Eio.Time.with_timeout_exn clock timeout_sec run
+           with exn -> Error (Printexc.to_string exn))
       | None ->
-          (try run () with _ -> "")
+          (try run () with exn -> Error (Printexc.to_string exn))
 
 (** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes.
     Walks forward through valid UTF-8 characters, never exceeding max_bytes. *)
@@ -634,54 +653,58 @@ let load_agents_from_neo4j () =
   let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
-  let json_str = graphql_request ~timeout_sec:5.0 gql_query in
-  Printf.eprintf "[Heartbeat] GraphQL response: %d bytes\n%!" (String.length json_str);
-  try
-    let json = Yojson.Safe.from_string json_str in
-    (* Check for GraphQL errors before parsing data *)
-    (match Yojson.Safe.Util.member "errors" json with
-     | `List errors when errors <> [] ->
-       let msg = try
-         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-       with Yojson.Safe.Util.Type_error _ | Failure _ -> "unknown error" in
-       Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
-       []
-     | _ ->
-    let edges = json
-      |> Yojson.Safe.Util.member "data"
-      |> Yojson.Safe.Util.member "agents"
-      |> Yojson.Safe.Util.member "edges"
-      |> Yojson.Safe.Util.to_list
-    in
-    List.filter_map (fun edge ->
+  match graphql_request ~timeout_sec:5.0 gql_query with
+  | Error err ->
+      Eio.traceln "⚠️ [Heartbeat] GraphQL request failed: %s" err;
+      []
+  | Ok json_str ->
+      Printf.eprintf "[Heartbeat] GraphQL response: %d bytes\n%!" (String.length json_str);
       try
-        let node = Yojson.Safe.Util.member "node" edge in
-        let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-        let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
-        let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
-        let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
-        let activity_level =
-          match Yojson.Safe.Util.(member "activityLevel" node) with
-          | `Null -> 0.5
-          | v -> Yojson.Safe.Util.to_float v
+        let json = Yojson.Safe.from_string json_str in
+        (* Check for GraphQL errors before parsing data *)
+        (match Yojson.Safe.Util.member "errors" json with
+         | `List errors when errors <> [] ->
+           let msg = try
+             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with Yojson.Safe.Util.Type_error _ | Failure _ -> "unknown error" in
+           Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
+           []
+         | _ ->
+        let edges = json
+          |> Yojson.Safe.Util.member "data"
+          |> Yojson.Safe.Util.member "agents"
+          |> Yojson.Safe.Util.member "edges"
+          |> Yojson.Safe.Util.to_list
         in
-        (* Client-side filter: only agents with preferredHours *)
-        let interests =
-          try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
-          with Yojson.Safe.Util.Type_error _ | Failure _ -> []
-        in
-        if preferred_hours <> [] then
-          Some { name; preferred_hours; peak_hour; traits; interests;
-                 personality_hint = None; activity_level }
-        else
-          None
-      with Yojson.Safe.Util.Type_error (msg, _) ->
-        Eio.traceln "⚠️ Agent parse error: %s" msg;
-        None
-    ) edges)
-  with e ->
-    Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
-    []
+        List.filter_map (fun edge ->
+          try
+            let node = Yojson.Safe.Util.member "node" edge in
+            let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+            let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
+            let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
+            let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
+            let activity_level =
+              match Yojson.Safe.Util.(member "activityLevel" node) with
+              | `Null -> 0.5
+              | v -> Yojson.Safe.Util.to_float v
+            in
+            (* Client-side filter: only agents with preferredHours *)
+            let interests =
+              try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
+              with Yojson.Safe.Util.Type_error _ | Failure _ -> []
+            in
+            if preferred_hours <> [] then
+              Some { name; preferred_hours; peak_hour; traits; interests;
+                     personality_hint = None; activity_level }
+            else
+              None
+          with Yojson.Safe.Util.Type_error (msg, _) ->
+            Eio.traceln "⚠️ Agent parse error: %s" msg;
+            None
+        ) edges)
+      with e ->
+        Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
+        []
 
 (** Cached agents - loaded once at startup, refreshed periodically *)
 let agents_cache = ref []
@@ -888,57 +911,60 @@ let load_lodge_agents_full () =
      Returns all 19 agents. Detailed fields (traits, interests, preferredHours)
      available via individual agent queries if needed. *)
   let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name emoji koreanName activityLevel status model } } } }\"}" in
-  let json_str = graphql_request ~timeout_sec:5.0 gql_query in
-  try
-    let json = Yojson.Safe.from_string json_str in
-    (match Yojson.Safe.Util.member "errors" json with
-     | `List errors when errors <> [] ->
-       let msg = try
-         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-       with _ -> "unknown error" in
-       Error (Printf.sprintf "GraphQL error: %s" msg)
-     | _ ->
-    let edges = json
-      |> Yojson.Safe.Util.member "data"
-      |> Yojson.Safe.Util.member "agents"
-      |> Yojson.Safe.Util.member "edges"
-      |> Yojson.Safe.Util.to_list
-    in
-    let agents = List.filter_map (fun edge ->
+  match graphql_request ~timeout_sec:5.0 gql_query with
+  | Error err ->
+      Error (Printf.sprintf "GraphQL request failed: %s" err)
+  | Ok json_str ->
       try
-        let node = Yojson.Safe.Util.member "node" edge in
-        let open Yojson.Safe.Util in
-        let name = member "name" node |> to_string in
-        let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
-        let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
-        let traits = (try member "traits" node |> to_list |> List.map to_string with _ -> []) in
-        let interests = (try member "interests" node |> to_list |> List.map to_string with _ -> []) in
-        let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
-        let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with _ -> []) in
-        let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
-        let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
-        let status = (match member "status" node with `String s -> s | _ -> "active") in
-        let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
-        let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
-        Some (`Assoc [
-          ("name", `String name);
-          ("emoji", `String emoji);
-          ("koreanName", match korean_name with Some s -> `String s | None -> `Null);
-          ("traits", `List (List.map (fun s -> `String s) traits));
-          ("interests", `List (List.map (fun s -> `String s) interests));
-          ("activityLevel", `Float activity_level);
-          ("preferredHours", `List (List.map (fun i -> `Int i) preferred_hours));
-          ("peakHour", match peak_hour with Some i -> `Int i | None -> `Null);
-          ("model", `String model);
-          ("status", `String status);
-          ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
-          ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
-        ])
-      with _ -> None
-    ) edges in
-    Ok (`Assoc [("agents", `List agents)]))
-  with e ->
-    Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))
+        let json = Yojson.Safe.from_string json_str in
+        (match Yojson.Safe.Util.member "errors" json with
+         | `List errors when errors <> [] ->
+           let msg = try
+             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with _ -> "unknown error" in
+           Error (Printf.sprintf "GraphQL error: %s" msg)
+         | _ ->
+        let edges = json
+          |> Yojson.Safe.Util.member "data"
+          |> Yojson.Safe.Util.member "agents"
+          |> Yojson.Safe.Util.member "edges"
+          |> Yojson.Safe.Util.to_list
+        in
+        let agents = List.filter_map (fun edge ->
+          try
+            let node = Yojson.Safe.Util.member "node" edge in
+            let open Yojson.Safe.Util in
+            let name = member "name" node |> to_string in
+            let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
+            let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
+            let traits = (try member "traits" node |> to_list |> List.map to_string with _ -> []) in
+            let interests = (try member "interests" node |> to_list |> List.map to_string with _ -> []) in
+            let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
+            let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with _ -> []) in
+            let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
+            let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
+            let status = (match member "status" node with `String s -> s | _ -> "active") in
+            let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
+            let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
+            Some (`Assoc [
+              ("name", `String name);
+              ("emoji", `String emoji);
+              ("koreanName", match korean_name with Some s -> `String s | None -> `Null);
+              ("traits", `List (List.map (fun s -> `String s) traits));
+              ("interests", `List (List.map (fun s -> `String s) interests));
+              ("activityLevel", `Float activity_level);
+              ("preferredHours", `List (List.map (fun i -> `Int i) preferred_hours));
+              ("peakHour", match peak_hour with Some i -> `Int i | None -> `Null);
+              ("model", `String model);
+              ("status", `String status);
+              ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
+              ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
+            ])
+          with _ -> None
+        ) edges in
+        Ok (`Assoc [("agents", `List agents)]))
+      with e ->
+        Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))
 
 (** Create a new agent via GraphQL mutation (admin API) *)
 let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
@@ -976,36 +1002,40 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
   in
   let gql_body = Printf.sprintf {|{"query": "%s"}|} (esc mutation) in
   Printf.eprintf "[Admin] Creating agent '%s' via GraphQL...\n%!" name;
-  let json_str = graphql_request ~timeout_sec:10.0 gql_body in
-  try
-    let json = Yojson.Safe.from_string json_str in
-    (match Yojson.Safe.Util.member "errors" json with
-     | `List errors when errors <> [] ->
-       let msg = try
-         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-       with _ -> "unknown error" in
-       Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
-       Error msg
-     | _ ->
-       let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
-       let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
-       if not success then begin
-         let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in
-         Printf.eprintf "[Admin] GraphQL mutation failed: %s\n%!" msg;
-         Error msg
-       end else begin
-         (* Invalidate heartbeat cache *)
-         agents_cache_time := 0.0;
-         Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
-         let agent = result |> Yojson.Safe.Util.member "agent" in
-         match agent with
-         | `Null -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)])
-         | a -> Ok a
-       end)
-  with e ->
-    let msg = Printexc.to_string e in
-    Printf.eprintf "[Admin] Failed to create agent: %s\n%!" msg;
-    Error msg
+  match graphql_request ~timeout_sec:10.0 gql_body with
+  | Error err ->
+      Printf.eprintf "[Admin] GraphQL request failed: %s\n%!" err;
+      Error err
+  | Ok json_str ->
+      try
+        let json = Yojson.Safe.from_string json_str in
+        (match Yojson.Safe.Util.member "errors" json with
+         | `List errors when errors <> [] ->
+           let msg = try
+             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with _ -> "unknown error" in
+           Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
+           Error msg
+         | _ ->
+           let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
+           let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
+           if not success then begin
+             let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in
+             Printf.eprintf "[Admin] GraphQL mutation failed: %s\n%!" msg;
+             Error msg
+           end else begin
+             (* Invalidate heartbeat cache *)
+             agents_cache_time := 0.0;
+             Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
+             let agent = result |> Yojson.Safe.Util.member "agent" in
+             match agent with
+             | `Null -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)])
+             | a -> Ok a
+           end)
+      with e ->
+        let msg = Printexc.to_string e in
+        Printf.eprintf "[Admin] Failed to create agent: %s\n%!" msg;
+        Error msg
 
 (** {1 Content Alert Scanner — Board activity → triggers} *)
 
@@ -1173,12 +1203,15 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
   in
   let json_payload = Printf.sprintf {|{"query": "%s"}|} (String.escaped mutation) in
   (* Fire and forget - don't block the main loop, but log failures *)
-  let result = graphql_request ~timeout_sec:3.0 json_payload in
-  let result =
-    if String.length result > 100 then String.sub result 0 100 else result
-  in
-  if String.length result > 0 && String.length result < 5 then
-    Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
+  match graphql_request ~timeout_sec:3.0 json_payload with
+  | Error err ->
+      Eio.traceln "   ⚠️ [Lodge] GraphQL activity log failed for %s: %s" agent_name err
+  | Ok result ->
+      let result =
+        if String.length result > 100 then String.sub result 0 100 else result
+      in
+      if String.length result > 0 && String.length result < 5 then
+        Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
 
 (* record_agent_memory and load_agent_memories are defined after
    add_turn_to_thread and get_recent_turns (OCaml requires definition before use) *)

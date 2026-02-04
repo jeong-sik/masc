@@ -153,11 +153,16 @@ let http_get_json ~net:_ url =
 
 (** GraphQL request via Cohttp_eio.
     Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
-let graphql_request ?(timeout_sec=5.0) body =
+let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let max_response_bytes = 1_000_000 in
+  let truncate_for_log s =
+    if String.length s > 200 then String.sub s 0 200 ^ "..."
+    else s
+  in
   match Eio_context.get_net_opt () with
-  | None -> ""
+  | None -> Error "Eio net not initialized"
   | Some net ->
       let headers =
         if api_key = "" then
@@ -171,17 +176,31 @@ let graphql_request ?(timeout_sec=5.0) body =
       let uri = Uri.of_string url in
       let run () =
         Eio.Switch.run (fun sw ->
-          let client = Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net in
+          let client =
+            Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+          in
           let body_content = Eio.Flow.string_source body in
-          let _resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
-          Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int
+          let resp, resp_body =
+            Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
+          in
+          let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+          let body_str =
+            Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
+          in
+          if String.length body_str = 0 then
+            Error "empty response"
+          else if Cohttp.Code.is_success status then
+            Ok body_str
+          else
+            Error (Printf.sprintf "HTTP %d: %s" status (truncate_for_log body_str))
         )
       in
       match Eio_context.get_clock_opt () with
       | Some clock ->
-          (try Eio.Time.with_timeout_exn clock timeout_sec run with _ -> "")
+          (try Eio.Time.with_timeout_exn clock timeout_sec run
+           with exn -> Error (Printexc.to_string exn))
       | None ->
-          (try run () with _ -> "")
+          (try run () with exn -> Error (Printexc.to_string exn))
 
 (** {1 LLM Provider Rotation — Avoid ollama overload} *)
 
@@ -526,19 +545,22 @@ let load_agents_config () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
   try
-    let json_str = graphql_request ~timeout_sec:5.0 query in
-    Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
-    (* Parse JSON response *)
-    let json = Yojson.Safe.from_string json_str in
-    let edges = json
-      |> Yojson.Safe.Util.member "data"
-      |> Yojson.Safe.Util.member "agents"
-      |> Yojson.Safe.Util.member "edges"
-      |> Yojson.Safe.Util.to_list
-    in
-    List.iter (fun edge ->
-      try
-        let node = Yojson.Safe.Util.member "node" edge in
+    match graphql_request ~timeout_sec:5.0 query with
+    | Error err ->
+        Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err
+    | Ok json_str ->
+        Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
+        (* Parse JSON response *)
+        let json = Yojson.Safe.from_string json_str in
+        let edges = json
+          |> Yojson.Safe.Util.member "data"
+          |> Yojson.Safe.Util.member "agents"
+          |> Yojson.Safe.Util.member "edges"
+          |> Yojson.Safe.Util.to_list
+        in
+        List.iter (fun edge ->
+          try
+            let node = Yojson.Safe.Util.member "node" edge in
         let name = Yojson.Safe.Util.(member "name" node |> to_string) in
         let interests_json = Yojson.Safe.Util.(member "interests" node) in
         let interests = match interests_json with
@@ -1311,26 +1333,30 @@ let get_all_agents () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status } } } }\"}" in
   try
-    let output = graphql_request ~timeout_sec:5.0 query in
-    try
-      let json = Yojson.Safe.from_string output in
-      let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in
-      List.filter_map (fun edge ->
+    match graphql_request ~timeout_sec:5.0 query with
+    | Error err ->
+        Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err;
+        []
+    | Ok output ->
         try
-          let node = edge |> member "node" in
-          let name = node |> member "name" |> to_string in
-          (* Only include core Lodge agents *)
-          if List.mem name (core_lodge_agents ()) then
-            let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
-            let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
-            let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
-            if status = "active" then
-              Some (name, primary_value, prompt, "system", 0)
-            else None
-          else None
-        with Yojson.Safe.Util.Type_error _ -> None
-      ) edges
-    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+          let json = Yojson.Safe.from_string output in
+          let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in
+          List.filter_map (fun edge ->
+            try
+              let node = edge |> member "node" in
+              let name = node |> member "name" |> to_string in
+              (* Only include core Lodge agents *)
+              if List.mem name (core_lodge_agents ()) then
+                let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
+                let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
+                let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
+                if status = "active" then
+                  Some (name, primary_value, prompt, "system", 0)
+                else None
+              else None
+            with Yojson.Safe.Util.Type_error _ -> None
+          ) edges
+        with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
   with Unix.Unix_error _ | Sys_error _ -> []
 
 (** Spawn a new agent — can be called by another agent *)

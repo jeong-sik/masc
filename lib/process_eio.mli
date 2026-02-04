@@ -54,6 +54,8 @@ val init :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit
 
+val is_initialized : unit -> bool
+
 val get_proc_mgr : unit -> Eio_unix.Process.mgr_ty Eio.Resource.t
 val get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t
 

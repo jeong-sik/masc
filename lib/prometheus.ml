@@ -32,11 +32,10 @@ type metric = {
 (** {1 Global Metrics Store} *)
 
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
-let metrics_mutex = Mutex.create ()
+let metrics_mutex = Eio.Mutex.create ()
 
 let with_lock f =
-  Mutex.lock metrics_mutex;
-  Common.protect ~module_name:"prometheus" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock metrics_mutex) f
+  Eio.Mutex.use_rw ~protect:true metrics_mutex (fun () -> f ())
 
 (** {1 Metric Registration} *)
 
@@ -107,18 +106,19 @@ let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
 (** {1 Built-in Metrics} *)
 
 let init () =
-  register_counter ~name:"masc_mcp_requests_total"
-    ~help:"Total MCP requests received" ();
-  register_counter ~name:"masc_tasks_total"
-    ~help:"Total tasks processed" ();
-  register_counter ~name:"masc_errors_total"
-    ~help:"Total errors" ();
-  register_gauge ~name:"masc_active_agents"
-    ~help:"Currently active agents" ();
-  register_gauge ~name:"masc_pending_tasks"
-    ~help:"Tasks waiting to be claimed" ();
-  register_gauge ~name:"masc_uptime_seconds"
-    ~help:"Server uptime in seconds" ()
+  (* Module-level init runs before Eio context exists.
+     Single-threaded at load time — bypass mutex. *)
+  let add name help mt =
+    let key = name in
+    if not (Hashtbl.mem metrics key) then
+      Hashtbl.add metrics key { name; help; metric_type = mt; value = 0.0; labels = [] }
+  in
+  add "masc_mcp_requests_total" "Total MCP requests received" Counter;
+  add "masc_tasks_total" "Total tasks processed" Counter;
+  add "masc_errors_total" "Total errors" Counter;
+  add "masc_active_agents" "Currently active agents" Gauge;
+  add "masc_pending_tasks" "Tasks waiting to be claimed" Gauge;
+  add "masc_uptime_seconds" "Server uptime in seconds" Gauge
 
 let start_time = Time_compat.now ()
 

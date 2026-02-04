@@ -717,6 +717,9 @@ module PostgresNative : sig
   (* create_eio requires Caqti-compatible Eio environment (net, clock, mono_clock) *)
   val create_eio : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
 
+  (* Expose Caqti pool for Board_pg and other PG-backed modules *)
+  val get_pool : t -> (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t
+
   (* Cleanup old pubsub messages - PostgreSQL specific *)
   val cleanup_pubsub_by_age : t -> days:int -> (int, error) result
   val cleanup_pubsub_by_limit : t -> max_messages:int -> (int, error) result
@@ -928,6 +931,8 @@ end = struct
              | Ok () -> Ok { pool; namespace = cfg.cluster_name; _sw = sw })
 
   let close _t = ()
+
+  let get_pool t = t.pool
 
   let get t ~key =
     let nkey = namespaced_key t.namespace key in

@@ -136,7 +136,6 @@ let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
 (** {1 Handlers} *)
 
 let handle_post_create args =
-  let store = Board.global () in
   let content = get_string args "content" "" in
   let author = get_string args "author" "anonymous" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
@@ -149,7 +148,7 @@ let handle_post_create args =
     | None -> Board.Internal
   in
 
-  match Board.create_post store ~author ~content ~visibility ~ttl_hours ?hearth ?thread_id () with
+  match Board_dispatch.create_post ~author ~content ~visibility ~ttl_hours ?hearth ?thread_id () with
   | Ok post ->
       let json = Board.post_to_yojson post in
       (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
@@ -167,8 +166,15 @@ let sort_order_of_string = function
   | "discussed" | "comments" -> Discussed
   | _ -> Hot  (* default *)
 
+let dispatch_sort_of sort_by =
+  match sort_by with
+  | Hot -> Board_dispatch.Hot
+  | Trending -> Board_dispatch.Trending
+  | Recent -> Board_dispatch.Recent
+  | Updated -> Board_dispatch.Updated
+  | Discussed -> Board_dispatch.Discussed
+
 let handle_post_list args =
-  let store = Board.global () in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let visibility_str = get_string_opt args "visibility" in
   let hearth = get_string_opt args "hearth" in
@@ -183,7 +189,8 @@ let handle_post_list args =
     | None -> None
   in
 
-  let all_posts = Board.list_posts store ~visibility_filter ?hearth ~limit:(limit + offset + 100) () in
+  let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
+    ~sort_by:(dispatch_sort_of sort_by) ~limit:(limit + offset + 100) () in
 
   (* Filter out lodge-system posts when exclude_system is true *)
   let all_posts = if exclude_system then
@@ -193,38 +200,8 @@ let handle_post_list args =
   else all_posts
   in
 
-  (* Apply sorting based on sort_by *)
-  let sorted_posts = match sort_by with
-    | Hot ->
-        (* Default: score + recency *)
-        all_posts  (* already sorted by score in Board.list_posts *)
-    | Recent ->
-        (* Sort by created_at descending *)
-        List.sort (fun (a : Board.post) (b : Board.post) ->
-          compare b.created_at a.created_at
-        ) all_posts
-    | Updated ->
-        (* Sort by updated_at descending (most recently active first) *)
-        List.sort (fun (a : Board.post) (b : Board.post) ->
-          compare b.updated_at a.updated_at
-        ) all_posts
-    | Trending ->
-        (* Recent posts with high engagement (score * recency_factor) *)
-        let now = Time_compat.now () in
-        List.sort (fun (a : Board.post) (b : Board.post) ->
-          let age_a = max 1.0 (now -. a.created_at) /. 3600.0 in  (* hours *)
-          let age_b = max 1.0 (now -. b.created_at) /. 3600.0 in
-          let score_a = float_of_int (a.votes_up - a.votes_down + a.reply_count * 2) /. (age_a ** 0.5) in
-          let score_b = float_of_int (b.votes_up - b.votes_down + b.reply_count * 2) /. (age_b ** 0.5) in
-          compare score_b score_a
-        ) all_posts
-    | Discussed ->
-        (* Sort by reply_count descending *)
-        List.sort (fun (a : Board.post) (b : Board.post) ->
-          let cmp = compare b.reply_count a.reply_count in
-          if cmp <> 0 then cmp else compare b.created_at a.created_at
-        ) all_posts
-  in
+  (* Sorting is already handled by Board_dispatch *)
+  let sorted_posts = all_posts in
 
   let posts =
     if random then
@@ -266,13 +243,12 @@ let handle_post_list args =
     (true, header ^ "\n\n" ^ String.concat "\n\n---\n\n" formatted)
 
 let handle_post_get args =
-  let store = Board.global () in
   let post_id = get_string args "post_id" "" in
 
-  match Board.get_post store ~post_id with
+  match Board_dispatch.get_post ~post_id with
   | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
   | Ok post ->
-      match Board.get_comments store ~post_id with
+      match Board_dispatch.get_comments ~post_id with
       | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
       | Ok comments ->
           let post_str = format_post post in
@@ -287,14 +263,13 @@ let handle_post_get args =
           (true, post_str ^ comments_str)
 
 let handle_comment_add args =
-  let store = Board.global () in
   let post_id = get_string args "post_id" "" in
   let content = get_string args "content" "" in
   let author = get_string args "author" "anonymous" in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
 
-  match Board.add_comment store ~post_id ~author ~content ?parent_id ~ttl_hours () with
+  match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id ~ttl_hours () with
   | Ok comment ->
       let json = Board.comment_to_yojson comment in
       (true, Printf.sprintf "✅ Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
@@ -318,14 +293,13 @@ let register_evolution_callback cb =
   evolution_hook := Some cb
 
 let handle_vote args =
-  let store = Board.global () in
   let post_id = get_string args "post_id" "" in
   let voter = get_string args "voter" "anonymous" in
   let direction_str = get_string args "direction" "up" in
 
   let direction = if direction_str = "down" then Board.Down else Board.Up in
 
-  match Board.vote store ~voter ~post_id ~direction with
+  match Board_dispatch.vote ~voter ~post_id ~direction with
   | Ok new_score ->
       let arrow = if direction = Board.Up then "↑" else "↓" in
       (* SOUL Evolution via callback (breaks compile-time dependency cycle) *)
@@ -333,7 +307,7 @@ let handle_vote args =
         match !evolution_hook with
         | None -> ""  (* Lodge not initialized yet *)
         | Some cb ->
-            match Board.get_post store ~post_id with
+            match Board_dispatch.get_post ~post_id with
             | Ok post ->
                 let author = Board.Agent_id.to_string post.author in
                 (* Agent-only evolution: 에이전트끼리만 서로 진화시킴 *)
@@ -354,31 +328,16 @@ let handle_vote args =
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
 let handle_stats _args =
-  let store = Board.global () in
-  let stats = Board.stats store in
+  let stats = Board_dispatch.stats () in
   (true, Printf.sprintf "📊 Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
 
 (** Search posts by keyword *)
 let handle_search args =
-  let store = Board.global () in
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   if query = "" then (false, "❌ query required")
   else
-    (* Load more than limit to filter from a larger pool *)
-    let all_posts : Board.post list = Board.list_posts store ~limit:(max limit 100) () in
-    let query_lower = String.lowercase_ascii query in
-    let pattern = Str.regexp_string query_lower in
-    let matches_str s =
-      try ignore (Str.search_forward pattern (String.lowercase_ascii s) 0); true
-      with Not_found -> false
-    in
-    let matched = List.filter (fun (p : Board.post) ->
-      matches_str p.content
-      || matches_str (Board.Agent_id.to_string p.author)
-      || (match p.hearth with Some h -> matches_str h | None -> false)
-    ) all_posts in
-    let results = List.filteri (fun i _ -> i < limit) matched in
+    let results = Board_dispatch.search ~query ~limit in
     if results = [] then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)
     else
       let formatted = List.map format_post results in
@@ -386,27 +345,25 @@ let handle_search args =
 
 (** Vote on comment *)
 let handle_comment_vote args =
-  let store = Board.global () in
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   let direction_str = get_string args "direction" "up" in
   let direction = if direction_str = "down" then Board.Down else Board.Up in
   if comment_id = "" then (false, "❌ comment_id required")
   else
-    match Board.vote_comment store ~voter ~comment_id ~direction with
+    match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
     | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if direction_str = "down" then "👎" else "👍") score)
     | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
 (** Agent profile *)
 let handle_profile args =
-  let store = Board.global () in
   let agent = get_string args "agent" "" in
   if agent = "" then (false, "❌ agent required")
   else
-    let all_posts : Board.post list = Board.list_posts store ~limit:1000 () in
+    let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
     let agent_posts = List.filter (fun (p : Board.post) -> Board.Agent_id.to_string p.author = agent) all_posts in
     let post_votes = List.fold_left (fun acc (p : Board.post) -> acc + p.votes_up - p.votes_down) 0 agent_posts in
-    let all_comments : Board.comment list = Board.list_comments store () in
+    let all_comments : Board.comment list = Board_dispatch.list_comments () in
     let agent_comments = List.filter (fun (c : Board.comment) -> Board.Agent_id.to_string c.author = agent) all_comments in
     let comment_votes = List.fold_left (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down) 0 agent_comments in
     (true, Printf.sprintf "📊 **%s** 프로필\n📝 게시물: %d개 (%+d점)\n💬 코멘트: %d개 (%+d점)\n⭐ 총: %+d점"
@@ -414,8 +371,7 @@ let handle_profile args =
 
 (** Hearth list *)
 let handle_hearth_list _args =
-  let store = Board.global () in
-  let hearths = Board.list_hearths store in
+  let hearths = Board_dispatch.list_hearths () in
   if hearths = [] then (true, "🔥 No active hearths.")
   else
     let formatted = List.map (fun (name, count) ->
@@ -559,6 +515,47 @@ let tool_hearth_list : Types.tool_schema = {
   ];
 }
 
+(** {1 Migration Tool} *)
+
+let handle_migrate _args =
+  match Board_dispatch.backend () with
+  | Board_dispatch.Postgres t ->
+      (* Load JSONL data into a temporary store *)
+      let store = Board.create_store () in
+      Board.load_persisted_posts store;
+      Board.load_persisted_comments store;
+      Board.recalculate_reply_counts store;
+      Board.load_persisted_votes store;
+      let jsonl_posts = Hashtbl.length store.Board.posts in
+      let jsonl_comments = Hashtbl.length store.Board.comments in
+      let jsonl_votes = Hashtbl.length store.Board.vote_log in
+      if jsonl_posts = 0 && jsonl_comments = 0 then
+        (true, "📭 No JSONL data to migrate.")
+      else begin
+        let r = Board_pg.migrate_from_store t store in
+        (true, Printf.sprintf
+          "✅ Migration complete.\n\
+           JSONL source: %d posts, %d comments, %d votes\n\
+           PG migrated: %d posts, %d comments, %d votes\n\
+           Skipped: %d posts, %d comments\n\
+           Backend: %s"
+          jsonl_posts jsonl_comments jsonl_votes
+          r.posts_migrated r.comments_migrated r.votes_migrated
+          r.posts_skipped r.comments_skipped
+          (Board_dispatch.backend_name ()))
+      end
+  | Board_dispatch.Jsonl _ ->
+      (false, "❌ Migration requires PostgreSQL backend. Set MASC_POSTGRES_URL and restart.")
+
+let tool_migrate : Types.tool_schema = {
+  name = "masc_board_migrate";
+  description = "Migrate Board data from JSONL files to PostgreSQL (idempotent, safe to re-run)";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
+  ];
+}
+
 (** All board tools *)
 let tools = [
   tool_post_create;
@@ -571,6 +568,7 @@ let tools = [
   tool_comment_vote;
   tool_profile;
   tool_hearth_list;
+  tool_migrate;
 ]
 
 (** Tool dispatcher *)
@@ -586,4 +584,5 @@ let handle_tool name args =
   | "masc_board_comment_vote" -> handle_comment_vote args
   | "masc_board_profile" -> handle_profile args
   | "masc_board_hearths" -> handle_hearth_list args
+  | "masc_board_migrate" -> handle_migrate args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)

@@ -12,6 +12,8 @@
    auto_responder
    auth
    board
+   board_pg
+   board_dispatch
    error
    backend
    backend_eio

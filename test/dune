@@ -184,6 +184,19 @@
  (modules test_concurrent_distributed)
  (libraries masc_mcp eio eio_main str yojson unix))
 
+; Board dispatch tests (JSONL backend routing)
+(test
+ (name test_board_dispatch)
+ (modules test_board_dispatch)
+ (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
+
+; Board PostgreSQL backend tests (skipped when MASC_POSTGRES_URL is absent)
+(test
+ (name test_board_pg)
+ (modules test_board_pg)
+ (libraries masc_mcp alcotest eio eio_main yojson uri caqti caqti-eio caqti-eio.unix
+            caqti-driver-postgresql mirage-crypto-rng mirage-crypto-rng.unix))
+
 ; ============================================================
 ; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)
 ; These modules are not currently in masc_mcp library.

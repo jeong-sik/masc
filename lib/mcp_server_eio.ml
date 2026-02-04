@@ -2094,8 +2094,7 @@ Time: %s
             (* Link Board post back to this thread *)
             let link_warning = match source_post_id with
               | Some pid ->
-                  let store = Board.global () in
-                  (match Board.set_thread_id store
+                  (match Board_dispatch.set_thread_id
                     ~post_id:pid ~thread_id:thread.Council.Conversation.id with
                    | Ok () -> ""
                    | Error e -> Printf.sprintf "\n⚠️ Board link failed: %s" (Board.show_board_error e))

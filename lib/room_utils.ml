@@ -264,6 +264,14 @@ let default_config_eio ~sw ~env base_path =
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem"
            | PostgresNative _ -> "PostgresNative");
+        (* Initialize Board backend based on storage type *)
+        (match backend with
+         | PostgresNative pg ->
+             let pool = Backend.PostgresNative.get_pool pg in
+             (match Board_dispatch.init_pg pool with
+              | Ok () -> ()
+              | Error _ -> Board_dispatch.init_jsonl ())
+         | _ -> Board_dispatch.init_jsonl ());
         backend
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."

@@ -199,6 +199,22 @@ let sweep () =
   | Jsonl store -> Board.sweep store
   | Postgres t -> Board_pg.sweep t
 
+(** {1 Karma Functions} *)
+
+let get_all_karma () =
+  match backend () with
+  | Jsonl store -> Board.get_all_karma store
+  | Postgres t -> Board_pg.get_all_karma t
+
+let get_agent_karma ~agent_name =
+  match backend () with
+  | Jsonl store -> Board.get_agent_karma store ~agent_name
+  | Postgres t -> Board_pg.get_agent_karma t ~agent_name
+
+(** Post to JSON with karma (delegates to Board for flair extraction) *)
+let post_to_yojson_with_karma (p : Board.post) ~author_karma =
+  Board.post_to_yojson_with_karma p ~author_karma
+
 (** Backend name for diagnostics *)
 let backend_name () =
   match !current_backend with

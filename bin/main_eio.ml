@@ -22,6 +22,7 @@ module Types = Masc_mcp.Types
 module Tempo = Masc_mcp.Tempo
 module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
+module Board_dispatch = Masc_mcp.Board_dispatch
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
@@ -1355,15 +1356,14 @@ let make_routes ~port ~host =
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let store = Board.global () in
          let hearth = query_param req "hearth" in
-         let posts = Board.list_posts store ?hearth () in
-         let karma_map = Board.get_all_karma store in
+         let posts = Board_dispatch.list_posts ?hearth () in
+         let karma_map = Board_dispatch.get_all_karma () in
          let get_karma author =
            try List.assoc author karma_map with Not_found -> 0
          in
          let posts_json = List.map (fun p ->
-           Board.post_to_yojson_with_karma p
+           Board_dispatch.post_to_yojson_with_karma p
              ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
          ) posts in
          let json = `Assoc [
@@ -1375,8 +1375,7 @@ let make_routes ~port ~host =
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let store = Board.global () in
-         let hearths = Board.list_hearths store in
+         let hearths = Board_dispatch.list_hearths () in
          let json = `Assoc [
            ("hearths", `List (List.map (fun (name, count) ->
              `Assoc [("name", `String name); ("count", `Int count)]
@@ -1392,8 +1391,7 @@ let make_routes ~port ~host =
 
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let store = Board.global () in
-         let karma_list = Board.get_all_karma store in
+         let karma_list = Board_dispatch.get_all_karma () in
          let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
          let json = `Assoc [
            ("karma", `List (List.map (fun (agent, k) ->
@@ -1557,8 +1555,7 @@ let make_extended_handler routes =
             let json = `Assoc [("flairs", `List flairs)] in
             Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, "/api/v1/board/hearths" ->
-            let store = Board.global () in
-            let hearths = Board.list_hearths store in
+            let hearths = Board_dispatch.list_hearths () in
             let json = `Assoc [
               ("hearths", `List (List.map (fun (name, count) ->
                 `Assoc [("name", `String name); ("count", `Int count)]
@@ -1567,12 +1564,11 @@ let make_extended_handler routes =
             Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
-            let store = Board.global () in
-            (match Board.get_post store ~post_id with
+            (match Board_dispatch.get_post ~post_id with
             | Error _ ->
                 Http.Response.json {|{"error":"Post not found"}|} reqd
             | Ok post ->
-                let comments = match Board.get_comments store ~post_id with
+                let comments = match Board_dispatch.get_comments ~post_id with
                   | Ok cs -> cs | Error _ -> []
                 in
                 let json = `Assoc [
@@ -2000,22 +1996,20 @@ let run_server ~sw ~env ~port ~base_path =
           h2_respond_json h2_reqd (Masc_mcp.Credits_dashboard.json_api ()) ~extra_headers:cors
 
       | `GET, "/api/v1/board" ->
-          let store = Board.global () in
           let hearth = query_param httpun_request "hearth" in
-          let posts = Board.list_posts store ?hearth () in
-          let karma_map = Board.get_all_karma store in
+          let posts = Board_dispatch.list_posts ?hearth () in
+          let karma_map = Board_dispatch.get_all_karma () in
           let get_karma author =
             try List.assoc author karma_map with Not_found -> 0
           in
           let posts_json = List.map (fun p ->
-            Board.post_to_yojson_with_karma p ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
+            Board_dispatch.post_to_yojson_with_karma p ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
           ) posts in
           let json = `Assoc [("posts", `List posts_json); ("count", `Int (List.length posts))] in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/board/hearths" ->
-          let store = Board.global () in
-          let hearths = Board.list_hearths store in
+          let hearths = Board_dispatch.list_hearths () in
           let json = `Assoc [
             ("hearths", `List (List.map (fun (name, count) ->
               `Assoc [("name", `String name); ("count", `Int count)]
@@ -2029,8 +2023,7 @@ let run_server ~sw ~env ~port ~base_path =
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/karma" ->
-          let store = Board.global () in
-          let karma_list = Board.get_all_karma store in
+          let karma_list = Board_dispatch.get_all_karma () in
           let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
           let json = `Assoc [
             ("karma", `List (List.map (fun (agent, k) ->
@@ -2185,7 +2178,7 @@ let run_cmd port base_path =
       Masc_mcp.Shutdown_hooks.run_all ();
 
       (* Flush dirty board data to prevent data loss *)
-      (try Board.flush_dirty (Board.global ())
+      (try Board_dispatch.flush ()
        with _ -> Printf.eprintf "[Shutdown] Board flush skipped (not initialized)\n%!");
 
       (* Also close local SSE connections tracked in main_eio *)

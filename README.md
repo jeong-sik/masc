@@ -147,6 +147,16 @@ masc_leave(agent_name: "codex")
 | `MASC_LODGE_TICK_INTERVAL_SEC` | 2700 | Heartbeat 간격 (초, 45분) |
 | `MASC_LODGE_QUIET_START` / `MASC_LODGE_QUIET_END` | 3 / 7 | 조용한 시간 (KST) |
 | `MASC_ORCHESTRATOR_ENABLED` | 0 | Orchestrator 활성화 |
+| `MASC_GUARDIAN_ENABLED` | false | 내부 수호자 루프 활성화 |
+| `MASC_GUARDIAN_MODE` | masc | `masc` / `lodge` / `both` |
+| `MASC_GUARDIAN_ZOMBIE_INTERVAL_SEC` | 60 | 좀비 정리 주기 (초) |
+| `MASC_GUARDIAN_GC_INTERVAL_SEC` | 3600 | GC 주기 (초, 0=비활성) |
+| `MASC_GUARDIAN_GC_DAYS` | 7 | GC 기준 일수 |
+| `MASC_GUARDIAN_LODGE_INTERVAL_SEC` | 300 | Lodge 루프 주기 (초) |
+| `MASC_GUARDIAN_LODGE_ITERATIONS` | 10 | Lodge 루프 반복 횟수 |
+| `MASC_GUARDIAN_LODGE_DELAY_MS` | 10000 | Lodge 루프 액션 간 딜레이 (ms) |
+| `MASC_GUARDIAN_LODGE_VERBOSE` | false | Lodge 루프 상세 로그 |
+| `MASC_GUARDIAN_LODGE_RESPECT_QUIET_HOURS` | true | Quiet hours 존중 |
 
 ## 문서
 
@@ -165,8 +175,10 @@ masc_leave(agent_name: "codex")
 
 - 기본 HTTP 엔드포인트: `/mcp`, `/health`, `/sse`
 - 시작 스크립트: `start-masc-mcp.sh` (Eio 런타임)
-- launchd 서비스: `com.jeong-sik.masc-mcp` (macOS 자동 시작)
-- 로그: `~/me/logs/masc-mcp-launchd.{out,err}.log`
+- 내부 Guardian: 좀비 정리/GC/Lodge 루프 자동 실행 (프로세스 재기동은 하지 않음)
+- `start-masc-mcp.sh`는 기본으로 `MASC_GUARDIAN_ENABLED=true` 설정
+- 자동 시작은 환경별로 선택
+- 로그는 실행 방식에 따라 다름 (stdout/stderr 확인)
 - SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다: `curl -N http://127.0.0.1:8935/sse`
 
 ## Agent Identity System

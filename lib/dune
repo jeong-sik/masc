@@ -40,6 +40,7 @@
    handover_eio
    hat
    heartbeat
+   guardian
    heartbeat_smart
    hebbian_eio
    http_server_eio

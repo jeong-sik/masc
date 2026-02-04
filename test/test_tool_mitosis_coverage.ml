@@ -143,7 +143,12 @@ let test_negative_context_ratio () =
 (* T2: context_ratio > 1.0 should be clamped to 1.0 *)
 let test_over_one_context_ratio () =
   let ctx = make_ctx () in
-  let args = `Assoc [("context_ratio", `Float 2.0); ("full_context", `String "test")] in
+  let args = `Assoc [
+    ("context_ratio", `Float 2.0);
+    ("full_context", `String "test");
+    (* Avoid spawn in tests: keep handoff threshold above clamped ratio *)
+    ("handoff_threshold", `Float 2.0);
+  ] in
   match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
   | Some (_, result) ->
       check bool "over-1 ratio handled" true (String.length result > 0)

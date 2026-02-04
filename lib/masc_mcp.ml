@@ -92,6 +92,7 @@ module Gcm_compat = Gcm_compat
 module Mention = Mention
 module Hat = Hat
 module Heartbeat = Heartbeat
+module Guardian = Guardian
 module Mitosis = Mitosis
 module Dashboard = Dashboard
 module Tempo = Tempo

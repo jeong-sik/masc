@@ -719,6 +719,37 @@ let set_thread_id t ~post_id ~thread_id =
     | Error err -> Error (caqti_err err)
     | Ok () -> Ok ()
 
+(** {1 Karma Calculation} *)
+
+let karma_by_author_q =
+  (Caqti_type.unit ->* Caqti_type.(t2 string int))
+  "SELECT author, COALESCE(SUM(votes_up), 0)::int AS karma \
+   FROM ( \
+     SELECT author, votes_up FROM masc_board_posts \
+     WHERE (expires_at = 0 OR expires_at > extract(epoch from now())) \
+     UNION ALL \
+     SELECT author, votes_up FROM masc_board_comments \
+     WHERE (expires_at = 0 OR expires_at > extract(epoch from now())) \
+   ) AS combined \
+   GROUP BY author \
+   ORDER BY karma DESC"
+
+let get_all_karma t =
+  match Caqti_eio.Pool.use (fun conn ->
+    let module C = (val conn : Caqti_eio.CONNECTION) in
+    C.collect_list karma_by_author_q ()
+  ) t.pool with
+  | Ok pairs -> pairs
+  | Error err ->
+      Printf.eprintf "[Board_pg] get_all_karma error: %s\n%!" (Caqti_error.show err);
+      []
+
+let get_agent_karma t ~agent_name =
+  let all_karma = get_all_karma t in
+  match List.find_opt (fun (name, _) -> name = agent_name) all_karma with
+  | Some (_, karma) -> karma
+  | None -> 0
+
 (** {1 TTL Sweep} *)
 
 let sweep t =

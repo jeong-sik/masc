@@ -52,11 +52,20 @@ def normalize_action(action: str) -> str:
     return base or "UNKNOWN"
 
 
+def system_reason(action: str) -> str:
+    if not action:
+        return "unknown"
+    parts = action.split(":", 1)
+    if len(parts) == 2:
+        return parts[1].strip().lower() or "unknown"
+    return "unknown"
+
+
 def load_entries(
     traces_dir: str,
     start_ts: float,
     end_ts: float,
-    phase: str,
+    phase: str | None,
     agent_filter: str | None,
 ) -> List[dict]:
     entries: List[dict] = []
@@ -96,7 +105,13 @@ def main() -> int:
     parser.add_argument("--since", type=str, default=None, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--until", type=str, default=None, help="End date (YYYY-MM-DD, inclusive)")
     parser.add_argument("--agent", type=str, default=None, help="Filter by agent name")
-    parser.add_argument("--phase", type=str, default="decide_action", help="Trace phase to include")
+    parser.add_argument(
+        "--phase",
+        type=str,
+        default="all",
+        choices=["all", "decide_action", "system_skip"],
+        help="Trace phase to include (default: all)",
+    )
     parser.add_argument("--format", type=str, default="text", choices=["text", "json"], help="Output format")
     args = parser.parse_args()
 
@@ -104,15 +119,24 @@ def main() -> int:
     traces_dir = os.path.join(me_root, ".masc", "traces")
 
     start_ts, end_ts = ts_range_from_args(args.days, args.since, args.until)
-    entries = load_entries(traces_dir, start_ts, end_ts, args.phase, args.agent)
 
-    total = len(entries)
+    if args.phase == "decide_action":
+        decide_entries = load_entries(traces_dir, start_ts, end_ts, "decide_action", args.agent)
+        system_entries: List[dict] = []
+    elif args.phase == "system_skip":
+        decide_entries = []
+        system_entries = load_entries(traces_dir, start_ts, end_ts, "system_skip", args.agent)
+    else:
+        decide_entries = load_entries(traces_dir, start_ts, end_ts, "decide_action", args.agent)
+        system_entries = load_entries(traces_dir, start_ts, end_ts, "system_skip", args.agent)
+
+    decisions_total = len(decide_entries)
     action_counts: Dict[str, int] = {}
     by_agent: Dict[str, Dict[str, int]] = {}
     self_heartbeat = 0
     llm_counts: Dict[str, int] = {}
 
-    for e in entries:
+    for e in decide_entries:
         action = normalize_action(str(e.get("action", "")))
         action_counts[action] = action_counts.get(action, 0) + 1
 
@@ -128,13 +152,26 @@ def main() -> int:
         if llm:
             llm_counts[llm] = llm_counts.get(llm, 0) + 1
 
-    acted = total - action_counts.get("SKIP", 0)
+    llm_skips = action_counts.get("SKIP", 0)
+    acted = decisions_total - llm_skips
+
+    system_skip_total = len(system_entries)
+    system_skip_reasons: Dict[str, int] = {}
+    for e in system_entries:
+        reason = system_reason(str(e.get("action", "")))
+        system_skip_reasons[reason] = system_skip_reasons.get(reason, 0) + 1
+
+    events_total = decisions_total + system_skip_total
 
     if args.format == "json":
         out = {
-            "total": total,
+            "events_total": events_total,
+            "decisions_total": decisions_total,
             "acted": acted,
-            "acted_rate": (acted / total) if total else 0.0,
+            "acted_rate": (acted / decisions_total) if decisions_total else 0.0,
+            "llm_skips": llm_skips,
+            "system_skips": system_skip_total,
+            "system_skip_reasons": system_skip_reasons,
             "action_counts": action_counts,
             "self_heartbeat_decisions": self_heartbeat,
             "llm_counts": llm_counts,
@@ -150,19 +187,27 @@ def main() -> int:
     print(f"Period: {start_s} ~ {end_s}")
     if args.agent:
         print(f"Agent: {args.agent}")
-    print(f"Total decisions: {total}")
-    print(f"Acted: {acted} ({pct(acted, total)})")
-    print("Action breakdown:")
-    for k in sorted(action_counts.keys()):
-        print(f"- {k}: {action_counts[k]} ({pct(action_counts[k], total)})")
-    print(f"Self-heartbeat decisions: {self_heartbeat} ({pct(self_heartbeat, total)})")
+    print(f"Decisions (LLM): {decisions_total}")
+    print(f"Acted: {acted} ({pct(acted, decisions_total)})")
+    print(f"LLM skip: {llm_skips} ({pct(llm_skips, decisions_total)})")
+    print(f"System skip: {system_skip_total} ({pct(system_skip_total, max(events_total, 1))})")
+    if system_skip_reasons:
+        print("System skip breakdown:")
+        for k in sorted(system_skip_reasons.keys()):
+            print(f"- {k}: {system_skip_reasons[k]}")
+
+    if decisions_total > 0:
+        print("Action breakdown:")
+        for k in sorted(action_counts.keys()):
+            print(f"- {k}: {action_counts[k]} ({pct(action_counts[k], decisions_total)})")
+    print(f"Self-heartbeat decisions: {self_heartbeat} ({pct(self_heartbeat, decisions_total)})")
 
     if llm_counts:
         print("LLM usage:")
         for k in sorted(llm_counts.keys()):
-            print(f"- {k}: {llm_counts[k]} ({pct(llm_counts[k], total)})")
+            print(f"- {k}: {llm_counts[k]} ({pct(llm_counts[k], decisions_total)})")
 
-    if len(by_agent) > 0 and not args.agent:
+    if len(by_agent) > 0 and not args.agent and decisions_total > 0:
         print("Per-agent acted rate:")
         for agent in sorted(by_agent.keys()):
             a_total = sum(by_agent[agent].values())

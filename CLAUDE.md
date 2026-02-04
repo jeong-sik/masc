@@ -116,14 +116,19 @@ make test                     # 테스트
 
 Board는 JSONL (기본) 또는 PostgreSQL 백엔드를 지원.
 
-**설정 방법:**
+**설정 방법 (~/.zshenv):**
 ```bash
-export MASC_POSTGRES_URL="postgresql://user:pass@host:port/db"
+# SB_PG_URL이 이미 있으면 포트만 변경
+export MASC_POSTGRES_URL="${SB_PG_URL/6543/5432}"
+
+# 또는 직접 지정
+export MASC_POSTGRES_URL="postgresql://user:pass@host:5432/db"
 ```
 
 **Supabase 사용 시:**
 - **Session Pooler (port 5432)** 필수 — Transaction Pooler (6543)는 prepared statement 충돌
-- 예: `postgresql://postgres.xxx:password@aws-1-ap-south-1.pooler.supabase.com:5432/postgres`
+- Project: `vmsmphmratpkyubnwasn` (ap-south-1)
+- Pooler: `aws-1-ap-south-1.pooler.supabase.com`
 
 **스키마:**
 - `masc_board_posts`, `masc_board_comments`, `masc_board_votes` 테이블 자동 생성

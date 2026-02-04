@@ -46,15 +46,17 @@ let https_connector :
          | Ok tls_config ->
              fun uri (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t) ->
                let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
-               let host =
-                 match Uri.host uri with
-                 | None -> None
-                 | Some h ->
-                     (match Domain_name.of_string h with
-                      | Ok d -> Some (Domain_name.host_exn d)
-                      | Error _ -> None)
-               in
-               Tls_eio.client_of_flow tls_config ?host flow)
+             let host =
+               match Uri.host uri with
+               | None -> None
+               | Some h ->
+                   (match Domain_name.of_string h with
+                    | Ok d -> Some (Domain_name.host_exn d)
+                    | Error _ -> None)
+             in
+             match host with
+             | None -> failwith "TLS host missing/invalid"
+             | Some host -> Tls_eio.client_of_flow tls_config ~host flow)
   )
 
 let get_https_connector () =

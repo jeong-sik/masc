@@ -424,10 +424,7 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let max_response_bytes = 1_000_000 in
-  let truncate_for_log s =
-    if String.length s > 200 then String.sub s 0 200 ^ "..."
-    else s
-  in
+  let suppress_body _s = "body suppressed" in
   match Eio_context.get_net_opt () with
   | None -> Error "Eio net not initialized"
   | Some net ->
@@ -459,7 +456,7 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
           else if Cohttp.Code.is_success status then
             Ok body_str
           else
-            Error (Printf.sprintf "HTTP %d: %s" status (truncate_for_log body_str))
+            Error (Printf.sprintf "HTTP %d (%s)" status (suppress_body body_str))
         )
       in
       match Eio_context.get_clock_opt () with

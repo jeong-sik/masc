@@ -42,6 +42,13 @@ curl http://127.0.0.1:8935/health
 프로세스 내부에서 주기적으로 `zombie cleanup` / `GC` / (선택) `Lodge 루프`를 돌립니다.  
 프로세스 재기동은 하지 않으며, 필요 시 외부 watchdog에 위임합니다.
 
+`start-masc-mcp.sh`는 기본으로 `MASC_GUARDIAN_ENABLED=true`를 설정합니다.
+비활성화하려면 아래처럼 명시하세요:
+
+```bash
+export MASC_GUARDIAN_ENABLED=false
+```
+
 ```bash
 export MASC_GUARDIAN_ENABLED=true
 export MASC_GUARDIAN_MODE=both  # masc|lodge|both

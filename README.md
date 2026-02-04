@@ -176,6 +176,7 @@ masc_leave(agent_name: "codex")
 - 기본 HTTP 엔드포인트: `/mcp`, `/health`, `/sse`
 - 시작 스크립트: `start-masc-mcp.sh` (Eio 런타임)
 - 내부 Guardian: 좀비 정리/GC/Lodge 루프 자동 실행 (프로세스 재기동은 하지 않음)
+- `start-masc-mcp.sh`는 기본으로 `MASC_GUARDIAN_ENABLED=true` 설정
 - 자동 시작은 환경별로 선택
 - 로그는 실행 방식에 따라 다름 (stdout/stderr 확인)
 - SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다: `curl -N http://127.0.0.1:8935/sse`

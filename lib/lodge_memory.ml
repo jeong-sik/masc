@@ -40,19 +40,37 @@ let truncate s n =
     in
     String.sub s 0 (find_boundary n)
 
-(** Run curl GraphQL request via argv (NO shell, safe from injection).
-    Body is piped via stdin, API key passed as header arg (not shell-interpolated).
-    Fixes: shell injection + API key exposure in process list. *)
+(** GraphQL request via Cohttp_eio.
+    Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
 let graphql_request ?(timeout_sec=5.0) body =
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
-  Process_eio.run_argv_with_stdin ~timeout_sec ~stdin_content:body
-    ["curl"; "-s"; "--connect-timeout"; "3";
-     "--max-time"; string_of_int (int_of_float timeout_sec);
-     url;
-     "-H"; "Content-Type: application/json";
-     "-H"; Printf.sprintf "Authorization: Bearer %s" api_key;
-     "-d"; "@-"]
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  match Eio_context.get_net_opt () with
+  | None -> ""
+  | Some net ->
+      let headers =
+        if api_key = "" then
+          Cohttp.Header.of_list [("Content-Type", "application/json")]
+        else
+          Cohttp.Header.of_list [
+            ("Content-Type", "application/json");
+            ("Authorization", "Bearer " ^ api_key);
+          ]
+      in
+      let uri = Uri.of_string url in
+      let run () =
+        Eio.Switch.run (fun sw ->
+          let client = Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net in
+          let body_content = Eio.Flow.string_source body in
+          let _resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
+          Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int
+        )
+      in
+      match Eio_context.get_clock_opt () with
+      | Some clock ->
+          (try Eio.Time.with_timeout_exn clock timeout_sec run with _ -> "")
+      | None ->
+          (try run () with _ -> "")
 
 (** Resolve ME_ROOT consistently *)
 let me_root () =

@@ -418,6 +418,38 @@ let cleanup_inactive_lodge_agents () =
 let run_shell_nonblocking cmd =
   Process_eio.run ~timeout_sec:60.0 cmd
 
+(** GraphQL request via Cohttp_eio.
+    Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
+let graphql_request ?(timeout_sec=5.0) body =
+  let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  match Eio_context.get_net_opt () with
+  | None -> ""
+  | Some net ->
+      let headers =
+        if api_key = "" then
+          Cohttp.Header.of_list [("Content-Type", "application/json")]
+        else
+          Cohttp.Header.of_list [
+            ("Content-Type", "application/json");
+            ("Authorization", "Bearer " ^ api_key);
+          ]
+      in
+      let uri = Uri.of_string url in
+      let run () =
+        Eio.Switch.run (fun sw ->
+          let client = Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net in
+          let body_content = Eio.Flow.string_source body in
+          let _resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
+          Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int
+        )
+      in
+      match Eio_context.get_clock_opt () with
+      | Some clock ->
+          (try Eio.Time.with_timeout_exn clock timeout_sec run with _ -> "")
+      | None ->
+          (try run () with _ -> "")
+
 (** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes.
     Walks forward through valid UTF-8 characters, never exceeding max_bytes. *)
 let utf8_truncate s max_bytes =
@@ -599,14 +631,10 @@ let time_modifier agent =
 let load_agents_from_neo4j () =
   (* first:25 — GRAPHQL_MAX_COST=2000. Increased from 15 to accommodate new agents.
      19 agents exist; alphabetical pagination requires headroom. *)
-  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests personalityHint activityLevel } } } }\"}" in
+  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    api_key gql_query
-  in
   Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
-  let json_str = run_shell_nonblocking cmd in
+  let json_str = graphql_request ~timeout_sec:5.0 gql_query in
   Printf.eprintf "[Heartbeat] GraphQL response: %d bytes\n%!" (String.length json_str);
   try
     let json = Yojson.Safe.from_string json_str in
@@ -860,12 +888,7 @@ let load_lodge_agents_full () =
      Returns all 19 agents. Detailed fields (traits, interests, preferredHours)
      available via individual agent queries if needed. *)
   let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name emoji koreanName activityLevel status model } } } }\"}" in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    api_key gql_query
-  in
-  let json_str = run_shell_nonblocking cmd in
+  let json_str = graphql_request ~timeout_sec:5.0 gql_query in
   try
     let json = Yojson.Safe.from_string json_str in
     (match Yojson.Safe.Util.member "errors" json with
@@ -952,13 +975,8 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
     (opt_str "primaryValue" primary_value)
   in
   let gql_body = Printf.sprintf {|{"query": "%s"}|} (esc mutation) in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 5 --max-time 10 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    api_key gql_body
-  in
   Printf.eprintf "[Admin] Creating agent '%s' via GraphQL...\n%!" name;
-  let json_str = run_shell_nonblocking cmd in
+  let json_str = graphql_request ~timeout_sec:10.0 gql_body in
   try
     let json = Yojson.Safe.from_string json_str in
     (match Yojson.Safe.Util.member "errors" json with
@@ -1154,13 +1172,11 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
     target_id timestamp
   in
   let json_payload = Printf.sprintf {|{"query": "%s"}|} (String.escaped mutation) in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --max-time 3 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null | head -c 100"
-    api_key json_payload
-  in
   (* Fire and forget - don't block the main loop, but log failures *)
-  let result = run_shell_line cmd in
+  let result = graphql_request ~timeout_sec:3.0 json_payload in
+  let result =
+    if String.length result > 100 then String.sub result 0 100 else result
+  in
   if String.length result > 0 && String.length result < 5 then
     Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
 

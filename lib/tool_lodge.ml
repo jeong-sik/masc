@@ -151,6 +151,38 @@ let http_get_json ~net:_ url =
 
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
+(** GraphQL request via Cohttp_eio.
+    Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
+let graphql_request ?(timeout_sec=5.0) body =
+  let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  match Eio_context.get_net_opt () with
+  | None -> ""
+  | Some net ->
+      let headers =
+        if api_key = "" then
+          Cohttp.Header.of_list [("Content-Type", "application/json")]
+        else
+          Cohttp.Header.of_list [
+            ("Content-Type", "application/json");
+            ("Authorization", "Bearer " ^ api_key);
+          ]
+      in
+      let uri = Uri.of_string url in
+      let run () =
+        Eio.Switch.run (fun sw ->
+          let client = Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net in
+          let body_content = Eio.Flow.string_source body in
+          let _resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
+          Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int
+        )
+      in
+      match Eio_context.get_clock_opt () with
+      | Some clock ->
+          (try Eio.Time.with_timeout_exn clock timeout_sec run with _ -> "")
+      | None ->
+          (try run () with _ -> "")
+
 (** {1 LLM Provider Rotation — Avoid ollama overload} *)
 
 type llm_provider =
@@ -493,18 +525,8 @@ let load_agents_config () =
   (* Query all Lodge identity fields for dynamic agent system *)
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
   try
-    let ic = Unix.open_process_in cmd in
-    let json_str = Fun.protect ~finally:(fun () ->
-      ignore (Unix.close_process_in ic)
-    ) (fun () ->
-      let buf = Buffer.create 4096 in
-      (try while true do Buffer.add_char buf (input_char ic) done
-       with End_of_file -> ());
-      Buffer.contents buf
-    ) in
+    let json_str = graphql_request ~timeout_sec:5.0 query in
     Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
     (* Parse JSON response *)
     let json = Yojson.Safe.from_string json_str in
@@ -1288,10 +1310,8 @@ let core_lodge_agents () = get_all_agent_names ()
 let get_all_agents () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status } } } }\"}" in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
   try
-    let (_, output) = run_shell_nonblocking cmd in
+    let output = graphql_request ~timeout_sec:5.0 query in
     try
       let json = Yojson.Safe.from_string output in
       let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in

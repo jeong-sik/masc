@@ -31,6 +31,7 @@
    datachannel_eio
    dtls
    dtls_crypto
+   eio_context
    encryption
    federation
    gcm_compat
@@ -203,6 +204,10 @@
    ipaddr
    cohttp
    cohttp-eio
+   tls
+   tls-eio
+   domain-name
+   ca-certs
    ;; UUID generation (for mind_eio, noosphere_eio)
    uuidm
    ;; Zstd compression

@@ -1603,6 +1603,8 @@ let run_server ~sw ~env ~port ~base_path =
   (* Set net and clock references in Mcp_eio for async operations *)
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
+  Masc_mcp.Eio_context.set_net net;
+  Masc_mcp.Eio_context.set_clock clock;
   Masc_mcp.Process_eio.init ~proc_mgr ~clock;
 
   (* Create Caqti-compatible stdenv adapter

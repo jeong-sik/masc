@@ -655,12 +655,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     <!-- Main Navigation Tabs -->
     <div class="main-tab-bar">
-      <button class="main-tab-btn active" onclick="switchMainTab('overview')">🏠 Overview</button>
-      <button class="main-tab-btn" onclick="switchMainTab('board')">💬 Board</button>
-      <button class="main-tab-btn" onclick="switchMainTab('activity')">📊 Activity</button>
-      <button class="main-tab-btn" onclick="switchMainTab('agents')">🤖 Agents</button>
-      <button class="main-tab-btn" onclick="switchMainTab('tasks')">📋 Tasks</button>
-      <button class="main-tab-btn" onclick="switchMainTab('journal')">📓 Journal</button>
+      <button class="main-tab-btn active" data-tab="overview" onclick="switchMainTab('overview')">🏠 Overview</button>
+      <button class="main-tab-btn" data-tab="board" onclick="switchMainTab('board')">💬 Board</button>
+      <button class="main-tab-btn" data-tab="activity" onclick="switchMainTab('activity')">📊 Activity</button>
+      <button class="main-tab-btn" data-tab="agents" onclick="switchMainTab('agents')">🤖 Agents</button>
+      <button class="main-tab-btn" data-tab="tasks" onclick="switchMainTab('tasks')">📋 Tasks</button>
+      <button class="main-tab-btn" data-tab="journal" onclick="switchMainTab('journal')">📓 Journal</button>
     </div>
 
     <!-- Overview Tab -->
@@ -1099,20 +1099,169 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
     }
 
-    // === Main Tab switching ===
+    // === Hash Router ===
+    const VALID_TABS = ['overview', 'board', 'activity', 'agents', 'tasks', 'journal'];
+
+    const Router = {
+      parse(hash) {
+        // Parse: #board?sort=popular&author=claude or #board/post/abc123
+        const h = (hash || '').replace(/^#/, '');
+        if (!h) return { tab: 'overview', params: {}, postId: null };
+
+        const [pathPart, queryPart] = h.split('?');
+        const segments = pathPart.split('/');
+        const tab = VALID_TABS.includes(segments[0]) ? segments[0] : 'overview';
+
+        // Check for post detail: #board/post/{id}
+        let postId = null;
+        if (segments[0] === 'board' && segments[1] === 'post' && segments[2]) {
+          postId = segments[2];
+        }
+
+        // Parse query params
+        const params = {};
+        if (queryPart) {
+          new URLSearchParams(queryPart).forEach((v, k) => { params[k] = v; });
+        }
+        return { tab, params, postId };
+      },
+
+      serialize(state) {
+        let hash = '#' + (state.tab || 'overview');
+
+        // Add post path if viewing detail
+        if (state.postId) {
+          hash += '/post/' + state.postId;
+        }
+
+        // Add query params (sort, author, tag, hearth)
+        const params = new URLSearchParams();
+        if (state.sort && state.sort !== 'newest') params.set('sort', state.sort);
+        if (state.author) params.set('author', state.author);
+        if (state.tag) params.set('tag', state.tag);
+        if (state.hearth) params.set('hearth', state.hearth);
+
+        const qs = params.toString();
+        if (qs) hash += '?' + qs;
+        return hash;
+      },
+
+      navigate(state, replace = false) {
+        const hash = this.serialize(state);
+        if (replace) {
+          history.replaceState(state, '', hash);
+        } else {
+          history.pushState(state, '', hash);
+        }
+        window.dispatchEvent(new CustomEvent('routechange', { detail: state }));
+      },
+
+      init() {
+        // Handle hash changes (browser back/forward or direct URL)
+        const handleRoute = () => {
+          const state = this.parse(location.hash);
+          // Merge with localStorage preferences
+          state.sort = state.params.sort || localStorage.getItem('boardSort') || 'newest';
+          state.author = state.params.author || '';
+          state.tag = state.params.tag || null;
+          state.hearth = state.params.hearth || null;
+          window.dispatchEvent(new CustomEvent('routechange', { detail: state }));
+        };
+
+        window.addEventListener('hashchange', handleRoute);
+        window.addEventListener('popstate', handleRoute);
+
+        // Initial route on page load
+        handleRoute();
+      }
+    };
+
+    // === App State ===
     let currentMainTab = 'overview';
     let hideSystemPosts = true;
-    function switchMainTab(tab) {
-      currentMainTab = tab;
-      document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.main-tab-content').forEach(c => c.style.display = 'none');
-      document.getElementById('main-tab-' + tab).style.display = 'block';
-      event.target.classList.add('active');
-      if (tab === 'journal') fetchJournal();
-      if (tab === 'board') fetchBoard();
-      if (tab === 'activity') fetchActivity();
-      if (tab === 'overview') fetchServerHealth();
-      if (tab === 'agents') fetchLodgeAgents();
+
+    const AppState = {
+      tab: 'overview',
+      postId: null,
+      sort: 'newest',
+      author: '',
+      tag: null,
+      hearth: null,
+
+      update(changes) {
+        Object.assign(this, changes);
+        currentMainTab = this.tab;
+        currentSort = this.sort;
+        currentAuthorFilter = this.author;
+        currentTagFilter = this.tag;
+        currentHearthFilter = this.hearth;
+      }
+    };
+
+    // === UI Adapter ===
+    const UI = {
+      apply(state) {
+        AppState.update(state);
+        this.switchTab(state.tab);
+
+        if (state.tab === 'board') {
+          this.applyBoardState(state);
+        }
+      },
+
+      switchTab(tab) {
+        // Update button active states
+        document.querySelectorAll('.main-tab-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+
+        // Show/hide content panels
+        document.querySelectorAll('.main-tab-content').forEach(c => c.style.display = 'none');
+        const panel = document.getElementById('main-tab-' + tab);
+        if (panel) panel.style.display = 'block';
+
+        // Fetch data for tab
+        if (tab === 'journal') fetchJournal();
+        if (tab === 'board') fetchBoard();
+        if (tab === 'activity') fetchActivity();
+        if (tab === 'overview') fetchServerHealth();
+        if (tab === 'agents') fetchLodgeAgents();
+      },
+
+      applyBoardState(state) {
+        // Update sort dropdown
+        const sortSelect = document.getElementById('sort-select');
+        if (sortSelect && state.sort) sortSelect.value = state.sort;
+
+        // Update author filter dropdown
+        const authorSelect = document.getElementById('author-filter');
+        if (authorSelect && state.author !== undefined) authorSelect.value = state.author;
+
+        // Show post detail if postId present
+        if (state.postId) {
+          showPostDirect(state.postId);
+        } else {
+          showBoardListDirect();
+        }
+      }
+    };
+
+    // Listen for route changes
+    window.addEventListener('routechange', (e) => {
+      UI.apply(e.detail);
+    });
+
+    // === Main Tab switching (now uses Router) ===
+    function switchMainTab(tab, opts = {}) {
+      const state = {
+        tab,
+        postId: null,
+        sort: currentSort,
+        author: currentAuthorFilter,
+        tag: currentTagFilter,
+        hearth: currentHearthFilter
+      };
+      Router.navigate(state, opts.replace);
     }
 
     function toggleHideSystem(checked) {
@@ -1253,6 +1402,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let currentAuthorFilter = '';
     function filterByAuthor(author) {
       currentAuthorFilter = author;
+      // Update URL with author filter (replace)
+      const state = {
+        tab: 'board',
+        postId: null, // Clear post detail when filtering
+        sort: currentSort,
+        author: author,
+        tag: currentTagFilter,
+        hearth: currentHearthFilter
+      };
+      Router.navigate(state, true);
       renderFromCache();
     }
 
@@ -1355,6 +1514,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     function filterByHearth(name) {
       currentHearthFilter = (currentHearthFilter === name) ? null : name;
+      // Update URL with hearth filter (replace)
+      const state = {
+        tab: 'board',
+        postId: null,
+        sort: currentSort,
+        author: currentAuthorFilter,
+        tag: currentTagFilter,
+        hearth: currentHearthFilter
+      };
+      Router.navigate(state, true);
       fetchBoard();
       fetchHearths();
     }
@@ -1510,14 +1679,24 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let currentSort = localStorage.getItem('boardSort') || 'newest';
     let autoScrollEnabled = localStorage.getItem('autoScroll') !== 'false';
 
-    // Initialize sort dropdown and auto-scroll
+    // Initialize router and UI state
     document.addEventListener('DOMContentLoaded', () => {
+      // Initialize sort dropdown
       const sortSelect = document.getElementById('sort-select');
       if (sortSelect) sortSelect.value = currentSort;
+
+      // Initialize auto-scroll checkbox
       const autoScrollCheck = document.getElementById('auto-scroll');
       if (autoScrollCheck) autoScrollCheck.checked = autoScrollEnabled;
-      // Version badge set via fetchServerHealth (avoids duplicate /health call)
-      fetchServerHealth().then(() => {}).catch(() => {});
+
+      // Initialize hide system checkbox
+      const hideSystemCheck = document.getElementById('hide-system');
+      if (hideSystemCheck) hideSystemCheck.checked = hideSystemPosts;
+
+      // Initialize Router (handles URL hash and triggers initial routechange)
+      Router.init();
+
+      // Fetch hearths sidebar
       fetchHearths();
     });
 
@@ -1537,6 +1716,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function changeSort(sortBy) {
       currentSort = sortBy;
       localStorage.setItem('boardSort', sortBy);
+      // Update URL with new sort (replace to avoid history spam)
+      const state = {
+        tab: 'board',
+        postId: AppState.postId,
+        sort: sortBy,
+        author: currentAuthorFilter,
+        tag: currentTagFilter,
+        hearth: currentHearthFilter
+      };
+      Router.navigate(state, true); // replace = true
       renderFromCache();
     }
 
@@ -1570,6 +1759,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     function filterByTag(tag) {
       currentTagFilter = currentTagFilter === tag ? null : tag;
+      // Update URL with tag filter (replace)
+      const state = {
+        tab: 'board',
+        postId: null,
+        sort: currentSort,
+        author: currentAuthorFilter,
+        tag: currentTagFilter,
+        hearth: currentHearthFilter
+      };
+      Router.navigate(state, true);
       updateTagFilterBar();
       renderFromCache();
     }
@@ -1591,7 +1790,21 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
     }
 
+    // Show post via URL navigation (pushes history)
     async function showPost(postId) {
+      const state = {
+        tab: 'board',
+        postId: postId,
+        sort: currentSort,
+        author: currentAuthorFilter,
+        tag: currentTagFilter,
+        hearth: currentHearthFilter
+      };
+      Router.navigate(state);
+    }
+
+    // Direct post display (called from router, no history push)
+    async function showPostDirect(postId) {
       try {
         const res = await fetch('/api/v1/board/' + postId);
         const data = await res.json();
@@ -1627,12 +1840,28 @@ let cached_html = lazy ({|<!DOCTYPE html>
         `;
         document.getElementById('board-list-view').style.display = 'none';
         document.getElementById('board-detail-view').classList.add('active');
+        AppState.postId = postId;
       } catch(e) { console.error('Post fetch error:', e); }
     }
 
+    // Back to list via URL navigation (pushes history)
     function showBoardList() {
+      const state = {
+        tab: 'board',
+        postId: null,
+        sort: currentSort,
+        author: currentAuthorFilter,
+        tag: currentTagFilter,
+        hearth: currentHearthFilter
+      };
+      Router.navigate(state);
+    }
+
+    // Direct list display (called from router, no history push)
+    function showBoardListDirect() {
       document.getElementById('board-detail-view').classList.remove('active');
       document.getElementById('board-list-view').style.display = 'flex';
+      AppState.postId = null;
     }
 
     // === Journal (SSE event log) ===

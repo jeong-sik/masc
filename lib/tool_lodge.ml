@@ -485,74 +485,69 @@ type agent_config = {
 
 (** In-memory cache for dynamic agents (protected by mutex for concurrent access) *)
 let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
-let agent_cache_mu = Mutex.create ()
+let agent_cache_mu = Eio.Mutex.create ()
 
-(** Load agents from Neo4j via GraphQL API (reliable JSON parsing) *)
+(** Load agents from Neo4j via GraphQL API (reliable JSON parsing).
+    Called both at module init (pre-Eio, single-threaded) and at runtime.
+    At runtime, acquires agent_cache_mu for thread-safe cache update. *)
 let load_agents_config () =
-  Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
-  (* Query all Lodge identity fields for dynamic agent system *)
-  (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
-  let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
-  try
-    let ic = Unix.open_process_in cmd in
-    let json_str = Fun.protect ~finally:(fun () ->
-      ignore (Unix.close_process_in ic)
-    ) (fun () ->
-      let buf = Buffer.create 4096 in
-      (try while true do Buffer.add_char buf (input_char ic) done
-       with End_of_file -> ());
-      Buffer.contents buf
-    ) in
-    Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
-    (* Parse JSON response *)
-    let json = Yojson.Safe.from_string json_str in
-    let edges = json
-      |> Yojson.Safe.Util.member "data"
-      |> Yojson.Safe.Util.member "agents"
-      |> Yojson.Safe.Util.member "edges"
-      |> Yojson.Safe.Util.to_list
-    in
-    List.iter (fun edge ->
-      try
-        let node = Yojson.Safe.Util.member "node" edge in
-        let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-        let interests_json = Yojson.Safe.Util.(member "interests" node) in
-        let interests = match interests_json with
-          | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
-          | _ -> []
-        in
-        let config = {
-          name;
-          primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
-          value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
-          prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
-          generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
-          status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
-          emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
-          korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
-          model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
-          interests;
-        } in
-        Mutex.lock agent_cache_mu;
-        Hashtbl.replace agent_cache config.name config;
-        Mutex.unlock agent_cache_mu
-      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
-    ) edges;
-    Mutex.lock agent_cache_mu;
-    let n = Hashtbl.length agent_cache in
-    Mutex.unlock agent_cache_mu;
-    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n
-  with e ->
-    Printf.eprintf "[Lodge] ❌ Failed to load agents: %s\n%!" (Printexc.to_string e)
+  let do_load () =
+    Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
+    (* Query all Lodge identity fields for dynamic agent system *)
+    (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
+    let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
+    let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+    let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
+    try
+      let json_str = Process_eio.run ~timeout_sec:10.0 cmd in
+      Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
+      (* Parse JSON response *)
+      let json = Yojson.Safe.from_string json_str in
+      let edges = json
+        |> Yojson.Safe.Util.member "data"
+        |> Yojson.Safe.Util.member "agents"
+        |> Yojson.Safe.Util.member "edges"
+        |> Yojson.Safe.Util.to_list
+      in
+      List.iter (fun edge ->
+        try
+          let node = Yojson.Safe.Util.member "node" edge in
+          let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+          let interests_json = Yojson.Safe.Util.(member "interests" node) in
+          let interests = match interests_json with
+            | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
+            | _ -> []
+          in
+          let config = {
+            name;
+            primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
+            value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
+            prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
+            generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
+            status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
+            emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
+            korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
+            model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
+            interests;
+          } in
+          Hashtbl.replace agent_cache config.name config
+        with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
+      ) edges;
+      let n = Hashtbl.length agent_cache in
+      Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n
+    with e ->
+      Printf.eprintf "[Lodge] ❌ Failed to load agents: %s\n%!" (Printexc.to_string e)
+  in
+  if Process_eio.is_initialized () then
+    Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () -> do_load ())
+  else
+    do_load () (* Module init: single-threaded, no Eio context *)
 
 (** Get cached agent config, or None if not loaded *)
 let get_cached_agent name =
-  Mutex.lock agent_cache_mu;
-  let r = Hashtbl.find_opt agent_cache name in
-  Mutex.unlock agent_cache_mu;
-  r
+  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    Hashtbl.find_opt agent_cache name
+  )
 
 (** Get primary value from cached agent (for SOUL-based decisions) *)
 let get_agent_primary_value name =
@@ -647,13 +642,13 @@ let evolve_agent ~name ~dimension ~outcome =
       try
         let _ = Safe_ops.read_process_safe cmd in
         (* Update cache *)
-        Mutex.lock agent_cache_mu;
-        Hashtbl.replace agent_cache name {
-          config with
-          value_weights = Some new_weights_json;
-          generation = new_gen;
-        };
-        Mutex.unlock agent_cache_mu;
+        Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+          Hashtbl.replace agent_cache name {
+            config with
+            value_weights = Some new_weights_json;
+            generation = new_gen;
+          }
+        );
         Printf.eprintf "[Evolution] %s evolved: %s %s%.2f -> gen %d\n%!"
           name dimension
           (if delta >= 0.0 then "+" else "") delta new_gen;
@@ -688,10 +683,9 @@ let () =
 
 (** Get all cached agent names *)
 let get_all_agent_names () =
-  Mutex.lock agent_cache_mu;
-  let r = Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache [] in
-  Mutex.unlock agent_cache_mu;
-  r
+  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache []
+  )
 
 (** Pick a random agent name from cache *)
 let random_agent_name () =
@@ -706,13 +700,12 @@ let validate_agent_name name =
     | Some _ -> Some name
     | None ->
       (* Try Korean name lookup *)
-      Mutex.lock agent_cache_mu;
-      let found = Hashtbl.fold (fun k v acc ->
-        match acc with Some _ -> acc | None ->
-        if v.korean_name = name then Some k else None
-      ) agent_cache None in
-      Mutex.unlock agent_cache_mu;
-      found
+      Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+        Hashtbl.fold (fun k v acc ->
+          match acc with Some _ -> acc | None ->
+          if v.korean_name = name then Some k else None
+        ) agent_cache None
+      )
 
 (** Get model for agent (from Neo4j cache) *)
 let get_agent_model name =

@@ -75,6 +75,7 @@ let test_with_session_header () =
 let () =
   (* Initialize RNG for session ID generation *)
   Mirage_crypto_rng_unix.use_default ();
+  Eio_main.run @@ fun _env ->
   Alcotest.run "Streamable HTTP" [
     "Session", [
       Alcotest.test_case "create" `Quick test_session_create;

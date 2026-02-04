@@ -57,7 +57,10 @@ let backend () =
   | None ->
       (* Auto-init JSONL as safe default *)
       init_jsonl ();
-      Jsonl (Board.global ())
+      (* init_jsonl always sets current_backend *)
+      match !current_backend with
+      | Some b -> b
+      | None -> failwith "[Board_dispatch] init_jsonl failed to set backend"
 
 (** {1 In-memory sort for JSONL mode} *)
 

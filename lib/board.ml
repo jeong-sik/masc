@@ -745,13 +745,14 @@ let stats store =
     let comment_count = Hashtbl.length store.comments in
     let now = Time_compat.now () in
     let expired_posts = Hashtbl.fold (fun _ (p : post) acc ->
-      if p.expires_at < now then acc + 1 else acc
+      if p.expires_at > 0.0 && p.expires_at < now then acc + 1 else acc
     ) store.posts 0 in
     `Assoc [
       ("post_count", `Int post_count);
       ("comment_count", `Int comment_count);
       ("expired_pending", `Int expired_posts);
       ("last_sweep", `Float store.last_sweep);
+      ("backend", `String "jsonl");
     ]
   )
 

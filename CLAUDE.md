@@ -33,23 +33,21 @@ let cmd = Printf.sprintf
 
 **⚠️ GRAPHQL_MAX_COST = 2000** (second-brain-graphql c09140c에서 상향)
 
-```
-first: 15  → OK (cost ~1200, limit 2000) ← 현재 사용 중
-first: 10  → ❌ sangsu/skeptic/pragmatist 누락 (알파벳순 정렬)
-first: 50  → cost 3051 > limit 2000 ❌
-```
-→ **`first: 15` 미만으로 줄이지 말 것** (15개 에이전트 존재, 알파벳순 페이지네이션)
+**Cursor-based pagination 사용** (`fetch_all_edges_paginated`):
+- `first: 10` per page + `pageInfo { hasNextPage endCursor }` 반복
+- 에이전트 수에 관계없이 cost limit 안전 (page당 ~800)
+- max 10 pages (100 agents) safety limit
 
 ### Heartbeat Agent Fields
 ```graphql
-{ agents(first: 15) { edges { node {
+{ agents(first: 10, after: "cursor...") { edges { node {
   name preferredHours peakHour traits activityLevel
-} } } }
+} } pageInfo { hasNextPage endCursor } } }
 ```
 
 ### Lodge Identity Fields
 ```graphql
-{ agents(first: 15) { edges { node {
+{ agents(first: 10, after: "cursor...") { edges { node {
   name primaryValue status emoji koreanName model interests
 } } } }
 ```

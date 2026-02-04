@@ -313,18 +313,20 @@ let fetch_hn_article ~net =
   | Ok body ->
     try
       let ids = Yojson.Safe.from_string body |> to_list |> List.filteri (fun i _ -> i < 10) in
-      let idx = Random.int (min 10 (List.length ids)) in
-      let story_id = List.nth ids idx |> to_int in
-      let story_url = Printf.sprintf "https://hacker-news.firebaseio.com/v0/item/%d.json" story_id in
-      match http_get_json ~net story_url with
-      | Error e -> Error e
-      | Ok story_body ->
-        let story = Yojson.Safe.from_string story_body in
-        let title = story |> member "title" |> to_string_option |> Option.value ~default:"" in
-        let url = story |> member "url" |> to_string_option
-          |> Option.value ~default:(Printf.sprintf "https://news.ycombinator.com/item?id=%d" story_id) in
-        if title = "" then Error "Empty title"
-        else Ok { title; url; source = HackerNews }
+      if ids = [] then Error "HN topstories empty"
+      else
+        let idx = Random.int (List.length ids) in
+        let story_id = List.nth ids idx |> to_int in
+        let story_url = Printf.sprintf "https://hacker-news.firebaseio.com/v0/item/%d.json" story_id in
+        match http_get_json ~net story_url with
+        | Error e -> Error e
+        | Ok story_body ->
+          let story = Yojson.Safe.from_string story_body in
+          let title = story |> member "title" |> to_string_option |> Option.value ~default:"" in
+          let url = story |> member "url" |> to_string_option
+            |> Option.value ~default:(Printf.sprintf "https://news.ycombinator.com/item?id=%d" story_id) in
+          if title = "" then Error "Empty title"
+          else Ok { title; url; source = HackerNews }
     with exn -> Error (Printf.sprintf "HN parse: %s" (Printexc.to_string exn))
 
 (** {1 DIG: LLM Analysis} *)

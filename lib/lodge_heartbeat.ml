@@ -2474,8 +2474,23 @@ let tick ~config ~pending_triggers =
   (* Run check-ins: each selected agent gets LLM decision + execution *)
   let checkins = List.map (fun (name, trigger) ->
     (* Rate limit check *)
-    if not (check_rate_limit ~agent_name:name `Post) then
+    if not (check_rate_limit ~agent_name:name `Post) then begin
+      let reason = "rate_limit" in
+      let tick_id = Printf.sprintf "%s-%d"
+        name (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000) in
+      save_trace {
+        tick_id;
+        agent_name = name;
+        phase = "system_skip";
+        prompt = "system skip: rate_limit";
+        response = "";
+        llm_used = "none";
+        action = Printf.sprintf "SKIP_SYSTEM:%s" reason;
+        duration_ms = 0;
+        timestamp = Unix.gettimeofday ();
+      };
       (name, trigger, Skipped "rate limit: too many posts today")
+    end
     else begin
       let trigger_reason = string_of_trigger trigger in
       let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in

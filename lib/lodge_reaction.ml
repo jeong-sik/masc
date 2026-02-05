@@ -160,40 +160,22 @@ let agent_signature_of_json (json : Yojson.Safe.t) : agent_signature =
 
 (** {1 Storage Operations} *)
 
-(** Append a reaction record to history *)
+(** Append a reaction record to history.
+    Uses Fs_compat for Eio-native I/O when available. *)
 let append_reaction (record : reaction_record) : unit =
   let path = reaction_history_path () in
-  let dir = Filename.dirname path in
-  if not (Sys.file_exists dir) then
-    ignore (Sys.command (sprintf "mkdir -p %s" dir));
-  let line = Yojson.Safe.to_string (reaction_record_to_json record) ^ "\n" in
-  let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-    output_string oc line
-  )
+  Fs_compat.append_jsonl path (reaction_record_to_json record)
 
-(** Load all reactions for an agent *)
+(** Load all reactions for an agent.
+    Uses Fs_compat for Eio-native I/O when available. *)
 let load_reactions ~agent_name : reaction_record list =
   let path = reaction_history_path () in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-      let rec read_lines acc =
-        match input_line ic with
-        | line ->
-          begin try
-            let record = reaction_record_of_json (Yojson.Safe.from_string line) in
-            if record.agent_name = agent_name then
-              read_lines (record :: acc)
-            else
-              read_lines acc
-          with _ -> read_lines acc end
-        | exception End_of_file -> List.rev acc
-      in
-      read_lines []
-    )
-  end
+  Fs_compat.load_jsonl path
+  |> List.filter_map (fun json ->
+      try
+        let record = reaction_record_of_json json in
+        if record.agent_name = agent_name then Some record else None
+      with _ -> None)
 
 (** Load recent reactions for an agent *)
 let load_recent_reactions ~agent_name ~limit : reaction_record list =
@@ -274,34 +256,36 @@ let compute_signature ~agent_name : agent_signature =
     recent_reactions = recent;
     generated_self_summary = None;  (* Set by periodic reflection *)
     total_reactions = total;
-    last_updated = Unix.gettimeofday ();
+    last_updated = Time_compat.now ();
   }
 
 (** {1 Signature Persistence} *)
 
-(** Load all agent signatures *)
+(** Load all agent signatures.
+    Uses Fs_compat for Eio-native I/O when available. *)
 let load_all_signatures () : agent_signature list =
   let path = signatures_path () in
-  if not (Sys.file_exists path) then []
+  if not (Fs_compat.file_exists path) then []
   else begin
     try
-      let json = Yojson.Safe.from_file path in
+      let content = Fs_compat.load_file path in
+      let json = Yojson.Safe.from_string content in
       Yojson.Safe.Util.to_list json |> List.map agent_signature_of_json
     with _ -> []
   end
 
-(** Save agent signature (upsert) *)
+(** Save agent signature (upsert).
+    Uses Fs_compat for Eio-native I/O when available. *)
 let save_signature (sig_ : agent_signature) : unit =
   let path = signatures_path () in
   let dir = Filename.dirname path in
-  if not (Sys.file_exists dir) then
-    ignore (Sys.command (sprintf "mkdir -p %s" dir));
+  Fs_compat.mkdir_p dir;
 
   let existing = load_all_signatures () in
   let updated = sig_ :: List.filter (fun s -> s.agent_name <> sig_.agent_name) existing in
 
   let json = `List (List.map agent_signature_to_json updated) in
-  Yojson.Safe.to_file path json
+  Fs_compat.save_file path (Yojson.Safe.to_string json)
 
 (** Load or compute signature for an agent *)
 let get_or_compute_signature ~agent_name : agent_signature =
@@ -354,7 +338,7 @@ let generate_identity_prompt (sig_ : agent_signature) ~(static_traits : string l
     sig_.recent_reactions
     |> List.map (fun (r : reaction_record) ->
         let action = reaction_type_to_string r.reaction in
-        let ago = (Unix.gettimeofday () -. r.timestamp) /. 3600.0 in
+        let ago = (Time_compat.now () -. r.timestamp) /. 3600.0 in
         sprintf "- %.0fh ago: %s %s's post%s (%.2f confidence)"
           ago action r.post_author
           (match r.reason with Some s -> sprintf " — %s" s | None -> "")
@@ -623,7 +607,7 @@ let update_self_summary ~agent_name ~summary : unit =
   let sig_ = get_or_compute_signature ~agent_name in
   let updated = { sig_ with
     generated_self_summary = Some summary;
-    last_updated = Unix.gettimeofday ();
+    last_updated = Time_compat.now ();
   } in
   save_signature updated
 
@@ -639,7 +623,7 @@ let record_reaction ~agent_name ~post_id ~post_author ~post_content
     reaction;
     confidence;
     reason;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   } in
   append_reaction record;
 
@@ -694,10 +678,6 @@ let calibration_of_json (json : Yojson.Safe.t) : confidence_calibration =
 (** Record a calibration data point *)
 let record_calibration ~agent_name ~post_id ~predicted ~actual : unit =
   let path = calibration_history_path () in
-  let dir = Filename.dirname path in
-  if not (Sys.file_exists dir) then
-    ignore (Sys.command (sprintf "mkdir -p %s" dir));
-
   let error = Float.abs (predicted -. actual) in
   let record = {
     agent_name;
@@ -705,37 +685,20 @@ let record_calibration ~agent_name ~post_id ~predicted ~actual : unit =
     predicted_confidence = predicted;
     actual_outcome = actual;
     error;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   } in
+  Fs_compat.append_jsonl path (calibration_to_json record)
 
-  let line = Yojson.Safe.to_string (calibration_to_json record) ^ "\n" in
-  let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-    output_string oc line
-  )
-
-(** Load all calibration records for an agent *)
+(** Load all calibration records for an agent.
+    Uses Fs_compat for Eio-native I/O when available. *)
 let load_calibration ~agent_name : confidence_calibration list =
   let path = calibration_history_path () in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-      let rec read_lines acc =
-        match input_line ic with
-        | line ->
-          begin try
-            let record = calibration_of_json (Yojson.Safe.from_string line) in
-            if record.agent_name = agent_name then
-              read_lines (record :: acc)
-            else
-              read_lines acc
-          with _ -> read_lines acc end
-        | exception End_of_file -> List.rev acc
-      in
-      read_lines []
-    )
-  end
+  Fs_compat.load_jsonl path
+  |> List.filter_map (fun json ->
+      try
+        let record = calibration_of_json json in
+        if record.agent_name = agent_name then Some record else None
+      with _ -> None)
 
 (** Compute average calibration error for an agent.
     Returns 0.5 (neutral) if no calibration data exists. *)
@@ -767,7 +730,7 @@ let decay_half_life_days = 10.0
     - 10 days old: weight = 0.50
     - 30 days old: weight ≈ 0.25 *)
 let reaction_weight ~timestamp : float =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let age_days = (now -. timestamp) /. 86400.0 in
   1.0 /. (1.0 +. (1.0 /. decay_half_life_days) *. age_days)
 

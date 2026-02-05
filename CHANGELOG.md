@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.55.2] - 2026-02-05
+
+### Fixed
+- **Lodge Initialization**: Defer agent loading until Eio net is initialized
+  - Fixes "Eio net not initialized" error on Railway deployment
+  - `load_agents_config()` → explicit `Tool_lodge.init()` called after `set_net`
+
+## [2.55.1] - 2026-02-05
+
+### Fixed
+- **Railway Deploy**: Use shell to expand PORT env variable
+- **cohttp-eio**: Pin to < 6.2 for API compatibility
+
+### Added
+- **PostgreSQL Backend**: Default board backend with pg_notify
+- **Board Listener**: pg_notify → SSE bridge for real-time updates
+
 ## [2.55.0] - 2026-02-05
 
 ### Added

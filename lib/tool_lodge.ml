@@ -172,10 +172,14 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
           ]
       in
       let uri = Uri.of_string url in
+      let is_https = Uri.scheme uri = Some "https" in
       let run () =
         Eio.Switch.run (fun sw ->
           let client =
-            Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+            if is_https then
+              Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+            else
+              Cohttp_eio.Client.make ~https:None net  (* HTTP: no TLS connector *)
           in
           let body_content = Eio.Flow.string_source body in
           let resp, resp_body =

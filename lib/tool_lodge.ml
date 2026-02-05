@@ -151,15 +151,31 @@ let http_get_json ~net:_ url =
 
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
-(** GraphQL request via Cohttp_eio.
-    Avoids curl DNS/connectivity failures by using OCaml HTTP client.
+(** curl-based GraphQL request — reliable DNS resolution in Railway containers *)
+let graphql_request_curl body : (string, string) Stdlib.result =
+  let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let escaped_body = String.concat "\\\"" (String.split_on_char '"' body) in
+  let auth_header = if api_key = "" then "" else Printf.sprintf "-H 'Authorization: Bearer %s'" api_key in
+  let cmd = Printf.sprintf "curl -s -m 10 '%s' -H 'Content-Type: application/json' %s -d \"%s\"" url auth_header escaped_body in
+  try
+    let ic = Unix.open_process_in cmd in
+    let output = In_channel.input_all ic in
+    let _ = Unix.close_process_in ic in
+    if String.length output = 0 then Error "❌ GraphQL curl: empty response"
+    else Ok output
+  with exn -> Error (Printf.sprintf "❌ GraphQL curl: %s" (Printexc.to_string exn))
+
+(** GraphQL request via Cohttp_eio with curl fallback.
+    Falls back to curl if Cohttp fails (Railway DNS issues).
     URL configurable via GRAPHQL_URL env var for Railway internal networking. *)
 let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let max_response_bytes = 1_000_000 in
-  match Eio_context.get_net_opt () with
+  let cohttp_result = match Eio_context.get_net_opt () with
   | None -> Error "❌ GraphQL: Eio net not initialized"
   | Some net ->
       let headers =
@@ -203,6 +219,13 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
            with exn -> Error (Printexc.to_string exn))
       | None ->
           (try run () with exn -> Error (Printexc.to_string exn))
+  in
+  (* Fallback to curl on Cohttp failure (Railway DNS issues) *)
+  match cohttp_result with
+  | Ok _ as success -> success
+  | Error cohttp_err ->
+      Printf.eprintf "[GraphQL] Cohttp failed (%s), trying curl fallback...\n%!" cohttp_err;
+      graphql_request_curl body
 
 (** {1 LLM Provider Rotation — Avoid ollama overload} *)
 

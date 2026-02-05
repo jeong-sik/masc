@@ -36,10 +36,13 @@ jobs:
       - name: Prepare binary for Docker
         run: cp _build/default/bin/main_eio.exe masc-mcp-linux-x64
 
+      - name: Stage binary for Railway upload
+        run: git add -f masc-mcp-linux-x64
+
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway
-        run: railway up --service masc-mcp
+        run: railway up --service masc-mcp --ci
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

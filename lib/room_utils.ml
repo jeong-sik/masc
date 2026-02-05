@@ -361,6 +361,12 @@ let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 (* Backend dispatch functions                   *)
 (* ============================================ *)
 
+(** Check if using PostgresNative backend (for HTTP state persistence) *)
+let is_pg_backend config =
+  match config.backend with
+  | PostgresNative _ -> true
+  | Memory _ | FileSystem _ -> false
+
 let backend_get config ~key =
   match config.backend with
   | Memory t -> Backend.MemoryBackend.get t ~key

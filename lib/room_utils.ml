@@ -100,12 +100,6 @@ let env_opt name =
   | Some value when String.trim value <> "" -> Some value
   | _ -> None
 
-(** Storage type from environment variable *)
-let storage_type_from_env () =
-  match env_opt "MASC_STORAGE_TYPE" with
-  | Some value -> String.lowercase_ascii value
-  | None -> "filesystem"  (* Default to zero-dependency FileSystem backend *)
-
 (** Auto-detect best backend based on environment variables
     Priority order:
     1. MASC_POSTGRES_URL / DATABASE_URL - if available, use PostgreSQL for distributed coordination
@@ -118,6 +112,12 @@ let auto_detect_backend () =
     Log.Backend.info "Auto-detect: No distributed DB found → FileSystem backend (default)";
     "filesystem"
   end
+
+(** Storage type from environment variable *)
+let storage_type_from_env () =
+  match env_opt "MASC_STORAGE_TYPE" with
+  | Some value -> String.lowercase_ascii value
+  | None -> auto_detect_backend ()  (* Smart default: PG if URL exists, else FileSystem *)
 
 (* ============================================ *)
 (* Backend creation                             *)

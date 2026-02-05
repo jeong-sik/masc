@@ -163,3 +163,6 @@ module Lodge_reaction = Lodge_reaction
 module Gardener_types = Gardener_types
 module Gardener = Gardener
 module Tool_gardener = Tool_gardener
+
+(* Library — Agent Knowledge Base *)
+module Tool_library = Tool_library

@@ -74,7 +74,8 @@ let should_throttle ~agent_type =
     false
   end
 
-(** LLM-MCP endpoint — delegates to Env_config *)
+(** [DEPRECATED] LLM-MCP endpoint — kept for backward compatibility, not used in new code.
+    New code should use Llm_direct.dispatch instead. *)
 let llm_mcp_url () = Env_config.Endpoints.llm_mcp_url
 
 (** Re-export from Mention module for convenience *)
@@ -110,14 +111,16 @@ let build_spawn_command ~agent_type ~prompt ~working_dir =
     | "codex" -> Printf.sprintf "echo %s | codex exec" escaped_prompt
     | "ollama" -> Printf.sprintf "echo %s | ollama run %s" escaped_prompt Env_config.Ollama.default_model
     | "glm" ->
-        (* GLM has no standalone CLI - use temp file to avoid shell escaping issues *)
-        let llm_url = llm_mcp_url () in
+        (* GLM via direct Z.ai API - no llm-mcp dependency.
+           API key passed via ZAI_API_KEY env var, not in command string. *)
+        let model = "glm-4.7" in
         let json_escaped =
           prompt
           |> String.split_on_char '"' |> String.concat {|\"|}
           |> String.split_on_char '\n' |> String.concat {|\\n|}
         in
-        Printf.sprintf "echo '{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":1,\"params\":{\"name\":\"glm\",\"arguments\":{\"prompt\":\"%s\"}}}' > /tmp/glm_spawn_$$.json && curl -s '%s' -H 'Content-Type: application/json' -d @/tmp/glm_spawn_$$.json && rm -f /tmp/glm_spawn_$$.json" json_escaped llm_url
+        (* Use env var expansion in bash, key never appears in process list *)
+        Printf.sprintf "echo '{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"%s\"}],\"stream\":false}' | curl -s 'https://api.z.ai/api/coding/paas/v4/chat/completions' -H 'Content-Type: application/json' -H \"Authorization: Bearer $ZAI_API_KEY\" -d @- | jq -r '.choices[0].message.content // \"error\"'" model json_escaped
     | _ -> Printf.sprintf "echo %s | %s" escaped_prompt agent_type
   in
   Printf.sprintf "cd %s && timeout 120 %s" (Filename.quote working_dir) base_cmd
@@ -161,39 +164,39 @@ let spawn_in_background ~agent_type ~prompt ~working_dir =
   let ret = run_system_nonblocking bg_cmd in
   debug_log (Printf.sprintf "SPAWN_RET: %s" (match ret with Unix.WEXITED n -> string_of_int n | _ -> "signal"))
 
-(** Call llm-mcp directly (fast mode) - Returns LLM response or error *)
-let call_llm_mcp_sync ~agent_type ~prompt =
-  let url = llm_mcp_url () in
+(** Call LLM directly via Llm_direct - Returns LLM response or error.
+    No llm-mcp dependency — uses direct API calls to GLM/Ollama/Claude. *)
+let call_llm_direct_sync ~agent_type ~prompt =
   let tool_name = match agent_type with
-    | "gemini" -> "gemini"
+    | "gemini" -> "glm"  (* Gemini not directly supported, use GLM *)
     | "claude" -> "claude-cli"
-    | "codex" -> "codex"
+    | "codex" -> "ollama"  (* Codex not supported, use Ollama *)
     | "glm" -> "glm"
     | _ -> "ollama"  (* ollama is the fallback for unknown types *)
   in
-  (* Escape prompt for JSON - replace quotes and newlines *)
-  let escaped_prompt =
-    prompt
-    |> String.split_on_char '"' |> String.concat {|\"|}
-    |> String.split_on_char '\n' |> String.concat {|\n|}
+  let model = match tool_name with
+    | "glm" -> "glm-4.7"
+    | "ollama" -> Env_config.Ollama.default_model
+    | "claude-cli" -> "claude-sonnet-4-20250514"
+    | _ -> "glm-4-flash"
   in
-  let json_body = Printf.sprintf
-    {|{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"%s","arguments":{"prompt":"%s","response_format":"verbose"}}}|}
-    tool_name escaped_prompt
-  in
-  (* Use temp file with unique name to avoid race conditions between threads *)
-  let tmp_file = Printf.sprintf "/tmp/llm_call_%d_%d.json"
-    (Unix.getpid ()) (int_of_float (Time_compat.now () *. 1000000.) mod 1000000) in
-  (let oc = open_out tmp_file in
-   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-     output_string oc json_body));
-  let cmd = Printf.sprintf
-    "curl -s '%s' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d @%s 2>/dev/null | jq -r '.result.content[0].text // .error.message // \"no response\"' 2>/dev/null | head -c 500"
-    url tmp_file
-  in
-  let response = run_shell_line cmd in
-  Safe_ops.remove_file_logged ~context:"auto_responder" tmp_file;
-  if response = "" then "no response" else response
+  try
+    let response = Llm_direct.dispatch
+      ~tool_name
+      ~model
+      ~prompt
+      ~timeout_sec:30
+      ~max_chars:500
+      ()
+    in
+    if response = "" then "no response" else response
+  with exn ->
+    Printf.eprintf "[auto_responder] LLM call failed: %s\n%!" (Printexc.to_string exn);
+    "no response"
+
+(** [DEPRECATED] Call llm-mcp — use call_llm_direct_sync instead *)
+let call_llm_mcp_sync ~agent_type ~prompt =
+  call_llm_direct_sync ~agent_type ~prompt
 
 (** MASC HTTP helper - call MASC tool via HTTP (using temp file to avoid escaping issues) *)
 let masc_call ~tool_name ~args =
@@ -231,12 +234,13 @@ let extract_nickname response =
   in
   find lines
 
-(** Call llm-mcp and broadcast response (fast mode, background)
-    New approach: Auto-responder handles MASC join/broadcast/leave directly *)
+(** Call LLM directly and broadcast response (fast mode, background)
+    Auto-responder handles MASC join/broadcast/leave directly.
+    No llm-mcp dependency — uses Llm_direct. *)
 let call_llm_and_broadcast ~agent_type ~prompt ~mention ~base_path =
   ignore base_path;
-  (* Step 1: Get simple answer from LLM (prompt is the original message content) *)
-  let response = call_llm_mcp_sync ~agent_type ~prompt in
+  (* Step 1: Get simple answer from LLM via direct API *)
+  let response = call_llm_direct_sync ~agent_type ~prompt in
   debug_log (Printf.sprintf "LLM_RESPONSE: %s" (if String.length response > 100 then String.sub response 0 100 ^ "..." else response));
 
   if response <> "" && response <> "no response" then begin
@@ -269,10 +273,10 @@ let call_llm_and_broadcast ~agent_type ~prompt ~mention ~base_path =
     Printf.eprintf "[Auto-Responder/LLM] LLM returned empty response\n%!"
 
 (** Run LLM call in background process (Thread.create doesn't work well with Eio)
-    Creates a shell script that does: LLM call -> MASC join -> broadcast -> leave *)
+    Creates a shell script that does: LLM call -> MASC join -> broadcast -> leave.
+    Uses direct API calls (GLM/Ollama) — no llm-mcp dependency. *)
 let llm_call_in_background ~agent_type ~prompt ~mention ~base_path =
   ignore base_path;
-  let llm_url = llm_mcp_url () in
   let masc_port = match Sys.getenv_opt "MASC_HTTP_PORT" with Some p -> p | None -> "8935" in
   let masc_url = Printf.sprintf "http://127.0.0.1:%s/mcp" masc_port in
   let escaped_prompt =
@@ -283,14 +287,23 @@ let llm_call_in_background ~agent_type ~prompt ~mention ~base_path =
   in
   (* MASC requires Accept header with both application/json and text/event-stream *)
   let accept_header = "-H 'Accept: application/json, text/event-stream'" in
+  (* Determine LLM call based on agent_type — direct API, no llm-mcp *)
+  let llm_call_cmd = match agent_type with
+    | "glm" | "gemini" ->
+        (* GLM via Z.ai API — key from env var, not in command *)
+        let model = "glm-4.7" in
+        Printf.sprintf {|echo '{"model":"%s","messages":[{"role":"user","content":"%s"}],"stream":false}' | curl -s 'https://api.z.ai/api/coding/paas/v4/chat/completions' -H 'Content-Type: application/json' -H "Authorization: Bearer $ZAI_API_KEY" -d @- | jq -r '.choices[0].message.content // "no response"' | head -c 300|} model escaped_prompt
+    | "ollama" | "codex" | _ ->
+        (* Ollama local API *)
+        let model = Env_config.Ollama.default_model in
+        Printf.sprintf {|echo '{"model":"%s","prompt":"%s","stream":false}' | curl -s 'http://127.0.0.1:11434/api/generate' -H 'Content-Type: application/json' -d @- | jq -r '.response // "no response"' | head -c 300|} model escaped_prompt
+  in
   let script = Printf.sprintf {|#!/bin/bash
-# LLM call in background for %s
+# LLM call in background for %s (direct API, no llm-mcp)
 set -e
 
-# Step 1: Call LLM
-RESPONSE=$(curl -s '%s' -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"%s","arguments":{"prompt":"%s","response_format":"verbose"}}}' \
-  | jq -r '.result.content[0].text // "no response"' | head -c 300)
+# Step 1: Call LLM directly
+RESPONSE=$(%s)
 
 echo "[LLM] Response: $RESPONSE" >> /tmp/auto_debug.log
 
@@ -324,7 +337,7 @@ curl -s '%s' -H 'Content-Type: application/json' %s \
   -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":1,\"params\":{\"name\":\"masc_leave\",\"arguments\":{\"agent_name\":\"$NICKNAME\"}}}" > /dev/null
 
 echo "[MASC] Left room" >> /tmp/auto_debug.log
-|} agent_type llm_url agent_type escaped_prompt masc_url accept_header agent_type masc_url accept_header mention masc_url accept_header
+|} agent_type llm_call_cmd masc_url accept_header agent_type masc_url accept_header mention masc_url accept_header
   in
   let script_file = Printf.sprintf "/tmp/llm_bg_%d_%d.sh"
     (Unix.getpid ()) (int_of_float (Time_compat.now () *. 1000.) mod 10000) in

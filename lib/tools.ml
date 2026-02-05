@@ -4076,6 +4076,106 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
       ("properties", `Assoc []);
     ];
   };
+
+  (* ============================================ *)
+  (* Library Tools - Agent Knowledge Base        *)
+  (* ============================================ *)
+
+  {
+    name = "masc_library_list";
+    description = "List all documents in the agent knowledge library. Returns title, confidence, source, and tags for each document.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("include_candidates", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include candidate documents awaiting verification");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_library_read";
+    description = "Read a specific library document by topic name.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Topic name or partial match (e.g., 'eio-mutex')");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  {
+    name = "masc_library_add";
+    description = "Add a new document to the library. Documents with confidence < 0.5 go to candidates/.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("title", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Document title");
+        ]);
+        ("source", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Source type: direct_experience, research, experiment, observation");
+          ("enum", `List [`String "direct_experience"; `String "research"; `String "experiment"; `String "observation"]);
+        ]);
+        ("confidence", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Confidence score 0.0-1.0");
+        ]);
+        ("tags", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "List of tags");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Document body content (markdown)");
+        ]);
+      ]);
+      ("required", `List [`String "title"; `String "source"; `String "confidence"; `String "content"]);
+    ];
+  };
+
+  {
+    name = "masc_library_promote";
+    description = "Promote a candidate document to the main library after verification.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Topic name to promote");
+        ]);
+        ("confidence", `Assoc [
+          ("type", `String "number");
+          ("description", `String "New confidence score (must be >= 0.5)");
+        ]);
+      ]);
+      ("required", `List [`String "topic"; `String "confidence"]);
+    ];
+  };
+
+  {
+    name = "masc_library_search";
+    description = "Search library documents by content or tags.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search query");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
 ]
 
 (** Get tool by name *)

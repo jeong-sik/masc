@@ -62,6 +62,12 @@ let backend () =
       | Some b -> b
       | None -> failwith "[Board_dispatch] init_jsonl failed to set backend"
 
+(** Get PostgreSQL pool if PG backend is active (for Board_listener) *)
+let get_pg_pool () =
+  match !current_backend with
+  | Some (Postgres t) -> Some (Board_pg.get_pool t)
+  | _ -> None
+
 (** {1 In-memory sort for JSONL mode} *)
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =

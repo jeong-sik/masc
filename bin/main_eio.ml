@@ -23,6 +23,7 @@ module Tempo = Masc_mcp.Tempo
 module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
 module Board_dispatch = Masc_mcp.Board_dispatch
+module Board_listener = Masc_mcp.Board_listener
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
@@ -1628,6 +1629,15 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Guardian.start ~sw ~clock ~net state.room_config;
   (* Start MCP session cleanup loop *)
   Masc_mcp.Session.start_mcp_session_cleanup_loop ~sw ~clock ();
+
+  (* Board Listener — bridges pg_notify to SSE for real-time updates (Phase C) *)
+  (match Board_dispatch.get_pg_pool () with
+   | Some pool ->
+       let listener = Board_listener.create pool in
+       Eio.Fiber.fork ~sw (fun () -> Board_listener.start listener);
+       Printf.eprintf "[Board_listener] Fiber started for real-time Board events\n%!"
+   | None ->
+       Printf.eprintf "[Board_listener] Skipped (not using PostgreSQL backend)\n%!");
 
   (* Periodic SSE stale-client reaper — every 60s, evict connections older than 30min *)
   Eio.Fiber.fork ~sw (fun () ->

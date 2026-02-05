@@ -47,6 +47,7 @@ module Streamable_http = Streamable_http
 module Board = Board
 module Board_pg = Board_pg
 module Board_dispatch = Board_dispatch
+module Board_listener = Board_listener
 module Web_dashboard = Web_dashboard
 module Credits_dashboard = Credits_dashboard
 module Lodge_dashboard = Lodge_dashboard

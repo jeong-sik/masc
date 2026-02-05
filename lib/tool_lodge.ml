@@ -152,9 +152,11 @@ let http_get_json ~net:_ url =
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
 (** GraphQL request via Cohttp_eio.
-    Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
+    Avoids curl DNS/connectivity failures by using OCaml HTTP client.
+    URL configurable via GRAPHQL_URL env var for Railway internal networking. *)
 let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
-  let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let max_response_bytes = 1_000_000 in
   match Eio_context.get_net_opt () with

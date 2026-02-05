@@ -49,7 +49,7 @@ let handle_walph_control ctx args =
 let handle_walph_natural ctx args =
   let message = get_string args "message" "" in
   if message = "" then
-    (true, "❌ message is required for natural language control")
+    (false, "❌ message is required for natural language control")
   else begin
     (* Phase 1: Heuristic-based intent classification (fast, no network) *)
     let msg_lower = String.lowercase_ascii message in

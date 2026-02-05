@@ -15,29 +15,29 @@ let max_id_length = 128
 let validate_content s =
   let len = String.length s in
   if len > max_content_length then
-    Error (Printf.sprintf "Content too long: %d chars (max %d)" len max_content_length)
+    Error (Printf.sprintf "❌ Social: Content too long [len=%d, max=%d]" len max_content_length)
   else
     Ok s
 
 let validate_author s =
   let len = String.length s in
   if len = 0 then
-    Error "Author cannot be empty"
+    Error "❌ Social: Author cannot be empty"
   else if len > max_author_length then
-    Error (Printf.sprintf "Author too long: %d chars (max %d)" len max_author_length)
+    Error (Printf.sprintf "❌ Social: Author too long [len=%d, max=%d]" len max_author_length)
   else if not (Str.string_match (Str.regexp "^[a-zA-Z0-9_-]+$") s 0) then
-    Error "Author must contain only alphanumeric, underscore, or dash"
+    Error "❌ Social: Author must contain only alphanumeric, underscore, or dash"
   else
     Ok s
 
 let validate_id ~field s =
   let len = String.length s in
   if len = 0 then
-    Error (Printf.sprintf "%s cannot be empty" field)
+    Error (Printf.sprintf "❌ Social: %s cannot be empty" field)
   else if len > max_id_length then
-    Error (Printf.sprintf "%s too long: %d chars (max %d)" field len max_id_length)
+    Error (Printf.sprintf "❌ Social: %s too long [len=%d, max=%d]" field len max_id_length)
   else if not (Str.string_match (Str.regexp "^[a-zA-Z0-9_-]+$") s 0) then
-    Error (Printf.sprintf "%s must contain only alphanumeric, underscore, or dash" field)
+    Error (Printf.sprintf "❌ Social: %s must contain only alphanumeric, underscore, or dash" field)
   else
     Ok s
 
@@ -99,11 +99,11 @@ let handle_post_create ctx args =
   let author = get_string args "author" ctx.agent_name in
   (* Validate inputs *)
   match validate_content content, validate_author author with
-  | Error e, _ -> (false, Printf.sprintf "Error: %s" e)
-  | _, Error e -> (false, Printf.sprintf "Error: %s" e)
+  | Error e, _ -> (false, e)
+  | _, Error e -> (false, e)
   | Ok content, Ok author ->
       if content = "" then
-        (false, "Error: content is required")
+        (false, "❌ Social: content is required")
       else
         let submolt = get_string_opt args "submolt" in
         match Social.create_post ctx.config ~author ~content ?submolt () with
@@ -111,7 +111,7 @@ let handle_post_create ctx args =
             let json = Social.post_to_yojson post in
             (true, Printf.sprintf "Post created:\n%s" (Yojson.Safe.pretty_to_string json))
         | Error e ->
-            (false, Printf.sprintf "Error: %s" e)
+            (false, e)
 
 let handle_post_list ctx args =
   let submolt = get_string_opt args "submolt" in
@@ -130,7 +130,7 @@ let handle_post_list ctx args =
 let handle_post_get ctx args =
   let post_id = get_string args "post_id" "" in
   match validate_id ~field:"post_id" post_id with
-  | Error e -> (false, Printf.sprintf "Error: %s" e)
+  | Error e -> (false, e)
   | Ok post_id ->
     match Social.get_post ctx.config ~post_id with
     | Ok post ->
@@ -150,7 +150,7 @@ let handle_post_get ctx args =
         in
         (true, post_str ^ comments_str)
     | Error e ->
-        (false, Printf.sprintf "Error: %s" e)
+        (false, e)
 
 let handle_comment_add ctx args =
   let post_id = get_string args "post_id" "" in
@@ -159,9 +159,9 @@ let handle_comment_add ctx args =
   let parent_id = get_string_opt args "parent_id" in
   (* Validate inputs *)
   match validate_id ~field:"post_id" post_id, validate_content content, validate_author author with
-  | Error e, _, _ -> (false, Printf.sprintf "Error: %s" e)
-  | _, Error e, _ -> (false, Printf.sprintf "Error: %s" e)
-  | _, _, Error e -> (false, Printf.sprintf "Error: %s" e)
+  | Error e, _, _ -> (false, e)
+  | _, Error e, _ -> (false, e)
+  | _, _, Error e -> (false, e)
   | Ok post_id, Ok content, Ok author ->
       (* Validate parent_id if provided *)
       let parent_valid = match parent_id with
@@ -171,22 +171,22 @@ let handle_comment_add ctx args =
             | Error e -> Error e
       in
       match parent_valid with
-      | Error e -> (false, Printf.sprintf "Error: %s" e)
+      | Error e -> (false, e)
       | Ok parent_id ->
           if content = "" then
-            (false, "Error: content is required")
+            (false, "❌ Social: content is required")
           else
             match Social.add_comment ctx.config ~post_id ~author ~content ?parent_id () with
             | Ok comment ->
                 let json = Social.comment_to_yojson comment in
                 (true, Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
             | Error e ->
-                (false, Printf.sprintf "Error: %s" e)
+                (false, e)
 
 let handle_comment_list ctx args =
   let post_id = get_string args "post_id" "" in
   match validate_id ~field:"post_id" post_id with
-  | Error e -> (false, Printf.sprintf "Error: %s" e)
+  | Error e -> (false, e)
   | Ok post_id ->
     let comments = Social.get_comments ctx.config ~post_id in
     if comments = [] then
@@ -203,8 +203,8 @@ let handle_vote ctx args =
   let voter = get_string args "voter" ctx.agent_name in
   (* Validate inputs *)
   match validate_id ~field:"target_id" target_id, validate_author voter with
-  | Error e, _ -> (false, Printf.sprintf "Error: %s" e)
-  | _, Error e -> (false, Printf.sprintf "Error: %s" e)
+  | Error e, _ -> (false, e)
+  | _, Error e -> (false, e)
   | Ok target_id, Ok voter ->
       let target_type = match target_type_str with
         | "comment" -> `Comment
@@ -220,7 +220,7 @@ let handle_vote ctx args =
           (true, Printf.sprintf "%s1 vote on %s %s (new score: %d)"
             emoji target_type_str target_id new_score)
       | Error e ->
-          (false, Printf.sprintf "Error: %s" e)
+          (false, e)
 
 (* Dispatch function - returns None if tool not handled *)
 let dispatch ctx ~name ~args : result option =

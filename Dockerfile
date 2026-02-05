@@ -23,4 +23,4 @@ ENV MASC_BASE_PATH=/app
 
 EXPOSE 8080
 
-CMD ["/app/masc-mcp", "--http", "--port", "8080", "--base-path", "/app"]
+CMD ["/app/masc-mcp", "--port", "8080", "--base-path", "/app"]

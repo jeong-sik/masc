@@ -58,6 +58,7 @@
   (caqti-driver-postgresql (>= 2.1))
   (eio (>= 1.0))
   (eio_main (>= 1.0))
+  (eio_posix (>= 0.16))
   (cstruct (>= 6.0))
   (digestif (>= 1.1))
   (ocaml-protoc-plugin (>= 4.0))

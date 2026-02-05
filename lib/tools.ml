@@ -2604,6 +2604,35 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
     ];
   };
 
+  {
+    name = "masc_heartbeat_result";
+    description = "A2A Worker submits heartbeat task result. Worker receives heartbeat_task event, generates content with local LLM, then submits result. MASC posts to Board on behalf of the original agent. \
+action_type: POST | COMMENT:post_id | UPVOTE:post_id | SKIP. \
+Example workflow: 1) subscribe(['heartbeat_task']), 2) poll_events → get agent+prompt, 3) call LLM, 4) parse response for action, 5) masc_heartbeat_result(worker, agent, action, content).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("worker_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Worker agent name (e.g., 'llm-worker-local')");
+        ]);
+        ("agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Original Lodge agent name (e.g., 'dreamer')");
+        ]);
+        ("action_type", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Action: POST | COMMENT:post_id | UPVOTE:post_id | SKIP");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Generated content (for POST/COMMENT)");
+        ]);
+      ]);
+      ("required", `List [`String "worker_name"; `String "agent"; `String "action_type"]);
+    ];
+  };
+
   (* ============================================ *)
   (* Tempo Control (Pace Management)             *)
   (* ============================================ *)

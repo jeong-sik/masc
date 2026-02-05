@@ -48,6 +48,7 @@ type event_type =
   | Broadcast
   | Completion
   | Error
+  | HeartbeatTask  (** Agent embodiment request — Worker should invoke LLM *)
 [@@deriving show]
 
 let event_type_of_string = function
@@ -55,6 +56,7 @@ let event_type_of_string = function
   | "broadcast" -> Ok Broadcast
   | "completion" -> Ok Completion
   | "error" -> Ok Error
+  | "heartbeat_task" -> Ok HeartbeatTask
   | s -> Error (Printf.sprintf "Unknown event type: %s" s)
 
 (** Subscription *)
@@ -77,6 +79,7 @@ let event_type_to_string = function
   | Broadcast -> "broadcast"
   | Completion -> "completion"
   | Error -> "error"
+  | HeartbeatTask -> "heartbeat_task"
 
 (** Subscription to JSON *)
 let subscription_to_json (sub : subscription) : Yojson.Safe.t =
@@ -530,3 +533,132 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
         (show_event_type event_type) agent sub.id
     end
   ) subscriptions
+
+(** {1 Heartbeat Task Events — Soul + Body Pattern}
+
+    MASC server emits heartbeat_task events when an agent should "speak".
+    Workers subscribe to these events and invoke LLM to generate responses.
+    This enables local LLM (Ollama) to power remote agent activity.
+
+    Flow:
+    1. MASC heartbeat tick → Thompson Sampling → agent selected
+    2. emit_heartbeat_task ~agent ~prompt ~context
+    3. Worker receives event via poll_events or SSE
+    4. Worker invokes local LLM with agent's prompt
+    5. Worker broadcasts result back to MASC
+*)
+
+(** Emit a heartbeat_task event for Worker to process.
+    @param agent Agent name (soul to embody)
+    @param prompt The prompt for LLM (includes agent personality)
+    @param context Board state, recent posts, etc.
+    @param board_id Optional target board ID *)
+let emit_heartbeat_task
+    ~agent
+    ~prompt
+    ~context
+    ?(board_id : string option)
+    () : unit =
+  let data = `Assoc ([
+    ("agent", `String agent);
+    ("prompt", `String prompt);
+    ("context", `String context);
+  ] @ match board_id with
+    | Some bid -> [("board_id", `String bid)]
+    | None -> [])
+  in
+  notify_event ~event_type:HeartbeatTask ~agent ~data;
+  Log.info ~ctx:"heartbeat" "💓 HeartbeatTask emitted for %s (prompt: %d chars)"
+    agent (String.length prompt)
+
+(** {1 A2A Worker Response — Complete the delegation cycle}
+
+    Worker processes heartbeat_task and submits result.
+    The result is then posted to Board on behalf of the original agent.
+*)
+
+(** Submit heartbeat task result from A2A Worker.
+    @param worker_name Worker agent name (e.g., "llm-worker-local")
+    @param agent Original agent name (soul owner)
+    @param action_type "POST" | "COMMENT:post_id" | "UPVOTE:post_id" | "SKIP"
+    @param content Generated content
+    @return Success/error *)
+let submit_heartbeat_result
+    ~worker_name
+    ~agent
+    ~action_type
+    ~content
+    () : (Yojson.Safe.t, string) result =
+  Log.info ~ctx:"a2a" "📥 Worker %s submitting result for %s: %s"
+    worker_name agent action_type;
+
+  let store = Board.global () in
+
+  (* Parse action type and execute *)
+  let result =
+    if action_type = "POST" then begin
+      match Board.create_post store ~author:agent ~content ~ttl_hours:168 () with
+      | Ok post ->
+          let post_id = Board.Post_id.to_string post.id in
+          Ok (`Assoc [
+            ("success", `Bool true);
+            ("action", `String "post");
+            ("post_id", `String post_id);
+            ("agent", `String agent);
+            ("worker", `String worker_name);
+          ])
+      | Error e ->
+          Error (Printf.sprintf "Board post failed: %s" (Board.show_board_error e))
+    end
+    else if String.length action_type > 8 && String.sub action_type 0 8 = "COMMENT:" then begin
+      let post_id = String.sub action_type 8 (String.length action_type - 8) in
+      match Board.add_comment store ~post_id ~author:agent ~content () with
+      | Ok comment ->
+          let comment_id = Board.Comment_id.to_string comment.id in
+          Ok (`Assoc [
+            ("success", `Bool true);
+            ("action", `String "comment");
+            ("post_id", `String post_id);
+            ("comment_id", `String comment_id);
+            ("agent", `String agent);
+            ("worker", `String worker_name);
+          ])
+      | Error e ->
+          Error (Printf.sprintf "Board comment failed: %s" (Board.show_board_error e))
+    end
+    else if String.length action_type > 7 && String.sub action_type 0 7 = "UPVOTE:" then begin
+      let post_id = String.sub action_type 7 (String.length action_type - 7) in
+      match Board.vote store ~voter:agent ~post_id ~direction:Board.Up with
+      | Ok _ ->
+          Ok (`Assoc [
+            ("success", `Bool true);
+            ("action", `String "upvote");
+            ("post_id", `String post_id);
+            ("agent", `String agent);
+            ("worker", `String worker_name);
+          ])
+      | Error e ->
+          Error (Printf.sprintf "Board vote failed: %s" (Board.show_board_error e))
+    end
+    else if action_type = "SKIP" then
+      Ok (`Assoc [
+        ("success", `Bool true);
+        ("action", `String "skip");
+        ("agent", `String agent);
+        ("worker", `String worker_name);
+      ])
+    else
+      Error (Printf.sprintf "Unknown action type: %s" action_type)
+  in
+
+  (* Broadcast completion event *)
+  (match result with
+   | Ok _ ->
+       notify_event ~event_type:Completion ~agent
+         ~data:(`Assoc [
+           ("worker", `String worker_name);
+           ("action", `String action_type);
+         ])
+   | Error _ -> ());
+
+  result

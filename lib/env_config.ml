@@ -257,6 +257,12 @@ module LodgeV2 = struct
   (** Min gap between same agent check-ins (seconds) *)
   let min_checkin_gap_seconds =
     get_float ~default:1800.0 "MASC_LODGE_MIN_CHECKIN_GAP"
+
+  (** Delegate LLM calls to external Workers (Soul + Body pattern).
+      When true, MASC emits heartbeat_task events instead of calling LLM directly.
+      Workers subscribe to events and invoke local LLM (Ollama). *)
+  let delegate_llm =
+    get_bool ~default:false "MASC_DELEGATE_LLM"
 end
 
 (** {1 Lodge Selection — Thompson Sampling Configuration} *)

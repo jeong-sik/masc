@@ -34,14 +34,17 @@ jobs:
         run: opam exec -- dune build --release bin/main_eio.exe
 
       - name: Prepare binary for Docker
-        run: cp _build/default/bin/main_eio.exe masc-mcp-linux-x64
-
-      - name: Create temporary commit with binary
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add -f masc-mcp-linux-x64
-          git commit -m "temp: add binary for Railway deploy"
+          cp _build/default/bin/main_eio.exe masc-mcp-linux-x64
+          chmod +x masc-mcp-linux-x64
+          ls -la masc-mcp-linux-x64
+
+      - name: Remove binary from gitignore for Railway upload
+        run: |
+          # Railway respects .gitignore, so we need to remove the binary exclusion
+          sed -i '/masc-mcp-linux-x64/d' .gitignore
+          echo "Modified .gitignore:"
+          tail -5 .gitignore
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

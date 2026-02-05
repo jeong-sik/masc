@@ -1605,6 +1605,8 @@ let run_server ~sw ~env ~port ~base_path =
   Masc_mcp.Eio_context.set_net net;
   Masc_mcp.Eio_context.set_clock clock;
   Masc_mcp.Process_eio.init ~proc_mgr ~clock;
+  (* Initialize Lodge after Eio context is ready (requires net for GraphQL) *)
+  Masc_mcp.Tool_lodge.init ();
 
   (* Create Caqti-compatible stdenv adapter
      Note: net type coercion from [Generic|Unix] to [Generic] is safe

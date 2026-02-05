@@ -149,6 +149,9 @@
    tool_board
    tool_lodge
    lodge_daemon
+   gardener_types
+   gardener
+   tool_gardener
    tool_council
    tool_suspend
    debate

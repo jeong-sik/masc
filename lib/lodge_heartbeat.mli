@@ -150,3 +150,25 @@ val create_agent_graphql :
 
 val string_of_trigger : checkin_trigger -> string
 val string_of_checkin_result : checkin_result -> string
+
+(** {1 Gap Signal Detection — Ecosystem Evolution} *)
+
+(** A gap signal indicates a detected need for a new agent role *)
+type gap_signal_t = {
+  gs_topic: string;           (** e.g., "security", "performance", "UX" *)
+  gs_detected_by: string;     (** agent who detected *)
+  gs_context: string;         (** surrounding discussion *)
+  gs_timestamp: float;
+}
+
+(** Check if any topic has accumulated enough signals to trigger spawn *)
+val check_gap_threshold : unit -> (string * int) list
+
+(** Get all signals for a specific topic *)
+val get_signals_for_topic : topic:string -> gap_signal_t list
+
+(** Clear signals for a topic (after agent is created) *)
+val clear_gap_signals : topic:string -> unit
+
+(** Spawn a new agent from accumulated gap signals *)
+val spawn_agent_from_gap : topic:string -> signals:gap_signal_t list -> bool

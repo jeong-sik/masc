@@ -63,6 +63,12 @@
  (modules test_lodge_selection)
  (libraries masc_mcp alcotest str yojson))
 
+; Gardener module tests (Self-Organizing Ecosystem)
+(test
+ (name test_gardener)
+ (modules test_gardener)
+ (libraries masc_mcp alcotest eio eio_main str yojson))
+
 ; Lodge_reaction module tests (Emergent Identity System)
 (test
  (name test_lodge_reaction)

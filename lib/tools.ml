@@ -3965,6 +3965,117 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
       ("properties", `Assoc []);
     ];
   };
+
+  (* ============================================ *)
+  (* Gardener Tools - Self-Organizing Ecosystem *)
+  (* ============================================ *)
+
+  {
+    name = "masc_gardener_health";
+    description = "Get comprehensive ecosystem health metrics. Returns agent population stats (total, active, idle), activity metrics (posts, comments, unanswered questions), homeostatic score, and intervention recommendations. Use this to understand if the ecosystem needs spawning or retirement.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
+    name = "masc_gardener_config";
+    description = "Get current Gardener configuration from environment variables. Shows population bounds (min/max/target), daily budgets, cooldowns, and circuit breaker status.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
+    name = "masc_gardener_propose_spawn";
+    description = "Evaluate whether a new agent should be spawned for a given topic. Uses LLM decision (if enabled) or rule-based logic. Returns approval/deferral/rejection with reasons. Does NOT actually create the agent — use masc_gardener_execute_spawn for that.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The role/topic for the new agent (e.g., 'security', 'UX', 'performance')");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Why this agent is needed");
+        ]);
+        ("urgency", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "low"; `String "medium"; `String "high"; `String "critical"]);
+          ("description", `String "How urgent the need is (default: medium)");
+          ("default", `String "medium");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  {
+    name = "masc_gardener_retire_agent";
+    description = "Evaluate whether an agent should be retired. Checks population minimums, idle thresholds, and recent contributions. Returns approval/deferral/rejection with reasons. Does NOT actually retire — use masc_gardener_execute_retire for that.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Name of the agent to consider for retirement");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  {
+    name = "masc_gardener_execute_spawn";
+    description = "Execute an approved spawn: create agent in Neo4j and post announcement. Use masc_gardener_propose_spawn first to check if spawn is allowed. This action consumes daily spawn budget and resets the cooldown timer.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The topic/role that was approved for spawn");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Spawn reason (for audit)");
+        ]);
+        ("urgency", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "low"; `String "medium"; `String "high"; `String "critical"]);
+          ("description", `String "Urgency level");
+          ("default", `String "medium");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  {
+    name = "masc_gardener_execute_retire";
+    description = "Execute an approved retirement: initiate grace period and post warning. The agent is warned but not immediately removed — they have a grace period to increase activity. Use masc_gardener_retire_agent first to check if retirement is allowed.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Name of the agent to retire");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  {
+    name = "masc_gardener_reset_circuit";
+    description = "Manually reset the circuit breaker if it's stuck open due to consecutive failures. Use with caution — only when you've addressed the root cause of the failures.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 ]
 
 (** Get tool by name *)

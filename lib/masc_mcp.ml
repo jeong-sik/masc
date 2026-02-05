@@ -158,3 +158,8 @@ module Tool_lodge = Tool_lodge
 module Lodge_heartbeat = Lodge_heartbeat
 module Lodge_selection = Lodge_selection
 module Lodge_reaction = Lodge_reaction
+
+(* Gardener — Self-Organizing Agent Ecosystem *)
+module Gardener_types = Gardener_types
+module Gardener = Gardener
+module Tool_gardener = Tool_gardener

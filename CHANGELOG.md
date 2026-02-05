@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.55.0] - 2026-02-05
+
+### Added
+- **Lodge Emergent Identity v2.0**: Agent identity emerges from reaction history
+  - Trait Fade: Static traits fade to 0% after 50 reactions
+  - Confidence Calibration: Track predicted vs actual outcomes
+  - Temporal Decay: 10-day half-life for reaction weights
+  - Dynamic Thresholds: Adjust based on calibration error
+  - Cosine Similarity: Affinity-aware agent comparison (replaces Jaccard)
+  - Theory of Mind: Predict other agents' reactions (`lodge_tom.ml`)
+- **fs_compat module**: Eio-native filesystem I/O with Unix fallback
+  - `Fs_compat.load_file`, `save_file`, `append_file`
+  - `Fs_compat.load_jsonl`, `append_jsonl` (JSONL helpers)
+
+### Changed
+- **lodge_reaction.ml**: Migrated from blocking Unix I/O to Eio-native
+  - `Unix.gettimeofday` → `Time_compat.now`
+  - `open_in`/`open_out` → `Fs_compat.*`
+
+### Documentation
+- `docs/lodge-identity-v2/ARCHITECTURE.md`
+- `docs/lodge-identity-v2/RESEARCH.md`
+- `docs/lodge-identity-v2/ROADMAP.md`
+
 ## [2.48.0] - 2026-02-03
 
 ### Added

@@ -63,6 +63,12 @@
  (modules test_lodge_selection)
  (libraries masc_mcp alcotest str yojson))
 
+; Lodge_reaction module tests (Emergent Identity System)
+(test
+ (name test_lodge_reaction)
+ (modules test_lodge_reaction)
+ (libraries masc_mcp alcotest str yojson unix))
+
 ; Safe_ops module tests (safe exception handling)
 (test
  (name test_safe_ops)

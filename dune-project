@@ -34,7 +34,7 @@
   (graphql_parser (>= 0.14.0))
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
-  (cohttp-eio (>= 6.0))
+  (cohttp-eio (and (>= 6.0) (< 6.2)))
   (tls (>= 0.16))
   (tls-eio (>= 0.16))
   (domain-name (>= 0.4))

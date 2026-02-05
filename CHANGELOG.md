@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.55.3] - 2026-02-05
+
+### Fixed
+- **Agent State Persistence**: Fix HTTP state loss on Railway (PostgreSQL mode)
+  - `is_pg_backend` helper to detect PostgresNative backend
+  - `join`: persist agent to `masc_kv` table for PostgreSQL mode
+  - `leave`: delete from `masc_kv` for PostgreSQL mode
+  - `is_agent_joined`: check `masc_kv` first for PostgreSQL mode
+  - FileSystem/Memory backends unchanged (no test breakage)
+- **Lodge Cache Filter**: Remove chicken-egg bug in agent loading
+
 ## [2.55.2] - 2026-02-05
 
 ### Fixed

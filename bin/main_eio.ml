@@ -24,6 +24,7 @@ module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
 module Board_dispatch = Masc_mcp.Board_dispatch
 module Board_listener = Masc_mcp.Board_listener
+module Task_dispatch = Masc_mcp.Task_dispatch
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
@@ -1622,6 +1623,14 @@ let run_server ~sw ~env ~port ~base_path =
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~base_path in
   server_state := Some state;
   Mcp_server.set_sse_callback state Sse.broadcast;
+
+  (* Initialize Task backend - share pool with Board if PostgreSQL available *)
+  (match Board_dispatch.get_pg_pool () with
+   | Some pool ->
+       (match Task_dispatch.init_pg pool with
+        | Ok () -> Printf.eprintf "[Task_dispatch] PostgreSQL backend initialized\n%!"
+        | Error e -> Printf.eprintf "[Task_dispatch] PG init failed: %s, using JSONL\n%!" (Types.show_masc_error e))
+   | None -> Task_dispatch.init_jsonl ());
   Progress.set_sse_callback Sse.broadcast;
   let cancel_orchestrator = Masc_mcp.Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config in
   (* Store cancel function for graceful shutdown *)

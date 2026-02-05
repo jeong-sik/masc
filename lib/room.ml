@@ -26,12 +26,14 @@ let read_state config =
 let write_state config state =
   write_json config (state_path config) (room_state_to_yojson state)
 
-(** Update state with function *)
+(** Update state with function - uses file lock for atomic read-modify-write *)
 let update_state config f =
-  let state = read_state config in
-  let new_state = f state in
-  write_state config new_state;
-  new_state
+  with_file_lock config (state_path config) (fun () ->
+    let state = read_state config in
+    let new_state = f state in
+    write_state config new_state;
+    new_state
+  )
 
 (** Get next message sequence *)
 let next_seq config =
@@ -292,9 +294,12 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
   let agent_json = agent_to_yojson agent in
   (* Write to filesystem (for backward compatibility) *)
   write_json config agent_file agent_json;
-  (* Also persist to backend (PostgreSQL when distributed) for HTTP persistence *)
-  let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
-  let _ = backend_set config ~key:agent_key ~value:(Yojson.Safe.to_string agent_json) in
+  (* Also persist to PostgreSQL backend for HTTP state persistence (stateless requests) *)
+  if is_pg_backend config then begin
+    let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
+    let _ = backend_set config ~key:agent_key ~value:(Yojson.Safe.to_string agent_json) in
+    ()
+  end;
 
   (* Update state *)
   let _ = update_state config (fun s ->
@@ -350,14 +355,24 @@ and leave config ~agent_name =
   let _stopped = Heartbeat.stop_by_agent ~agent_name:actual_name in
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
-  let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
   let in_fs = Sys.file_exists agent_file in
-  let in_backend = backend_exists config ~key:agent_key in
+  (* For PostgreSQL backend: also check masc_kv for HTTP state persistence *)
+  let in_backend =
+    if is_pg_backend config then
+      let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
+      backend_exists config ~key:agent_key
+    else
+      false
+  in
   if in_fs || in_backend then begin
     (* Remove from filesystem if exists *)
     if in_fs then Sys.remove agent_file;
-    (* Remove from backend (PostgreSQL when distributed) *)
-    let _ = backend_delete config ~key:agent_key in
+    (* Remove from PostgreSQL backend if applicable *)
+    if is_pg_backend config then begin
+      let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
+      let _ = backend_delete config ~key:agent_key in
+      ()
+    end;
 
     let _ = update_state config (fun s ->
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
@@ -372,7 +387,7 @@ and leave config ~agent_name =
 
     Printf.sprintf "✅ %s left the room" actual_name
   end else
-    Printf.sprintf "⚠ %s was not in the room" agent_name
+    Printf.sprintf "⚠ %s was not in the room" actual_name
 
 (** Broadcast message *)
 and broadcast config ~from_agent ~content =
@@ -1530,12 +1545,21 @@ let get_agents_raw config =
 (** Check if an agent has joined the room *)
 let is_agent_joined config ~agent_name =
   ensure_initialized config;
-  (* Check backend first (PostgreSQL when distributed, Memory/FS otherwise) *)
-  let agent_key = Printf.sprintf "agents:%s" (safe_filename agent_name) in
-  if backend_exists config ~key:agent_key then
-    true
-  else begin
-    (* Fallback to filesystem check for backward compatibility *)
+  (* For PostgreSQL backend: check masc_kv first (HTTP state persistence) *)
+  if is_pg_backend config then begin
+    let agent_key = Printf.sprintf "agents:%s" (safe_filename agent_name) in
+    if backend_exists config ~key:agent_key then true
+    else begin
+      (* Fallback to filesystem for backward compatibility *)
+      let agents_path = agents_dir config in
+      if not (Sys.file_exists agents_path) then false
+      else
+        let filename = safe_filename agent_name ^ ".json" in
+        let path = Filename.concat agents_path filename in
+        Sys.file_exists path
+    end
+  end else begin
+    (* For FileSystem/Memory backend: check filesystem directly *)
     let agents_path = agents_dir config in
     if not (Sys.file_exists agents_path) then false
     else

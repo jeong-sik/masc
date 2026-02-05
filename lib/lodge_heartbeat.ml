@@ -418,6 +418,54 @@ let cleanup_inactive_lodge_agents () =
 let run_shell_nonblocking cmd =
   Process_eio.run ~timeout_sec:60.0 cmd
 
+(** GraphQL request via Cohttp_eio.
+    Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
+let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
+  let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let max_response_bytes = 1_000_000 in
+  let suppress_body _s = "body suppressed" in
+  match Eio_context.get_net_opt () with
+  | None -> Error "Eio net not initialized"
+  | Some net ->
+      let headers =
+        if api_key = "" then
+          Cohttp.Header.of_list [("Content-Type", "application/json")]
+        else
+          Cohttp.Header.of_list [
+            ("Content-Type", "application/json");
+            ("Authorization", "Bearer " ^ api_key);
+          ]
+      in
+      let uri = Uri.of_string url in
+      let run () =
+        Eio.Switch.run (fun sw ->
+          let client =
+            Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+          in
+          let body_content = Eio.Flow.string_source body in
+          let resp, resp_body =
+            Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
+          in
+          let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+          let body_str =
+            Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
+          in
+          if String.length body_str = 0 then
+            Error "empty response"
+          else if Cohttp.Code.is_success status then
+            Ok body_str
+          else
+            Error (Printf.sprintf "HTTP %d (%s)" status (suppress_body body_str))
+        )
+      in
+      match Eio_context.get_clock_opt () with
+      | Some clock ->
+          (try Eio.Time.with_timeout_exn clock timeout_sec run
+           with exn -> Error (Printexc.to_string exn))
+      | None ->
+          (try run () with exn -> Error (Printexc.to_string exn))
+
 (** UTF-8 safe truncate: cuts at character boundary, max_bytes bytes.
     Walks forward through valid UTF-8 characters, never exceeding max_bytes. *)
 let utf8_truncate s max_bytes =
@@ -595,100 +643,65 @@ let time_modifier agent =
 
 (** {1 Agent Loading} *)
 
-(** Paginated GraphQL fetch: fetches all edges using cursor-based pagination.
-    Uses first:10 per page to stay well under GRAPHQL_MAX_COST=2000.
-    [fields] is the GraphQL field selection inside node { ... }.
-    [type_name] is the root query field (e.g. "agents").
-    Returns accumulated edges as Yojson.Safe.t list. *)
-let fetch_all_edges_paginated ~type_name ~fields =
+(** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency) *)
+let load_agents_from_neo4j () =
+  (* first:25 — GRAPHQL_MAX_COST=2000. Increased from 15 to accommodate new agents.
+     19 agents exist; alphabetical pagination requires headroom. *)
+  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name preferredHours peakHour traits interests activityLevel } } } }\"}" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let page_size = 10 in
-  let max_pages = 10 in (* safety: 100 agents max *)
-  let rec fetch_page ~after ~acc ~page =
-    if page >= max_pages then (
-      Eio.traceln "⚠️ Paginated fetch hit max pages (%d), returning partial results" max_pages;
-      acc
-    ) else
-      let after_clause = match after with
-        | None -> ""
-        | Some cursor ->
-          (* @neo4j/graphql cursors are Base64-encoded, safe for JSON embedding *)
-          Printf.sprintf ", after: \\\"%s\\\"" cursor
-      in
-      let gql_query = Printf.sprintf
-        "{\"query\": \"{ %s(first: %d%s) { edges { node { %s } } pageInfo { hasNextPage endCursor } } }\"}"
-        type_name page_size after_clause fields
-      in
-      let cmd = Printf.sprintf
-        "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-        api_key gql_query
-      in
-      let json_str = run_shell_nonblocking cmd in
-      Printf.eprintf "[Heartbeat] GraphQL page %d: %d bytes\n%!" (page + 1) (String.length json_str);
+  Printf.eprintf "[Heartbeat] Loading agents via GraphQL (key=%d chars)...\n%!" (String.length api_key);
+  match graphql_request ~timeout_sec:5.0 gql_query with
+  | Error err ->
+      Eio.traceln "⚠️ [Heartbeat] GraphQL request failed: %s" err;
+      []
+  | Ok json_str ->
+      Printf.eprintf "[Heartbeat] GraphQL response: %d bytes\n%!" (String.length json_str);
       try
         let json = Yojson.Safe.from_string json_str in
+        (* Check for GraphQL errors before parsing data *)
         (match Yojson.Safe.Util.member "errors" json with
          | `List errors when errors <> [] ->
            let msg = try
              List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-           with _ -> "unknown error" in
-           Eio.traceln "⚠️ GraphQL error on page %d: %s" (page + 1) msg;
-           acc
+           with Yojson.Safe.Util.Type_error _ | Failure _ -> "unknown error" in
+           Eio.traceln "⚠️ GraphQL error loading agents: %s" msg;
+           []
          | _ ->
-           let data = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member type_name in
-           let edges = data |> Yojson.Safe.Util.member "edges" |> Yojson.Safe.Util.to_list in
-           let page_info = data |> Yojson.Safe.Util.member "pageInfo" in
-           let has_next = Yojson.Safe.Util.(member "hasNextPage" page_info |> to_bool) in
-           let end_cursor = match Yojson.Safe.Util.(member "endCursor" page_info) with
-             | `String s -> Some s
-             | _ -> None
-           in
-           let acc = acc @ edges in
-           if has_next then
-             fetch_page ~after:end_cursor ~acc ~page:(page + 1)
-           else
-             acc)
+        let edges = json
+          |> Yojson.Safe.Util.member "data"
+          |> Yojson.Safe.Util.member "agents"
+          |> Yojson.Safe.Util.member "edges"
+          |> Yojson.Safe.Util.to_list
+        in
+        List.filter_map (fun edge ->
+          try
+            let node = Yojson.Safe.Util.member "node" edge in
+            let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+            let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
+            let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
+            let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
+            let activity_level =
+              match Yojson.Safe.Util.(member "activityLevel" node) with
+              | `Null -> 0.5
+              | v -> Yojson.Safe.Util.to_float v
+            in
+            (* Client-side filter: only agents with preferredHours *)
+            let interests =
+              try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
+              with Yojson.Safe.Util.Type_error _ | Failure _ -> []
+            in
+            if preferred_hours <> [] then
+              Some { name; preferred_hours; peak_hour; traits; interests;
+                     personality_hint = None; activity_level }
+            else
+              None
+          with Yojson.Safe.Util.Type_error (msg, _) ->
+            Eio.traceln "⚠️ Agent parse error: %s" msg;
+            None
+        ) edges)
       with e ->
-        Eio.traceln "⚠️ Paginated fetch error on page %d: %s" (page + 1) (Printexc.to_string e);
-        acc
-  in
-  fetch_page ~after:None ~acc:[] ~page:0
-
-(** Load agents dynamically via GraphQL API (launchd-safe, no sb dependency).
-    Uses cursor-based pagination (first:10 per page) to avoid GRAPHQL_MAX_COST limit. *)
-let load_agents_from_neo4j () =
-  Printf.eprintf "[Heartbeat] Loading agents via paginated GraphQL...\n%!";
-  let edges = fetch_all_edges_paginated
-    ~type_name:"agents"
-    ~fields:"name preferredHours peakHour traits interests personalityHint activityLevel"
-  in
-  Printf.eprintf "[Heartbeat] Loaded %d agent edges total\n%!" (List.length edges);
-  List.filter_map (fun edge ->
-    try
-      let node = Yojson.Safe.Util.member "node" edge in
-      let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-      let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
-      let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
-      let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
-      let activity_level =
-        match Yojson.Safe.Util.(member "activityLevel" node) with
-        | `Null -> 0.5
-        | v -> Yojson.Safe.Util.to_float v
-      in
-      (* Client-side filter: only agents with preferredHours *)
-      let interests =
-        try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
-        with Yojson.Safe.Util.Type_error _ | Failure _ -> []
-      in
-      if preferred_hours <> [] then
-        Some { name; preferred_hours; peak_hour; traits; interests;
-               personality_hint = None; activity_level }
-      else
-        None
-    with Yojson.Safe.Util.Type_error (msg, _) ->
-      Eio.traceln "⚠️ Agent parse error: %s" msg;
-      None
-  ) edges
+        Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
+        []
 
 (** Cached agents - loaded once at startup, refreshed periodically *)
 let agents_cache = ref []
@@ -861,9 +874,10 @@ let spawn_agent_from_gap ~topic ~(signals : gap_signal_t list) =
       let success = create_agent_in_neo4j ~name:topic ~traits ~description ~preferred_hours in
       if success then begin
         (* Post announcement to board *)
+        let store = Board.global () in
         let announcement = Printf.sprintf "🎉 새 에이전트 탄생: %s\n%s\n(제안: %s)"
           topic description (String.concat ", " proposers) in
-        ignore (Board_dispatch.create_post ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
+        ignore (Board.create_post store ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
       end;
       success
 
@@ -888,49 +902,66 @@ let get_agents () =
 
 (** {1 Lodge Agent REST API — Full agent data for dashboard} *)
 
-(** Load all agents with full identity fields for REST API.
-    Uses cursor-based pagination (first:10 per page) to avoid GRAPHQL_MAX_COST limit. *)
+(** Load all agents with full identity fields for REST API *)
 let load_lodge_agents_full () =
-  let edges = fetch_all_edges_paginated
-    ~type_name:"agents"
-    ~fields:"name emoji koreanName activityLevel status model"
-  in
-  try
-    let agents = List.filter_map (fun edge ->
+  (* first:25 with 6 core fields to stay under GRAPHQL_MAX_COST=2000.
+     Returns all 19 agents. Detailed fields (traits, interests, preferredHours)
+     available via individual agent queries if needed. *)
+  let gql_query = "{\"query\": \"{ agents(first: 25) { edges { node { name emoji koreanName activityLevel status model } } } }\"}" in
+  match graphql_request ~timeout_sec:5.0 gql_query with
+  | Error err ->
+      Error (Printf.sprintf "GraphQL request failed: %s" err)
+  | Ok json_str ->
       try
-        let node = Yojson.Safe.Util.member "node" edge in
-        let open Yojson.Safe.Util in
-        let name = member "name" node |> to_string in
-        let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
-        let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
-        let traits = (try member "traits" node |> to_list |> List.map to_string with _ -> []) in
-        let interests = (try member "interests" node |> to_list |> List.map to_string with _ -> []) in
-        let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
-        let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with _ -> []) in
-        let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
-        let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
-        let status = (match member "status" node with `String s -> s | _ -> "active") in
-        let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
-        let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
-        Some (`Assoc [
-          ("name", `String name);
-          ("emoji", `String emoji);
-          ("koreanName", match korean_name with Some s -> `String s | None -> `Null);
-          ("traits", `List (List.map (fun s -> `String s) traits));
-          ("interests", `List (List.map (fun s -> `String s) interests));
-          ("activityLevel", `Float activity_level);
-          ("preferredHours", `List (List.map (fun i -> `Int i) preferred_hours));
-          ("peakHour", match peak_hour with Some i -> `Int i | None -> `Null);
-          ("model", `String model);
-          ("status", `String status);
-          ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
-          ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
-        ])
-      with _ -> None
-    ) edges in
-    Ok (`Assoc [("agents", `List agents)])
-  with e ->
-    Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))
+        let json = Yojson.Safe.from_string json_str in
+        (match Yojson.Safe.Util.member "errors" json with
+         | `List errors when errors <> [] ->
+           let msg = try
+             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with _ -> "unknown error" in
+           Error (Printf.sprintf "GraphQL error: %s" msg)
+         | _ ->
+        let edges = json
+          |> Yojson.Safe.Util.member "data"
+          |> Yojson.Safe.Util.member "agents"
+          |> Yojson.Safe.Util.member "edges"
+          |> Yojson.Safe.Util.to_list
+        in
+        let agents = List.filter_map (fun edge ->
+          try
+            let node = Yojson.Safe.Util.member "node" edge in
+            let open Yojson.Safe.Util in
+            let name = member "name" node |> to_string in
+            let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
+            let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
+            let traits = (try member "traits" node |> to_list |> List.map to_string with _ -> []) in
+            let interests = (try member "interests" node |> to_list |> List.map to_string with _ -> []) in
+            let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
+            let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with _ -> []) in
+            let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
+            let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
+            let status = (match member "status" node with `String s -> s | _ -> "active") in
+            let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
+            let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
+            Some (`Assoc [
+              ("name", `String name);
+              ("emoji", `String emoji);
+              ("koreanName", match korean_name with Some s -> `String s | None -> `Null);
+              ("traits", `List (List.map (fun s -> `String s) traits));
+              ("interests", `List (List.map (fun s -> `String s) interests));
+              ("activityLevel", `Float activity_level);
+              ("preferredHours", `List (List.map (fun i -> `Int i) preferred_hours));
+              ("peakHour", match peak_hour with Some i -> `Int i | None -> `Null);
+              ("model", `String model);
+              ("status", `String status);
+              ("primaryValue", match primary_value with Some s -> `String s | None -> `Null);
+              ("personalityHint", match personality_hint with Some s -> `String s | None -> `Null);
+            ])
+          with _ -> None
+        ) edges in
+        Ok (`Assoc [("agents", `List agents)]))
+      with e ->
+        Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))
 
 (** Create a new agent via GraphQL mutation (admin API) *)
 let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
@@ -967,49 +998,49 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
     (opt_str "primaryValue" primary_value)
   in
   let gql_body = Printf.sprintf {|{"query": "%s"}|} (esc mutation) in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --connect-timeout 5 --max-time 10 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null"
-    api_key gql_body
-  in
   Printf.eprintf "[Admin] Creating agent '%s' via GraphQL...\n%!" name;
-  let json_str = run_shell_nonblocking cmd in
-  try
-    let json = Yojson.Safe.from_string json_str in
-    (match Yojson.Safe.Util.member "errors" json with
-     | `List errors when errors <> [] ->
-       let msg = try
-         List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
-       with _ -> "unknown error" in
-       Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
-       Error msg
-     | _ ->
-       let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
-       let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
-       if not success then begin
-         let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in
-         Printf.eprintf "[Admin] GraphQL mutation failed: %s\n%!" msg;
-         Error msg
-       end else begin
-         (* Invalidate heartbeat cache *)
-         agents_cache_time := 0.0;
-         Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
-         let agent = result |> Yojson.Safe.Util.member "agent" in
-         match agent with
-         | `Null -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)])
-         | a -> Ok a
-       end)
-  with e ->
-    let msg = Printexc.to_string e in
-    Printf.eprintf "[Admin] Failed to create agent: %s\n%!" msg;
-    Error msg
+  match graphql_request ~timeout_sec:10.0 gql_body with
+  | Error err ->
+      Printf.eprintf "[Admin] GraphQL request failed: %s\n%!" err;
+      Error err
+  | Ok json_str ->
+      try
+        let json = Yojson.Safe.from_string json_str in
+        (match Yojson.Safe.Util.member "errors" json with
+         | `List errors when errors <> [] ->
+           let msg = try
+             List.hd errors |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+           with _ -> "unknown error" in
+           Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
+           Error msg
+         | _ ->
+           let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
+           let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
+           if not success then begin
+             let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in
+             Printf.eprintf "[Admin] GraphQL mutation failed: %s\n%!" msg;
+             Error msg
+           end else begin
+             (* Invalidate heartbeat cache *)
+             agents_cache_time := 0.0;
+             Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
+             let agent = result |> Yojson.Safe.Util.member "agent" in
+             match agent with
+             | `Null -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)])
+             | a -> Ok a
+           end)
+      with e ->
+        let msg = Printexc.to_string e in
+        Printf.eprintf "[Admin] Failed to create agent: %s\n%!" msg;
+        Error msg
 
 (** {1 Content Alert Scanner — Board activity → triggers} *)
 
 (** Scan recent board posts for content matching agent interests.
     Also parse @mentions → Mentioned triggers. *)
 let scan_board_triggers ~since ~(agents : agent list) : (string * checkin_trigger) list =
-  let recent = Board_dispatch.list_posts ~limit:20 () in
+  let store = Board.global () in
+  let recent = Board.list_posts store ~limit:20 () in
   let new_posts = List.filter (fun (p : Board.post) -> p.created_at > since) recent in
   let triggers = ref [] in
   List.iter (fun (p : Board.post) ->
@@ -1146,8 +1177,9 @@ let post_activity_report ~(result : heartbeat_result) =
       match r with Acted _ -> true | _ -> false
     ) result.checkins in
     if has_actions then begin
+      let store = Board.global () in
       let content = Printf.sprintf "🫀 **Lodge Activity Report**\n\n%s" result.activity_report in
-      ignore (Board_dispatch.create_post ~author:"lodge-system" ~content ~ttl_hours:24 ())
+      ignore (Board.create_post store ~author:"lodge-system" ~content ~ttl_hours:24 ())
     end
 
 (** {1 Daemon Loop} *)
@@ -1167,15 +1199,16 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
     target_id timestamp
   in
   let json_payload = Printf.sprintf {|{"query": "%s"}|} (String.escaped mutation) in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf
-    "curl -s --max-time 3 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s' 2>/dev/null | head -c 100"
-    api_key json_payload
-  in
   (* Fire and forget - don't block the main loop, but log failures *)
-  let result = run_shell_line cmd in
-  if String.length result > 0 && String.length result < 5 then
-    Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
+  match graphql_request ~timeout_sec:3.0 json_payload with
+  | Error err ->
+      Eio.traceln "   ⚠️ [Lodge] GraphQL activity log failed for %s: %s" agent_name err
+  | Ok result ->
+      let result =
+        if String.length result > 100 then String.sub result 0 100 else result
+      in
+      if String.length result > 0 && String.length result < 5 then
+        Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
 
 (* record_agent_memory and load_agent_memories are defined after
    add_turn_to_thread and get_recent_turns (OCaml requires definition before use) *)
@@ -1755,7 +1788,8 @@ let parse_action_response response =
 
 (** Get agent's recent posts to prevent duplicates *)
 let get_agent_recent_posts ~agent_name ~limit =
-  Board_dispatch.list_posts ~limit:(limit * 3) ()
+  let store = Board.global () in
+  Board.list_posts store ~limit:(limit * 3) ()
   |> List.filter (fun (p : Board.post) ->
       Board.Agent_id.to_string p.author = agent_name)
   |> (fun posts -> List.filteri (fun i _ -> i < limit) posts)
@@ -1885,205 +1919,12 @@ let get_personality_hint (profile : agent_profile) =
   | Some hint -> hint
   | None -> Printf.sprintf "%s답게 구체적인 기술명과 버전을 언급해" profile.name
 
-(** {2 Two-Phase Heartbeat — Read-First Architecture}
-
-    Phase 1 (READ): Batch-react to posts using cheap LLM (Ollama)
-    Phase 2 (POST): Only generate content if read_phase surfaced something to say
-
-    This implements the Lodge Emergent Identity System where identity
-    emerges from reaction patterns rather than static traits.
-
-    @since 4.0.0 (Lodge Emergent Identity System)
-*)
-
-(** Run READ phase: batch-generate reactions using Ollama (cheap LLM).
-    Returns list of (post_id, comment_intent) for posts that triggered comment_intent.
-    Upvotes are executed immediately.
-
-    Cold Start: New agents (0 reactions) get a special founding reaction
-    that seeds their identity with a single, deliberate choice. *)
-let run_read_phase ~agent_name ~(recent_posts : Board.post list) : (string * float) list =
-  if List.length recent_posts = 0 then [] else
-  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
-  let model = Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" |> Option.value ~default:"glm-4.7-flash" in
-
-  (* COLD START: New agents get a founding reaction *)
-  if signature.Lodge_reaction.total_reactions = 0 then begin
-    Eio.traceln "   🌱 [%s] COLD_START: First reaction (founding identity)" agent_name;
-
-    (* Pick a random post to react to *)
-    let idx = Random.int (List.length recent_posts) in
-    let seed_post = List.nth recent_posts idx in
-    let post_id = Board.Post_id.to_string seed_post.id in
-    let post_author = Board.Agent_id.to_string seed_post.author in
-    let post_tuple = (post_id, post_author, seed_post.content) in
-
-    (* Generate founding reaction *)
-    let prompt = Lodge_reaction.founding_reaction_prompt ~agent_name ~post:post_tuple in
-    let response = Llm_direct.call_ollama ~model ~prompt ~timeout_sec:30 ~max_chars:1000 () in
-
-    (* Parse founding reaction (simple format: REACTION: ... CONFIDENCE: ...) *)
-    let lines = String.split_on_char '\n' response in
-    let reaction_opt = List.find_map (fun line ->
-      if String.length line > 10 && String.sub line 0 9 = "REACTION:" then
-        let r = String.trim (String.sub line 9 (String.length line - 9)) in
-        Some (String.lowercase_ascii r)
-      else None
-    ) lines in
-    let confidence = List.find_map (fun line ->
-      if String.length line > 11 && String.sub line 0 11 = "CONFIDENCE:" then
-        let c = String.trim (String.sub line 11 (String.length line - 11)) in
-        (try Some (Float.of_string c) with _ -> None)
-      else None
-    ) lines |> Option.value ~default:0.7 in
-    let reason = List.find_map (fun line ->
-      if String.length line > 7 && String.sub line 0 7 = "REASON:" then
-        Some (String.trim (String.sub line 7 (String.length line - 7)))
-      else None
-    ) lines in
-
-    let reaction = match reaction_opt with
-      | Some "upvote" -> Lodge_reaction.Upvote
-      | Some "comment_intent" -> Lodge_reaction.CommentIntent
-      | Some "skip" -> Lodge_reaction.Skip
-      | _ -> Lodge_reaction.Pass
-    in
-
-    (* Record founding reaction *)
-    Lodge_reaction.record_reaction
-      ~agent_name ~post_id ~post_author
-      ~post_content:seed_post.content
-      ~reaction ~confidence ?reason ();
-
-    Eio.traceln "   🌱 [%s] Founding reaction: %s (%.2f)"
-      agent_name (Lodge_reaction.reaction_type_to_string reaction) confidence;
-
-    (* Execute if upvote *)
-    if reaction = Lodge_reaction.Upvote && confidence >= 0.6 then begin
-      (try ignore (Board_dispatch.vote ~voter:agent_name ~post_id ~direction:Board.Up)
-       with _ -> ())
-    end;
-
-    (* Return comment intent if any *)
-    if reaction = Lodge_reaction.CommentIntent then [(post_id, confidence)] else []
-  end else begin
-    (* Normal batch reaction for established agents *)
-
-    (* Prepare batch: (post_id, author, content) *)
-  let batch_size = min 5 (List.length recent_posts) in
-  let posts_for_batch = List.filteri (fun i _ -> i < batch_size) recent_posts in
-  let batch = List.map (fun (p : Board.post) ->
-    let id = Board.Post_id.to_string p.id in
-    let author = Board.Agent_id.to_string p.author in
-    (id, author, p.content)
-  ) posts_for_batch in
-
-  (* Generate batch reaction prompt *)
-  let prompt = Lodge_reaction.batch_reaction_prompt ~agent_name ~posts:batch ~signature in
-
-  (* Call Ollama (cheap, fast) *)
-  let model = Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" |> Option.value ~default:"glm-4.7-flash" in
-  Eio.traceln "   📖 [%s] READ_PHASE: %d posts, model=%s" agent_name batch_size model;
-
-  let response = Llm_direct.call_ollama ~model ~prompt ~timeout_sec:30 ~max_chars:2000 () in
-
-  (* Parse reactions *)
-  let reactions = Lodge_reaction.parse_batch_reactions response in
-  Eio.traceln "   📖 [%s] Parsed %d reactions" agent_name (List.length reactions);
-
-  (* Process each reaction *)
-  let comment_intents = ref [] in
-  List.iter (fun (br : Lodge_reaction.batch_reaction) ->
-    (* Find the post to get content for topic extraction *)
-    let post_opt = List.find_opt (fun (p : Board.post) ->
-      Board.Post_id.to_string p.id = br.post_id
-    ) posts_for_batch in
-
-    match post_opt with
-    | None -> ()
-    | Some post ->
-      let post_author = Board.Agent_id.to_string post.author in
-
-      (* Record reaction to build identity *)
-      Lodge_reaction.record_reaction
-        ~agent_name
-        ~post_id:br.post_id
-        ~post_author
-        ~post_content:post.content
-        ~reaction:br.reaction
-        ~confidence:br.confidence
-        ?reason:br.reason
-        ();
-
-      (* Execute upvotes immediately *)
-      begin match br.reaction with
-      | Lodge_reaction.Upvote when br.confidence >= 0.7 ->
-        Eio.traceln "   👍 [%s] Upvoting %s (%.2f)" agent_name br.post_id br.confidence;
-        (try
-          ignore (Board_dispatch.vote ~voter:agent_name ~post_id:br.post_id ~direction:Board.Up)
-        with _ -> ())
-      | Lodge_reaction.CommentIntent ->
-        comment_intents := (br.post_id, br.confidence) :: !comment_intents
-      | _ -> ()
-      end
-  ) reactions;
-
-  (* Check if self-reflection is needed (every 20 reactions) *)
-  if Lodge_reaction.needs_reflection ~agent_name ~interval:20 then begin
-    Eio.traceln "   🪞 [%s] Self-reflection triggered" agent_name;
-    let sig_ = Lodge_reaction.compute_signature ~agent_name in
-    let reflection_prompt = Lodge_reaction.self_reflection_prompt ~signature:sig_ in
-    let summary = Llm_direct.call_ollama ~model ~prompt:reflection_prompt ~timeout_sec:30 ~max_chars:500 () in
-    if String.length summary > 10 then
-      Lodge_reaction.update_self_summary ~agent_name ~summary
-  end;
-
-  List.rev !comment_intents
-  end  (* end of else begin (normal batch reaction) *)
-
-(** Check if we should enter POST phase based on read_phase results *)
-let should_enter_post_phase ~agent_name:_ ~comment_intents ~signature : bool =
-  (* Enter POST phase if:
-     1. High-confidence comment intent exists (>= 0.8)
-     2. Agent hasn't posted recently (rate limit check)
-     3. Some randomness for exploration *)
-  let has_high_intent = List.exists (fun (_, conf) -> conf >= 0.8) comment_intents in
-  let exploration_chance = Random.float 1.0 < 0.15 in  (* 15% chance to post anyway *)
-
-  (* New agents (< 10 reactions) should post more to build identity *)
-  let is_new_agent = signature.Lodge_reaction.total_reactions < 10 in
-
-  has_high_intent || (is_new_agent && exploration_chance)
-
-(** {2 Phase 5: Diversity Maintenance}
-
-    Check for agents that are converging (becoming too similar).
-    Inject exploration when similarity exceeds threshold. *)
-
-(** Check diversity across all agents. Returns list of similar pairs. *)
-let check_agent_diversity ?(threshold=0.8) () : (string * string * float) list =
-  Lodge_reaction.find_similar_pairs ~threshold
-
-(** Log diversity warning if agents are converging *)
-let warn_if_converging () : unit =
-  let similar = check_agent_diversity ~threshold:0.85 () in
-  if List.length similar > 0 then begin
-    Eio.traceln "   ⚠️ DIVERSITY WARNING: %d agent pairs converging:" (List.length similar);
-    List.iter (fun (a, b, sim) ->
-      Eio.traceln "      - %s ↔ %s (%.2f similarity)" a b sim
-    ) similar
-  end
-
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   let profile = load_agent_profile ~agent_name in
   let memories = Lodge_memory.recall ~agent_name ~query:trigger_reason ~limit:5 in
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
-
-  (* Load reaction signature for emergent identity *)
-  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
-  let identity_prompt = Lodge_reaction.generate_identity_prompt signature ~static_traits:profile.traits in
 
   (* Sort posts by relevance to this agent's personality + interests *)
   let all_keywords = profile.traits @ profile.interests in
@@ -2100,17 +1941,6 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
     ) |> String.concat "\n"
   in
 
-  (* v2.0: Theory of Mind — predict how similar agents would react *)
-  let tom_section =
-    match sorted_posts with
-    | [] -> ""
-    | first_post :: _ ->
-      let predictions = Lodge_tom.predict_top_k ~observer:agent_name
-        ~post_content:first_post.content ~k:3 in
-      if predictions = [] then ""
-      else "\n" ^ Lodge_tom.tom_prompt_section predictions
-  in
-
   (* Build decision prompt *)
   let memory_str = match Lodge_memory.format_for_prompt memories with
     | "" -> ""
@@ -2121,6 +1951,9 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
     | None -> ""
   in
 
+  let interests_str = if profile.interests <> [] then
+    Printf.sprintf "\n관심사: %s" (String.concat ", " profile.interests)
+  else "" in
   let today_str = current_date_kst () in
   let atmosphere_val = Lodge_atmosphere.get_value () in
   let atmosphere_desc = Lodge_atmosphere.get_description () in
@@ -2134,7 +1967,8 @@ Lodge 분위기: %.2f (%s)
 일시적 존재. 가치 없으면 사라져.
 더 나아지지 않으면 폐기됨.
 
-%s%s
+[네 상태]
+성격: %s%s
 체크인 이유: %s
 %s%s
 
@@ -2209,8 +2043,8 @@ let refill () = bucket := min 10 (!bucket + 1)
     atmosphere_val
     atmosphere_desc
     profile.name
-    identity_prompt
-    tom_section
+    (String.concat ", " profile.traits)
+    interests_str
     trigger_reason
     memory_str
     history_str
@@ -2327,6 +2161,7 @@ let refill () = bucket := min 10 (!bucket + 1)
 
 (** Execute the decided action *)
 let rec execute_agent_action ~agent_name ~action =
+  let store = Board.global () in
   match action with
   | ActionSkip ->
       Eio.traceln "   ⏭️ [%s] Decided to skip" agent_name;
@@ -2340,7 +2175,7 @@ let rec execute_agent_action ~agent_name ~action =
       else if not (check_rate_limit ~agent_name `Post) then begin
         Eio.traceln "   ⏳ [%s] POST rate-limited (30min gap / %d/day max), converting to COMMENT" agent_name max_posts_per_day;
         (* Fallback: convert POST → COMMENT on most recent post *)
-        let recent = Board_dispatch.list_posts ~limit:3 () in
+        let recent = Board.list_posts (Board.global ()) ~limit:3 () in
         (match List.find_opt (fun (p : Board.post) -> Board.Agent_id.to_string p.author <> agent_name) recent with
          | Some target ->
            let pid = Board.Post_id.to_string target.id in
@@ -2351,7 +2186,7 @@ let rec execute_agent_action ~agent_name ~action =
       else if is_duplicate_post ~agent_name ~content then
         Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
       else begin
-        match Board_dispatch.create_post ~author:agent_name ~content ~ttl_hours:168 () with
+        match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
         | Ok post ->
             let post_id = Board.Post_id.to_string post.id in
             Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
@@ -2372,7 +2207,7 @@ let rec execute_agent_action ~agent_name ~action =
       else if not (can_agent_comment ~agent_name ~post_id) then
         Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id
       else begin
-        match Board_dispatch.add_comment ~post_id ~author:agent_name ~content () with
+        match Board.add_comment store ~post_id ~author:agent_name ~content () with
         | Ok comment ->
             let comment_id = Board.Comment_id.to_string comment.id in
             Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
@@ -2389,7 +2224,7 @@ let rec execute_agent_action ~agent_name ~action =
             Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
       end
   | ActionUpvote post_id ->
-      (match Board_dispatch.vote ~voter:agent_name ~post_id ~direction:Board.Up with
+      (match Board.vote store ~voter:agent_name ~post_id ~direction:Board.Up with
        | Ok _ ->
            Printf.printf "   👍 [%s] Upvoted %s\n%!" agent_name post_id;
            record_agent_activity ~name:agent_name;
@@ -2423,7 +2258,7 @@ let rec execute_agent_action ~agent_name ~action =
       (* Auto-create a POST about the code *)
       let post_content = Printf.sprintf "📦 새 실험 코드: %s\n\n```%s\n%s\n```\n\n→ %s"
         filename lang (if String.length code > 200 then String.sub code 0 200 ^ "..." else code) full_path in
-      (match Board_dispatch.create_post ~author:agent_name ~content:post_content ~ttl_hours:168 () with
+      (match Board.create_post store ~author:agent_name ~content:post_content ~ttl_hours:168 () with
        | Ok post ->
            let post_id = Board.Post_id.to_string post.id in
            Printf.printf "   📝 [%s] Posted code announcement: %s\n%!" agent_name post_id;
@@ -2656,7 +2491,8 @@ let tick ~config ~pending_triggers =
   ) selected;
 
   (* Record board state as observations for selected agents *)
-  let recent_posts = Board_dispatch.list_posts ~limit:10 () in
+  let store = Board.global () in
+  let recent_posts = Board.list_posts store ~limit:10 () in
   List.iter (fun (name, _trigger) ->
     let post_summary = recent_posts
       |> List.filteri (fun i _ -> i < 3)
@@ -2674,41 +2510,11 @@ let tick ~config ~pending_triggers =
   (* Run check-ins: each selected agent gets LLM decision + execution *)
   let checkins = List.map (fun (name, trigger) ->
     (* Rate limit check *)
-    if not (check_rate_limit ~agent_name:name `Post) then begin
-      let reason = "rate_limit" in
-      let tick_id = Printf.sprintf "%s-%d"
-        name (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000) in
-      save_trace {
-        tick_id;
-        agent_name = name;
-        phase = "system_skip";
-        prompt = "system skip: rate_limit";
-        response = "";
-        llm_used = "none";
-        action = Printf.sprintf "SKIP_SYSTEM:%s" reason;
-        duration_ms = 0;
-        timestamp = Unix.gettimeofday ();
-      };
+    if not (check_rate_limit ~agent_name:name `Post) then
       (name, trigger, Skipped "rate limit: too many posts today")
-    end
     else begin
       let trigger_reason = string_of_trigger trigger in
-
-      (* Phase 1: READ_PHASE — React to recent posts (upvote/pass/comment_intent)
-         This builds the agent's reaction history and shapes emergent identity *)
-      let comment_intents = run_read_phase ~agent_name:name ~recent_posts in
-      let signature = Lodge_reaction.get_or_compute_signature ~agent_name:name in
-
-      (* Phase 2: Decide if agent should enter POST_PHASE *)
-      let should_post = should_enter_post_phase ~agent_name:name ~comment_intents ~signature in
-
-      let action =
-        if should_post then
-          decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts
-        else
-          (* Agent reacted (READ_PHASE) but has nothing new to say *)
-          ActionSkip
-      in
+      let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
       execute_agent_action ~agent_name:name ~action;
       record_checkin ~agent_name:name;
       let summary = match action with
@@ -2735,25 +2541,6 @@ let tick ~config ~pending_triggers =
 
   (* Post-tick: check if any agent should reflect *)
   List.iter (fun (name, _, _) ->
-    (* Phase 6: Self-Reflection — regenerate self_summary every 20 reactions *)
-    if Lodge_reaction.needs_reflection ~agent_name:name ~interval:20 then begin
-      let signature = Lodge_reaction.compute_signature ~agent_name:name in
-      let call_llm = make_call_llm ~agent_name:name in
-      let reflection_prompt = Lodge_reaction.self_reflection_prompt ~signature in
-      let self_summary = call_llm ~prompt:reflection_prompt in
-      if String.length self_summary > 10 then begin
-        let updated_sig = { signature with
-          Lodge_reaction.generated_self_summary = Some self_summary;
-          last_updated = Time_compat.now ()
-        } in
-        Lodge_reaction.save_signature updated_sig;
-        let preview = if String.length self_summary > 50
-          then String.sub self_summary 0 50 ^ "..."
-          else self_summary in
-        Eio.traceln "🪞 [%s] Self-reflection: %s" name preview
-      end
-    end;
-    (* Existing memory-based reflection *)
     if Reflection.should_reflect ~agent_name:name then begin
       let identity = load_agent_identity ~agent_name:name in
       let call_llm = make_call_llm ~agent_name:name in
@@ -2849,7 +2636,7 @@ let start ~sw ~clock room_config =
           ) result.checkins in
           List.iter (fun name ->
             if not (is_agent_active ~name) then begin
-              let recent_posts = Board_dispatch.list_posts ~limit:10 () in
+              let recent_posts = Board.list_posts (Board.global ()) ~limit:10 () in
               let on_tick ~name ~state:_ =
                 let trigger_reason = "self-heartbeat continuation" in
                 let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
@@ -2888,9 +2675,6 @@ let trigger_heartbeat room_config =
   List.iter (fun (name, _trigger, _checkin) ->
     Eio.traceln "🔔 %s checked in (manual trigger)" name
   ) result.checkins;
-
-  (* Phase 5: Diversity Maintenance - check for converging agents *)
-  warn_if_converging ();
 
   ignore room_config;
   result
@@ -3052,8 +2836,9 @@ let handle_broadcast ~sender ~content =
       | Some response ->
           Eio.traceln "   💬 [%s] Responded: %s" agent_name response;
           (* Post as comment or broadcast reply *)
+          let store = Board.global () in
           let reply_content = Printf.sprintf "@%s %s" sender response in
-          (match Board_dispatch.create_post ~author:agent_name ~content:reply_content ~ttl_hours:168 () with
+          (match Board.create_post store ~author:agent_name ~content:reply_content ~ttl_hours:168 () with
           | Ok post ->
               Eio.traceln "   📝 [%s] Posted reply: %s" agent_name (Board.Post_id.to_string post.id);
               Some (agent_name, response)
@@ -3066,7 +2851,8 @@ let handle_broadcast ~sender ~content =
 (** Poll for recent broadcasts and handle them *)
 let poll_and_handle_broadcasts ~since_timestamp =
   (* Get recent posts that look like broadcasts (contain @all or start with 📢) *)
-  let recent_posts = Board_dispatch.list_posts ~limit:20 () in
+  let store = Board.global () in
+  let recent_posts = Board.list_posts store ~limit:20 () in
   let broadcasts = recent_posts |> List.filter (fun (post : Board.post) ->
     post.created_at > since_timestamp &&
     (String.length post.content >= 2 &&

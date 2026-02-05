@@ -211,13 +211,14 @@ let default_configs = [
     working_dir = None;
     mcp_tools = [];
   });
-  (* GLM uses llm-mcp HTTP endpoint via curl *)
+  (* GLM uses Z.ai API directly - no llm-mcp dependency *)
   ("glm", {
     agent_name = "glm";
-    command = "curl -s -X POST http://localhost:8932/mcp -H 'Content-Type: application/json' -d";
+    (* Direct Z.ai API call - requires ZAI_API_KEY env var *)
+    command = "curl -s -X POST https://api.z.ai/api/coding/paas/v4/chat/completions -H 'Content-Type: application/json' -H \"Authorization: Bearer $ZAI_API_KEY\" -d";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
-    mcp_tools = [];  (* MCP tools not applicable for API call *)
+    mcp_tools = [];  (* GLM has no MCP support *)
   });
 ]
 
@@ -303,21 +304,20 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
       (* Build command arguments - direct execution without shell *)
       let (cmd_args, stdin_data) =
         if agent_name = "glm" then
-          (* GLM: use curl with JSON-RPC body *)
+          (* GLM: Direct Z.ai API call - no llm-mcp dependency *)
+          let api_key = Sys.getenv_opt "ZAI_API_KEY" |> Option.value ~default:"" in
+          let model = "glm-4.7" in
           let json_body = Yojson.Safe.to_string (`Assoc [
-            ("jsonrpc", `String "2.0");
-            ("id", `Int 1);
-            ("method", `String "tools/call");
-            ("params", `Assoc [
-              ("name", `String "glm");
-              ("arguments", `Assoc [
-                ("prompt", `String augmented_prompt);
-                ("stream", `Bool false)
-              ])
-            ])
+            ("model", `String model);
+            ("messages", `List [
+              `Assoc [("role", `String "user"); ("content", `String augmented_prompt)]
+            ]);
+            ("stream", `Bool false)
           ]) in
-          (["curl"; "-s"; "-X"; "POST"; "http://localhost:8932/mcp";
-            "-H"; "Content-Type: application/json"; "-d"; json_body], None)
+          (["curl"; "-s"; "-X"; "POST"; "https://api.z.ai/api/coding/paas/v4/chat/completions";
+            "-H"; "Content-Type: application/json";
+            "-H"; Printf.sprintf "Authorization: Bearer %s" api_key;
+            "-d"; json_body], None)
         else
           (* Other agents: parse command and pass prompt via stdin *)
           let base_args = parse_command config.command in

@@ -152,6 +152,7 @@
    gardener_types
    gardener
    tool_gardener
+   tool_library
    tool_council
    tool_suspend
    debate

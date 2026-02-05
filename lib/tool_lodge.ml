@@ -151,6 +151,54 @@ let http_get_json ~net:_ url =
 
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
+(** GraphQL request via Cohttp_eio.
+    Avoids curl DNS/connectivity failures by using OCaml HTTP client. *)
+let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
+  let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
+  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  let max_response_bytes = 1_000_000 in
+  let suppress_body _s = "body suppressed" in
+  match Eio_context.get_net_opt () with
+  | None -> Error "Eio net not initialized"
+  | Some net ->
+      let headers =
+        if api_key = "" then
+          Cohttp.Header.of_list [("Content-Type", "application/json")]
+        else
+          Cohttp.Header.of_list [
+            ("Content-Type", "application/json");
+            ("Authorization", "Bearer " ^ api_key);
+          ]
+      in
+      let uri = Uri.of_string url in
+      let run () =
+        Eio.Switch.run (fun sw ->
+          let client =
+            Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+          in
+          let body_content = Eio.Flow.string_source body in
+          let resp, resp_body =
+            Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content
+          in
+          let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+          let body_str =
+            Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
+          in
+          if String.length body_str = 0 then
+            Error "empty response"
+          else if Cohttp.Code.is_success status then
+            Ok body_str
+          else
+            Error (Printf.sprintf "HTTP %d (%s)" status (suppress_body body_str))
+        )
+      in
+      match Eio_context.get_clock_opt () with
+      | Some clock ->
+          (try Eio.Time.with_timeout_exn clock timeout_sec run
+           with exn -> Error (Printexc.to_string exn))
+      | None ->
+          (try run () with exn -> Error (Printexc.to_string exn))
+
 (** {1 LLM Provider Rotation — Avoid ollama overload} *)
 
 type llm_provider =
@@ -485,69 +533,67 @@ type agent_config = {
 
 (** In-memory cache for dynamic agents (protected by mutex for concurrent access) *)
 let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
-let agent_cache_mu = Eio.Mutex.create ()
+let agent_cache_mu = Mutex.create ()
 
-(** Load agents from Neo4j via GraphQL API (reliable JSON parsing).
-    Called both at module init (pre-Eio, single-threaded) and at runtime.
-    At runtime, acquires agent_cache_mu for thread-safe cache update. *)
+(** Load agents from Neo4j via GraphQL API (reliable JSON parsing) *)
 let load_agents_config () =
-  let do_load () =
-    Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
-    (* Query all Lodge identity fields for dynamic agent system *)
-    (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
-    let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
-    let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-    let cmd = Printf.sprintf "curl -s --connect-timeout 3 --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
-    try
-      let json_str = Process_eio.run ~timeout_sec:10.0 cmd in
-      Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
-      (* Parse JSON response *)
-      let json = Yojson.Safe.from_string json_str in
-      let edges = json
-        |> Yojson.Safe.Util.member "data"
-        |> Yojson.Safe.Util.member "agents"
-        |> Yojson.Safe.Util.member "edges"
-        |> Yojson.Safe.Util.to_list
-      in
-      List.iter (fun edge ->
-        try
-          let node = Yojson.Safe.Util.member "node" edge in
-          let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-          let interests_json = Yojson.Safe.Util.(member "interests" node) in
-          let interests = match interests_json with
-            | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
-            | _ -> []
-          in
-          let config = {
-            name;
-            primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
-            value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
-            prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
-            generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
-            status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
-            emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
-            korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
-            model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
-            interests;
-          } in
-          Hashtbl.replace agent_cache config.name config
-        with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
-      ) edges;
-      let n = Hashtbl.length agent_cache in
-      Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n
-    with e ->
-      Printf.eprintf "[Lodge] ❌ Failed to load agents: %s\n%!" (Printexc.to_string e)
-  in
-  if Process_eio.is_initialized () then
-    Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () -> do_load ())
-  else
-    do_load () (* Module init: single-threaded, no Eio context *)
+  Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
+  (* Query all Lodge identity fields for dynamic agent system *)
+  (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
+  let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
+  try
+    match graphql_request ~timeout_sec:5.0 query with
+    | Error err ->
+        Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err
+    | Ok json_str ->
+        Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
+        (* Parse JSON response *)
+        let json = Yojson.Safe.from_string json_str in
+        let edges = json
+          |> Yojson.Safe.Util.member "data"
+          |> Yojson.Safe.Util.member "agents"
+          |> Yojson.Safe.Util.member "edges"
+          |> Yojson.Safe.Util.to_list
+        in
+        List.iter (fun edge ->
+          try
+            let node = Yojson.Safe.Util.member "node" edge in
+        let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+        let interests_json = Yojson.Safe.Util.(member "interests" node) in
+        let interests = match interests_json with
+          | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
+          | _ -> []
+        in
+        let config = {
+          name;
+          primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
+          value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
+          prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
+          generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
+          status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
+          emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
+          korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
+          model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
+          interests;
+        } in
+        Mutex.lock agent_cache_mu;
+        Hashtbl.replace agent_cache config.name config;
+        Mutex.unlock agent_cache_mu
+      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
+    ) edges;
+    Mutex.lock agent_cache_mu;
+    let n = Hashtbl.length agent_cache in
+    Mutex.unlock agent_cache_mu;
+    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n
+  with e ->
+    Printf.eprintf "[Lodge] ❌ Failed to load agents: %s\n%!" (Printexc.to_string e)
 
 (** Get cached agent config, or None if not loaded *)
 let get_cached_agent name =
-  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
-    Hashtbl.find_opt agent_cache name
-  )
+  Mutex.lock agent_cache_mu;
+  let r = Hashtbl.find_opt agent_cache name in
+  Mutex.unlock agent_cache_mu;
+  r
 
 (** Get primary value from cached agent (for SOUL-based decisions) *)
 let get_agent_primary_value name =
@@ -642,13 +688,13 @@ let evolve_agent ~name ~dimension ~outcome =
       try
         let _ = Safe_ops.read_process_safe cmd in
         (* Update cache *)
-        Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
-          Hashtbl.replace agent_cache name {
-            config with
-            value_weights = Some new_weights_json;
-            generation = new_gen;
-          }
-        );
+        Mutex.lock agent_cache_mu;
+        Hashtbl.replace agent_cache name {
+          config with
+          value_weights = Some new_weights_json;
+          generation = new_gen;
+        };
+        Mutex.unlock agent_cache_mu;
         Printf.eprintf "[Evolution] %s evolved: %s %s%.2f -> gen %d\n%!"
           name dimension
           (if delta >= 0.0 then "+" else "") delta new_gen;
@@ -683,9 +729,10 @@ let () =
 
 (** Get all cached agent names *)
 let get_all_agent_names () =
-  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
-    Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache []
-  )
+  Mutex.lock agent_cache_mu;
+  let r = Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache [] in
+  Mutex.unlock agent_cache_mu;
+  r
 
 (** Pick a random agent name from cache *)
 let random_agent_name () =
@@ -700,12 +747,13 @@ let validate_agent_name name =
     | Some _ -> Some name
     | None ->
       (* Try Korean name lookup *)
-      Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
-        Hashtbl.fold (fun k v acc ->
-          match acc with Some _ -> acc | None ->
-          if v.korean_name = name then Some k else None
-        ) agent_cache None
-      )
+      Mutex.lock agent_cache_mu;
+      let found = Hashtbl.fold (fun k v acc ->
+        match acc with Some _ -> acc | None ->
+        if v.korean_name = name then Some k else None
+      ) agent_cache None in
+      Mutex.unlock agent_cache_mu;
+      found
 
 (** Get model for agent (from Neo4j cache) *)
 let get_agent_model name =
@@ -1281,29 +1329,31 @@ let core_lodge_agents () = get_all_agent_names ()
 let get_all_agents () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status } } } }\"}" in
-  let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let cmd = Printf.sprintf "curl -s --max-time 5 https://second-brain-graphql-production.up.railway.app/graphql -H 'Content-Type: application/json' -H %s -d '%s' 2>/dev/null" (Filename.quote ("Authorization: Bearer " ^ api_key)) query in
   try
-    let (_, output) = run_shell_nonblocking cmd in
-    try
-      let json = Yojson.Safe.from_string output in
-      let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in
-      List.filter_map (fun edge ->
+    match graphql_request ~timeout_sec:5.0 query with
+    | Error err ->
+        Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err;
+        []
+    | Ok output ->
         try
-          let node = edge |> member "node" in
-          let name = node |> member "name" |> to_string in
-          (* Only include core Lodge agents *)
-          if List.mem name (core_lodge_agents ()) then
-            let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
-            let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
-            let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
-            if status = "active" then
-              Some (name, primary_value, prompt, "system", 0)
-            else None
-          else None
-        with Yojson.Safe.Util.Type_error _ -> None
-      ) edges
-    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+          let json = Yojson.Safe.from_string output in
+          let edges = json |> member "data" |> member "agents" |> member "edges" |> to_list in
+          List.filter_map (fun edge ->
+            try
+              let node = edge |> member "node" in
+              let name = node |> member "name" |> to_string in
+              (* Only include core Lodge agents *)
+              if List.mem name (core_lodge_agents ()) then
+                let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
+                let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
+                let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
+                if status = "active" then
+                  Some (name, primary_value, prompt, "system", 0)
+                else None
+              else None
+            with Yojson.Safe.Util.Type_error _ -> None
+          ) edges
+        with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
   with Unix.Unix_error _ | Sys_error _ -> []
 
 (** Spawn a new agent — can be called by another agent *)

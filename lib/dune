@@ -140,6 +140,8 @@
    tool_walph
    tool_agent
    tool_task
+   task_pg
+   task_dispatch
    tool_room
    tool_control
    tool_verification

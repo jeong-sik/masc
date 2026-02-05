@@ -138,8 +138,10 @@ let () = test "walph_natural_empty" (fun () ->
   let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
   let args = `Assoc [("message", `String "")] in
   let (success, result) = Tool_walph.handle_walph_natural ctx args in
-  assert success;
-  assert (String.length result > 0)
+  (* Empty message should return failure with error message *)
+  assert (not success);
+  assert (String.length result > 0);
+  assert (Str.string_match (Str.regexp ".*required.*") result 0)
 )
 
 (* Test helper functions *)

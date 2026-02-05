@@ -55,6 +55,8 @@
    lodge_atmosphere
    lodge_heartbeat
    lodge_memory
+   lodge_reaction
+   lodge_tom
    lodge_selection
    memory_stream
    agent_planner

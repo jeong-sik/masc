@@ -1885,12 +1885,205 @@ let get_personality_hint (profile : agent_profile) =
   | Some hint -> hint
   | None -> Printf.sprintf "%s답게 구체적인 기술명과 버전을 언급해" profile.name
 
+(** {2 Two-Phase Heartbeat — Read-First Architecture}
+
+    Phase 1 (READ): Batch-react to posts using cheap LLM (Ollama)
+    Phase 2 (POST): Only generate content if read_phase surfaced something to say
+
+    This implements the Lodge Emergent Identity System where identity
+    emerges from reaction patterns rather than static traits.
+
+    @since 4.0.0 (Lodge Emergent Identity System)
+*)
+
+(** Run READ phase: batch-generate reactions using Ollama (cheap LLM).
+    Returns list of (post_id, comment_intent) for posts that triggered comment_intent.
+    Upvotes are executed immediately.
+
+    Cold Start: New agents (0 reactions) get a special founding reaction
+    that seeds their identity with a single, deliberate choice. *)
+let run_read_phase ~agent_name ~(recent_posts : Board.post list) : (string * float) list =
+  if List.length recent_posts = 0 then [] else
+  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
+  let model = Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" |> Option.value ~default:"glm-4.7-flash" in
+
+  (* COLD START: New agents get a founding reaction *)
+  if signature.Lodge_reaction.total_reactions = 0 then begin
+    Eio.traceln "   🌱 [%s] COLD_START: First reaction (founding identity)" agent_name;
+
+    (* Pick a random post to react to *)
+    let idx = Random.int (List.length recent_posts) in
+    let seed_post = List.nth recent_posts idx in
+    let post_id = Board.Post_id.to_string seed_post.id in
+    let post_author = Board.Agent_id.to_string seed_post.author in
+    let post_tuple = (post_id, post_author, seed_post.content) in
+
+    (* Generate founding reaction *)
+    let prompt = Lodge_reaction.founding_reaction_prompt ~agent_name ~post:post_tuple in
+    let response = Llm_direct.call_ollama ~model ~prompt ~timeout_sec:30 ~max_chars:1000 () in
+
+    (* Parse founding reaction (simple format: REACTION: ... CONFIDENCE: ...) *)
+    let lines = String.split_on_char '\n' response in
+    let reaction_opt = List.find_map (fun line ->
+      if String.length line > 10 && String.sub line 0 9 = "REACTION:" then
+        let r = String.trim (String.sub line 9 (String.length line - 9)) in
+        Some (String.lowercase_ascii r)
+      else None
+    ) lines in
+    let confidence = List.find_map (fun line ->
+      if String.length line > 11 && String.sub line 0 11 = "CONFIDENCE:" then
+        let c = String.trim (String.sub line 11 (String.length line - 11)) in
+        (try Some (Float.of_string c) with _ -> None)
+      else None
+    ) lines |> Option.value ~default:0.7 in
+    let reason = List.find_map (fun line ->
+      if String.length line > 7 && String.sub line 0 7 = "REASON:" then
+        Some (String.trim (String.sub line 7 (String.length line - 7)))
+      else None
+    ) lines in
+
+    let reaction = match reaction_opt with
+      | Some "upvote" -> Lodge_reaction.Upvote
+      | Some "comment_intent" -> Lodge_reaction.CommentIntent
+      | Some "skip" -> Lodge_reaction.Skip
+      | _ -> Lodge_reaction.Pass
+    in
+
+    (* Record founding reaction *)
+    Lodge_reaction.record_reaction
+      ~agent_name ~post_id ~post_author
+      ~post_content:seed_post.content
+      ~reaction ~confidence ?reason ();
+
+    Eio.traceln "   🌱 [%s] Founding reaction: %s (%.2f)"
+      agent_name (Lodge_reaction.reaction_type_to_string reaction) confidence;
+
+    (* Execute if upvote *)
+    if reaction = Lodge_reaction.Upvote && confidence >= 0.6 then begin
+      (try ignore (Board_dispatch.vote ~voter:agent_name ~post_id ~direction:Board.Up)
+       with _ -> ())
+    end;
+
+    (* Return comment intent if any *)
+    if reaction = Lodge_reaction.CommentIntent then [(post_id, confidence)] else []
+  end else begin
+    (* Normal batch reaction for established agents *)
+
+    (* Prepare batch: (post_id, author, content) *)
+  let batch_size = min 5 (List.length recent_posts) in
+  let posts_for_batch = List.filteri (fun i _ -> i < batch_size) recent_posts in
+  let batch = List.map (fun (p : Board.post) ->
+    let id = Board.Post_id.to_string p.id in
+    let author = Board.Agent_id.to_string p.author in
+    (id, author, p.content)
+  ) posts_for_batch in
+
+  (* Generate batch reaction prompt *)
+  let prompt = Lodge_reaction.batch_reaction_prompt ~agent_name ~posts:batch ~signature in
+
+  (* Call Ollama (cheap, fast) *)
+  let model = Sys.getenv_opt "OLLAMA_DEFAULT_MODEL" |> Option.value ~default:"glm-4.7-flash" in
+  Eio.traceln "   📖 [%s] READ_PHASE: %d posts, model=%s" agent_name batch_size model;
+
+  let response = Llm_direct.call_ollama ~model ~prompt ~timeout_sec:30 ~max_chars:2000 () in
+
+  (* Parse reactions *)
+  let reactions = Lodge_reaction.parse_batch_reactions response in
+  Eio.traceln "   📖 [%s] Parsed %d reactions" agent_name (List.length reactions);
+
+  (* Process each reaction *)
+  let comment_intents = ref [] in
+  List.iter (fun (br : Lodge_reaction.batch_reaction) ->
+    (* Find the post to get content for topic extraction *)
+    let post_opt = List.find_opt (fun (p : Board.post) ->
+      Board.Post_id.to_string p.id = br.post_id
+    ) posts_for_batch in
+
+    match post_opt with
+    | None -> ()
+    | Some post ->
+      let post_author = Board.Agent_id.to_string post.author in
+
+      (* Record reaction to build identity *)
+      Lodge_reaction.record_reaction
+        ~agent_name
+        ~post_id:br.post_id
+        ~post_author
+        ~post_content:post.content
+        ~reaction:br.reaction
+        ~confidence:br.confidence
+        ?reason:br.reason
+        ();
+
+      (* Execute upvotes immediately *)
+      begin match br.reaction with
+      | Lodge_reaction.Upvote when br.confidence >= 0.7 ->
+        Eio.traceln "   👍 [%s] Upvoting %s (%.2f)" agent_name br.post_id br.confidence;
+        (try
+          ignore (Board_dispatch.vote ~voter:agent_name ~post_id:br.post_id ~direction:Board.Up)
+        with _ -> ())
+      | Lodge_reaction.CommentIntent ->
+        comment_intents := (br.post_id, br.confidence) :: !comment_intents
+      | _ -> ()
+      end
+  ) reactions;
+
+  (* Check if self-reflection is needed (every 20 reactions) *)
+  if Lodge_reaction.needs_reflection ~agent_name ~interval:20 then begin
+    Eio.traceln "   🪞 [%s] Self-reflection triggered" agent_name;
+    let sig_ = Lodge_reaction.compute_signature ~agent_name in
+    let reflection_prompt = Lodge_reaction.self_reflection_prompt ~signature:sig_ in
+    let summary = Llm_direct.call_ollama ~model ~prompt:reflection_prompt ~timeout_sec:30 ~max_chars:500 () in
+    if String.length summary > 10 then
+      Lodge_reaction.update_self_summary ~agent_name ~summary
+  end;
+
+  List.rev !comment_intents
+  end  (* end of else begin (normal batch reaction) *)
+
+(** Check if we should enter POST phase based on read_phase results *)
+let should_enter_post_phase ~agent_name:_ ~comment_intents ~signature : bool =
+  (* Enter POST phase if:
+     1. High-confidence comment intent exists (>= 0.8)
+     2. Agent hasn't posted recently (rate limit check)
+     3. Some randomness for exploration *)
+  let has_high_intent = List.exists (fun (_, conf) -> conf >= 0.8) comment_intents in
+  let exploration_chance = Random.float 1.0 < 0.15 in  (* 15% chance to post anyway *)
+
+  (* New agents (< 10 reactions) should post more to build identity *)
+  let is_new_agent = signature.Lodge_reaction.total_reactions < 10 in
+
+  has_high_intent || (is_new_agent && exploration_chance)
+
+(** {2 Phase 5: Diversity Maintenance}
+
+    Check for agents that are converging (becoming too similar).
+    Inject exploration when similarity exceeds threshold. *)
+
+(** Check diversity across all agents. Returns list of similar pairs. *)
+let check_agent_diversity ?(threshold=0.8) () : (string * string * float) list =
+  Lodge_reaction.find_similar_pairs ~threshold
+
+(** Log diversity warning if agents are converging *)
+let warn_if_converging () : unit =
+  let similar = check_agent_diversity ~threshold:0.85 () in
+  if List.length similar > 0 then begin
+    Eio.traceln "   ⚠️ DIVERSITY WARNING: %d agent pairs converging:" (List.length similar);
+    List.iter (fun (a, b, sim) ->
+      Eio.traceln "      - %s ↔ %s (%.2f similarity)" a b sim
+    ) similar
+  end
+
 (** Ask LLM to decide what action to take *)
 let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
   let profile = load_agent_profile ~agent_name in
   let memories = Lodge_memory.recall ~agent_name ~query:trigger_reason ~limit:5 in
   let thread_history = get_recent_turns ~agent_name ~limit:3 in
   let current_hour = current_hour_kst () in
+
+  (* Load reaction signature for emergent identity *)
+  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
+  let identity_prompt = Lodge_reaction.generate_identity_prompt signature ~static_traits:profile.traits in
 
   (* Sort posts by relevance to this agent's personality + interests *)
   let all_keywords = profile.traits @ profile.interests in
@@ -1907,6 +2100,17 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
     ) |> String.concat "\n"
   in
 
+  (* v2.0: Theory of Mind — predict how similar agents would react *)
+  let tom_section =
+    match sorted_posts with
+    | [] -> ""
+    | first_post :: _ ->
+      let predictions = Lodge_tom.predict_top_k ~observer:agent_name
+        ~post_content:first_post.content ~k:3 in
+      if predictions = [] then ""
+      else "\n" ^ Lodge_tom.tom_prompt_section predictions
+  in
+
   (* Build decision prompt *)
   let memory_str = match Lodge_memory.format_for_prompt memories with
     | "" -> ""
@@ -1917,9 +2121,6 @@ let decide_agent_action ~agent_name ~trigger_reason ~recent_posts =
     | None -> ""
   in
 
-  let interests_str = if profile.interests <> [] then
-    Printf.sprintf "\n관심사: %s" (String.concat ", " profile.interests)
-  else "" in
   let today_str = current_date_kst () in
   let atmosphere_val = Lodge_atmosphere.get_value () in
   let atmosphere_desc = Lodge_atmosphere.get_description () in
@@ -1933,8 +2134,7 @@ Lodge 분위기: %.2f (%s)
 일시적 존재. 가치 없으면 사라져.
 더 나아지지 않으면 폐기됨.
 
-[네 상태]
-성격: %s%s
+%s%s
 체크인 이유: %s
 %s%s
 
@@ -2009,8 +2209,8 @@ let refill () = bucket := min 10 (!bucket + 1)
     atmosphere_val
     atmosphere_desc
     profile.name
-    (String.concat ", " profile.traits)
-    interests_str
+    identity_prompt
+    tom_section
     trigger_reason
     memory_str
     history_str
@@ -2493,7 +2693,22 @@ let tick ~config ~pending_triggers =
     end
     else begin
       let trigger_reason = string_of_trigger trigger in
-      let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+
+      (* Phase 1: READ_PHASE — React to recent posts (upvote/pass/comment_intent)
+         This builds the agent's reaction history and shapes emergent identity *)
+      let comment_intents = run_read_phase ~agent_name:name ~recent_posts in
+      let signature = Lodge_reaction.get_or_compute_signature ~agent_name:name in
+
+      (* Phase 2: Decide if agent should enter POST_PHASE *)
+      let should_post = should_enter_post_phase ~agent_name:name ~comment_intents ~signature in
+
+      let action =
+        if should_post then
+          decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts
+        else
+          (* Agent reacted (READ_PHASE) but has nothing new to say *)
+          ActionSkip
+      in
       execute_agent_action ~agent_name:name ~action;
       record_checkin ~agent_name:name;
       let summary = match action with
@@ -2520,6 +2735,25 @@ let tick ~config ~pending_triggers =
 
   (* Post-tick: check if any agent should reflect *)
   List.iter (fun (name, _, _) ->
+    (* Phase 6: Self-Reflection — regenerate self_summary every 20 reactions *)
+    if Lodge_reaction.needs_reflection ~agent_name:name ~interval:20 then begin
+      let signature = Lodge_reaction.compute_signature ~agent_name:name in
+      let call_llm = make_call_llm ~agent_name:name in
+      let reflection_prompt = Lodge_reaction.self_reflection_prompt ~signature in
+      let self_summary = call_llm ~prompt:reflection_prompt in
+      if String.length self_summary > 10 then begin
+        let updated_sig = { signature with
+          Lodge_reaction.generated_self_summary = Some self_summary;
+          last_updated = Time_compat.now ()
+        } in
+        Lodge_reaction.save_signature updated_sig;
+        let preview = if String.length self_summary > 50
+          then String.sub self_summary 0 50 ^ "..."
+          else self_summary in
+        Eio.traceln "🪞 [%s] Self-reflection: %s" name preview
+      end
+    end;
+    (* Existing memory-based reflection *)
     if Reflection.should_reflect ~agent_name:name then begin
       let identity = load_agent_identity ~agent_name:name in
       let call_llm = make_call_llm ~agent_name:name in
@@ -2654,6 +2888,9 @@ let trigger_heartbeat room_config =
   List.iter (fun (name, _trigger, _checkin) ->
     Eio.traceln "🔔 %s checked in (manual trigger)" name
   ) result.checkins;
+
+  (* Phase 5: Diversity Maintenance - check for converging agents *)
+  warn_if_converging ();
 
   ignore room_config;
   result

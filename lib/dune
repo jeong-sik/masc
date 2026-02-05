@@ -12,6 +12,8 @@
    auto_responder
    auth
    board
+   board_pg
+   board_dispatch
    error
    backend
    backend_eio
@@ -39,6 +41,7 @@
    handover_eio
    hat
    heartbeat
+   guardian
    heartbeat_smart
    hebbian_eio
    http_server_eio
@@ -53,6 +56,8 @@
    lodge_atmosphere
    lodge_heartbeat
    lodge_memory
+   lodge_reaction
+   lodge_tom
    lodge_selection
    memory_stream
    agent_planner
@@ -216,6 +221,8 @@
    dune-build-info
    ;; Time compatibility (Eio-native with Unix fallback)
    time_compat
+   ;; Filesystem compatibility (Eio-native with Unix fallback)
+   fs_compat
    ;; Council - multi-agent governance
    council
    ;; Jiphyeon - Episode storage for Agent Being Protocol

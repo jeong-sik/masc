@@ -29,7 +29,7 @@ type response_mode =
 (** Session storage with mutex protection *)
 module Session = struct
   let sessions : (string, session) Hashtbl.t = Hashtbl.create 64
-  let mutex = Mutex.create ()
+  let mutex = Eio.Mutex.create ()
 
   let generate_id () =
     (* Use Mirage_crypto_rng for secure random ID *)
@@ -49,8 +49,7 @@ module Session = struct
       (String.sub hex 20 12)
 
   let with_lock f =
-    Mutex.lock mutex;
-    Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+    Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
 
   let create ~transport =
     with_lock (fun () ->

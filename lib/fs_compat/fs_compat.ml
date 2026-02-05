@@ -1,0 +1,108 @@
+(** Filesystem Compatibility Layer - Eio-native I/O with fallback
+
+    Provides a unified filesystem API for gradual migration from
+    blocking Unix I/O to Eio.Path operations.
+
+    Usage:
+    1. At server startup: [Fs_compat.set_fs (Eio.Stdenv.fs env)]
+    2. In code: [Fs_compat.load_file path] instead of [open_in ...]
+
+    When fs is not set (non-Eio contexts), falls back to blocking Unix I/O.
+    This allows incremental migration without changing all call sites at once.
+
+    @since 2026-02 - Lodge Emergent Identity v2.0
+*)
+
+(** Global fs reference - set at Eio_main.run startup *)
+let global_fs : Eio.Fs.dir_ty Eio.Path.t option ref = ref None
+
+(** Set the global Eio filesystem. Call once at server startup.
+    @param fs The Eio fs from [Eio.Stdenv.fs env] *)
+let set_fs fs =
+  global_fs := Some fs
+
+(** Clear the global fs (for testing or shutdown) *)
+let clear_fs () =
+  global_fs := None
+
+(** Check if Eio fs is available *)
+let has_fs () =
+  Option.is_some !global_fs
+
+(** Load entire file contents as string.
+    Eio-native when available, fallback to Unix. *)
+let load_file (path : string) : string =
+  match !global_fs with
+  | Some fs ->
+    let eio_path = Eio.Path.(fs / path) in
+    Eio.Path.load eio_path
+  | None ->
+    (* Fallback: blocking Unix I/O *)
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+      let len = in_channel_length ic in
+      really_input_string ic len
+    )
+
+(** Save string to file (overwrite).
+    Eio-native when available, fallback to Unix. *)
+let save_file (path : string) (content : string) : unit =
+  match !global_fs with
+  | Some fs ->
+    let eio_path = Eio.Path.(fs / path) in
+    Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content
+  | None ->
+    (* Fallback: blocking Unix I/O *)
+    let oc = open_out path in
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      output_string oc content
+    )
+
+(** Append string to file.
+    Eio-native when available, fallback to Unix. *)
+let append_file (path : string) (content : string) : unit =
+  match !global_fs with
+  | Some fs ->
+    let eio_path = Eio.Path.(fs / path) in
+    Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content
+  | None ->
+    (* Fallback: blocking Unix I/O *)
+    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      output_string oc content
+    )
+
+(** Check if file exists.
+    Uses Sys.file_exists (works in both Eio and non-Eio contexts). *)
+let file_exists (path : string) : bool =
+  Sys.file_exists path
+
+(** Create directory recursively if not exists. *)
+let mkdir_p (path : string) : unit =
+  match !global_fs with
+  | Some fs ->
+    let eio_path = Eio.Path.(fs / path) in
+    Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path
+  | None ->
+    (* Fallback: use mkdir -p command *)
+    if not (Sys.file_exists path) then
+      ignore (Sys.command (Printf.sprintf "mkdir -p %s" path))
+
+(** Load JSONL file as list of JSON values.
+    Filters out malformed lines. *)
+let load_jsonl (path : string) : Yojson.Safe.t list =
+  if not (file_exists path) then []
+  else
+    let content = load_file path in
+    String.split_on_char '\n' content
+    |> List.filter (fun line -> String.length (String.trim line) > 0)
+    |> List.filter_map (fun line ->
+        try Some (Yojson.Safe.from_string line)
+        with _ -> None)
+
+(** Append JSON value as line to JSONL file. *)
+let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
+  let dir = Filename.dirname path in
+  mkdir_p dir;
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  append_file path line

@@ -1,0 +1,5 @@
+(library
+ (name fs_compat)
+ (public_name masc_mcp.fs_compat)
+ (modules fs_compat)
+ (libraries eio yojson))

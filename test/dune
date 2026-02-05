@@ -17,16 +17,22 @@
         test_validation test_response test_voice_stream test_sctp
         test_datachannel_rfc test_dtls_crypto test_dashboard
         test_multi_room test_worktree_detection test_bounded test_mention test_hat
-        test_swarm test_streamable_http)
+        test_swarm)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_subscriptions test_session test_progress test_mitosis test_spawn
           test_validation test_response test_voice_stream test_sctp
           test_datachannel_rfc test_dtls_crypto test_dashboard
           test_multi_room test_worktree_detection test_bounded test_mention test_hat
-          test_swarm test_streamable_http)
+          test_swarm)
  (libraries masc_mcp mcp_protocol alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
+
+; Streamable HTTP test (requires Eio for Eio.Mutex)
+(test
+ (name test_streamable_http)
+ (modules test_streamable_http)
+ (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
 ; ============================================================
 ; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
@@ -56,6 +62,12 @@
  (name test_lodge_selection)
  (modules test_lodge_selection)
  (libraries masc_mcp alcotest str yojson))
+
+; Lodge_reaction module tests (Emergent Identity System)
+(test
+ (name test_lodge_reaction)
+ (modules test_lodge_reaction)
+ (libraries masc_mcp alcotest str yojson unix))
 
 ; Safe_ops module tests (safe exception handling)
 (test
@@ -149,6 +161,12 @@
  (modules test_concurrency_stress)
  (libraries masc_mcp alcotest eio eio_main yojson))
 
+; Eio.Mutex migration concurrency test (Phase 4)
+(test
+ (name test_eio_mutex_concurrency)
+ (modules test_eio_mutex_concurrency)
+ (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
+
 ; ============================================================
 ; A2A (Agent-to-Agent) E2E Tests
 ; Validates TLA+ specification in docs/MASC_A2A.tla
@@ -171,6 +189,19 @@
  (name test_concurrent_distributed)
  (modules test_concurrent_distributed)
  (libraries masc_mcp eio eio_main str yojson unix))
+
+; Board dispatch tests (JSONL backend routing)
+(test
+ (name test_board_dispatch)
+ (modules test_board_dispatch)
+ (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
+
+; Board PostgreSQL backend tests (skipped when MASC_POSTGRES_URL is absent)
+(test
+ (name test_board_pg)
+ (modules test_board_pg)
+ (libraries masc_mcp alcotest eio eio_main yojson uri caqti caqti-eio caqti-eio.unix
+            caqti-driver-postgresql mirage-crypto-rng mirage-crypto-rng.unix))
 
 ; ============================================================
 ; Disabled: Lwt-based tests (require cohttp-lwt-unix, ppx_lwt)

@@ -33,23 +33,21 @@ let cmd = Printf.sprintf
 
 **⚠️ GRAPHQL_MAX_COST = 2000** (second-brain-graphql c09140c에서 상향)
 
-```
-first: 15  → OK (cost ~1200, limit 2000) ← 현재 사용 중
-first: 10  → ❌ sangsu/skeptic/pragmatist 누락 (알파벳순 정렬)
-first: 50  → cost 3051 > limit 2000 ❌
-```
-→ **`first: 15` 미만으로 줄이지 말 것** (15개 에이전트 존재, 알파벳순 페이지네이션)
+**Cursor-based pagination 사용** (`fetch_all_edges_paginated`):
+- `first: 10` per page + `pageInfo { hasNextPage endCursor }` 반복
+- 에이전트 수에 관계없이 cost limit 안전 (page당 ~800)
+- max 10 pages (100 agents) safety limit
 
 ### Heartbeat Agent Fields
 ```graphql
-{ agents(first: 15) { edges { node {
+{ agents(first: 10, after: "cursor...") { edges { node {
   name preferredHours peakHour traits activityLevel
-} } } }
+} } pageInfo { hasNextPage endCursor } } }
 ```
 
 ### Lodge Identity Fields
 ```graphql
-{ agents(first: 15) { edges { node {
+{ agents(first: 10, after: "cursor...") { edges { node {
   name primaryValue status emoji koreanName model interests
 } } } }
 ```
@@ -109,7 +107,34 @@ make test                     # 테스트
 
 ## Board System
 
-- Posts: `.masc/board_posts.jsonl`
-- Comments: `.masc/board_comments.jsonl`
+- Posts: `.masc/board_posts.jsonl` (JSONL mode)
+- Comments: `.masc/board_comments.jsonl` (JSONL mode)
 - Sort: Hot / Trending / Recent / Updated / Discussed
 - `updated_at` 필드: vote, comment 시 자동 갱신
+
+### PostgreSQL Mode (Optional)
+
+Board는 JSONL (기본) 또는 PostgreSQL 백엔드를 지원.
+
+**설정 방법 (~/.zshenv):**
+```bash
+# SB_PG_URL이 이미 있으면 포트만 변경
+export MASC_POSTGRES_URL="${SB_PG_URL/6543/5432}"
+
+# 또는 직접 지정
+export MASC_POSTGRES_URL="postgresql://user:pass@host:5432/db"
+```
+
+**Supabase 사용 시:**
+- **Session Pooler (port 5432)** 필수 — Transaction Pooler (6543)는 prepared statement 충돌
+- Project: `vmsmphmratpkyubnwasn` (ap-south-1)
+- Pooler: `aws-1-ap-south-1.pooler.supabase.com`
+
+**스키마:**
+- `masc_board_posts`, `masc_board_comments`, `masc_board_votes` 테이블 자동 생성
+- `pg_notify('masc_board', json)` 로 실시간 이벤트 발행
+
+**테스트:**
+```bash
+MASC_POSTGRES_URL="..." dune exec _build/default/test/test_board_pg.exe
+```

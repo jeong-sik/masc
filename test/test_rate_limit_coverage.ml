@@ -172,6 +172,7 @@ let test_too_many_requests_body () =
    ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "Rate Limit Coverage" [
     "constants", [
       test_case "default_rate" `Quick test_default_rate;

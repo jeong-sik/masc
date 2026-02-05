@@ -36,7 +36,7 @@ type breaker = {
 
 type t = {
   breakers: (string, breaker) Hashtbl.t;
-  mutex: Mutex.t;
+  mutex: Eio.Mutex.t;
   failure_threshold: int;     (** Failures before opening (default: 3) *)
   failure_window_sec: float;  (** Window to count failures (default: 60s) *)
   cooldown_sec: float;        (** How long to stay open (default: 300s) *)
@@ -67,7 +67,7 @@ let create
     () =
   {
     breakers = Hashtbl.create 64;
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
     failure_threshold;
     failure_window_sec = failure_window;
     cooldown_sec = cooldown;
@@ -82,12 +82,7 @@ let create_from_env () =
 (** {1 Internal Helpers} *)
 
 let with_lock t f =
-  Mutex.lock t.mutex;
-  Common.protect
-    ~module_name:"circuit_breaker"
-    ~finally_label:"unlock"
-    ~finally:(fun () -> Mutex.unlock t.mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
 
 let get_or_create_breaker t ~agent_id =
   match Hashtbl.find_opt t.breakers agent_id with

@@ -1,0 +1,55 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.4.x
+
+      - name: Pin private dependencies
+        run: |
+          opam pin add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
+          opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
+          opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
+          opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
+          opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
+          opam pin add neo4j_packstream https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
+          opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#v0.4.1 -n -y
+
+      - name: Install dependencies
+        run: opam install . --deps-only -y
+
+      - name: Build release binary
+        run: opam exec -- dune build --release bin/main_eio.exe
+
+      - name: Prepare binary for Docker
+        run: |
+          cp _build/default/bin/main_eio.exe masc-mcp-linux-x64
+          chmod +x masc-mcp-linux-x64
+          ls -la masc-mcp-linux-x64
+
+      - name: Remove binary from gitignore for Railway upload
+        run: |
+          # Railway respects .gitignore, so we need to remove the binary exclusion
+          sed -i '/masc-mcp-linux-x64/d' .gitignore
+          echo "Modified .gitignore:"
+          tail -5 .gitignore
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        run: railway up --service masc-mcp --ci
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

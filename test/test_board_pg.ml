@@ -1,0 +1,216 @@
+(** Test Board_pg - PostgreSQL backend for MASC Board
+
+    All tests require MASC_POSTGRES_URL environment variable.
+    When absent, tests are skipped (not failed). *)
+
+open Masc_mcp
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
+(** Check if PG is available *)
+let pg_url () = Sys.getenv_opt "MASC_POSTGRES_URL"
+
+(** {1 Helper: run test inside Eio with PG pool} *)
+
+let with_pg_backend f () =
+  match pg_url () with
+  | None -> Alcotest.skip ()
+  | Some url ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let uri = Uri.of_string url in
+      let pool_config = Caqti_pool_config.create ~max_size:2 () in
+      let stdenv = (env :> Caqti_eio.stdenv) in
+      match Caqti_eio_unix.connect_pool ~sw ~stdenv ~pool_config uri with
+      | Error err ->
+          Alcotest.fail (Printf.sprintf "Pool creation failed: %s" (Caqti_error.show err))
+      | Ok pool ->
+      match Board_pg.create pool with
+      | Error e ->
+          Alcotest.fail (Printf.sprintf "Board_pg.create failed: %s" (Board.show_board_error e))
+      | Ok t ->
+          f t
+
+(** {1 Post CRUD} *)
+
+let test_create_and_get_post = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-agent" ~content:"PG test post" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      Alcotest.(check string) "author" "pg-test-agent" (Board.Agent_id.to_string post.author);
+      Alcotest.(check string) "content" "PG test post" post.content;
+      match Board_pg.get_post t ~post_id:pid with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok fetched ->
+          Alcotest.(check string) "content matches" "PG test post" fetched.content
+)
+
+let test_list_posts = with_pg_backend (fun t ->
+  ignore (Board_pg.create_post t ~author:"pg-test-lister" ~content:"pg list 1" ());
+  ignore (Board_pg.create_post t ~author:"pg-test-lister" ~content:"pg list 2" ());
+  let posts = Board_pg.list_posts t ~limit:10 () in
+  Alcotest.(check bool) "at least 2 posts" true (List.length posts >= 2)
+)
+
+let test_list_posts_sort_orders = with_pg_backend (fun t ->
+  ignore (Board_pg.create_post t ~author:"pg-test-sorter" ~content:"sort test" ());
+  let _hot = Board_pg.list_posts t ~sort_by:Board_pg.Hot ~limit:5 () in
+  let _recent = Board_pg.list_posts t ~sort_by:Board_pg.Recent ~limit:5 () in
+  let _trending = Board_pg.list_posts t ~sort_by:Board_pg.Trending ~limit:5 () in
+  let _updated = Board_pg.list_posts t ~sort_by:Board_pg.Updated ~limit:5 () in
+  let _discussed = Board_pg.list_posts t ~sort_by:Board_pg.Discussed ~limit:5 () in
+  (* All sort orders should work without error *)
+  ()
+)
+
+(** {1 Comment Operations} *)
+
+let test_add_and_get_comments = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-commenter" ~content:"post for pg comments" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      (match Board_pg.add_comment t ~post_id:pid ~author:"pg-test-responder" ~content:"pg comment" () with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok _ -> ());
+      match Board_pg.get_comments t ~post_id:pid with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok comments ->
+          Alcotest.(check bool) "has comment" true (List.length comments >= 1)
+)
+
+(** {1 Vote Operations} *)
+
+let test_vote_post = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-voter" ~content:"pg vote me" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      match Board_pg.vote_post t ~voter:"pg-test-judge" ~post_id:pid ~direction:Board.Up with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok score ->
+          Alcotest.(check int) "score after upvote" 1 score
+)
+
+let test_vote_dedup = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-dedup" ~content:"pg dedup vote" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      ignore (Board_pg.vote_post t ~voter:"pg-test-same" ~post_id:pid ~direction:Board.Up);
+      match Board_pg.vote_post t ~voter:"pg-test-same" ~post_id:pid ~direction:Board.Up with
+      | Ok _ -> Alcotest.fail "Expected Already_voted error"
+      | Error (Board.Already_voted _) -> ()
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+)
+
+let test_vote_flip = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-flipper" ~content:"pg flip vote" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      ignore (Board_pg.vote_post t ~voter:"pg-test-flipper-v" ~post_id:pid ~direction:Board.Up);
+      (* Flip from Up to Down *)
+      match Board_pg.vote_post t ~voter:"pg-test-flipper-v" ~post_id:pid ~direction:Board.Down with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok score ->
+          (* Was +1 (up), now flipped: -1 (down) = score -1 *)
+          Alcotest.(check int) "score after flip" (-1) score
+)
+
+(** {1 Stats / Search / Hearth} *)
+
+let test_stats = with_pg_backend (fun t ->
+  let stats = Board_pg.stats t in
+  match stats with
+  | `Assoc fields ->
+      Alcotest.(check bool) "has post_count" true (List.mem_assoc "post_count" fields);
+      Alcotest.(check bool) "has backend" true (List.mem_assoc "backend" fields);
+      (match List.assoc_opt "backend" fields with
+       | Some (`String "postgresql") -> ()
+       | _ -> Alcotest.fail "backend should be 'postgresql'")
+  | _ -> Alcotest.fail "stats should be JSON object"
+)
+
+let test_search = with_pg_backend (fun t ->
+  ignore (Board_pg.create_post t ~author:"pg-test-searcher" ~content:"pg_unique_xyz_search_term" ());
+  let results = Board_pg.search t ~query:"pg_unique_xyz_search_term" ~limit:10 in
+  Alcotest.(check bool) "found search result" true (List.length results >= 1)
+)
+
+let test_hearths = with_pg_backend (fun t ->
+  ignore (Board_pg.create_post t ~author:"pg-test-hearth" ~content:"pg fire topic"
+    ~hearth:"pg-test-hearth" ());
+  let hearths = Board_pg.list_hearths t in
+  Alcotest.(check bool) "has hearths" true (List.length hearths >= 1)
+)
+
+let test_set_thread_id = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-thread" ~content:"pg link me" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      match Board_pg.set_thread_id t ~post_id:pid ~thread_id:"pg-thread-abc" with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok () ->
+          match Board_pg.get_post t ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok p ->
+              Alcotest.(check (option string)) "thread_id set"
+                (Some "pg-thread-abc") p.thread_id
+)
+
+(** {1 Validation} *)
+
+let test_empty_content = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-validator" ~content:"" () with
+  | Ok _ -> Alcotest.fail "Expected validation error for empty content"
+  | Error (Board.Validation_error _) -> ()
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+)
+
+let test_empty_author = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"" ~content:"valid content" () with
+  | Ok _ -> Alcotest.fail "Expected validation error for empty author"
+  | Error _ -> ()
+)
+
+(** {1 Sweep} *)
+
+let test_sweep = with_pg_backend (fun t ->
+  let (swept_posts, swept_comments) = Board_pg.sweep t in
+  (* Sweep should not error; counts are >= 0 *)
+  Alcotest.(check bool) "swept posts >= 0" true (swept_posts >= 0);
+  Alcotest.(check bool) "swept comments >= 0" true (swept_comments >= 0)
+)
+
+(** {1 Test Runner} *)
+
+let () =
+  Alcotest.run "Board_pg" [
+    "posts", [
+      Alcotest.test_case "create and get" `Quick test_create_and_get_post;
+      Alcotest.test_case "list" `Quick test_list_posts;
+      Alcotest.test_case "sort orders" `Quick test_list_posts_sort_orders;
+    ];
+    "comments", [
+      Alcotest.test_case "add and get" `Quick test_add_and_get_comments;
+    ];
+    "votes", [
+      Alcotest.test_case "upvote" `Quick test_vote_post;
+      Alcotest.test_case "dedup" `Quick test_vote_dedup;
+      Alcotest.test_case "flip" `Quick test_vote_flip;
+    ];
+    "misc", [
+      Alcotest.test_case "stats" `Quick test_stats;
+      Alcotest.test_case "search" `Quick test_search;
+      Alcotest.test_case "hearths" `Quick test_hearths;
+      Alcotest.test_case "set_thread_id" `Quick test_set_thread_id;
+      Alcotest.test_case "sweep" `Quick test_sweep;
+    ];
+    "validation", [
+      Alcotest.test_case "empty content" `Quick test_empty_content;
+      Alcotest.test_case "empty author" `Quick test_empty_author;
+    ];
+  ]

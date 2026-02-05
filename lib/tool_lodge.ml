@@ -535,13 +535,124 @@ type agent_config = {
 let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
 let agent_cache_mu = Mutex.create ()
 
-(** Load agents from Neo4j via GraphQL API (reliable JSON parsing) *)
+(** {2 File-based cache for offline fallback} *)
+
+(** Get .masc directory path *)
+let get_masc_dir () =
+  let me_root = match Sys.getenv_opt "ME_ROOT" with
+    | Some r -> r
+    | None -> match Sys.getenv_opt "HOME" with
+      | Some h -> h ^ "/me"
+      | None -> "."
+  in
+  me_root ^ "/.masc"
+
+(** Agent cache file path *)
+let agent_file_cache_path () =
+  get_masc_dir () ^ "/agent_cache.json"
+
+(** Cache TTL in hours (configurable via env) *)
+let agent_cache_ttl_hours () =
+  match Sys.getenv_opt "MASC_AGENT_CACHE_TTL_HOURS" with
+  | Some s -> (try float_of_string s with _ -> 24.0)
+  | None -> 24.0
+
+(** Convert agent_config to JSON *)
+let agent_config_to_yojson (a : agent_config) : Yojson.Safe.t =
+  `Assoc [
+    ("name", `String a.name);
+    ("primary_value", match a.primary_value with Some v -> `String v | None -> `Null);
+    ("value_weights", match a.value_weights with Some v -> `String v | None -> `Null);
+    ("prompt_template", match a.prompt_template with Some v -> `String v | None -> `Null);
+    ("generation", `Int a.generation);
+    ("status", `String a.status);
+    ("emoji", `String a.emoji);
+    ("korean_name", `String a.korean_name);
+    ("model", `String a.model);
+    ("interests", `List (List.map (fun s -> `String s) a.interests));
+  ]
+
+(** Parse agent_config from JSON *)
+let agent_config_of_yojson (json : Yojson.Safe.t) : agent_config option =
+  try
+    let open Yojson.Safe.Util in
+    Some {
+      name = json |> member "name" |> to_string;
+      primary_value = json |> member "primary_value" |> to_string_option;
+      value_weights = json |> member "value_weights" |> to_string_option;
+      prompt_template = json |> member "prompt_template" |> to_string_option;
+      generation = json |> member "generation" |> to_int_option |> Option.value ~default:0;
+      status = json |> member "status" |> to_string_option |> Option.value ~default:"active";
+      emoji = json |> member "emoji" |> to_string_option |> Option.value ~default:"🤖";
+      korean_name = json |> member "korean_name" |> to_string_option |> Option.value ~default:"";
+      model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7-flash:latest";
+      interests = json |> member "interests" |> to_list |> List.filter_map to_string_option;
+    }
+  with _ -> None
+
+(** Save in-memory agent cache to file *)
+let save_agents_to_file_cache () =
+  Mutex.lock agent_cache_mu;
+  let agents = Hashtbl.fold (fun _ v acc -> v :: acc) agent_cache [] in
+  Mutex.unlock agent_cache_mu;
+  if agents = [] then ()
+  else begin
+    let cache_json = `Assoc [
+      ("updated_at", `Float (Unix.gettimeofday ()));
+      ("agents", `List (List.map agent_config_to_yojson agents));
+    ] in
+    try
+      let path = agent_file_cache_path () in
+      let dir = Filename.dirname path in
+      if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
+      let oc = open_out path in
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        output_string oc (Yojson.Safe.pretty_to_string cache_json))
+    with e ->
+      Printf.eprintf "[Lodge] Failed to save agent cache: %s\n%!" (Printexc.to_string e)
+  end
+
+(** Load agents from file cache (returns true if loaded, false otherwise) *)
+let load_agents_from_file_cache () : bool =
+  let path = agent_file_cache_path () in
+  if not (Sys.file_exists path) then begin
+    Printf.eprintf "[Lodge] No file cache at %s\n%!" path;
+    false
+  end else begin
+    try
+      let ic = open_in path in
+      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
+        (fun () -> really_input_string ic (in_channel_length ic)) in
+      let json = Yojson.Safe.from_string content in
+      let open Yojson.Safe.Util in
+      let updated_at = json |> member "updated_at" |> to_float in
+      let age_hours = (Unix.gettimeofday () -. updated_at) /. 3600.0 in
+      let ttl = agent_cache_ttl_hours () in
+      if age_hours > ttl then begin
+        Printf.eprintf "[Lodge] Cache expired (%.1f hours old, TTL=%.0f)\n%!" age_hours ttl;
+        false
+      end else begin
+        let agents_json = json |> member "agents" |> to_list in
+        let loaded = List.filter_map agent_config_of_yojson agents_json in
+        Mutex.lock agent_cache_mu;
+        List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded;
+        Mutex.unlock agent_cache_mu;
+        Printf.eprintf "[Lodge] Loaded %d agents from file cache (%.1f hours old)\n%!" (List.length loaded) age_hours;
+        true
+      end
+    with e ->
+      Printf.eprintf "[Lodge] Failed to load file cache: %s\n%!" (Printexc.to_string e);
+      false
+  end
+
+(** Load agents from Neo4j via GraphQL API with file cache fallback *)
 let load_agents_config () =
   Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
   (* Query all Lodge identity fields for dynamic agent system *)
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
   let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
-  try
+  let graphql_success = ref false in
+  begin try
     match graphql_request ~timeout_sec:5.0 query with
     | Error err ->
         Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err
@@ -558,35 +669,47 @@ let load_agents_config () =
         List.iter (fun edge ->
           try
             let node = Yojson.Safe.Util.member "node" edge in
-        let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-        let interests_json = Yojson.Safe.Util.(member "interests" node) in
-        let interests = match interests_json with
-          | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
-          | _ -> []
-        in
-        let config = {
-          name;
-          primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
-          value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
-          prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
-          generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
-          status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
-          emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
-          korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
-          model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
-          interests;
-        } in
+            let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+            let interests_json = Yojson.Safe.Util.(member "interests" node) in
+            let interests = match interests_json with
+              | `List items -> List.filter_map (fun i -> Yojson.Safe.Util.to_string_option i) items
+              | _ -> []
+            in
+            let config = {
+              name;
+              primary_value = Yojson.Safe.Util.(member "primaryValue" node |> to_string_option);
+              value_weights = Yojson.Safe.Util.(member "valueWeights" node |> to_string_option);
+              prompt_template = Yojson.Safe.Util.(member "promptTemplate" node |> to_string_option);
+              generation = Yojson.Safe.Util.(member "generation" node |> to_int_option) |> Option.value ~default:0;
+              status = Yojson.Safe.Util.(member "status" node |> to_string_option) |> Option.value ~default:"active";
+              emoji = Yojson.Safe.Util.(member "emoji" node |> to_string_option) |> Option.value ~default:"🤖";
+              korean_name = Yojson.Safe.Util.(member "koreanName" node |> to_string_option) |> Option.value ~default:name;
+              model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:"glm-4.7-flash:latest";
+              interests;
+            } in
+            Mutex.lock agent_cache_mu;
+            Hashtbl.replace agent_cache config.name config;
+            Mutex.unlock agent_cache_mu
+          with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
+        ) edges;
         Mutex.lock agent_cache_mu;
-        Hashtbl.replace agent_cache config.name config;
-        Mutex.unlock agent_cache_mu
-      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
-    ) edges;
-    Mutex.lock agent_cache_mu;
-    let n = Hashtbl.length agent_cache in
-    Mutex.unlock agent_cache_mu;
-    Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n
+        let n = Hashtbl.length agent_cache in
+        Mutex.unlock agent_cache_mu;
+        if n > 0 then begin
+          graphql_success := true;
+          Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n;
+          (* Save to file cache for offline fallback *)
+          save_agents_to_file_cache ()
+        end
   with e ->
-    Printf.eprintf "[Lodge] ❌ Failed to load agents: %s\n%!" (Printexc.to_string e)
+    Printf.eprintf "[Lodge] ❌ GraphQL failed: %s\n%!" (Printexc.to_string e)
+  end;
+  (* Fallback to file cache if GraphQL failed *)
+  if not !graphql_success then begin
+    Printf.eprintf "[Lodge] Trying file cache fallback...\n%!";
+    if not (load_agents_from_file_cache ()) then
+      Printf.eprintf "[Lodge] ⚠ No agents available (GraphQL failed, no valid cache)\n%!"
+  end
 
 (** Get cached agent config, or None if not loaded *)
 let get_cached_agent name =
@@ -1345,14 +1468,12 @@ let get_all_agents () =
             try
               let node = edge |> member "node" in
               let name = node |> member "name" |> to_string in
-              (* Only include core Lodge agents *)
-              if List.mem name (core_lodge_agents ()) then
-                let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
-                let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
-                let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
-                if status = "active" then
-                  Some (name, primary_value, prompt, "system", 0)
-                else None
+              (* Trust GraphQL results — no cache filter (fixes chicken-egg bug) *)
+              let primary_value = (try node |> member "primaryValue" |> to_string with Yojson.Safe.Util.Type_error _ -> "unknown") in
+              let prompt = (try node |> member "promptTemplate" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
+              let status = (try node |> member "status" |> to_string with Yojson.Safe.Util.Type_error _ -> "active") in
+              if status = "active" then
+                Some (name, primary_value, prompt, "system", 0)
               else None
             with Yojson.Safe.Util.Type_error _ -> None
           ) edges

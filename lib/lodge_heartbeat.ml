@@ -630,6 +630,7 @@ and agent_action =
   | ActionPropose of string * string (** name, reason *)
   | ActionCode of string * string * string (** filename, lang, code *)
   | ActionSkip
+  | ActionDelegated of string      (** Soul sent to Worker (request_id) *)
 
 type heartbeat_result = {
   timestamp: float;
@@ -2080,6 +2081,27 @@ let refill () = bucket := min 10 (!bucket + 1)
     (String.concat ", " profile.traits)
   in
 
+  (* A2A Delegation: if delegation mode is on, emit heartbeat_task for A2A Worker *)
+  if Env_config.LodgeV2.delegate_llm then begin
+    let request_id = Printf.sprintf "hb-%s-%d"
+      agent_name (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000) in
+    let board_context = recent_posts
+      |> List.filteri (fun i _ -> i < 3)
+      |> List.map (fun (p : Board.post) ->
+          Printf.sprintf "%s: %s" (Board.Agent_id.to_string p.author)
+            (if String.length p.content > 60 then String.sub p.content 0 60 ^ "..." else p.content))
+      |> String.concat "\n"
+    in
+    (* Emit A2A heartbeat_task event — Worker with llm_generate capability will process *)
+    A2a_tools.emit_heartbeat_task
+      ~agent:agent_name
+      ~prompt
+      ~context:board_context
+      ();
+    Printf.printf "   🔮 [%s] A2A delegated to llm-worker (req: %s)\n%!" agent_name request_id;
+    ActionDelegated request_id
+  end else
+
   (* Call LLM with cascade fallback: GLM-4.7 → GLM-4.7-flash (Ollama) → skip *)
   let is_valid_response s =
     let len = String.length s in
@@ -2147,6 +2169,7 @@ let refill () = bucket := min 10 (!bucket + 1)
     | ActionUpvote id -> Printf.sprintf "UPVOTE:%s" id
     | ActionPropose (topic, _) -> Printf.sprintf "PROPOSE:%s" topic
     | ActionCode (filename, _, _) -> Printf.sprintf "CODE:%s" filename
+    | ActionDelegated id -> Printf.sprintf "DELEGATED:%s" id
   in
   save_trace {
     tick_id;
@@ -2323,6 +2346,10 @@ let rec execute_agent_action ~agent_name ~action =
         clear_gap_signals ~topic
       end;
       record_agent_activity ~name:agent_name
+  | ActionDelegated req_id ->
+      (* Soul delegated to Worker — no local action needed.
+         Worker will process via heartbeat_task event and call masc_board_post/comment. *)
+      Printf.printf "   🔮 [%s] Action delegated to Worker (req: %s)\n%!" agent_name req_id
 
 (** {1 LLM call helper for Planner/Reflection} *)
 
@@ -2552,16 +2579,19 @@ let tick ~config ~pending_triggers =
         | ActionPropose (topic, _) -> Printf.sprintf "Proposed agent: %s" topic
         | ActionCode (filename, lang, _) -> Printf.sprintf "Created %s (%s)" filename lang
         | ActionSkip -> "Decided to skip"
+        | ActionDelegated req_id -> Printf.sprintf "Delegated to Worker (%s)" req_id
       in
       (* Record action for Thompson Sampling *)
       (match action with
        | ActionPost _ -> Lodge_selection.record_action ~agent_name:name ~action:`Post
        | ActionComment _ -> Lodge_selection.record_action ~agent_name:name ~action:`Comment
        | ActionSkip -> Lodge_selection.record_action ~agent_name:name ~action:`Skip
+       | ActionDelegated _ -> ()  (* Worker will record when it processes *)
        | ActionUpvote _ | ActionPropose _ | ActionCode _ -> ());  (* No tracking for these *)
 
       match action with
       | ActionSkip -> (name, trigger, Passed "no valuable contribution")
+      | ActionDelegated req_id -> (name, trigger, Acted { action; summary = Printf.sprintf "Delegated (%s)" req_id })
       | _ -> (name, trigger, Acted { action; summary })
     end
   ) selected in

@@ -54,6 +54,7 @@ and agent_action =
   | ActionPropose of string * string
   | ActionCode of string * string * string  (** filename, lang, code *)
   | ActionSkip
+  | ActionDelegated of string  (** Soul sent to Worker (request_id) *)
 
 type heartbeat_result = {
   timestamp: float;

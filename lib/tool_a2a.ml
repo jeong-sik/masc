@@ -90,6 +90,19 @@ let handle_poll_events _ctx args =
   | Ok json -> (true, Yojson.Safe.pretty_to_string json)
   | Error e -> (false, Printf.sprintf "❌ Poll events failed: %s" e)
 
+(** A2A Worker submits heartbeat task result *)
+let handle_heartbeat_result _ctx args =
+  let worker_name = get_string args "worker_name" "" in
+  let agent = get_string args "agent" "" in
+  let action_type = get_string args "action_type" "" in
+  let content = get_string args "content" "" in
+  if worker_name = "" || agent = "" || action_type = "" then
+    (false, "❌ worker_name, agent, and action_type are required")
+  else
+    match A2a_tools.submit_heartbeat_result ~worker_name ~agent ~action_type ~content () with
+    | Ok json -> (true, Yojson.Safe.pretty_to_string json)
+    | Error e -> (false, Printf.sprintf "❌ Submit result failed: %s" e)
+
 (* Dispatch function - returns None if tool not handled *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -99,4 +112,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_a2a_subscribe" -> Some (handle_a2a_subscribe ctx args)
   | "masc_a2a_unsubscribe" -> Some (handle_a2a_unsubscribe ctx args)
   | "masc_poll_events" -> Some (handle_poll_events ctx args)
+  | "masc_heartbeat_result" -> Some (handle_heartbeat_result ctx args)
   | _ -> None

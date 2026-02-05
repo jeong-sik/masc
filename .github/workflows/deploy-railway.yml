@@ -36,8 +36,12 @@ jobs:
       - name: Prepare binary for Docker
         run: cp _build/default/bin/main_eio.exe masc-mcp-linux-x64
 
-      - name: Stage binary for Railway upload
-        run: git add -f masc-mcp-linux-x64
+      - name: Create temporary commit with binary
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -f masc-mcp-linux-x64
+          git commit -m "temp: add binary for Railway deploy"
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

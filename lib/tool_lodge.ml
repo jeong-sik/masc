@@ -709,11 +709,14 @@ let record_feedback ~name ~dimension ~is_positive =
   let outcome = if is_positive then Positive else Negative in
   evolve_agent ~name ~dimension ~outcome
 
-(** Module initialization - load agents from Neo4j *)
-let () =
-  (* Load agents at startup for evolution triggers *)
-  load_agents_config ();
+(** Initialize Lodge module after Eio context is ready.
+    Call from main_eio.ml after Eio_context.set_net *)
+let init () =
+  (* Load agents for evolution triggers *)
+  load_agents_config ()
 
+(** Module initialization - only register callbacks (no network calls) *)
+let () =
   (* Register SOUL Evolution callback with Tool_board (breaks dependency cycle) *)
   Tool_board.register_evolution_callback {
     Tool_board.get_primary_value = get_agent_primary_value;

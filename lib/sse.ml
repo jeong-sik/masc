@@ -1,8 +1,9 @@
 (** SSE (Server-Sent Events) module for MCP Streamable HTTP Transport
     MCP Spec 2025-03-26 compliant *)
 
-(** Maximum concurrent SSE clients — prevents connection storm on restart *)
-let max_clients = 50
+(** Maximum concurrent SSE clients — prevents connection storm on restart.
+    Increased from 50 to 200 to handle Claude.ai MCP client reconnections. *)
+let max_clients = 200
 
 (** SSE client state *)
 type client = {

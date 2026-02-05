@@ -5,9 +5,21 @@ open Types
 (* Include all utilities from Room_utils *)
 include Room_utils
 
-(** Read room state *)
+(** Read room state — checks PostgreSQL first for HTTP state persistence *)
 let read_state config =
-  let json = read_json config (state_path config) in
+  (* Try PostgreSQL backend first for stateless HTTP environments *)
+  let pg_state =
+    if is_pg_backend config then
+      match backend_get config ~key:"room:state" with
+      | Ok (Some json_str) ->
+          (try Some (Yojson.Safe.from_string json_str) with _ -> None)
+      | Ok None | Error _ -> None
+    else None
+  in
+  let json = match pg_state with
+    | Some j -> j
+    | None -> read_json config (state_path config)
+  in
   match room_state_of_yojson json with
   | Ok state -> state
   | Error _ -> {
@@ -22,9 +34,15 @@ let read_state config =
       paused_at = None;
     }
 
-(** Write room state *)
+(** Write room state — persists to both filesystem and PostgreSQL *)
 let write_state config state =
-  write_json config (state_path config) (room_state_to_yojson state)
+  write_json config (state_path config) (room_state_to_yojson state);
+  (* Also persist to PostgreSQL for HTTP state persistence *)
+  if is_pg_backend config then begin
+    let json_str = Yojson.Safe.to_string (room_state_to_yojson state) in
+    let _ = backend_set config ~key:"room:state" ~value:json_str in
+    ()
+  end
 
 (** Update state with function - uses file lock for atomic read-modify-write *)
 let update_state config f =

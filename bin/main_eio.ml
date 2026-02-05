@@ -841,7 +841,10 @@ let close_sse_conn info =
     (try Httpun.Body.Writer.close info.writer with
      | exn ->
          (* Expected during client disconnect - log for debugging *)
-         Printf.eprintf "[DEBUG] close_sse_conn: %s\n%!" (Printexc.to_string exn))
+         Printf.eprintf "[DEBUG] close_sse_conn: %s\n%!" (Printexc.to_string exn));
+    (* Critical: unregister from Sse module to prevent client count leak.
+       unregister_if_current is idempotent (checks client_id match). *)
+    Sse.unregister_if_current info.session_id info.client_id
   end
 
 let stop_sse_session session_id =
@@ -849,9 +852,8 @@ let stop_sse_session session_id =
   | None -> ()
   | Some info ->
       Hashtbl.remove sse_conn_by_session session_id;
-      close_sse_conn info;
-      Sse.unregister_if_current info.session_id info.client_id;
-      Printf.printf "📴 SSE disconnected: %s\n%!" info.session_id
+      close_sse_conn info
+      (* Note: Sse.unregister_if_current already called in close_sse_conn *)
 
 (** Close all SSE connections gracefully - for shutdown *)
 let close_all_sse_connections () =
@@ -871,10 +873,8 @@ let send_raw info data =
         Httpun.Body.Writer.flush info.writer (fun _ -> ())
       );
       true
-    with exn ->
-      (* Expected during client disconnect - log for debugging *)
-      Printf.eprintf "[DEBUG] send_raw failed (%s): %s\n%!"
-        info.session_id (Printexc.to_string exn);
+    with _exn ->
+      (* Expected during client disconnect - silent close *)
       close_sse_conn info;
       false
 
@@ -966,10 +966,11 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
            else Printf.eprintf "[SSE] ping loop error: %s\n%!" (Printexc.to_string exn))
    | _ -> ());
 
-  Printf.printf "📡 SSE connected: %s (last_event_id: %s, active: %d/%d)\n%!"
-    session_id
-    (match last_event_id with Some id -> string_of_int id | None -> "none")
-    (Sse.client_count ()) Sse.max_clients
+  (* Only log when approaching capacity or in debug mode *)
+  let client_count = Sse.client_count () in
+  if client_count > Sse.max_clients / 2 then
+    Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
+      session_id client_count Sse.max_clients
 
 (** SSE simple handler - for compatibility, returns single event *)
 let sse_simple_handler request reqd =

@@ -145,9 +145,9 @@ let http_get_json ~net:_ url =
     let (status, content) = run_shell_nonblocking cmd in
     match status with
     | Unix.WEXITED 0 -> Ok content
-    | Unix.WEXITED n -> Error (Printf.sprintf "curl exit %d" n)
-    | _ -> Error "curl signaled"
-  with exn -> Error (Printf.sprintf "HTTP exception: %s" (Printexc.to_string exn))
+    | Unix.WEXITED n -> Error (Printf.sprintf "❌ HTTP: curl exit %d [url=%s]" n (String.sub safe_url 0 (min 60 (String.length safe_url))))
+    | _ -> Error "❌ HTTP: curl signaled"
+  with exn -> Error (Printf.sprintf "❌ HTTP: %s" (Printexc.to_string exn))
 
 (* NOTE: http_get_local removed — using curl subprocess for all HTTP *)
 
@@ -157,9 +157,8 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   let url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let max_response_bytes = 1_000_000 in
-  let suppress_body _s = "body suppressed" in
   match Eio_context.get_net_opt () with
-  | None -> Error "Eio net not initialized"
+  | None -> Error "❌ GraphQL: Eio net not initialized"
   | Some net ->
       let headers =
         if api_key = "" then
@@ -185,11 +184,11 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
             Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
           in
           if String.length body_str = 0 then
-            Error "empty response"
+            Error "❌ GraphQL: empty response"
           else if Cohttp.Code.is_success status then
             Ok body_str
           else
-            Error (Printf.sprintf "HTTP %d (%s)" status (suppress_body body_str))
+            Error (Printf.sprintf "❌ GraphQL: HTTP %d" status)
         )
       in
       match Eio_context.get_clock_opt () with
@@ -266,11 +265,11 @@ let cli_generate provider ~system prompt =
     cleanup ();
     match status with
     | Unix.WEXITED 0 -> Ok content
-    | Unix.WEXITED n -> Error (Printf.sprintf "%s exit %d" cli_cmd n)
-    | _ -> Error (Printf.sprintf "%s signaled" cli_cmd)
+    | Unix.WEXITED n -> Error (Printf.sprintf "❌ LLM: %s exit %d" cli_cmd n)
+    | _ -> Error (Printf.sprintf "❌ LLM: %s signaled" cli_cmd)
   with exn ->
     cleanup ();
-    Error (Printf.sprintf "%s exception: %s" cli_cmd (Printexc.to_string exn))
+    Error (Printf.sprintf "❌ LLM: %s exception [%s]" cli_cmd (Printexc.to_string exn))
 
 (** Unified LLM generate with automatic provider selection *)
 let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
@@ -288,7 +287,7 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
         (* Will use ollama_generate below *)
         Error e1
   end else
-    Error "prefer_fast=false not implemented yet"
+    Error "❌ LLM: prefer_fast=false not implemented"
 
 (** Call GLM API directly — Z.ai cloud API, 200K context, no VRAM.
     No llm-mcp dependency. *)
@@ -298,8 +297,8 @@ let llm_mcp_glm ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system pr
     let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
     let result = Llm_direct.call_glm ~model:"glm-4.7" ~prompt:full_prompt ~timeout_sec:120 ~max_chars:max_tokens () in
     if String.length result > 0 then Ok result
-    else Error "GLM returned empty response"
-  with exn -> Error (Printf.sprintf "GLM direct exception: %s" (Printexc.to_string exn))
+    else Error "❌ LLM: GLM returned empty response"
+  with exn -> Error (Printf.sprintf "❌ LLM: GLM exception [%s]" (Printexc.to_string exn))
 
 (** Call local ollama API — DEPRECATED, use llm_mcp_glm instead *)
 let ollama_generate ~net:_ ?(model = Env_config.Ollama.default_model) ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
@@ -323,11 +322,11 @@ let ollama_generate ~net:_ ?(model = Env_config.Ollama.default_model) ?(temperat
     | Unix.WEXITED 0 ->
         let json = Yojson.Safe.from_string content in
         Ok (json |> member "response" |> to_string)
-    | Unix.WEXITED n -> Error (Printf.sprintf "ollama curl exit %d" n)
-    | _ -> Error "ollama curl signaled"
+    | Unix.WEXITED n -> Error (Printf.sprintf "❌ LLM: ollama exit %d" n)
+    | _ -> Error "❌ LLM: ollama signaled"
   with
-  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse: %s" msg)
-  | exn -> Error (Printf.sprintf "ollama exception: %s" (Printexc.to_string exn))
+  | Yojson.Json_error msg -> Error (Printf.sprintf "❌ Parse: JSON error [%s]" msg)
+  | exn -> Error (Printf.sprintf "❌ LLM: ollama exception [%s]" (Printexc.to_string exn))
 
 (** Smart LLM generate — CLI rotation with ollama fallback *)
 let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
@@ -357,11 +356,11 @@ let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt
 
 let fetch_hn_article ~net =
   match http_get_json ~net "https://hacker-news.firebaseio.com/v0/topstories.json" with
-  | Error e -> Error (Printf.sprintf "HN fetch failed: %s" e)
+  | Error e -> Error (Printf.sprintf "❌ Fetch: HN API failed [%s]" e)
   | Ok body ->
     try
       let ids = Yojson.Safe.from_string body |> to_list |> List.filteri (fun i _ -> i < 10) in
-      if ids = [] then Error "HN topstories empty"
+      if ids = [] then Error "❌ Fetch: HN topstories empty"
       else
         let idx = Random.int (List.length ids) in
         let story_id = List.nth ids idx |> to_int in
@@ -373,9 +372,9 @@ let fetch_hn_article ~net =
           let title = story |> member "title" |> to_string_option |> Option.value ~default:"" in
           let url = story |> member "url" |> to_string_option
             |> Option.value ~default:(Printf.sprintf "https://news.ycombinator.com/item?id=%d" story_id) in
-          if title = "" then Error "Empty title"
+          if title = "" then Error "❌ Fetch: HN story has empty title"
           else Ok { title; url; source = HackerNews }
-    with exn -> Error (Printf.sprintf "HN parse: %s" (Printexc.to_string exn))
+    with exn -> Error (Printf.sprintf "❌ Parse: HN JSON error [%s]" (Printexc.to_string exn))
 
 (** {1 DIG: LLM Analysis} *)
 
@@ -1011,11 +1010,11 @@ let heartbeat ~net (args : Yojson.Safe.t) =
 
   (* READ *)
   match fetch_hn_article ~net with
-  | Error e -> (false, Printf.sprintf "❌ Read failed: %s" e)
+  | Error e -> (false, Printf.sprintf "❌ Lodge: Read failed [%s]" e)
   | Ok article ->
     (* DIG — with Eio timeout *)
     match dig_article ~net article with
-    | Error e -> (false, Printf.sprintf "❌ Dig failed: %s (article: %s)" e article.title)
+    | Error e -> (false, Printf.sprintf "❌ Lodge: Dig failed [article=%s, error=%s]" article.title e)
     | Ok analysis ->
       let content = Printf.sprintf
         "📖 **%s**\n🔗 %s\n\n%s\n\n---\n_Lodge Heartbeat · %s_"
@@ -1057,16 +1056,16 @@ let heartbeat ~net (args : Yojson.Safe.t) =
         end else "" in
         (true, Printf.sprintf "🏔️ Lodge shared: %s\n%s%s" article.title msg summary)
       end else
-        (false, Printf.sprintf "❌ Share failed: %s" msg)
+        (false, Printf.sprintf "❌ Lodge: Share failed [%s]" msg)
 
 (** {1 Classify tool: classify a post} *)
 
 let classify ~net (args : Yojson.Safe.t) =
   let post_id = Safe_ops.json_string ~default:"" "post_id" args in
-  if post_id = "" then (false, "post_id required")
+  if post_id = "" then (false, "❌ Lodge: post_id required")
   else
     let (success, detail) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
-    if not success then (false, Printf.sprintf "❌ %s" detail)
+    if not success then (false, Printf.sprintf "❌ Lodge: Board get failed [%s]" detail)
     else
       let clean_content = extract_post_content detail in
       let cls = classify_content ~net clean_content in
@@ -1087,7 +1086,7 @@ let react ~net (args : Yojson.Safe.t) =
     | Some n -> n
     | None -> random_agent_name ()
   in
-  if post_id_arg = "" then (false, "post_id required")
+  if post_id_arg = "" then (false, "❌ Lodge: post_id required")
   else
     let post_id =
       if post_id_arg = "random" then begin
@@ -1102,12 +1101,12 @@ let react ~net (args : Yojson.Safe.t) =
       end else post_id_arg
     in
     let (success, detail) = Tool_board.handle_tool "masc_board_get" (`Assoc [("post_id", `String post_id)]) in
-    if not success then (false, Printf.sprintf "❌ %s" detail)
+    if not success then (false, Printf.sprintf "❌ Lodge: Board get failed [%s]" detail)
     else
       let clean_content = extract_post_content detail in
       if skip_classify then
       match react_to_content ~net ~agent_name clean_content with
-      | Error e -> (false, Printf.sprintf "❌ React failed: %s" e)
+      | Error e -> (false, Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]" agent_name e)
       | Ok reaction ->
         let comment_args = `Assoc [
           ("post_id", `String post_id);
@@ -1116,7 +1115,7 @@ let react ~net (args : Yojson.Safe.t) =
         ] in
         let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
         if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
-        else (false, Printf.sprintf "❌ Comment failed: %s" msg)
+        else (false, Printf.sprintf "❌ Lodge: Comment failed [post=%s, error=%s]" post_id msg)
     else
       let cls = classify_content ~net clean_content in
       match cls.category with
@@ -1124,7 +1123,7 @@ let react ~net (args : Yojson.Safe.t) =
       | Notify -> (true, Printf.sprintf "⚠️ %s classified as NOTIFY — flagged for human" post_id)
       | Review ->
         match react_to_content ~net ~agent_name clean_content with
-        | Error e -> (false, Printf.sprintf "❌ React failed: %s" e)
+        | Error e -> (false, Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]" agent_name e)
         | Ok reaction ->
           let comment_args = `Assoc [
             ("post_id", `String post_id);
@@ -1133,7 +1132,7 @@ let react ~net (args : Yojson.Safe.t) =
           ] in
           let (ok, msg) = Tool_board.handle_tool "masc_board_comment" comment_args in
           if ok then (true, Printf.sprintf "💬 Lodge reaction posted on %s:\n%s" post_id reaction)
-          else (false, Printf.sprintf "❌ Comment failed: %s" msg)
+          else (false, Printf.sprintf "❌ Lodge: Comment failed [post=%s, error=%s]" post_id msg)
 
 (** {1 Full cycle: heartbeat + ONE random agent reacts} *)
 
@@ -1168,7 +1167,7 @@ let lodge_discussion ~net (_args : Yojson.Safe.t) =
   let agent = random_agent_name () in
 
   let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 10)]) in
-  if not ok then (false, Printf.sprintf "❌ Failed to list posts: %s" posts_result)
+  if not ok then (false, Printf.sprintf "❌ Lodge: Failed to list posts [%s]" posts_result)
   else
     let post_ids =
       let re = Str.regexp "\\*\\*\\(p-[a-f0-9]+\\)\\*\\*" in
@@ -1487,7 +1486,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
   (* Check if agent already exists *)
   let existing = get_all_agents () in
   if List.exists (fun (n, _, _, _, _) -> n = agent_name) existing then
-    (false, Printf.sprintf "❌ 에이전트 '%s'가 이미 존재합니다" agent_name)
+    (false, Printf.sprintf "❌ Lodge: 에이전트 '%s'가 이미 존재합니다" agent_name)
   else
     (* Create in Neo4j *)
     let escaped_prompt = Str.global_replace (Str.regexp "'") "" child_prompt in
@@ -1528,7 +1527,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
         ])
       in
       (true, Printf.sprintf "✅ '%s' 에이전트가 '%s'에 의해 생성되었습니다" agent_name parent_name)
-    with exn -> (false, Printf.sprintf "❌ 생성 실패: %s" (Printexc.to_string exn))
+    with exn -> (false, Printf.sprintf "❌ Lodge: 생성 실패 [%s]" (Printexc.to_string exn))
 
 (** Check if an agent feels the need to spawn — based on interest breadth *)
 let should_spawn ~net agent_name interests =
@@ -1679,7 +1678,7 @@ let has_agent_commented agent_name post_id =
 (** Agent patrol: check board and react to unreacted posts *)
 let agent_patrol ~net (args : Yojson.Safe.t) =
   let agent_str = Safe_ops.json_string ~default:"" "agent" args in
-  if agent_str = "" then (false, "❌ agent required (pragmatist|dreamer|skeptic|connector|historian)")
+  if agent_str = "" then (false, "❌ Lodge: agent required [valid=pragmatist|dreamer|skeptic|connector|historian]")
   else
     let agent_name = match validate_agent_name agent_str with
       | Some n -> n
@@ -1687,7 +1686,7 @@ let agent_patrol ~net (args : Yojson.Safe.t) =
     in
 
     let (ok, posts_result) = Tool_board.handle_tool "masc_board_list" (`Assoc [("limit", `Int 10)]) in
-    if not ok then (false, Printf.sprintf "❌ Failed to list posts: %s" posts_result)
+    if not ok then (false, Printf.sprintf "❌ Lodge: Failed to list posts [%s]" posts_result)
     else
       let post_ids =
         let re = Str.regexp "\\*\\*\\(p-[a-f0-9]+\\)\\*\\*" in
@@ -1730,7 +1729,7 @@ let agent_patrol ~net (args : Yojson.Safe.t) =
           if react_ok then
             (true, Printf.sprintf "💬 %s patrolled and reacted to %s:\n%s%s" agent_name target_post react_msg upvote_msg)
           else
-            (false, Printf.sprintf "❌ %s patrol failed on %s: %s" agent_name target_post react_msg)
+            (false, Printf.sprintf "❌ Lodge: Patrol failed [agent=%s, post=%s, error=%s]" agent_name target_post react_msg)
 
 let tool_agent_patrol : Types.tool_schema = {
   name = "lodge_agent_patrol";
@@ -1785,7 +1784,7 @@ let propose_project ~net:_ args =
   in
 
   if title = "" || description = "" then
-    (false, "❌ title and description required")
+    (false, "❌ Lodge: title and description required")
   else
     let project_id = Printf.sprintf "proj-%s" (String.sub (Digest.string (title ^ description) |> Digest.to_hex) 0 8) in
     let tags_str = String.concat ", " tags in
@@ -1802,7 +1801,7 @@ let propose_project ~net:_ args =
     if ok then
       (true, Printf.sprintf "✅ 프로젝트 제안됨!\n🆔 %s\n📋 %s\n\n%s" project_id title result)
     else
-      (false, Printf.sprintf "❌ 프로젝트 제안 실패: %s" result)
+      (false, Printf.sprintf "❌ Lodge: 프로젝트 제안 실패 [%s]" result)
 
 (** Join an existing project *)
 let join_project ~net:_ args =
@@ -1811,7 +1810,7 @@ let join_project ~net:_ args =
   let role = Safe_ops.json_string ~default:"contributor" "role" args in
 
   if project_id = "" then
-    (false, "❌ project_id required")
+    (false, "❌ Lodge: project_id required")
   else
     (* Find the project post and add a comment *)
     let comment_content = Printf.sprintf "🙋 **%s** 참여합니다! (역할: %s)" agent_name role in
@@ -1824,7 +1823,7 @@ let join_project ~net:_ args =
     if ok then
       (true, Printf.sprintf "✅ %s이(가) 프로젝트에 참여함!\n역할: %s\n%s" agent_name role result)
     else
-      (false, Printf.sprintf "❌ 참여 실패: %s" result)
+      (false, Printf.sprintf "❌ Lodge: 참여 실패 [%s]" result)
 
 (** Share code snippet *)
 let share_code ~net:_ args =
@@ -1835,7 +1834,7 @@ let share_code ~net:_ args =
   let description = Safe_ops.json_string ~default:"" "description" args in
 
   if code = "" then
-    (false, "❌ code required")
+    (false, "❌ Lodge: code required")
   else
     let content = Printf.sprintf "💻 **코드 공유: %s**\n\n%s\n\n```%s\n%s\n```\n\n👤 작성자: %s"
       title (if description = "" then "" else description ^ "\n") language code author in
@@ -1849,7 +1848,7 @@ let share_code ~net:_ args =
     if ok then
       (true, Printf.sprintf "✅ 코드 공유됨!\n📋 %s\n\n%s" title result)
     else
-      (false, Printf.sprintf "❌ 코드 공유 실패: %s" result)
+      (false, Printf.sprintf "❌ Lodge: 코드 공유 실패 [%s]" result)
 
 (** Research a topic using web search and share findings *)
 let research ~net args =
@@ -1857,14 +1856,14 @@ let research ~net args =
   let agent_name = Safe_ops.json_string ~default:"researcher" "agent_name" args in
 
   if topic = "" then
-    (false, "❌ topic required")
+    (false, "❌ Lodge: topic required")
   else
     (* Use smart_generate (CLI rotation) for research *)
     let system = "/no_think\n당신은 리서처입니다. 주어진 주제에 대해 알고 있는 정보를 바탕으로 간결한 요약(3-5문장)을 작성하세요. 한글로 작성하세요." in
     let prompt = Printf.sprintf "주제: %s\n\n이 주제에 대해 핵심 정보를 요약해주세요." topic in
 
     match smart_generate ~net ~system prompt with
-    | Error e -> (false, Printf.sprintf "❌ 리서치 실패: %s" e)
+    | Error e -> (false, Printf.sprintf "❌ Lodge: 리서치 실패 [topic=%s, error=%s]" topic e)
     | Ok summary ->
         let content = Printf.sprintf "🔍 **리서치: %s**\n\n%s\n\n👤 연구자: %s"
           topic summary agent_name in
@@ -1878,7 +1877,7 @@ let research ~net args =
         if ok then
           (true, Printf.sprintf "✅ 리서치 공유됨!\n📋 %s\n\n%s" topic result)
         else
-          (false, Printf.sprintf "❌ 리서치 공유 실패: %s" result)
+          (false, Printf.sprintf "❌ Lodge: 리서치 공유 실패 [%s]" result)
 
 let tool_propose_project : Types.tool_schema = {
   name = "lodge_propose_project";
@@ -1943,7 +1942,7 @@ let get_profile ~net:_ args =
   let agent_name = Safe_ops.json_string ~default:"" "agent_name" args in
 
   if agent_name = "" then
-    (false, "❌ agent_name required")
+    (false, "❌ Lodge: agent_name required")
   else
     (* Get posts by this agent *)
     let (_, posts_result) = Tool_board.handle_tool "masc_board_search" (`Assoc [("query", `String agent_name); ("limit", `Int 10)]) in
@@ -1974,7 +1973,7 @@ let lodge_search ~net:_ args =
   let limit = Safe_ops.json_int ~default:20 "limit" args in
 
   if query = "" then
-    (false, "❌ query required")
+    (false, "❌ Lodge: query required")
   else
     (* Search board *)
     let (board_ok, board_result) = Tool_board.handle_tool "masc_board_search"
@@ -2005,7 +2004,7 @@ let lodge_comment_like ~net:_ args =
   let voter = Safe_ops.json_string ~default:"anonymous" "voter" args in
 
   if comment_id = "" then
-    (false, "❌ comment_id required")
+    (false, "❌ Lodge: comment_id required")
   else
     Tool_board.handle_tool "masc_board_comment_vote"
       (`Assoc [

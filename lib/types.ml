@@ -745,10 +745,28 @@ type masc_error =
   | InvalidToken of string
   (* Rate limit errors *)
   | RateLimitExceeded of rate_limit_error
+  (* Lodge errors — agent registry and social features *)
+  | LodgeError of lodge_error
+  (* Cache errors — file/memory caching *)
+  | CacheError of cache_error
+
+(** Lodge-specific errors *)
+and lodge_error =
+  | LodgeGraphQLFailed of string
+  | LodgeAgentNotCached of string
+  | LodgeInvalidResponse of string
+[@@deriving show { with_path = false }]
+
+(** Cache-specific errors *)
+and cache_error =
+  | CacheReadFailed of string
+  | CacheWriteFailed of string
+  | CacheExpired of { key: string; age_hours: float }
+  | CacheCorrupted of string
 [@@deriving show { with_path = false }]
 
 (** Convert error to user-friendly message *)
-let masc_error_to_string = function
+let rec masc_error_to_string = function
   | NotInitialized -> "❌ MASC not initialized. Use masc_init first."
   | AlreadyInitialized -> "MASC already initialized."
   | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
@@ -772,6 +790,21 @@ let masc_error_to_string = function
   | RateLimitExceeded { limit; current; wait_seconds; category } ->
       Printf.sprintf "⏳ Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
         (show_rate_limit_category category) current limit wait_seconds
+  | LodgeError e -> lodge_error_to_string e
+  | CacheError e -> cache_error_to_string e
+
+(** Convert lodge error to user-friendly message *)
+and lodge_error_to_string = function
+  | LodgeGraphQLFailed msg -> Printf.sprintf "❌ Lodge: GraphQL failed [%s]" msg
+  | LodgeAgentNotCached name -> Printf.sprintf "❌ Lodge: Agent not cached [agent=%s]" name
+  | LodgeInvalidResponse msg -> Printf.sprintf "❌ Lodge: Invalid response [%s]" msg
+
+(** Convert cache error to user-friendly message *)
+and cache_error_to_string = function
+  | CacheReadFailed path -> Printf.sprintf "❌ Cache: Read failed [path=%s]" path
+  | CacheWriteFailed path -> Printf.sprintf "❌ Cache: Write failed [path=%s]" path
+  | CacheExpired { key; age_hours } -> Printf.sprintf "❌ Cache: Expired [key=%s, age=%.1fh]" key age_hours
+  | CacheCorrupted path -> Printf.sprintf "❌ Cache: Corrupted [path=%s]" path
 
 (** Result type alias for MASC operations *)
 type 'a masc_result = ('a, masc_error) result

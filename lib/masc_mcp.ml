@@ -152,3 +152,4 @@ module Tool_misc = Tool_misc
 (* Lodge subsystem *)
 module Lodge_heartbeat = Lodge_heartbeat
 module Lodge_selection = Lodge_selection
+module Lodge_reaction = Lodge_reaction

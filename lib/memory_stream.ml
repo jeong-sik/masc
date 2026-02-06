@@ -11,6 +11,8 @@
 
     @since 4.0.0 *)
 
+[@@@warning "-32"]
+
 open Printf
 
 (* ---------- Types ---------- *)
@@ -149,6 +151,22 @@ let count_entries ~agent_name : int =
        with End_of_file -> ());
       !n)
   end
+
+(** Rewrite all entries atomically (used by Lodge_memory_gc). *)
+let rewrite_entries ~agent_name (entries : memory_entry list) =
+  let dir = memory_dir ~agent_name in
+  ensure_dir dir;
+  let path = stream_path ~agent_name in
+  let tmp_path = path ^ ".tmp" in
+  (* Write to temp file first, then atomic rename *)
+  let oc = open_out tmp_path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    List.iter (fun entry ->
+      let json_str = Yojson.Safe.to_string (entry_to_json entry) in
+      output_string oc json_str;
+      output_char oc '\n'
+    ) entries);
+  Sys.rename tmp_path path
 
 (* ---------- Scoring ---------- *)
 

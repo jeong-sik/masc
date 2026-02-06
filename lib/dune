@@ -3,6 +3,7 @@
  (public_name masc_mcp)
  (modules
    a2a_tools
+   ag_ui
    agent_card
    agent_ecosystem
    agent_identity
@@ -21,11 +22,13 @@
    bounded
    cache_eio
    env_config
+   capability_match
    cancellation
    checkpoint_types
    common
    compression_dict
    config
+   context_router
    dashboard
    web_dashboard
    credits_dashboard
@@ -57,6 +60,7 @@
    lodge_atmosphere
    lodge_heartbeat
    lodge_memory
+   lodge_memory_gc
    lodge_reaction
    lodge_tom
    lodge_selection
@@ -153,6 +157,7 @@
    gardener
    tool_gardener
    tool_library
+   library_bridge
    tool_council
    tool_suspend
    debate

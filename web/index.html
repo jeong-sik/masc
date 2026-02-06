@@ -292,7 +292,29 @@
 
   <script>
     const MCP_URL = 'http://127.0.0.1:8935/mcp';
+    const MAX_EVENTS = 50;  // 이벤트 스트림 최대 개수
     let requestId = 1;
+
+    // Debounce helper - 연속 호출 방지
+    function debounce(fn, delay) {
+      let timer = null;
+      return function(...args) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+      };
+    }
+
+    // Throttle helper - 일정 간격으로만 실행
+    function throttle(fn, limit) {
+      let inThrottle = false;
+      return function(...args) {
+        if (!inThrottle) {
+          fn.apply(this, args);
+          inThrottle = true;
+          setTimeout(() => inThrottle = false, limit);
+        }
+      };
+    }
 
     // MCP JSON-RPC call helper (handles SSE-formatted response)
     async function mcpCall(toolName, args) {
@@ -452,17 +474,21 @@
 
       // Join with fresh identity
       await joinRoom();
-      loadStatus();
+      loadStatusImmediate();
       addLocalEvent('🔄 Identity reset: ' + oldName + ' → ' + myAgentName);
     }
 
-    // Helper: Add local event to stream
+    // Helper: Add local event to stream (with limit)
     function addLocalEvent(text) {
       const events = document.getElementById('events');
       const time = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
       events.insertAdjacentHTML('afterbegin',
         `<div class="event"><span class="time">${time}</span>${text}</div>`
       );
+      // 오래된 이벤트 삭제 - MAX_EVENTS 초과 시
+      while (events.children.length > MAX_EVENTS) {
+        events.removeChild(events.lastChild);
+      }
     }
 
     // Load agents via masc_who
@@ -520,10 +546,13 @@
       }
     }
 
-    function loadStatus() {
+    function loadStatusImmediate() {
       loadAgents();
       loadTasks();
     }
+
+    // Debounced version - SSE 이벤트 폭주 시 500ms마다 1번만 실행
+    const loadStatus = debounce(loadStatusImmediate, 500);
 
     // Single SSE connection with reconnection logic
     let evtSource = null;
@@ -574,12 +603,19 @@
       };
     }
 
-    // Cleanup on page unload
+    // Cleanup on page unload (SSE + leave room)
     window.addEventListener('beforeunload', () => {
       if (evtSource) {
         evtSource.close();
         evtSource = null;
       }
+      // Leave room
+      navigator.sendBeacon(MCP_URL, JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: { name: 'masc_leave', arguments: { agent_name: myAgentName } },
+        id: 0
+      }));
     });
 
     // Start SSE connection
@@ -613,15 +649,6 @@
       }
     }
 
-    // Leave room on page close
-    window.addEventListener('beforeunload', () => {
-      navigator.sendBeacon(MCP_URL, JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'tools/call',
-        params: { name: 'masc_leave', arguments: { agent_name: 'lobby' } },
-        id: 0
-      }));
-    });
 
     // Council functions
     function showCouncilTab(tab) {
@@ -692,9 +719,9 @@
       }
     }
 
-    // Initial load
+    // Initial load (immediate, no debounce)
     joinRoom().then(() => {
-      loadStatus();
+      loadStatusImmediate();
       loadDebates();
       loadVotes();
     });

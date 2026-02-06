@@ -37,6 +37,12 @@ val default_weights : scoring_weights
 
 (** {1 Core Operations} *)
 
+(** Load all entries from the agent's memory stream. *)
+val load_all_entries : agent_name:string -> memory_entry list
+
+(** Rewrite all entries atomically (used by memory GC). *)
+val rewrite_entries : agent_name:string -> memory_entry list -> unit
+
 (** Add a new memory entry to the stream.
     [importance] is 1-10 (higher = more important).
     Automatically rotates file if > max_entries. *)

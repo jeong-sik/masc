@@ -124,7 +124,7 @@ module Response = struct
 
       @param compress Enable compression if client accepts (default: true)
       @param request Optional request to check Accept-Encoding header *)
-  let json ?(status = `OK) ?(compress = true) ?request body reqd =
+  let json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request body reqd =
     let should_compress =
       compress &&
       match request with
@@ -147,6 +147,7 @@ module Response = struct
       | Some enc -> ("content-encoding", enc) :: base_headers
       | None -> base_headers
     in
+    let headers = extra_headers @ headers in
     let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
     Httpun.Reqd.respond_with_string reqd response final_body
 

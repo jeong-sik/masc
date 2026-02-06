@@ -1,9 +1,14 @@
-(** Lodge Cascade — JSON-driven LLM cascade with Claude rotation.
+(** Lodge Cascade — JSON-driven LLM cascade with strategy-aware routing.
 
     Reads slot arrays from config/llm_cascade.json.
     Each slot = (tool_name, model, api_key_env).
     Claude slots are rotated round-robin across heartbeat ticks.
-    Config file is hot-reloaded by checking mtime every 60s. *)
+    Config file is hot-reloaded by checking mtime every 60s.
+
+    Strategies:
+    - sequential: try slots in config order (default, current behavior)
+    - cost_optimized: reorder by cost tier ascending (cheapest first)
+    - quality_first: reorder by cost tier descending (strongest first) *)
 
 open Printf
 
@@ -14,6 +19,22 @@ type cascade_slot = {
   model : string;        (* "glm-4.7", "glm-4.7-flash", "claude-sonnet-4-20250514" *)
   key_env : string option; (* env var name for api_key, e.g. "CLAUDE_CODE_OAUTH_TOKEN_anyang" *)
 }
+
+(** Routing strategy for slot ordering *)
+type strategy =
+  | Sequential       (** Config order, Claude round-robin (default) *)
+  | Cost_optimized   (** Cheapest first: ollama(0) → glm(1) → claude(3) *)
+  | Quality_first    (** Strongest first: claude(3) → glm(1) → ollama(0) *)
+
+let strategy_of_string = function
+  | "cost_optimized" -> Cost_optimized
+  | "quality_first" -> Quality_first
+  | _ -> Sequential
+
+let string_of_strategy = function
+  | Sequential -> "sequential"
+  | Cost_optimized -> "cost_optimized"
+  | Quality_first -> "quality_first"
 
 (** Result of a cascade call, including which LLM was used *)
 type cascade_result = {
@@ -56,12 +77,71 @@ let parse_slot (json : Yojson.Safe.t) : cascade_slot =
   let key_env = json |> member "key_env" |> to_string_option in
   { tool_name; model; key_env }
 
+(** Parse cost_tiers from config: tool_name -> int cost tier *)
+let parse_cost_tiers (json : Yojson.Safe.t) : (string * int) list =
+  let open Yojson.Safe.Util in
+  match json |> member "cost_tiers" with
+  | `Assoc pairs ->
+    List.filter_map (fun (k, v) ->
+      match v with `Int n -> Some (k, n) | _ -> None
+    ) pairs
+  | _ -> [("ollama", 0); ("glm", 1); ("claude-cli", 3)]
+
+(** Parse per-cascade strategy from config *)
+let parse_strategy (json : Yojson.Safe.t) ~cascade_name : strategy =
+  let open Yojson.Safe.Util in
+  match json |> member "strategy" with
+  | `Assoc _ as strat ->
+    (match strat |> member cascade_name |> to_string_option with
+     | Some s -> strategy_of_string s
+     | None -> Sequential)
+  | `String s -> strategy_of_string s
+  | _ -> Sequential
+
+(** Reorder slots based on strategy and cost tiers *)
+let apply_strategy ~(strategy : strategy) ~(cost_tiers : (string * int) list)
+    (slots : cascade_slot list) : cascade_slot list =
+  match strategy with
+  | Sequential -> slots  (* Config order, unchanged *)
+  | Cost_optimized ->
+    let cost_of s =
+      List.assoc_opt s.tool_name cost_tiers |> Option.value ~default:1
+    in
+    List.stable_sort (fun a b -> compare (cost_of a) (cost_of b)) slots
+  | Quality_first ->
+    let cost_of s =
+      List.assoc_opt s.tool_name cost_tiers |> Option.value ~default:1
+    in
+    List.stable_sort (fun a b -> compare (cost_of b) (cost_of a)) slots
+
 let load_cascade ~config_path ~cascade_name : cascade_slot list =
   try
     let json = load_json_file config_path in
     let open Yojson.Safe.Util in
     let arr = json |> member cascade_name |> to_list in
     List.map parse_slot arr
+  with
+  | Sys_error msg ->
+    eprintf "[cascade] config load failed: %s — using empty cascade\n%!" msg;
+    []
+  | exn ->
+    eprintf "[cascade] config parse error: %s — using empty cascade\n%!" (Printexc.to_string exn);
+    []
+
+(** Load cascade with strategy applied *)
+let load_cascade_with_strategy ~config_path ~cascade_name : cascade_slot list =
+  try
+    let json = load_json_file config_path in
+    let open Yojson.Safe.Util in
+    let arr = json |> member cascade_name |> to_list in
+    let slots = List.map parse_slot arr in
+    let strategy = parse_strategy json ~cascade_name in
+    let cost_tiers = parse_cost_tiers json in
+    let reordered = apply_strategy ~strategy ~cost_tiers slots in
+    if strategy <> Sequential then
+      printf "[cascade] %s: strategy=%s, %d slots reordered\n%!"
+        cascade_name (string_of_strategy strategy) (List.length reordered);
+    reordered
   with
   | Sys_error msg ->
     eprintf "[cascade] config load failed: %s — using empty cascade\n%!" msg;
@@ -194,4 +274,4 @@ let default_config_path () =
 
 let get_cascade ?(config_path = "") ~cascade_name () : cascade_slot list =
   let path = if String.length config_path > 0 then config_path else default_config_path () in
-  load_cascade ~config_path:path ~cascade_name
+  load_cascade_with_strategy ~config_path:path ~cascade_name

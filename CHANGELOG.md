@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.60.0] - 2026-02-06
+
+### Added
+- **AG-UI Protocol Bridge** (`ag_ui.ml`): CopilotKit AG-UI event translation layer
+  - 14 event types (lifecycle, text, tool, state, custom)
+  - MASC→AG-UI event mapping for all core event types
+  - `/ag-ui/events` SSE endpoint with room filtering and missed-event replay
+  - 18 tests
+- **Context Router** (`context_router.ml`): Pre-retrieval decision gate for selective RAG
+  - 3-tier routing: Skip (no retrieval), Light (reduced budget), Full (all sources)
+  - 5 query intent types: Conversational, Task_command, Status_check, Knowledge_query, Coordination
+  - State-aware broadcast overlap check (60% keyword threshold)
+  - 25 tests
+- **Capability Match** (`capability_match.ml`): Task-Agent compatibility scoring
+  - Scoring: `trait_overlap * 0.4 + interest_overlap * 0.4 + capability_match * 0.2`
+  - Keyword extraction with stop-word filtering and substring matching
+  - `rank_agents_for_task`, `rank_tasks_for_agent`, `best_agent_for_task`, `suggest_task_for_agent`
+  - JSON serialization for agent profiles and match scores
+  - 24 tests
+- **AGENTS.md**: Agent capability declaration file (OpenAI→AAIF standard)
+- **Lodge Memory GC** (`lodge_memory_gc.ml`): Stale memory cleanup (AgeMem pattern)
+- **Library Bridge** (`library_bridge.ml`): Lodge Heartbeat ↔ Library auto-recording
+
+### Changed
+- **A2A v0.3 Agent Card**: Added `A2A-Version` HTTP header to `/.well-known/agent-card.json`
+- **HTTP Server**: `Response.json` now accepts `~extra_headers` parameter
+- **Lodge Cascade**: Added routing strategy support (cost_optimized, latency_optimized, quality_first)
+- **Task Metrics**: `masc_done` records completion time for ProceduralPattern trustScore feedback
+
 ## [2.59.0] - 2026-02-06
 
 ### Added

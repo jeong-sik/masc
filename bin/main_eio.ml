@@ -1076,8 +1076,102 @@ let make_routes ~port ~host =
          let (resolved_host, resolved_port) = parse_host_port host_header host port in
          let card = Masc_mcp.Agent_card.generate_default ~host:resolved_host ~port:resolved_port () in
          let json = Masc_mcp.Agent_card.to_json card |> Yojson.Safe.to_string in
-         Http.Response.json json reqd
+         let a2a_version = Masc_mcp.A2a_tools.default_a2a_version in
+         Http.Response.json ~extra_headers:[("A2A-Version", a2a_version)] json reqd
        ) request reqd)
+  |> Http.Router.get "/ag-ui/events" (fun request reqd ->
+       (* AG-UI Protocol SSE endpoint — translates MASC events to AG-UI format.
+          Clients connect here to receive real-time AG-UI events. *)
+       let origin = get_origin request in
+       let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
+       let protocol_version = get_protocol_version_for_session ~session_id request in
+       let room_id = Option.value ~default:"default" (query_param request "room") in
+       let last_event_id = get_last_event_id request in
+
+       stop_sse_session session_id;
+
+       let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
+       let response = Httpun.Response.create ~headers `OK in
+       let writer = Httpun.Reqd.respond_with_streaming reqd response in
+       let mutex = Eio.Mutex.create () in
+       let info_ref : sse_conn_info option ref = ref None in
+       let push event =
+         match !info_ref with
+         | None -> ()
+         | Some info ->
+           (* Translate MASC SSE data to AG-UI event format.
+              Parse the JSON from the SSE data line and re-emit as AG-UI CUSTOM. *)
+           let ag_ui_event =
+             try
+               (* Extract JSON from SSE format: "id: N\nevent: type\ndata: {...}\n\n" *)
+               let lines = String.split_on_char '\n' event in
+               let data_line = List.find_opt (fun l ->
+                 String.length l > 6 && String.sub l 0 6 = "data: "
+               ) lines in
+               match data_line with
+               | Some dl ->
+                 let json_str = String.sub dl 6 (String.length dl - 6) in
+                 let json = Yojson.Safe.from_string json_str in
+                 let ag_event = Masc_mcp.Ag_ui.of_custom ~room_id
+                   ~name:"MASC_EVENT" json in
+                 Masc_mcp.Ag_ui.event_to_sse ag_event
+               | None -> event  (* Pass through if no data line *)
+             with _ -> event  (* Pass through on parse error *)
+           in
+           ignore (send_raw info ag_ui_event)
+       in
+       let (client_id, evicted) =
+         Sse.register session_id ~push
+           ~last_event_id:(Option.value ~default:0 last_event_id)
+       in
+       (match evicted with
+        | Some evicted_sid -> stop_sse_session evicted_sid
+        | None -> ());
+       let info = {
+         session_id;
+         client_id;
+         writer;
+         mutex;
+         stop = ref false;
+         closed = false;
+       } in
+       info_ref := Some info;
+       Hashtbl.replace sse_conn_by_session session_id info;
+
+       (* Send AG-UI priming: RUN_STARTED event *)
+       let prime = Masc_mcp.Ag_ui.(
+         make_event ~thread_id:room_id
+           ~run_id:(Some session_id)
+           Run_started
+         |> event_to_sse
+       ) in
+       ignore (send_raw info prime);
+
+       (* Replay missed events *)
+       (match last_event_id with
+        | Some last_id ->
+          let missed = Sse.get_events_after last_id in
+          List.iter (fun ev -> ignore (send_raw info ev)) missed
+        | None -> ());
+
+       (* Keep-alive ping *)
+       (match !current_sw, !current_clock with
+        | Some sw, Some clock ->
+          Eio.Fiber.fork ~sw (fun () ->
+            let rec loop () =
+              if not !(info.stop) then begin
+                (try Eio.Time.sleep clock sse_ping_interval_s
+                 with _ -> ());
+                (try
+                   if info.closed then stop_sse_session info.session_id
+                   else if not !(info.stop) then
+                     ignore (send_raw info ": ping\n\n")
+                 with _ -> stop_sse_session info.session_id);
+                loop ()
+              end
+            in
+            try loop () with _ -> ())
+        | _ -> ()))
   |> Http.Router.get "/dashboard" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          Http.Response.html_cached

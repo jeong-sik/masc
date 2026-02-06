@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.61.0] - 2026-02-06
+
+### Added
+- **Perpetual Agent Runtime** — Infinite context system for 24h+ autonomous agent operation
+  - `llm_client.ml`: Vendor-agnostic LLM caller (Ollama, Claude, Gemini, GLM Cloud, OpenRouter) with cascade fallback
+  - `context_manager.ml`: 3-tier memory (working → session → semantic) with 4 compaction strategies
+  - `verifier.ml`: Low-cost model action verification (PASS/WARN/FAIL)
+  - `succession.ml`: Cross-model DNA extraction, hydration, and generation tracking
+  - `perpetual_loop.ml`: Autonomous loop (think → act → observe → verify → compact → heartbeat → loop/handoff)
+  - `tool_perpetual.ml`: 4 MCP tools (`masc_perpetual_start`, `masc_perpetual_status`, `masc_perpetual_stop`, `masc_perpetual_inject`)
+  - `bin/perpetual_cli.exe`: Standalone CLI for running agents outside MCP
+  - 3-threshold context management: compact (50%), prepare (70%), handoff (85%)
+  - Idle detection with configurable max consecutive idle turns
+  - 92 tests
+
 ## [2.60.0] - 2026-02-06
 
 ### Added

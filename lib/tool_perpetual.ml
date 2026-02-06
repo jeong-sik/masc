@@ -1,0 +1,252 @@
+(** Tool_perpetual — MCP tool schemas for the Perpetual Agent Runtime.
+
+    Provides 4 MCP tools:
+    - masc_perpetual_start  — Start a perpetual agent with goal + model cascade
+    - masc_perpetual_status — Get current state (turn, context%, generation)
+    - masc_perpetual_stop   — Graceful shutdown with handover
+    - masc_perpetual_inject — Inject new goal/context into running agent
+
+    @since 2.61.0 *)
+
+(* ================================================================ *)
+(* Tool Schemas                                                     *)
+(* ================================================================ *)
+
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_perpetual_start";
+    description = "Start a perpetual agent that runs autonomously with infinite context. \
+The agent will think → act → observe → verify in a loop, compacting context as needed \
+and handing off to successor agents when context fills up. \
+Requires: goal (what to accomplish), models (LLM cascade in priority order). \
+Example models: 'ollama:glm-4.7-flash', 'claude:opus', 'glm:glm-4.7'.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The goal for the agent to accomplish autonomously");
+        ]);
+        ("models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "LLM model cascade in priority order. \
+Format: 'provider:model_id'. Examples: 'ollama:glm-4.7-flash', 'claude:opus', 'glm:glm-4.7'");
+        ]);
+        ("verify", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable action verification via cheap model (default: true)");
+        ]);
+        ("heartbeat_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Heartbeat interval in seconds (default: 30)");
+        ]);
+        ("max_idle", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max idle turns before stopping (default: 5)");
+        ]);
+      ]);
+      ("required", `List [`String "goal"; `String "models"]);
+    ];
+  };
+
+  {
+    name = "masc_perpetual_status";
+    description = "Get the current status of the running perpetual agent. \
+Returns: trace_id, running state, generation, turn count, context usage, cost.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("trace_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Trace ID of the perpetual agent (optional, uses latest if omitted)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_perpetual_stop";
+    description = "Stop a running perpetual agent gracefully. \
+The agent will finish its current turn, save a checkpoint, and extract DNA for potential resumption.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("trace_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Trace ID of the agent to stop (optional, stops latest)");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for stopping (for logging)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_perpetual_inject";
+    description = "Inject a new message or updated goal into a running perpetual agent. \
+The agent will receive this as a user message on its next turn.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("trace_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Trace ID of the target agent (optional, uses latest)");
+        ]);
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Message to inject into the agent's context");
+        ]);
+        ("new_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: replace the agent's goal entirely");
+        ]);
+      ]);
+      ("required", `List [`String "message"]);
+    ];
+  };
+]
+
+(* ================================================================ *)
+(* Tool Dispatch                                                    *)
+(* ================================================================ *)
+
+(** Global registry of running perpetual agents. *)
+let active_agents : (string, Perpetual_loop.loop_state * Perpetual_loop.loop_config) Hashtbl.t =
+  Hashtbl.create 4
+
+let latest_trace_id : string option ref = ref None
+
+let handle_start args =
+  let open Yojson.Safe.Util in
+  let goal = args |> member "goal" |> to_string in
+  let model_strs = args |> member "models" |> to_list |> List.map to_string in
+  let verify = args |> member "verify" |> to_bool_option
+               |> Option.value ~default:true in
+  let heartbeat = args |> member "heartbeat_sec" |> to_number_option
+                  |> Option.value ~default:30.0 in
+  let max_idle = args |> member "max_idle" |> to_int_option
+                 |> Option.value ~default:5 in
+  (* Parse model specs *)
+  let models = List.filter_map (fun s ->
+    match Llm_client.model_spec_of_string s with
+    | Ok m -> Some m
+    | Error e -> Printf.eprintf "[perpetual] Bad model spec %s: %s\n%!" s e; None
+  ) model_strs in
+  if models = [] then
+    `Assoc [("error", `String "No valid models provided")]
+  else begin
+    let config = Perpetual_loop.default_config ~goal ~models () in
+    let config = { config with
+      feedback_enabled = verify;
+      heartbeat_interval_s = heartbeat;
+      max_idle_turns = max_idle;
+      on_event = (fun ev ->
+        match ev with
+        | Perpetual_loop.TurnStart n ->
+          Printf.eprintf "[perpetual:%s] Turn %d\n%!" config.initial_goal n
+        | Perpetual_loop.Error e ->
+          Printf.eprintf "[perpetual:error] %s\n%!" e
+        | Perpetual_loop.Terminated reason ->
+          Printf.eprintf "[perpetual:done] %s\n%!" reason
+        | _ -> ()
+      );
+    } in
+    let state = Perpetual_loop.create_state config in
+    Hashtbl.replace active_agents state.trace_id (state, config);
+    latest_trace_id := Some state.trace_id;
+    (* Note: actual loop execution must be started by the caller
+       in an Eio fiber.  This just creates the state. *)
+    `Assoc [
+      ("trace_id", `String state.trace_id);
+      ("status", `String "created");
+      ("generation", `Int 0);
+      ("models", `List (List.map (fun (m : Llm_client.model_spec) ->
+        `String m.model_id) models));
+    ]
+  end
+
+let handle_status args =
+  let open Yojson.Safe.Util in
+  let trace = match args |> member "trace_id" |> to_string_option with
+    | Some id -> Some id
+    | None -> !latest_trace_id
+  in
+  match trace with
+  | None -> `Assoc [("error", `String "No perpetual agent running")]
+  | Some id ->
+    match Hashtbl.find_opt active_agents id with
+    | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
+    | Some (state, _config) -> Perpetual_loop.status state
+
+let handle_stop args =
+  let open Yojson.Safe.Util in
+  let trace = match args |> member "trace_id" |> to_string_option with
+    | Some id -> Some id
+    | None -> !latest_trace_id
+  in
+  let reason = args |> member "reason" |> to_string_option
+               |> Option.value ~default:"manual stop" in
+  match trace with
+  | None -> `Assoc [("error", `String "No perpetual agent running")]
+  | Some id ->
+    match Hashtbl.find_opt active_agents id with
+    | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
+    | Some (state, _config) ->
+      Perpetual_loop.stop state;
+      `Assoc [
+        ("trace_id", `String id);
+        ("status", `String "stopped");
+        ("reason", `String reason);
+        ("final_turn", `Int state.turn_count);
+        ("total_cost", `Float state.total_cost);
+      ]
+
+let handle_inject args =
+  let open Yojson.Safe.Util in
+  let trace = match args |> member "trace_id" |> to_string_option with
+    | Some id -> Some id
+    | None -> !latest_trace_id
+  in
+  let message = args |> member "message" |> to_string in
+  match trace with
+  | None -> `Assoc [("error", `String "No perpetual agent running")]
+  | Some id ->
+    match Hashtbl.find_opt active_agents id with
+    | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
+    | Some (state, _config) ->
+      let msg = Llm_client.user_msg message in
+      state.context <- Context_manager.append state.context msg;
+      Context_manager.persist_message state.session msg;
+      state.idle_turns <- 0;  (* Reset idle counter *)
+      `Assoc [
+        ("trace_id", `String id);
+        ("status", `String "injected");
+        ("message_length", `Int (String.length message));
+        ("new_context_ratio", `Float (Context_manager.context_ratio state.context));
+      ]
+
+type result = bool * string
+
+type context = { agent_name : string }
+
+(** Wrap a Yojson.Safe.t result into (success, json_string).
+    Returns (false, ...) if the JSON contains an "error" key. *)
+let wrap_result json =
+  let s = Yojson.Safe.to_string json in
+  let is_error = match json with
+    | `Assoc fields -> List.mem_assoc "error" fields
+    | _ -> false
+  in
+  (not is_error, s)
+
+(** Dispatch a perpetual tool call (standard MCP pattern). *)
+let dispatch _ctx ~name ~args : result option =
+  match name with
+  | "masc_perpetual_start" -> Some (wrap_result (handle_start args))
+  | "masc_perpetual_status" -> Some (wrap_result (handle_status args))
+  | "masc_perpetual_stop" -> Some (wrap_result (handle_stop args))
+  | "masc_perpetual_inject" -> Some (wrap_result (handle_inject args))
+  | _ -> None

@@ -178,7 +178,14 @@
    void
    webrtc_bindings
    webrtc_common
-   webrtc_datachannel)
+   webrtc_datachannel
+   ;; Perpetual Agent Runtime (infinite context system)
+   llm_client
+   context_manager
+   verifier
+   succession
+   perpetual_loop
+   tool_perpetual)
  (libraries
    yojson
    base64

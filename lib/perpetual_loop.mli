@@ -1,0 +1,88 @@
+(** Perpetual_loop — Autonomous agent loop with infinite context.
+
+    The core runtime for a perpetual agent.  Each turn follows:
+    think → act → observe → verify → compact → heartbeat → loop
+
+    Handles context compaction, succession to new agents, and
+    feedback verification via a cheap model.  Runs as an Eio fiber.
+
+    @since 2.61.0 *)
+
+(** {1 Events} *)
+
+(** Events emitted during the loop for monitoring. *)
+type event =
+  | TurnStart of int
+  | TurnEnd of { turn : int; tokens_used : int; cost : float }
+  | Compacted of { before_tokens : int; after_tokens : int }
+  | Prepared of { dna_size : int }
+  | Handoff of { to_model : string; generation : int }
+  | Verified of { action : string; verdict : string }
+  | Heartbeat of { turn : int; context_pct : float }
+  | Error of string
+  | IdleDetected of int
+  | Terminated of string
+
+(** {1 Configuration} *)
+
+(** Loop configuration — immutable after creation. *)
+type loop_config = {
+  initial_goal : string;
+  model_cascade : Llm_client.model_spec list;   (** Ordered preference *)
+  tools : Llm_client.tool_def list;
+  heartbeat_interval_s : float;                  (** Default: 30.0 *)
+  max_idle_turns : int;                          (** Stop after N turns with no progress *)
+  feedback_enabled : bool;                       (** Run verifier after each action *)
+  verifier_model : Llm_client.model_spec;        (** Cheap model for verification *)
+  compact_threshold : float;                     (** Default: 0.5 *)
+  prepare_threshold : float;                     (** Default: 0.7 *)
+  handoff_threshold : float;                     (** Default: 0.85 *)
+  compact_strategies : Context_manager.compaction_strategy list;
+  session_base_dir : string;                     (** Where to store session data *)
+  on_event : event -> unit;                      (** Callback for monitoring *)
+}
+
+(** {1 Loop State} *)
+
+(** Mutable loop state — evolves during execution. *)
+type loop_state = {
+  mutable context : Context_manager.working_context;
+  mutable session : Context_manager.session_context;
+  mutable generation : int;
+  mutable turn_count : int;
+  mutable idle_turns : int;
+  mutable total_cost : float;
+  mutable total_tokens : int;
+  mutable last_heartbeat : float;
+  mutable running : bool;
+  trace_id : string;
+}
+
+(** {1 Core Functions} *)
+
+(** Create initial loop state from configuration. *)
+val create_state : loop_config -> loop_state
+
+(** Run one turn of the loop.
+    Returns true to continue, false to stop. *)
+val run_turn : config:loop_config -> state:loop_state -> bool
+
+(** Run the perpetual loop until stopped or goal complete.
+    Blocks the calling fiber. *)
+val run : config:loop_config -> state:loop_state -> unit
+
+(** Stop the loop gracefully.  Sets running=false. *)
+val stop : loop_state -> unit
+
+(** Get current status as JSON. *)
+val status : loop_state -> Yojson.Safe.t
+
+(** {1 Defaults} *)
+
+(** Default configuration builder. *)
+val default_config :
+  goal:string ->
+  models:Llm_client.model_spec list ->
+  ?verifier:Llm_client.model_spec ->
+  ?session_dir:string ->
+  unit -> loop_config

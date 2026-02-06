@@ -312,3 +312,9 @@
  (name test_agent_ecosystem)
  (modules test_agent_ecosystem)
  (libraries masc_mcp alcotest str))
+
+; Perpetual Agent Runtime tests (infinite context system)
+(test
+ (name test_perpetual)
+ (modules test_perpetual)
+ (libraries masc_mcp str yojson unix))

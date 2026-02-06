@@ -109,6 +109,9 @@ The agent will receive this as a user message on its next turn.";
   };
 ]
 
+type result = bool * string
+type context = { agent_name : string }
+
 (* ================================================================ *)
 (* Tool Dispatch                                                    *)
 (* ================================================================ *)
@@ -227,10 +230,6 @@ let handle_inject args =
         ("message_length", `Int (String.length message));
         ("new_context_ratio", `Float (Context_manager.context_ratio state.context));
       ]
-
-type result = bool * string
-
-type context = { agent_name : string }
 
 (** Wrap a Yojson.Safe.t result into (success, json_string).
     Returns (false, ...) if the JSON contains an "error" key. *)

@@ -1,9 +1,14 @@
 (** MASC Agent Example - agent_core integration for multi-agent coordination
 
-    This example demonstrates how to integrate llm_mcp.agent_core with
-    MASC-MCP for coordinated multi-agent workflows.
+    @deprecated This example is deprecated since v2.59.0.
+    The llm-mcp dependency has been removed from MASC.
+    For new agent implementations, use {!Llm_direct} for LLM calls
+    and {!Masc_mcp.Tools} for MASC tool execution.
 
-    Prerequisites:
+    This file is kept for reference but will not compile without
+    the llm_mcp library installed separately.
+
+    Previous prerequisites:
     1. opam pin add llm_mcp git+ssh://git@github.com/jeong-sik/llm-mcp.git#main
     2. Add "llm_mcp.agent_core" to your dune libraries
 

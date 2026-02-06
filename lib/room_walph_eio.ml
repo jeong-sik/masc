@@ -203,9 +203,10 @@ let walph_should_continue config ~agent_name =
 
 (** {1 Preset Mapping} *)
 
-(** Map Walph preset to llm-mcp chain ID
+(** Map Walph preset to task type description.
+    Previously mapped to llm-mcp chain IDs, now used for direct LLM prompting.
     @param preset The loop preset (coverage, refactor, docs, drain)
-    @return Some chain_id for presets with corresponding chains, None for drain *)
+    @return Some chain_id for presets with corresponding prompts, None for drain *)
 let get_chain_id_for_preset = function
   | "coverage" -> Some "walph-coverage"
   | "refactor" -> Some "walph-refactor"
@@ -220,7 +221,7 @@ let get_chain_id_for_preset = function
 (** Walph (Walph Wiggum variant) pattern: Keep claiming tasks until stop condition
     Eio-native implementation with fiber-safe concurrency.
 
-    @param net Eio network capability (for llm-mcp chain calls)
+    @param net Eio network capability (unused after llm-mcp removal)
     @param clock Eio clock capability (for hard timeouts)
     @param preset Loop preset (drain, coverage, refactor, docs)
     @param max_iterations Maximum iterations before forced stop
@@ -353,8 +354,21 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
                             Printf.sprintf "Complete this task: %s. %s" task_title task_desc
                       in
                       let _ = Room.broadcast config ~from_agent:agent_name
-                        ~content:(Printf.sprintf "🔗 @walph calling chain '%s' for '%s'..." cid task_title) in
-                      Llm_client_eio.call_chain ~net ~clock ~goal ~chain_id:cid ()
+                        ~content:(Printf.sprintf "🔗 @walph executing '%s' for '%s'..." cid task_title) in
+                      (* Direct LLM call — no llm-mcp dependency *)
+                      ignore (net, clock);  (* Previously used for llm-mcp HTTP call *)
+                      try
+                        let response = Llm_direct.dispatch
+                          ~tool_name:"glm"
+                          ~model:Env_config.Llm.default_model
+                          ~prompt:goal
+                          ~timeout_sec:60
+                          ~max_chars:4000
+                          ()
+                        in
+                        if response = "" then Error "Empty LLM response"
+                        else Ok response
+                      with exn -> Error (Printexc.to_string exn)
                   in
 
                   (match chain_result with
@@ -365,7 +379,7 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
                        (* Mark task as done *)
                        (match task_id with
                         | Some tid ->
-                            let notes_str = Printf.sprintf "Chain result: %s" (String.sub result 0 (min 100 (String.length result))) in
+                            let notes_str = Printf.sprintf "LLM result: %s" (String.sub result 0 (min 100 (String.length result))) in
                             let _ = Room.transition_task_r config ~agent_name ~task_id:tid ~action:"done" ~notes:notes_str () in
                             ()
                         | None -> ());
@@ -373,13 +387,7 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
                        let _ = Room.broadcast config ~from_agent:agent_name
                          ~content:(Printf.sprintf "📊 @walph Iteration %d: %s ✅" walph_state.iterations claim_result) in
                        loop ()
-                   | Error e ->
-                       let err_msg = match e with
-                         | Llm_client_eio.ConnectionError s -> "Connection: " ^ s
-                         | Llm_client_eio.ParseError s -> "Parse: " ^ s
-                         | Llm_client_eio.ServerError (code, s) -> Printf.sprintf "Server(%d): %s" code s
-                         | Llm_client_eio.Timeout -> "Timeout"
-                       in
+                   | Error err_msg ->
                        let _ = Room.broadcast config ~from_agent:agent_name
                          ~content:(Printf.sprintf "⚠️ @walph chain error: %s (continuing...)" err_msg) in
                        (* Continue even on chain error *)

@@ -197,6 +197,10 @@ module Llm = struct
   (** Timeout for LLM API calls (seconds) *)
   let timeout_seconds =
     get_float ~default:30.0 "MASC_LLM_TIMEOUT_SEC"
+
+  (** Default GLM model for Z.ai API calls *)
+  let default_model =
+    get_string ~default:"glm-4.7" "MASC_GLM_DEFAULT_MODEL"
 end
 
 (** {1 Rate Limit Cleanup Configuration} *)
@@ -302,9 +306,11 @@ end
 (** {1 Endpoint Configuration} *)
 
 module Endpoints = struct
-  (** LLM-MCP server URL *)
+  (** @deprecated LLM-MCP server URL - no longer used.
+      Use {!Llm_direct.dispatch} for direct API calls instead.
+      Kept for backward compatibility; will be removed in v3.0. *)
   let llm_mcp_url =
-    get_string ~default:"http://127.0.0.1:8932/mcp" "LLM_MCP_URL"
+    get_string ~default:"" "LLM_MCP_URL"  (* Default empty - not used *)
 
   (** MASC server host *)
   let masc_host =

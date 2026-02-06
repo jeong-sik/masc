@@ -1363,7 +1363,7 @@ let walph_should_continue config =
     end else true
   )
 
-(** Map Walph preset to llm-mcp chain ID
+(** Map Walph preset to task type (no llm-mcp)
     @param preset The loop preset (coverage, refactor, docs, review, figma, drain)
     @return Some chain_id for presets with corresponding chains, None for drain *)
 let get_chain_id_for_preset = function

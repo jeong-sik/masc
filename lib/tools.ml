@@ -3633,15 +3633,15 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
   };
 
   (* Walph Pattern: Iterative Task Loop
-     Integration with llm-mcp chains:
-     - preset="coverage" → chain.orchestrate walph-coverage (FeedbackLoop for test coverage)
-     - preset="refactor" → chain.orchestrate walph-refactor (FeedbackLoop for lint errors)
-     - preset="docs" → chain.orchestrate walph-docs (FeedbackLoop for documentation)
-     - preset="figma" → chain.orchestrate walph-figma (Vision-first visual fidelity loop)
-     - preset="drain" → simple task claiming without chain execution *)
+     Presets with direct LLM execution:
+     - preset="coverage" → FeedbackLoop for test coverage (direct LLM)
+     - preset="refactor" → FeedbackLoop for lint errors (direct LLM)
+     - preset="docs" → FeedbackLoop for documentation (direct LLM)
+     - preset="figma" → Vision-first visual fidelity loop (direct LLM)
+     - preset="drain" → simple task claiming without LLM execution *)
   {
     name = "masc_walph_loop";
-    description = "Walph pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @walph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets map to llm-mcp FeedbackLoop chains: coverage → walph-coverage, refactor → walph-refactor, docs → walph-docs, review → pr-review-pipeline, figma → walph-figma, drain → simple claim loop.";
+    description = "Walph pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @walph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets: coverage → test coverage FeedbackLoop, refactor → lint FeedbackLoop, docs → doc coverage FeedbackLoop, review → PR review pipeline, figma → SSIM visual fidelity loop, drain → simple claim loop.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -3702,7 +3702,7 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
   (* Walph Natural Language: Control walph via natural language *)
   {
     name = "masc_walph_natural";
-    description = "Control Walph loop using natural language. Heuristic-based intent classification (Korean/English). Examples: '커버리지 올려줘' → START coverage, '그만' → STOP, '잠깐 멈춰' → PAUSE, '다시 시작' → RESUME, '지금 뭐해?' → STATUS. Falls back to llm-mcp for ambiguous messages (requires llm-mcp server on port 8932).";
+    description = "Control Walph loop using natural language. Heuristic-based intent classification (Korean/English). Examples: '커버리지 올려줘' → START coverage, '그만' → STOP, '잠깐 멈춰' → PAUSE, '다시 시작' → RESUME, '지금 뭐해?' → STATUS. Uses direct LLM calls for ambiguous message classification.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

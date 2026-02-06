@@ -21,7 +21,7 @@ type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
 
 (** Global Eio network reference for Walph chain execution.
     Set by main_eio.ml during server initialization.
-    Used by walph_loop to call llm-mcp chain.orchestrate.
+    Used by walph_loop for direct LLM API calls.
 
     Initialization order is enforced:
     - set_net MUST be called before any get_net usage

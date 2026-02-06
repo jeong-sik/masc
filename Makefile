@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test clean coverage doc install-deps dev-setup fmt fmt-check ci
+.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci
 
 # Default target
 all: build
@@ -19,11 +19,19 @@ clean:
 	dune clean
 
 # Run tests with coverage instrumentation
-# NOTE: bisect_ppx pending ppxlib 0.37+ support (OCaml 5.2+ AST changes)
 coverage:
-	@echo "⚠️  Coverage disabled: bisect_ppx pending ppxlib 0.37+ support"
-	@echo "Running tests instead..."
-	dune test
+	rm -rf _coverage
+	mkdir -p _coverage
+	BISECT_FILE=$(CURDIR)/_coverage/bisect dune test --instrument-with bisect_ppx --force
+
+# Print coverage summary to stdout
+coverage-summary: coverage
+	bisect-ppx-report summary --coverage-path _coverage
+
+# Generate HTML coverage report
+coverage-html: coverage
+	bisect-ppx-report html --coverage-path _coverage -o _coverage/html
+	@echo "Coverage report: _coverage/html/index.html"
 
 # Generate documentation
 doc:

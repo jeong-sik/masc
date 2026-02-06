@@ -319,8 +319,8 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
     Error "❌ LLM: prefer_fast=false not implemented"
 
 (** Call GLM API directly — Z.ai cloud API, 200K context, no VRAM.
-    No llm-mcp dependency. *)
-let llm_mcp_glm ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system prompt =
+    Uses Llm_direct.call_glm for direct API calls (no proxy). *)
+let glm_direct ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system prompt =
   ignore _temp;
   try
     let full_prompt = Printf.sprintf "%s\n\n%s" system prompt in
@@ -329,7 +329,7 @@ let llm_mcp_glm ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system pr
     else Error "❌ LLM: GLM returned empty response"
   with exn -> Error (Printf.sprintf "❌ LLM: GLM exception [%s]" (Printexc.to_string exn))
 
-(** Call local ollama API — DEPRECATED, use llm_mcp_glm instead *)
+(** Call local ollama API — DEPRECATED, use glm_direct instead *)
 let ollama_generate ~net:_ ?(model = Env_config.Ollama.default_model) ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
   try
     let body = Yojson.Safe.to_string (`Assoc [
@@ -377,9 +377,9 @@ let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt
           Ok response
       | Error e2 ->
           Printf.eprintf "[LLM] ❌ %s failed: %s\n%!" (string_of_provider cli2) e2;
-          (* 3. Fallback to cloud GLM via llm-mcp — 200K context, no VRAM *)
-          Printf.eprintf "[LLM] Falling back to cloud GLM (llm-mcp)...\n%!";
-          llm_mcp_glm ~net ~temperature ~max_tokens:num_predict ~system prompt
+          (* 3. Fallback to cloud GLM via Z.ai API — 200K context, no VRAM *)
+          Printf.eprintf "[LLM] Falling back to cloud GLM (Z.ai)...\n%!";
+          glm_direct ~net ~temperature ~max_tokens:num_predict ~system prompt
 
 (** {1 READ: Content Fetching} *)
 
@@ -2104,7 +2104,7 @@ let loop_status : (int * int * string) option ref = ref None  (* (current, total
     are incompatible. Tool_board uses Eio mutex which cannot be accessed
     from Thread.create threads (causes Eio__Eio_mutex.Poisoned error).
 
-    For long-running loops, use llm-mcp chain orchestration instead. *)
+    For long-running loops, use Walph presets with direct LLM execution. *)
 let autonomous_loop ~net args =
   let iterations = Safe_ops.json_int ~default:10 "iterations" args in
   let iterations = min iterations 50 in  (* cap at 50 for foreground - prevents blocking *)

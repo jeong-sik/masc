@@ -129,10 +129,10 @@ let default_configs = [
   });
   ("ollama", {
     agent_name = "ollama";
-    command = "llm-mcp --agent ollama --prompt";  (* Use llm-mcp CLI agent mode *)
+    command = Printf.sprintf "ollama run %s" Env_config.Ollama.default_model;  (* Direct ollama CLI *)
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
-    mcp_tools = [];  (* No MCP flags needed - llm-mcp handles everything *)
+    mcp_tools = [];  (* Ollama has no MCP support *)
   });
 ]
 
@@ -155,7 +155,7 @@ let build_mcp_args agent_name tools =
     (* Codex: Uses config.toml MCP servers automatically, no extra flags needed *)
     []
   | "ollama" ->
-    (* Ollama: Uses llm-mcp CLI agent mode, no extra flags needed *)
+    (* Ollama: Direct CLI, no MCP support *)
     []
   | _ -> []
 

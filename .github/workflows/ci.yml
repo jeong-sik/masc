@@ -18,17 +18,12 @@ jobs:
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: 5.2.x
+          ocaml-compiler: 5.4.x
           dune-cache: true
 
       - name: Pin external dependencies
         run: |
           opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
-          # bisect_ppx isn't reliably available on opam yet for newer compilers (e.g. OCaml 5.4),
-          # so pin from git to keep CI solvable when `--with-test` pulls it in.
-          # bisect_ppx needs an OCaml-version-matched branch for newer compilers.
-          # (llm-mcp pins `#5.2`; masc-mcp CI uses OCaml 5.4.)
-          opam pin add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
           opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
           opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
           opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
@@ -67,7 +62,7 @@ jobs:
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: 5.2.x
+          ocaml-compiler: 5.4.x
           dune-cache: true
 
       - name: Pin external dependencies
@@ -102,7 +97,7 @@ jobs:
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: 5.2.x
+          ocaml-compiler: 5.4.x
           dune-cache: true
 
       - name: Pin external dependencies

@@ -1,0 +1,124 @@
+(** Llm_client — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
+
+    Provides structured chat/completion calls to any LLM provider via
+    OpenAI-compatible API format.  Local models (Ollama) and remote APIs
+    (Claude, GLM, Gemini, OpenRouter) are supported through a unified
+    interface.
+
+    Uses Process_eio subprocess calls for HTTP (proven pattern from
+    llm_direct.ml).  Native cohttp-eio upgrade is a future optimization.
+
+    @since 2.61.0 *)
+
+(** {1 Provider Types} *)
+
+(** Supported LLM providers. *)
+type provider =
+  | Ollama
+  | Claude
+  | Gemini
+  | Glm_cloud
+  | OpenRouter
+  | Custom of string
+
+(** Model specification — everything needed to call a specific model. *)
+type model_spec = {
+  provider : provider;
+  model_id : string;           (** e.g. "glm-4.7-flash", "claude-opus-4-6" *)
+  max_context : int;           (** Max context window in tokens *)
+  api_url : string;            (** Base API URL *)
+  api_key_env : string option; (** Env var name for API key *)
+  cost_per_1k_input : float;   (** USD per 1K input tokens *)
+  cost_per_1k_output : float;  (** USD per 1K output tokens *)
+}
+
+(** {1 Message Types} *)
+
+(** Role in a conversation. *)
+type role = System | User | Assistant | Tool
+
+(** A single message in a conversation. *)
+type message = {
+  role : role;
+  content : string;
+  name : string option;       (** For tool messages: tool name *)
+  tool_call_id : string option; (** For tool result messages *)
+}
+
+(** Tool/function definition for function calling. *)
+type tool_def = {
+  tool_name : string;
+  tool_description : string;
+  parameters : Yojson.Safe.t;  (** JSON Schema for parameters *)
+}
+
+(** A tool call requested by the model. *)
+type tool_call = {
+  call_id : string;
+  call_name : string;
+  call_arguments : string;     (** JSON string of arguments *)
+}
+
+(** Token usage from a completion. *)
+type token_usage = {
+  input_tokens : int;
+  output_tokens : int;
+  total_tokens : int;
+}
+
+(** {1 Request/Response} *)
+
+(** Completion request. *)
+type completion_request = {
+  model : model_spec;
+  messages : message list;
+  temperature : float;
+  max_tokens : int;
+  tools : tool_def list;
+  response_format : [ `Text | `Json ];
+}
+
+(** Completion response. *)
+type completion_response = {
+  content : string;
+  tool_calls : tool_call list;
+  usage : token_usage;
+  model_used : string;
+  latency_ms : int;
+}
+
+(** {1 Core Functions} *)
+
+(** Call LLM with structured request.
+    Uses subprocess curl for HTTP — no Eio runtime dependency.
+    @return Ok response on success, Error message on failure. *)
+val complete : completion_request -> (completion_response, string) result
+
+(** Cascade — try models in order until one succeeds.
+    Each request targets a different model. First success wins.
+    @return Ok response from first successful model, Error if all fail. *)
+val cascade : completion_request list -> (completion_response, string) result
+
+(** {1 Helpers} *)
+
+(** Built-in model specs for common configurations. *)
+val ollama_glm : model_spec
+val ollama_lfm : model_spec
+val claude_opus : model_spec
+val claude_sonnet : model_spec
+val glm_cloud : model_spec
+
+(** Create a message. *)
+val system_msg : string -> message
+val user_msg : string -> message
+val assistant_msg : string -> message
+val tool_msg : name:string -> call_id:string -> string -> message
+
+(** Estimate token count for a message list (heuristic: ~4 chars per token). *)
+val estimate_tokens : message list -> int
+
+(** Parse model spec from string like "ollama:glm-4.7-flash" or "claude:opus". *)
+val model_spec_of_string : string -> (model_spec, string) result
+
+(** String representation of provider. *)
+val string_of_provider : provider -> string

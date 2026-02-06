@@ -1,0 +1,527 @@
+(** Llm_client — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
+
+    Unified interface for calling any LLM provider.  All providers are
+    normalized to an internal message format and results are parsed into
+    structured completion_response records.
+
+    HTTP calls use Process_eio subprocess (curl) — the same proven pattern
+    used by llm_direct.ml.  This avoids complex TLS/cohttp-eio setup
+    while being equally reliable.
+
+    @since 2.61.0 *)
+
+open Printf
+
+(* ================================================================ *)
+(* Types                                                            *)
+(* ================================================================ *)
+
+type provider =
+  | Ollama
+  | Claude
+  | Gemini
+  | Glm_cloud
+  | OpenRouter
+  | Custom of string
+
+type model_spec = {
+  provider : provider;
+  model_id : string;
+  max_context : int;
+  api_url : string;
+  api_key_env : string option;
+  cost_per_1k_input : float;
+  cost_per_1k_output : float;
+}
+
+type role = System | User | Assistant | Tool
+
+type message = {
+  role : role;
+  content : string;
+  name : string option;
+  tool_call_id : string option;
+}
+
+type tool_def = {
+  tool_name : string;
+  tool_description : string;
+  parameters : Yojson.Safe.t;
+}
+
+type tool_call = {
+  call_id : string;
+  call_name : string;
+  call_arguments : string;
+}
+
+type token_usage = {
+  input_tokens : int;
+  output_tokens : int;
+  total_tokens : int;
+}
+
+type completion_request = {
+  model : model_spec;
+  messages : message list;
+  temperature : float;
+  max_tokens : int;
+  tools : tool_def list;
+  response_format : [ `Text | `Json ];
+}
+
+type completion_response = {
+  content : string;
+  tool_calls : tool_call list;
+  usage : token_usage;
+  model_used : string;
+  latency_ms : int;
+}
+
+(* ================================================================ *)
+(* Provider Helpers                                                 *)
+(* ================================================================ *)
+
+let string_of_provider = function
+  | Ollama -> "ollama"
+  | Claude -> "claude"
+  | Gemini -> "gemini"
+  | Glm_cloud -> "glm_cloud"
+  | OpenRouter -> "openrouter"
+  | Custom s -> sprintf "custom(%s)" s
+
+let string_of_role = function
+  | System -> "system"
+  | User -> "user"
+  | Assistant -> "assistant"
+  | Tool -> "tool"
+
+(* ================================================================ *)
+(* Built-in Model Specs                                             *)
+(* ================================================================ *)
+
+let ollama_glm = {
+  provider = Ollama;
+  model_id = "glm-4.7-flash";
+  max_context = 202000;
+  api_url = "http://127.0.0.1:11434";
+  api_key_env = None;
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
+let ollama_lfm = {
+  provider = Ollama;
+  model_id = "LFM2.5-1.2B-Instruct";
+  max_context = 128000;
+  api_url = "http://127.0.0.1:11434";
+  api_key_env = None;
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
+let claude_opus = {
+  provider = Claude;
+  model_id = "claude-opus-4-6";
+  max_context = 200000;
+  api_url = "https://api.anthropic.com";
+  api_key_env = Some "ANTHROPIC_API_KEY";
+  cost_per_1k_input = 0.015;
+  cost_per_1k_output = 0.075;
+}
+
+let claude_sonnet = {
+  provider = Claude;
+  model_id = "claude-sonnet-4-5-20250929";
+  max_context = 200000;
+  api_url = "https://api.anthropic.com";
+  api_key_env = Some "ANTHROPIC_API_KEY";
+  cost_per_1k_input = 0.003;
+  cost_per_1k_output = 0.015;
+}
+
+let glm_cloud = {
+  provider = Glm_cloud;
+  model_id = "glm-4.7";
+  max_context = 128000;
+  api_url = "https://api.z.ai";
+  api_key_env = Some "ZAI_API_KEY";
+  cost_per_1k_input = 0.001;
+  cost_per_1k_output = 0.002;
+}
+
+(* ================================================================ *)
+(* Message Constructors                                             *)
+(* ================================================================ *)
+
+let system_msg content = { role = System; content; name = None; tool_call_id = None }
+let user_msg content = { role = User; content; name = None; tool_call_id = None }
+let assistant_msg content = { role = Assistant; content; name = None; tool_call_id = None }
+
+let tool_msg ~name ~call_id content =
+  { role = Tool; content; name = Some name; tool_call_id = Some call_id }
+
+(* ================================================================ *)
+(* Token Estimation                                                 *)
+(* ================================================================ *)
+
+(** Heuristic: ~4 characters per token (conservative estimate). *)
+let estimate_tokens (msgs : message list) =
+  List.fold_left (fun acc (m : message) -> acc + (String.length m.content / 4) + 4) 0 msgs
+
+(* ================================================================ *)
+(* JSON Encoding — per provider                                     *)
+(* ================================================================ *)
+
+let message_to_openai_json (m : message) : Yojson.Safe.t =
+  let base = [
+    ("role", `String (string_of_role m.role));
+    ("content", `String m.content);
+  ] in
+  let with_name = match m.name with
+    | Some n -> ("name", `String n) :: base
+    | None -> base
+  in
+  let with_id = match m.tool_call_id with
+    | Some id -> ("tool_call_id", `String id) :: with_name
+    | None -> with_name
+  in
+  `Assoc with_id
+
+let tool_def_to_openai_json (td : tool_def) : Yojson.Safe.t =
+  `Assoc [
+    ("type", `String "function");
+    ("function", `Assoc [
+      ("name", `String td.tool_name);
+      ("description", `String td.tool_description);
+      ("parameters", td.parameters);
+    ]);
+  ]
+
+(** Build OpenAI-compatible request body (works for Ollama, GLM, OpenRouter). *)
+let build_openai_body (req : completion_request) : string =
+  let messages_json = List.map message_to_openai_json req.messages in
+  let base = [
+    ("model", `String req.model.model_id);
+    ("messages", `List messages_json);
+    ("temperature", `Float req.temperature);
+    ("max_tokens", `Int req.max_tokens);
+  ] in
+  let with_tools = match req.tools with
+    | [] -> base
+    | tools ->
+      let tools_json = List.map tool_def_to_openai_json tools in
+      ("tools", `List tools_json) :: base
+  in
+  let with_format = match req.response_format with
+    | `Json -> ("response_format", `Assoc [("type", `String "json_object")]) :: with_tools
+    | `Text -> with_tools
+  in
+  Yojson.Safe.to_string (`Assoc with_format)
+
+(** Build Anthropic Messages API request body. *)
+let build_claude_body (req : completion_request) : string =
+  (* Claude uses separate system parameter *)
+  let system_text = List.fold_left (fun acc m ->
+    match m.role with System -> acc ^ m.content ^ "\n" | _ -> acc
+  ) "" req.messages |> String.trim in
+  let non_system = List.filter (fun m -> m.role <> System) req.messages in
+  let messages_json = List.map (fun m ->
+    `Assoc [
+      ("role", `String (string_of_role m.role));
+      ("content", `String m.content);
+    ]
+  ) non_system in
+  let base = [
+    ("model", `String req.model.model_id);
+    ("max_tokens", `Int req.max_tokens);
+    ("messages", `List messages_json);
+  ] in
+  let with_system = if system_text <> "" then
+    ("system", `String system_text) :: base
+  else base in
+  let with_tools = match req.tools with
+    | [] -> with_system
+    | tools ->
+      let tools_json = List.map (fun td ->
+        `Assoc [
+          ("name", `String td.tool_name);
+          ("description", `String td.tool_description);
+          ("input_schema", td.parameters);
+        ]
+      ) tools in
+      ("tools", `List tools_json) :: with_system
+  in
+  Yojson.Safe.to_string (`Assoc with_tools)
+
+(* ================================================================ *)
+(* Response Parsing — per provider                                  *)
+(* ================================================================ *)
+
+let parse_openai_response (json_str : string) : (completion_response, string) result =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    let open Yojson.Safe.Util in
+    (* Check for error *)
+    (match json |> member "error" with
+     | `Null -> ()
+     | err ->
+       let msg = err |> member "message" |> to_string_option
+                 |> Option.value ~default:"Unknown API error" in
+       raise (Failure msg));
+    let choice = json |> member "choices" |> index 0 in
+    let msg = choice |> member "message" in
+    let content = msg |> member "content" |> to_string_option
+                  |> Option.value ~default:"" in
+    (* Parse tool calls if present *)
+    let tool_calls = match msg |> member "tool_calls" with
+      | `List calls ->
+        List.filter_map (fun tc ->
+          try
+            let fn = tc |> member "function" in
+            Some {
+              call_id = tc |> member "id" |> to_string;
+              call_name = fn |> member "name" |> to_string;
+              call_arguments = fn |> member "arguments" |> to_string;
+            }
+          with _ -> None
+        ) calls
+      | _ -> []
+    in
+    (* Parse usage *)
+    let usage_json = json |> member "usage" in
+    let usage = {
+      input_tokens = (try usage_json |> member "prompt_tokens" |> to_int with _ -> 0);
+      output_tokens = (try usage_json |> member "completion_tokens" |> to_int with _ -> 0);
+      total_tokens = (try usage_json |> member "total_tokens" |> to_int with _ -> 0);
+    } in
+    let model_used = json |> member "model" |> to_string_option
+                     |> Option.value ~default:"unknown" in
+    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+  with
+  | Failure msg -> Error msg
+  | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))
+
+let parse_claude_response (json_str : string) : (completion_response, string) result =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    let open Yojson.Safe.Util in
+    (* Check for error *)
+    (match json |> member "type" |> to_string_option with
+     | Some "error" ->
+       let msg = json |> member "error" |> member "message" |> to_string in
+       raise (Failure msg)
+     | _ -> ());
+    (* Extract content blocks *)
+    let content_blocks = json |> member "content" |> to_list in
+    let content = List.fold_left (fun acc block ->
+      match block |> member "type" |> to_string with
+      | "text" -> acc ^ (block |> member "text" |> to_string)
+      | _ -> acc
+    ) "" content_blocks in
+    (* Extract tool use blocks *)
+    let tool_calls = List.filter_map (fun block ->
+      match block |> member "type" |> to_string with
+      | "tool_use" ->
+        Some {
+          call_id = block |> member "id" |> to_string;
+          call_name = block |> member "name" |> to_string;
+          call_arguments = block |> member "input" |> Yojson.Safe.to_string;
+        }
+      | _ -> None
+    ) content_blocks in
+    (* Parse usage *)
+    let usage_json = json |> member "usage" in
+    let input_tokens = try usage_json |> member "input_tokens" |> to_int with _ -> 0 in
+    let output_tokens = try usage_json |> member "output_tokens" |> to_int with _ -> 0 in
+    let usage = {
+      input_tokens;
+      output_tokens;
+      total_tokens = input_tokens + output_tokens;
+    } in
+    let model_used = json |> member "model" |> to_string_option
+                     |> Option.value ~default:"unknown" in
+    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+  with
+  | Failure msg -> Error msg
+  | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))
+
+let parse_ollama_generate_response (json_str : string) : (completion_response, string) result =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    let open Yojson.Safe.Util in
+    let content = json |> member "response" |> to_string in
+    let eval_count = try json |> member "eval_count" |> to_int with _ -> 0 in
+    let prompt_eval_count = try json |> member "prompt_eval_count" |> to_int with _ -> 0 in
+    let model_used = json |> member "model" |> to_string_option
+                     |> Option.value ~default:"unknown" in
+    let usage = {
+      input_tokens = prompt_eval_count;
+      output_tokens = eval_count;
+      total_tokens = prompt_eval_count + eval_count;
+    } in
+    Ok { content; tool_calls = []; usage; model_used; latency_ms = 0 }
+  with exn ->
+    Error (sprintf "Ollama parse error: %s" (Printexc.to_string exn))
+
+(* ================================================================ *)
+(* HTTP Execution via curl subprocess                               *)
+(* ================================================================ *)
+
+(** Get API key from environment variable. *)
+let get_api_key (spec : model_spec) : string =
+  match spec.api_key_env with
+  | Some env_var -> Sys.getenv_opt env_var |> Option.value ~default:""
+  | None -> ""
+
+(** Run curl with body via stdin, return response string. *)
+let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
+  let header_args = List.concat_map (fun (k, v) ->
+    ["-H"; sprintf "%s: %s" k v]
+  ) headers in
+  let argv = ["curl"; "-s"; "--max-time"; string_of_int timeout_sec;
+              "-X"; "POST"; url] @ header_args @ ["-d"; "@-"] in
+  try
+    let raw = Process_eio.run_argv_with_stdin
+      ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
+      ~stdin_content:body
+      argv in
+    if String.length raw = 0 then Error "Empty response from API"
+    else Ok raw
+  with exn ->
+    Error (sprintf "HTTP error: %s" (Printexc.to_string exn))
+
+(* ================================================================ *)
+(* Provider-Specific Execution                                      *)
+(* ================================================================ *)
+
+let call_ollama_chat (req : completion_request) : (completion_response, string) result =
+  let url = sprintf "%s/v1/chat/completions" req.model.api_url in
+  let body = build_openai_body req in
+  let headers = [("Content-Type", "application/json")] in
+  match curl_post ~url ~headers ~body ~timeout_sec:120 with
+  | Error e -> Error e
+  | Ok raw -> parse_openai_response raw
+
+(** Ollama fallback: /api/generate for models without chat support. *)
+let call_ollama_generate (req : completion_request) : (completion_response, string) result =
+  let url = sprintf "%s/api/generate" req.model.api_url in
+  let prompt = List.fold_left (fun acc m ->
+    match m.role with
+    | System -> sprintf "%s[System] %s\n" acc m.content
+    | User -> sprintf "%s%s\n" acc m.content
+    | Assistant -> sprintf "%s[Assistant] %s\n" acc m.content
+    | Tool -> sprintf "%s[Tool:%s] %s\n" acc
+                (Option.value ~default:"" m.name) m.content
+  ) "" req.messages in
+  let body = Yojson.Safe.to_string (`Assoc [
+    ("model", `String req.model.model_id);
+    ("prompt", `String prompt);
+    ("stream", `Bool false);
+  ]) in
+  let headers = [("Content-Type", "application/json")] in
+  match curl_post ~url ~headers ~body ~timeout_sec:120 with
+  | Error e -> Error e
+  | Ok raw -> parse_ollama_generate_response raw
+
+let call_claude (req : completion_request) : (completion_response, string) result =
+  let api_key = get_api_key req.model in
+  if api_key = "" then Error "ANTHROPIC_API_KEY not set"
+  else
+    let url = sprintf "%s/v1/messages" req.model.api_url in
+    let body = build_claude_body req in
+    let headers = [
+      ("Content-Type", "application/json");
+      ("x-api-key", api_key);
+      ("anthropic-version", "2023-06-01");
+    ] in
+    match curl_post ~url ~headers ~body ~timeout_sec:120 with
+    | Error e -> Error e
+    | Ok raw -> parse_claude_response raw
+
+let call_openai_compatible (req : completion_request) : (completion_response, string) result =
+  let api_key = get_api_key req.model in
+  let path = match req.model.provider with
+    | Glm_cloud -> "/api/coding/paas/v4/chat/completions"
+    | _ -> "/v1/chat/completions"
+  in
+  let url = sprintf "%s%s" req.model.api_url path in
+  let body = build_openai_body req in
+  let headers = [("Content-Type", "application/json")] @
+    (if api_key <> "" then [("Authorization", sprintf "Bearer %s" api_key)] else [])
+  in
+  match curl_post ~url ~headers ~body ~timeout_sec:60 with
+  | Error e -> Error e
+  | Ok raw -> parse_openai_response raw
+
+(* ================================================================ *)
+(* Core: complete                                                   *)
+(* ================================================================ *)
+
+let complete (req : completion_request) : (completion_response, string) result =
+  let t0 = Time_compat.now () in
+  let result = match req.model.provider with
+    | Ollama ->
+      (* Try chat API first, fall back to generate *)
+      (match call_ollama_chat req with
+       | Ok _ as ok -> ok
+       | Error _ -> call_ollama_generate req)
+    | Claude -> call_claude req
+    | Gemini | Glm_cloud | OpenRouter | Custom _ ->
+      call_openai_compatible req
+  in
+  let elapsed_ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+  (* Inject latency into response *)
+  Result.map (fun resp -> { resp with latency_ms = elapsed_ms }) result
+
+(* ================================================================ *)
+(* Cascade: try models in order                                     *)
+(* ================================================================ *)
+
+let cascade (requests : completion_request list) : (completion_response, string) result =
+  let rec try_next errors = function
+    | [] ->
+      let all_errors = String.concat "; " (List.rev errors) in
+      Error (sprintf "All models failed: %s" all_errors)
+    | req :: rest ->
+      eprintf "[llm_client] cascade: trying %s (%s)\n%!"
+        req.model.model_id (string_of_provider req.model.provider);
+      match complete req with
+      | Ok resp ->
+        eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
+          resp.model_used resp.latency_ms;
+        Ok resp
+      | Error e ->
+        eprintf "[llm_client] cascade: %s failed: %s\n%!"
+          req.model.model_id e;
+        try_next (e :: errors) rest
+  in
+  try_next [] requests
+
+(* ================================================================ *)
+(* Model Spec Parser                                                *)
+(* ================================================================ *)
+
+let model_spec_of_string s =
+  match String.split_on_char ':' s with
+  | ["ollama"; model_id] ->
+    Ok { ollama_glm with model_id }
+  | ["claude"; "opus"] ->
+    Ok claude_opus
+  | ["claude"; "sonnet"] ->
+    Ok claude_sonnet
+  | ["claude"; model_id] ->
+    Ok { claude_opus with model_id }
+  | ["glm"; model_id] ->
+    Ok { glm_cloud with model_id }
+  | ["openrouter"; model_id] ->
+    Ok {
+      provider = OpenRouter;
+      model_id;
+      max_context = 128000;
+      api_url = "https://openrouter.ai/api";
+      api_key_env = Some "OPENROUTER_API_KEY";
+      cost_per_1k_input = 0.001;
+      cost_per_1k_output = 0.002;
+    }
+  | _ -> Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)

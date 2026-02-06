@@ -1,0 +1,358 @@
+(** Context_manager — 3-tier memory with progressive compaction.
+
+    Implements the working memory tier (Tier 1) with in-process
+    operations and session persistence (Tier 2) via JSONL files.
+    Tier 3 (semantic/pgvector) is accessed externally.
+
+    Compaction pipeline:
+    1. PruneToolOutputs — truncate verbose tool results
+    2. MergeContiguous  — collapse consecutive same-role messages
+    3. DropLowImportance — remove low-scored messages
+    4. SummarizeOld — LLM-compress oldest messages (most aggressive)
+
+    @since 2.61.0 *)
+
+open Printf
+
+(* ================================================================ *)
+(* Types                                                            *)
+(* ================================================================ *)
+
+type working_context = {
+  system_prompt : string;
+  messages : Llm_client.message list;
+  token_count : int;
+  max_tokens : int;
+  importance_scores : (int * float) list;
+}
+
+type checkpoint = {
+  checkpoint_id : string;
+  timestamp : float;
+  generation : int;
+  message_count : int;
+  token_count : int;
+  serialized : string;
+}
+
+type session_context = {
+  session_id : string;
+  session_dir : string;
+  mutable full_history : Llm_client.message list;
+  mutable checkpoints : checkpoint list;
+}
+
+type compaction_strategy =
+  | PruneToolOutputs
+  | MergeContiguous
+  | DropLowImportance
+  | SummarizeOld
+
+(* ================================================================ *)
+(* Token Estimation                                                 *)
+(* ================================================================ *)
+
+(** Count tokens in a message (~4 chars/token + role overhead). *)
+let msg_tokens (m : Llm_client.message) =
+  (String.length m.content / 4) + 4
+
+let count_tokens (system_prompt : string) (msgs : Llm_client.message list) =
+  let sys_tokens = (String.length system_prompt / 4) + 4 in
+  List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
+
+(* ================================================================ *)
+(* Context Ratio                                                    *)
+(* ================================================================ *)
+
+let context_ratio (ctx : working_context) : float =
+  if ctx.max_tokens = 0 then 0.0
+  else float_of_int ctx.token_count /. float_of_int ctx.max_tokens
+
+let exceeds_threshold ctx threshold =
+  context_ratio ctx >= threshold
+
+(* ================================================================ *)
+(* Working Context Operations                                       *)
+(* ================================================================ *)
+
+let create ~system_prompt ~max_tokens =
+  let token_count = (String.length system_prompt / 4) + 4 in
+  { system_prompt; messages = []; token_count; max_tokens; importance_scores = [] }
+
+let append ctx (msg : Llm_client.message) =
+  let new_tokens = msg_tokens msg in
+  { ctx with
+    messages = ctx.messages @ [msg];
+    token_count = ctx.token_count + new_tokens;
+  }
+
+let append_many ctx msgs =
+  List.fold_left append ctx msgs
+
+(* ================================================================ *)
+(* Importance Scoring                                               *)
+(* ================================================================ *)
+
+(** Stanford Generative Agents adapted scoring.
+    - Recency: exponential decay from most recent
+    - Role weight: system > tool results > user > assistant
+    - Content length: longer messages tend to be more important
+    - Tool calls: messages with tool actions are important *)
+let score_importance ctx =
+  let n = List.length ctx.messages in
+  let scores = List.mapi (fun i (m : Llm_client.message) ->
+    (* Recency: 0.0 (oldest) → 1.0 (newest) with exponential curve *)
+    let recency = if n <= 1 then 1.0
+      else let t = float_of_int i /. float_of_int (n - 1) in
+           t *. t  (* Quadratic: recent messages weighted more *)
+    in
+    (* Role weight *)
+    let role_w = match m.role with
+      | Llm_client.System -> 1.0
+      | Llm_client.Tool -> 0.7
+      | Llm_client.User -> 0.6
+      | Llm_client.Assistant -> 0.4
+    in
+    (* Content signal: very short = less important, very long = average *)
+    let len = String.length m.content in
+    let content_w = if len < 20 then 0.3
+      else if len < 100 then 0.6
+      else if len < 500 then 0.8
+      else 0.7  (* Very long = slightly less (verbose tool output) *)
+    in
+    (* Tool call indicator *)
+    let tool_w = match m.tool_call_id with Some _ -> 0.8 | None -> 0.5 in
+    let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
+    (i, Float.min 1.0 (Float.max 0.0 score))
+  ) ctx.messages in
+  { ctx with importance_scores = scores }
+
+(* ================================================================ *)
+(* Compaction Strategies                                            *)
+(* ================================================================ *)
+
+(** Truncate tool output messages longer than max_len.
+    Keeps first keep_len and last keep_len characters with "[...truncated...]". *)
+let prune_tool_outputs ?(max_len=500) ?(keep_len=100) ctx =
+  let messages = List.map (fun (m : Llm_client.message) ->
+    match m.role with
+    | Llm_client.Tool when String.length m.content > max_len ->
+      let head = String.sub m.content 0 keep_len in
+      let tail_start = String.length m.content - keep_len in
+      let tail = String.sub m.content tail_start keep_len in
+      { m with content = sprintf "%s\n[...truncated %d chars...]\n%s"
+          head (String.length m.content - 2 * keep_len) tail }
+    | _ -> m
+  ) ctx.messages in
+  let token_count = count_tokens ctx.system_prompt messages in
+  { ctx with messages; token_count }
+
+(** Merge consecutive messages with the same role. *)
+let merge_contiguous ctx =
+  let rec merge = function
+    | [] -> []
+    | [m] -> [m]
+    | (m1 : Llm_client.message) :: (m2 :: rest as tail) ->
+      if m1.role = m2.role then
+        let merged = { m1 with content = m1.content ^ "\n" ^ m2.content } in
+        merge (merged :: rest)
+      else
+        m1 :: merge tail
+  in
+  let messages = merge ctx.messages in
+  let token_count = count_tokens ctx.system_prompt messages in
+  { ctx with messages; token_count; importance_scores = [] }
+
+(** Drop messages with importance score below threshold. *)
+let drop_low_importance ?(threshold=0.3) ctx =
+  let scored = if ctx.importance_scores = [] then
+    (score_importance ctx).importance_scores
+  else ctx.importance_scores in
+  let messages = List.filteri (fun i _m ->
+    match List.assoc_opt i scored with
+    | Some score -> score >= threshold
+    | None -> true  (* Keep if no score *)
+  ) ctx.messages in
+  let token_count = count_tokens ctx.system_prompt messages in
+  { ctx with messages; token_count; importance_scores = [] }
+
+(** Summarize oldest N% of messages into a single summary message.
+    This is the most aggressive strategy — uses token estimation
+    rather than actual LLM call (LLM summarization done externally). *)
+let summarize_old ?(oldest_pct=0.3) ctx =
+  let n = List.length ctx.messages in
+  let split_at = max 1 (int_of_float (float_of_int n *. oldest_pct)) in
+  if n <= 2 then ctx  (* Not enough messages to summarize *)
+  else
+    let old_msgs, recent_msgs = List.filteri (fun i _ -> i < split_at) ctx.messages,
+                                 List.filteri (fun i _ -> i >= split_at) ctx.messages in
+    (* Build a summary from old messages (heuristic, not LLM-based) *)
+    let summary_parts = List.map (fun (m : Llm_client.message) ->
+      let role_str = match m.role with
+        | System -> "SYS" | User -> "USR"
+        | Assistant -> "AST" | Tool -> "TOOL"
+      in
+      let truncated = if String.length m.content > 80
+        then String.sub m.content 0 80 ^ "..."
+        else m.content in
+      sprintf "[%s] %s" role_str truncated
+    ) old_msgs in
+    let summary = sprintf "[Context summary of %d earlier messages]\n%s"
+      (List.length old_msgs) (String.concat "\n" summary_parts) in
+    let summary_msg = Llm_client.system_msg summary in
+    let messages = summary_msg :: recent_msgs in
+    let token_count = count_tokens ctx.system_prompt messages in
+    { ctx with messages; token_count; importance_scores = [] }
+
+(* ================================================================ *)
+(* Compaction Pipeline                                              *)
+(* ================================================================ *)
+
+let apply_strategy ctx = function
+  | PruneToolOutputs -> prune_tool_outputs ctx
+  | MergeContiguous -> merge_contiguous ctx
+  | DropLowImportance -> drop_low_importance ctx
+  | SummarizeOld -> summarize_old ctx
+
+let compact ctx strategies =
+  List.fold_left apply_strategy ctx strategies
+
+(* ================================================================ *)
+(* Checkpointing                                                    *)
+(* ================================================================ *)
+
+let generate_checkpoint_id () =
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
+  sprintf "ckpt-%d" ts
+
+let role_to_string (r : Llm_client.role) = match r with
+  | System -> "system" | User -> "user"
+  | Assistant -> "assistant" | Tool -> "tool"
+
+let role_of_string = function
+  | "system" -> Llm_client.System | "user" -> Llm_client.User
+  | "assistant" -> Llm_client.Assistant | _ -> Llm_client.Tool
+
+let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
+  let base = [
+    ("role", `String (role_to_string m.role));
+    ("content", `String m.content);
+  ] in
+  let with_name = match m.name with
+    | Some n -> ("name", `String n) :: base | None -> base in
+  let with_id = match m.tool_call_id with
+    | Some id -> ("tool_call_id", `String id) :: with_name | None -> with_name in
+  `Assoc with_id
+
+let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
+  let open Yojson.Safe.Util in
+  {
+    role = json |> member "role" |> to_string |> role_of_string;
+    content = json |> member "content" |> to_string;
+    name = json |> member "name" |> to_string_option;
+    tool_call_id = json |> member "tool_call_id" |> to_string_option;
+  }
+
+let serialize_context (ctx : working_context) : string =
+  let json = `Assoc [
+    ("system_prompt", `String ctx.system_prompt);
+    ("messages", `List (List.map message_to_json ctx.messages));
+    ("token_count", `Int ctx.token_count);
+    ("max_tokens", `Int ctx.max_tokens);
+  ] in
+  Yojson.Safe.to_string json
+
+let deserialize_context (s : string) ~max_tokens : working_context =
+  let json = Yojson.Safe.from_string s in
+  let open Yojson.Safe.Util in
+  let system_prompt = json |> member "system_prompt" |> to_string in
+  let messages = json |> member "messages" |> to_list |> List.map message_of_json in
+  let token_count = json |> member "token_count" |> to_int in
+  { system_prompt; messages; token_count; max_tokens; importance_scores = [] }
+
+let create_checkpoint ctx ~generation =
+  {
+    checkpoint_id = generate_checkpoint_id ();
+    timestamp = Time_compat.now ();
+    generation;
+    message_count = List.length ctx.messages;
+    token_count = ctx.token_count;
+    serialized = serialize_context ctx;
+  }
+
+let restore_checkpoint ckpt ~max_tokens =
+  deserialize_context ckpt.serialized ~max_tokens
+
+(* ================================================================ *)
+(* Session Persistence                                              *)
+(* ================================================================ *)
+
+let ensure_dir path =
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    end
+  in
+  mkdir_p path
+
+let create_session ~session_id ~base_dir =
+  let session_dir = Filename.concat base_dir session_id in
+  ensure_dir session_dir;
+  { session_id; session_dir; full_history = []; checkpoints = [] }
+
+let persist_message session msg =
+  session.full_history <- session.full_history @ [msg];
+  let path = Filename.concat session.session_dir "history.jsonl" in
+  let line = Yojson.Safe.to_string (message_to_json msg) ^ "\n" in
+  let fd = Unix.openfile path
+    [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let _ = Unix.write_substring fd line 0 (String.length line) in ())
+
+let save_checkpoint session ckpt =
+  session.checkpoints <- session.checkpoints @ [ckpt];
+  let path = Filename.concat session.session_dir
+    (sprintf "%s.json" ckpt.checkpoint_id) in
+  let json = `Assoc [
+    ("checkpoint_id", `String ckpt.checkpoint_id);
+    ("timestamp", `Float ckpt.timestamp);
+    ("generation", `Int ckpt.generation);
+    ("message_count", `Int ckpt.message_count);
+    ("token_count", `Int ckpt.token_count);
+    ("serialized", `String ckpt.serialized);
+  ] in
+  let content = Yojson.Safe.to_string json in
+  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let _ = Unix.write_substring fd content 0 (String.length content) in ())
+
+let load_latest_checkpoint session =
+  let dir = session.session_dir in
+  if not (Sys.file_exists dir) then None
+  else
+    let files = Sys.readdir dir |> Array.to_list in
+    let ckpt_files = List.filter (fun f ->
+      let len = String.length f in
+      len > 5 && String.sub f 0 5 = "ckpt-" &&
+      String.sub f (len - 5) 5 = ".json"
+    ) files in
+    match List.sort (fun a b -> compare b a) ckpt_files with
+    | [] -> None
+    | latest :: _ ->
+      let path = Filename.concat dir latest in
+      let ic = open_in path in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let n = in_channel_length ic in
+        let buf = Bytes.create n in
+        really_input ic buf 0 n;
+        let json = Yojson.Safe.from_string (Bytes.to_string buf) in
+        let open Yojson.Safe.Util in
+        Some {
+          checkpoint_id = json |> member "checkpoint_id" |> to_string;
+          timestamp = json |> member "timestamp" |> to_number;
+          generation = json |> member "generation" |> to_int;
+          message_count = json |> member "message_count" |> to_int;
+          token_count = json |> member "token_count" |> to_int;
+          serialized = json |> member "serialized" |> to_string;
+        })

@@ -28,6 +28,7 @@ config/llm_cascade.json
 # Test artifacts
 *.log
 benchmarks/results/
+_coverage/
 
 
 # Downloaded release binary

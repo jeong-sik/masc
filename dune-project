@@ -67,6 +67,7 @@
   (h2 (>= 0.10))
   (h2-eio (>= 0.10))
   (alcotest (and :with-test (>= 1.6)))
+  (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (uuidm (>= 0.9))
   ; Neo4j Bolt native driver

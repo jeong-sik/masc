@@ -54,3 +54,11 @@
  (public_name masc-tui)
  (package masc_mcp)
  (libraries unix yojson))
+
+;; Perpetual Agent CLI - Standalone perpetual agent runner
+(executable
+ (name perpetual_cli)
+ (modules perpetual_cli)
+ (public_name masc-perpetual)
+ (package masc_mcp)
+ (libraries masc_mcp yojson unix str))

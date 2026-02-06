@@ -169,3 +169,11 @@ module Tool_gardener = Tool_gardener
 
 (* Library — Agent Knowledge Base *)
 module Tool_library = Tool_library
+
+(* Perpetual Agent Runtime — Infinite Context System *)
+module Llm_client = Llm_client
+module Context_manager = Context_manager
+module Verifier = Verifier
+module Succession = Succession
+module Perpetual_loop = Perpetual_loop
+module Tool_perpetual = Tool_perpetual

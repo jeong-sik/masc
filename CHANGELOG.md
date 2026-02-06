@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.59.0] - 2026-02-06
+
+### Added
+- **Agent Knowledge Library**: Personal knowledge base at `~/me/docs/library/`
+  - `masc_library_list`, `masc_library_read`, `masc_library_add`, `masc_library_search`
+  - YAML frontmatter with confidence scores
+  - Candidates promotion flow (`masc_library_promote`)
+
+### Changed
+- **Remove llm-mcp dependency** (#78): Direct API calls replace llm-mcp proxy
+  - `Llm_direct.dispatch` for Z.ai GLM, Ollama, Claude CLI
+  - `llm_client_eio.ml` deprecated (kept for backward compatibility)
+  - `Endpoints.llm_mcp_url` deprecated, scheduled for v3.0 removal
+
+## [2.58.0] - 2026-02-05
+
+### Added
+- **Gardener Agent**: Self-Organizing Agent Ecosystem Manager
+  - Homeostatic balance (min=5, target=15, max=30 agents)
+  - Gap signal processing for spawn decisions
+  - Retirement management with grace periods
+  - Circuit breaker, daily budgets, cooldowns
+  - 7 MCP tools: `masc_gardener_health`, `masc_gardener_config`, `masc_gardener_propose_spawn`, etc.
+  - 62 tests covering all safety mechanisms
+
+## [2.57.0] - 2026-02-05
+
+### Added
+- **A2A Worker Pattern**: Delegated LLM calls for Soul + Body architecture
+  - `MASC_DELEGATE_LLM=true` emits `heartbeat_task` events
+  - Workers subscribe and invoke local LLM (Ollama)
+
+## [2.56.3] - 2026-02-05
+
+### Fixed
+- **Lodge GraphQL**: Add curl fallback for Railway DNS issues
+- **Task Backend**: Integrate Task_dispatch with PostgreSQL backend
+
+## [2.56.2] - 2026-02-05
+
+### Fixed
+- **SSE Client Leak**: Prevent client count leak on connection close
+
+## [2.56.1] - 2026-02-05
+
+### Changed
+- **Error Standardization**: Comprehensive error types across modules
+- **Lodge GraphQL**: Configurable URL for Railway internal networking
+- **Lodge HTTPS**: Conditional HTTPS connector for HTTP URLs
+
 ## [2.55.3] - 2026-02-05
 
 ### Fixed

@@ -14,7 +14,7 @@
 
 (** Action types that can be executed *)
 type action_kind =
-  | ShellCommand of string           (** Run a shell command *)
+  | ExecCommand of string list       (** Run a command with argv (no shell) *)
   | ConfigChange of string * string  (** key, value *)
   | Notification of string * string  (** target, message *)
   | GitHubAction of github_action    (** GitHub CLI action *)
@@ -29,6 +29,8 @@ and github_action =
 (** Execution result *)
 type exec_result = {
   success: bool;
+  stdout: string;
+  stderr: string;
   output: string;
   timestamp: float;
 }
@@ -61,7 +63,7 @@ let default_mappings : action_mapping list = [
   (* Deploy pattern *)
   {
     pattern = "deploy \\(v?[0-9.]+\\)";
-    action = ShellCommand "echo 'Deploy placeholder'";
+    action = ExecCommand ["echo"; "Deploy placeholder"];
     requires_unanimous = true;
     min_threshold = 1.0;
   };
@@ -90,35 +92,73 @@ let extract_number text =
 
 (** {1 Action Execution} *)
 
-let execute_shell cmd =
-  try
-    let ic = Unix.open_process_in cmd in
-    let output =
-      try In_channel.input_all ic
-      with Sys_error _ -> ""
-    in
-    let status = Unix.close_process_in ic in
-    match status with
-    | Unix.WEXITED 0 ->
-      { success = true; output; timestamp = Unix.gettimeofday () }
-    | _ ->
-      { success = false; output; timestamp = Unix.gettimeofday () }
-  with e ->
-    { success = false;
-      output = Printexc.to_string e;
-      timestamp = Unix.gettimeofday () }
+let read_all_from_ic ic =
+  let buf = Buffer.create 4096 in
+  (try
+     while true do
+       Buffer.add_char buf (input_char ic)
+     done
+   with End_of_file -> ());
+  Buffer.contents buf
 
-let execute_github action =
+let combine_output ~stdout ~stderr =
+  let stdout = String.trim stdout in
+  let stderr = String.trim stderr in
+  match stdout, stderr with
+  | "", "" -> ""
+  | s, "" -> s
+  | "", e -> e
+  | s, e ->
+      Printf.sprintf {|[stdout]
+%s
+
+[stderr]
+%s|} s e
+
+let execute_argv argv =
+  let timestamp () = Unix.gettimeofday () in
+  match argv with
+  | [] ->
+      { success = false;
+        stdout = "";
+        stderr = "Empty argv";
+        output = "Empty argv";
+        timestamp = timestamp () }
+  | prog :: _ ->
+      try
+        let stdout_ic, stdin_oc, stderr_ic =
+          Unix.open_process_args_full prog (Array.of_list argv) (Unix.environment ())
+        in
+        (* NOTE: We intentionally never write to stdin. Most commands we execute
+           (e.g. gh) do not read stdin; leaving it open avoids double-closing
+           issues with [close_process_full]. *)
+        let stdout = (try read_all_from_ic stdout_ic with Sys_error _ -> "") in
+        let stderr = (try read_all_from_ic stderr_ic with Sys_error _ -> "") in
+        let status = Unix.close_process_full (stdout_ic, stdin_oc, stderr_ic) in
+        let success = match status with Unix.WEXITED 0 -> true | _ -> false in
+        let output = combine_output ~stdout ~stderr in
+        { success; stdout; stderr; output; timestamp = timestamp () }
+      with e ->
+        let err = Printexc.to_string e in
+        { success = false;
+          stdout = "";
+          stderr = err;
+          output = err;
+          timestamp = timestamp () }
+
+let github_argv action =
   match action with
   | MergePR pr_num ->
-    execute_shell (Printf.sprintf "gh pr merge %d --auto --merge" pr_num)
+      ["gh"; "pr"; "merge"; string_of_int pr_num; "--auto"; "--merge"]
   | ClosePR pr_num ->
-    execute_shell (Printf.sprintf "gh pr close %d" pr_num)
+      ["gh"; "pr"; "close"; string_of_int pr_num]
   | ApproveReview pr_num ->
-    execute_shell (Printf.sprintf "gh pr review %d --approve" pr_num)
+      ["gh"; "pr"; "review"; string_of_int pr_num; "--approve"]
   | CreateIssue (title, body) ->
-    execute_shell (Printf.sprintf "gh issue create --title %s --body %s"
-      (Filename.quote title) (Filename.quote body))
+      ["gh"; "issue"; "create"; "--title"; title; "--body"; body]
+
+let execute_github action =
+  execute_argv (github_argv action)
 
 let rec ensure_dir path =
   if not (Sys.file_exists path) then begin
@@ -142,12 +182,18 @@ let execute_config_change key value =
     let oc = open_out config_file in
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc (Yojson.Safe.pretty_to_string json));
+    let msg = Printf.sprintf "Config written: %s = %s → %s" key value config_file in
     { success = true;
-      output = Printf.sprintf "Config written: %s = %s → %s" key value config_file;
+      stdout = msg;
+      stderr = "";
+      output = msg;
       timestamp = Unix.gettimeofday () }
   with exn ->
+    let msg = Printf.sprintf "Config error: %s" (Printexc.to_string exn) in
     { success = false;
-      output = Printf.sprintf "Config error: %s" (Printexc.to_string exn);
+      stdout = "";
+      stderr = msg;
+      output = msg;
       timestamp = Unix.gettimeofday () }
 
 (** Send notification to target (file-based for now) *)
@@ -164,23 +210,32 @@ let execute_notification target message =
       output_string oc (Yojson.Safe.to_string json ^ "\n"));
     (* Also log to stderr for visibility *)
     Printf.eprintf "[Council] 📢 %s: %s\n%!" target message;
+    let msg = Printf.sprintf "Notified %s: %s" target message in
     { success = true;
-      output = Printf.sprintf "Notified %s: %s" target message;
+      stdout = msg;
+      stderr = "";
+      output = msg;
       timestamp = Unix.gettimeofday () }
   with exn ->
+    let msg = Printf.sprintf "Notification error: %s" (Printexc.to_string exn) in
     { success = false;
-      output = Printf.sprintf "Notification error: %s" (Printexc.to_string exn);
+      stdout = "";
+      stderr = msg;
+      output = msg;
       timestamp = Unix.gettimeofday () }
 
 let execute_action action =
   match action with
-  | ShellCommand cmd -> execute_shell cmd
+  | ExecCommand argv -> execute_argv argv
   | ConfigChange (key, value) -> execute_config_change key value
   | Notification (target, message) -> execute_notification target message
   | GitHubAction gh -> execute_github gh
   | Custom id ->
+    let msg = Printf.sprintf "Unknown custom action: %s" id in
     { success = false;
-      output = Printf.sprintf "Unknown custom action: %s" id;
+      stdout = "";
+      stderr = msg;
+      output = msg;
       timestamp = Unix.gettimeofday () }
 
 (** {1 Decision Processing} *)
@@ -236,7 +291,7 @@ let dry_run ~topic ~result : string =
     if check_threshold result mapping then
       Printf.sprintf "Would execute: %s" 
         (match mapping.action with
-         | ShellCommand cmd -> Printf.sprintf "shell(%s)" cmd
+         | ExecCommand argv -> Printf.sprintf "exec(%s)" (String.concat " " (List.map Filename.quote argv))
          | ConfigChange (k, v) -> Printf.sprintf "config(%s=%s)" k v
          | Notification (t, m) -> Printf.sprintf "notify(%s: %s)" t m
          | GitHubAction (MergePR _) -> Printf.sprintf "gh pr merge %s" 

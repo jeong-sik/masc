@@ -332,6 +332,8 @@ let handle_execute _ctx args =
     | Some exec_result ->
       let json = `Assoc [
         ("success", `Bool exec_result.Executor.success);
+        ("stdout", `String exec_result.stdout);
+        ("stderr", `String exec_result.stderr);
         ("output", `String exec_result.output);
         ("timestamp", `Float exec_result.timestamp);
       ] in

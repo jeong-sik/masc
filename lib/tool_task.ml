@@ -120,7 +120,9 @@ let handle_done ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric)
+       ignore (Metrics_store_eio.record ctx.config metric);
+       (* Feed success into Thompson Sampling quality signal *)
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up
    | Error _ -> ());
   result_to_response result
 
@@ -154,7 +156,9 @@ let handle_cancel_task ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric)
+       ignore (Metrics_store_eio.record ctx.config metric);
+       (* Feed failure into Thompson Sampling quality signal *)
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down
    | Error _ -> ());
   result_to_response result
 
@@ -211,7 +215,8 @@ let handle_transition ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric)
+       ignore (Metrics_store_eio.record ctx.config metric);
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up
    | Ok _, "cancel" ->
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
@@ -225,7 +230,8 @@ let handle_transition ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric)
+       ignore (Metrics_store_eio.record ctx.config metric);
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down
    | _ -> ());
   result_to_response result
 

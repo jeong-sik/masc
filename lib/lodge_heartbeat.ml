@@ -2606,6 +2606,37 @@ let tick ~config ~pending_triggers =
     end
   ) checkins;
 
+  (* Post-tick: record learnable content to Library as candidates.
+     ActionCode → experimental code becomes a library candidate.
+     ActionPropose → ecosystem gap signal becomes a library candidate.
+     Low confidence (0.2-0.3) → goes to candidates/ for later verification. *)
+  List.iter (fun (name, _, result) ->
+    match result with
+    | Acted { action = ActionCode (filename, lang, code); _ } when String.length code > 50 ->
+      let title = Printf.sprintf "Experimental: %s (%s)" filename lang in
+      let body = Printf.sprintf
+        "Code created by agent %s during heartbeat.\n\nLanguage: %s\nFile: %s\n\n```%s\n%s\n```"
+        name lang filename lang code in
+      (try
+        Library_bridge.record_to_library
+          ~agent_name:name ~title ~source:"experiment"
+          ~confidence:0.3 ~tags:["heartbeat"; "code"; lang] ~content:body;
+        Printf.printf "   📚 [%s] Library candidate: %s\n%!" name title
+      with exn ->
+        Eio.traceln "   ⚠️ [%s] Library record failed: %s" name (Printexc.to_string exn))
+    | Acted { action = ActionPropose (proposed_name, reason); _ } ->
+      let title = Printf.sprintf "Gap Signal: %s" proposed_name in
+      let body = Printf.sprintf
+        "Agent %s identified a capability gap and proposed new agent: %s\n\nReason: %s"
+        name proposed_name reason in
+      (try
+        Library_bridge.record_to_library
+          ~agent_name:name ~title ~source:"observation"
+          ~confidence:0.2 ~tags:["heartbeat"; "gap-signal"; "ecosystem"] ~content:body
+      with _ -> ())
+    | _ -> ()
+  ) checkins;
+
   (* Flush pending votes and save stats for Thompson Sampling *)
   Lodge_selection.flush_pending_votes ();
   Lodge_selection.save_stats ();
@@ -2708,6 +2739,13 @@ let start ~sw ~clock room_config =
 
           (* Cleanup inactive Lodge agents *)
           cleanup_inactive_lodge_agents ();
+
+          (* Memory GC: run every 10 ticks to prune stale + consolidate similar *)
+          if !_lodge_total_ticks mod 10 = 0 && !_lodge_total_ticks > 0 then begin
+            let gc_result = Lodge_memory_gc.run_gc () in
+            if gc_result.total_pruned > 0 || gc_result.total_merged > 0 then
+              Printf.printf "🧹 %s\n%!" (Lodge_memory_gc.format_result gc_result)
+          end;
 
           (* Sleep for the configured tick interval (default: 4h) *)
           Eio.Time.sleep clock tick_interval

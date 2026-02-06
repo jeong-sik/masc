@@ -1,10 +1,18 @@
-(** Agent Card - A2A Protocol Compatible Agent Metadata
+(** Agent Card - A2A Protocol v0.3.0 Compatible Agent Metadata
 
     Implements the A2A Agent Card specification for standardized agent discovery.
     Provides `/.well-known/agent-card.json` endpoint support.
 
-    @see https://github.com/google/A2A for A2A specification
-*)
+    v0.3.0 changes:
+    - capabilities: structured record (streaming, pushNotifications, extendedAgentCard)
+    - supportedInterfaces replaces bindings (protocol enum)
+    - signatures: JWS array (RFC 7515) replaces single signature string
+    - protocolVersions field
+    - MIME types for input/output modes
+    - iconUrl, documentationUrl optional fields
+
+    @see https://a2a-protocol.org/latest/specification/
+    @since 2.60.0 *)
 
 (** Provider information for the agent *)
 type provider = {
@@ -17,43 +25,112 @@ type skill = {
   id: string;
   name: string;
   description: string option;
-  input_modes: string list;   (** e.g., ["text", "file", "data"] *)
-  output_modes: string list;  (** e.g., ["text", "file", "artifact"] *)
+  input_modes: string list;   (** MIME types: "text/plain", "application/json" *)
+  output_modes: string list;  (** MIME types: "text/plain", "application/json" *)
 } [@@deriving yojson, show, eq]
 
-(** Protocol binding for agent communication *)
+(** Protocol binding for agent communication.
+    Internal type; serialized as "supportedInterfaces" in v0.3 JSON. *)
 type binding = {
-  protocol: string;  (** "json-rpc" | "grpc" | "rest" | "sse" *)
+  protocol: string;  (** "JSONRPC" | "GRPC" | "REST" | "SSE" *)
   url: string;
 } [@@deriving yojson, show, eq]
 
 (** Security scheme for authentication *)
 type security_scheme = {
-  scheme_type: string;  (** "bearer" | "apiKey" | "oauth2" | "none" *)
+  scheme_type: string;  (** "bearer" | "apiKey" | "oauth2" | "openIdConnect" | "mutualTLS" | "none" *)
   bearer_format: string option;
   api_key_name: string option;
   api_key_in: string option;  (** "header" | "query" *)
 } [@@deriving yojson, show, eq]
 
-(** Agent Card - A2A compliant agent metadata *)
+(** Structured capabilities — A2A v0.3 spec *)
+type agent_capabilities = {
+  streaming: bool;
+  push_notifications: bool;
+  extended_agent_card: bool;
+} [@@deriving yojson, show, eq]
+
+(** JWS signature for Agent Card signing — A2A v0.3 spec (RFC 7515) *)
+type agent_card_signature = {
+  protected_header: string;  (** Base64url-encoded JSON (alg, kid) *)
+  signature: string;         (** Base64url-encoded computed signature *)
+  header: (string * string) list;  (** Optional unprotected JWS header *)
+} [@@deriving yojson, show, eq]
+
+(** Agent Card - A2A v0.3.0 compliant agent metadata *)
 type agent_card = {
   name: string;
   version: string;
   description: string option;
   provider: provider option;
-  capabilities: string list;
+  protocol_versions: string list;          (** e.g., ["0.3"] *)
+  capabilities: agent_capabilities;        (** Structured capabilities *)
   skills: skill list;
-  bindings: binding list;
+  supported_interfaces: binding list;      (** v0.3: supportedInterfaces *)
   security_schemes: (string * security_scheme) list;
-  default_input_modes: string list;
-  default_output_modes: string list;
+  default_input_modes: string list;        (** MIME types *)
+  default_output_modes: string list;       (** MIME types *)
   extensions: (string * Yojson.Safe.t) list;
-  signature: string option;  (** Optional cryptographic signature *)
+  signatures: agent_card_signature list;   (** v0.3: JWS signatures *)
+  icon_url: string option;                 (** v0.3: agent icon *)
+  documentation_url: string option;        (** v0.3: documentation link *)
   created_at: string;
   updated_at: string;
 } [@@deriving show, eq]
 
-(** Convert agent_card to JSON (A2A spec format) *)
+(* ---------- JSON Serialization ---------- *)
+
+let capabilities_to_json (c : agent_capabilities) : Yojson.Safe.t =
+  `Assoc [
+    ("streaming", `Bool c.streaming);
+    ("pushNotifications", `Bool c.push_notifications);
+    ("extendedAgentCard", `Bool c.extended_agent_card);
+  ]
+
+let capabilities_of_json (json : Yojson.Safe.t) : agent_capabilities =
+  let open Yojson.Safe.Util in
+  match json with
+  | `Assoc _ ->
+    {
+      streaming = (try json |> member "streaming" |> to_bool with _ -> false);
+      push_notifications = (try json |> member "pushNotifications" |> to_bool with _ -> false);
+      extended_agent_card = (try json |> member "extendedAgentCard" |> to_bool with _ -> false);
+    }
+  | `List strs ->
+    (* Backward compat: parse old string list format *)
+    let has s = List.exists (fun v -> try to_string v = s with _ -> false) strs in
+    {
+      streaming = has "streaming";
+      push_notifications = has "push-notifications";
+      extended_agent_card = false;
+    }
+  | _ ->
+    { streaming = false; push_notifications = false; extended_agent_card = false }
+
+let signature_to_json (s : agent_card_signature) : Yojson.Safe.t =
+  `Assoc ([
+    ("protected", `String s.protected_header);
+    ("signature", `String s.signature);
+  ] @ (if s.header = [] then [] else [
+    ("header", `Assoc (List.map (fun (k, v) -> (k, `String v)) s.header))
+  ]))
+
+let signature_of_json (json : Yojson.Safe.t) : agent_card_signature option =
+  let open Yojson.Safe.Util in
+  try
+    let protected_header = json |> member "protected" |> to_string in
+    let signature = json |> member "signature" |> to_string in
+    let header =
+      match json |> member "header" with
+      | `Assoc pairs -> List.filter_map (fun (k, v) ->
+          try Some (k, to_string v) with _ -> None) pairs
+      | _ -> []
+    in
+    Some { protected_header; signature; header }
+  with _ -> None
+
+(** Convert agent_card to JSON (A2A v0.3 spec format) *)
 let to_json (card : agent_card) : Yojson.Safe.t =
   let optional_string key = function
     | None -> []
@@ -69,21 +146,25 @@ let to_json (card : agent_card) : Yojson.Safe.t =
   ] @ optional_string "description" card.description
     @ optional_obj "provider" card.provider
     @ [
-    ("capabilities", `List (List.map (fun s -> `String s) card.capabilities));
+    ("protocolVersions", `List (List.map (fun s -> `String s) card.protocol_versions));
+    ("capabilities", capabilities_to_json card.capabilities);
     ("skills", `List (List.map skill_to_yojson card.skills));
-    ("bindings", `List (List.map binding_to_yojson card.bindings));
+    ("supportedInterfaces", `List (List.map binding_to_yojson card.supported_interfaces));
     ("securitySchemes", `Assoc (List.map (fun (k, v) -> (k, security_scheme_to_yojson v)) card.security_schemes));
     ("defaultInputModes", `List (List.map (fun s -> `String s) card.default_input_modes));
     ("defaultOutputModes", `List (List.map (fun s -> `String s) card.default_output_modes));
   ] @ (if card.extensions = [] then [] else [
     ("extensions", `Assoc card.extensions)
-  ]) @ optional_string "signature" card.signature
+  ]) @ (if card.signatures = [] then [] else [
+    ("signatures", `List (List.map signature_to_json card.signatures))
+  ]) @ optional_string "iconUrl" card.icon_url
+    @ optional_string "documentationUrl" card.documentation_url
     @ [
     ("createdAt", `String card.created_at);
     ("updatedAt", `String card.updated_at);
   ])
 
-(** Parse agent_card from JSON *)
+(** Parse agent_card from JSON (accepts both v0.3 and legacy formats) *)
 let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
   let open Yojson.Safe.Util in
   try
@@ -100,24 +181,32 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
         | Error _ -> None
     in
 
-    let capabilities =
-      json |> member "capabilities"
-      |> to_list
-      |> List.map to_string
+    let protocol_versions =
+      match json |> member "protocolVersions" with
+      | `List vs -> List.filter_map (fun v -> try Some (to_string v) with _ -> None) vs
+      | _ -> ["0.3"]
     in
 
+    let capabilities = capabilities_of_json (json |> member "capabilities") in
+
     let skills =
-      json |> member "skills"
-      |> to_list
+      (match json |> member "skills" with
+      | `List vs -> vs | _ -> [])
       |> List.filter_map (fun s ->
         match skill_of_yojson s with
         | Ok v -> Some v
         | Error _ -> None)
     in
 
-    let bindings =
-      json |> member "bindings"
-      |> to_list
+    (* Accept both "supportedInterfaces" (v0.3) and "bindings" (legacy) *)
+    let supported_interfaces =
+      let ifaces_json =
+        match json |> member "supportedInterfaces" with
+        | `List _ as v -> v
+        | _ -> json |> member "bindings"
+      in
+      (match ifaces_json with
+      | `List vs -> vs | _ -> [])
       |> List.filter_map (fun b ->
         match binding_of_yojson b with
         | Ok v -> Some v
@@ -135,15 +224,15 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
     in
 
     let default_input_modes =
-      json |> member "defaultInputModes"
-      |> to_list
-      |> List.map to_string
+      (match json |> member "defaultInputModes" with
+      | `List vs -> vs | _ -> [])
+      |> List.filter_map (fun v -> try Some (to_string v) with _ -> None)
     in
 
     let default_output_modes =
-      json |> member "defaultOutputModes"
-      |> to_list
-      |> List.map to_string
+      (match json |> member "defaultOutputModes" with
+      | `List vs -> vs | _ -> [])
+      |> List.filter_map (fun v -> try Some (to_string v) with _ -> None)
     in
 
     let extensions =
@@ -152,7 +241,18 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
       | _ -> []
     in
 
-    let signature = json |> member "signature" |> to_string_option in
+    (* Accept both "signatures" (v0.3 array) and "signature" (legacy string) *)
+    let signatures =
+      match json |> member "signatures" with
+      | `List vs -> List.filter_map signature_of_json vs
+      | _ ->
+        match json |> member "signature" |> to_string_option with
+        | Some s -> [{ protected_header = ""; signature = s; header = [] }]
+        | None -> []
+    in
+
+    let icon_url = json |> member "iconUrl" |> to_string_option in
+    let documentation_url = json |> member "documentationUrl" |> to_string_option in
     let created_at = json |> member "createdAt" |> to_string in
     let updated_at = json |> member "updatedAt" |> to_string in
 
@@ -161,14 +261,17 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
       version;
       description;
       provider;
+      protocol_versions;
       capabilities;
       skills;
-      bindings;
+      supported_interfaces;
       security_schemes;
       default_input_modes;
       default_output_modes;
       extensions;
-      signature;
+      signatures;
+      icon_url;
+      documentation_url;
       created_at;
       updated_at;
     }
@@ -187,96 +290,90 @@ let now_iso8601 () : string =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
-(** MASC skill definitions *)
+(** MASC skill definitions (MIME-typed for v0.3) *)
 let masc_skills : skill list = [
   {
     id = "task-management";
     name = "Task Management";
     description = Some "Create, claim, and complete tasks on the quest board";
-    input_modes = ["text"];
-    output_modes = ["text"; "data"];
+    input_modes = ["text/plain"; "application/json"];
+    output_modes = ["text/plain"; "application/json"];
   };
   {
     id = "agent-coordination";
     name = "Agent Coordination";
     description = Some "Join room, broadcast messages, coordinate with other agents";
-    input_modes = ["text"];
-    output_modes = ["text"; "stream"];
+    input_modes = ["text/plain"];
+    output_modes = ["text/plain"; "text/event-stream"];
   };
   {
     id = "file-locking";
     name = "File Locking";
     description = Some "Lock and unlock files to prevent concurrent edits";
-    input_modes = ["text"];
-    output_modes = ["text"];
+    input_modes = ["text/plain"];
+    output_modes = ["text/plain"];
   };
   {
     id = "git-worktree";
     name = "Git Worktree Management";
     description = Some "Create isolated git worktrees for parallel development";
-    input_modes = ["text"];
-    output_modes = ["text"; "file"];
+    input_modes = ["text/plain"];
+    output_modes = ["text/plain"; "application/octet-stream"];
   };
   {
     id = "voting";
     name = "Multi-Agent Voting";
     description = Some "Create votes and reach consensus among agents";
-    input_modes = ["text"];
-    output_modes = ["text"; "data"];
+    input_modes = ["text/plain"; "application/json"];
+    output_modes = ["text/plain"; "application/json"];
   };
   {
     id = "cost-tracking";
     name = "Cost Tracking";
     description = Some "Log and report token usage and API costs";
-    input_modes = ["data"];
-    output_modes = ["text"; "data"];
+    input_modes = ["application/json"];
+    output_modes = ["text/plain"; "application/json"];
   };
   {
     id = "human-in-loop";
     name = "Human-in-the-Loop";
     description = Some "Interrupt workflows for user approval on sensitive actions";
-    input_modes = ["text"];
-    output_modes = ["text"];
+    input_modes = ["text/plain"];
+    output_modes = ["text/plain"];
   };
   {
     id = "portal-a2a";
     name = "A2A Portal Communication";
     description = Some "Direct agent-to-agent private communication channels";
-    input_modes = ["text"];
-    output_modes = ["text"; "stream"];
+    input_modes = ["text/plain"; "application/json"];
+    output_modes = ["text/plain"; "text/event-stream"];
   };
 ]
 
-(** Generate default MASC agent card *)
+(** Generate default MASC agent card (A2A v0.3 compliant) *)
 let generate_default ?(port=8935) ?(host="127.0.0.1") () : agent_card =
   let timestamp = now_iso8601 () in
   let base_url = Printf.sprintf "http://%s:%d" host port in
   {
     name = "MASC-MCP";
-    version = "2.0.0";
-    description = Some "Multi-Agent Streaming Coordination - A2A compatible agent coordination system";
+    version = "2.60.0";
+    description = Some "Multi-Agent Streaming Coordination - A2A v0.3 compatible agent coordination system";
     provider = Some {
       organization = "Second Brain";
       url = Some "https://github.com/jeong-sik/me";
     };
-    capabilities = [
-      "streaming";
-      "push-notifications";
-      "state-management";
-      "multi-agent";
-      "git-worktree";
-      "voting";
-      "cost-tracking";
-      "human-in-loop";
-      "encryption";
-      "rate-limiting";
-    ];
+    protocol_versions = ["0.3"];
+    capabilities = {
+      streaming = true;
+      push_notifications = true;
+      extended_agent_card = false;
+    };
     skills = masc_skills;
-    bindings = [
-      { protocol = "sse"; url = Printf.sprintf "%s/sse" base_url };
-      { protocol = "json-rpc"; url = Printf.sprintf "%s/mcp" base_url };
-      { protocol = "rest"; url = Printf.sprintf "%s/api/v1" base_url };
-      { protocol = "grpc"; url = Printf.sprintf "grpc://%s:%d" host (port + 1000) };  (* gRPC on port+1000 *)
+    supported_interfaces = [
+      { protocol = "SSE"; url = Printf.sprintf "%s/sse" base_url };
+      { protocol = "JSONRPC"; url = Printf.sprintf "%s/mcp" base_url };
+      { protocol = "REST"; url = Printf.sprintf "%s/api/v1" base_url };
+      { protocol = "GRPC"; url = Printf.sprintf "grpc://%s:%d" host (port + 1000) };
     ];
     security_schemes = [
       ("bearer", {
@@ -292,8 +389,8 @@ let generate_default ?(port=8935) ?(host="127.0.0.1") () : agent_card =
         api_key_in = None;
       });
     ];
-    default_input_modes = ["text"; "data"];
-    default_output_modes = ["text"; "data"; "stream"];
+    default_input_modes = ["text/plain"; "application/json"];
+    default_output_modes = ["text/plain"; "application/json"; "text/event-stream"];
     extensions = [
       ("masc", `Assoc [
         ("roomPath", `String ".masc");
@@ -309,15 +406,20 @@ let generate_default ?(port=8935) ?(host="127.0.0.1") () : agent_card =
         ]);
       ]);
     ];
-    signature = None;
+    signatures = [];
+    icon_url = None;
+    documentation_url = Some "https://github.com/jeong-sik/masc-mcp";
     created_at = timestamp;
     updated_at = timestamp;
   }
 
-(** Update agent card with new bindings based on runtime config *)
-let with_bindings (card : agent_card) (bindings : binding list) : agent_card =
+(** Update agent card with new interfaces based on runtime config *)
+let with_interfaces (card : agent_card) (interfaces : binding list) : agent_card =
   let timestamp = now_iso8601 () in
-  { card with bindings; updated_at = timestamp }
+  { card with supported_interfaces = interfaces; updated_at = timestamp }
+
+(** Backward compat alias *)
+let with_bindings = with_interfaces
 
 (** Add extension data to agent card *)
 let with_extension (card : agent_card) (key : string) (value : Yojson.Safe.t) : agent_card =

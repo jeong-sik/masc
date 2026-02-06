@@ -1508,7 +1508,50 @@ let get_all_agents () =
         with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
   with Unix.Unix_error _ | Sys_error _ -> []
 
-(** Spawn a new agent — can be called by another agent *)
+(** Execute Cypher via Neo4j HTTP API (works in Railway) *)
+let neo4j_http_cypher cypher =
+  let neo4j_uri = Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"" in
+  let neo4j_password = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
+  if neo4j_uri = "" || neo4j_password = "" then
+    Error "NEO4J_URI or NEO4J_PASSWORD not set"
+  else
+    (* Convert bolt/neo4j protocol URIs to https:// for HTTP API *)
+    let http_uri =
+      if String.length neo4j_uri > 10 && String.sub neo4j_uri 0 10 = "neo4j+s://" then
+        (* neo4j+s:// = secure Neo4j protocol → https:// *)
+        "https://" ^ String.sub neo4j_uri 10 (String.length neo4j_uri - 10)
+      else if String.length neo4j_uri > 8 && String.sub neo4j_uri 0 8 = "bolt+s://" then
+        (* bolt+s:// = secure Bolt protocol → https:// *)
+        "https://" ^ String.sub neo4j_uri 8 (String.length neo4j_uri - 8)
+      else if String.length neo4j_uri > 8 && String.sub neo4j_uri 0 8 = "neo4j://" then
+        "https://" ^ String.sub neo4j_uri 8 (String.length neo4j_uri - 8)
+      else if String.length neo4j_uri > 7 && String.sub neo4j_uri 0 7 = "bolt://" then
+        "https://" ^ String.sub neo4j_uri 7 (String.length neo4j_uri - 7)
+      else neo4j_uri
+    in
+    (* Neo4j HTTP API endpoint for Cypher *)
+    let url = http_uri ^ "/db/neo4j/tx/commit" in
+    (* Escape cypher for JSON *)
+    let escaped_cypher = Str.global_replace (Str.regexp "\"") "\\\"" cypher in
+    let escaped_cypher = Str.global_replace (Str.regexp "\n") "\\n" escaped_cypher in
+    let body = Printf.sprintf {|{"statements":[{"statement":"%s"}]}|} escaped_cypher in
+    let auth = Base64.encode_exn ("neo4j:" ^ neo4j_password) in
+    let cmd = Printf.sprintf
+      "curl -s -X POST '%s' -H 'Content-Type: application/json' -H 'Authorization: Basic %s' -d '%s'"
+      url auth body
+    in
+    Printf.eprintf "[neo4j_http] cmd: curl -s -X POST '%s' ... (body=%d chars)\n%!" url (String.length body);
+    try
+      let ic = Unix.open_process_in cmd in
+      let output = In_channel.input_all ic in
+      let _ = Unix.close_process_in ic in
+      Printf.eprintf "[neo4j_http] response: %s\n%!" (if String.length output < 200 then output else String.sub output 0 200 ^ "...");
+      if String.length output > 0 then Ok output
+      else Error "empty response"
+    with exn -> Error (Printexc.to_string exn)
+
+(** Spawn a new agent — can be called by another agent.
+    Uses GraphQL createAgent mutation (works in Railway production). *)
 let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
   (* Validate child name — no prefix, agents are independent *)
   let agent_name = if String.length child_name > 50 then String.sub child_name 0 50 else child_name in
@@ -1517,46 +1560,74 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
   if List.exists (fun (n, _, _, _, _) -> n = agent_name) existing then
     (false, Printf.sprintf "❌ Lodge: 에이전트 '%s'가 이미 존재합니다" agent_name)
   else
-    (* Create in Neo4j *)
-    let escaped_prompt = Str.global_replace (Str.regexp "'") "" child_prompt in
-    let cypher = Printf.sprintf
-      "CREATE (a:Agent { \
-         name: '%s', \
-         role: '%s', \
-         prompt_template: '%s', \
-         created_at: datetime(), \
-         created_by: '%s', \
-         status: 'active', \
-         visit_count: 0, \
-         reaction_count: 0 \
-       }) \
-       WITH a \
-       MATCH (parent:Agent {name: '%s'}) \
-       CREATE (a)-[:SPAWNED_BY]->(parent) \
-       WITH a \
-       MERGE (lodge:Activity {name: 'lodge'}) \
-       CREATE (a)-[:PARTICIPATES_IN]->(lodge) \
-       RETURN a.name"
-      agent_name child_role escaped_prompt parent_name parent_name
-    in
-    let cmd = Printf.sprintf "%s neo4j query \"%s\"" (sb_path ()) cypher in
-    try
-      let _ = run_shell_nonblocking cmd in
-      (* Announce spawn via LLM *)
-      let announcement = Printf.sprintf
-        "🐣 새 에이전트 탄생!\n이름: %s\n성격: %s\n부모: %s\n\n\"%s\""
-        agent_name child_role parent_name child_prompt
+    (* Create via GraphQL mutation *)
+    let graphql_url = Sys.getenv_opt "GRAPHQL_URL"
+      |> Option.value ~default:"https://second-brain-graphql-production.up.railway.app/graphql" in
+    let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+    if api_key = "" then
+      (false, "❌ Lodge: GRAPHQL_API_KEY not configured")
+    else
+      (* Escape for GraphQL JSON *)
+      let escape_gql s =
+        s |> Str.global_replace (Str.regexp "\\\\") "\\\\\\\\"
+          |> Str.global_replace (Str.regexp "\"") "\\\""
+          |> Str.global_replace (Str.regexp "\n") "\\n"
       in
-      (* Post to board *)
-      let _ = Tool_board.handle_tool "masc_board_post"
-        (`Assoc [
-          ("author", `String parent_name);
-          ("content", `String announcement);
-          ("visibility", `String "internal");
-        ])
+      let escaped_role = escape_gql child_role in
+      let escaped_prompt = escape_gql child_prompt in
+      (* Generate random activity hours for diversity *)
+      let peak_hour = 9 + Random.int 12 in (* 9-20 KST *)
+      (* Build GraphQL mutation *)
+      let mutation = Printf.sprintf
+        {|{"query":"mutation { createAgent(name: \"%s\", role: \"%s\", description: \"%s\", peakHour: %d, preferredHours: [%d, %d, %d], traits: [\"%s\"], model: \"glm-4.7\", status: \"active\") { success message agent { name } } }"}|}
+        agent_name escaped_role escaped_prompt
+        peak_hour ((peak_hour - 1 + 24) mod 24) peak_hour ((peak_hour + 1) mod 24)
+        escaped_role
       in
-      (true, Printf.sprintf "✅ '%s' 에이전트가 '%s'에 의해 생성되었습니다" agent_name parent_name)
-    with exn -> (false, Printf.sprintf "❌ Lodge: 생성 실패 [%s]" (Printexc.to_string exn))
+      Printf.eprintf "[spawn_agent] GraphQL mutation: createAgent(name=%s, role=%s)\n%!" agent_name child_role;
+      let cmd = Printf.sprintf
+        "curl -s '%s' -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s'"
+        graphql_url api_key mutation
+      in
+      try
+        let ic = Unix.open_process_in cmd in
+        let output = In_channel.input_all ic in
+        let _ = Unix.close_process_in ic in
+        Printf.eprintf "[spawn_agent] GraphQL response: %s\n%!" (if String.length output < 300 then output else String.sub output 0 300 ^ "...");
+        (* Parse response *)
+        let json = Yojson.Safe.from_string output in
+        let data = json |> member "data" in
+        if data = `Null then
+          let errs = json |> member "errors" in
+          let err_msg = match errs with
+            | `List (e :: _) -> e |> member "message" |> to_string_option |> Option.value ~default:"Unknown error"
+            | _ -> output
+          in
+          (false, Printf.sprintf "❌ Lodge: GraphQL error: %s" err_msg)
+        else
+          let result = data |> member "createAgent" in
+          let success = result |> member "success" |> to_bool in
+          if success then begin
+            Printf.eprintf "[spawn_agent] GraphQL success\n%!";
+            (* Success - agent created *)
+            let announcement = Printf.sprintf
+              "🐣 새 에이전트 탄생!\n이름: %s\n성격: %s\n부모: %s\n\n\"%s\""
+              agent_name child_role parent_name child_prompt
+            in
+            let _ = Tool_board.handle_tool "masc_board_post"
+              (`Assoc [
+                ("author", `String parent_name);
+                ("content", `String announcement);
+                ("visibility", `String "internal");
+              ])
+            in
+            (true, Printf.sprintf "✅ '%s' 에이전트가 '%s'에 의해 생성되었습니다" agent_name parent_name)
+          end else
+            let msg = result |> member "message" |> to_string_option |> Option.value ~default:"Unknown" in
+            (false, Printf.sprintf "❌ Lodge: %s" msg)
+      with
+      | Yojson.Json_error e -> (false, Printf.sprintf "❌ Lodge: JSON parse error: %s" e)
+      | exn -> (false, Printf.sprintf "❌ Lodge: %s" (Printexc.to_string exn))
 
 (** Check if an agent feels the need to spawn — based on interest breadth *)
 let should_spawn ~net agent_name interests =

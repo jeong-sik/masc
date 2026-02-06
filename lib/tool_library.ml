@@ -24,7 +24,6 @@ let string_contains ~sub s =
 type result = bool * string
 
 type context = {
-  config: Room.config;
   agent_name: string;
 }
 

@@ -629,18 +629,22 @@ let emit_heartbeat_task
     ~prompt
     ~context
     ?(board_id : string option)
+    ?(action_hint : string option)
     () : unit =
   let data = `Assoc ([
     ("agent", `String agent);
     ("prompt", `String prompt);
     ("context", `String context);
-  ] @ match board_id with
+  ] @ (match board_id with
     | Some bid -> [("board_id", `String bid)]
     | None -> [])
+  @ (match action_hint with
+    | Some hint -> [("action_hint", `String hint)]
+    | None -> []))
   in
   notify_event ~event_type:HeartbeatTask ~agent ~data;
-  Log.info ~ctx:"heartbeat" "💓 HeartbeatTask emitted for %s (prompt: %d chars)"
-    agent (String.length prompt)
+  Log.info ~ctx:"heartbeat" "💓 HeartbeatTask emitted for %s (prompt: %d chars, hint: %s)"
+    agent (String.length prompt) (Option.value ~default:"none" action_hint)
 
 (** {1 A2A Worker Response — Complete the delegation cycle}
 

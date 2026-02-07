@@ -190,68 +190,176 @@ let participant_merge_cypher ~thread_id ~participant ~role =
 
 (** {1 Neo4j HTTP Client} *)
 
-(** Read all bytes from an input channel (pipe-safe, does NOT use in_channel_length). *)
-let read_all_from_ic ic =
-  let buf = Buffer.create 4096 in
-  (try while true do
-    Buffer.add_char buf (input_char ic)
-  done with End_of_file -> ());
-  Buffer.contents buf
+type eio_net = [`Generic] Eio.Net.ty Eio.Resource.t
+type eio_clock = float Eio.Time.clock_ty Eio.Resource.t
+
+let current_net : eio_net option ref = ref None
+let current_clock : eio_clock option ref = ref None
+type https_connector =
+  | Https_connector :
+      (Uri.t ->
+       [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
+       [> Eio.Flow.two_way_ty ] Eio.Resource.t)
+      -> https_connector
+
+let current_https_connector : https_connector option ref = ref None
+
+let set_eio_context ?clock ?https_connector (net : _ Eio.Net.t) =
+  current_net := Some (net :> eio_net);
+  current_clock := clock;
+  current_https_connector := Option.map (fun c -> Https_connector c) https_connector
+
+let clear_eio_context () =
+  current_net := None;
+  current_clock := None;
+  current_https_connector := None
+
+let truncate_for_log s =
+  let max_len = 500 in
+  if String.length s <= max_len then s else String.sub s 0 max_len ^ "..."
+
+let looks_like_localhost host =
+  host = "localhost" || host = "127.0.0.1" || host = "::1"
+
+let neo4j_http_base_uri () : (Uri.t, string) result =
+  (* Prefer explicit HTTP URI if provided to avoid bolt/http port mismatches. *)
+  match Sys.getenv_opt "NEO4J_HTTP_URI" with
+  | Some uri_str when String.trim uri_str <> "" ->
+      Ok (Uri.of_string uri_str)
+  | _ ->
+      let uri_str =
+        Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"http://localhost:7474"
+      in
+      let uri = Uri.of_string uri_str in
+      match Uri.scheme uri with
+      | Some ("http" | "https") -> Ok uri
+      | Some scheme
+        when String.length scheme >= 4
+             && (String.sub scheme 0 4 = "bolt" || String.sub scheme 0 4 = "neo4") ->
+          let host = Uri.host uri |> Option.value ~default:"localhost" in
+          let is_secure =
+            (* e.g. bolt+s / neo4j+s / neo4j+ssc *)
+            String.contains scheme '+'
+          in
+          let scheme = if is_secure then "https" else "http" in
+          let port =
+            (* Local Neo4j uses dedicated HTTP ports (7474/7473), not the bolt port. *)
+            if looks_like_localhost host then (if is_secure then 7473 else 7474)
+            else Uri.port uri |> Option.value ~default:(if is_secure then 7473 else 7474)
+          in
+          Ok (Uri.make ~scheme ~host ~port ())
+      | Some other ->
+          Error (Printf.sprintf "Unsupported NEO4J_URI scheme for HTTP API: %s" other)
+      | None ->
+          Error "NEO4J_URI missing scheme"
+
+let neo4j_tx_commit_uri () : (Uri.t, string) result =
+  match neo4j_http_base_uri () with
+  | Error _ as e -> e
+  | Ok base ->
+      let base_str = Uri.to_string base in
+      let base_str =
+        if String.length base_str > 0 && base_str.[String.length base_str - 1] = '/'
+        then String.sub base_str 0 (String.length base_str - 1)
+        else base_str
+      in
+      Ok (Uri.of_string (base_str ^ "/db/neo4j/tx/commit"))
+
+let neo4j_auth_header () : (string * string, string) result =
+  let user = Sys.getenv_opt "NEO4J_USER" |> Option.value ~default:"neo4j" in
+  let password = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
+  if String.trim password = "" then
+    Error "NEO4J_PASSWORD not set (Neo4j persistence disabled)"
+  else
+    let creds = Base64.encode_exn (user ^ ":" ^ password) in
+    Ok ("Authorization", "Basic " ^ creds)
 
 (** Execute a Cypher query via Neo4j HTTP API.
     Returns Ok json_response on success, Error msg on failure.
     Uses environment variables: NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD *)
 let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
-  let uri = match Sys.getenv_opt "NEO4J_URI" with Some v -> v | None -> "http://localhost:7474" in
-  let user = match Sys.getenv_opt "NEO4J_USER" with Some v -> v | None -> "neo4j" in
-  let password = match Sys.getenv_opt "NEO4J_PASSWORD" with Some v -> v | None -> "password" in
+  match !current_net with
+  | None ->
+      Error "Eio net not initialized (Neo4j persistence disabled)"
+  | Some net ->
+      let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
+      let* endpoint_uri = neo4j_tx_commit_uri () in
+      let* auth_header = neo4j_auth_header () in
 
-  let endpoint = uri ^ "/db/neo4j/tx/commit" in
-  (* Build JSON payload using Yojson to avoid injection *)
-  let payload = Yojson.Safe.to_string (`Assoc [
-    ("statements", `List [
-      `Assoc [("statement", `String cypher)]
-    ])
-  ]) in
+      (* Build JSON payload using Yojson to avoid injection *)
+      let payload =
+        Yojson.Safe.to_string
+          (`Assoc
+            [
+              ( "statements",
+                `List [ `Assoc [ ("statement", `String cypher) ] ] );
+            ])
+      in
 
-  (* Write payload to temp file to avoid shell escaping issues *)
-  let tmp_file = Filename.temp_file "neo4j_" ".json" in
-  Fun.protect ~finally:(fun () ->
-    try Sys.remove tmp_file with _ -> ()
-  ) (fun () ->
-    let oc = open_out tmp_file in
-    output_string oc payload;
-    close_out oc;
+      let timeout_sec = 10.0 in
+      let max_response_bytes = 1_000_000 in
 
-    let cmd = Printf.sprintf
-      "curl -s --max-time 10 -X POST '%s' -H 'Content-Type: application/json' -u '%s:%s' -d @'%s' 2>/dev/null"
-      endpoint user password tmp_file
-    in
-    let ic = Unix.open_process_in cmd in
-    let response = try read_all_from_ic ic with Sys_error _ -> "" in
-    let status = Unix.close_process_in ic in
-    match status with
-    | Unix.WEXITED 0 ->
-        (try
-          let json = Yojson.Safe.from_string response in
-          let open Yojson.Safe.Util in
-          let errors = json |> member "errors" |> to_list in
-          if errors = [] then Ok json
+      let run () =
+        Eio.Switch.run (fun sw ->
+          let is_https = Uri.scheme endpoint_uri = Some "https" in
+          let client =
+            if not is_https then Cohttp_eio.Client.make ~https:None net
+            else
+              match !current_https_connector with
+              | Some (Https_connector c) ->
+                  Cohttp_eio.Client.make ~https:(Some c) net
+              | None ->
+                  failwith "HTTPS requested but https connector not initialized"
+          in
+          let headers =
+            Cohttp.Header.of_list
+              [ ("Content-Type", "application/json"); auth_header ]
+          in
+          let body_content = Eio.Flow.string_source payload in
+          let resp, resp_body =
+            Cohttp_eio.Client.post client ~sw endpoint_uri ~headers
+              ~body:body_content
+          in
+          let status_code =
+            Cohttp.Response.status resp |> Cohttp.Code.code_of_status
+          in
+          let response =
+            Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_response_bytes
+          in
+          if String.length response = 0 then Error "Neo4j: empty response"
+          else if not (Cohttp.Code.is_success status_code) then
+            Error
+              (Printf.sprintf "Neo4j HTTP %d: %s" status_code
+                 (truncate_for_log response))
           else
-            let err_msg = errors
-              |> List.map (fun e -> e |> member "message" |> to_string_option |> Option.value ~default:"unknown")
-              |> String.concat "; "
-            in
-            Error (Printf.sprintf "Neo4j error: %s" err_msg)
-        with e ->
-          if String.length response = 0 then
-            Error "Neo4j: empty response (server unreachable?)"
-          else
-            Error (Printf.sprintf "Neo4j response parse error: %s" (Printexc.to_string e)))
-    | Unix.WEXITED code ->
-        Error (Printf.sprintf "curl exited with code %d" code)
-    | _ -> Error "curl command terminated abnormally"
-  )
+            try
+              let json = Yojson.Safe.from_string response in
+              let open Yojson.Safe.Util in
+              let errors = json |> member "errors" |> to_list in
+              if errors = [] then Ok json
+              else
+                let err_msg =
+                  errors
+                  |> List.map (fun e ->
+                         e |> member "message" |> to_string_option
+                         |> Option.value ~default:"unknown")
+                  |> String.concat "; "
+                in
+                Error (Printf.sprintf "Neo4j error: %s" err_msg)
+            with e ->
+              Error
+                (Printf.sprintf "Neo4j response parse error: %s"
+                   (Printexc.to_string e)))
+      in
+
+      (match !current_clock with
+      | Some clock -> (
+          try Eio.Time.with_timeout_exn clock timeout_sec run
+          with
+          | Eio.Time.Timeout -> Error "Neo4j HTTP timeout"
+          | exn -> Error (Printexc.to_string exn))
+      | None -> (
+          try run () with exn -> Error (Printexc.to_string exn)))
 
 (** Execute a Cypher query, ignoring the response data.
     Returns Ok () on success, Error msg on failure. *)

@@ -1700,6 +1700,9 @@ let run_server ~sw ~env ~port ~base_path =
   Mcp_eio.set_clock clock;
   Masc_mcp.Eio_context.set_net net;
   Masc_mcp.Eio_context.set_clock clock;
+  Council.Thread_persist.set_eio_context ~clock
+    ~https_connector:(Masc_mcp.Eio_context.get_https_connector ())
+    net;
   Masc_mcp.Process_eio.init ~proc_mgr ~clock;
   (* Initialize Lodge after Eio context is ready (requires net for GraphQL) *)
   Masc_mcp.Tool_lodge.init ();

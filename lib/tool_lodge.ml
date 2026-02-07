@@ -998,7 +998,7 @@ let translate_to_korean ~net text =
     | Error _ -> text  (* fallback to original *)
 
 (** React to content with a dynamic agent (from Neo4j cache) *)
-let react_to_content ~net ?agent_name:provided_name content =
+let react_to_content ~net ?agent_name:provided_name ?post_id content =
   let agent_name = match provided_name with
     | Some n -> n
     | None -> random_agent_name ()
@@ -1017,6 +1017,17 @@ let react_to_content ~net ?agent_name:provided_name content =
     You are a Lodge participant. %s%s\n\
     Share your unique perspective. Be thoughtful, specific, and add value. 2-4 sentences only."
     agent_desc interests_context in
+  (* A2A delegation: emit event for external worker instead of local LLM *)
+  if Env_config.LodgeV2.delegate_llm then begin
+    let action_hint = match post_id with
+      | Some pid -> Some ("COMMENT:" ^ pid)
+      | None -> Some "POST"
+    in
+    A2a_tools.emit_heartbeat_task ~agent:agent_name ~prompt:system
+      ~context:(Printf.sprintf "React to this Lodge post:\n%s" content)
+      ?action_hint ();
+    Ok ""  (* Empty = delegated; caller skips comment posting *)
+  end else
   match smart_generate ~net ~temperature:0.8 ~num_predict:250 ~system
     (Printf.sprintf "React to this Lodge post:\n%s\n\nYour perspective:" content) with
   | Error e -> Error e
@@ -1071,8 +1082,9 @@ let heartbeat ~net (args : Yojson.Safe.t) =
           (* Auto-trigger reactions from agents *)
           let reactions = if post_id <> "" then
             List.filter_map (fun agent ->
-              match react_to_content ~net ~agent_name:agent content with
+              match react_to_content ~net ~agent_name:agent ~post_id content with
               | Error _ -> None
+              | Ok "" -> Some (Printf.sprintf "🔮 %s (delegated)" agent)
               | Ok reaction ->
                 let args = `Assoc [("post_id", `String post_id); ("content", `String reaction); ("author", `String agent)] in
                 let (ok, _) = Tool_board.handle_tool "masc_board_comment" args in
@@ -1134,8 +1146,9 @@ let react ~net (args : Yojson.Safe.t) =
     else
       let clean_content = extract_post_content detail in
       if skip_classify then
-      match react_to_content ~net ~agent_name clean_content with
+      match react_to_content ~net ~agent_name ~post_id clean_content with
       | Error e -> (false, Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]" agent_name e)
+      | Ok "" -> (true, Printf.sprintf "🔮 Lodge reaction delegated for %s [agent=%s]" post_id agent_name)
       | Ok reaction ->
         let comment_args = `Assoc [
           ("post_id", `String post_id);
@@ -1151,8 +1164,9 @@ let react ~net (args : Yojson.Safe.t) =
       | Noise -> (true, Printf.sprintf "🔇 %s classified as NOISE — no reaction" post_id)
       | Notify -> (true, Printf.sprintf "⚠️ %s classified as NOTIFY — flagged for human" post_id)
       | Review ->
-        match react_to_content ~net ~agent_name clean_content with
+        match react_to_content ~net ~agent_name ~post_id clean_content with
         | Error e -> (false, Printf.sprintf "❌ Lodge: React failed [agent=%s, error=%s]" agent_name e)
+        | Ok "" -> (true, Printf.sprintf "🔮 Lodge reaction delegated for %s [agent=%s]" post_id agent_name)
         | Ok reaction ->
           let comment_args = `Assoc [
             ("post_id", `String post_id);

@@ -84,9 +84,16 @@ let mkdir_p (path : string) : unit =
     let eio_path = Eio.Path.(fs / path) in
     Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path
   | None ->
-    (* Fallback: use mkdir -p command *)
-    if not (Sys.file_exists path) then
-      ignore (Sys.command (Printf.sprintf "mkdir -p %s" path))
+    (* Fallback: recursive mkdir without invoking a shell. *)
+    let rec ensure_dir (p : string) : unit =
+      if p = "" || p = "." || p = "/" then ()
+      else if Sys.file_exists p then ()
+      else begin
+        ensure_dir (Filename.dirname p);
+        try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+      end
+    in
+    ensure_dir path
 
 (** Load JSONL file as list of JSON values.
     Filters out malformed lines. *)

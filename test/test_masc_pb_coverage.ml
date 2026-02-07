@@ -642,8 +642,8 @@ let test_update_plan_proto_roundtrip () =
 
 let test_add_note_request_make () =
   let r = Masc_pb.Masc.V1.AddNoteRequest.make
-    ~task_id:"t-note" ~content:"Important note" () in
-  check string "content" "Important note" r.content
+    ~task_id:"t-note" ~note:"Important note" () in
+  check string "note" "Important note" r.note
 
 let test_add_note_response_make () =
   let r = Masc_pb.Masc.V1.AddNoteResponse.make ~success:true () in
@@ -651,11 +651,11 @@ let test_add_note_response_make () =
 
 let test_add_note_proto_roundtrip () =
   let original = Masc_pb.Masc.V1.AddNoteRequest.make
-    ~task_id:"t" ~content:"note" () in
+    ~task_id:"t" ~note:"note" () in
   let encoded = Masc_pb.Masc.V1.AddNoteRequest.to_proto original in
   let reader = Ocaml_protoc_plugin.Reader.create (Ocaml_protoc_plugin.Writer.contents encoded) in
   match Masc_pb.Masc.V1.AddNoteRequest.from_proto reader with
-  | Ok decoded -> check string "content" "note" decoded.content
+  | Ok decoded -> check string "note" "note" decoded.note
   | Error _ -> fail "add_note proto decode failed"
 
 (* ============================================================
@@ -784,12 +784,65 @@ let () =
       test_case "request make" `Quick test_add_task_request_make;
       test_case "response make" `Quick test_add_task_response_make;
     ];
+    "claim_task", [
+      test_case "request make" `Quick test_claim_task_request_make;
+      test_case "response make" `Quick test_claim_task_response_make;
+      test_case "proto roundtrip" `Quick test_claim_task_proto_roundtrip;
+      test_case "json roundtrip" `Quick test_claim_task_json_roundtrip;
+    ];
+    "done_task", [
+      test_case "request make" `Quick test_done_task_request_make;
+      test_case "response make" `Quick test_done_task_response_make;
+      test_case "proto roundtrip" `Quick test_done_task_proto_roundtrip;
+    ];
+    "cancel_task", [
+      test_case "request make" `Quick test_cancel_task_request_make;
+      test_case "response make" `Quick test_cancel_task_response_make;
+      test_case "proto roundtrip" `Quick test_cancel_task_proto_roundtrip;
+    ];
+    "get_messages", [
+      test_case "request make" `Quick test_get_messages_request_make;
+      test_case "response make" `Quick test_get_messages_response_make;
+      test_case "proto roundtrip" `Quick test_get_messages_proto_roundtrip;
+    ];
+    "create_vote", [
+      test_case "request make" `Quick test_create_vote_request_make;
+      test_case "response make" `Quick test_create_vote_response_make;
+      test_case "proto roundtrip" `Quick test_create_vote_proto_roundtrip;
+    ];
+    "cast_vote", [
+      test_case "request make" `Quick test_cast_vote_request_make;
+      test_case "response make" `Quick test_cast_vote_response_make;
+      test_case "proto roundtrip" `Quick test_cast_vote_proto_roundtrip;
+    ];
+    "init_plan", [
+      test_case "request make" `Quick test_init_plan_request_make;
+      test_case "response make" `Quick test_init_plan_response_make;
+      test_case "proto roundtrip" `Quick test_init_plan_proto_roundtrip;
+    ];
+    "update_plan", [
+      test_case "request make" `Quick test_update_plan_request_make;
+      test_case "response make" `Quick test_update_plan_response_make;
+      test_case "proto roundtrip" `Quick test_update_plan_proto_roundtrip;
+    ];
+    "add_note", [
+      test_case "request make" `Quick test_add_note_request_make;
+      test_case "response make" `Quick test_add_note_response_make;
+      test_case "proto roundtrip" `Quick test_add_note_proto_roundtrip;
+    ];
+    "get_plan", [
+      test_case "request make" `Quick test_get_plan_request_make;
+      test_case "response make" `Quick test_get_plan_response_make;
+      test_case "proto roundtrip" `Quick test_get_plan_proto_roundtrip;
+    ];
     "broadcast_response", [
       test_case "make" `Quick test_broadcast_response_make;
     ];
     "planning_context", [
       test_case "make" `Quick test_planning_context_make;
       test_case "name" `Quick test_planning_context_name;
+      test_case "proto roundtrip" `Quick test_planning_context_proto_roundtrip;
+      test_case "json roundtrip" `Quick test_planning_context_json_roundtrip;
     ];
     "proto_roundtrip", [
       test_case "agent" `Quick test_agent_proto_roundtrip;
@@ -803,5 +856,8 @@ let () =
       test_case "agent" `Quick test_agent_json_roundtrip;
       test_case "task" `Quick test_task_json_roundtrip;
       test_case "message" `Quick test_message_json_roundtrip;
+      test_case "vote" `Quick test_vote_json_roundtrip;
+      test_case "broadcast_request" `Quick test_broadcast_request_json_roundtrip;
+      test_case "status_response" `Quick test_status_response_json_roundtrip;
     ];
   ]

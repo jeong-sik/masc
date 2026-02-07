@@ -48,15 +48,14 @@ let test_activity_log_file_ends_with_log () =
    llm_mcp_url Tests
    ============================================================ *)
 
-let test_llm_mcp_url_nonempty () =
+let test_llm_mcp_url_empty_or_http () =
   let url = Auto_responder.llm_mcp_url () in
-  check bool "nonempty" true (String.length url > 0)
-
-let test_llm_mcp_url_is_http () =
-  let url = Auto_responder.llm_mcp_url () in
-  check bool "is http" true
-    (String.length url > 7 &&
-     (String.sub url 0 7 = "http://" || String.sub url 0 8 = "https://"))
+  (* LLM_MCP_URL is deprecated (and unset in CI); treat empty as valid.
+     If set, it must be an http(s) URL. *)
+  check bool "empty or http(s)" true
+    (String.length url = 0 ||
+     (String.length url > 7 &&
+      (String.sub url 0 7 = "http://" || String.sub url 0 8 = "https://")))
 
 (* ============================================================
    build_spawn_command Tests
@@ -289,8 +288,7 @@ let () =
       test_case "ends with .log" `Quick test_activity_log_file_ends_with_log;
     ];
     "llm_mcp_url", [
-      test_case "nonempty" `Quick test_llm_mcp_url_nonempty;
-      test_case "is http" `Quick test_llm_mcp_url_is_http;
+      test_case "empty or http(s)" `Quick test_llm_mcp_url_empty_or_http;
     ];
     "build_spawn_command", [
       test_case "claude" `Quick test_build_spawn_command_claude;

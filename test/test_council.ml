@@ -336,11 +336,20 @@ let test_executor_dry_run_reject () =
   check bool "mentions would not" 
     (try String.sub output 0 9 = "Would NOT" with _ -> false) true
 
+let test_executor_github_argv_create_issue () =
+  let title = "Title with spaces and 'quotes' and \"double-quotes\"" in
+  let body = "line1\nline2\nline3 with spaces" in
+  let argv = Executor.github_argv (Executor.CreateIssue (title, body)) in
+  check (list string) "argv"
+    argv
+    ["gh"; "issue"; "create"; "--title"; title; "--body"; body]
+
 let executor_tests = [
   "find action PR", `Quick, test_executor_find_action_pr;
   "no action for random", `Quick, test_executor_find_action_none;
   "dry run approve", `Quick, test_executor_dry_run_approve;
   "dry run reject", `Quick, test_executor_dry_run_reject;
+  "github argv create issue", `Quick, test_executor_github_argv_create_issue;
 ]
 
 (* ============================================================

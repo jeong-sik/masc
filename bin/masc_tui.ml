@@ -112,12 +112,14 @@ let create_state ~room ~port ~refresh_interval = {
 (** Get terminal size (fallback to 80x24) *)
 let get_terminal_size () =
   try
-    let ic = Unix.open_process_in "tput cols" in
-    let cols = int_of_string (String.trim (input_line ic)) in
-    ignore (Unix.close_process_in ic);
-    let ic = Unix.open_process_in "tput lines" in
-    let rows = int_of_string (String.trim (input_line ic)) in
-    ignore (Unix.close_process_in ic);
+    let read_tput arg =
+      let ic = Unix.open_process_args_in "tput" [| "tput"; arg |] in
+      Fun.protect
+        ~finally:(fun () -> ignore (Unix.close_process_in ic))
+        (fun () -> int_of_string (String.trim (input_line ic)))
+    in
+    let cols = read_tput "cols" in
+    let rows = read_tput "lines" in
     (rows, cols)
   with _ -> (24, 80)
 

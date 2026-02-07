@@ -577,6 +577,7 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
     let agent_match = match sub.agent_filter with
       | None -> true
       | Some filter -> filter = "*" || filter = agent
+          || event_type = HeartbeatTask (* System event: bypass agent filter *)
     in
     (* Check event type *)
     let event_match = List.mem event_type sub.event_types in

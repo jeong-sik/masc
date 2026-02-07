@@ -156,15 +156,27 @@ let graphql_request_curl body : (string, string) Stdlib.result =
   let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let escaped_body = String.concat "\\\"" (String.split_on_char '"' body) in
-  let auth_header = if api_key = "" then "" else Printf.sprintf "-H 'Authorization: Bearer %s'" api_key in
-  let cmd = Printf.sprintf "curl -s -m 10 '%s' -H 'Content-Type: application/json' %s -d \"%s\"" url auth_header escaped_body in
+  let argv =
+    [ "curl"; "-s"; "-m"; "10"; url;
+      "-H"; "Content-Type: application/json"
+    ]
+    |> fun base ->
+    if api_key = "" then base
+    else base @ [ "-H"; "Authorization: Bearer " ^ api_key ]
+    |> fun with_auth ->
+    (* Use --data-raw to avoid treating leading '@' specially. *)
+    with_auth @ [ "--data-raw"; body ]
+  in
   try
-    let ic = Unix.open_process_in cmd in
+    let ic = Unix.open_process_args_in "curl" (Array.of_list argv) in
     let output = In_channel.input_all ic in
-    let _ = Unix.close_process_in ic in
-    if String.length output = 0 then Error "❌ GraphQL curl: empty response"
-    else Ok output
+    let status = Unix.close_process_in ic in
+    match status with
+    | Unix.WEXITED 0 ->
+        if String.length output = 0 then Error "❌ GraphQL curl: empty response"
+        else Ok output
+    | Unix.WEXITED n -> Error (Printf.sprintf "❌ GraphQL curl: exit %d" n)
+    | _ -> Error "❌ GraphQL curl: signaled"
   with exn -> Error (Printf.sprintf "❌ GraphQL curl: %s" (Printexc.to_string exn))
 
 (** GraphQL request via Cohttp_eio with curl fallback.

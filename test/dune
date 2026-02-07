@@ -158,6 +158,12 @@
  (modules test_pubsub_postgres)
  (libraries masc_mcp alcotest))
 
+; Fs_compat tests (mkdir_p fallback must be shell-free and safe)
+(test
+ (name test_fs_compat)
+ (modules test_fs_compat)
+ (libraries masc_mcp alcotest unix))
+
 ; ============================================================
 ; Concurrency stress tests (20+ agents)
 ; Phase 4: MCP Unify project

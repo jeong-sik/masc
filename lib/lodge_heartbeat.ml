@@ -2720,7 +2720,10 @@ let start ~sw ~clock room_config =
 
           (* Start self-heartbeat for agents who acted (continue engagement) *)
           let acted_agents = List.filter_map (fun (name, _, r) ->
-            match r with Acted _ -> Some name | _ -> None
+            match r with
+            | Acted { action = ActionDelegated _; _ } -> None (* Skip: Worker handles via heartbeat_task event *)
+            | Acted _ -> Some name
+            | _ -> None
           ) result.checkins in
           List.iter (fun name ->
             if not (is_agent_active ~name) then begin

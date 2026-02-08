@@ -19,7 +19,11 @@ let test name f =
 let () = test "load_agents_from_neo4j_curl_fallback" (fun () ->
   (* When Eio net is not initialized, Cohttp fails but curl fallback succeeds.
      If GRAPHQL_API_KEY is set and network is available, agents are returned. *)
-  let has_api_key = Sys.getenv_opt "GRAPHQL_API_KEY" <> None in
+  let has_api_key =
+    match Sys.getenv_opt "GRAPHQL_API_KEY" with
+    | Some s when String.length s > 0 -> true
+    | _ -> false
+  in
   let agents = Lodge_heartbeat.load_agents_from_neo4j () in
   if has_api_key then
     (* With API key, curl fallback should return agents (or [] if network down) *)
@@ -31,7 +35,11 @@ let () = test "load_agents_from_neo4j_curl_fallback" (fun () ->
 
 (* Test: load_lodge_agents_full also uses curl fallback *)
 let () = test "load_lodge_agents_full_curl_fallback" (fun () ->
-  let has_api_key = Sys.getenv_opt "GRAPHQL_API_KEY" <> None in
+  let has_api_key =
+    match Sys.getenv_opt "GRAPHQL_API_KEY" with
+    | Some s when String.length s > 0 -> true
+    | _ -> false
+  in
   match Lodge_heartbeat.load_lodge_agents_full () with
   | Ok json ->
       if has_api_key then begin

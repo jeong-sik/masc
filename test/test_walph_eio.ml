@@ -9,6 +9,15 @@
 
 open Alcotest
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
 (** Test fixture: Create isolated config with Eio environment *)
 let with_test_config name f =
   Eio_main.run @@ fun env ->
@@ -22,12 +31,7 @@ let with_test_config name f =
   Fun.protect
     ~finally:(fun () ->
       let _ = Masc_mcp.Room.reset config in
-      let path = Masc_mcp.Room.masc_dir config in
-      if Sys.file_exists path then
-        let _ = Sys.command (Printf.sprintf "rm -rf %s" path) in ();
-      let parent = Filename.dirname path in
-      if Sys.file_exists parent then
-        try Unix.rmdir parent with _ -> ())
+      (try rm_rf tmp_dir with _ -> ()))
     (fun () -> f env fs config)
 
 (** Test: Basic state machine in Eio context *)

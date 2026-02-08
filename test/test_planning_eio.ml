@@ -5,6 +5,15 @@ open Masc_mcp
 
 let temp_dir = ref ""
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
 let setup () =
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "planning_eio_test_%d" (int_of_float (Unix.gettimeofday () *. 1000.))) in
@@ -14,8 +23,7 @@ let setup () =
 let teardown () =
   (* Clean up temp directory *)
   if !temp_dir <> "" then begin
-    let cmd = Printf.sprintf "rm -rf %s" (Filename.quote !temp_dir) in
-    ignore (Sys.command cmd)
+    (try rm_rf !temp_dir with _ -> ())
   end
 
 let make_config () : Room.config =

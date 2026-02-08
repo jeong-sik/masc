@@ -4,10 +4,19 @@ open Masc_mcp
 
 let test_dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_planning_test"
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
 let setup_config () =
   (* Clean up and recreate test directory *)
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" test_dir));
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s" test_dir));
+  (try rm_rf test_dir with _ -> ());
+  Fs_compat.mkdir_p test_dir;
   (* Use memory backend for tests to avoid filesystem dependencies *)
   Unix.putenv "MASC_STORAGE_TYPE" "memory";
   Room.default_config test_dir

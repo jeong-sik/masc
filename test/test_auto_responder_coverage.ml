@@ -3,8 +3,6 @@
     Tests for MASC Auto-responder:
     - mode type (Disabled, Spawn, Llm)
     - activity_log_file: log file path
-    - llm_mcp_url: LLM MCP endpoint
-    - build_spawn_command: shell command builder
     - build_response_prompt: prompt string builder
     - extract_nickname: nickname extraction from response
     - re-exports from Mention
@@ -43,79 +41,6 @@ let test_activity_log_file_ends_with_log () =
   check bool "ends with .log" true
     (String.length path > 4 &&
      String.sub path (String.length path - 4) 4 = ".log")
-
-(* ============================================================
-   llm_mcp_url Tests
-   ============================================================ *)
-
-let test_llm_mcp_url_empty_or_http () =
-  let url = Auto_responder.llm_mcp_url () in
-  (* LLM_MCP_URL is deprecated (and unset in CI); treat empty as valid.
-     If set, it must be an http(s) URL. *)
-  check bool "empty or http(s)" true
-    (String.length url = 0 ||
-     (String.length url > 7 &&
-      (String.sub url 0 7 = "http://" || String.sub url 0 8 = "https://")))
-
-(* ============================================================
-   build_spawn_command Tests
-   ============================================================ *)
-
-let test_build_spawn_command_claude () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"claude" ~prompt:"hello" ~working_dir:"/tmp" in
-  check bool "contains claude" true
-    (try
-      let _ = Str.search_forward (Str.regexp "claude") cmd 0 in true
-    with Not_found -> false)
-
-let test_build_spawn_command_gemini () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"gemini" ~prompt:"test" ~working_dir:"/tmp" in
-  check bool "contains gemini" true
-    (try
-      let _ = Str.search_forward (Str.regexp "gemini") cmd 0 in true
-    with Not_found -> false)
-
-let test_build_spawn_command_codex () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"codex" ~prompt:"test" ~working_dir:"/tmp" in
-  check bool "contains codex" true
-    (try
-      let _ = Str.search_forward (Str.regexp "codex") cmd 0 in true
-    with Not_found -> false)
-
-let test_build_spawn_command_ollama () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"ollama" ~prompt:"test" ~working_dir:"/tmp" in
-  check bool "contains ollama" true
-    (try
-      let _ = Str.search_forward (Str.regexp "ollama") cmd 0 in true
-    with Not_found -> false)
-
-let test_build_spawn_command_glm () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"glm" ~prompt:"test" ~working_dir:"/tmp" in
-  check bool "contains curl" true
-    (try
-      let _ = Str.search_forward (Str.regexp "curl") cmd 0 in true
-    with Not_found -> false)
-
-let test_build_spawn_command_unknown () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"unknown" ~prompt:"test" ~working_dir:"/tmp" in
-  check bool "contains unknown" true
-    (try
-      let _ = Str.search_forward (Str.regexp "unknown") cmd 0 in true
-    with Not_found -> false)
-
-let test_build_spawn_command_has_cd () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"claude" ~prompt:"test" ~working_dir:"/home/user" in
-  check bool "has cd" true
-    (try
-      let _ = Str.search_forward (Str.regexp "cd") cmd 0 in true
-    with Not_found -> false)
-
-let test_build_spawn_command_has_timeout () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"claude" ~prompt:"test" ~working_dir:"/tmp" in
-  check bool "has timeout" true
-    (try
-      let _ = Str.search_forward (Str.regexp "timeout") cmd 0 in true
-    with Not_found -> false)
 
 (* ============================================================
    build_response_prompt Tests
@@ -259,18 +184,10 @@ let test_get_mode_returns_valid () =
    Edge Cases
    ============================================================ *)
 
-let test_build_spawn_command_special_chars () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"claude" ~prompt:"hello's \"world\"" ~working_dir:"/tmp" in
-  check bool "handles special chars" true (String.length cmd > 0)
-
 let test_build_response_prompt_long_content () =
   let long_content = String.make 1000 'x' in
   let prompt = Auto_responder.build_response_prompt ~from_agent:"a" ~content:long_content ~mention:"b" in
   check bool "handles long content" true (String.length prompt > 1000)
-
-let test_build_spawn_command_escapes_prompt () =
-  let cmd = Auto_responder.build_spawn_command ~agent_type:"claude" ~prompt:"test\nwith\nnewlines" ~working_dir:"/tmp" in
-  check bool "handles newlines" true (String.length cmd > 0)
 
 (* ============================================================
    Test Runners
@@ -286,19 +203,6 @@ let () =
     "activity_log_file", [
       test_case "nonempty" `Quick test_activity_log_file_nonempty;
       test_case "ends with .log" `Quick test_activity_log_file_ends_with_log;
-    ];
-    "llm_mcp_url", [
-      test_case "empty or http(s)" `Quick test_llm_mcp_url_empty_or_http;
-    ];
-    "build_spawn_command", [
-      test_case "claude" `Quick test_build_spawn_command_claude;
-      test_case "gemini" `Quick test_build_spawn_command_gemini;
-      test_case "codex" `Quick test_build_spawn_command_codex;
-      test_case "ollama" `Quick test_build_spawn_command_ollama;
-      test_case "glm" `Quick test_build_spawn_command_glm;
-      test_case "unknown" `Quick test_build_spawn_command_unknown;
-      test_case "has cd" `Quick test_build_spawn_command_has_cd;
-      test_case "has timeout" `Quick test_build_spawn_command_has_timeout;
     ];
     "build_response_prompt", [
       test_case "nonempty" `Quick test_build_response_prompt_nonempty;
@@ -335,8 +239,6 @@ let () =
       test_case "returns valid" `Quick test_get_mode_returns_valid;
     ];
     "edge_cases", [
-      test_case "special chars" `Quick test_build_spawn_command_special_chars;
       test_case "long content" `Quick test_build_response_prompt_long_content;
-      test_case "escapes prompt" `Quick test_build_spawn_command_escapes_prompt;
     ];
   ]

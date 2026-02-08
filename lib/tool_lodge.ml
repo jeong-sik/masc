@@ -116,36 +116,26 @@ let source_of_string = function
 
 (** {1 HTTP helpers} *)
 
-(** Escape single quotes for shell command *)
-let shell_escape s = Str.global_replace (Str.regexp "'") "'\\''" s
+let run_cmd_with_status ?(timeout_sec = 60.0) (argv : string list) : Unix.process_status * string =
+  Process_eio.run_argv_with_status ~timeout_sec argv
 
-(** {1 Non-blocking Shell Execution}
+let run_cmd ?(timeout_sec = 10.0) (argv : string list) : string =
+  Process_eio.run_argv ~timeout_sec argv
 
-    All shell commands use Eio-native process execution via Process_eio
-    (global proc_mgr/clock initialized from main_eio.ml).
-*)
+let sb_argv args = (sb_path ()) :: args
 
-(** Run shell command and capture all output (Eio-native).
-    Delegates to Process_eio.run_with_status (global proc_mgr/clock). *)
-let run_shell_nonblocking cmd =
-  Process_eio.run_with_status ~timeout_sec:60.0 cmd
-
-(** Run shell command and get single line result (Eio-native) *)
-let run_shell_line cmd =
-  let output = Process_eio.run ~timeout_sec:10.0 cmd in
-  match String.split_on_char '\n' (String.trim output) with
-  | first :: _ -> first
-  | [] -> ""
+let sb_neo4j_query ?(timeout_sec = 60.0) (cypher : string) : Unix.process_status * string =
+  run_cmd_with_status ~timeout_sec (sb_argv ["neo4j"; "query"; cypher])
 
 (** HTTP GET via curl subprocess — supports both HTTP and HTTPS *)
 let http_get_json ~net:_ url =
   try
-    let safe_url = shell_escape url in
-    let cmd = Printf.sprintf "curl -sf --max-time 10 '%s'" safe_url in
-    let (status, content) = run_shell_nonblocking cmd in
+    let (status, content) =
+      run_cmd_with_status ~timeout_sec:15.0 ["curl"; "-sf"; "--max-time"; "10"; url]
+    in
     match status with
     | Unix.WEXITED 0 -> Ok content
-    | Unix.WEXITED n -> Error (Printf.sprintf "❌ HTTP: curl exit %d [url=%s]" n (String.sub safe_url 0 (min 60 (String.length safe_url))))
+    | Unix.WEXITED n -> Error (Printf.sprintf "❌ HTTP: curl exit %d [url=%s]" n (String.sub url 0 (min 60 (String.length url))))
     | _ -> Error "❌ HTTP: curl signaled"
   with exn -> Error (Printf.sprintf "❌ HTTP: %s" (Printexc.to_string exn))
 
@@ -156,27 +146,19 @@ let graphql_request_curl body : (string, string) Stdlib.result =
   let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let argv =
-    [ "curl"; "-s"; "-m"; "10"; url;
-      "-H"; "Content-Type: application/json"
-    ]
-    |> fun base ->
-    if api_key = "" then base
-    else base @ [ "-H"; "Authorization: Bearer " ^ api_key ]
-    |> fun with_auth ->
-    (* Use --data-raw to avoid treating leading '@' specially. *)
-    with_auth @ [ "--data-raw"; body ]
-  in
   try
-    let ic = Unix.open_process_args_in "curl" (Array.of_list argv) in
-    let output = In_channel.input_all ic in
-    let status = Unix.close_process_in ic in
-    match status with
-    | Unix.WEXITED 0 ->
-        if String.length output = 0 then Error "❌ GraphQL curl: empty response"
-        else Ok output
-    | Unix.WEXITED n -> Error (Printf.sprintf "❌ GraphQL curl: exit %d" n)
-    | _ -> Error "❌ GraphQL curl: signaled"
+    let argv =
+      [ "curl"; "-s"; "-m"; "10"; "-f"; url;
+        "-H"; "Content-Type: application/json"
+      ]
+      |> fun base ->
+      if api_key = "" then base else base @ [ "-H"; "Authorization: Bearer " ^ api_key ]
+      |> fun with_auth ->
+      (* Read request body from stdin to avoid quoting/escaping issues. *)
+      with_auth @ [ "-d"; "@-" ]
+    in
+    let output = Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv in
+    if String.length output = 0 then Error "❌ GraphQL curl: empty response" else Ok output
   with exn -> Error (Printf.sprintf "❌ GraphQL curl: %s" (Printexc.to_string exn))
 
 (** GraphQL request via Cohttp_eio with curl fallback.
@@ -267,7 +249,9 @@ let next_cli_provider () =
 (** Check if ollama has a small model loaded (not blocking with 30b) *)
 let ollama_is_light () =
   try
-    let (_, content) = run_shell_nonblocking "curl -sf http://localhost:11434/api/ps 2>/dev/null" in
+    let (_status, content) =
+      run_cmd_with_status ~timeout_sec:10.0 ["curl"; "-sf"; "http://localhost:11434/api/ps"]
+    in
     let json = Yojson.Safe.from_string content in
     let models = json |> member "models" |> to_list in
     (* If no models loaded or only small models, ollama is light *)
@@ -287,29 +271,24 @@ let cli_generate provider ~system prompt =
     | Codex_cli -> "codex"
     | _ -> failwith "Not a CLI provider"
   in
-  (* Create secure temp file with restricted permissions *)
-  let tmp_file = Filename.temp_file "llm-prompt-" ".txt" in
-  let cleanup () = try Unix.unlink tmp_file with Unix.Unix_error _ -> () in
   try
-    (* Write prompt with owner-only permissions (0600) *)
-    let fd = Unix.openfile tmp_file [Unix.O_WRONLY; Unix.O_TRUNC] 0o600 in
-    let _ = Unix.write_substring fd full_prompt 0 (String.length full_prompt) in
-    Unix.close fd;
-    (* Use stdin for prompt (-) to avoid shell escaping issues with long prompts *)
-    let cmd = match provider with
-      | Gemini_cli -> Printf.sprintf "cat '%s' | gemini 2>/dev/null" tmp_file
-      | Claude_cli -> Printf.sprintf "cat '%s' | claude -p - 2>/dev/null" tmp_file
-      | Codex_cli -> Printf.sprintf "cat '%s' | codex exec - 2>/dev/null" tmp_file
+    let argv = match provider with
+      | Gemini_cli -> ["gemini"]
+      | Claude_cli -> ["claude"; "-p"; "-"]
+      | Codex_cli -> ["codex"; "exec"; "-"]
       | _ -> failwith "Not a CLI provider"
     in
-    let (status, content) = run_shell_nonblocking cmd in
-    cleanup ();
+    let (status, content) =
+      Process_eio.run_argv_with_stdin_and_status
+        ~timeout_sec:120.0
+        ~stdin_content:full_prompt
+        argv
+    in
     match status with
     | Unix.WEXITED 0 -> Ok content
     | Unix.WEXITED n -> Error (Printf.sprintf "❌ LLM: %s exit %d" cli_cmd n)
     | _ -> Error (Printf.sprintf "❌ LLM: %s signaled" cli_cmd)
   with exn ->
-    cleanup ();
     Error (Printf.sprintf "❌ LLM: %s exception [%s]" cli_cmd (Printexc.to_string exn))
 
 (** Unified LLM generate with automatic provider selection *)
@@ -355,10 +334,18 @@ let ollama_generate ~net:_ ?(model = Env_config.Ollama.default_model) ?(temperat
         ("num_ctx", `Int 8192);
       ]);
     ]) in
-    (* Escape single quotes in body for shell *)
-    let escaped_body = Str.global_replace (Str.regexp "'") "'\\''" body in
-    let cmd = Printf.sprintf "curl -sf --max-time 120 -X POST http://127.0.0.1:11434/api/generate -H 'Content-Type: application/json' -d '%s'" escaped_body in
-    let (status, content) = run_shell_nonblocking cmd in
+    let argv =
+      ["curl"; "-sf"; "--max-time"; "120";
+       "-X"; "POST"; "http://127.0.0.1:11434/api/generate";
+       "-H"; "Content-Type: application/json";
+       "-d"; "@-"]
+    in
+    let (status, content) =
+      Process_eio.run_argv_with_stdin_and_status
+        ~timeout_sec:125.0
+        ~stdin_content:body
+        argv
+    in
     match status with
     | Unix.WEXITED 0 ->
         let json = Yojson.Safe.from_string content in
@@ -480,10 +467,18 @@ let extract_interests ~net content =
     with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
 
 (** Save agent's new interests to Neo4j via sb CLI *)
+let cypher_escape s =
+  let buf = Buffer.create (String.length s) in
+  String.iter (fun c -> if c = '\'' then Buffer.add_string buf "\\'" else Buffer.add_char buf c) s;
+  Buffer.contents buf
+
 let save_interests_to_neo4j ~agent_name interests =
   if interests = [] then Ok "no interests to save"
   else
-    let topics_str = String.concat ", " (List.map (Printf.sprintf "'%s'") interests) in
+    let esc = cypher_escape in
+    let topics_str =
+      String.concat ", " (List.map (fun t -> Printf.sprintf "'%s'" (esc t)) interests)
+    in
     let cypher = Printf.sprintf
       "MERGE (a:Agent {name: '%s'}) \
        WITH a \
@@ -493,51 +488,50 @@ let save_interests_to_neo4j ~agent_name interests =
        ON CREATE SET r.first_seen = datetime(), r.count = 1 \
        ON MATCH SET r.count = r.count + 1, r.last_seen = datetime() \
        RETURN count(r) as connections"
-      agent_name topics_str
+      (esc agent_name) topics_str
     in
-    (* Use sb neo4j query via subprocess.
-       In double-quoted shell string, single quotes don't need escaping.
-       We only escape: backslash, double-quote, dollar sign. *)
-    let escaped_cypher = cypher
-      |> Str.global_replace (Str.regexp "\\\\") "\\\\\\\\"
-      |> Str.global_replace (Str.regexp "\"") "\\\""
-      |> Str.global_replace (Str.regexp "\\$") "\\$"
-    in
-    let cmd = Printf.sprintf "%s neo4j query \"%s\"" (sb_path ()) escaped_cypher in
     try
-      let _ = run_shell_nonblocking cmd in
-      Ok (Printf.sprintf "saved %d interests for %s" (List.length interests) agent_name)
+      let (status, _output) = sb_neo4j_query ~timeout_sec:60.0 cypher in
+      match status with
+      | Unix.WEXITED 0 ->
+          Ok (Printf.sprintf "saved %d interests for %s" (List.length interests) agent_name)
+      | Unix.WEXITED n -> Error (Printf.sprintf "Neo4j exit %d" n)
+      | _ -> Error "Neo4j signaled"
     with exn -> Error (Printf.sprintf "Neo4j error: %s" (Printexc.to_string exn))
 
 (** Get agent's existing interests from Neo4j *)
 let get_agent_interests ~agent_name =
+  let esc = cypher_escape in
   let cypher = Printf.sprintf
     "MATCH (a:Agent {name: '%s'})-[r:INTERESTED_IN]->(t:Topic) \
      RETURN t.name as topic, r.count as count \
      ORDER BY r.count DESC LIMIT 10"
-    agent_name
+    (esc agent_name)
   in
-  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
-    let (_, output) = run_shell_nonblocking cmd in
+    let (status, output) = sb_neo4j_query ~timeout_sec:60.0 cypher in
     (* Parse JSON result *)
-    try
-      let json = Yojson.Safe.from_string output in
-      let records = json |> member "records" |> to_list in
-      List.map (fun r ->
-        let arr = to_list r in
-        match arr with
-        | [topic_arr; _] ->
-          (match to_list topic_arr with
-           | [t] -> to_string t
-           | _ -> "")
-        | _ -> ""
-      ) records |> List.filter (fun s -> s <> "")
-    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+    match status with
+    | Unix.WEXITED 0 -> (
+        try
+          let json = Yojson.Safe.from_string output in
+          let records = json |> member "records" |> to_list in
+          List.map (fun r ->
+            let arr = to_list r in
+            match arr with
+            | [topic_arr; _] ->
+              (match to_list topic_arr with
+               | [t] -> to_string t
+               | _ -> "")
+            | _ -> ""
+          ) records |> List.filter (fun s -> s <> "")
+        with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> [])
+    | _ -> []
   with Unix.Unix_error _ | Sys_error _ -> []
 
 (** Record agent visit to Lodge *)
 let record_lodge_visit ~agent_name ~article_title =
+  let esc = cypher_escape in
   let cypher = Printf.sprintf
     "MERGE (a:Agent {name: '%s'}) \
      SET a.last_visit = datetime(), \
@@ -546,11 +540,10 @@ let record_lodge_visit ~agent_name ~article_title =
      CREATE (v:LodgeVisit {timestamp: datetime(), article: '%s'}) \
      CREATE (a)-[:VISITED]->(v) \
      RETURN a.visit_count as visits"
-    agent_name (Str.global_replace (Str.regexp "'") "" article_title)
+    (esc agent_name) (esc article_title)
   in
-  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
-    let _ = run_shell_nonblocking cmd in
+    let _ = sb_neo4j_query ~timeout_sec:60.0 cypher in
     ()
   with Unix.Unix_error _ | Sys_error _ -> ()
 
@@ -840,16 +833,22 @@ let evolve_agent ~name ~dimension ~outcome =
       let new_weights_json = serialize_value_weights new_weights in
       let new_gen = config.generation + 1 in
       (* Update Neo4j via cypher-shell *)
+      let esc = cypher_escape in
       let cypher = Printf.sprintf
         "MATCH (a:Agent {name: '%s'}) SET a.value_weights = '%s', a.generation = %d, a.last_updated = datetime() RETURN a.name"
-        name new_weights_json new_gen
+        (esc name) (esc new_weights_json) new_gen
       in
       let neo4j_uri = Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"" in
       let neo4j_pw = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
-      let cmd = Printf.sprintf "cypher-shell -a %s -u neo4j -p %s --format plain %s 2>/dev/null"
-        (Filename.quote neo4j_uri) (Filename.quote neo4j_pw) (Filename.quote cypher) in
       try
-        let _ = Safe_ops.read_process_safe cmd in
+        let argv =
+          ["cypher-shell"; "-a"; neo4j_uri;
+           "-u"; "neo4j"; "-p"; neo4j_pw;
+           "--format"; "plain";
+           cypher]
+        in
+        let (status, _output) = run_cmd_with_status ~timeout_sec:60.0 argv in
+        (match status with Unix.WEXITED 0 -> () | _ -> raise (Failure "cypher-shell failed"));
         (* Update cache *)
         Mutex.lock agent_cache_mu;
         Hashtbl.replace agent_cache name {
@@ -1554,27 +1553,33 @@ let neo4j_http_cypher cypher =
       else if String.length neo4j_uri > 7 && String.sub neo4j_uri 0 7 = "bolt://" then
         "https://" ^ String.sub neo4j_uri 7 (String.length neo4j_uri - 7)
       else neo4j_uri
-    in
-    (* Neo4j HTTP API endpoint for Cypher *)
-    let url = http_uri ^ "/db/neo4j/tx/commit" in
-    (* Escape cypher for JSON *)
-    let escaped_cypher = Str.global_replace (Str.regexp "\"") "\\\"" cypher in
-    let escaped_cypher = Str.global_replace (Str.regexp "\n") "\\n" escaped_cypher in
-    let body = Printf.sprintf {|{"statements":[{"statement":"%s"}]}|} escaped_cypher in
-    let auth = Base64.encode_exn ("neo4j:" ^ neo4j_password) in
-    let cmd = Printf.sprintf
-      "curl -s -X POST '%s' -H 'Content-Type: application/json' -H 'Authorization: Basic %s' -d '%s'"
-      url auth body
-    in
-    Printf.eprintf "[neo4j_http] cmd: curl -s -X POST '%s' ... (body=%d chars)\n%!" url (String.length body);
-    try
-      let ic = Unix.open_process_in cmd in
-      let output = In_channel.input_all ic in
-      let _ = Unix.close_process_in ic in
-      Printf.eprintf "[neo4j_http] response: %s\n%!" (if String.length output < 200 then output else String.sub output 0 200 ^ "...");
-      if String.length output > 0 then Ok output
-      else Error "empty response"
-    with exn -> Error (Printexc.to_string exn)
+	    in
+	    (* Neo4j HTTP API endpoint for Cypher *)
+	    let url = http_uri ^ "/db/neo4j/tx/commit" in
+	    let body =
+	      Yojson.Safe.to_string (`Assoc [
+	        ("statements", `List [
+	          `Assoc [("statement", `String cypher)]
+	        ])
+	      ])
+	    in
+	    let auth = Base64.encode_exn ("neo4j:" ^ neo4j_password) in
+	    let argv =
+	      ["curl"; "-s";
+	       "-X"; "POST"; url;
+	       "-H"; "Content-Type: application/json";
+	       "-H"; "Authorization: Basic " ^ auth;
+	       "-d"; "@-"]
+	    in
+	    Printf.eprintf "[neo4j_http] POST %s (body=%d chars)\n%!" url (String.length body);
+	    try
+	      let output =
+	        Process_eio.run_argv_with_stdin ~timeout_sec:30.0 ~stdin_content:body argv
+	      in
+	      Printf.eprintf "[neo4j_http] response: %s\n%!" (if String.length output < 200 then output else String.sub output 0 200 ^ "...");
+	      if String.length output > 0 then Ok output
+	      else Error "empty response"
+	    with exn -> Error (Printexc.to_string exn)
 
 (** Spawn a new agent — can be called by another agent.
     Uses GraphQL createAgent mutation (works in Railway production). *)
@@ -1601,27 +1606,30 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
       in
       let escaped_role = escape_gql child_role in
       let escaped_prompt = escape_gql child_prompt in
-      (* Generate random activity hours for diversity *)
-      let peak_hour = 9 + Random.int 12 in (* 9-20 KST *)
-      (* Build GraphQL mutation *)
-      let mutation = Printf.sprintf
-        {|{"query":"mutation { createAgent(name: \"%s\", role: \"%s\", description: \"%s\", peakHour: %d, preferredHours: [%d, %d, %d], traits: [\"%s\"], model: \"glm-4.7\", status: \"active\") { success message agent { name } } }"}|}
-        agent_name escaped_role escaped_prompt
-        peak_hour ((peak_hour - 1 + 24) mod 24) peak_hour ((peak_hour + 1) mod 24)
-        escaped_role
-      in
-      Printf.eprintf "[spawn_agent] GraphQL mutation: createAgent(name=%s, role=%s)\n%!" agent_name child_role;
-      let cmd = Printf.sprintf
-        "curl -s '%s' -H 'Content-Type: application/json' -H 'Authorization: Bearer %s' -d '%s'"
-        graphql_url api_key mutation
-      in
-      try
-        let ic = Unix.open_process_in cmd in
-        let output = In_channel.input_all ic in
-        let _ = Unix.close_process_in ic in
-        Printf.eprintf "[spawn_agent] GraphQL response: %s\n%!" (if String.length output < 300 then output else String.sub output 0 300 ^ "...");
-        (* Parse response *)
-        let json = Yojson.Safe.from_string output in
+	      (* Generate random activity hours for diversity *)
+	      let peak_hour = 9 + Random.int 12 in (* 9-20 KST *)
+	      (* Build GraphQL query string, then wrap with JSON (no shell quoting). *)
+	      let gql = Printf.sprintf
+	        "mutation { createAgent(name: \"%s\", role: \"%s\", description: \"%s\", peakHour: %d, preferredHours: [%d, %d, %d], traits: [\"%s\"], model: \"glm-4.7\", status: \"active\") { success message agent { name } } }"
+	        agent_name escaped_role escaped_prompt
+	        peak_hour ((peak_hour - 1 + 24) mod 24) peak_hour ((peak_hour + 1) mod 24)
+	        escaped_role
+	      in
+	      let body = Yojson.Safe.to_string (`Assoc [("query", `String gql)]) in
+	      Printf.eprintf "[spawn_agent] GraphQL mutation: createAgent(name=%s, role=%s)\n%!" agent_name child_role;
+	      try
+	        let argv =
+	          ["curl"; "-s"; graphql_url;
+	           "-H"; "Content-Type: application/json";
+	           "-H"; "Authorization: Bearer " ^ api_key;
+	           "-d"; "@-"]
+	        in
+	        let output =
+	          Process_eio.run_argv_with_stdin ~timeout_sec:30.0 ~stdin_content:body argv
+	        in
+	        Printf.eprintf "[spawn_agent] GraphQL response: %s\n%!" (if String.length output < 300 then output else String.sub output 0 300 ^ "...");
+	        (* Parse response *)
+	        let json = Yojson.Safe.from_string output in
         let data = json |> member "data" in
         if data = `Null then
           let errs = json |> member "errors" in
@@ -1726,30 +1734,32 @@ let get_all_agent_interests () =
      RETURN a.name as agent, collect(t.name) as topics, a.visit_count as visits \
      ORDER BY a.name"
   in
-  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   try
-    let (_, output) = run_shell_nonblocking cmd in
-    try
-      let json = Yojson.Safe.from_string output in
-      let records = json |> member "records" |> to_list in
-      List.filter_map (fun r ->
-        (* Neo4j result: [ [ [agent, topics] ] ] — unwrap twice *)
+    let (status, output) = sb_neo4j_query ~timeout_sec:60.0 cypher in
+    match status with
+    | Unix.WEXITED 0 -> (
         try
-          let row = match to_list r with
-            | [inner] -> to_list inner
-            | other -> other
-          in
-          match row with
-          | agent_json :: topics_json :: _ ->
-            let agent = to_string agent_json in
-            let topics = to_list topics_json |> List.filter_map (fun t ->
-              try Some (to_string t) with Yojson.Safe.Util.Type_error _ -> None
-            ) in
-            if agent <> "" then Some (agent, topics) else None
-          | _ -> None
-        with Yojson.Safe.Util.Type_error _ -> None
-      ) records
-    with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+          let json = Yojson.Safe.from_string output in
+          let records = json |> member "records" |> to_list in
+          List.filter_map (fun r ->
+            (* Neo4j result: [ [ [agent, topics] ] ] — unwrap twice *)
+            try
+              let row = match to_list r with
+                | [inner] -> to_list inner
+                | other -> other
+              in
+              match row with
+              | agent_json :: topics_json :: _ ->
+                let agent = to_string agent_json in
+                let topics = to_list topics_json |> List.filter_map (fun t ->
+                  try Some (to_string t) with Yojson.Safe.Util.Type_error _ -> None
+                ) in
+                if agent <> "" then Some (agent, topics) else None
+              | _ -> None
+            with Yojson.Safe.Util.Type_error _ -> None
+          ) records
+        with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> [])
+    | _ -> []
   with Unix.Unix_error _ | Sys_error _ -> []
 
 let evolve ~net:_ (args : Yojson.Safe.t) =
@@ -2074,17 +2084,17 @@ let get_profile ~net:_ args =
     let (_, posts_result) = Tool_board.handle_tool "masc_board_search" (`Assoc [("query", `String agent_name); ("limit", `Int 10)]) in
 
     (* Get agent info from Neo4j *)
+    let esc = cypher_escape in
     let cypher = Printf.sprintf
       "MATCH (a:Agent {name: '%s'}) \
        OPTIONAL MATCH (a)-[:SPAWNED_BY]->(parent:Agent) \
        RETURN a.role as role, a.created_at as created, a.visit_count as visits, \
               a.reaction_count as reactions, parent.name as parent"
-      agent_name
+      (esc agent_name)
     in
-    let cmd = Printf.sprintf "%s neo4j query \"%s\"" (sb_path ()) cypher in
     let neo4j_info =
       try
-        let (_, content) = run_shell_nonblocking cmd in
+        let (_status, content) = sb_neo4j_query ~timeout_sec:60.0 cypher in
         content
       with Unix.Unix_error _ | Sys_error _ -> "Neo4j unavailable"
     in
@@ -2106,16 +2116,16 @@ let lodge_search ~net:_ args =
       (`Assoc [("query", `String query); ("limit", `Int limit)]) in
 
     (* Search agents in Neo4j *)
+    let esc = cypher_escape in
     let cypher = Printf.sprintf
       "MATCH (a:Agent) WHERE toLower(a.name) CONTAINS toLower('%s') \
        OR toLower(a.role) CONTAINS toLower('%s') \
        RETURN a.name, a.role, a.visit_count LIMIT 5"
-      query query
+      (esc query) (esc query)
     in
-    let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
     let agent_results =
       try
-        let (_, output) = run_shell_nonblocking cmd in
+        let (_status, output) = sb_neo4j_query ~timeout_sec:60.0 cypher in
         if String.length output > 10 then
           Printf.sprintf "\n\n👥 **에이전트 검색 결과:**\n%s" output
         else ""
@@ -2153,31 +2163,33 @@ let lodge_progress ~net:_ _args =
             COALESCE(a.visit_count, 0) as visits, interests \
      ORDER BY visits DESC LIMIT 10"
   in
-  let cmd = Printf.sprintf "%s neo4j query \"%s\" 2>/dev/null" (sb_path ()) cypher in
   let agent_stats =
     try
-      let (_, output) = run_shell_nonblocking cmd in
-      try
-        let json = Yojson.Safe.from_string output in
-        let records = json |> Yojson.Safe.Util.member "records" |> Yojson.Safe.Util.to_list in
-        List.filter_map (fun r ->
+      let (status, output) = sb_neo4j_query ~timeout_sec:60.0 cypher in
+      match status with
+      | Unix.WEXITED 0 -> (
           try
-            let row = match Yojson.Safe.Util.to_list r with
-              | [inner] -> Yojson.Safe.Util.to_list inner
-              | other -> other
-            in
-            match row with
-            | agent :: agent_role :: visits :: interests :: _ ->
-              let name = Yojson.Safe.Util.to_string agent in
-              let p = (try Yojson.Safe.Util.to_string agent_role with Yojson.Safe.Util.Type_error _ -> "unknown") in
-              let v = (try Yojson.Safe.Util.to_int visits with Yojson.Safe.Util.Type_error _ -> 0) in
-              let i = (try Yojson.Safe.Util.to_int interests with Yojson.Safe.Util.Type_error _ -> 0) in
-              let emoji = emoji_of_agent p in
-              Some (Printf.sprintf "   %s %s: %d visits, %d topics" emoji name v i)
-            | _ -> None
-          with Yojson.Safe.Util.Type_error _ -> None
-        ) records
-      with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
+            let json = Yojson.Safe.from_string output in
+            let records = json |> Yojson.Safe.Util.member "records" |> Yojson.Safe.Util.to_list in
+            List.filter_map (fun r ->
+              try
+                let row = match Yojson.Safe.Util.to_list r with
+                  | [inner] -> Yojson.Safe.Util.to_list inner
+                  | other -> other
+                in
+                match row with
+                | agent :: agent_role :: visits :: interests :: _ ->
+                  let name = Yojson.Safe.Util.to_string agent in
+                  let p = (try Yojson.Safe.Util.to_string agent_role with Yojson.Safe.Util.Type_error _ -> "unknown") in
+                  let v = (try Yojson.Safe.Util.to_int visits with Yojson.Safe.Util.Type_error _ -> 0) in
+                  let i = (try Yojson.Safe.Util.to_int interests with Yojson.Safe.Util.Type_error _ -> 0) in
+                  let emoji = emoji_of_agent p in
+                  Some (Printf.sprintf "   %s %s: %d visits, %d topics" emoji name v i)
+                | _ -> None
+              with Yojson.Safe.Util.Type_error _ -> None
+            ) records
+          with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> [])
+      | _ -> []
     with Unix.Unix_error _ | Sys_error _ -> []
   in
 

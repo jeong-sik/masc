@@ -1324,6 +1324,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ]);
         (* Auto-Responder: spawn mentioned agent if enabled *)
         let _ = Auto_responder.maybe_respond
+          ~sw
           ~base_path:config.base_path
           ~from_agent:agent_name
           ~content:message

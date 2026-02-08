@@ -4,6 +4,15 @@ open Alcotest
 open Masc_mcp
 
 (* Test helpers *)
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
 let setup_test_room () =
   (* Use PID + timestamp for deterministic unique dir *)
   let test_dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -13,7 +22,7 @@ let setup_test_room () =
   (config, test_dir)
 
 let cleanup_test_room test_dir =
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" test_dir))
+  (try rm_rf test_dir with _ -> ())
 
 let task_count config =
   let backlog = Room.read_backlog config in

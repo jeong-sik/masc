@@ -168,8 +168,8 @@ let get_tty () =
     match Sys.getenv_opt "TTY" with
     | Some tty -> Some tty
     | None ->
-        (* Try to read from tty command — Eio-native *)
-        let output = Process_eio.run ~timeout_sec:5.0 "tty 2>/dev/null" in
+        (* Try to read from tty command — argv-based (no shell) *)
+        let output = Process_eio.run_argv ~timeout_sec:5.0 ["tty"] in
         let trimmed = String.trim output in
         if String.length trimmed > 0 then Some trimmed else None
   with e ->

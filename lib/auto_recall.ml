@@ -139,31 +139,62 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
     }
   ) messages
 
-(** {1 Non-blocking Shell Execution} *)
-
-(** Run shell command and read lines (Eio-native) *)
-let run_shell_lines cmd =
-  Process_eio.run ~timeout_sec:30.0 cmd
-  |> String.split_on_char '\n'
-  |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
-
 (** Fetch recently modified files from working directory *)
 let fetch_from_file_context (room_config : Room_utils.config) ~(config : recall_config) ~query =
   let _ = config in  (* suppress unused warning *)
   let masc_dir = Room_utils.masc_dir room_config in
   let work_dir = Filename.dirname masc_dir in (* Parent of .masc *)
   
-  (* Get recently modified files using find *)
+  (* Get recently modified files without shelling out (no find/xargs). *)
   let max_files = 10 in
   let max_preview_bytes = 500 in
   
-  let cmd = Printf.sprintf 
-    "find %s -maxdepth 3 -type f -name '*.ml' -o -name '*.mli' -o -name '*.py' -o -name '*.ts' -o -name '*.js' -o -name '*.md' 2>/dev/null | head -50 | xargs ls -t 2>/dev/null | head -%d"
-    (Filename.quote work_dir) max_files
+  let is_allowed_file path =
+    Filename.check_suffix path ".ml"
+    || Filename.check_suffix path ".mli"
+    || Filename.check_suffix path ".py"
+    || Filename.check_suffix path ".ts"
+    || Filename.check_suffix path ".js"
+    || Filename.check_suffix path ".md"
   in
-  
-  let files = run_shell_lines cmd in
+
+  let should_skip_dir name =
+    name = ".git"
+    || name = "node_modules"
+    || name = "_build"
+    || name = ".worktrees"
+    || name = ".masc"
+  in
+
+  let rec walk depth dir acc =
+    if depth > 3 then acc
+    else
+      match Safe_ops.list_dir_safe dir with
+      | Error _ -> acc
+      | Ok names ->
+          List.fold_left (fun acc name ->
+            if should_skip_dir name then acc
+            else
+              let path = Filename.concat dir name in
+              try
+                if Sys.is_directory path then walk (depth + 1) path acc
+                else if is_allowed_file path then path :: acc
+                else acc
+              with _ -> acc
+          ) acc names
+  in
+
+  let files =
+    walk 0 work_dir []
+    |> List.filter_map (fun path ->
+        try
+          let st = Unix.stat path in
+          Some (st.Unix.st_mtime, path)
+        with _ -> None)
+    |> List.sort (fun (a_m, _) (b_m, _) -> compare b_m a_m)
+    |> List.filteri (fun i _ -> i < max_files)
+    |> List.map snd
+  in
   
   (* Read preview of each file *)
   let read_preview path =

@@ -6,14 +6,23 @@ open Masc_mcp
 (* Test helpers *)
 let tmp_dir = ref ""
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
 let setup () =
   tmp_dir := Filename.temp_dir "lodge_reaction_test" "";
   Unix.putenv "ME_ROOT" !tmp_dir;
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s/.masc" !tmp_dir))
+  Fs_compat.mkdir_p (Filename.concat !tmp_dir ".masc")
 
 let teardown () =
   if !tmp_dir <> "" then
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" !tmp_dir))
+    (try rm_rf !tmp_dir with _ -> ())
 
 (* Type conversion tests *)
 let test_reaction_type_roundtrip () =

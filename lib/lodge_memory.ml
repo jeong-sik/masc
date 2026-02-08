@@ -45,15 +45,21 @@ let graphql_request_curl body : (string, string) Stdlib.result =
   let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let escaped_body = String.concat "\\\"" (String.split_on_char '"' body) in
-  let auth_header = if api_key = "" then "" else Printf.sprintf "-H 'Authorization: Bearer %s'" api_key in
-  let cmd = Printf.sprintf "curl -s -m 10 '%s' -H 'Content-Type: application/json' %s -d \"%s\"" url auth_header escaped_body in
+  let argv =
+    [ "curl"; "-s"; "-m"; "10"; url;
+      "-H"; "Content-Type: application/json"
+    ]
+    |> fun base ->
+    if api_key = "" then base else base @ [ "-H"; "Authorization: Bearer " ^ api_key ]
+    |> fun with_auth ->
+    (* Read request body from stdin to avoid quoting/escaping issues. *)
+    with_auth @ [ "-d"; "@-" ]
+  in
   try
-    let ic = Unix.open_process_in cmd in
-    let output = In_channel.input_all ic in
-    let _ = Unix.close_process_in ic in
-    if String.length output = 0 then Error "curl: empty response"
-    else Ok output
+    let output =
+      Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
+    in
+    if String.length output = 0 then Error "curl: empty response" else Ok output
   with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn))
 
 (** GraphQL request via Cohttp_eio with curl fallback.

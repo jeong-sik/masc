@@ -9,15 +9,15 @@
 open Types
 open Room_utils
 
-(** Run shell command and get lines (Eio-native) *)
-let run_shell_lines cmd =
-  Process_eio.run ~timeout_sec:30.0 cmd
+(** Run argv and get lines (Eio-native, no shell) *)
+let run_argv_lines argv =
+  Process_eio.run_argv ~timeout_sec:30.0 argv
   |> String.split_on_char '\n'
   |> List.filter (fun s -> s <> "")
 
-(** Run shell command and get exit code (Eio-native) *)
-let run_shell_exit cmd =
-  match Process_eio.run_with_status ~timeout_sec:30.0 cmd with
+(** Run argv and get exit code (Eio-native, no shell) *)
+let run_argv_exit argv =
+  match Process_eio.run_argv_with_status ~timeout_sec:30.0 argv with
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
@@ -122,8 +122,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
               worktree_path branch_name repo_name link_note worktree_path)
         end else begin
           (* Fetch origin first *)
-          let fetch_cmd = Printf.sprintf "cd %s && git fetch origin 2>&1" (Filename.quote root) in
-          let _ = run_shell_exit fetch_cmd in
+          let _ = run_argv_exit ["git"; "-C"; root; "fetch"; "origin"] in
 
           match Room_git.resolve_base_branch root base_branch with
           | Error e -> Error e
@@ -134,10 +133,20 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
                     Printf.sprintf "\n  Note: origin/%s not found; used origin/%s" missing resolved_base
               in
               (* Create worktree with new branch from base *)
-              let cmd = Printf.sprintf
-                "cd %s && git worktree add %s -b %s origin/%s 2>&1"
-                (Filename.quote root) (Filename.quote worktree_path) (Filename.quote branch_name) (Filename.quote resolved_base) in
-              let exit_code = run_shell_exit cmd in
+              let exit_code =
+                run_argv_exit
+                  [
+                    "git";
+                    "-C";
+                    root;
+                    "worktree";
+                    "add";
+                    worktree_path;
+                    "-b";
+                    branch_name;
+                    Printf.sprintf "origin/%s" resolved_base;
+                  ]
+              in
 
               if exit_code = 0 then begin
                 (* Update agent's current_worktree in state *)
@@ -186,17 +195,14 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
           Error (IoError (Printf.sprintf "Worktree not found: %s" worktree_path))
         else begin
           (* Remove worktree *)
-          let remove_cmd = Printf.sprintf "cd %s && git worktree remove %s 2>&1" (Filename.quote root) (Filename.quote worktree_path) in
-          let exit_code = run_shell_exit remove_cmd in
+          let exit_code = run_argv_exit ["git"; "-C"; root; "worktree"; "remove"; worktree_path] in
 
           if exit_code = 0 then begin
             (* Try to delete the branch (may fail if not merged, which is ok) *)
-            let branch_cmd = Printf.sprintf "cd %s && git branch -d %s 2>&1" (Filename.quote root) (Filename.quote branch_name) in
-            let _ = run_shell_exit branch_cmd in
+            let _ = run_argv_exit ["git"; "-C"; root; "branch"; "-d"; branch_name] in
 
             (* Prune stale worktrees *)
-            let prune_cmd = Printf.sprintf "cd %s && git worktree prune 2>&1" (Filename.quote root) in
-            let _ = run_shell_exit prune_cmd in
+            let _ = run_argv_exit ["git"; "-C"; root; "worktree"; "prune"] in
 
             (* Log event *)
             let event = Printf.sprintf
@@ -226,8 +232,7 @@ let worktree_list config =
     match git_root config with
     | None -> `Assoc [("error", `String "Not a git repository")]
     | Some root ->
-        let cmd = Printf.sprintf "cd %s && git worktree list --porcelain 2>/dev/null" (Filename.quote root) in
-        let lines = run_shell_lines cmd in
+        let lines = run_argv_lines ["git"; "-C"; root; "worktree"; "list"; "--porcelain"] in
 
         (* Parse porcelain output into worktree info *)
         let rec parse_worktrees lines current acc =

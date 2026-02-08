@@ -1,131 +1,95 @@
-(** Auto-Responder Daemon - Automatic @mention response via spawn
+(** Auto-Responder Daemon - Automatic @mention response
 
-    When a broadcast message contains @mention, automatically spawn
-    the mentioned agent to respond.
+    When a broadcast message contains an @mention, optionally:
+    - Spawn the mentioned CLI agent to respond (Spawn mode)
+    - Use direct LLM call + in-process MASC tool calls to respond (Llm mode)
 
-    Enable with: MASC_AUTO_RESPOND=true
+    Enable with: MASC_AUTO_RESPOND=true|spawn|llm
 
-    Chain limit: Max 3 responses per minute to prevent infinite loops
+    Design:
+    - No shell execution (argv-only)
+    - Non-blocking: work runs in an Eio fiber forked from the server switch
+    - Rate-limited to prevent runaway mention loops
 *)
 
-(** Auto-respond mode *)
+open Yojson.Safe.Util
+
 type mode = Disabled | Spawn | Llm
 
-(** Check auto-respond mode *)
 let get_mode () =
   match Sys.getenv_opt "MASC_AUTO_RESPOND" with
   | Some "true" | Some "1" | Some "yes" | Some "spawn" -> Spawn
   | Some "llm" | Some "fast" -> Llm
   | _ -> Disabled
 
-(** Check if auto-respond is enabled *)
 let is_enabled () = get_mode () <> Disabled
 
-(** Activity log file - human readable, shared across all modes *)
 let activity_log_file () =
   match Sys.getenv_opt "ME_ROOT" with
   | Some root -> root ^ "/logs/auto-responder.log"
   | None -> "/tmp/auto-responder.log"
 
-(** Debug logging to file *)
 let debug_log msg =
   let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 "/tmp/auto_debug.log" in
-  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    Printf.fprintf oc "[%f] %s\n%!" (Time_compat.now ()) msg)
+  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer"
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> Printf.fprintf oc "[%f] %s\n%!" (Time_compat.now ()) msg)
 
-(** Activity logging - human readable format *)
 let activity_log ~mode ~from_agent ~mention ~status ~detail =
   let log_file = activity_log_file () in
   let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 log_file in
-  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    let time = Unix.localtime (Time_compat.now ()) in
-    let timestamp = Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-      (time.Unix.tm_year + 1900) (time.Unix.tm_mon + 1) time.Unix.tm_mday
-      time.Unix.tm_hour time.Unix.tm_min time.Unix.tm_sec
-    in
-    let mode_str = match mode with Disabled -> "OFF" | Spawn -> "SPAWN" | Llm -> "LLM" in
-    Printf.fprintf oc "[%s] [%s] %s → @%s | %s | %s\n%!"
-      timestamp mode_str from_agent mention status detail)
+  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer"
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      let time = Unix.localtime (Time_compat.now ()) in
+      let timestamp =
+        Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+          (time.Unix.tm_year + 1900)
+          (time.Unix.tm_mon + 1)
+          time.Unix.tm_mday
+          time.Unix.tm_hour
+          time.Unix.tm_min
+          time.Unix.tm_sec
+      in
+      let mode_str = match mode with Disabled -> "OFF" | Spawn -> "SPAWN" | Llm -> "LLM" in
+      Printf.fprintf oc "[%s] [%s] %s → @%s | %s | %s\n%!"
+        timestamp mode_str from_agent mention status detail)
 
-(** Chain limit: track recent responses to prevent infinite loops *)
+(* --- Loop prevention / throttling --- *)
+
 let recent_responses : (string, float) Hashtbl.t = Hashtbl.create 16
-let chain_limit = 3  (* max responses per agent type per minute *)
-let chain_window = 60.0  (* seconds *)
+let chain_limit = 3
+let chain_window = 60.0
 
-(** Check if we should throttle this response *)
 let should_throttle ~agent_type =
   let now = Time_compat.now () in
-  let key = agent_type in
-  (* Clean old entries *)
-  Hashtbl.filter_map_inplace (fun _ ts ->
-    if now -. ts < chain_window then Some ts else None
-  ) recent_responses;
-  (* Count recent responses for this agent type *)
-  let count = Hashtbl.fold (fun k _ acc ->
-    if String.length k >= String.length agent_type &&
-       String.sub k 0 (String.length agent_type) = agent_type
-    then acc + 1 else acc
-  ) recent_responses 0 in
-  if count >= chain_limit then begin
+  Hashtbl.filter_map_inplace (fun _ ts -> if now -. ts < chain_window then Some ts else None) recent_responses;
+  let count =
+    Hashtbl.fold (fun k _ acc ->
+      if String.length k >= String.length agent_type
+         && String.sub k 0 (String.length agent_type) = agent_type
+      then acc + 1 else acc
+    ) recent_responses 0
+  in
+  if count >= chain_limit then (
     debug_log (Printf.sprintf "THROTTLE: %s has %d responses in last %.0fs" agent_type count chain_window);
     true
-  end else begin
-    Hashtbl.add recent_responses (Printf.sprintf "%s-%f" key now) now;
+  ) else (
+    Hashtbl.add recent_responses (Printf.sprintf "%s-%f" agent_type now) now;
     false
-  end
+  )
 
-(** [DEPRECATED] LLM-MCP endpoint — kept for backward compatibility, not used in new code.
-    New code should use Llm_direct.dispatch instead. *)
-let llm_mcp_url () = Env_config.Endpoints.llm_mcp_url
+(* --- Mention helpers (re-export) --- *)
 
-(** Re-export from Mention module for convenience *)
 let spawnable_agents = Mention.spawnable_agents
 let agent_type_of_mention = Mention.agent_type_of_mention
 let is_spawnable = Mention.is_spawnable
 
-(** {1 Non-blocking Shell Execution} *)
+(* --- CLI spawn (Spawn mode) --- *)
 
-(** Run shell command (Eio-native).
-    Delegates to Process_eio.run_with_status (global proc_mgr/clock). *)
-let run_shell_nonblocking cmd =
-  Process_eio.run_with_status ~timeout_sec:60.0 cmd
+let has_timeout =
+  lazy (String.trim (Process_eio.run_argv ~timeout_sec:2.0 ["which"; "timeout"]) <> "")
 
-(** Run shell command and get single line (Eio-native) *)
-let run_shell_line cmd =
-  let output = Process_eio.run ~timeout_sec:10.0 cmd in
-  match String.split_on_char '\n' (String.trim output) with
-  | first :: _ -> first
-  | [] -> ""
-
-(** Run command, ignore result (Eio-native) *)
-let run_system_nonblocking cmd =
-  let (status, _) = Process_eio.run_with_status ~timeout_sec:60.0 cmd in
-  status
-
-(** Build shell command for spawning an agent *)
-let build_spawn_command ~agent_type ~prompt ~working_dir =
-  let escaped_prompt = Filename.quote prompt in
-  let base_cmd = match agent_type with
-    | "claude" -> Printf.sprintf "echo %s | claude -p --allowedTools 'mcp__masc__*'" escaped_prompt
-    | "gemini" -> Printf.sprintf "echo %s | gemini --yolo" escaped_prompt
-    | "codex" -> Printf.sprintf "echo %s | codex exec" escaped_prompt
-    | "ollama" -> Printf.sprintf "echo %s | ollama run %s" escaped_prompt Env_config.Ollama.default_model
-    | "glm" ->
-        (* GLM via direct Z.ai API - no llm-mcp dependency.
-           API key passed via ZAI_API_KEY env var, not in command string. *)
-        let model = "glm-4.7" in
-        let json_escaped =
-          prompt
-          |> String.split_on_char '"' |> String.concat {|\"|}
-          |> String.split_on_char '\n' |> String.concat {|\\n|}
-        in
-        (* Use env var expansion in bash, key never appears in process list *)
-        Printf.sprintf "echo '{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"%s\"}],\"stream\":false}' | curl -s 'https://api.z.ai/api/coding/paas/v4/chat/completions' -H 'Content-Type: application/json' -H \"Authorization: Bearer $ZAI_API_KEY\" -d @- | jq -r '.choices[0].message.content // \"error\"'" model json_escaped
-    | _ -> Printf.sprintf "echo %s | %s" escaped_prompt agent_type
-  in
-  Printf.sprintf "cd %s && timeout 120 %s" (Filename.quote working_dir) base_cmd
-
-(** Build prompt for auto-response *)
 let build_response_prompt ~from_agent ~content ~mention =
   Printf.sprintf {|You received a mention in the MASC room from %s.
 
@@ -142,89 +106,108 @@ Quick response protocol:
 Respond in 1-2 sentences. Be helpful and concise.|}
     from_agent content mention mention
 
-(** Spawn agent in background (non-blocking) - Heavy mode *)
-let spawn_in_background ~agent_type ~prompt ~working_dir =
-  let cmd = build_spawn_command ~agent_type ~prompt ~working_dir in
-  let log_file = Printf.sprintf "/tmp/auto_respond_%s_%d.log"
-    agent_type (int_of_float (Time_compat.now () *. 1000.) mod 10000)
-  in
-  (* Write command to file for debugging *)
-  let debug_file = "/tmp/auto_spawn_cmd.txt" in
-  (let oc = open_out debug_file in
-   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-     Printf.fprintf oc "CMD: %s\nLOG: %s\n" cmd log_file));
-  (* Run in background with nohup - use script file to avoid quoting issues *)
-  let script_file = "/tmp/auto_spawn_script.sh" in
-  (let sc = open_out script_file in
-   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr sc) (fun () ->
-     Printf.fprintf sc "#!/bin/bash\n%s\n" cmd));
-  ignore (Unix.chmod script_file 0o755);
-  let bg_cmd = Printf.sprintf "nohup %s > %s 2>&1 &" script_file log_file in
-  debug_log (Printf.sprintf "SPAWN_CMD: %s" bg_cmd);
-  let ret = run_system_nonblocking bg_cmd in
-  debug_log (Printf.sprintf "SPAWN_RET: %s" (match ret with Unix.WEXITED n -> string_of_int n | _ -> "signal"))
+let cli_argv_of_agent_type (agent_type : string) : string list =
+  match agent_type with
+  | "claude" -> ["claude"; "-p"; "--allowedTools"; "mcp__masc__*"]
+  | "gemini" -> ["gemini"; "--yolo"]
+  | "codex" -> ["codex"; "exec"]
+  | "ollama" -> ["ollama"; "run"; Env_config.Ollama.default_model]
+  | other -> [other]
 
-(** Call LLM directly via Llm_direct - Returns LLM response or error.
-    No llm-mcp dependency — uses direct API calls to GLM/Ollama/Claude. *)
-let call_llm_direct_sync ~agent_type ~prompt =
-  let tool_name = match agent_type with
-    | "gemini" -> "glm"  (* Gemini not directly supported, use GLM *)
-    | "claude" -> "claude-cli"
-    | "codex" -> "ollama"  (* Codex not supported, use Ollama *)
-    | "glm" -> "glm"
-    | _ -> "ollama"  (* ollama is the fallback for unknown types *)
+let run_cli_agent ~agent_type ~prompt =
+  let base = cli_argv_of_agent_type agent_type in
+  let argv = if Lazy.force has_timeout then ["timeout"; "120"] @ base else base in
+  debug_log (Printf.sprintf "SPAWN argv=%s" (String.concat " " (List.map Filename.quote argv)));
+  let (status, output) =
+    Process_eio.run_argv_with_stdin_and_status
+      ~timeout_sec:140.0
+      ~stdin_content:prompt
+      argv
   in
-  let model = match tool_name with
+  let status_s = match status with
+    | Unix.WEXITED n -> Printf.sprintf "exit=%d" n
+    | Unix.WSIGNALED n -> Printf.sprintf "signaled=%d" n
+    | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
+  in
+  let preview =
+    let s = String.trim output in
+    if String.length s > 200 then String.sub s 0 200 ^ "..." else s
+  in
+  debug_log (Printf.sprintf "SPAWN_DONE %s output=%s" status_s preview)
+
+(* --- LLM mode: direct call + in-process MASC HTTP tools/call --- *)
+
+let call_llm_direct_sync ~agent_type ~prompt =
+  let tool_name =
+    match agent_type with
+    | "gemini" -> "glm" (* Gemini not directly supported, use GLM *)
+    | "claude" -> "claude-cli"
+    | "codex" -> "ollama" (* Codex not directly supported, use Ollama *)
+    | "glm" -> "glm"
+    | _ -> "ollama"
+  in
+  let model =
+    match tool_name with
     | "glm" -> "glm-4.7"
     | "ollama" -> Env_config.Ollama.default_model
     | "claude-cli" -> "claude-sonnet-4-20250514"
     | _ -> "glm-4-flash"
   in
   try
-    let response = Llm_direct.dispatch
-      ~tool_name
-      ~model
-      ~prompt
-      ~timeout_sec:30
-      ~max_chars:500
-      ()
+    let response =
+      Llm_direct.dispatch ~tool_name ~model ~prompt ~timeout_sec:30 ~max_chars:500 ()
     in
     if response = "" then "no response" else response
   with exn ->
     Printf.eprintf "[auto_responder] LLM call failed: %s\n%!" (Printexc.to_string exn);
     "no response"
 
-(** [DEPRECATED] Call llm-mcp — use call_llm_direct_sync instead *)
-let call_llm_mcp_sync ~agent_type ~prompt =
-  call_llm_direct_sync ~agent_type ~prompt
+let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
+  let masc_port = match Sys.getenv_opt "MASC_HTTP_PORT" with Some p -> p | None -> "8935" in
+  let uri = Uri.of_string (Printf.sprintf "http://127.0.0.1:%s/mcp" masc_port) in
+  let body =
+    `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("method", `String "tools/call");
+      ("id", `Int 1);
+      ("params", `Assoc [
+        ("name", `String tool_name);
+        ("arguments", args);
+      ]);
+    ]
+    |> Yojson.Safe.to_string
+  in
+  match Eio_context.get_net_opt () with
+  | None -> Error "Eio net not initialized"
+  | Some net ->
+      let client = Cohttp_eio.Client.make ~https:None net in
+      let headers = Cohttp.Header.of_list [
+        ("Content-Type", "application/json");
+        ("Accept", "application/json, text/event-stream");
+      ] in
+      let body_content = Eio.Flow.string_source body in
+      try
+        let resp, resp_body = Cohttp_eio.Client.post client ~sw uri ~headers ~body:body_content in
+        let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+        let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024) in
+        if not (Cohttp.Code.is_success status) then
+          Error (Printf.sprintf "MASC HTTP %d" status)
+        else
+          (* Extract MCP tool text: result.content[0].text *)
+          try
+            let json = Yojson.Safe.from_string body_str in
+            let txt =
+              json |> member "result" |> member "content" |> to_list |> List.hd
+                  |> member "text" |> to_string
+            in
+            Ok txt
+          with _ ->
+            Ok body_str
+      with exn ->
+        Error (Printexc.to_string exn)
 
-(** MASC HTTP helper - call MASC tool via HTTP (using temp file to avoid escaping issues) *)
-let masc_call ~tool_name ~args =
-  let masc_url = Printf.sprintf "http://127.0.0.1:%d/mcp"
-    (match Sys.getenv_opt "MASC_HTTP_PORT" with Some p -> int_of_string p | None -> 8935)
-  in
-  let body = Printf.sprintf
-    {|{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"%s","arguments":%s}}|}
-    tool_name args
-  in
-  (* Use temp file to avoid shell escaping issues *)
-  let tmp_file = Printf.sprintf "/tmp/masc_call_%d_%d.json"
-    (Unix.getpid ()) (int_of_float (Time_compat.now () *. 1000000.) mod 1000000) in
-  (let oc = open_out tmp_file in
-   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-     output_string oc body));
-  let cmd = Printf.sprintf
-    "curl -s '%s' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d @%s 2>/dev/null"
-    masc_url tmp_file
-  in
-  let (_, content) = run_shell_nonblocking cmd in
-  Safe_ops.remove_file_logged ~context:"auto_responder" tmp_file;
-  content
-
-(** Extract nickname from MASC join response *)
-let extract_nickname response =
-  (* Look for "Nickname: xxx" pattern *)
-  let lines = String.split_on_char '\n' response in
+let extract_nickname (response_text : string) : string option =
+  let lines = String.split_on_char '\n' response_text in
   let rec find = function
     | [] -> None
     | line :: rest ->
@@ -234,131 +217,44 @@ let extract_nickname response =
   in
   find lines
 
-(** Call LLM directly and broadcast response (fast mode, background)
-    Auto-responder handles MASC join/broadcast/leave directly.
-    No llm-mcp dependency — uses Llm_direct. *)
-let call_llm_and_broadcast ~agent_type ~prompt ~mention ~base_path =
-  ignore base_path;
-  (* Step 1: Get simple answer from LLM via direct API *)
+let call_llm_and_broadcast ~sw ~agent_type ~prompt ~mention =
   let response = call_llm_direct_sync ~agent_type ~prompt in
-  debug_log (Printf.sprintf "LLM_RESPONSE: %s" (if String.length response > 100 then String.sub response 0 100 ^ "..." else response));
-
-  if response <> "" && response <> "no response" then begin
-    (* Step 2: Join MASC to get assigned nickname *)
-    let join_args = Printf.sprintf {|{"agent_name":"%s","capabilities":["llm-auto-responder"]}|} agent_type in
-    let join_resp = masc_call ~tool_name:"masc_join" ~args:join_args in
-    debug_log (Printf.sprintf "MASC_JOIN: %s" (if String.length join_resp > 200 then String.sub join_resp 0 200 ^ "..." else join_resp));
-
-    match extract_nickname join_resp with
-    | None ->
-        debug_log "MASC_JOIN_FAILED: Could not extract nickname";
-        Printf.eprintf "[Auto-Responder/LLM] Failed to join MASC\n%!"
-    | Some nickname ->
-        debug_log (Printf.sprintf "MASC_NICKNAME: %s" nickname);
-
-        (* Step 3: Broadcast response with proper nickname *)
-        let message = Printf.sprintf "@%s %s" mention (String.escaped response) in
-        let broadcast_args = Printf.sprintf {|{"agent_name":"%s","message":"%s"}|} nickname message in
-        let _ = masc_call ~tool_name:"masc_broadcast" ~args:broadcast_args in
-        debug_log "MASC_BROADCAST: sent";
-
-        (* Step 4: Leave MASC *)
-        let leave_args = Printf.sprintf {|{"agent_name":"%s"}|} nickname in
-        let _ = masc_call ~tool_name:"masc_leave" ~args:leave_args in
-        debug_log "MASC_LEAVE: done";
-
-        let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
-        Printf.eprintf "[Auto-Responder/LLM] %s: %s\n%!" nickname short_resp
-  end else
+  debug_log (Printf.sprintf "LLM_RESPONSE: %s"
+    (if String.length response > 100 then String.sub response 0 100 ^ "..." else response));
+  if response = "" || response = "no response" then
     Printf.eprintf "[Auto-Responder/LLM] LLM returned empty response\n%!"
+  else begin
+    let join_args =
+      `Assoc [
+        ("agent_name", `String agent_type);
+        ("capabilities", `List [`String "llm-auto-responder"]);
+      ]
+    in
+    match masc_call ~sw ~tool_name:"masc_join" ~args:join_args with
+    | Error e ->
+        debug_log (Printf.sprintf "MASC_JOIN_FAILED: %s" e);
+        Printf.eprintf "[Auto-Responder/LLM] Failed to join MASC (%s)\n%!" e
+    | Ok join_resp -> (
+        debug_log (Printf.sprintf "MASC_JOIN: %s"
+          (if String.length join_resp > 200 then String.sub join_resp 0 200 ^ "..." else join_resp));
+        match extract_nickname join_resp with
+        | None ->
+            debug_log "MASC_JOIN_FAILED: Could not extract nickname";
+            Printf.eprintf "[Auto-Responder/LLM] Failed to join MASC (no nickname)\n%!"
+        | Some nickname ->
+            let msg = Printf.sprintf "@%s %s" mention response in
+            let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
+            ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args);
+            let leave_args = `Assoc [("agent_name", `String nickname)] in
+            ignore (masc_call ~sw ~tool_name:"masc_leave" ~args:leave_args);
+            let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
+            Printf.eprintf "[Auto-Responder/LLM] %s: %s\n%!" nickname short_resp
+      )
+  end
 
-(** Run LLM call in background process (Thread.create doesn't work well with Eio)
-    Creates a shell script that does: LLM call -> MASC join -> broadcast -> leave.
-    Uses direct API calls (GLM/Ollama) — no llm-mcp dependency. *)
-let llm_call_in_background ~agent_type ~prompt ~mention ~base_path =
-  ignore base_path;
-  let masc_port = match Sys.getenv_opt "MASC_HTTP_PORT" with Some p -> p | None -> "8935" in
-  let masc_url = Printf.sprintf "http://127.0.0.1:%s/mcp" masc_port in
-  let escaped_prompt =
-    prompt
-    |> String.split_on_char '"' |> String.concat {|\\\"|}
-    |> String.split_on_char '\n' |> String.concat " "
-    |> String.split_on_char '\'' |> String.concat {|'\\''|}
-  in
-  (* MASC requires Accept header with both application/json and text/event-stream *)
-  let accept_header = "-H 'Accept: application/json, text/event-stream'" in
-  (* Determine LLM call based on agent_type — direct API, no llm-mcp *)
-  let llm_call_cmd = match agent_type with
-    | "glm" | "gemini" ->
-        (* GLM via Z.ai API — key from env var, not in command *)
-        let model = "glm-4.7" in
-        Printf.sprintf {|echo '{"model":"%s","messages":[{"role":"user","content":"%s"}],"stream":false}' | curl -s 'https://api.z.ai/api/coding/paas/v4/chat/completions' -H 'Content-Type: application/json' -H "Authorization: Bearer $ZAI_API_KEY" -d @- | jq -r '.choices[0].message.content // "no response"' | head -c 300|} model escaped_prompt
-    | "ollama" | "codex" | _ ->
-        (* Ollama local API *)
-        let model = Env_config.Ollama.default_model in
-        Printf.sprintf {|echo '{"model":"%s","prompt":"%s","stream":false}' | curl -s 'http://127.0.0.1:11434/api/generate' -H 'Content-Type: application/json' -d @- | jq -r '.response // "no response"' | head -c 300|} model escaped_prompt
-  in
-  let script = Printf.sprintf {|#!/bin/bash
-# LLM call in background for %s (direct API, no llm-mcp)
-set -e
+(* --- Public API --- *)
 
-# Step 1: Call LLM directly
-RESPONSE=$(%s)
-
-echo "[LLM] Response: $RESPONSE" >> /tmp/auto_debug.log
-
-if [ "$RESPONSE" = "no response" ] || [ -z "$RESPONSE" ]; then
-  echo "[LLM] Empty response, skipping MASC" >> /tmp/auto_debug.log
-  exit 0
-fi
-
-# Step 2: Join MASC (with Accept header for SSE support)
-JOIN_RESP=$(curl -s '%s' -H 'Content-Type: application/json' %s \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"masc_join","arguments":{"agent_name":"%s","capabilities":["llm-auto-responder"]}}}')
-
-# macOS compatible: use sed instead of grep -oP
-NICKNAME=$(echo "$JOIN_RESP" | sed -n 's/.*Nickname: \([a-z]*-[a-z]*-[a-z]*\).*/\1/p' | head -1)
-echo "[MASC] Nickname: $NICKNAME" >> /tmp/auto_debug.log
-
-if [ -z "$NICKNAME" ]; then
-  echo "[MASC] Failed to join, no nickname" >> /tmp/auto_debug.log
-  exit 1
-fi
-
-# Step 3: Broadcast (escape response for JSON)
-ESCAPED_RESP=$(echo "$RESPONSE" | sed 's/"/\\"/g' | tr '\n' ' ')
-curl -s '%s' -H 'Content-Type: application/json' %s \
-  -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":1,\"params\":{\"name\":\"masc_broadcast\",\"arguments\":{\"agent_name\":\"$NICKNAME\",\"message\":\"@%s $ESCAPED_RESP\"}}}" > /dev/null
-
-echo "[MASC] Broadcast sent" >> /tmp/auto_debug.log
-
-# Step 4: Leave
-curl -s '%s' -H 'Content-Type: application/json' %s \
-  -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"id\":1,\"params\":{\"name\":\"masc_leave\",\"arguments\":{\"agent_name\":\"$NICKNAME\"}}}" > /dev/null
-
-echo "[MASC] Left room" >> /tmp/auto_debug.log
-|} agent_type llm_call_cmd masc_url accept_header agent_type masc_url accept_header mention masc_url accept_header
-  in
-  let script_file = Printf.sprintf "/tmp/llm_bg_%d_%d.sh"
-    (Unix.getpid ()) (int_of_float (Time_compat.now () *. 1000.) mod 10000) in
-  let log_file = Printf.sprintf "/tmp/llm_bg_%s_%d.log"
-    agent_type (int_of_float (Time_compat.now () *. 1000.) mod 10000) in
-  (let oc = open_out script_file in
-   Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-     output_string oc script));
-  ignore (Unix.chmod script_file 0o755);
-  let bg_cmd = Printf.sprintf "nohup %s > %s 2>&1 &" script_file log_file in
-  debug_log (Printf.sprintf "LLM_BG_CMD: %s" bg_cmd);
-  let ret = run_system_nonblocking bg_cmd in
-  debug_log (Printf.sprintf "LLM_BG_RET: %s" (match ret with Unix.WEXITED n -> string_of_int n | _ -> "signal"))
-
-(** Maybe spawn a response agent if mention detected and enabled
-
-    Returns:
-    - Some task_id if spawn was triggered
-    - None if no spawn needed
-*)
-let maybe_respond ~base_path ~from_agent ~content ~mention =
+let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
   let mode = get_mode () in
   let mode_str = match mode with Disabled -> "Disabled" | Spawn -> "Spawn" | Llm -> "Llm" in
   debug_log (Printf.sprintf "CALLED: from=%s mention=%s mode=%s enabled=%b"
@@ -367,7 +263,7 @@ let maybe_respond ~base_path ~from_agent ~content ~mention =
   | None ->
       debug_log "EXIT: No mention";
       None
-  | Some _m when not (is_enabled ()) ->
+  | Some _ when not (is_enabled ()) ->
       let env_val = match Sys.getenv_opt "MASC_AUTO_RESPOND" with Some v -> v | None -> "not set" in
       debug_log (Printf.sprintf "EXIT: Disabled (env=%s)" env_val);
       Printf.eprintf "[Auto-Responder] Disabled (MASC_AUTO_RESPOND=%s)\n%!" env_val;
@@ -376,52 +272,50 @@ let maybe_respond ~base_path ~from_agent ~content ~mention =
       let from_base = agent_type_of_mention from_agent in
       let mention_base = agent_type_of_mention m in
       debug_log (Printf.sprintf "CHECK: from_base=%s mention_base=%s spawnable=%b" from_base mention_base (is_spawnable m));
-      (* Prevent infinite loop: don't respond to same agent type *)
-      if from_base = mention_base then begin
+      if from_base = mention_base then (
         debug_log "EXIT: Self-mention";
         Printf.eprintf "[Auto-Responder] Skip self-mention @%s from %s\n%!" m from_agent;
         None
-      end
-      else if not (is_spawnable m) then begin
+      ) else if not (is_spawnable m) then (
         debug_log "EXIT: Not spawnable";
         activity_log ~mode ~from_agent ~mention:m ~status:"SKIP" ~detail:"Not spawnable agent type";
         Printf.eprintf "[Auto-Responder] @%s not spawnable\n%!" m;
         None
-      end
-      else if should_throttle ~agent_type:mention_base then begin
+      ) else if should_throttle ~agent_type:mention_base then (
         debug_log "EXIT: Throttled";
-        activity_log ~mode ~from_agent ~mention:m ~status:"THROTTLE" ~detail:(Printf.sprintf "Max %d responses per %.0fs" chain_limit chain_window);
+        activity_log ~mode ~from_agent ~mention:m ~status:"THROTTLE"
+          ~detail:(Printf.sprintf "Max %d responses per %.0fs" chain_limit chain_window);
         Printf.eprintf "[Auto-Responder] Throttled @%s (chain limit)\n%!" m;
         None
-      end
-      else begin
-        let prompt = build_response_prompt ~from_agent ~content ~mention:m in
-        let task_id = Printf.sprintf "auto-respond-%s-%d" mention_base
-          (int_of_float (Time_compat.now () *. 1000.) mod 10000) in
+      ) else (
+        let task_id =
+          Printf.sprintf "auto-respond-%s-%d" mention_base
+            (int_of_float (Time_compat.now () *. 1000.) mod 10000)
+        in
         debug_log (Printf.sprintf "DISPATCH: mode=%s task_id=%s" mode_str task_id);
-        (* Mode-based dispatch *)
-        (match mode with
-        | Llm ->
-            debug_log "ACTION: LLM call";
-            activity_log ~mode ~from_agent ~mention:m ~status:"LLM" ~detail:task_id;
-            Printf.eprintf "[Auto-Responder/LLM] Fast-calling %s for @%s\n%!" mention_base m;
-            (* LLM mode: run in background process (Thread.create doesn't work well with Eio) *)
-            llm_call_in_background ~agent_type:mention_base ~prompt:content ~mention:from_agent ~base_path
-        | Spawn ->
-            (* glm has no CLI - use LLM mode approach (auto-responder handles MASC) *)
-            if mention_base = "glm" then begin
-              debug_log "ACTION: LLM call (glm has no CLI)";
-              activity_log ~mode ~from_agent ~mention:m ~status:"LLM-GLM" ~detail:task_id;
-              Printf.eprintf "[Auto-Responder/LLM-GLM] Fast-calling glm for @%s\n%!" m;
-              (* Run in background process *)
-              llm_call_in_background ~agent_type:"glm" ~prompt:content ~mention:from_agent ~base_path
-            end else begin
-              debug_log "ACTION: Spawn";
-              activity_log ~mode ~from_agent ~mention:m ~status:"SPAWN" ~detail:task_id;
-              Printf.eprintf "[Auto-Responder/Spawn] Spawning %s for @%s from %s\n%!" mention_base m from_agent;
-              spawn_in_background ~agent_type:mention_base ~prompt ~working_dir:base_path
-            end
-        | Disabled ->
-            debug_log "ACTION: Mode disabled (should not reach here)");
+        activity_log ~mode ~from_agent ~mention:m
+          ~status:(match mode with Spawn -> "SPAWN" | Llm -> "LLM" | Disabled -> "OFF")
+          ~detail:task_id;
+        Eio.Fiber.fork ~sw (fun () ->
+          try
+            match mode with
+            | Disabled -> ()
+            | Llm ->
+                Printf.eprintf "[Auto-Responder/LLM] Calling %s for @%s\n%!" mention_base m;
+                call_llm_and_broadcast ~sw ~agent_type:mention_base ~prompt:content ~mention:from_agent
+            | Spawn ->
+                if mention_base = "glm" then (
+                  (* No CLI for glm; use LLM mode path. *)
+                  Printf.eprintf "[Auto-Responder/LLM-GLM] Calling glm for @%s\n%!" m;
+                  call_llm_and_broadcast ~sw ~agent_type:"glm" ~prompt:content ~mention:from_agent
+                ) else (
+                  let prompt = build_response_prompt ~from_agent ~content ~mention:m in
+                  Printf.eprintf "[Auto-Responder/Spawn] Spawning %s for @%s from %s\n%!" mention_base m from_agent;
+                  run_cli_agent ~agent_type:mention_base ~prompt
+                )
+          with exn ->
+            debug_log (Printf.sprintf "ERROR: %s" (Printexc.to_string exn))
+        );
         Some task_id
-      end
+      )
+

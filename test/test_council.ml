@@ -21,15 +21,34 @@ module Balance = Council.Balance
 
 let test_base_path = "/tmp/masc-test-council"
 
+let rec mkdir_p path =
+  if Sys.file_exists path then
+    ()
+  else begin
+    let parent = Filename.dirname path in
+    if parent <> path then mkdir_p parent;
+    try Unix.mkdir path 0o755
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+
 let setup () =
   (* Create test directories *)
   let masc_dir = Filename.concat test_base_path ".masc" in
   let debates_dir = Filename.concat masc_dir "debates" in
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s" debates_dir));
+  mkdir_p debates_dir;
   ()
 
 let teardown () =
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" test_base_path));
+  (try rm_rf test_base_path with _ -> ());
   ()
 
 (* ============================================================
@@ -516,16 +535,11 @@ let convo_config : Conversation.config = {
 }
 
 let convo_setup () =
-  (* Since conversation.ml uses Sys.getcwd()/.masc, we need to create
-     the actual dir at CWD/.masc/conversations/threads too.
-     For unit tests, we also create our test dir for direct file checks. *)
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" convo_test_root));
-  let cwd_convo = Sys.getcwd () ^ "/.masc/conversations/threads" in
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s" cwd_convo));
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s/.masc/conversations/threads" convo_test_root))
+  (try rm_rf convo_test_root with _ -> ());
+  mkdir_p (Filename.concat convo_test_root ".masc/conversations/threads")
 
 let convo_teardown () =
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" convo_test_root))
+  (try rm_rf convo_test_root with _ -> ())
 
 let test_convo_start () =
   convo_setup ();

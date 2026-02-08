@@ -18,16 +18,15 @@ type focus_payload = {
 
 (** {1 Non-blocking Shell Execution} *)
 
-(** Run shell command and get single line (Eio-native) *)
-let run_shell_line cmd =
-  let output = Process_eio.run ~timeout_sec:10.0 cmd in
+(** Run argv and get single line (Eio-native, no shell) *)
+let run_argv_line argv =
+  let output = Process_eio.run_argv ~timeout_sec:10.0 argv in
   match String.split_on_char '\n' output with
   | [] -> ""
-  | h :: _ -> h
+  | h :: _ -> String.trim h
 
-(** Run system command in background (Eio-native) *)
-let run_system_nonblocking cmd =
-  ignore (Process_eio.run ~timeout_sec:60.0 cmd)
+let run_argv_ignore argv =
+  ignore (Process_eio.run_argv_with_status ~timeout_sec:60.0 argv)
 
 (** Get non-empty environment variable *)
 let getenv_nonempty name =
@@ -71,14 +70,14 @@ let render_focus_template template payload =
 (** Check if running on macOS *)
 let is_macos () =
   try
-    let os = run_shell_line "uname -s" in
+    let os = run_argv_line ["uname"; "-s"] in
     os = "Darwin"
   with End_of_file | Unix.Unix_error _ -> false
 
 (** Check if terminal-notifier is available *)
 let has_terminal_notifier =
   lazy (
-    let result = run_shell_line "which terminal-notifier 2>/dev/null" in
+    let result = run_argv_line ["which"; "terminal-notifier"] in
     result <> ""
   )
 
@@ -156,20 +155,18 @@ let agent_emoji = function
 
 (** Send notification via terminal-notifier (preferred) *)
 let send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd =
-  let title = escape_shell title in
-  let subtitle = escape_shell subtitle in
-  let message = escape_shell message in
-  let sound_arg = if sound then "-sound default" else "" in
-  let focus_arg = match focus_cmd with
-    | Some cmd -> Printf.sprintf " -execute '%s'" (escape_shell cmd)
-    | None -> ""
+  let argv =
+    ["terminal-notifier";
+     "-title"; title;
+     "-subtitle"; subtitle;
+     "-message"; message;
+     "-group"; "masc"]
+    |> fun base -> if sound then base @ ["-sound"; "default"] else base
+    |> fun base -> match focus_cmd with
+      | Some cmd -> base @ ["-execute"; cmd]
+      | None -> base
   in
-  let cmd = Printf.sprintf
-    "terminal-notifier -title '%s' -subtitle '%s' -message '%s' -group masc %s%s >/dev/null 2>&1 &"
-    title subtitle message sound_arg focus_arg
-  in
-  run_system_nonblocking cmd;
-  ()
+  run_argv_ignore argv
 
 (** Send notification via osascript (fallback) *)
 let send_via_osascript ~title ~subtitle ~message =
@@ -180,16 +177,7 @@ let send_via_osascript ~title ~subtitle ~message =
     "display notification \"%s\" with title \"%s\" subtitle \"%s\""
     message title subtitle
   in
-  let cmd = Printf.sprintf "osascript -e %s 2>/dev/null &" (Filename.quote script) in
-  run_system_nonblocking cmd;
-  ()
-
-let run_focus_command = function
-  | Some cmd ->
-      let cmd = Printf.sprintf "%s >/dev/null 2>&1 &" cmd in
-      run_system_nonblocking cmd;
-      ()
-  | None -> ()
+  run_argv_ignore ["osascript"; "-e"; script]
 
 (** Send macOS notification - uses terminal-notifier if available *)
 let send_notification ?(sound=false) ?focus_cmd ~title ~subtitle ~message () =
@@ -200,8 +188,10 @@ let send_notification ?(sound=false) ?focus_cmd ~title ~subtitle ~message () =
     send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd
   else begin
     send_via_osascript ~title ~subtitle ~message;
-    if focus_on_osascript () then
-      run_focus_command focus_cmd
+    ignore (focus_on_osascript ());
+    (* NOTE: For osascript fallback, we intentionally do not execute focus_cmd.
+       focus_cmd can contain arbitrary shell snippets (user-configured) and would
+       require `sh -c` execution. terminal-notifier handles click actions. *)
   end
 
 (** Send notification for MASC event *)

@@ -7,23 +7,14 @@ open Printf
 
 (* ---------- Helpers ---------- *)
 
-(** Write string to tmp file with restricted permissions, return path.
-    Uses Filename.temp_file for uniqueness (PID + counter).
-    Permissions: 0o600 (owner-only) to prevent credential leakage. *)
-let write_tmp ~prefix content =
-  let path = Filename.temp_file prefix ".json" in
-  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_TRUNC] 0o600 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-    let _ = Unix.write_substring fd content 0 (String.length content) in ());
-  path
-
-(** Run shell command with guaranteed tmp file cleanup. *)
-let run_with_cleanup ~tmp_files ~timeout_sec cmd =
-  let cleanup () = List.iter (fun f ->
-    try Sys.remove f with Sys_error _ -> ()
-  ) tmp_files in
-  Fun.protect ~finally:cleanup (fun () ->
-    Process_eio.run ~timeout_sec cmd)
+let env_set (env : string array) (k : string) (v : string) : string array =
+  let prefix = k ^ "=" in
+  let rest =
+    env
+    |> Array.to_list
+    |> List.filter (fun kv -> not (String.starts_with ~prefix kv))
+  in
+  Array.of_list ((prefix ^ v) :: rest)
 
 (** Strip [Extra] metadata and hook outputs from LLM responses. *)
 let strip_extra s =
@@ -97,20 +88,22 @@ let call_glm ?(api_key="") ~model ~prompt ~timeout_sec ~max_chars () =
 (** Call Claude CLI as subprocess.
     Uses CLAUDE_CODE_OAUTH_TOKEN env var for auth. *)
 let call_claude_cli ?(api_key="") ~model ~prompt ~timeout_sec ~max_chars () =
-  (* Set up env: if api_key provided, inject as CLAUDE_CODE_OAUTH_TOKEN *)
-  let env_prefix = if api_key <> "" then
-    sprintf "CLAUDE_CODE_OAUTH_TOKEN=%s " (Filename.quote api_key)
-  else "" in
-  (* Write prompt to tmp file to avoid shell escaping issues *)
-  let tmp_prompt = write_tmp ~prefix:"llm_direct_claude_prompt" prompt in
-  let cmd = sprintf
-    "TMPDIR=/tmp/claude-safe && mkdir -p $TMPDIR && \
-     %sclaude -p --model %s --max-turns 1 < %s 2>/dev/null | head -c %d"
-    env_prefix (Filename.quote model) tmp_prompt max_chars
+  let env =
+    let env = Unix.environment () in
+    let env = env_set env "TMPDIR" "/tmp/claude-safe" in
+    if api_key = "" then env else env_set env "CLAUDE_CODE_OAUTH_TOKEN" api_key
   in
-  let result = run_with_cleanup ~tmp_files:[tmp_prompt]
-    ~timeout_sec:(Float.of_int timeout_sec +. 5.0) cmd in
-  strip_extra result
+  let raw =
+    Process_eio.run_argv_with_stdin
+      ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
+      ~env
+      ~stdin_content:prompt
+      ["claude"; "-p"; "--model"; model; "--max-turns"; "1"]
+  in
+  let truncated =
+    if String.length raw > max_chars then String.sub raw 0 max_chars else raw
+  in
+  strip_extra truncated
 
 (* ---------- Ollama ---------- *)
 

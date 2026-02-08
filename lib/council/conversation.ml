@@ -79,8 +79,8 @@ let list_dir_safe dir =
 
 (** {1 Directory Management} *)
 
-let masc_dir _config =
-  Sys.getcwd () ^ "/.masc"
+let masc_dir (config : config) =
+  Filename.concat config.base_path ".masc"
 
 let conversations_dir config =
   Filename.concat (masc_dir config) "conversations"

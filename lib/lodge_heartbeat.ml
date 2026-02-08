@@ -371,7 +371,7 @@ let needs_rewrite ~name =
       let usage = float_of_int ctx.token_count /. float_of_int ctx.max_tokens in
       usage >= ctx.rewrite_threshold
 
-(** Forward reference for rewrite_context (defined after run_shell_nonblocking) *)
+(** Forward reference for rewrite_context (defined later) *)
 let rewrite_context_ref : (name:string -> unit) ref = ref (fun ~name:_ -> ())
 
 (** Rewrite context - calls forward reference *)
@@ -411,27 +411,38 @@ let cleanup_inactive_lodge_agents () =
   (* Cleanup happens automatically via timeout check in is_agent_active *)
   ()
 
-(** {1 Non-blocking Shell Execution} *)
+(** {1 External CLI helpers (argv-based, no shell)} *)
 
-(** Run shell command via Eio-native process execution.
-    Delegates to Process_eio.run (global proc_mgr/clock). *)
-let run_shell_nonblocking cmd =
-  Process_eio.run ~timeout_sec:60.0 cmd
+let sb_path () =
+  match Sys.getenv_opt "ME_ROOT" with
+  | Some root -> Printf.sprintf "%s/scripts/sb" root
+  | None -> (
+      match Sys.getenv_opt "HOME" with
+      | Some home -> Printf.sprintf "%s/me/scripts/sb" home
+      | None -> "./scripts/sb")
 
 (** curl-based GraphQL request — reliable DNS resolution in Railway containers *)
 let graphql_request_curl body : (string, string) Stdlib.result =
   let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let escaped_body = String.concat "\\\"" (String.split_on_char '"' body) in
-  let auth_header = if api_key = "" then "" else Printf.sprintf "-H 'Authorization: Bearer %s'" api_key in
-  let cmd = Printf.sprintf "curl -s -m 10 '%s' -H 'Content-Type: application/json' %s -d \"%s\"" url auth_header escaped_body in
+  if api_key = "" then
+    Error "GRAPHQL_API_KEY not set"
+  else
+  let argv =
+    [ "curl"; "-s"; "-m"; "10"; url;
+      "-H"; "Content-Type: application/json"
+    ]
+    |> fun base -> base @ [ "-H"; "Authorization: Bearer " ^ api_key ]
+    |> fun with_auth ->
+    (* Read request body from stdin to avoid quoting/escaping issues. *)
+    with_auth @ [ "-d"; "@-" ]
+  in
   try
-    let ic = Unix.open_process_in cmd in
-    let output = In_channel.input_all ic in
-    let _ = Unix.close_process_in ic in
-    if String.length output = 0 then Error "curl: empty response"
-    else Ok output
+    let output =
+      Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
+    in
+    if String.length output = 0 then Error "curl: empty response" else Ok output
   with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn))
 
 (** GraphQL request via Cohttp_eio with curl fallback.
@@ -440,6 +451,9 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
   let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
+  if api_key = "" then
+    Error "GRAPHQL_API_KEY not set"
+  else
   let max_response_bytes = 1_000_000 in
   let suppress_body _s = "body suppressed" in
   let cohttp_result = match Eio_context.get_net_opt () with
@@ -518,13 +532,7 @@ let utf8_truncate s max_bytes =
     String.sub s 0 end_pos
   end
 
-(** Run shell command and get all output (up to 500 chars) *)
-let run_shell_line cmd =
-  let output = Process_eio.run ~timeout_sec:10.0 cmd in
-  let s = String.trim output in
-  if String.length s > 4000 then String.sub s 0 4000 else s
-
-(** Initialize rewrite_context implementation (now that run_shell_nonblocking is available) *)
+(** Initialize rewrite_context implementation *)
 let () =
   rewrite_context_ref := fun ~name ->
     match Hashtbl.find_opt agent_contexts name with
@@ -869,10 +877,8 @@ let create_agent_in_neo4j ~name ~traits ~description ~preferred_hours =
     "MERGE (a:Agent {name: '%s'}) SET a.traits = [%s], a.description = '%s', a.preferred_hours = [%s], a.activity_level = 0.7, a.created_at = datetime(), a.created_by = 'ecosystem_evolution' RETURN a.name"
     (esc name) traits_str (esc description) hours_str
   in
-  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
-  let cmd = Printf.sprintf "cd %s && sb neo4j query %s 2>/dev/null"
-    (Filename.quote me_root) (Filename.quote query) in
-  let result = run_shell_nonblocking cmd in
+  let sb = sb_path () in
+  let result = Process_eio.run_argv ~timeout_sec:30.0 [sb; "neo4j"; "query"; query] in
   if String.length result > 0 && not (String.sub result 0 (min 5 (String.length result)) = "Error") then begin
     Eio.traceln "   ✅ [Neo4j] Agent '%s' created successfully" name;
     (* Invalidate cache so new agent is loaded *)
@@ -1369,11 +1375,10 @@ let load_agent_profile ~agent_name : agent_profile =
   | Some (profile, ts) when now -. ts < profile_cache_ttl -> profile
   | _ ->
     let profile =
-      let cmd = Printf.sprintf
-        "cd /Users/dancer/me && ./scripts/sb graphql agent %s 2>/dev/null"
-        agent_name
+      let sb = sb_path () in
+      let json_str =
+        Process_eio.run_argv ~timeout_sec:30.0 [sb; "graphql"; "agent"; agent_name]
       in
-      let json_str = run_shell_nonblocking cmd in
       try
         let json = Yojson.Safe.from_string json_str in
         let open Yojson.Safe.Util in
@@ -2788,10 +2793,8 @@ let trigger_heartbeat room_config =
 (** Load agent specialties dynamically from Neo4j *)
 let load_agent_specialties_from_neo4j () =
   let query = "MATCH (a:Agent) WHERE a.traits IS NOT NULL RETURN a.name, a.traits, a.description" in
-  let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
-  let cmd = Printf.sprintf "cd %s && sb neo4j query %s 2>/dev/null"
-    (Filename.quote me_root) (Filename.quote query) in
-  let json_str = run_shell_nonblocking cmd in
+  let sb = sb_path () in
+  let json_str = Process_eio.run_argv ~timeout_sec:30.0 [sb; "neo4j"; "query"; query] in
   try
     let json = Yojson.Safe.from_string json_str in
     let records = Yojson.Safe.Util.(json |> member "records" |> to_list) in

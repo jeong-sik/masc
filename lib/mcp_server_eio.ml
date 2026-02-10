@@ -872,9 +872,44 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> auth_token
   in
 
+  let read_term_session_agent () =
+    match Sys.getenv_opt "TERM_SESSION_ID" with
+    | None -> None
+    | Some sid ->
+        let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+        try
+          let ic = open_in file in
+          let name =
+            Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+              ~finally:(fun () -> close_in_noerr ic)
+              (fun () -> input_line ic)
+          in
+          if name = "" then None else Some name
+        with Sys_error _ | End_of_file -> None
+  in
+
+  let persisted_agent_name () =
+    match read_mcp_session_agent () with
+    | Some n -> Some n
+    | None -> read_term_session_agent ()
+  in
+
+  (* If the client keeps sending a legacy agent type (e.g. "claude") but we've
+     already joined and have a generated nickname, prefer the nickname. This
+     avoids repeated auto-joins and makes join-required tools "just work". *)
+  let agent_name =
+    match persisted_agent_name () with
+    | Some persisted
+      when Nickname.is_generated_nickname persisted
+           && not (Nickname.is_generated_nickname agent_name) ->
+        persisted
+    | _ -> agent_name
+  in
+
   (* Enforce tool authorization when enabled *)
+  let auth_enabled = Auth.is_auth_enabled config.base_path in
   let auth_result =
-    if Auth.is_auth_enabled config.base_path then
+    if auth_enabled then
       match Auth.authorize_tool config.base_path ~agent_name ~token ~tool_name:name with
       | Ok () -> Ok ()
       | Error err -> Error err
@@ -885,36 +920,36 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match auth_result with
   | Error err -> (false, Types.masc_error_to_string err)
   | Ok () ->
-  (* Log tool call *)
-  Log.Mcp.debug "[%s] %s" agent_name name;
+  let extract_nickname_from_join_result ~fallback result =
+    try
+      let prefix = "  Nickname: " in
+      let start_idx =
+        let idx = ref 0 in
+        while !idx < String.length result - String.length prefix &&
+              String.sub result !idx (String.length prefix) <> prefix do
+          incr idx
+        done;
+        !idx + String.length prefix
+      in
+      let end_idx = String.index_from result start_idx '\n' in
+      String.sub result start_idx (end_idx - start_idx)
+    with Not_found | Invalid_argument _ -> fallback
+  in
 
-  (* Update activity for any tool call - TODO: migrate to Session_eio when ready *)
-  if agent_name <> "unknown" then begin
-    Session.update_activity registry ~agent_name ();
-    (* Also update disk-based heartbeat for zombie detection across restarts *)
-    if Room.is_initialized config then
-      ignore (Room.heartbeat config ~agent_name)
-  end;
-
-  (* Auto-join: if agent not in session and tool requires agent, auto-register *)
-  let read_only_tools = ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
-                         "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
-                         "masc_worktree_list"; "masc_pending_interrupts";
-                         "masc_cost_report"; "masc_portal_status"] in
-  if agent_name <> "unknown" && not (List.mem name read_only_tools) then begin
-    match Hashtbl.find_opt registry.sessions agent_name with
-    | Some _ -> ()  (* Already joined *)
-    | None ->
-        (* Auto-join silently *)
-        let agent_file = Filename.concat config.base_path ".masc/agents" |> fun d ->
-          Filename.concat d (agent_name ^ ".json") in
-        if not (Sys.file_exists agent_file) && Room.is_initialized config then begin
-          let _ = Room.join config ~agent_name ~capabilities:[] () in
-          Log.Mcp.info "Auto-joined: %s" agent_name
-        end;
-        let _ = Session.register registry ~agent_name in
-        ()
-  end;
+  let write_term_session_agent nickname =
+    match Sys.getenv_opt "TERM_SESSION_ID" with
+    | None -> ()
+    | Some sid ->
+        let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+        (try
+          let oc = open_out file in
+          Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+            ~finally:(fun () -> close_out_noerr oc)
+            (fun () -> output_string oc nickname)
+        with e ->
+          Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!"
+            file (Printexc.to_string e))
+  in
 
   (* Tools that require agent to be joined first *)
   let requires_join = [
@@ -928,8 +963,74 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_lock"; "masc_unlock";
   ] in
 
-  (* Check if agent must join first *)
+  (* Auto-init/auto-join for better UX (only when auth is disabled). *)
   let join_required = List.mem name requires_join in
+
+  let init_error =
+    if (not auth_enabled) && join_required && not (Room.is_initialized config) then
+      (try
+         ignore (Room.init config ~agent_name:None);
+         None
+       with Invalid_argument msg -> Some msg
+          | Sys_error msg -> Some msg
+          | Yojson.Json_error msg -> Some msg
+          | exn -> Some (Printexc.to_string exn))
+    else
+      None
+  in
+  match init_error with
+  | Some msg ->
+      (false, Printf.sprintf "❌ %s" msg)
+  | None ->
+
+  let read_only_tools = ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
+                         "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
+                         "masc_worktree_list"; "masc_pending_interrupts";
+                         "masc_cost_report"; "masc_portal_status"] in
+  let is_read_only = List.mem name read_only_tools in
+
+  let agent_name =
+    if (not auth_enabled) && join_required && agent_name <> "unknown" then begin
+      let room_initialized = Room.is_initialized config in
+      let is_joined =
+        if room_initialized then
+          try Room.is_agent_joined config ~agent_name
+          with Sys_error _ | Yojson.Json_error _ | Invalid_argument _ -> false
+        else
+          false
+      in
+      if is_joined then
+        agent_name
+      else begin
+        let join_result = Room.join config ~agent_name ~capabilities:[] () in
+        let nickname = extract_nickname_from_join_result ~fallback:agent_name join_result in
+        Log.Mcp.info "Auto-joined for %s: %s -> %s" name agent_name nickname;
+        (* Persist nickname so subsequent calls can use it. *)
+        write_mcp_session_agent nickname;
+        write_term_session_agent nickname;
+        ignore (Session.register registry ~agent_name:nickname);
+        nickname
+      end
+    end else
+      agent_name
+  in
+
+  (* Auto-register session for non-read-only tools *)
+  if agent_name <> "unknown" && not is_read_only then
+    ignore (Session.register registry ~agent_name);
+
+  (* Log tool call *)
+  Log.Mcp.debug "[%s] %s" agent_name name;
+
+  (* Update activity for any tool call - TODO: migrate to Session_eio when ready *)
+  if agent_name <> "unknown" then begin
+    Session.update_activity registry ~agent_name ();
+    (* Also update disk-based heartbeat for zombie detection across restarts *)
+    if Room.is_initialized config then
+      ignore (Room.heartbeat config ~agent_name)
+  end;
+
+  (* Check if agent must join first *)
   let room_initialized = Room.is_initialized config in
   let is_joined =
     if room_initialized then
@@ -946,8 +1047,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "[DEBUG] tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b\n%!"
     name agent_name join_required room_initialized is_joined;
 
-  if join_required && not is_joined then
-    (false, Printf.sprintf "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b" name name agent_name is_joined)
+  if join_required && not room_initialized then
+    (false, Printf.sprintf
+      "⚠️ MASC room not initialized.\n\n💡 Workflow: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
+      name agent_name room_initialized)
+  else if join_required && not is_joined then
+    (false, Printf.sprintf
+      "❌ Join required: Call masc_join first before using %s.\n\n💡 Workflow: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
+      name name agent_name is_joined)
   else
 
   (* Safe exec for checkpoint commands - Eio-native *)

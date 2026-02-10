@@ -9,6 +9,7 @@ module Mcp = Masc_mcp.Mcp_server
 module Room = Masc_mcp.Room
 module Session = Masc_mcp.Session
 module Types = Masc_mcp.Types
+module Common = Masc_mcp.Common
 
 (* ===== Test Helpers ===== *)
 
@@ -538,6 +539,69 @@ let test_execute_tool_unknown_tool () =
 
   cleanup_dir base_path
 
+let test_execute_tool_auto_init_and_join_for_broadcast () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+  (* Simulate a stable MCP session so auto-join can persist the generated nickname. *)
+  let mcp_session_id = "testsession_auto_join" in
+  let agent_file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" mcp_session_id in
+  (try if Sys.file_exists agent_file then Unix.unlink agent_file with _ -> ());
+
+  (* Call a join-required tool without prior init/join: should auto-init + auto-join. *)
+  let (success1, msg1) = Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id state
+    ~name:"masc_broadcast"
+    ~arguments:(`Assoc [
+      ("agent_name", `String "claude-opus");
+      ("message", `String "hello");
+    ]) in
+
+  Alcotest.(check bool) "success1" true success1;
+  Alcotest.(check bool) "broadcast response" true
+    (try let _ = Str.search_forward (Str.regexp_string "📢 [") msg1 0 in true with Not_found -> false);
+
+  (* Nickname should be persisted to the MCP session file. *)
+  Alcotest.(check bool) "agent file created" true (Sys.file_exists agent_file);
+  let nickname =
+    let ic = open_in agent_file in
+    Common.protect ~module_name:"test_mcp_server_coverage" ~finally_label:"finalizer"
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> input_line ic)
+  in
+  Alcotest.(check bool) "nickname non-empty" true (nickname <> "");
+  Alcotest.(check bool) "msg1 contains nickname" true
+    (try let _ = Str.search_forward (Str.regexp_string nickname) msg1 0 in true with Not_found -> false);
+
+  (* Second call with the legacy type should reuse the persisted nickname (no re-join). *)
+  let (success2, msg2) = Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id state
+    ~name:"masc_broadcast"
+    ~arguments:(`Assoc [
+      ("agent_name", `String "claude-opus");
+      ("message", `String "second");
+    ]) in
+  Alcotest.(check bool) "success2" true success2;
+  Alcotest.(check bool) "msg2 contains nickname" true
+    (try let _ = Str.search_forward (Str.regexp_string nickname) msg2 0 in true with Not_found -> false);
+
+  (* Should have exactly one agent file in the room. *)
+  let agents_dir = Filename.concat base_path ".masc/agents" in
+  let json_files =
+    if Sys.file_exists agents_dir then
+      Sys.readdir agents_dir
+      |> Array.to_list
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+    else
+      []
+  in
+  Alcotest.(check int) "single agent file" 1 (List.length json_files);
+
+  (try if Sys.file_exists agent_file then Unix.unlink agent_file with _ -> ());
+  cleanup_dir base_path
+
 (* ===== Test Suites ===== *)
 
 
@@ -613,6 +677,7 @@ let execute_tool_tests = [
   "masc_set_room", `Quick, test_execute_tool_masc_set_room;
   "masc_set_room_not_found", `Quick, test_execute_tool_masc_set_room_not_found;
   "unknown_tool", `Quick, test_execute_tool_unknown_tool;
+  "auto_init_and_join_broadcast", `Quick, test_execute_tool_auto_init_and_join_for_broadcast;
 ]
 
 let () =

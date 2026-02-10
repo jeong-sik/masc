@@ -963,7 +963,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_lock"; "masc_unlock";
   ] in
 
-  (* Auto-init/auto-join for better UX (only when auth is disabled). *)
+  (* Auto-init/auto-join for better UX.
+     - Auto-init only when auth is disabled (avoid side effects in secured rooms).
+     - Auto-join when allowed by auth (and safe for token-based auth). *)
   let join_required = List.mem name requires_join in
 
   let init_error =
@@ -989,8 +991,26 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                          "masc_cost_report"; "masc_portal_status"] in
   let is_read_only = List.mem name read_only_tools in
 
+  let can_auto_join =
+    if (not join_required) || agent_name = "unknown" then
+      false
+    else if not auth_enabled then
+      true
+    else
+      (* If per-agent tokens are required, only auto-join when agent_name already
+         looks like a stable nickname. Otherwise Room.join would generate a new
+         nickname, breaking token verification for subsequent calls. *)
+      let auth_cfg = Auth.load_auth_config config.base_path in
+      if auth_cfg.require_token && not (Nickname.is_generated_nickname agent_name) then
+        false
+      else
+        match Auth.authorize_tool config.base_path ~agent_name ~token ~tool_name:"masc_join" with
+        | Ok () -> true
+        | Error _ -> false
+  in
+
   let agent_name =
-    if (not auth_enabled) && join_required && agent_name <> "unknown" then begin
+    if can_auto_join then begin
       let room_initialized = Room.is_initialized config in
       let is_joined =
         if room_initialized then

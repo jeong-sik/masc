@@ -136,7 +136,7 @@ let test_idempotency_cleanup () =
   Retry.record_idempotency ~key:key2;
 
   (* Increase sleep time for more tolerance (10x margin) *)
-  Unix.sleepf 0.2;
+  Time_compat.sleep 0.2;
   let removed = Retry.cleanup_idempotency ~max_age_seconds:0.1 in
 
   check bool "removed some keys" true (removed >= 2)

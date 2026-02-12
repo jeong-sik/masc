@@ -18,14 +18,14 @@ let test_session_find () =
 let test_session_touch () =
   let session = SH.Session.create ~transport:SH.Streamable_HTTP in
   let old_time = session.last_seen in
-  Unix.sleepf 0.01;
+  Time_compat.sleep 0.01;
   SH.Session.touch session;
   Alcotest.(check bool) "last_seen updated" true (session.last_seen > old_time)
 
 let test_session_cleanup () =
   (* Create a session that will expire immediately *)
   let _session = SH.Session.create ~transport:SH.Streamable_HTTP in
-  Unix.sleepf 0.01;
+  Time_compat.sleep 0.01;
   let removed = SH.Session.cleanup ~ttl_seconds:0.001 in
   Alcotest.(check bool) "at least one session cleaned" true (removed >= 1)
 

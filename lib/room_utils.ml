@@ -802,7 +802,7 @@ let with_file_lock config path f =
           match backend_acquire_lock config ~key ~ttl_seconds ~owner with
           | Ok true -> true
           | _ ->
-              Unix.sleepf 0.05;
+              Time_compat.sleep 0.05;
               acquire (attempts - 1)
       in
       if acquire 20 then
@@ -835,7 +835,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
         else
           match backend_acquire_lock config ~key ~ttl_seconds ~owner with
           | Ok true -> true
-          | _ -> Unix.sleepf 0.05; acquire (attempts - 1)
+          | _ -> Time_compat.sleep 0.05; acquire (attempts - 1)
       in
       if acquire 20 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"

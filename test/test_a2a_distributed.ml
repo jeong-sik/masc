@@ -48,7 +48,7 @@ let producer () =
     match Room_eio.broadcast config ~from_agent:"producer-agent" ~content with
     | Ok msg -> Printf.printf "[Producer] Broadcast successful, seq=%d\n%!" msg.seq
     | Error e -> Printf.printf "[Producer] Broadcast failed: %s\n%!" e;
-    Unix.sleepf 0.1
+    Time_compat.sleep 0.1
   done;
 
   (* Leave gracefully *)

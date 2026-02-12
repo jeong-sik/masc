@@ -116,7 +116,7 @@ let test_load_recent_reactions () =
         ~reaction:Lodge_reaction.Upvote
         ~confidence:0.8
         ();
-      Unix.sleepf 0.01  (* Small delay for timestamp ordering *)
+      Time_compat.sleep 0.01  (* Small delay for timestamp ordering *)
     done;
 
     let recent = Lodge_reaction.load_recent_reactions ~agent_name:"test-agent" ~limit:3 in

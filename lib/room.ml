@@ -639,47 +639,37 @@ let add_task config ~title ~priority ~description =
 (** Add multiple tasks in a batch *)
 let batch_add_tasks config tasks =
   ensure_initialized config;
-
-  let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-  mkdir_p (Filename.dirname lock_file);
-
-  let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-  (* FD leak fix: ensure fd is always closed, even if lockf fails *)
-  Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-    Unix.lockf fd Unix.F_LOCK 0;
-    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-      try
-        let backlog = read_backlog config in
-        let next_num = ref (next_task_number config backlog) in
-        let added_tasks = List.map (fun (title, priority, description) ->
-          let task_id = Printf.sprintf "task-%03d" !next_num in
-          incr next_num;
-          {
-            id = task_id;
-            title;
-            description;
-            task_status = Todo;
-            priority;
-            files = [];
-            created_at = now_iso ();
-            worktree = None;
-          }
-        ) tasks in
-
-        let new_backlog = {
-          tasks = backlog.tasks @ added_tasks;
-          last_updated = now_iso ();
-          version = backlog.version + 1;
-        } in
-        write_backlog config new_backlog;
-
-        let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
-        let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
-        let _ = broadcast config ~from_agent:"system" ~content:msg in
-        Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
-      with e ->
-        Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
-    )
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    try
+      let backlog = read_backlog config in
+      let next_num = ref (next_task_number config backlog) in
+      let added_tasks = List.map (fun (title, priority, description) ->
+        let task_id = Printf.sprintf "task-%03d" !next_num in
+        incr next_num;
+        {
+          id = task_id;
+          title;
+          description;
+          task_status = Todo;
+          priority;
+          files = [];
+          created_at = now_iso ();
+          worktree = None;
+        }
+      ) tasks in
+      let new_backlog = {
+        tasks = backlog.tasks @ added_tasks;
+        last_updated = now_iso ();
+        version = backlog.version + 1;
+      } in
+      write_backlog config new_backlog;
+      let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
+      let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
+      let _ = broadcast config ~from_agent:"system" ~content:msg in
+      Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
+    with e ->
+      Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
   )
 
 (** Claim task with file locking (TOCTOU prevention) *)
@@ -692,65 +682,50 @@ let claim_task config ~agent_name ~task_id =
   | _, Error e -> Printf.sprintf "❌ %s" e
   | Ok _, Ok _ ->
 
-  let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-  mkdir_p (Filename.dirname lock_file);
-
-  (* FD leak fix: ensure fd is always closed with Fun.protect *)
-  let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-  Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-    Unix.lockf fd Unix.F_LOCK 0;
-    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-      try
-        let backlog = read_backlog config in
-        let found = ref false in
-        let already_claimed = ref None in
-
-        let new_tasks = List.map (fun task ->
-          if task.id = task_id then begin
-            found := true;
-            match task.task_status with
-            | Todo ->
-                { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
-            | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
-                already_claimed := Some assignee;
-                task
-          end else task
-        ) backlog.tasks in
-
-        if not !found then
-          Printf.sprintf "❌ Task %s not found" task_id
-        else match !already_claimed with
-          | Some other -> Printf.sprintf "⚠ Task %s is already claimed by %s" task_id other
-          | None ->
-              let new_backlog = {
-                tasks = new_tasks;
-                last_updated = now_iso ();
-                version = backlog.version + 1;
-              } in
-              write_backlog config new_backlog;
-
-              (* Update agent status *)
-              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-              if Sys.file_exists agent_file then begin
-                let json = read_json config agent_file in
-                match agent_of_yojson json with
-                | Ok agent ->
-                    let updated = { agent with status = Busy; current_task = Some task_id } in
-                    write_json config agent_file (agent_to_yojson updated)
-                | Error _ -> ()
-              end;
-
-              let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
-
-              (* Log event *)
-              log_event config (Printf.sprintf
-                "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}"
-                agent_name task_id (now_iso ()));
-
-              Printf.sprintf "✅ %s claimed %s" agent_name task_id
-      with e ->
-        Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
-    )
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    try
+      let backlog = read_backlog config in
+      let found = ref false in
+      let already_claimed = ref None in
+      let new_tasks = List.map (fun task ->
+        if task.id = task_id then begin
+          found := true;
+          match task.task_status with
+          | Todo ->
+              { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
+          | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
+              already_claimed := Some assignee;
+              task
+        end else task
+      ) backlog.tasks in
+      if not !found then
+        Printf.sprintf "❌ Task %s not found" task_id
+      else match !already_claimed with
+        | Some other -> Printf.sprintf "⚠ Task %s is already claimed by %s" task_id other
+        | None ->
+            let new_backlog = {
+              tasks = new_tasks;
+              last_updated = now_iso ();
+              version = backlog.version + 1;
+            } in
+            write_backlog config new_backlog;
+            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+            if Sys.file_exists agent_file then begin
+              let json = read_json config agent_file in
+              match agent_of_yojson json with
+              | Ok agent ->
+                  let updated = { agent with status = Busy; current_task = Some task_id } in
+                  write_json config agent_file (agent_to_yojson updated)
+              | Error _ -> ()
+            end;
+            let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+            log_event config (Printf.sprintf
+              "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}"
+              agent_name task_id (now_iso ()));
+            Printf.sprintf "✅ %s claimed %s" agent_name task_id
+    with e ->
+      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
 (** Result-returning version of claim_task for type-safe error handling *)
@@ -760,50 +735,44 @@ let claim_task_r config ~agent_name ~task_id : string Types.masc_result =
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-    mkdir_p (Filename.dirname lock_file);
-    (* FD leak fix: ensure fd is always closed with Fun.protect *)
-    let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-    Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-      Unix.lockf fd Unix.F_LOCK 0;
-      Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-        try
-          let backlog = read_backlog config in
-          let found = ref false in
-          let already_claimed = ref None in
-          let new_tasks = List.map (fun task ->
-            if task.id = task_id then begin
-              found := true;
-              match task.task_status with
-              | Todo -> { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
-              | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
-                  already_claimed := Some assignee; task
-            end else task
-          ) backlog.tasks in
-          if not !found then Error (Types.TaskNotFound task_id)
-          else match !already_claimed with
-            | Some other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
-            | None ->
-                let new_backlog = {
-                  tasks = new_tasks;
-                  last_updated = now_iso ();
-                  version = backlog.version + 1;
-                } in
-                write_backlog config new_backlog;
-                let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-                if Sys.file_exists agent_file then begin
-                  let json = read_json config agent_file in
-                  match agent_of_yojson json with
-                  | Ok agent ->
-                      let updated = { agent with status = Busy; current_task = Some task_id } in
-                      write_json config agent_file (agent_to_yojson updated)
-                  | Error _ -> ()
-                end;
-                let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
-                log_event config (Printf.sprintf "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}" agent_name task_id (now_iso ()));
-                Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
-        with e -> Error (Types.IoError (Printexc.to_string e))
-      )
+    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    with_file_lock config backlog_path (fun () ->
+      try
+        let backlog = read_backlog config in
+        let found = ref false in
+        let already_claimed = ref None in
+        let new_tasks = List.map (fun task ->
+          if task.id = task_id then begin
+            found := true;
+            match task.task_status with
+            | Todo -> { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
+            | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
+                already_claimed := Some assignee; task
+          end else task
+        ) backlog.tasks in
+        if not !found then Error (Types.TaskNotFound task_id)
+        else match !already_claimed with
+          | Some other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
+          | None ->
+              let new_backlog = {
+                tasks = new_tasks;
+                last_updated = now_iso ();
+                version = backlog.version + 1;
+              } in
+              write_backlog config new_backlog;
+              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+              if Sys.file_exists agent_file then begin
+                let json = read_json config agent_file in
+                match agent_of_yojson json with
+                | Ok agent ->
+                    let updated = { agent with status = Busy; current_task = Some task_id } in
+                    write_json config agent_file (agent_to_yojson updated)
+                | Error _ -> ()
+              end;
+              let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+              log_event config (Printf.sprintf "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}" agent_name task_id (now_iso ()));
+              Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
+      with e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Unified task transition (single entrypoint) *)
@@ -814,108 +783,102 @@ let transition_task_r config ~agent_name ~task_id ~action
     | Error e, _ -> Error e
     | _, Error e -> Error e
     | Ok _, Ok _ ->
-        let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-        mkdir_p (Filename.dirname lock_file);
-        (* FD leak fix: ensure fd is always closed with Fun.protect *)
-        let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-        Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-          Unix.lockf fd Unix.F_LOCK 0;
-          Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-            try
-              let backlog = read_backlog config in
-              (match expected_version with
-               | Some v when backlog.version <> v ->
-                   Error (Types.TaskInvalidState
-                     (Printf.sprintf "Version mismatch (expected %d, got %d)" v backlog.version))
-               | _ ->
-                   let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-                   match task_opt with
-                   | None -> Error (Types.TaskNotFound task_id)
-                   | Some task ->
-                       let now = now_iso () in
-                       let action = String.lowercase_ascii action in
-                       let status_to_string = function
-                         | Types.Todo -> "todo"
-                         | Types.Claimed _ -> "claimed"
-                         | Types.InProgress _ -> "in_progress"
-                         | Types.Done _ -> "done"
-                         | Types.Cancelled _ -> "cancelled"
-                       in
-                       let transition =
-                         match action, task.task_status with
-                         | "claim", Types.Todo ->
-                             Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
-                         | "start", Types.Claimed { assignee; _ } when assignee = agent_name ->
-                             Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
-                         | "done", Types.Claimed { assignee; _ }
-                         | "done", Types.InProgress { assignee; _ } when assignee = agent_name ->
-                             Ok (Types.Done {
-                               assignee = agent_name;
-                               completed_at = now;
-                               notes = if notes = "" then None else Some notes;
-                             }, None)
-                         | "cancel", Types.Todo ->
-                             Ok (Types.Cancelled {
-                               cancelled_by = agent_name;
-                               cancelled_at = now;
-                               reason = if reason = "" then None else Some reason;
-                             }, None)
-                         | "cancel", Types.Claimed { assignee; _ }
-                         | "cancel", Types.InProgress { assignee; _ } when assignee = agent_name ->
-                             Ok (Types.Cancelled {
-                               cancelled_by = agent_name;
-                               cancelled_at = now;
-                               reason = if reason = "" then None else Some reason;
-                             }, None)
-                         | "release", Types.Claimed { assignee; _ }
-                         | "release", Types.InProgress { assignee; _ } when assignee = agent_name ->
-                             Ok (Types.Todo, None)
-                         | _ ->
-                             Error (Types.TaskInvalidState
-                               (Printf.sprintf "Invalid transition: %s -> %s (%s)"
-                                 (status_to_string task.task_status) action task_id))
-                       in
-                       (match transition with
-                        | Error e -> Error e
-                        | Ok (new_status, set_current) ->
-                            let new_tasks = List.map (fun t ->
-                              if t.id = task_id then { t with task_status = new_status } else t
-                            ) backlog.tasks in
-                            let new_backlog = {
-                              tasks = new_tasks;
-                              last_updated = now_iso ();
-                              version = backlog.version + 1;
-                            } in
-                            write_backlog config new_backlog;
-                            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-                            if Sys.file_exists agent_file then begin
-                              let json = read_json config agent_file in
-                              match agent_of_yojson json with
-                              | Ok agent ->
-                                  let updated =
-                                    match set_current with
-                                    | Some _ -> { agent with status = Busy; current_task = Some task_id }
-                                    | None ->
-                                        if agent.current_task = Some task_id then
-                                          { agent with status = Active; current_task = None }
-                                        else
-                                          agent
-                                  in
-                                  write_json config agent_file (agent_to_yojson updated)
-                              | Error _ -> ()
-                            end;
-                            log_event config (Printf.sprintf
-                              "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
-                              agent_name task_id action
-                              (status_to_string task.task_status)
-                              (status_to_string new_status)
-                              now);
-                            Ok (Printf.sprintf "✅ %s %s → %s" task_id
-                                  (status_to_string task.task_status)
-                                  (status_to_string new_status))
-                       ))
-            with e -> Error (Types.IoError (Printexc.to_string e))
-          )
+        let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+        with_file_lock config backlog_path (fun () ->
+          try
+            let backlog = read_backlog config in
+            (match expected_version with
+             | Some v when backlog.version <> v ->
+                 Error (Types.TaskInvalidState
+                   (Printf.sprintf "Version mismatch (expected %d, got %d)" v backlog.version))
+             | _ ->
+                 let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+                 match task_opt with
+                 | None -> Error (Types.TaskNotFound task_id)
+                 | Some task ->
+                     let now = now_iso () in
+                     let action = String.lowercase_ascii action in
+                     let status_to_string = function
+                       | Types.Todo -> "todo"
+                       | Types.Claimed _ -> "claimed"
+                       | Types.InProgress _ -> "in_progress"
+                       | Types.Done _ -> "done"
+                       | Types.Cancelled _ -> "cancelled"
+                     in
+                     let transition =
+                       match action, task.task_status with
+                       | "claim", Types.Todo ->
+                           Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
+                       | "start", Types.Claimed { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
+                       | "done", Types.Claimed { assignee; _ }
+                       | "done", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.Done {
+                             assignee = agent_name;
+                             completed_at = now;
+                             notes = if notes = "" then None else Some notes;
+                           }, None)
+                       | "cancel", Types.Todo ->
+                           Ok (Types.Cancelled {
+                             cancelled_by = agent_name;
+                             cancelled_at = now;
+                             reason = if reason = "" then None else Some reason;
+                           }, None)
+                       | "cancel", Types.Claimed { assignee; _ }
+                       | "cancel", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.Cancelled {
+                             cancelled_by = agent_name;
+                             cancelled_at = now;
+                             reason = if reason = "" then None else Some reason;
+                           }, None)
+                       | "release", Types.Claimed { assignee; _ }
+                       | "release", Types.InProgress { assignee; _ } when assignee = agent_name ->
+                           Ok (Types.Todo, None)
+                       | _ ->
+                           Error (Types.TaskInvalidState
+                             (Printf.sprintf "Invalid transition: %s -> %s (%s)"
+                               (status_to_string task.task_status) action task_id))
+                     in
+                     (match transition with
+                      | Error e -> Error e
+                      | Ok (new_status, set_current) ->
+                          let new_tasks = List.map (fun t ->
+                            if t.id = task_id then { t with task_status = new_status } else t
+                          ) backlog.tasks in
+                          let new_backlog = {
+                            tasks = new_tasks;
+                            last_updated = now_iso ();
+                            version = backlog.version + 1;
+                          } in
+                          write_backlog config new_backlog;
+                          let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+                          if Sys.file_exists agent_file then begin
+                            let json = read_json config agent_file in
+                            match agent_of_yojson json with
+                            | Ok agent ->
+                                let updated =
+                                  match set_current with
+                                  | Some _ -> { agent with status = Busy; current_task = Some task_id }
+                                  | None ->
+                                      if agent.current_task = Some task_id then
+                                        { agent with status = Active; current_task = None }
+                                      else
+                                        agent
+                                in
+                                write_json config agent_file (agent_to_yojson updated)
+                            | Error _ -> ()
+                          end;
+                          log_event config (Printf.sprintf
+                            "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
+                            agent_name task_id action
+                            (status_to_string task.task_status)
+                            (status_to_string new_status)
+                            now);
+                          Ok (Printf.sprintf "✅ %s %s → %s" task_id
+                                (status_to_string task.task_status)
+                                (status_to_string new_status))
+                     ))
+          with e -> Error (Types.IoError (Printexc.to_string e))
         )
 
 (** Release task back to backlog - transition wrapper *)
@@ -925,168 +888,135 @@ let release_task_r config ~agent_name ~task_id ?expected_version () : string Typ
 (** Complete task with file locking *)
 let complete_task config ~agent_name ~task_id ~notes =
   ensure_initialized config;
-
-  let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-  mkdir_p (Filename.dirname lock_file);
-
-  (* FD leak fix: ensure fd is always closed with Fun.protect *)
-  let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-  Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-    Unix.lockf fd Unix.F_LOCK 0;
-    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-      try
-        let backlog = read_backlog config in
-
-        (* Find the task and check ownership *)
-        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-
-        match task_opt with
-        | None ->
-            Printf.sprintf "❌ Task %s not found" task_id
-        | Some task ->
-            (* Verify the task is claimed/in-progress by this agent *)
-            let can_complete = match task.task_status with
-              | Claimed { assignee; _ } -> assignee = agent_name
-              | InProgress { assignee; _ } -> assignee = agent_name
-              | Todo -> false  (* Cannot complete unclaimed task *)
-              | Done _ | Cancelled _ -> false  (* Already done or cancelled *)
-            in
-
-            if not can_complete then
-              Printf.sprintf "⚠ Task %s is not claimed by %s. Claim it first!" task_id agent_name
-            else begin
-              let new_tasks = List.map (fun t ->
-                if t.id = task_id then
-                  { t with task_status = Done {
-                      assignee = agent_name;
-                      completed_at = now_iso ();
-                      notes = if notes = "" then None else Some notes
-                    }
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    try
+      let backlog = read_backlog config in
+      let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+      match task_opt with
+      | None ->
+          Printf.sprintf "❌ Task %s not found" task_id
+      | Some task ->
+          let can_complete = match task.task_status with
+            | Claimed { assignee; _ } | InProgress { assignee; _ } -> assignee = agent_name
+            | Todo | Done _ | Cancelled _ -> false
+          in
+          if not can_complete then
+            Printf.sprintf "⚠ Task %s is not claimed by %s. Claim it first!" task_id agent_name
+          else begin
+            let new_tasks = List.map (fun t ->
+              if t.id = task_id then
+                { t with task_status = Done {
+                    assignee = agent_name;
+                    completed_at = now_iso ();
+                    notes = if notes = "" then None else Some notes
                   }
-                else t
-              ) backlog.tasks in
-
-              let new_backlog = {
-                tasks = new_tasks;
-                last_updated = now_iso ();
-                version = backlog.version + 1;
-              } in
-              write_backlog config new_backlog;
-
-              (* Update agent status *)
-              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-              if Sys.file_exists agent_file then begin
-                let json = read_json config agent_file in
-                match agent_of_yojson json with
-                | Ok agent ->
-                    let updated = { agent with status = Active; current_task = None } in
-                    write_json config agent_file (agent_to_yojson updated)
-                | Error _ -> ()
-              end;
-
-              let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
-                        else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-              let _ = broadcast config ~from_agent:agent_name ~content:msg in
-
-              (* Log event *)
-              log_event config (Printf.sprintf
-                "{\"type\":\"task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"notes\":%s,\"ts\":\"%s\"}"
-                agent_name task_id
-                (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes)
-                (now_iso ()));
-
-              Printf.sprintf "✅ %s completed %s" agent_name task_id
-            end
-      with e ->
-        Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
-    )
+                }
+              else t
+            ) backlog.tasks in
+            let new_backlog = {
+              tasks = new_tasks;
+              last_updated = now_iso ();
+              version = backlog.version + 1;
+            } in
+            write_backlog config new_backlog;
+            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+            if Sys.file_exists agent_file then begin
+              let json = read_json config agent_file in
+              match agent_of_yojson json with
+              | Ok agent ->
+                  let updated = { agent with status = Active; current_task = None } in
+                  write_json config agent_file (agent_to_yojson updated)
+              | Error _ -> ()
+            end;
+            let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
+                      else Printf.sprintf "✅ Completed %s - %s" task_id notes in
+            let _ = broadcast config ~from_agent:agent_name ~content:msg in
+            log_event config (Printf.sprintf
+              "{\"type\":\"task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"notes\":%s,\"ts\":\"%s\"}"
+              agent_name task_id
+              (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes)
+              (now_iso ()));
+            Printf.sprintf "✅ %s completed %s" agent_name task_id
+          end
+    with e ->
+      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
 (** Result-returning version of complete_task for type-safe error handling *)
 let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else
-    let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-    mkdir_p (Filename.dirname lock_file);
-    (* FD leak fix: ensure fd is always closed with Fun.protect *)
-    let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-    Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-      Unix.lockf fd Unix.F_LOCK 0;
-      Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-        try
-          let backlog = read_backlog config in
-          let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-          match task_opt with
-          | None -> Error (Types.TaskNotFound task_id)
-          | Some task ->
-              let can_complete = match task.task_status with
-                | Claimed { assignee; _ } | InProgress { assignee; _ } -> assignee = agent_name
-                | Todo | Done _ | Cancelled _ -> false
-              in
-              if not can_complete then Error (Types.TaskNotClaimed task_id)
-              else begin
-                let new_tasks = List.map (fun t ->
-                  if t.id = task_id then
-                    { t with task_status = Done { assignee = agent_name; completed_at = now_iso (); notes = if notes = "" then None else Some notes } }
-                  else t
-                ) backlog.tasks in
-                let new_backlog = {
-                  tasks = new_tasks;
-                  last_updated = now_iso ();
-                  version = backlog.version + 1;
-                } in
-                write_backlog config new_backlog;
-                let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-                if Sys.file_exists agent_file then begin
-                  let json = read_json config agent_file in
-                  match agent_of_yojson json with
-                  | Ok agent -> let updated = { agent with status = Active; current_task = None } in write_json config agent_file (agent_to_yojson updated)
-                  | Error _ -> ()
-                end;
-                let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-                let _ = broadcast config ~from_agent:agent_name ~content:msg in
-                log_event config (Printf.sprintf "{\"type\":\"task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"notes\":%s,\"ts\":\"%s\"}" agent_name task_id (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes) (now_iso ()));
-                Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
-              end
-        with e -> Error (Types.IoError (Printexc.to_string e))
-      )
+    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    with_file_lock config backlog_path (fun () ->
+      try
+        let backlog = read_backlog config in
+        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+        match task_opt with
+        | None -> Error (Types.TaskNotFound task_id)
+        | Some task ->
+            let can_complete = match task.task_status with
+              | Claimed { assignee; _ } | InProgress { assignee; _ } -> assignee = agent_name
+              | Todo | Done _ | Cancelled _ -> false
+            in
+            if not can_complete then Error (Types.TaskNotClaimed task_id)
+            else begin
+              let new_tasks = List.map (fun t ->
+                if t.id = task_id then
+                  { t with task_status = Done { assignee = agent_name; completed_at = now_iso (); notes = if notes = "" then None else Some notes } }
+                else t
+              ) backlog.tasks in
+              let new_backlog = {
+                tasks = new_tasks;
+                last_updated = now_iso ();
+                version = backlog.version + 1;
+              } in
+              write_backlog config new_backlog;
+              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+              if Sys.file_exists agent_file then begin
+                let json = read_json config agent_file in
+                match agent_of_yojson json with
+                | Ok agent -> let updated = { agent with status = Active; current_task = None } in write_json config agent_file (agent_to_yojson updated)
+                | Error _ -> ()
+              end;
+              let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
+              let _ = broadcast config ~from_agent:agent_name ~content:msg in
+              log_event config (Printf.sprintf "{\"type\":\"task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"notes\":%s,\"ts\":\"%s\"}" agent_name task_id (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes) (now_iso ()));
+              Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
+            end
+      with e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Cancel a task - A2A compatible *)
 let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else
-    let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-    mkdir_p (Filename.dirname lock_file);
-    (* FD leak fix: ensure fd is always closed with Fun.protect *)
-    let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-    Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-      Unix.lockf fd Unix.F_LOCK 0;
-      Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-        try
-          let backlog = read_backlog config in
-          let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-          match task_opt with
-          | None -> Error (Types.TaskNotFound task_id)
-          | Some task ->
-              (* Can cancel if: Todo, Claimed by me, or InProgress by me *)
-              let can_cancel = match task.task_status with
-                | Types.Todo -> true
-                | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } -> assignee = agent_name
-                | Types.Done _ | Types.Cancelled _ -> false
-              in
-              if not can_cancel then
-                Error (Types.TaskInvalidState (Printf.sprintf "Cannot cancel task %s (already done/cancelled or owned by another agent)" task_id))
-              else begin
-                let new_tasks = List.map (fun t ->
-                  if t.id = task_id then
-                    { t with task_status = Types.Cancelled {
-                      cancelled_by = agent_name;
-                      cancelled_at = now_iso ();
-                      reason = if reason = "" then None else Some reason
-                    }}
-                  else t
-                ) backlog.tasks in
+    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    with_file_lock config backlog_path (fun () ->
+      try
+        let backlog = read_backlog config in
+        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+        match task_opt with
+        | None -> Error (Types.TaskNotFound task_id)
+        | Some task ->
+            (* Can cancel if: Todo, Claimed by me, or InProgress by me *)
+            let can_cancel = match task.task_status with
+              | Types.Todo -> true
+              | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } -> assignee = agent_name
+              | Types.Done _ | Types.Cancelled _ -> false
+            in
+            if not can_cancel then
+              Error (Types.TaskInvalidState (Printf.sprintf "Cannot cancel task %s (already done/cancelled or owned by another agent)" task_id))
+            else begin
+              let new_tasks = List.map (fun t ->
+                if t.id = task_id then
+                  { t with task_status = Types.Cancelled {
+                    cancelled_by = agent_name;
+                    cancelled_at = now_iso ();
+                    reason = if reason = "" then None else Some reason
+                  }}
+                else t
+              ) backlog.tasks in
               let new_backlog = {
                 tasks = new_tasks;
                 last_updated = now_iso ();
@@ -1103,112 +1033,104 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                     write_json config agent_file (agent_to_yojson updated)
                 | _ -> ()
               end;
-                let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
-                let _ = broadcast config ~from_agent:agent_name ~content:msg in
-                log_event config (Printf.sprintf "{\"type\":\"task_cancelled\",\"agent\":\"%s\",\"task\":\"%s\",\"reason\":%s,\"ts\":\"%s\"}"
-                  agent_name task_id (if reason = "" then "null" else Printf.sprintf "\"%s\"" reason) (now_iso ()));
-                Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
-              end
-        with e -> Error (Types.IoError (Printexc.to_string e))
-      )
+              let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
+              let _ = broadcast config ~from_agent:agent_name ~content:msg in
+              log_event config (Printf.sprintf "{\"type\":\"task_cancelled\",\"agent\":\"%s\",\"task\":\"%s\",\"reason\":%s,\"ts\":\"%s\"}"
+                agent_name task_id (if reason = "" then "null" else Printf.sprintf "\"%s\"" reason) (now_iso ()));
+              Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
+            end
+      with e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Claim next highest priority unclaimed task *)
 let claim_next config ~agent_name =
   ensure_initialized config;
 
-  let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-  mkdir_p (Filename.dirname lock_file);
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    try
+      let backlog = read_backlog config in
 
-  (* FD leak fix: ensure fd is always closed with Fun.protect *)
-  let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-  Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-    Unix.lockf fd Unix.F_LOCK 0;
-    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-      try
-        let backlog = read_backlog config in
-
-        (* Starvation prevention: Calculate effective priority
-           Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
-        let now = Time_compat.now () in
-        let parse_time iso =
-          try
-            (* Parse ISO 8601: 2026-01-05T12:30:00Z *)
-            Scanf.sscanf iso "%d-%d-%dT%d:%d:%d"
-              (fun y mo d h mi _ ->
-                let tm = { Unix.tm_sec = 0; tm_min = mi; tm_hour = h;
-                           tm_mday = d; tm_mon = mo - 1; tm_year = y - 1900;
-                           tm_wday = 0; tm_yday = 0; tm_isdst = false } in
-                Some (fst (Unix.mktime tm)))
-          with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+      (* Starvation prevention: Calculate effective priority
+         Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
+      let now = Time_compat.now () in
+      let parse_time iso =
+        try
+          (* Parse ISO 8601: 2026-01-05T12:30:00Z *)
+          Scanf.sscanf iso "%d-%d-%dT%d:%d:%d"
+            (fun y mo d h mi _ ->
+              let tm = { Unix.tm_sec = 0; tm_min = mi; tm_hour = h;
+                         tm_mday = d; tm_mon = mo - 1; tm_year = y - 1900;
+                         tm_wday = 0; tm_yday = 0; tm_isdst = false } in
+              Some (fst (Unix.mktime tm)))
+        with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+      in
+      let effective_priority (task : Types.task) =
+        let age_hours =
+          match parse_time task.created_at with
+          | Some created -> (now -. created) /. 3600.0
+          | None -> 0.0
         in
-        let effective_priority (task : Types.task) =
-          let age_hours =
-            match parse_time task.created_at with
-            | Some created -> (now -. created) /. 3600.0
-            | None -> 0.0
-          in
-          let boost = int_of_float (age_hours /. 24.0) in
-          max 1 (task.priority - boost)
-        in
+        let boost = int_of_float (age_hours /. 24.0) in
+        max 1 (task.priority - boost)
+      in
 
-        (* Find highest priority (lowest number) unclaimed task
-           Within same priority, prefer older tasks (FIFO) *)
-        let sorted = List.sort (fun a b ->
-          let priority_cmp = compare (effective_priority a) (effective_priority b) in
-          if priority_cmp <> 0 then priority_cmp
-          else compare a.created_at b.created_at  (* Older first for same priority *)
-        ) backlog.tasks in
-        let unclaimed = List.filter (fun t ->
-          match t.task_status with
-          | Todo -> true
-          | _ -> false
-        ) sorted in
+      (* Find highest priority (lowest number) unclaimed task
+         Within same priority, prefer older tasks (FIFO) *)
+      let sorted = List.sort (fun a b ->
+        let priority_cmp = compare (effective_priority a) (effective_priority b) in
+        if priority_cmp <> 0 then priority_cmp
+        else compare a.created_at b.created_at  (* Older first for same priority *)
+      ) backlog.tasks in
+      let unclaimed = List.filter (fun t ->
+        match t.task_status with
+        | Todo -> true
+        | _ -> false
+      ) sorted in
 
-        match unclaimed with
-        | [] ->
-            "📋 No unclaimed tasks available"
-        | task :: _ ->
-            (* Claim this task *)
-            let new_tasks = List.map (fun t ->
-              if t.id = task.id then
-                { t with task_status = Claimed {
-                    assignee = agent_name;
-                    claimed_at = now_iso ()
-                  }
+      match unclaimed with
+      | [] ->
+          "📋 No unclaimed tasks available"
+      | task :: _ ->
+          (* Claim this task *)
+          let new_tasks = List.map (fun t ->
+            if t.id = task.id then
+              { t with task_status = Claimed {
+                  assignee = agent_name;
+                  claimed_at = now_iso ()
                 }
-              else t
-            ) backlog.tasks in
+              }
+            else t
+          ) backlog.tasks in
 
-            let new_backlog = {
-              tasks = new_tasks;
-              last_updated = now_iso ();
-              version = backlog.version + 1;
-            } in
-            write_backlog config new_backlog;
+          let new_backlog = {
+            tasks = new_tasks;
+            last_updated = now_iso ();
+            version = backlog.version + 1;
+          } in
+          write_backlog config new_backlog;
 
-            (* Update agent status *)
-            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if Sys.file_exists agent_file then begin
-              let json = read_json config agent_file in
-              match agent_of_yojson json with
-              | Ok agent ->
-                  let updated = { agent with status = Busy; current_task = Some task.id } in
-                  write_json config agent_file (agent_to_yojson updated)
-              | Error _ -> ()
-            end;
+          (* Update agent status *)
+          let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+          if Sys.file_exists agent_file then begin
+            let json = read_json config agent_file in
+            match agent_of_yojson json with
+            | Ok agent ->
+                let updated = { agent with status = Busy; current_task = Some task.id } in
+                write_json config agent_file (agent_to_yojson updated)
+            | Error _ -> ()
+          end;
 
-            let _ = broadcast config ~from_agent:agent_name
-              ~content:(Printf.sprintf "📋 Auto-claimed [P%d] %s: %s" task.priority task.id task.title) in
+          let _ = broadcast config ~from_agent:agent_name
+            ~content:(Printf.sprintf "📋 Auto-claimed [P%d] %s: %s" task.priority task.id task.title) in
 
-            log_event config (Printf.sprintf
-              "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
-              agent_name task.id task.priority (now_iso ()));
+          log_event config (Printf.sprintf
+            "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
+            agent_name task.id task.priority (now_iso ()));
 
-            Printf.sprintf "✅ %s auto-claimed [P%d] %s: %s" agent_name task.priority task.id task.title
-      with e ->
-        Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
-    )
+          Printf.sprintf "✅ %s auto-claimed [P%d] %s: %s" agent_name task.priority task.id task.title
+    with e ->
+      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
 (* ======== Walph Control System ======== *)
@@ -1497,44 +1419,37 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
 let update_priority config ~task_id ~priority =
   ensure_initialized config;
 
-  let lock_file = Filename.concat (tasks_dir config) ".backlog.lock" in
-  mkdir_p (Filename.dirname lock_file);
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    try
+      let backlog = read_backlog config in
 
-  (* FD leak fix: ensure fd is always closed with Fun.protect *)
-  let fd = Unix.openfile lock_file [Unix.O_CREAT; Unix.O_RDWR] 0o644 in
-  Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ()) (fun () ->
-    Unix.lockf fd Unix.F_LOCK 0;
-    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ()) (fun () ->
-      try
-        let backlog = read_backlog config in
+      let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
 
-        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+      match task_opt with
+      | None ->
+          Printf.sprintf "❌ Task %s not found" task_id
+      | Some task ->
+          let old_priority = task.priority in
+          let new_tasks = List.map (fun t ->
+            if t.id = task_id then { t with priority }
+            else t
+          ) backlog.tasks in
 
-        match task_opt with
-        | None ->
-            Printf.sprintf "❌ Task %s not found" task_id
-        | Some task ->
-            let old_priority = task.priority in
-            let new_tasks = List.map (fun t ->
-              if t.id = task_id then { t with priority }
-              else t
-            ) backlog.tasks in
+          let new_backlog = {
+            tasks = new_tasks;
+            last_updated = now_iso ();
+            version = backlog.version + 1;
+          } in
+          write_backlog config new_backlog;
 
-            let new_backlog = {
-              tasks = new_tasks;
-              last_updated = now_iso ();
-              version = backlog.version + 1;
-            } in
-            write_backlog config new_backlog;
+          log_event config (Printf.sprintf
+            "{\"type\":\"priority_change\",\"task\":\"%s\",\"old\":%d,\"new\":%d,\"ts\":\"%s\"}"
+            task_id old_priority priority (now_iso ()));
 
-            log_event config (Printf.sprintf
-              "{\"type\":\"priority_change\",\"task\":\"%s\",\"old\":%d,\"new\":%d,\"ts\":\"%s\"}"
-              task_id old_priority priority (now_iso ()));
-
-            Printf.sprintf "✅ Task %s priority: P%d → P%d" task_id old_priority priority
-      with e ->
-        Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
-    )
+          Printf.sprintf "✅ Task %s priority: P%d → P%d" task_id old_priority priority
+    with e ->
+      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
 (** Get raw task list (for orchestrator) *)

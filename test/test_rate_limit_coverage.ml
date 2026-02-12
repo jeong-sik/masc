@@ -98,7 +98,7 @@ let test_cleanup_removes_old () =
   let limiter = Rate_limit.create () in
   let _ = Rate_limit.check limiter ~key:"old" in
   (* Ensure entry is older than the cleanup threshold. *)
-  Unix.sleepf 0.01;
+  Time_compat.sleep 0.01;
   let removed = Rate_limit.cleanup limiter ~older_than_seconds:0 in
   check int "removes immediately when threshold=0" 1 removed
 

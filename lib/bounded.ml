@@ -277,10 +277,7 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
   else
     let state = create_state constraints in
     let history = ref [] in
-    let sleep_s secs =
-      try Eio.Time.sleep (Process_eio.get_clock ()) secs
-      with Failure _ -> Unix.sleepf secs
-    in
+    let sleep_s = Time_compat.sleep in
 
     let rec loop () =
       (* 1. Hard limit check (failsafe) *)

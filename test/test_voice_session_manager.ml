@@ -150,7 +150,7 @@ let test_heartbeat () =
     let m = create ~config_path:dir in
     let s1 = start_session m ~agent_id:"claude" () in
     let old_activity = s1.last_activity in
-    Unix.sleepf 0.01;
+    Time_compat.sleep 0.01;
     heartbeat m ~agent_id:"claude";
     let s2 = get_session m ~agent_id:"claude" in
     match s2 with

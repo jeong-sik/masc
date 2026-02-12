@@ -359,7 +359,7 @@ let run ~config ~state =
       state.running <- false
     else
       (* Brief pause between turns to avoid hammering the LLM *)
-      Unix.sleepf 0.5
+      Time_compat.sleep 0.5
   done;
   eprintf "[perpetual] Loop ended: turns=%d, tokens=%d, cost=$%.4f\n%!"
     state.turn_count state.total_tokens state.total_cost

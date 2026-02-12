@@ -104,7 +104,7 @@ let test_session_heartbeat_activity () =
   let session = Voice_session_manager.start_session manager ~agent_id:"claude" () in
   let initial_activity = session.Voice_session_manager.last_activity in
 
-  Unix.sleepf 0.01;
+  Time_compat.sleep 0.01;
   Voice_session_manager.heartbeat manager ~agent_id:"claude";
 
   match Voice_session_manager.get_session manager ~agent_id:"claude" with

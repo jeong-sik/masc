@@ -47,7 +47,7 @@ let test_client_mutable_agent_filter () =
 let test_client_mutable_last_activity () =
   let client = test_client () in
   let initial = client.last_activity in
-  Unix.sleepf 0.01;
+  Time_compat.sleep 0.01;
   client.last_activity <- Unix.gettimeofday ();
   check bool "updated" true (client.last_activity > initial)
 

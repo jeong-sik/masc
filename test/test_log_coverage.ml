@@ -138,7 +138,7 @@ let test_timestamp_format () =
 
 let test_timestamp_changes () =
   let ts1 = Log.timestamp () in
-  Unix.sleepf 0.01;
+  Time_compat.sleep 0.01;
   let ts2 = Log.timestamp () in
   (* At minimum they should be valid timestamps *)
   check bool "ts1 valid" true (String.length ts1 = 19);

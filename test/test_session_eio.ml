@@ -26,7 +26,7 @@ let test_update_activity () =
   let session = register registry ~agent_name:"claude" in
   let initial_time = session.last_activity in
   (* Increase sleep time for more tolerance on slow systems *)
-  Unix.sleepf 0.2;
+  Time_compat.sleep 0.2;
   update_activity registry ~agent_name:"claude" ();
   Alcotest.(check bool) "activity updated" true (session.last_activity > initial_time)
 

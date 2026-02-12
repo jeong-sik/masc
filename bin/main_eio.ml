@@ -2337,7 +2337,7 @@ let run_cmd port base_path =
         let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
         Printf.eprintf "⚠️  Port %d in use, retrying in %.0fs (attempt %d/%d)...\n%!"
           port delay (attempt + 1) max_bind_retries;
-        Unix.sleepf delay;
+        Time_compat.sleep delay;
         try_start (attempt + 1)
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
         Printf.eprintf "❌ [MASC FATAL] Port %d is still in use after %d retries.\n%!"

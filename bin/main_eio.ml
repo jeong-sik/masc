@@ -128,11 +128,29 @@ let get_session_id_query target =
           | _ -> None)
   | _ -> None
 
+let get_cookie_value (request : Httpun.Request.t) cookie_name =
+  match Httpun.Headers.get request.headers "cookie" with
+  | None -> None
+  | Some raw ->
+      raw
+      |> String.split_on_char ';'
+      |> List.find_map (fun part ->
+           match String.split_on_char '=' (String.trim part) with
+           | key :: value_parts
+             when String.lowercase_ascii (String.trim key)
+                  = String.lowercase_ascii cookie_name ->
+               let value = String.concat "=" value_parts |> String.trim in
+               if value = "" then None else Some value
+           | _ -> None)
+
 (** Get session_id from either query param or header *)
 let get_session_id_any (request : Httpun.Request.t) =
   match get_session_id_query request.target with
   | Some _ as id -> id
-  | None -> Httpun.Headers.get request.headers "mcp-session-id"
+  | None ->
+      (match Httpun.Headers.get request.headers "mcp-session-id" with
+       | Some _ as id -> id
+       | None -> get_cookie_value request "mcp-session-id")
 
 (** Build legacy SSE messages endpoint URL (event: endpoint) *)
 let legacy_messages_endpoint_url (request : Httpun.Request.t) session_id =
@@ -664,9 +682,16 @@ let mcp_headers session_id protocol_version = [
   ("mcp-protocol-version", protocol_version);
 ]
 
+let session_cookie_header session_id =
+  ("set-cookie",
+   Printf.sprintf "mcp-session-id=%s; Path=/; Max-Age=86400; SameSite=Lax" session_id)
+
 (** SSE response headers *)
 let sse_headers session_id protocol_version origin =
-  [("content-type", Http_negotiation.sse_content_type)]
+  [
+    ("content-type", Http_negotiation.sse_content_type);
+    session_cookie_header session_id;
+  ]
   @ mcp_headers session_id protocol_version
   @ cors_headers origin
 
@@ -676,6 +701,7 @@ let sse_stream_headers session_id protocol_version origin =
     ("content-type", Http_negotiation.sse_content_type);
     ("cache-control", "no-cache");
     ("connection", "keep-alive");
+    session_cookie_header session_id;
   ]
   @ mcp_headers session_id protocol_version
   @ cors_headers origin
@@ -1160,6 +1186,7 @@ let send_raw info data =
         Httpun.Body.Writer.write_string info.writer data;
         Httpun.Body.Writer.flush info.writer (fun _ -> ())
       );
+      Sse.touch info.session_id;
       true
     with _exn ->
       (* Expected during client disconnect - silent close *)

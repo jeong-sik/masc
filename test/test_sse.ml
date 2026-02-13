@@ -21,9 +21,27 @@ let test_unregister_if_current () =
   check bool "unregistered" false (exists session_id);
   ()
 
+let test_cleanup_stale_respects_touch () =
+  let open Masc_mcp.Sse in
+  let stale_sid = "stale_session_" ^ string_of_int (Random.int 1000000) in
+  let alive_sid = "alive_session_" ^ string_of_int (Random.int 1000000) in
+  let noop _ = () in
+  let (_id1, _) = register stale_sid ~push:noop ~last_event_id:0 in
+  let (_id2, _) = register alive_sid ~push:noop ~last_event_id:0 in
+
+  Unix.sleepf 0.05;
+  touch alive_sid;
+
+  let evicted = cleanup_stale ~max_age_s:0.02 () in
+  check bool "stale evicted" true (List.mem stale_sid evicted);
+  check bool "stale removed" false (exists stale_sid);
+  check bool "touched connection survives" true (exists alive_sid);
+
+  unregister alive_sid
+
 let () =
   run "sse"
     [
       ("unregister_if_current", [test_case "guards reconnect" `Quick test_unregister_if_current]);
+      ("cleanup_stale", [test_case "uses idle time" `Quick test_cleanup_stale_respects_touch]);
     ]
-

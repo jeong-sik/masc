@@ -54,6 +54,17 @@ type loop_state = {
   mutable total_cost : float;
   mutable total_tokens : int;
   mutable last_heartbeat : float;
+  mutable started_at : float;
+  mutable last_turn_ts : float;
+  mutable last_model_used : string;
+  mutable last_usage : Llm_client.token_usage;
+  mutable last_latency_ms : int;
+  mutable compaction_count : int;
+  mutable compaction_tokens_saved : int;
+  mutable last_compaction_ts : float;
+  mutable last_compaction_before_tokens : int;
+  mutable last_compaction_after_tokens : int;
+  mutable events : (float * event) list;
   mutable running : bool;
   trace_id : string;
 }

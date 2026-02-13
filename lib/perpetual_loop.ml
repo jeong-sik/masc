@@ -59,6 +59,17 @@ type loop_state = {
   mutable total_cost : float;
   mutable total_tokens : int;
   mutable last_heartbeat : float;
+  mutable started_at : float;
+  mutable last_turn_ts : float;
+  mutable last_model_used : string;
+  mutable last_usage : Llm_client.token_usage;
+  mutable last_latency_ms : int;
+  mutable compaction_count : int;
+  mutable compaction_tokens_saved : int;
+  mutable last_compaction_ts : float;
+  mutable last_compaction_before_tokens : int;
+  mutable last_compaction_after_tokens : int;
+  mutable events : (float * event) list;
   mutable running : bool;
   trace_id : string;
 }
@@ -123,6 +134,10 @@ let create_state config =
   let session = Context_manager.create_session
     ~session_id:trace_id
     ~base_dir:config.session_base_dir in
+  let zero_usage : Llm_client.token_usage = {
+    input_tokens = 0; output_tokens = 0; total_tokens = 0;
+  } in
+  let now_ts = Time_compat.now () in
   {
     context;
     session;
@@ -131,10 +146,33 @@ let create_state config =
     idle_turns = 0;
     total_cost = 0.0;
     total_tokens = 0;
-    last_heartbeat = Time_compat.now ();
+    last_heartbeat = now_ts;
+    started_at = now_ts;
+    last_turn_ts = 0.0;
+    last_model_used = "";
+    last_usage = zero_usage;
+    last_latency_ms = 0;
+    compaction_count = 0;
+    compaction_tokens_saved = 0;
+    last_compaction_ts = 0.0;
+    last_compaction_before_tokens = 0;
+    last_compaction_after_tokens = 0;
+    events = [];
     running = true;
     trace_id;
   }
+
+let record_event (state : loop_state) (ev : event) =
+  let ts = Time_compat.now () in
+  state.events <- (ts, ev) :: state.events;
+  (* Keep only the most recent ~200 events to bound memory. *)
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  if List.length state.events > 200 then
+    state.events <- take 200 state.events
 
 (* ================================================================ *)
 (* LLM Call with Cascade                                            *)
@@ -191,7 +229,11 @@ let run_turn ~config ~state =
   else begin
     state.turn_count <- state.turn_count + 1;
     let turn = state.turn_count in
-    config.on_event (TurnStart turn);
+    let emit ev =
+      record_event state ev;
+      config.on_event ev
+    in
+    emit (TurnStart turn);
 
     (* 1. THINK + ACT: Call LLM *)
     let requests = build_requests config state in
@@ -199,21 +241,42 @@ let run_turn ~config ~state =
 
     match result with
     | Error e ->
-      config.on_event (Error (sprintf "Turn %d: LLM call failed: %s" turn e));
+      emit (Error (sprintf "Turn %d: LLM call failed: %s" turn e));
       state.idle_turns <- state.idle_turns + 1;
       (* Check idle threshold *)
       if state.idle_turns >= config.max_idle_turns then begin
-        config.on_event (IdleDetected state.idle_turns);
-        config.on_event (Terminated "Max idle turns reached");
+        emit (IdleDetected state.idle_turns);
+        emit (Terminated "Max idle turns reached");
         state.running <- false;
         false
       end else
         true  (* Continue despite error *)
 
     | Ok resp ->
+      let now_ts = Time_compat.now () in
+      state.last_turn_ts <- now_ts;
+      state.last_model_used <- resp.model_used;
+      state.last_usage <- resp.usage;
+      state.last_latency_ms <- resp.latency_ms;
+
       (* 2. OBSERVE: Update state from response *)
-      let cost = calculate_cost resp.usage
-        (List.hd config.model_cascade) in
+      let primary_model =
+        match config.model_cascade with
+        | m :: _ -> m
+        | [] -> Llm_client.ollama_glm
+      in
+      let used_model =
+        let used =
+          match String.split_on_char ':' resp.model_used with
+          | [base; "latest"] -> base
+          | _ -> resp.model_used
+        in
+        List.find_opt (fun (m : Llm_client.model_spec) ->
+          m.model_id = resp.model_used || m.model_id = used
+        ) config.model_cascade
+        |> Option.value ~default:primary_model
+      in
+      let cost = calculate_cost resp.usage used_model in
       state.total_cost <- state.total_cost +. cost;
       state.total_tokens <- state.total_tokens + resp.usage.total_tokens;
 
@@ -243,7 +306,7 @@ let run_turn ~config ~state =
           context_summary = sprintf "Turn %d, generation %d" turn state.generation;
         } in
         let verdict = Verifier.verify ~model:config.verifier_model vreq in
-        config.on_event (Verified {
+        emit (Verified {
           action = action_desc;
           verdict = Verifier.verdict_to_string verdict;
         });
@@ -264,7 +327,12 @@ let run_turn ~config ~state =
         state.context <- Context_manager.compact
           state.context config.compact_strategies;
         let after = state.context.token_count in
-        config.on_event (Compacted { before_tokens = before; after_tokens = after })
+        state.compaction_count <- state.compaction_count + 1;
+        state.compaction_tokens_saved <- state.compaction_tokens_saved + max 0 (before - after);
+        state.last_compaction_ts <- Time_compat.now ();
+        state.last_compaction_before_tokens <- before;
+        state.last_compaction_after_tokens <- after;
+        emit (Compacted { before_tokens = before; after_tokens = after })
       end;
 
       (* 5. PREPARE DNA: If context > prepare_threshold *)
@@ -287,7 +355,7 @@ let run_turn ~config ~state =
           ~metrics in
         let dna_json = Succession.dna_to_json dna in
         let dna_size = String.length (Yojson.Safe.to_string dna_json) in
-        config.on_event (Prepared { dna_size });
+        emit (Prepared { dna_size });
 
         (* Save checkpoint *)
         let ckpt = Context_manager.create_checkpoint
@@ -304,11 +372,11 @@ let run_turn ~config ~state =
           | [m] -> m          (* Same model *)
           | [] -> Llm_client.ollama_glm
         in
-        config.on_event (Handoff {
+        emit (Handoff {
           to_model = next_model.model_id;
           generation = state.generation + 1;
         });
-        config.on_event (Terminated "Context handoff triggered");
+        emit (Terminated "Context handoff triggered");
         state.running <- false;
         false
       end
@@ -318,25 +386,25 @@ let run_turn ~config ~state =
         if now -. state.last_heartbeat >= config.heartbeat_interval_s then begin
           state.last_heartbeat <- now;
           let pct = Context_manager.context_ratio state.context *. 100.0 in
-          config.on_event (Heartbeat { turn; context_pct = pct })
+          emit (Heartbeat { turn; context_pct = pct })
         end;
 
         (* 8. Check termination conditions *)
         if is_goal_complete resp.content then begin
-          config.on_event (Terminated "Goal complete");
+          emit (Terminated "Goal complete");
           state.running <- false;
           false
         end else if is_stuck resp.content then begin
-          config.on_event (Terminated "Agent stuck");
+          emit (Terminated "Agent stuck");
           state.running <- false;
           false
         end else if state.idle_turns >= config.max_idle_turns then begin
-          config.on_event (IdleDetected state.idle_turns);
-          config.on_event (Terminated "Max idle turns reached");
+          emit (IdleDetected state.idle_turns);
+          emit (Terminated "Max idle turns reached");
           state.running <- false;
           false
         end else begin
-          config.on_event (TurnEnd {
+          emit (TurnEnd {
             turn;
             tokens_used = resp.usage.total_tokens;
             cost;
@@ -372,6 +440,83 @@ let stop state =
 (* ================================================================ *)
 
 let status state : Yojson.Safe.t =
+  let now_ts = Time_compat.now () in
+  let age_s = if state.started_at <= 0.0 then 0.0 else now_ts -. state.started_at in
+  let last_turn_ago_s = if state.last_turn_ts <= 0.0 then 0.0 else now_ts -. state.last_turn_ts in
+  let last_heartbeat_ago_s =
+    if state.last_heartbeat <= 0.0 then 0.0 else now_ts -. state.last_heartbeat
+  in
+  let last_compaction_ago_s =
+    if state.last_compaction_ts <= 0.0 then 0.0 else now_ts -. state.last_compaction_ts
+  in
+  let event_kind = function
+    | TurnStart _ -> "turn_start"
+    | TurnEnd _ -> "turn_end"
+    | Compacted _ -> "compacted"
+    | Prepared _ -> "prepared"
+    | Handoff _ -> "handoff"
+    | Verified _ -> "verified"
+    | Heartbeat _ -> "heartbeat"
+    | Error _ -> "error"
+    | IdleDetected _ -> "idle_detected"
+    | Terminated _ -> "terminated"
+  in
+  let event_to_json (ev : event) : Yojson.Safe.t =
+    match ev with
+    | TurnStart n -> `Assoc [("kind", `String (event_kind ev)); ("turn", `Int n)]
+    | TurnEnd { turn; tokens_used; cost } ->
+      `Assoc [
+        ("kind", `String (event_kind ev));
+        ("turn", `Int turn);
+        ("tokens_used", `Int tokens_used);
+        ("cost_usd", `Float cost);
+      ]
+    | Compacted { before_tokens; after_tokens } ->
+      `Assoc [
+        ("kind", `String (event_kind ev));
+        ("before_tokens", `Int before_tokens);
+        ("after_tokens", `Int after_tokens);
+      ]
+    | Prepared { dna_size } ->
+      `Assoc [("kind", `String (event_kind ev)); ("dna_size", `Int dna_size)]
+    | Handoff { to_model; generation } ->
+      `Assoc [
+        ("kind", `String (event_kind ev));
+        ("to_model", `String to_model);
+        ("generation", `Int generation);
+      ]
+    | Verified { action; verdict } ->
+      `Assoc [
+        ("kind", `String (event_kind ev));
+        ("action", `String action);
+        ("verdict", `String verdict);
+      ]
+    | Heartbeat { turn; context_pct } ->
+      `Assoc [
+        ("kind", `String (event_kind ev));
+        ("turn", `Int turn);
+        ("context_pct", `Float context_pct);
+      ]
+    | Error msg ->
+      `Assoc [("kind", `String (event_kind ev)); ("message", `String msg)]
+    | IdleDetected n ->
+      `Assoc [("kind", `String (event_kind ev)); ("idle_turns", `Int n)]
+    | Terminated reason ->
+      `Assoc [("kind", `String (event_kind ev)); ("reason", `String reason)]
+  in
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  let events_tail =
+    state.events
+    |> take 20
+    |> List.rev
+    |> List.map (fun (ts, ev) ->
+      `Assoc [("ts_unix", `Float ts); ("event", event_to_json ev)]
+    )
+  in
   `Assoc [
     ("trace_id", `String state.trace_id);
     ("running", `Bool state.running);
@@ -380,6 +525,28 @@ let status state : Yojson.Safe.t =
     ("idle_turns", `Int state.idle_turns);
     ("total_tokens", `Int state.total_tokens);
     ("total_cost_usd", `Float state.total_cost);
+    ("started_at_ts", `Float state.started_at);
+    ("age_s", `Float age_s);
+    ("last_turn_ts", `Float state.last_turn_ts);
+    ("last_turn_ago_s", `Float last_turn_ago_s);
+    ("last_model_used", `String state.last_model_used);
+    ("last_usage", `Assoc [
+      ("input_tokens", `Int state.last_usage.input_tokens);
+      ("output_tokens", `Int state.last_usage.output_tokens);
+      ("total_tokens", `Int state.last_usage.total_tokens);
+    ]);
+    ("last_latency_ms", `Int state.last_latency_ms);
+    ("last_heartbeat_ts", `Float state.last_heartbeat);
+    ("last_heartbeat_ago_s", `Float last_heartbeat_ago_s);
+    ("compaction_count", `Int state.compaction_count);
+    ("compaction_tokens_saved", `Int state.compaction_tokens_saved);
+    ("last_compaction", `Assoc [
+      ("ts_unix", `Float state.last_compaction_ts);
+      ("ago_s", `Float last_compaction_ago_s);
+      ("before_tokens", `Int state.last_compaction_before_tokens);
+      ("after_tokens", `Int state.last_compaction_after_tokens);
+    ]);
+    ("events_tail", `List events_tail);
     ("context_ratio", `Float (Context_manager.context_ratio state.context));
     ("context_tokens", `Int state.context.token_count);
     ("context_max", `Int state.context.max_tokens);

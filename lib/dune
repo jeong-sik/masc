@@ -185,7 +185,8 @@
    verifier
    succession
    perpetual_loop
-   tool_perpetual)
+   tool_perpetual
+   tool_keeper)
  (libraries
    yojson
    base64

@@ -29,6 +29,10 @@ module Task_dispatch = Masc_mcp.Task_dispatch
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
+module Safe_ops = Masc_mcp.Safe_ops
+module Context_manager = Masc_mcp.Context_manager
+module Llm_client = Masc_mcp.Llm_client
+module Tool_perpetual = Masc_mcp.Tool_perpetual
 
 (** MCP Protocol Versions *)
 (* ============================================ *)
@@ -301,6 +305,253 @@ let with_read_auth handler request reqd =
         match Auth.check_permission base_path ~agent_name ~token ~permission:Types.CanReadState with
         | Ok () -> handler state request reqd
         | Error err -> respond_auth_error request reqd err
+
+(* ================================================================ *)
+(* Dashboard Data (Batch API)                                       *)
+(* ================================================================ *)
+
+let bool_of_env name =
+  match Sys.getenv_opt name with
+  | None -> false
+  | Some v ->
+      let v = v |> String.trim |> String.lowercase_ascii in
+      v = "1" || v = "true" || v = "yes" || v = "y"
+
+let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
+  let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
+  let names =
+    let dir = Tool_keeper.keeper_dir config in
+    if not (Sys.file_exists dir) then []
+    else
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.map Filename.remove_extension
+      |> List.filter Tool_keeper.validate_name
+      |> List.sort String.compare
+  in
+  let now_ts = Masc_mcp.Time_compat.now () in
+  let summaries =
+    List.filter_map (fun name ->
+      match Tool_keeper.read_meta config name with
+      | Error _ -> None
+      | Ok None -> None
+      | Ok (Some (m : Tool_keeper.keeper_meta)) ->
+          let keepalive_running = Hashtbl.mem Tool_keeper.keepalives m.name in
+          let agent = Tool_keeper.parse_agent_status config ~agent_name:m.agent_name in
+
+          let created_ts =
+            Masc_mcp.Resilience.Time.parse_iso8601_opt m.created_at
+            |> Option.value ~default:0.0
+          in
+          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
+          let last_turn_ago_s = if m.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.last_turn_ts in
+          let last_handoff_ago_s =
+            if m.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.last_handoff_ts
+          in
+          let last_compaction_ago_s =
+            if m.last_compaction_ts <= 0.0 then 0.0 else now_ts -. m.last_compaction_ts
+          in
+
+          let last_metrics =
+            let path = Tool_keeper.keeper_metrics_path config m.name in
+            match Tool_keeper.read_file_tail_lines path ~max_bytes:20000 ~max_lines:1 with
+            | [] -> None
+            | line :: _ ->
+                (try Some (Yojson.Safe.from_string line) with _ -> None)
+          in
+
+          let models_resolved =
+            match Tool_keeper.model_specs_of_strings m.models with
+            | Error _ -> `List []
+            | Ok specs ->
+                `List (List.map (fun (s : Llm_client.model_spec) ->
+                  `Assoc [
+                    ("provider", `String (Llm_client.string_of_provider s.provider));
+                    ("model_id", `String s.model_id);
+                    ("max_context", `Int s.max_context);
+                  ]
+                ) specs)
+          in
+
+          let context =
+            match last_metrics with
+            | Some metrics ->
+                `Assoc [
+                  ("source", `String "metrics");
+                  ("context_ratio", `Float (Safe_ops.json_float "context_ratio" metrics));
+                  ("context_tokens", `Int (Safe_ops.json_int "context_tokens" metrics));
+                  ("context_max", `Int (Safe_ops.json_int "context_max" metrics));
+                  ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
+                ]
+            | None ->
+                (match Tool_keeper.model_specs_of_strings m.models with
+                 | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
+                 | Ok specs ->
+                     let primary =
+                       match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm
+                     in
+                     let base_dir = Tool_keeper.session_base_dir config in
+                     let (_session, ctx_opt) =
+                       Tool_keeper.load_context_from_checkpoint
+                         ~trace_id:m.trace_id
+                         ~primary_model_max_tokens:primary.max_context
+                         ~base_dir
+                     in
+                     match ctx_opt with
+                     | None -> `Assoc [("has_checkpoint", `Bool false)]
+                     | Some c ->
+                         `Assoc [
+                           ("has_checkpoint", `Bool true);
+                           ("source", `String "checkpoint");
+                           ("context_ratio", `Float (Context_manager.context_ratio c));
+                           ("context_tokens", `Int c.token_count);
+                           ("context_max", `Int c.max_tokens);
+                           ("message_count", `Int (List.length c.messages));
+                         ])
+          in
+
+          let summary =
+            `Assoc [
+              ("name", `String m.name);
+              ("agent_name", `String m.agent_name);
+              ("trace_id", `String m.trace_id);
+              ("generation", `Int m.generation);
+              ("goal", if include_goals then `String m.goal else `Null);
+              ("models", `List (List.map (fun s -> `String s) m.models));
+              ("models_resolved", models_resolved);
+              ("presence_keepalive", `Bool m.presence_keepalive);
+              ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
+              ("keepalive_running", `Bool keepalive_running);
+              ("agent", agent);
+              ("keeper_age_s", `Float keeper_age_s);
+              ("last_turn_ago_s", `Float last_turn_ago_s);
+              ("last_handoff_ago_s", `Float last_handoff_ago_s);
+              ("last_compaction_ago_s", `Float last_compaction_ago_s);
+              ("total_turns", `Int m.total_turns);
+              ("total_tokens", `Int m.total_tokens);
+              ("total_cost_usd", `Float m.total_cost_usd);
+              ("last_model_used", `String m.last_model_used);
+              ("last_usage", `Assoc [
+                ("input_tokens", `Int m.last_input_tokens);
+                ("output_tokens", `Int m.last_output_tokens);
+                ("total_tokens", `Int m.last_total_tokens);
+              ]);
+              ("last_latency_ms", `Int m.last_latency_ms);
+              ("compaction_count", `Int m.compaction_count);
+              ("last_metrics", match last_metrics with None -> `Null | Some j -> j);
+              ("context", context);
+            ]
+          in
+          Some summary
+    ) names
+  in
+  `Assoc [
+    ("keepers", `List summaries);
+    ("total", `Int (List.length summaries));
+  ]
+
+let perpetual_dashboard_json () : Yojson.Safe.t =
+  let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
+  let items =
+    Hashtbl.fold (fun trace_id (state, (config : Masc_mcp.Perpetual_loop.loop_config)) acc ->
+      let base = Masc_mcp.Perpetual_loop.status state in
+      let with_cfg =
+        match base with
+        | `Assoc fields ->
+              let models =
+              `List (List.map (fun (m : Llm_client.model_spec) ->
+                `Assoc [
+                  ("provider", `String (Llm_client.string_of_provider m.provider));
+                  ("model_id", `String m.model_id);
+                  ("max_context", `Int m.max_context);
+                ]
+              ) config.model_cascade)
+            in
+            `Assoc ([
+              ("goal", if include_goals then `String config.initial_goal else `Null);
+              ("model_cascade", models);
+              ("heartbeat_interval_s", `Float config.heartbeat_interval_s);
+              ("compact_threshold", `Float config.compact_threshold);
+              ("prepare_threshold", `Float config.prepare_threshold);
+              ("handoff_threshold", `Float config.handoff_threshold);
+            ] @ fields)
+        | other -> other
+      in
+      (trace_id, with_cfg) :: acc
+    ) Tool_perpetual.active_agents []
+  in
+  let items =
+    items
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+    |> List.map snd
+  in
+  `Assoc [
+    ("agents", `List items);
+    ("total", `Int (List.length items));
+  ]
+
+let dashboard_batch_json (config : Room.config) : Yojson.Safe.t =
+  let room_state = Room.read_state config in
+  let tempo = Tempo.get_tempo config in
+  let tasks = Room.get_tasks_raw config in
+  let agents = Room.get_agents_raw config in
+  let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+  let status_json =
+    `Assoc [
+      ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
+      ("project", `String room_state.project);
+      ("tempo_interval_s", `Float tempo.current_interval_s);
+      ("paused", `Bool room_state.paused);
+    ]
+  in
+  let tasks_json =
+    List.map (fun (t : Types.task) ->
+      `Assoc [
+        ("id", `String t.id);
+        ("title", `String t.title);
+        ("status", `String (Types.string_of_task_status t.task_status));
+        ("priority", `Int t.priority);
+        ("assignee",
+         match t.task_status with
+         | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } ->
+             `String assignee
+         | _ -> `Null);
+      ]
+    )
+      (List.filter
+         (fun (t : Types.task) ->
+           match t.task_status with Types.Done _ | Types.Cancelled _ -> false | _ -> true)
+         tasks)
+  in
+  let agents_json =
+    List.map (fun (a : Types.agent) ->
+      `Assoc [
+        ("name", `String a.name);
+        ("status", `String (Types.string_of_agent_status a.status));
+        ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+      ]
+    ) agents
+  in
+  let msgs_json =
+    List.map
+      (fun (m : Types.message) ->
+        `Assoc [
+          ("from", `String m.from_agent);
+          ("content", `String m.content);
+          ("timestamp", `String m.timestamp);
+          ("seq", `Int m.seq);
+        ])
+      (List.filteri (fun idx _ -> idx < 20) msgs)
+  in
+  `Assoc [
+    ("status", status_json);
+    ("tasks", `Assoc [ ("tasks", `List tasks_json); ("total", `Int (List.length tasks_json)) ]);
+    ("agents", `Assoc [ ("agents", `List agents_json); ("total", `Int (List.length agents_json)) ]);
+    ("messages", `Assoc [ ("messages", `List msgs_json); ("total", `Int (List.length msgs_json)) ]);
+    ("keepers", keepers_dashboard_json config);
+    ("perpetual", perpetual_dashboard_json ());
+  ]
 
 let parse_host_port host_header default_host default_port =
   match host_header with
@@ -1404,53 +1655,7 @@ let make_routes ~port ~host =
   |> Http.Router.get "/api/v1/dashboard" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
-         let room_state = Room.read_state config in
-         let tempo = Tempo.get_tempo config in
-         let tasks = Room.get_tasks_raw config in
-         let agents = Room.get_agents_raw config in
-         let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
-         let status_json = `Assoc [
-           ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
-           ("project", `String room_state.project);
-           ("tempo_interval_s", `Float tempo.current_interval_s);
-           ("paused", `Bool room_state.paused);
-         ] in
-         let tasks_json = List.map (fun (t : Types.task) ->
-           `Assoc [
-             ("id", `String t.id);
-             ("title", `String t.title);
-             ("status", `String (Types.string_of_task_status t.task_status));
-             ("priority", `Int t.priority);
-             ("assignee", match t.task_status with
-               | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
-               | _ -> `Null);
-           ]
-         ) (List.filter (fun (t : Types.task) ->
-              match t.task_status with
-              | Types.Done _ | Types.Cancelled _ -> false
-              | _ -> true
-            ) tasks) in
-         let agents_json = List.map (fun (a : Types.agent) ->
-           `Assoc [
-             ("name", `String a.name);
-             ("status", `String (Types.string_of_agent_status a.status));
-             ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
-           ]
-         ) agents in
-         let msgs_json = List.map (fun (m : Types.message) ->
-           `Assoc [
-             ("from", `String m.from_agent);
-             ("content", `String m.content);
-             ("timestamp", `String m.timestamp);
-             ("seq", `Int m.seq);
-           ]
-         ) (List.filteri (fun idx _ -> idx < 20) msgs) in
-         let json = `Assoc [
-           ("status", status_json);
-           ("tasks", `Assoc [("tasks", `List tasks_json); ("total", `Int (List.length tasks_json))]);
-           ("agents", `Assoc [("agents", `List agents_json); ("total", `Int (List.length agents_json))]);
-           ("messages", `Assoc [("messages", `List msgs_json); ("total", `Int (List.length msgs_json))]);
-         ] in
+         let json = dashboard_batch_json config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
@@ -2065,53 +2270,7 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/dashboard" ->
           let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
           let config = state.Mcp_server.room_config in
-          let room_state = Masc_mcp.Room.read_state config in
-          let tempo = Masc_mcp.Tempo.get_tempo config in
-          let tasks = Masc_mcp.Room.get_tasks_raw config in
-          let agents = Masc_mcp.Room.get_agents_raw config in
-          let msgs = Masc_mcp.Room.get_messages_raw config ~since_seq:0 ~limit:20 in
-          let status_json = `Assoc [
-            ("cluster", `String (Option.value ~default:"unknown" (Sys.getenv_opt "MASC_CLUSTER_NAME")));
-            ("project", `String room_state.project);
-            ("tempo_interval_s", `Float tempo.current_interval_s);
-            ("paused", `Bool room_state.paused);
-          ] in
-          let tasks_json = List.map (fun (t : Masc_mcp.Types.task) ->
-            `Assoc [
-              ("id", `String t.id);
-              ("title", `String t.title);
-              ("status", `String (Masc_mcp.Types.string_of_task_status t.task_status));
-              ("priority", `Int t.priority);
-              ("assignee", match t.task_status with
-                | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
-                | _ -> `Null);
-            ]
-          ) (List.filter (fun (t : Masc_mcp.Types.task) ->
-               match t.task_status with
-               | Masc_mcp.Types.Done _ | Masc_mcp.Types.Cancelled _ -> false
-               | _ -> true
-             ) tasks) in
-          let agents_json = List.map (fun (a : Masc_mcp.Types.agent) ->
-            `Assoc [
-              ("name", `String a.name);
-              ("status", `String (Masc_mcp.Types.string_of_agent_status a.status));
-              ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
-            ]
-          ) agents in
-          let msgs_json = List.map (fun (m : Masc_mcp.Types.message) ->
-            `Assoc [
-              ("from", `String m.from_agent);
-              ("content", `String m.content);
-              ("timestamp", `String m.timestamp);
-              ("seq", `Int m.seq);
-            ]
-          ) (List.filteri (fun idx _ -> idx < 20) msgs) in
-          let json = `Assoc [
-            ("status", status_json);
-            ("tasks", `Assoc [("tasks", `List tasks_json); ("total", `Int (List.length tasks_json))]);
-            ("agents", `Assoc [("agents", `List agents_json); ("total", `Int (List.length agents_json))]);
-            ("messages", `Assoc [("messages", `List msgs_json); ("total", `Int (List.length msgs_json))]);
-          ] in
+          let json = dashboard_batch_json config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/status" ->

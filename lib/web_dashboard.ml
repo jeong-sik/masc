@@ -137,6 +137,44 @@ let cached_html = lazy ({|<!DOCTYPE html>
     .agent-name { font-weight: 600; flex: 1; }
     .agent-task { font-size: 12px; color: #888; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* Live Agents (Keepers / Perpetual) */
+    .live-agent-list { display: flex; flex-direction: column; gap: 10px; }
+    .live-agent {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+    .live-agent-main { flex: 1; min-width: 0; }
+    .live-agent-title { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .live-agent-name { font-weight: 600; }
+    .live-agent-sub { font-size: 11px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pill {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(34,211,238,0.15);
+      color: #22d3ee;
+      border: 1px solid rgba(34,211,238,0.2);
+    }
+    .pill.warn {
+      background: rgba(251,191,36,0.12);
+      color: #fbbf24;
+      border-color: rgba(251,191,36,0.25);
+    }
+    .pill.bad {
+      background: rgba(248,113,113,0.12);
+      color: #f87171;
+      border-color: rgba(248,113,113,0.25);
+    }
+    .live-agent-meta { font-size: 12px; color: #aaa; display: flex; flex-wrap: wrap; gap: 10px; }
+    .ctx-bar { height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; margin-top: 8px; }
+    .ctx-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #4ade80, #22d3ee); transition: width 0.3s ease; }
+    .ctx-fill.warn { background: linear-gradient(90deg, #fbbf24, #f97316); }
+    .ctx-fill.bad { background: linear-gradient(90deg, #f87171, #ef4444); }
+
     /* Tasks (Kanban) */
     .task-board {
       display: grid;
@@ -700,6 +738,22 @@ let cached_html = lazy ({|<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="grid-2col">
+        <div class="section">
+          <h2>🧠 Keepers</h2>
+          <div class="live-agent-list" id="keeper-list">
+            <div class="empty">Loading keepers...</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>♾ Perpetual Agents</h2>
+          <div class="live-agent-list" id="perpetual-list">
+            <div class="empty">Loading perpetual agents...</div>
+          </div>
+        </div>
+      </div>
+
       <div class="section">
         <h2>🖥️ Server Health</h2>
         <div id="server-health" class="server-health">
@@ -890,6 +944,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
         updateAgents(data.agents);
         updateTasks(data.tasks);
         updateMessages(data.messages);
+        updateKeepers(data.keepers);
+        updatePerpetual(data.perpetual);
         updateTempo(data.status);
       } catch (e) {
         console.error('Fetch error:', e);
@@ -976,6 +1032,159 @@ let cached_html = lazy ({|<!DOCTYPE html>
       `).join('');
     }
 
+    // === Live Agent Rendering (Keepers / Perpetual) ===
+    function isNum(x) { return typeof x === 'number' && !isNaN(x); }
+    function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+    function fmtSecShort(s) {
+      if (!isNum(s) || s <= 0) return 'never';
+      if (s < 60) return Math.round(s) + 's';
+      if (s < 3600) return Math.round(s / 60) + 'm';
+      if (s < 86400) return Math.round(s / 3600) + 'h';
+      return Math.round(s / 86400) + 'd';
+    }
+    function fmtPct(r) { return isNum(r) ? (Math.round(r * 100) + '%') : '-'; }
+    function fmtCascade(models) {
+      const xs = Array.isArray(models) ? models : [];
+      if (xs.length === 0) return '-';
+      if (xs.length <= 2) return xs.join(' → ');
+      return xs[0] + ' → ' + xs[1] + ' +' + (xs.length - 2);
+    }
+    function ctxClass(r) {
+      if (!isNum(r)) return '';
+      if (r >= 0.85) return 'bad';
+      if (r >= 0.70) return 'warn';
+      return '';
+    }
+
+    function updateKeepers(data) {
+      const list = document.getElementById('keeper-list');
+      if (!list) return;
+      const keepers = (data && data.keepers) ? data.keepers : [];
+      if (keepers.length === 0) {
+        list.innerHTML = '<div class="empty">No keepers</div>';
+        return;
+      }
+      list.innerHTML = keepers.map(k => {
+        const agent = k.agent || {};
+        const exists = !!agent.exists;
+        const zombie = !!agent.is_zombie;
+        const statusClass = (exists && !zombie) ? 'active' : 'inactive';
+
+        const ctx = k.context || {};
+        const ratio = ctx.context_ratio;
+        const tokens = ctx.context_tokens;
+        const max = ctx.context_max;
+        const pct = fmtPct(ratio);
+        const fillPct = isNum(ratio) ? clamp(ratio * 100, 0, 100) : 0;
+        const fillClass = ctxClass(ratio);
+
+        const keepalive = !!k.keepalive_running;
+        const keepalivePill = keepalive
+          ? '<span class="pill">keepalive</span>'
+          : '<span class="pill bad">no-keepalive</span>';
+        const zombiePill = zombie ? '<span class="pill bad">zombie</span>' : '';
+        const handoffSoon = isNum(ratio) && ratio >= 0.80 ? '<span class="pill warn">handoff-soon</span>' : '';
+
+        const modelUsed = k.last_model_used || '-';
+        const cascade = fmtCascade(k.models);
+
+        const usage = k.last_usage || {};
+        const io = (isNum(usage.input_tokens) && isNum(usage.output_tokens))
+          ? `io ${usage.input_tokens}/${usage.output_tokens}`
+          : '';
+
+        const age = fmtSecShort(k.keeper_age_s);
+        const last = isNum(k.last_turn_ago_s) ? (fmtSecShort(k.last_turn_ago_s) + ' ago') : 'never';
+        const ctxText = (isNum(tokens) && isNum(max) && max > 0) ? `${pct} (${tokens}/${max})` : pct;
+
+        return `
+          <div class="live-agent">
+            <div class="agent-status ${statusClass}"></div>
+            <div class="live-agent-main">
+              <div class="live-agent-title">
+                <span class="live-agent-name">${k.name || 'keeper'}</span>
+                <span class="live-agent-sub">${k.agent_name || ''}</span>
+                ${keepalivePill}
+                ${zombiePill}
+                ${handoffSoon}
+              </div>
+              <div class="live-agent-meta">
+                <span>model ${modelUsed}</span>
+                <span>cascade ${cascade}</span>
+                <span>ctx ${ctxText}</span>
+                <span>${io}</span>
+                <span>last ${last}</span>
+                <span>age ${age}</span>
+                <span>compactions ${k.compaction_count || 0}</span>
+              </div>
+              <div class="ctx-bar"><div class="ctx-fill ${fillClass}" style="width:${fillPct}%"></div></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function updatePerpetual(data) {
+      const list = document.getElementById('perpetual-list');
+      if (!list) return;
+      const agents = (data && data.agents) ? data.agents : [];
+      if (agents.length === 0) {
+        list.innerHTML = '<div class="empty">No perpetual agents</div>';
+        return;
+      }
+      list.innerHTML = agents.map(a => {
+        const running = !!a.running;
+        const statusClass = running ? 'active' : 'inactive';
+
+        const ratio = a.context_ratio;
+        const tokens = a.context_tokens;
+        const max = a.context_max;
+        const pct = fmtPct(ratio);
+        const fillPct = isNum(ratio) ? clamp(ratio * 100, 0, 100) : 0;
+        const fillClass = ctxClass(ratio);
+        const ctxText = (isNum(tokens) && isNum(max) && max > 0) ? `${pct} (${tokens}/${max})` : pct;
+
+        const age = fmtSecShort(a.age_s);
+        const last = isNum(a.last_turn_ago_s) ? (fmtSecShort(a.last_turn_ago_s) + ' ago') : 'never';
+
+        const usage = a.last_usage || {};
+        const io = (isNum(usage.input_tokens) && isNum(usage.output_tokens))
+          ? `io ${usage.input_tokens}/${usage.output_tokens}`
+          : '';
+
+        const cascade = Array.isArray(a.model_cascade)
+          ? fmtCascade(a.model_cascade.map(m => (m.provider ? (m.provider + ':' + m.model_id) : m.model_id)))
+          : '-';
+
+        const gen = isNum(a.generation) ? a.generation : 0;
+        const genPill = gen > 0 ? `<span class="pill warn">gen ${gen}</span>` : `<span class="pill">gen 0</span>`;
+
+        return `
+          <div class="live-agent">
+            <div class="agent-status ${statusClass}"></div>
+            <div class="live-agent-main">
+              <div class="live-agent-title">
+                <span class="live-agent-name">${(a.trace_id || 'trace').slice(0, 24)}</span>
+                <span class="live-agent-sub">${a.last_model_used || ''}</span>
+                ${genPill}
+              </div>
+              <div class="live-agent-meta">
+                <span>running ${running ? 'yes' : 'no'}</span>
+                <span>turns ${a.turn_count || 0}</span>
+                <span>ctx ${ctxText}</span>
+                <span>${io}</span>
+                <span>last ${last}</span>
+                <span>age ${age}</span>
+                <span>cost $${isNum(a.total_cost_usd) ? a.total_cost_usd.toFixed(4) : '0.0000'}</span>
+                <span>cascade ${cascade}</span>
+              </div>
+              <div class="ctx-bar"><div class="ctx-fill ${fillClass}" style="width:${fillPct}%"></div></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     function updateTempo(status) {
       // Convert tempo_interval_s to mode: <120s=fast, <400s=normal, else=slow
       const interval = status.tempo_interval_s || 300;
@@ -1002,10 +1211,20 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let sseConnected = false;
     let fetchDataTimer = null;
     let fetchBoardTimer = null;
-    let fallbackIntervalId = null;
+    let periodicRefreshId = null;
     const connStatus = document.getElementById('connection-status');
     const connText = document.getElementById('conn-text');
     const eventCounter = document.getElementById('event-counter');
+
+    function startPeriodicRefresh() {
+      if (periodicRefreshId) return;
+      // Keepers/perpetual presence heartbeats don't emit SSE events.
+      // Polling keeps the live-agent panels accurate even when the room is quiet.
+      periodicRefreshId = setInterval(() => {
+        invalidateDashboardCache();
+        fetchData();
+      }, 10000);
+    }
 
     function updateConnectionStatus(connected) {
       sseConnected = connected;
@@ -1013,12 +1232,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       connStatus.classList.toggle('connected', connected);
       connStatus.classList.toggle('disconnected', !connected);
       connText.textContent = connected ? 'Connected' : 'Disconnected';
-      // Fallback polling only when SSE is disconnected (CPU optimization)
-      if (connected) {
-        if (fallbackIntervalId) { clearInterval(fallbackIntervalId); fallbackIntervalId = null; }
-      } else {
-        if (!fallbackIntervalId) fallbackIntervalId = setInterval(fetchData, 15000);
-      }
+      startPeriodicRefresh();
     }
 
     function incrementEventCount() {
@@ -1969,9 +2183,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
       finally { btn.disabled = false; }
     }
 
-    // Initial load + polling fallback
+    // Initial load + periodic polling (keepers/perpetual heartbeats don't emit SSE)
     // Initial load: fetchData uses batch /api/v1/dashboard endpoint
     // fetchServerHealth is called from DOMContentLoaded (version badge)
+    startPeriodicRefresh();
     fetchData();
     connectSSE();
 

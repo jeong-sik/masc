@@ -1127,7 +1127,17 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_misc : Tool_misc.context = { config; agent_name } in
   let simple_ctx_suspend : Tool_suspend.context = { config; caller_agent = Some agent_name } in
   let simple_ctx_library : Tool_library.context = { agent_name } in
-  let simple_ctx_perpetual : Tool_perpetual.context = { agent_name } in
+  let simple_ctx_perpetual : Tool_perpetual.context = {
+    agent_name;
+    start_loop = Some (fun loop_state loop_config ->
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          Perpetual_loop.run ~config:loop_config ~state:loop_state
+        with exn ->
+          Printf.eprintf "[perpetual:error] loop crashed for %s: %s\n%!"
+            loop_state.Perpetual_loop.trace_id (Printexc.to_string exn)));
+  } in
+  let simple_ctx_keeper : _ Tool_keeper.context = { config; sw; clock } in
 
   (* Chain through all extracted tool modules *)
   match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
@@ -1215,6 +1225,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_library.dispatch simple_ctx_library ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_keeper.dispatch simple_ctx_keeper ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_perpetual.dispatch simple_ctx_perpetual ~name ~args:arguments with
@@ -2432,7 +2445,13 @@ let handle_list_tools_eio state id =
   let room_path = Room.masc_dir state.Mcp_server.room_config in
   let config = Config.load room_path in
   let enabled_categories = config.enabled_categories in
-  let all_tools = Tools.all_schemas @ Tool_board.tools @ Tool_lodge.tools @ Tool_perpetual.schemas in
+  let all_tools =
+    Tools.all_schemas
+    @ Tool_board.tools
+    @ Tool_lodge.tools
+    @ Tool_perpetual.schemas
+    @ Tool_keeper.schemas
+  in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
     Mode.is_tool_enabled enabled_categories schema.name
   ) all_tools in

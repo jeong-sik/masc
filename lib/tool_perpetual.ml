@@ -110,7 +110,10 @@ The agent will receive this as a user message on its next turn.";
 ]
 
 type result = bool * string
-type context = { agent_name : string }
+type context = {
+  agent_name : string;
+  start_loop : (Perpetual_loop.loop_state -> Perpetual_loop.loop_config -> unit) option;
+}
 
 (* ================================================================ *)
 (* Tool Dispatch                                                    *)
@@ -122,7 +125,7 @@ let active_agents : (string, Perpetual_loop.loop_state * Perpetual_loop.loop_con
 
 let latest_trace_id : string option ref = ref None
 
-let handle_start args =
+let handle_start ctx args =
   let open Yojson.Safe.Util in
   let goal = args |> member "goal" |> to_string in
   let model_strs = args |> member "models" |> to_list |> List.map to_string in
@@ -160,11 +163,12 @@ let handle_start args =
     let state = Perpetual_loop.create_state config in
     Hashtbl.replace active_agents state.trace_id (state, config);
     latest_trace_id := Some state.trace_id;
-    (* Note: actual loop execution must be started by the caller
-       in an Eio fiber.  This just creates the state. *)
+    (match ctx.start_loop with
+     | Some start -> start state config
+     | None -> ());
     `Assoc [
       ("trace_id", `String state.trace_id);
-      ("status", `String "created");
+      ("status", `String (match ctx.start_loop with Some _ -> "started" | None -> "created"));
       ("generation", `Int 0);
       ("models", `List (List.map (fun (m : Llm_client.model_spec) ->
         `String m.model_id) models));
@@ -182,7 +186,29 @@ let handle_status args =
   | Some id ->
     match Hashtbl.find_opt active_agents id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
-    | Some (state, _config) -> Perpetual_loop.status state
+    | Some (state, config) ->
+      let base = Perpetual_loop.status state in
+      (match base with
+       | `Assoc fields ->
+         let models =
+           `List (List.map (fun (m : Llm_client.model_spec) ->
+             `Assoc [
+               ("provider", `String (Llm_client.string_of_provider m.provider));
+               ("model_id", `String m.model_id);
+               ("max_context", `Int m.max_context);
+               ("api_key_env", match m.api_key_env with None -> `Null | Some k -> `String k);
+             ]
+           ) config.model_cascade)
+         in
+         `Assoc ([
+           ("goal", `String config.initial_goal);
+           ("model_cascade", models);
+           ("heartbeat_interval_s", `Float config.heartbeat_interval_s);
+           ("compact_threshold", `Float config.compact_threshold);
+           ("prepare_threshold", `Float config.prepare_threshold);
+           ("handoff_threshold", `Float config.handoff_threshold);
+         ] @ fields)
+       | other -> other)
 
 let handle_stop args =
   let open Yojson.Safe.Util in
@@ -244,7 +270,7 @@ let wrap_result json =
 (** Dispatch a perpetual tool call (standard MCP pattern). *)
 let dispatch _ctx ~name ~args : result option =
   match name with
-  | "masc_perpetual_start" -> Some (wrap_result (handle_start args))
+  | "masc_perpetual_start" -> Some (wrap_result (handle_start _ctx args))
   | "masc_perpetual_status" -> Some (wrap_result (handle_status args))
   | "masc_perpetual_stop" -> Some (wrap_result (handle_stop args))
   | "masc_perpetual_inject" -> Some (wrap_result (handle_inject args))

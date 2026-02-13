@@ -73,6 +73,12 @@ let handle_heartbeat_start ctx args =
             end else
               true
           in
+          (* Keep agent liveness fresh so zombie cleanup does not remove active heartbeat owners. *)
+          (try
+             ignore (Room.heartbeat ctx.config ~agent_name:ctx.agent_name)
+           with exn ->
+             Printf.eprintf "[Heartbeat] keepalive error: %s\n%!"
+               (Printexc.to_string exn));
           if should_send then begin
             (try
                ignore (Room.broadcast ctx.config ~from_agent:ctx.agent_name ~content:message)

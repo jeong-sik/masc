@@ -17,6 +17,7 @@ module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
+module Tool_keeper = Masc_mcp.Tool_keeper
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
 module Tempo = Masc_mcp.Tempo
@@ -31,7 +32,6 @@ module Sse = Masc_mcp.Sse
 module Safe_ops = Masc_mcp.Safe_ops
 module Context_manager = Masc_mcp.Context_manager
 module Llm_client = Masc_mcp.Llm_client
-module Tool_keeper = Masc_mcp.Tool_keeper
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 
 (** MCP Protocol Versions *)

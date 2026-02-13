@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.65.0] - 2026-02-13
+
+### Added
+- Keeper dashboard: expose bounded `metrics_series` time-series (context ratio/tokens + handoff markers) via `/api/v1/dashboard`.
+- Web dashboard: show keeper context sparkline + handoff threshold + ETA-to-handoff (turns).
+
+### Changed
+- Keeper "handoff-soon" indicator now respects per-keeper `handoff_threshold` (warns at 95% of threshold).
+
 ## [2.64.0] - 2026-02-13
 
 ### Added

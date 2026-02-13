@@ -118,8 +118,15 @@ let create ~system_prompt ~max_tokens =
   { system_prompt; messages = []; token_count; max_tokens; importance_scores = [] }
 
 let set_system_prompt (ctx : working_context) ~system_prompt =
-  let token_count = count_tokens system_prompt ctx.messages in
-  { ctx with system_prompt; token_count; importance_scores = [] }
+  (* Avoid leaking prior compaction summaries into the "system prompt" channel for providers
+     that treat all system-role messages as instructions (notably Claude). *)
+  let messages =
+    List.map (fun (m : Llm_client.message) ->
+      if m.role = Llm_client.System then { m with role = Llm_client.Assistant } else m
+    ) ctx.messages
+  in
+  let token_count = count_tokens system_prompt messages in
+  { ctx with system_prompt; messages; token_count; importance_scores = [] }
 
 let append ctx (msg : Llm_client.message) =
   let new_tokens = msg_tokens msg in

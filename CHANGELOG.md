@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.64.0] - 2026-02-13
+
+### Added
+- Keeper prompt customization: `masc_keeper_up` / `masc_keeper_msg` now accept `instructions` (persisted) and `new_instructions` (update).
+
+### Changed
+- Compaction prefers structured continuity snapshots (`[STATE] ... [/STATE]`) and emits summaries as assistant messages (prevents Claude system prompt pollution).
+- Succession hydration preserves the previous system prompt (keeper/perpetual constitution + custom instructions) across handoffs.
+- Keeper + Perpetual default system prompts include a continuity constitution and a stable `[STATE]` template for compaction/handoff.
+
+### Fixed
+- Keeper auto-handoff now stamps the successor DNA with the new `trace_id` and next `generation` before hydration/checkpointing.
+
 ## [2.61.0] - 2026-02-06
 
 ### Added

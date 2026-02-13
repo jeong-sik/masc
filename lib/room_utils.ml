@@ -675,9 +675,12 @@ let ensure_initialized_r config : (unit, masc_error) result =
 (* ============================================ *)
 
 let rec mkdir_p path =
-  if not (Sys.file_exists path) then begin
+  if path = "" || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else begin
     mkdir_p (Filename.dirname path);
-    Unix.mkdir path 0o755
+    (try Unix.mkdir path 0o755
+     with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
   end
 
 let read_json_local path =

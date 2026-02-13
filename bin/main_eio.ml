@@ -17,6 +17,7 @@ module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
+module Tool_keeper = Masc_mcp.Tool_keeper
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
 module Tempo = Masc_mcp.Tempo
@@ -1720,6 +1721,13 @@ let run_server ~sw ~env ~port ~base_path =
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~base_path in
   server_state := Some state;
   Mcp_server.set_sse_callback state Sse.broadcast;
+
+  (* Keepers are meant to be long-lived. Start their keepalive fibers on startup
+     so liveness/last_seen stays up-to-date even if no tool calls happen. *)
+  (try
+     let keeper_ctx : _ Tool_keeper.context = { config = state.room_config; sw; clock } in
+     Tool_keeper.start_existing_keepalives keeper_ctx
+   with _ -> ());
 
   (* Initialize Task backend - share pool with Board if PostgreSQL available *)
   (match Board_dispatch.get_pg_pool () with

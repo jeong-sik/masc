@@ -580,6 +580,11 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
   else begin
     let stop = ref false in
     Hashtbl.replace keepalives m.name stop;
+    (* Keepers should be usable even if the user hasn't called masc_init yet. *)
+    (try
+       if not (Room_utils.is_initialized ctx.config) then
+         ignore (Room.init ctx.config ~agent_name:None)
+     with _ -> ());
     (* Ensure the keeper agent exists in room (skip join if already present). *)
     (try
        if not (Room.is_agent_joined ctx.config ~agent_name:m.agent_name) then

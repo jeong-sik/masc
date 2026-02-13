@@ -110,7 +110,10 @@ The agent will receive this as a user message on its next turn.";
 ]
 
 type result = bool * string
-type context = { agent_name : string }
+type context = {
+  agent_name : string;
+  start_loop : (Perpetual_loop.loop_state -> Perpetual_loop.loop_config -> unit) option;
+}
 
 (* ================================================================ *)
 (* Tool Dispatch                                                    *)
@@ -122,7 +125,7 @@ let active_agents : (string, Perpetual_loop.loop_state * Perpetual_loop.loop_con
 
 let latest_trace_id : string option ref = ref None
 
-let handle_start args =
+let handle_start ctx args =
   let open Yojson.Safe.Util in
   let goal = args |> member "goal" |> to_string in
   let model_strs = args |> member "models" |> to_list |> List.map to_string in
@@ -160,11 +163,12 @@ let handle_start args =
     let state = Perpetual_loop.create_state config in
     Hashtbl.replace active_agents state.trace_id (state, config);
     latest_trace_id := Some state.trace_id;
-    (* Note: actual loop execution must be started by the caller
-       in an Eio fiber.  This just creates the state. *)
+    (match ctx.start_loop with
+     | Some start -> start state config
+     | None -> ());
     `Assoc [
       ("trace_id", `String state.trace_id);
-      ("status", `String "created");
+      ("status", `String (match ctx.start_loop with Some _ -> "started" | None -> "created"));
       ("generation", `Int 0);
       ("models", `List (List.map (fun (m : Llm_client.model_spec) ->
         `String m.model_id) models));
@@ -244,7 +248,7 @@ let wrap_result json =
 (** Dispatch a perpetual tool call (standard MCP pattern). *)
 let dispatch _ctx ~name ~args : result option =
   match name with
-  | "masc_perpetual_start" -> Some (wrap_result (handle_start args))
+  | "masc_perpetual_start" -> Some (wrap_result (handle_start _ctx args))
   | "masc_perpetual_status" -> Some (wrap_result (handle_status args))
   | "masc_perpetual_stop" -> Some (wrap_result (handle_stop args))
   | "masc_perpetual_inject" -> Some (wrap_result (handle_inject args))

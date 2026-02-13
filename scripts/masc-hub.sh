@@ -11,16 +11,54 @@
 # |   (tasks list)   |   (interactive)  |
 # +------------------+------------------+
 #
-# Usage: masc-hub [room] [port]
+# Usage: masc-hub [room] [port] [--with-server] [--respawn]
 #   room: MASC room/cluster name (default: from ME_ROOT or 'default')
 #   port: MASC server port (default: 8935)
 
 set -e
 
+WITH_SERVER="false"
+RESPAWN_SERVER="false"
+DO_KILL="false"
+DO_HELP="false"
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -k|--kill)
+            DO_KILL="true"
+            shift
+            ;;
+        -h|--help)
+            DO_HELP="true"
+            shift
+            ;;
+        --with-server)
+            WITH_SERVER="true"
+            shift
+            ;;
+        --respawn)
+            RESPAWN_SERVER="true"
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ $# -gt 0 ]]; then
+    POSITIONAL_ARGS+=("$@")
+fi
+
 # Configuration
-ROOM="${1:-${MASC_CLUSTER_NAME:-$(basename "${ME_ROOT:-$(pwd)}")}}"
-PORT="${2:-${MASC_PORT:-8935}}"
 SESSION_NAME="masc-hub"
+PORT="${POSITIONAL_ARGS[1]:-${MASC_PORT:-8935}}"
 MASC_URL="http://127.0.0.1:${PORT}"
 
 # Resolve base path (same logic as masc-watch)
@@ -60,6 +98,7 @@ resolve_base_path() {
 
 BASE_PATH="$(resolve_base_path)"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOM="${POSITIONAL_ARGS[0]:-${MASC_CLUSTER_NAME:-$(basename "${ME_ROOT:-$BASE_PATH}")}}"
 
 # Colors for echo
 RED='\033[0;31m'
@@ -162,6 +201,18 @@ create_session() {
     # Focus on shell pane for user interaction
     tmux select-pane -t "$SESSION_NAME:0.3"
 
+    if [ "$WITH_SERVER" = "true" ]; then
+        info "Starting server in tmux window: server"
+        tmux new-window -t "$SESSION_NAME" -n "server" -c "$SCRIPT_DIR"
+        tmux send-keys -t "$SESSION_NAME:server" "cd '$SCRIPT_DIR' && export ME_ROOT='$BASE_PATH' MASC_MCP_PORT='$PORT'" Enter
+        if [ "$RESPAWN_SERVER" = "true" ]; then
+            tmux send-keys -t "$SESSION_NAME:server" "while true; do ./start-masc-mcp.sh --port '$PORT' --base-path '$BASE_PATH'; echo '[masc-hub] server exited, restarting in 1s...'; sleep 1; done" Enter
+        else
+            tmux send-keys -t "$SESSION_NAME:server" "./start-masc-mcp.sh --port '$PORT' --base-path '$BASE_PATH'" Enter
+        fi
+        tmux select-window -t "$SESSION_NAME:masc"
+    fi
+
     success "Session created!"
 }
 
@@ -175,30 +226,33 @@ attach_session() {
 main() {
     check_deps
 
-    # Handle arguments
-    case "${1:-}" in
-        -k|--kill)
-            cleanup_session
-            exit 0
-            ;;
-        -h|--help)
-            echo "Usage: masc-hub [room] [port]"
-            echo "       masc-hub -k|--kill    Kill existing session"
-            echo "       masc-hub -h|--help    Show this help"
-            echo ""
-            echo "Environment:"
-            echo "  MASC_CLUSTER_NAME  Room name (default: basename of ME_ROOT)"
-            echo "  MASC_PORT          Server port (default: 8935)"
-            echo "  MASC_BASE_PATH     Override base path"
-            echo ""
-            echo "Panes:"
-            echo "  Top-left:     Dashboard (masc-watch)"
-            echo "  Bottom-left:  Task Board (watch tasks)"
-            echo "  Top-right:    SSE Events (curl stream)"
-            echo "  Bottom-right: Agent Shell (interactive)"
-            exit 0
-            ;;
-    esac
+    if [ "$DO_HELP" = "true" ]; then
+        echo "Usage: masc-hub [room] [port]"
+        echo "       masc-hub [room] [port] --with-server [--respawn]"
+        echo "       masc-hub -k|--kill    Kill existing session"
+        echo "       masc-hub -h|--help    Show this help"
+        echo ""
+        echo "Environment:"
+        echo "  MASC_CLUSTER_NAME  Room name (default: basename of ME_ROOT)"
+        echo "  MASC_PORT          Server port (default: 8935)"
+        echo "  MASC_BASE_PATH     Override base path"
+        echo ""
+        echo "Panes:"
+        echo "  Top-left:     Dashboard (masc-watch)"
+        echo "  Bottom-left:  Task Board (watch tasks)"
+        echo "  Top-right:    SSE Events (curl stream)"
+        echo "  Bottom-right: Agent Shell (interactive)"
+        echo ""
+        echo "Options:"
+        echo "  --with-server   Start MASC server in a dedicated tmux window (no launchd required)"
+        echo "  --respawn       Restart server automatically if it exits (only with --with-server)"
+        exit 0
+    fi
+
+    if [ "$DO_KILL" = "true" ]; then
+        cleanup_session
+        exit 0
+    fi
 
     # Reuse existing session if available
     if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -214,10 +268,14 @@ main() {
 
     # Optional: check server, but don't fail
     if ! check_server; then
-        echo -n "Continue anyway? [y/N] "
-        read -r response
-        if [ "${response,,}" != "y" ]; then
-            exit 1
+        if [ "$WITH_SERVER" = "true" ]; then
+            warn "Server will be started inside tmux (window: server)"
+        else
+            echo -n "Continue anyway? [y/N] "
+            read -r response
+            if [ "${response,,}" != "y" ]; then
+                exit 1
+            fi
         fi
     fi
 

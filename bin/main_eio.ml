@@ -319,6 +319,7 @@ let bool_of_env name =
 
 let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
+  let series_points = 120 in
   let names =
     let dir = Tool_keeper.keeper_dir config in
     if not (Sys.file_exists dir) then []
@@ -359,6 +360,37 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
             | [] -> None
             | line :: _ ->
                 (try Some (Yojson.Safe.from_string line) with _ -> None)
+          in
+
+          let metrics_series =
+            let path = Tool_keeper.keeper_metrics_path config m.name in
+            let lines =
+              Tool_keeper.read_file_tail_lines
+                path ~max_bytes:200000 ~max_lines:series_points
+            in
+            let open Yojson.Safe.Util in
+            `List (List.filter_map (fun line ->
+              try
+                let j = Yojson.Safe.from_string line in
+                let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+                let ratio = Safe_ops.json_float ~default:0.0 "context_ratio" j in
+                let tokens = Safe_ops.json_int ~default:0 "context_tokens" j in
+                let max = Safe_ops.json_int ~default:0 "context_max" j in
+                let compacted = Safe_ops.json_bool ~default:false "compacted" j in
+                let gen = Safe_ops.json_int ~default:m.generation "generation" j in
+                let handoff_obj = j |> member "handoff" in
+                let handoff_performed = Safe_ops.json_bool ~default:false "performed" handoff_obj in
+                Some (`Assoc [
+                  ("ts_unix", `Float ts_unix);
+                  ("context_ratio", `Float ratio);
+                  ("context_tokens", `Int tokens);
+                  ("context_max", `Int max);
+                  ("compacted", `Bool compacted);
+                  ("handoff", `Bool handoff_performed);
+                  ("generation", `Int gen);
+                ])
+              with _ -> None
+            ) lines)
           in
 
           let models_resolved =
@@ -423,6 +455,8 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               ("presence_keepalive", `Bool m.presence_keepalive);
               ("presence_keepalive_sec", `Int m.presence_keepalive_sec);
               ("keepalive_running", `Bool keepalive_running);
+              ("auto_handoff", `Bool m.auto_handoff);
+              ("handoff_threshold", `Float m.handoff_threshold);
               ("agent", agent);
               ("keeper_age_s", `Float keeper_age_s);
               ("last_turn_ago_s", `Float last_turn_ago_s);
@@ -440,6 +474,7 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               ("last_latency_ms", `Int m.last_latency_ms);
               ("compaction_count", `Int m.compaction_count);
               ("last_metrics", match last_metrics with None -> `Null | Some j -> j);
+              ("metrics_series", metrics_series);
               ("context", context);
             ]
           in

@@ -557,7 +557,21 @@
     // Single SSE connection with reconnection logic
     let evtSource = null;
     let reconnectAttempts = 0;
+    let reconnectTimer = null;
     const maxReconnectDelay = 30000;  // max 30s between retries
+    const lobbySseSessionStorageKey = 'masc_lobby_sse_session_id';
+
+    function getOrCreateLobbySseSessionId() {
+      let sid = sessionStorage.getItem(lobbySseSessionStorageKey);
+      if (sid) return sid;
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        sid = 'lobby_' + window.crypto.randomUUID();
+      } else {
+        sid = 'lobby_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+      }
+      sessionStorage.setItem(lobbySseSessionStorageKey, sid);
+      return sid;
+    }
 
     function updateSSEStatus(status) {
       const el = document.getElementById('sse-status');
@@ -570,10 +584,15 @@
       }
 
       updateSSEStatus('🟡');  // connecting
-      evtSource = new EventSource('http://127.0.0.1:8935/sse?room=me');
+      const sid = encodeURIComponent(getOrCreateLobbySseSessionId());
+      evtSource = new EventSource(`http://127.0.0.1:8935/sse?room=me&session_id=${sid}`);
 
       evtSource.onopen = () => {
         reconnectAttempts = 0;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
         updateSSEStatus('🟢');  // connected
         addLocalEvent('✅ SSE connected');
       };
@@ -594,12 +613,17 @@
       evtSource.onerror = (err) => {
         updateSSEStatus('🔴');  // disconnected
         evtSource.close();
+        evtSource = null;
 
         // Exponential backoff reconnect
+        if (reconnectTimer) return;
         reconnectAttempts++;
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
         addLocalEvent(`⚠️ SSE disconnected, reconnecting in ${delay/1000}s...`);
-        setTimeout(connectSSE, delay);
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connectSSE();
+        }, delay);
       };
     }
 
@@ -608,6 +632,10 @@
       if (evtSource) {
         evtSource.close();
         evtSource = null;
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
       // Leave room
       navigator.sendBeacon(MCP_URL, JSON.stringify({

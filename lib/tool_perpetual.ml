@@ -186,7 +186,29 @@ let handle_status args =
   | Some id ->
     match Hashtbl.find_opt active_agents id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
-    | Some (state, _config) -> Perpetual_loop.status state
+    | Some (state, config) ->
+      let base = Perpetual_loop.status state in
+      (match base with
+       | `Assoc fields ->
+         let models =
+           `List (List.map (fun (m : Llm_client.model_spec) ->
+             `Assoc [
+               ("provider", `String (Llm_client.string_of_provider m.provider));
+               ("model_id", `String m.model_id);
+               ("max_context", `Int m.max_context);
+               ("api_key_env", match m.api_key_env with None -> `Null | Some k -> `String k);
+             ]
+           ) config.model_cascade)
+         in
+         `Assoc ([
+           ("goal", `String config.initial_goal);
+           ("model_cascade", models);
+           ("heartbeat_interval_s", `Float config.heartbeat_interval_s);
+           ("compact_threshold", `Float config.compact_threshold);
+           ("prepare_threshold", `Float config.prepare_threshold);
+           ("handoff_threshold", `Float config.handoff_threshold);
+         ] @ fields)
+       | other -> other)
 
 let handle_stop args =
   let open Yojson.Safe.Util in

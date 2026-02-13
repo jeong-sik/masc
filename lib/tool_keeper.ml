@@ -87,13 +87,25 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
 
   {
     name = "masc_keeper_status";
-    description = "Get keeper status (meta + current context stats).";
+    description = "Get keeper status (meta + current context stats + monitoring tails).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("name", `Assoc [
           ("type", `String "string");
           ("description", `String "Keeper handle");
+        ]);
+        ("tail_turns", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "How many recent turns to include from keeper metrics (default: 5).");
+        ]);
+        ("tail_messages", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "How many recent history messages to include (default: 10).");
+        ]);
+        ("tail_bytes", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "How many bytes from the end of files to scan for tails (default: 200000).");
         ]);
       ]);
       ("required", `List [`String "name"]);
@@ -247,6 +259,7 @@ type keeper_meta = {
   name: string;
   agent_name: string;
   trace_id: string;
+  trace_history: string list;
   goal: string;
   models: string list;
   generation: int;
@@ -260,6 +273,21 @@ type keeper_meta = {
   last_handoff_ts: float;
   created_at: string;
   updated_at: string;
+  total_turns: int;
+  total_input_tokens: int;
+  total_output_tokens: int;
+  total_tokens: int;
+  total_cost_usd: float;
+  last_turn_ts: float;
+  last_model_used: string;
+  last_input_tokens: int;
+  last_output_tokens: int;
+  last_total_tokens: int;
+  last_latency_ms: int;
+  compaction_count: int;
+  last_compaction_ts: float;
+  last_compaction_before_tokens: int;
+  last_compaction_after_tokens: int;
 }
 
 let now_iso () = Types.now_iso ()
@@ -269,6 +297,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("name", `String m.name);
     ("agent_name", `String m.agent_name);
     ("trace_id", `String m.trace_id);
+    ("trace_history", `List (List.map (fun s -> `String s) m.trace_history));
     ("goal", `String m.goal);
     ("models", `List (List.map (fun s -> `String s) m.models));
     ("generation", `Int m.generation);
@@ -282,6 +311,21 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("last_handoff_ts", `Float m.last_handoff_ts);
     ("created_at", `String m.created_at);
     ("updated_at", `String m.updated_at);
+    ("total_turns", `Int m.total_turns);
+    ("total_input_tokens", `Int m.total_input_tokens);
+    ("total_output_tokens", `Int m.total_output_tokens);
+    ("total_tokens", `Int m.total_tokens);
+    ("total_cost_usd", `Float m.total_cost_usd);
+    ("last_turn_ts", `Float m.last_turn_ts);
+    ("last_model_used", `String m.last_model_used);
+    ("last_input_tokens", `Int m.last_input_tokens);
+    ("last_output_tokens", `Int m.last_output_tokens);
+    ("last_total_tokens", `Int m.last_total_tokens);
+    ("last_latency_ms", `Int m.last_latency_ms);
+    ("compaction_count", `Int m.compaction_count);
+    ("last_compaction_ts", `Float m.last_compaction_ts);
+    ("last_compaction_before_tokens", `Int m.last_compaction_before_tokens);
+    ("last_compaction_after_tokens", `Int m.last_compaction_after_tokens);
   ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
@@ -289,6 +333,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let name = Safe_ops.json_string ~default:"" "name" json in
     let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
     let trace_id = Safe_ops.json_string ~default:"" "trace_id" json in
+    let trace_history =
+      Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
+    in
     let goal = Safe_ops.json_string ~default:"" "goal" json in
     let models = Safe_ops.json_string_list "models" json in
     let generation = Safe_ops.json_int ~default:0 "generation" json in
@@ -302,6 +349,21 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
     let created_at = Safe_ops.json_string ~default:"" "created_at" json in
     let updated_at = Safe_ops.json_string ~default:"" "updated_at" json in
+    let total_turns = Safe_ops.json_int ~default:0 "total_turns" json in
+    let total_input_tokens = Safe_ops.json_int ~default:0 "total_input_tokens" json in
+    let total_output_tokens = Safe_ops.json_int ~default:0 "total_output_tokens" json in
+    let total_tokens = Safe_ops.json_int ~default:0 "total_tokens" json in
+    let total_cost_usd = Safe_ops.json_float ~default:0.0 "total_cost_usd" json in
+    let last_turn_ts = Safe_ops.json_float ~default:0.0 "last_turn_ts" json in
+    let last_model_used = Safe_ops.json_string ~default:"" "last_model_used" json in
+    let last_input_tokens = Safe_ops.json_int ~default:0 "last_input_tokens" json in
+    let last_output_tokens = Safe_ops.json_int ~default:0 "last_output_tokens" json in
+    let last_total_tokens = Safe_ops.json_int ~default:0 "last_total_tokens" json in
+    let last_latency_ms = Safe_ops.json_int ~default:0 "last_latency_ms" json in
+    let compaction_count = Safe_ops.json_int ~default:0 "compaction_count" json in
+    let last_compaction_ts = Safe_ops.json_float ~default:0.0 "last_compaction_ts" json in
+    let last_compaction_before_tokens = Safe_ops.json_int ~default:0 "last_compaction_before_tokens" json in
+    let last_compaction_after_tokens = Safe_ops.json_int ~default:0 "last_compaction_after_tokens" json in
     if not (validate_name name) then
       Error "invalid keeper meta (bad name)"
     else if not (validate_name trace_id) then
@@ -311,6 +373,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         name;
         agent_name = if agent_name = "" then keeper_agent_name name else agent_name;
         trace_id;
+        trace_history;
         goal;
         models;
         generation;
@@ -324,6 +387,21 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         last_handoff_ts;
         created_at = if created_at = "" then now_iso () else created_at;
         updated_at = if updated_at = "" then now_iso () else updated_at;
+        total_turns;
+        total_input_tokens;
+        total_output_tokens;
+        total_tokens;
+        total_cost_usd;
+        last_turn_ts;
+        last_model_used;
+        last_input_tokens;
+        last_output_tokens;
+        last_total_tokens;
+        last_latency_ms;
+        compaction_count;
+        last_compaction_ts;
+        last_compaction_before_tokens;
+        last_compaction_after_tokens;
       }
   with exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
@@ -374,6 +452,91 @@ let ensure_api_keys (models : Llm_client.model_spec list) : (unit, string) resul
   match missing with
   | [] -> Ok ()
   | xs -> Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
+
+let keeper_metrics_path config name =
+  Filename.concat (keeper_dir config) (name ^ ".metrics.jsonl")
+
+let append_jsonl_line path (json : Yojson.Safe.t) =
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  let fd = Unix.openfile path
+    [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let _ = Unix.write_substring fd line 0 (String.length line) in
+    ())
+
+let cost_usd_of_usage (usage : Llm_client.token_usage) (model : Llm_client.model_spec) : float =
+  let input_cost = float_of_int usage.input_tokens *. model.cost_per_1k_input /. 1000.0 in
+  let output_cost = float_of_int usage.output_tokens *. model.cost_per_1k_output /. 1000.0 in
+  input_cost +. output_cost
+
+let model_spec_for_used (specs : Llm_client.model_spec list) (model_used : string) :
+  Llm_client.model_spec option =
+  let used =
+    match String.split_on_char ':' model_used with
+    | [base; "latest"] -> base
+    | _ -> model_used
+  in
+  List.find_opt (fun (m : Llm_client.model_spec) ->
+    m.model_id = model_used || m.model_id = used
+  ) specs
+
+let read_file_tail_lines path ~max_bytes ~max_lines : string list =
+  if max_lines <= 0 || max_bytes <= 0 then []
+  else if not (Sys.file_exists path) then []
+  else
+    try
+      let ic = open_in_bin path in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let len = in_channel_length ic in
+        let start = max 0 (len - max_bytes) in
+        seek_in ic start;
+        let remaining = len - start in
+        let buf = Bytes.create remaining in
+        really_input ic buf 0 remaining;
+        let chunk = Bytes.to_string buf in
+        let lines =
+          chunk
+          |> String.split_on_char '\n'
+          |> List.filter (fun s -> String.trim s <> "")
+        in
+        let n = List.length lines in
+        let drop = max 0 (n - max_lines) in
+        lines |> List.mapi (fun i s -> (i, s)) |> List.filter (fun (i, _) -> i >= drop) |> List.map snd
+      )
+    with _ ->
+      []
+
+let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Safe.t =
+  let agent_file =
+    Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")
+  in
+  if not (Sys.file_exists agent_file) then
+    `Assoc [("exists", `Bool false)]
+  else
+    match Safe_ops.read_json_file_safe agent_file with
+    | Error _ -> `Assoc [("exists", `Bool true); ("error", `String "failed_to_read")]
+    | Ok json ->
+      (match Types.agent_of_yojson json with
+       | Error _ -> `Assoc [("exists", `Bool true); ("error", `String "failed_to_parse")]
+       | Ok (agent : Types.agent) ->
+         let now_ts = Time_compat.now () in
+         let joined_ts = Resilience.Time.parse_iso8601_opt agent.joined_at |> Option.value ~default:0.0 in
+         let last_seen_ts = Resilience.Time.parse_iso8601_opt agent.last_seen |> Option.value ~default:0.0 in
+         let age_s = if joined_ts <= 0.0 then 0.0 else now_ts -. joined_ts in
+         let last_seen_ago_s = if last_seen_ts <= 0.0 then 0.0 else now_ts -. last_seen_ts in
+         `Assoc [
+           ("exists", `Bool true);
+           ("name", `String agent.name);
+           ("agent_type", `String agent.agent_type);
+           ("status", `String (Types.string_of_agent_status agent.status));
+           ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
+           ("current_task", match agent.current_task with None -> `Null | Some t -> `String t);
+           ("joined_at", `String agent.joined_at);
+           ("last_seen", `String agent.last_seen);
+           ("age_s", `Float age_s);
+           ("last_seen_ago_s", `Float last_seen_ago_s);
+           ("is_zombie", `Bool (Room.is_zombie_agent agent.last_seen));
+         ])
 
 let build_keeper_system_prompt goal =
   Printf.sprintf
@@ -497,6 +660,7 @@ let handle_keeper_up ctx args : tool_result =
                name;
                agent_name = keeper_agent_name name;
                trace_id;
+               trace_history = [];
                goal;
                models = models_in;
                generation = 0;
@@ -510,6 +674,21 @@ let handle_keeper_up ctx args : tool_result =
                last_handoff_ts = 0.0;
                created_at = now_iso ();
                updated_at = now_iso ();
+               total_turns = 0;
+               total_input_tokens = 0;
+               total_output_tokens = 0;
+               total_tokens = 0;
+               total_cost_usd = 0.0;
+               last_turn_ts = 0.0;
+               last_model_used = "";
+               last_input_tokens = 0;
+               last_output_tokens = 0;
+               last_total_tokens = 0;
+               last_latency_ms = 0;
+               compaction_count = 0;
+               last_compaction_ts = 0.0;
+               last_compaction_before_tokens = 0;
+               last_compaction_after_tokens = 0;
              } in
              match write_meta ctx.config meta with
              | Error e -> (false, "❌ " ^ e)
@@ -560,6 +739,9 @@ let handle_keeper_status ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some m) ->
+      let tail_turns = max 0 (get_int args "tail_turns" 5) in
+      let tail_messages = max 0 (get_int args "tail_messages" 10) in
+      let tail_bytes = max 1_000 (get_int args "tail_bytes" 200_000) in
       let models = m.models in
       (match model_specs_of_strings models with
        | Error e -> (false, "❌ " ^ e)
@@ -579,10 +761,66 @@ let handle_keeper_status ctx args : tool_result =
              ]
          in
          let keepalive_running = `Bool (Hashtbl.mem keepalives m.name) in
+         let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
+         let now_ts = Time_compat.now () in
+         let created_ts =
+           Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+         in
+         let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
+         let last_turn_ago_s = if m.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.last_turn_ts in
+         let last_handoff_ago_s = if m.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.last_handoff_ts in
+         let last_compaction_ago_s = if m.last_compaction_ts <= 0.0 then 0.0 else now_ts -. m.last_compaction_ts in
+
+         let models_resolved = `List (List.map (fun (s : Llm_client.model_spec) ->
+           `Assoc [
+             ("provider", `String (Llm_client.string_of_provider s.provider));
+             ("model_id", `String s.model_id);
+             ("max_context", `Int s.max_context);
+             ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);
+           ]
+         ) specs) in
+
+         let metrics_tail =
+           let lines = read_file_tail_lines (keeper_metrics_path ctx.config m.name)
+             ~max_bytes:tail_bytes ~max_lines:tail_turns in
+           `List (List.filter_map (fun line ->
+             try Some (Yojson.Safe.from_string line) with _ -> None
+           ) lines)
+         in
+
+         let history_tail =
+           let history_path =
+             Filename.concat (Filename.concat (session_base_dir ctx.config) m.trace_id) "history.jsonl"
+           in
+           let lines = read_file_tail_lines history_path
+             ~max_bytes:tail_bytes ~max_lines:tail_messages in
+           let open Yojson.Safe.Util in
+           `List (List.filter_map (fun line ->
+             try
+               let j = Yojson.Safe.from_string line in
+               let role = j |> member "role" |> to_string_option |> Option.value ~default:"unknown" in
+               let content = j |> member "content" |> to_string_option |> Option.value ~default:"" in
+               let preview =
+                 if String.length content > 200 then String.sub content 0 200 ^ "..."
+                 else content
+               in
+               Some (`Assoc [("role", `String role); ("content", `String preview)])
+             with _ -> None
+           ) lines)
+         in
+
          let json = `Assoc [
            ("meta", meta_to_json m);
            ("keepalive_running", keepalive_running);
+           ("agent", agent_status);
+           ("keeper_age_s", `Float keeper_age_s);
+           ("last_turn_ago_s", `Float last_turn_ago_s);
+           ("last_handoff_ago_s", `Float last_handoff_ago_s);
+           ("last_compaction_ago_s", `Float last_compaction_ago_s);
+           ("models_resolved", models_resolved);
            ("context", ctx_stats);
+           ("metrics_tail", metrics_tail);
+           ("history_tail", history_tail);
          ] in
          (true, Yojson.Safe.pretty_to_string json))
 
@@ -611,6 +849,7 @@ let handle_keeper_msg ctx args : tool_result =
             name;
             agent_name = keeper_agent_name name;
             trace_id;
+            trace_history = [];
             goal;
             models = inline_models;
             generation = 0;
@@ -624,6 +863,21 @@ let handle_keeper_msg ctx args : tool_result =
             last_handoff_ts = 0.0;
             created_at = now_iso ();
             updated_at = now_iso ();
+            total_turns = 0;
+            total_input_tokens = 0;
+            total_output_tokens = 0;
+            total_tokens = 0;
+            total_cost_usd = 0.0;
+            last_turn_ts = 0.0;
+            last_model_used = "";
+            last_input_tokens = 0;
+            last_output_tokens = 0;
+            last_total_tokens = 0;
+            last_latency_ms = 0;
+            compaction_count = 0;
+            last_compaction_ts = 0.0;
+            last_compaction_before_tokens = 0;
+            last_compaction_after_tokens = 0;
           } in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;
@@ -701,31 +955,99 @@ let handle_keeper_msg ctx args : tool_result =
               let assistant_msg = Llm_client.assistant_msg resp.content in
               let ctx_work = Context_manager.append ctx_work assistant_msg in
               Context_manager.persist_message session assistant_msg;
+              let now_ts = Time_compat.now () in
+              let used_model =
+                model_spec_for_used specs resp.model_used
+                |> Option.value ~default:primary
+              in
+              let cost_usd = cost_usd_of_usage resp.usage used_model in
+
               (* Compact opportunistically to control growth. *)
+              let before_compact_tokens = ctx_work.token_count in
               let ctx_work = compact_if_needed ctx_work in
+              let after_compact_tokens = ctx_work.token_count in
+              let compacted = after_compact_tokens < before_compact_tokens in
 
               let ctx_ratio = Context_manager.context_ratio ctx_work in
-              let now_ts = Time_compat.now () in
+              let meta_turn = { meta with
+                updated_at = now_iso ();
+                total_turns = meta.total_turns + 1;
+                total_input_tokens = meta.total_input_tokens + resp.usage.input_tokens;
+                total_output_tokens = meta.total_output_tokens + resp.usage.output_tokens;
+                total_tokens = meta.total_tokens + resp.usage.total_tokens;
+                total_cost_usd = meta.total_cost_usd +. cost_usd;
+                last_turn_ts = now_ts;
+                last_model_used = resp.model_used;
+                last_input_tokens = resp.usage.input_tokens;
+                last_output_tokens = resp.usage.output_tokens;
+                last_total_tokens = resp.usage.total_tokens;
+                last_latency_ms = resp.latency_ms;
+                compaction_count = meta.compaction_count + (if compacted then 1 else 0);
+                last_compaction_ts = (if compacted then now_ts else meta.last_compaction_ts);
+                last_compaction_before_tokens =
+                  (if compacted then before_compact_tokens else meta.last_compaction_before_tokens);
+                last_compaction_after_tokens =
+                  (if compacted then after_compact_tokens else meta.last_compaction_after_tokens);
+              } in
+
+              ignore (save_checkpoint session ctx_work ~generation:meta_turn.generation);
+
               let do_handoff =
-                meta.auto_handoff &&
-                ctx_ratio >= meta.handoff_threshold &&
-                (now_ts -. meta.last_handoff_ts >= float_of_int meta.handoff_cooldown_sec)
+                meta_turn.auto_handoff &&
+                ctx_ratio >= meta_turn.handoff_threshold &&
+                (now_ts -. meta_turn.last_handoff_ts >= float_of_int meta_turn.handoff_cooldown_sec)
               in
 
+              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
+
               if not do_handoff then begin
-                ignore (save_checkpoint session ctx_work ~generation:meta.generation);
+                (match write_meta ctx.config meta_turn with
+                 | Ok () -> ()
+                 | Error e -> Printf.eprintf "[keeper:%s] failed to write meta: %s\n%!" meta_turn.name e);
+
+                (try
+                   let metrics_json = `Assoc [
+                     ("ts", `String (now_iso ()));
+                     ("ts_unix", `Float now_ts);
+                     ("name", `String meta_turn.name);
+                     ("agent_name", `String meta_turn.agent_name);
+                     ("trace_id", `String meta_turn.trace_id);
+                     ("generation", `Int meta_turn.generation);
+                     ("model_used", `String resp.model_used);
+                     ("usage", `Assoc [
+                       ("input_tokens", `Int resp.usage.input_tokens);
+                       ("output_tokens", `Int resp.usage.output_tokens);
+                       ("total_tokens", `Int resp.usage.total_tokens);
+                     ]);
+                     ("latency_ms", `Int resp.latency_ms);
+                     ("cost_usd", `Float cost_usd);
+                     ("context_ratio", `Float ctx_ratio);
+                     ("context_tokens", `Int ctx_work.token_count);
+                     ("context_max", `Int ctx_work.max_tokens);
+                     ("message_count", `Int (List.length ctx_work.messages));
+                     ("compacted", `Bool compacted);
+                     ("compaction_before_tokens", `Int before_compact_tokens);
+                     ("compaction_after_tokens", `Int after_compact_tokens);
+                     ("handoff", `Assoc [("performed", `Bool false)]);
+                   ] in
+                   append_jsonl_line metrics_path metrics_json
+                 with _ -> ());
+
                 let json = `Assoc [
-                  ("name", `String meta.name);
-                  ("trace_id", `String meta.trace_id);
-                  ("generation", `Int meta.generation);
+                  ("name", `String meta_turn.name);
+                  ("trace_id", `String meta_turn.trace_id);
+                  ("generation", `Int meta_turn.generation);
                   ("model_used", `String resp.model_used);
                   ("usage", `Assoc [
                     ("input_tokens", `Int resp.usage.input_tokens);
                     ("output_tokens", `Int resp.usage.output_tokens);
                     ("total_tokens", `Int resp.usage.total_tokens);
                   ]);
+                  ("latency_ms", `Int resp.latency_ms);
+                  ("cost_usd", `Float cost_usd);
                   ("reply", `String resp.content);
                   ("context_ratio", `Float ctx_ratio);
+                  ("compacted", `Bool compacted);
                 ] in
                 (true, Yojson.Safe.pretty_to_string json)
               end else begin
@@ -737,9 +1059,9 @@ let handle_keeper_msg ctx args : tool_result =
                   | [] -> primary
                 in
                 let metrics = Succession.{
-                  total_turns = 0;
-                  total_tokens_used = resp.usage.total_tokens;
-                  total_cost_usd = 0.0;
+                  total_turns = meta_turn.total_turns;
+                  total_tokens_used = meta_turn.total_tokens;
+                  total_cost_usd = meta_turn.total_cost_usd;
                   tasks_completed = 0;
                   errors_encountered = 0;
                   elapsed_seconds = 0.0;
@@ -747,38 +1069,78 @@ let handle_keeper_msg ctx args : tool_result =
                 let dna = Succession.extract_dna
                   ~working_ctx:ctx_work
                   ~session_ctx:session
-                  ~goal:meta.goal
-                  ~generation:meta.generation
-                  ~trace_id:meta.trace_id
+                  ~goal:meta_turn.goal
+                  ~generation:meta_turn.generation
+                  ~trace_id:meta_turn.trace_id
                   ~metrics
                 in
                 let spec = Succession.{
                   model = next_model;
                   inherit_tools = false;
-                  context_budget = meta.context_budget;
+                  context_budget = meta_turn.context_budget;
                 } in
                 let successor_ctx = Succession.hydrate dna spec in
                 let successor_trace = generate_trace_id () in
                 let successor_session = Context_manager.create_session
                   ~session_id:successor_trace ~base_dir in
-                ignore (save_checkpoint successor_session successor_ctx ~generation:(meta.generation + 1));
+                ignore (save_checkpoint successor_session successor_ctx ~generation:(meta_turn.generation + 1));
 
-                let meta' = { meta with
+                let prev_trace_id = meta_turn.trace_id in
+                let trace_history = take 20 (prev_trace_id :: meta_turn.trace_history) in
+                let meta' = { meta_turn with
                   trace_id = successor_trace;
-                  generation = meta.generation + 1;
+                  trace_history;
+                  generation = meta_turn.generation + 1;
                   last_handoff_ts = now_ts;
                   updated_at = now_iso ();
                 } in
                 ignore (write_meta ctx.config meta');
 
+                (try
+                   let metrics_json = `Assoc [
+                     ("ts", `String (now_iso ()));
+                     ("ts_unix", `Float now_ts);
+                     ("name", `String meta'.name);
+                     ("agent_name", `String meta'.agent_name);
+                     ("trace_id", `String prev_trace_id);
+                     ("generation", `Int meta_turn.generation);
+                     ("model_used", `String resp.model_used);
+                     ("usage", `Assoc [
+                       ("input_tokens", `Int resp.usage.input_tokens);
+                       ("output_tokens", `Int resp.usage.output_tokens);
+                       ("total_tokens", `Int resp.usage.total_tokens);
+                     ]);
+                     ("latency_ms", `Int resp.latency_ms);
+                     ("cost_usd", `Float cost_usd);
+                     ("context_ratio", `Float ctx_ratio);
+                     ("context_tokens", `Int ctx_work.token_count);
+                     ("context_max", `Int ctx_work.max_tokens);
+                     ("message_count", `Int (List.length ctx_work.messages));
+                     ("compacted", `Bool compacted);
+                     ("compaction_before_tokens", `Int before_compact_tokens);
+                     ("compaction_after_tokens", `Int after_compact_tokens);
+                     ("handoff", `Assoc [
+                       ("performed", `Bool true);
+                       ("prev_trace_id", `String prev_trace_id);
+                       ("new_trace_id", `String meta'.trace_id);
+                       ("to_model", `String next_model.model_id);
+                       ("new_generation", `Int meta'.generation);
+                     ]);
+                   ] in
+                   append_jsonl_line metrics_path metrics_json
+                 with _ -> ());
+
                 let json = `Assoc [
                   ("name", `String meta'.name);
                   ("reply", `String resp.content);
                   ("model_used", `String resp.model_used);
+                  ("latency_ms", `Int resp.latency_ms);
+                  ("cost_usd", `Float cost_usd);
                   ("context_ratio", `Float ctx_ratio);
+                  ("compacted", `Bool compacted);
                   ("handoff", `Assoc [
                     ("performed", `Bool true);
-                    ("prev_trace_id", `String meta.trace_id);
+                    ("prev_trace_id", `String prev_trace_id);
                     ("new_trace_id", `String meta'.trace_id);
                     ("to_model", `String next_model.model_id);
                     ("new_generation", `Int meta'.generation);

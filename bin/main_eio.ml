@@ -1152,6 +1152,40 @@ let set_sse_active_connections_metric () =
   Masc_mcp.Prometheus.set_gauge "masc_sse_connections_active"
     (float_of_int (Sse.client_count ()))
 
+let record_sse_reject_metric ~endpoint ~reason =
+  Masc_mcp.Prometheus.inc_counter "masc_sse_rejects_total"
+    ~labels:[("endpoint", endpoint); ("reason", reason)] ()
+
+let respond_sse_rejected
+    reqd
+    ~session_id
+    ~protocol_version
+    ~origin
+    ~endpoint
+    ~(reason : Sse.admission_reject_reason)
+    ~retry_ms
+  =
+  let reason_label = Sse.admission_reason_to_string reason in
+  let retry_after_s =
+    max 1 (int_of_float (ceil (float_of_int retry_ms /. 1000.0)))
+  in
+  record_sse_reject_metric ~endpoint ~reason:reason_label;
+  let body =
+    Yojson.Safe.to_string (`Assoc [
+      ("error", `String "sse_connection_rate_limited");
+      ("reason", `String reason_label);
+      ("retry_after_ms", `Int retry_ms);
+      ("session_id", `String session_id);
+    ])
+  in
+  let headers = Httpun.Headers.of_list (
+    ("content-length", string_of_int (String.length body))
+    :: ("retry-after", string_of_int retry_after_s)
+    :: json_headers session_id protocol_version origin
+  ) in
+  let response = Httpun.Response.create ~headers `Too_many_requests in
+  Httpun.Reqd.respond_with_string reqd response body
+
 let close_sse_conn info =
   if not info.closed then begin
     info.closed <- true;
@@ -1216,100 +1250,106 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
     | None -> "mcp"
   in
 
-  (* Replace existing connection for session_id *)
-  if Hashtbl.mem sse_conn_by_session session_id then
-    Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
-      ~labels:[("endpoint", endpoint_label)] ();
-  stop_sse_session session_id;
+  match Sse.admit_connection session_id with
+  | Rejected { reason; retry_ms } ->
+      respond_sse_rejected reqd
+        ~session_id ~protocol_version ~origin
+        ~endpoint:endpoint_label ~reason ~retry_ms
+  | Allowed ->
+      (* Replace existing connection for session_id *)
+      if Hashtbl.mem sse_conn_by_session session_id then
+        Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
+          ~labels:[("endpoint", endpoint_label)] ();
+      stop_sse_session session_id;
 
-  let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
-  let response = Httpun.Response.create ~headers `OK in
-  let writer = Httpun.Reqd.respond_with_streaming reqd response in
-  let mutex = Eio.Mutex.create () in
-  let info_ref : sse_conn_info option ref = ref None in
-  let push event =
-    match !info_ref with
-    | None -> ()
-    | Some info -> ignore (send_raw info event)
-  in
-  let (client_id, evicted) =
-    Sse.register session_id ~push
-      ~last_event_id:(Option.value ~default:0 last_event_id)
-  in
-  (* Clean up writer for evicted session *)
-  (match evicted with
-   | Some evicted_sid ->
-       Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
-         ~labels:[("endpoint", endpoint_label)] ();
-       stop_sse_session evicted_sid
-   | None -> ());
-  let info = {
-    session_id;
-    client_id;
-    writer;
-    mutex;
-    stop = ref false;
-    closed = false;
-  } in
-  info_ref := Some info;
-  Hashtbl.replace sse_conn_by_session session_id info;
-  set_sse_active_connections_metric ();
+      let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
+      let response = Httpun.Response.create ~headers `OK in
+      let writer = Httpun.Reqd.respond_with_streaming reqd response in
+      let mutex = Eio.Mutex.create () in
+      let info_ref : sse_conn_info option ref = ref None in
+      let push event =
+        match !info_ref with
+        | None -> ()
+        | Some info -> ignore (send_raw info event)
+      in
+      let (client_id, evicted) =
+        Sse.register session_id ~push
+          ~last_event_id:(Option.value ~default:0 last_event_id)
+      in
+      (* Clean up writer for evicted session *)
+      (match evicted with
+       | Some evicted_sid ->
+           Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
+             ~labels:[("endpoint", endpoint_label)] ();
+           stop_sse_session evicted_sid
+       | None -> ());
+      let info = {
+        session_id;
+        client_id;
+        writer;
+        mutex;
+        stop = ref false;
+        closed = false;
+      } in
+      info_ref := Some info;
+      Hashtbl.replace sse_conn_by_session session_id info;
+      set_sse_active_connections_metric ();
 
-  (* Send priming event first *)
-  ignore (send_raw info (sse_prime_event ()));
+      (* Send priming event first *)
+      ignore (send_raw info (sse_prime_event ()));
 
-  (* Legacy SSE transport: provide messages endpoint (event: endpoint) *)
-  (match legacy_messages_endpoint with
-   | None -> ()
-   | Some f ->
-       let endpoint_url = f session_id in
-       ignore (send_raw info (Sse.format_event ~event_type:"endpoint" endpoint_url)));
+      (* Legacy SSE transport: provide messages endpoint (event: endpoint) *)
+      (match legacy_messages_endpoint with
+       | None -> ()
+       | Some f ->
+           let endpoint_url = f session_id in
+           ignore (send_raw info (Sse.format_event ~event_type:"endpoint" endpoint_url)));
 
-  (* Replay missed events if Last-Event-ID provided (MCP spec MUST) *)
-  (match last_event_id with
-   | Some last_id ->
-       let missed = Sse.get_events_after last_id in
-       List.iter (fun ev -> ignore (send_raw info ev)) missed
-   | None -> ());
+      (* Replay missed events if Last-Event-ID provided (MCP spec MUST) *)
+      (match last_event_id with
+       | Some last_id ->
+           let missed = Sse.get_events_after last_id in
+           List.iter (fun ev -> ignore (send_raw info ev)) missed
+       | None -> ());
 
-  (* Keep-alive ping loop *)
-  (match !current_sw, !current_clock with
-   | Some sw, Some clock ->
-       Eio.Fiber.fork ~sw (fun () ->
-         let is_cancelled exn =
-           match exn with
-           | Eio.Cancel.Cancelled _ -> true
-           | _ -> false
-         in
-         let rec loop () =
-           if not !(info.stop) then begin
-             (try
-                Eio.Time.sleep clock sse_ping_interval_s
-              with exn ->
-                if is_cancelled exn then raise exn;
-                Printf.eprintf "[SSE] ping sleep error: %s\n%!" (Printexc.to_string exn));
-             (try
-                if info.closed then
-                  stop_sse_session info.session_id
-                else if not !(info.stop) then
-                  ignore (send_raw info ": ping\n\n")
-              with exn ->
-                if is_cancelled exn then raise exn;
-                Printf.eprintf "[SSE] ping send error: %s\n%!" (Printexc.to_string exn);
-                stop_sse_session info.session_id);
-             loop ()
-           end
-         in
-         try loop () with exn ->
-           if is_cancelled exn then ()
-           else Printf.eprintf "[SSE] ping loop error: %s\n%!" (Printexc.to_string exn))
-   | _ -> ());
+      (* Keep-alive ping loop *)
+      (match !current_sw, !current_clock with
+       | Some sw, Some clock ->
+           Eio.Fiber.fork ~sw (fun () ->
+             let is_cancelled exn =
+               match exn with
+               | Eio.Cancel.Cancelled _ -> true
+               | _ -> false
+             in
+             let rec loop () =
+               if not !(info.stop) then begin
+                 (try
+                    Eio.Time.sleep clock sse_ping_interval_s
+                  with exn ->
+                    if is_cancelled exn then raise exn;
+                    Printf.eprintf "[SSE] ping sleep error: %s\n%!" (Printexc.to_string exn));
+                 (try
+                    if info.closed then
+                      stop_sse_session info.session_id
+                    else if not !(info.stop) then
+                      ignore (send_raw info ": ping\n\n")
+                  with exn ->
+                    if is_cancelled exn then raise exn;
+                    Printf.eprintf "[SSE] ping send error: %s\n%!" (Printexc.to_string exn);
+                    stop_sse_session info.session_id);
+                 loop ()
+               end
+             in
+             try loop () with exn ->
+               if is_cancelled exn then ()
+               else Printf.eprintf "[SSE] ping loop error: %s\n%!" (Printexc.to_string exn))
+       | _ -> ());
 
-  (* Only log when approaching capacity or in debug mode *)
-  let client_count = Sse.client_count () in
-  if client_count > Sse.max_clients / 2 then
-    Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
-      session_id client_count Sse.max_clients
+      (* Only log when approaching capacity or in debug mode *)
+      let client_count = Sse.client_count () in
+      if client_count > Sse.max_clients / 2 then
+        Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
+          session_id client_count Sse.max_clients
 
 (** SSE simple handler - for compatibility, returns single event *)
 let sse_simple_handler request reqd =
@@ -1427,97 +1467,103 @@ let make_routes ~port ~host =
        let room_id = Option.value ~default:"default" (query_param request "room") in
        let last_event_id = get_last_event_id request in
 
-       if Hashtbl.mem sse_conn_by_session session_id then
-         Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
-           ~labels:[("endpoint", "ag_ui")] ();
-       stop_sse_session session_id;
+       match Sse.admit_connection session_id with
+       | Rejected { reason; retry_ms } ->
+           respond_sse_rejected reqd
+             ~session_id ~protocol_version ~origin
+             ~endpoint:"ag_ui" ~reason ~retry_ms
+       | Allowed ->
+           if Hashtbl.mem sse_conn_by_session session_id then
+             Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
+               ~labels:[("endpoint", "ag_ui")] ();
+           stop_sse_session session_id;
 
-       let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
-       let response = Httpun.Response.create ~headers `OK in
-       let writer = Httpun.Reqd.respond_with_streaming reqd response in
-       let mutex = Eio.Mutex.create () in
-       let info_ref : sse_conn_info option ref = ref None in
-       let push event =
-         match !info_ref with
-         | None -> ()
-         | Some info ->
-           (* Translate MASC SSE data to AG-UI event format.
-              Parse the JSON from the SSE data line and re-emit as AG-UI CUSTOM. *)
-           let ag_ui_event =
-             try
-               (* Extract JSON from SSE format: "id: N\nevent: type\ndata: {...}\n\n" *)
-               let lines = String.split_on_char '\n' event in
-               let data_line = List.find_opt (fun l ->
-                 String.length l > 6 && String.sub l 0 6 = "data: "
-               ) lines in
-               match data_line with
-               | Some dl ->
-                 let json_str = String.sub dl 6 (String.length dl - 6) in
-                 let json = Yojson.Safe.from_string json_str in
-                 let ag_event = Masc_mcp.Ag_ui.of_custom ~room_id
-                   ~name:"MASC_EVENT" json in
-                 Masc_mcp.Ag_ui.event_to_sse ag_event
-               | None -> event  (* Pass through if no data line *)
-             with _ -> event  (* Pass through on parse error *)
+           let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
+           let response = Httpun.Response.create ~headers `OK in
+           let writer = Httpun.Reqd.respond_with_streaming reqd response in
+           let mutex = Eio.Mutex.create () in
+           let info_ref : sse_conn_info option ref = ref None in
+           let push event =
+             match !info_ref with
+             | None -> ()
+             | Some info ->
+               (* Translate MASC SSE data to AG-UI event format.
+                  Parse the JSON from the SSE data line and re-emit as AG-UI CUSTOM. *)
+               let ag_ui_event =
+                 try
+                   (* Extract JSON from SSE format: "id: N\nevent: type\ndata: {...}\n\n" *)
+                   let lines = String.split_on_char '\n' event in
+                   let data_line = List.find_opt (fun l ->
+                     String.length l > 6 && String.sub l 0 6 = "data: "
+                   ) lines in
+                   match data_line with
+                   | Some dl ->
+                     let json_str = String.sub dl 6 (String.length dl - 6) in
+                     let json = Yojson.Safe.from_string json_str in
+                     let ag_event = Masc_mcp.Ag_ui.of_custom ~room_id
+                       ~name:"MASC_EVENT" json in
+                     Masc_mcp.Ag_ui.event_to_sse ag_event
+                   | None -> event  (* Pass through if no data line *)
+                 with _ -> event  (* Pass through on parse error *)
+               in
+               ignore (send_raw info ag_ui_event)
            in
-           ignore (send_raw info ag_ui_event)
-       in
-       let (client_id, evicted) =
-         Sse.register session_id ~push
-           ~last_event_id:(Option.value ~default:0 last_event_id)
-       in
-       (match evicted with
-        | Some evicted_sid ->
-            Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
-              ~labels:[("endpoint", "ag_ui")] ();
-            stop_sse_session evicted_sid
-        | None -> ());
-       let info = {
-         session_id;
-         client_id;
-         writer;
-         mutex;
-         stop = ref false;
-         closed = false;
-       } in
-       info_ref := Some info;
-       Hashtbl.replace sse_conn_by_session session_id info;
-       set_sse_active_connections_metric ();
+           let (client_id, evicted) =
+             Sse.register session_id ~push
+               ~last_event_id:(Option.value ~default:0 last_event_id)
+           in
+           (match evicted with
+            | Some evicted_sid ->
+                Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
+                  ~labels:[("endpoint", "ag_ui")] ();
+                stop_sse_session evicted_sid
+            | None -> ());
+           let info = {
+             session_id;
+             client_id;
+             writer;
+             mutex;
+             stop = ref false;
+             closed = false;
+           } in
+           info_ref := Some info;
+           Hashtbl.replace sse_conn_by_session session_id info;
+           set_sse_active_connections_metric ();
 
-       (* Send AG-UI priming: RUN_STARTED event *)
-       let prime = Masc_mcp.Ag_ui.(
-         make_event ~thread_id:room_id
-           ~run_id:(Some session_id)
-           Run_started
-         |> event_to_sse
-       ) in
-       ignore (send_raw info prime);
+           (* Send AG-UI priming: RUN_STARTED event *)
+           let prime = Masc_mcp.Ag_ui.(
+             make_event ~thread_id:room_id
+               ~run_id:(Some session_id)
+               Run_started
+             |> event_to_sse
+           ) in
+           ignore (send_raw info prime);
 
-       (* Replay missed events *)
-       (match last_event_id with
-        | Some last_id ->
-          let missed = Sse.get_events_after last_id in
-          List.iter (fun ev -> ignore (send_raw info ev)) missed
-        | None -> ());
+           (* Replay missed events *)
+           (match last_event_id with
+            | Some last_id ->
+              let missed = Sse.get_events_after last_id in
+              List.iter (fun ev -> ignore (send_raw info ev)) missed
+            | None -> ());
 
-       (* Keep-alive ping *)
-       (match !current_sw, !current_clock with
-        | Some sw, Some clock ->
-          Eio.Fiber.fork ~sw (fun () ->
-            let rec loop () =
-              if not !(info.stop) then begin
-                (try Eio.Time.sleep clock sse_ping_interval_s
-                 with _ -> ());
-                (try
-                   if info.closed then stop_sse_session info.session_id
-                   else if not !(info.stop) then
-                     ignore (send_raw info ": ping\n\n")
-                 with _ -> stop_sse_session info.session_id);
-                loop ()
-              end
-            in
-            try loop () with _ -> ())
-        | _ -> ()))
+           (* Keep-alive ping *)
+           (match !current_sw, !current_clock with
+            | Some sw, Some clock ->
+              Eio.Fiber.fork ~sw (fun () ->
+                let rec loop () =
+                  if not !(info.stop) then begin
+                    (try Eio.Time.sleep clock sse_ping_interval_s
+                     with _ -> ());
+                    (try
+                       if info.closed then stop_sse_session info.session_id
+                       else if not !(info.stop) then
+                         ignore (send_raw info ": ping\n\n")
+                     with _ -> stop_sse_session info.session_id);
+                    loop ()
+                  end
+                in
+                try loop () with _ -> ())
+            | _ -> ()))
   |> Http.Router.get "/dashboard" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          Http.Response.html_cached

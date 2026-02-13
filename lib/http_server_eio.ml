@@ -390,14 +390,16 @@ module Router = struct
   let dispatch routes request reqd =
     let req_path = Request.path request in
     let req_method = Request.method_ request in
-    match List.find_opt (fun r -> String.equal r.path req_path) routes with
-    | Some route ->
-        if List.mem req_method route.methods then
-          route.handler request reqd
+    let path_matches =
+      List.filter (fun route -> String.equal route.path req_path) routes
+    in
+    match List.find_opt (fun route -> List.mem req_method route.methods) path_matches with
+    | Some route -> route.handler request reqd
+    | None ->
+        if path_matches = [] then
+          Response.not_found reqd
         else
           Response.method_not_allowed reqd
-    | None ->
-        Response.not_found reqd
 end
 
 (** Health check endpoint - JSON response *)

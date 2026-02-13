@@ -62,6 +62,10 @@ val exceeds_threshold : working_context -> float -> bool
 (** Create an empty working context for a given model. *)
 val create : system_prompt:string -> max_tokens:int -> working_context
 
+(** Replace the system prompt and recompute token_count.
+    Useful when a keeper/perpetual goal or instructions change, while keeping messages. *)
+val set_system_prompt : working_context -> system_prompt:string -> working_context
+
 (** Append a message to working context, updating token count. *)
 val append : working_context -> Llm_client.message -> working_context
 
@@ -78,6 +82,10 @@ val apply_strategy : working_context -> compaction_strategy -> working_context
 
 (** Apply a pipeline of compaction strategies in order. *)
 val compact : working_context -> compaction_strategy list -> working_context
+
+(** Extract [STATE] ... [/STATE] blocks from free-form text.
+    Returns the block bodies in appearance order. *)
+val extract_state_blocks : string -> string list
 
 (** {1 Serialization} *)
 

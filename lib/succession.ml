@@ -68,52 +68,171 @@ let merge_metrics a b = {
 
 (** Build a progress summary from the most recent assistant messages. *)
 let build_progress_summary (msgs : Llm_client.message list) : string =
-  let assistant_msgs = List.filter (fun (m : Llm_client.message) ->
-    m.role = Llm_client.Assistant
-  ) msgs in
-  let recent = match List.length assistant_msgs with
-    | n when n > 5 ->
-      (* Take last 5 assistant messages *)
-      let start = n - 5 in
-      List.filteri (fun i _ -> i >= start) assistant_msgs
-    | _ -> assistant_msgs
+  let clip s max_len =
+    if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
   in
-  let parts = List.map (fun (m : Llm_client.message) ->
-    if String.length m.content > 120
-    then String.sub m.content 0 120 ^ "..."
-    else m.content
-  ) recent in
-  String.concat "\n" parts
+  let last_opt = function
+    | [] -> None
+    | xs -> Some (List.nth xs (List.length xs - 1))
+  in
+  let latest_state_block () =
+    let rec loop = function
+      | [] -> None
+      | (m : Llm_client.message) :: rest ->
+        let blocks = Context_manager.extract_state_blocks m.content in
+        (match last_opt blocks with
+         | Some b -> Some b
+         | None -> loop rest)
+    in
+    loop (List.rev msgs)
+  in
+  match latest_state_block () with
+  | Some b ->
+    (* Prefer the structured continuity snapshot when available. *)
+    clip (Printf.sprintf "[STATE]\n%s\n[/STATE]" b) 3000
+  | None ->
+    (* Fallback heuristic: last assistant outputs, clipped. *)
+    let assistant_msgs = List.filter (fun (m : Llm_client.message) ->
+      m.role = Llm_client.Assistant
+    ) msgs in
+    let recent = match List.length assistant_msgs with
+      | n when n > 5 ->
+        let start = n - 5 in
+        List.filteri (fun i _ -> i >= start) assistant_msgs
+      | _ -> assistant_msgs
+    in
+    let parts = List.map (fun (m : Llm_client.message) ->
+      clip m.content 200
+    ) recent in
+    String.concat "\n" parts
 
 (** Extract pending actions from user messages that haven't been addressed. *)
 let extract_pending_actions (msgs : Llm_client.message list) : string list =
-  (* Simple heuristic: last user message content as pending if no assistant reply after *)
-  match List.rev msgs with
-  | [] -> []
-  | (last : Llm_client.message) :: _ when last.role = Llm_client.User ->
-    [last.content]
-  | _ -> []
+  let starts_with_ci ~prefix s =
+    let prefix = String.lowercase_ascii prefix in
+    let s = String.lowercase_ascii (String.trim s) in
+    let lp = String.length prefix in
+    String.length s >= lp && String.sub s 0 lp = prefix
+  in
+  let extract_next_from_state block =
+    let lines =
+      block
+      |> String.split_on_char '\n'
+      |> List.map String.trim
+      |> List.filter (fun l -> l <> "")
+    in
+    match List.find_opt (fun l -> starts_with_ci ~prefix:"next:" l) lines with
+    | None -> []
+    | Some l ->
+      let value =
+        match String.split_on_char ':' l with
+        | _k :: rest -> String.concat ":" rest |> String.trim
+        | [] -> ""
+      in
+      if value = "" then [] else
+        value
+        |> String.split_on_char ';'
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+        |> (fun xs -> if List.length xs > 5 then List.filteri (fun i _ -> i < 5) xs else xs)
+  in
+  let last_opt = function
+    | [] -> None
+    | xs -> Some (List.nth xs (List.length xs - 1))
+  in
+  let latest_state_block () =
+    let rec loop = function
+      | [] -> None
+      | (m : Llm_client.message) :: rest ->
+        let blocks = Context_manager.extract_state_blocks m.content in
+        (match last_opt blocks with
+         | Some b -> Some b
+         | None -> loop rest)
+    in
+    loop (List.rev msgs)
+  in
+  match latest_state_block () with
+  | Some b ->
+    let next = extract_next_from_state b in
+    if next <> [] then next else
+      (match List.rev msgs with
+       | [] -> []
+       | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [last.content]
+       | _ -> [])
+  | None ->
+    (match List.rev msgs with
+     | [] -> []
+     | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [last.content]
+     | _ -> [])
 
 (** Extract key decisions from assistant messages containing decision markers. *)
 let extract_key_decisions (msgs : Llm_client.message list) : string list =
-  let decision_markers = ["decided"; "chosen"; "selected"; "using"; "approach:";
-                          "strategy:"; "will use"; "going with"] in
-  List.filter_map (fun (m : Llm_client.message) ->
-    if m.role <> Llm_client.Assistant then None
-    else
-      let lower = String.lowercase_ascii m.content in
-      let has_marker = List.exists (fun marker ->
-        try
-          let _ = Str.search_forward (Str.regexp_string marker) lower 0 in
-          true
-        with Not_found -> false
-      ) decision_markers in
-      if has_marker then
-        Some (if String.length m.content > 150
-              then String.sub m.content 0 150 ^ "..."
-              else m.content)
-      else None
-  ) msgs
+  let starts_with_ci ~prefix s =
+    let prefix = String.lowercase_ascii prefix in
+    let s = String.lowercase_ascii (String.trim s) in
+    let lp = String.length prefix in
+    String.length s >= lp && String.sub s 0 lp = prefix
+  in
+  let extract_decisions_from_state block =
+    let lines =
+      block
+      |> String.split_on_char '\n'
+      |> List.map String.trim
+      |> List.filter (fun l -> l <> "")
+    in
+    match List.find_opt (fun l -> starts_with_ci ~prefix:"decisions:" l) lines with
+    | None -> []
+    | Some l ->
+      let value =
+        match String.split_on_char ':' l with
+        | _k :: rest -> String.concat ":" rest |> String.trim
+        | [] -> ""
+      in
+      if value = "" then [] else
+        value
+        |> String.split_on_char ';'
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+        |> (fun xs -> if List.length xs > 5 then List.filteri (fun i _ -> i < 5) xs else xs)
+  in
+  let last_opt = function
+    | [] -> None
+    | xs -> Some (List.nth xs (List.length xs - 1))
+  in
+  let latest_state_block () =
+    let rec loop = function
+      | [] -> None
+      | (m : Llm_client.message) :: rest ->
+        let blocks = Context_manager.extract_state_blocks m.content in
+        (match last_opt blocks with
+         | Some b -> Some b
+         | None -> loop rest)
+    in
+    loop (List.rev msgs)
+  in
+  match latest_state_block () with
+  | Some b ->
+    let d = extract_decisions_from_state b in
+    if d <> [] then d else []
+  | None ->
+    let decision_markers = ["decided"; "chosen"; "selected"; "using"; "approach:";
+                            "strategy:"; "will use"; "going with"] in
+    List.filter_map (fun (m : Llm_client.message) ->
+      if m.role <> Llm_client.Assistant then None
+      else
+        let lower = String.lowercase_ascii m.content in
+        let has_marker = List.exists (fun marker ->
+          try
+            let _ = Str.search_forward (Str.regexp_string marker) lower 0 in
+            true
+          with Not_found -> false
+        ) decision_markers in
+        if has_marker then
+          Some (if String.length m.content > 150
+                then String.sub m.content 0 150 ^ "..."
+                else m.content)
+        else None
+    ) msgs
 
 let extract_dna ~(working_ctx : Context_manager.working_context)
     ~(session_ctx : Context_manager.session_context)
@@ -198,7 +317,7 @@ let normalize_for_model (msgs : Llm_client.message list)
 (** Build the system prompt for a successor agent from DNA. *)
 let build_successor_system_prompt (dna : succession_dna) : string =
   let parts = [
-    sprintf "You are generation %d of a perpetual agent (trace: %s)." dna.generation dna.trace_id;
+    sprintf "You are generation %d of a continuous agent (trace: %s)." dna.generation dna.trace_id;
     sprintf "Goal: %s" dna.goal;
     "";
     sprintf "Previous progress:\n%s" dna.progress_summary;
@@ -233,18 +352,34 @@ let build_successor_system_prompt (dna : succession_dna) : string =
   String.concat "\n" with_metrics
 
 let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.working_context =
-  let system_prompt = build_successor_system_prompt dna in
-  let base_ctx = Context_manager.create
-    ~system_prompt
-    ~max_tokens:spec.model.max_context in
+  let restored_opt =
+    if dna.compressed_context = "" then None
+    else
+      try Some (Context_manager.deserialize_context
+                  dna.compressed_context ~max_tokens:spec.model.max_context)
+      with _ -> None
+  in
+  (* Preserve the previous system prompt (keeper/perpetual constitution + custom instructions).
+     This is critical for continuity across handoffs. *)
+  let inherited_prompt =
+    match restored_opt with
+    | None -> ""
+    | Some restored -> String.trim restored.system_prompt
+  in
+  let succession_prompt = build_successor_system_prompt dna in
+  let system_prompt =
+    if inherited_prompt = "" then succession_prompt
+    else inherited_prompt ^ "\n\n" ^ succession_prompt
+  in
+  let base_ctx = Context_manager.create ~system_prompt ~max_tokens:spec.model.max_context in
   (* If context budget allows, restore compressed context messages *)
-  if spec.context_budget > 0.0 && dna.compressed_context <> "" then begin
-    try
-      let restored = Context_manager.deserialize_context
-        dna.compressed_context ~max_tokens:spec.model.max_context in
+  match restored_opt with
+  | None -> base_ctx
+  | Some restored ->
+    if spec.context_budget <= 0.0 then base_ctx
+    else begin
       let budget_tokens = int_of_float
         (float_of_int spec.model.max_context *. spec.context_budget *. 0.5) in
-      (* Take messages from restored context up to budget *)
       let rec take_up_to budget acc = function
         | [] -> List.rev acc
         | m :: rest ->
@@ -255,11 +390,7 @@ let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.wor
       let transferred = take_up_to budget_tokens [] restored.messages in
       let normalized = normalize_for_model transferred spec.model in
       Context_manager.append_many base_ctx normalized
-    with _ ->
-      (* If deserialization fails, start fresh with just the system prompt *)
-      base_ctx
-  end
-  else base_ctx
+    end
 
 (* ================================================================ *)
 (* JSON Serialization                                               *)

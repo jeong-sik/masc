@@ -47,6 +47,10 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
           ("type", `String "string");
           ("description", `String "Keeper goal/system purpose (required when creating)");
         ]);
+        ("instructions", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
+        ]);
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -131,6 +135,10 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
           ("type", `String "string");
           ("description", `String "Optional: set goal when creating keeper inline");
         ]);
+        ("instructions", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: set instructions when creating keeper inline");
+        ]);
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -139,6 +147,10 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
         ("new_goal", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: replace keeper goal (persisted)");
+        ]);
+        ("new_instructions", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: replace keeper instructions (persisted)");
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);
@@ -261,6 +273,7 @@ type keeper_meta = {
   trace_id: string;
   trace_history: string list;
   goal: string;
+  instructions: string;
   models: string list;
   generation: int;
   verify: bool;
@@ -299,6 +312,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("trace_id", `String m.trace_id);
     ("trace_history", `List (List.map (fun s -> `String s) m.trace_history));
     ("goal", `String m.goal);
+    ("instructions", `String m.instructions);
     ("models", `List (List.map (fun s -> `String s) m.models));
     ("generation", `Int m.generation);
     ("verify", `Bool m.verify);
@@ -337,6 +351,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
     in
     let goal = Safe_ops.json_string ~default:"" "goal" json in
+    let instructions = Safe_ops.json_string ~default:"" "instructions" json in
     let models = Safe_ops.json_string_list "models" json in
     let generation = Safe_ops.json_int ~default:0 "generation" json in
     let verify = Safe_ops.json_bool ~default:false "verify" json in
@@ -375,6 +390,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         trace_id;
         trace_history;
         goal;
+        instructions;
         models;
         generation;
         verify;
@@ -538,13 +554,37 @@ let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Sa
            ("is_zombie", `Bool (Room.is_zombie_agent agent.last_seen));
          ])
 
-let build_keeper_system_prompt goal =
+let keeper_constitution =
+  "Continuity rules:\n\
+   - This conversation may be compacted/summarized and handed off to a successor.\n\
+   - You MUST preserve continuity by emitting a stable state block at the end of each reply.\n\
+   - The state block is used for compaction/handoff. Do not include secrets.\n\
+   - Reply in the user's language. Keep the main reply concise.\n\
+   - Do not output [GOAL_COMPLETE] unless explicitly requested.\n\
+   \n\
+   State block template (must use these exact markers):\n\
+   [STATE]\n\
+   Goal: <short>\n\
+   Progress: <short>\n\
+   Next: <0-3 items separated by ';'>\n\
+   Decisions: <0-3 items separated by ';'>\n\
+   OpenQuestions: <0-3 items separated by ';'>\n\
+   Constraints: <0-3 items separated by ';'>\n\
+   [/STATE]\n"
+
+let build_keeper_system_prompt ~goal ~instructions =
+  let custom =
+    let s = String.trim instructions in
+    if s = "" then ""
+    else Printf.sprintf "\nCustom instructions:\n%s\n" s
+  in
   Printf.sprintf
     "You are a keeper agent with persistent memory.\n\
-     Your goal: %s\n\
-     You will receive user messages. Reply clearly and concisely.\n\
-     Do not output [GOAL_COMPLETE] unless explicitly requested.\n"
-    goal
+     Goal: %s\n\
+     \n\
+     %s\
+     %s"
+    goal keeper_constitution custom
 
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
@@ -627,6 +667,7 @@ let handle_keeper_up ctx args : tool_result =
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
     let context_budget_opt = Safe_ops.json_float_opt "context_budget" args in
+    let instructions_opt = get_string_opt args "instructions" in
     match read_meta ctx.config name with
     | Error e -> (false, Printf.sprintf "❌ %s" e)
     | Ok None ->
@@ -644,6 +685,7 @@ let handle_keeper_up ctx args : tool_result =
         let handoff_threshold = Option.value ~default:0.85 handoff_threshold_opt in
         let handoff_cooldown_sec = Option.value ~default:300 handoff_cooldown_sec_opt in
         let context_budget = Option.value ~default:0.6 context_budget_opt in
+        let instructions = Option.value ~default:"" instructions_opt in
         (match model_specs_of_strings models_in with
          | Error e -> (false, "❌ " ^ e)
          | Ok specs ->
@@ -658,7 +700,7 @@ let handle_keeper_up ctx args : tool_result =
              let base_dir = session_base_dir ctx.config in
              mkdir_p base_dir;
              let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
-             let system_prompt = build_keeper_system_prompt goal in
+             let system_prompt = build_keeper_system_prompt ~goal ~instructions in
              let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
              ignore (save_checkpoint session ctx0 ~generation:0);
              let meta = {
@@ -667,6 +709,7 @@ let handle_keeper_up ctx args : tool_result =
                trace_id;
                trace_history = [];
                goal;
+               instructions;
                models = models_in;
                generation = 0;
                verify;
@@ -705,6 +748,7 @@ let handle_keeper_up ctx args : tool_result =
                  ("trace_id", `String meta.trace_id);
                  ("generation", `Int meta.generation);
                  ("goal", `String meta.goal);
+                 ("instructions", `String meta.instructions);
                  ("models", `List (List.map (fun s -> `String s) meta.models));
                  ("presence_keepalive", `Bool meta.presence_keepalive);
                  ("presence_keepalive_sec", `Int meta.presence_keepalive_sec);
@@ -718,6 +762,7 @@ let handle_keeper_up ctx args : tool_result =
       let models = if models_in <> [] then models_in else old.models in
       let updated = { old with
         goal;
+        instructions = Option.value ~default:old.instructions instructions_opt;
         models;
         verify = Option.value ~default:old.verify verify_opt;
         presence_keepalive = Option.value ~default:old.presence_keepalive presence_keepalive_opt;
@@ -838,6 +883,7 @@ let handle_keeper_msg ctx args : tool_result =
     (false, "❌ message is required")
   else
     let inline_goal = get_string_opt args "goal" in
+    let inline_instructions = get_string_opt args "instructions" in
     let inline_models = get_string_list args "models" in
     (* Ensure keeper exists (create inline if missing) *)
     let ensure_keeper () : (keeper_meta, string) result =
@@ -850,12 +896,14 @@ let handle_keeper_msg ctx args : tool_result =
         else if inline_models = [] then Error "keeper not found and models not provided"
         else
           let trace_id = generate_trace_id () in
+          let instructions = Option.value ~default:"" inline_instructions in
           let meta = {
             name;
             agent_name = keeper_agent_name name;
             trace_id;
             trace_history = [];
             goal;
+            instructions;
             models = inline_models;
             generation = 0;
             verify = false;
@@ -894,7 +942,7 @@ let handle_keeper_msg ctx args : tool_result =
               | Ok () ->
                 let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
                 let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
-                let system_prompt = build_keeper_system_prompt goal in
+                let system_prompt = build_keeper_system_prompt ~goal ~instructions in
                 let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
                 ignore (save_checkpoint session ctx0 ~generation:0);
                 match write_meta ctx.config meta with
@@ -904,12 +952,21 @@ let handle_keeper_msg ctx args : tool_result =
     match ensure_keeper () with
     | Error e -> (false, "❌ " ^ e)
     | Ok meta0 ->
-      (* Update goal if requested *)
+      (* Update keeper settings inline if requested. *)
       let meta =
-        match get_string_opt args "new_goal" with
-        | None -> meta0
-        | Some ng ->
-          let updated = { meta0 with goal = ng; updated_at = now_iso () } in
+        let goal =
+          match get_string_opt args "new_goal" with
+          | None -> meta0.goal
+          | Some ng -> ng
+        in
+        let instructions =
+          match get_string_opt args "new_instructions" with
+          | None -> meta0.instructions
+          | Some ni -> ni
+        in
+        if goal = meta0.goal && instructions = meta0.instructions then meta0
+        else
+          let updated = { meta0 with goal; instructions; updated_at = now_iso () } in
           ignore (write_meta ctx.config updated);
           updated
       in
@@ -925,13 +982,19 @@ let handle_keeper_msg ctx args : tool_result =
             mkdir_p base_dir;
             let (session, ctx_opt) = load_context_from_checkpoint
               ~trace_id:meta.trace_id ~primary_model_max_tokens:primary.max_context ~base_dir in
-            let ctx_work =
+            let base_ctx =
               match ctx_opt with
               | Some c -> c
               | None ->
                 Context_manager.create
-                  ~system_prompt:(build_keeper_system_prompt meta.goal)
+                  ~system_prompt:(build_keeper_system_prompt ~goal:meta.goal ~instructions:meta.instructions)
                   ~max_tokens:primary.max_context
+            in
+            let ctx_work =
+              (* Always re-apply the current keeper prompt so goal/instructions updates
+                 actually take effect even when restoring an old checkpoint. *)
+              Context_manager.set_system_prompt base_ctx
+                ~system_prompt:(build_keeper_system_prompt ~goal:meta.goal ~instructions:meta.instructions)
             in
             let user_msg = Llm_client.user_msg message in
             let ctx_work = Context_manager.append ctx_work user_msg in
@@ -1071,12 +1134,14 @@ let handle_keeper_msg ctx args : tool_result =
                   errors_encountered = 0;
                   elapsed_seconds = 0.0;
                 } in
+                let successor_trace = generate_trace_id () in
+                let next_generation = meta_turn.generation + 1 in
                 let dna = Succession.extract_dna
                   ~working_ctx:ctx_work
                   ~session_ctx:session
                   ~goal:meta_turn.goal
-                  ~generation:meta_turn.generation
-                  ~trace_id:meta_turn.trace_id
+                  ~generation:next_generation
+                  ~trace_id:successor_trace
                   ~metrics
                 in
                 let spec = Succession.{
@@ -1085,17 +1150,16 @@ let handle_keeper_msg ctx args : tool_result =
                   context_budget = meta_turn.context_budget;
                 } in
                 let successor_ctx = Succession.hydrate dna spec in
-                let successor_trace = generate_trace_id () in
                 let successor_session = Context_manager.create_session
                   ~session_id:successor_trace ~base_dir in
-                ignore (save_checkpoint successor_session successor_ctx ~generation:(meta_turn.generation + 1));
+                ignore (save_checkpoint successor_session successor_ctx ~generation:next_generation);
 
                 let prev_trace_id = meta_turn.trace_id in
                 let trace_history = take 20 (prev_trace_id :: meta_turn.trace_history) in
                 let meta' = { meta_turn with
                   trace_id = successor_trace;
                   trace_history;
-                  generation = meta_turn.generation + 1;
+                  generation = next_generation;
                   last_handoff_ts = now_ts;
                   updated_at = now_iso ();
                 } in

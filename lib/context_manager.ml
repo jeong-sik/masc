@@ -49,6 +49,44 @@ type compaction_strategy =
   | SummarizeOld
 
 (* ================================================================ *)
+(* Memory Formats                                                  *)
+(* ================================================================ *)
+
+let memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
+
+let state_block_start = "[STATE]"
+let state_block_end = "[/STATE]"
+
+let starts_with ~prefix s =
+  let lp = String.length prefix in
+  String.length s >= lp && String.sub s 0 lp = prefix
+
+let find_substring ~needle haystack ~from =
+  let n_len = String.length needle in
+  let h_len = String.length haystack in
+  let rec loop i =
+    if i < 0 || i + n_len > h_len then None
+    else if String.sub haystack i n_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop from
+
+let extract_state_blocks (s : string) : string list =
+  let rec loop from acc =
+    match find_substring ~needle:state_block_start s ~from with
+    | None -> List.rev acc
+    | Some i ->
+      let j_from = i + String.length state_block_start in
+      (match find_substring ~needle:state_block_end s ~from:j_from with
+       | None -> List.rev acc
+       | Some j ->
+         let body = String.sub s j_from (j - j_from) |> String.trim in
+         let next_from = j + String.length state_block_end in
+         loop next_from (body :: acc))
+  in
+  loop 0 []
+
+(* ================================================================ *)
 (* Token Estimation                                                 *)
 (* ================================================================ *)
 
@@ -78,6 +116,10 @@ let exceeds_threshold ctx threshold =
 let create ~system_prompt ~max_tokens =
   let token_count = (String.length system_prompt / 4) + 4 in
   { system_prompt; messages = []; token_count; max_tokens; importance_scores = [] }
+
+let set_system_prompt (ctx : working_context) ~system_prompt =
+  let token_count = count_tokens system_prompt ctx.messages in
+  { ctx with system_prompt; token_count; importance_scores = [] }
 
 let append ctx (msg : Llm_client.message) =
   let new_tokens = msg_tokens msg in
@@ -123,6 +165,13 @@ let score_importance ctx =
     (* Tool call indicator *)
     let tool_w = match m.tool_call_id with Some _ -> 0.8 | None -> 0.5 in
     let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
+    (* Sticky memory: never drop our compacted memory summary. *)
+    let score =
+      if starts_with ~prefix:memory_summary_prefix m.content then
+        Float.max score 0.95
+      else
+        score
+    in
     (i, Float.min 1.0 (Float.max 0.0 score))
   ) ctx.messages in
   { ctx with importance_scores = scores }
@@ -186,20 +235,45 @@ let summarize_old ?(oldest_pct=0.3) ctx =
   else
     let old_msgs, recent_msgs = List.filteri (fun i _ -> i < split_at) ctx.messages,
                                  List.filteri (fun i _ -> i >= split_at) ctx.messages in
-    (* Build a summary from old messages (heuristic, not LLM-based) *)
-    let summary_parts = List.map (fun (m : Llm_client.message) ->
-      let role_str = match m.role with
-        | System -> "SYS" | User -> "USR"
-        | Assistant -> "AST" | Tool -> "TOOL"
-      in
-      let truncated = if String.length m.content > 80
-        then String.sub m.content 0 80 ^ "..."
-        else m.content in
-      sprintf "[%s] %s" role_str truncated
-    ) old_msgs in
-    let summary = sprintf "[Context summary of %d earlier messages]\n%s"
-      (List.length old_msgs) (String.concat "\n" summary_parts) in
-    let summary_msg = Llm_client.system_msg summary in
+    (* Prefer structured continuity: keep recent [STATE] snapshots if present.
+       Important: do NOT emit this as a System message. For Claude, system-role
+       messages are concatenated into the system prompt, turning summaries into
+       "instructions" and breaking behavior. *)
+    let blocks =
+      old_msgs
+      |> List.concat_map (fun (m : Llm_client.message) -> extract_state_blocks m.content)
+    in
+    let take_last n lst =
+      let len = List.length lst in
+      if len <= n then lst
+      else List.filteri (fun i _ -> i >= (len - n)) lst
+    in
+    let blocks_tail = take_last 3 blocks in
+    let summary =
+      if blocks_tail <> [] then
+        let rendered =
+          blocks_tail
+          |> List.map (fun b -> sprintf "%s\n%s\n%s" state_block_start b state_block_end)
+          |> String.concat "\n\n"
+        in
+        sprintf "%s\n(Extracted continuity snapshots; reference only.)\n\n%s"
+          memory_summary_prefix rendered
+      else
+        (* Fallback heuristic: role-tagged truncation. *)
+        let summary_parts = List.map (fun (m : Llm_client.message) ->
+          let role_str = match m.role with
+            | System -> "SYS" | User -> "USR"
+            | Assistant -> "AST" | Tool -> "TOOL"
+          in
+          let truncated = if String.length m.content > 80
+            then String.sub m.content 0 80 ^ "..."
+            else m.content in
+          sprintf "[%s] %s" role_str truncated
+        ) old_msgs in
+        sprintf "%s\n(Fallback summary of %d earlier messages; reference only.)\n%s"
+          memory_summary_prefix (List.length old_msgs) (String.concat "\n" summary_parts)
+    in
+    let summary_msg = Llm_client.assistant_msg summary in
     let messages = summary_msg :: recent_msgs in
     let token_count = count_tokens ctx.system_prompt messages in
     { ctx with messages; token_count; importance_scores = [] }

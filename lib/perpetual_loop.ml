@@ -118,11 +118,29 @@ let generate_trace_id () =
 
 let create_state config =
   let system_prompt = sprintf
-    "You are a perpetual agent. Your goal: %s\n\
-     You have tools available. Use them to accomplish your goal.\n\
-     When you complete the goal, respond with [GOAL_COMPLETE].\n\
-     If you get stuck, respond with [STUCK: reason]."
-    config.initial_goal in
+    "You are a perpetual agent with infinite context via compaction and succession.\n\
+     Goal: %s\n\
+     \n\
+     Continuity rules:\n\
+     - This run may be compacted/summarized; you must preserve continuity.\n\
+     - End every reply with a stable state block used for compaction/handoff.\n\
+     - Do not include secrets in the state block.\n\
+     \n\
+     State block template (must use these exact markers):\n\
+     [STATE]\n\
+     Goal: <short>\n\
+     Progress: <short>\n\
+     Next: <0-3 items separated by ';'>\n\
+     Decisions: <0-3 items separated by ';'>\n\
+     OpenQuestions: <0-3 items separated by ';'>\n\
+     Constraints: <0-3 items separated by ';'>\n\
+     [/STATE]\n\
+     \n\
+     Tooling:\n\
+     - You may have tools available; use them when helpful.\n\
+     - When goal complete, include [GOAL_COMPLETE]. When stuck, include [STUCK: reason]."
+    config.initial_goal
+  in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
     | [] -> Llm_client.ollama_glm

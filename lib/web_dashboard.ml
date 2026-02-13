@@ -174,6 +174,20 @@ let cached_html = lazy ({|<!DOCTYPE html>
     .ctx-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #4ade80, #22d3ee); transition: width 0.3s ease; }
     .ctx-fill.warn { background: linear-gradient(90deg, #fbbf24, #f97316); }
     .ctx-fill.bad { background: linear-gradient(90deg, #f87171, #ef4444); }
+    .ctx-spark { margin-top: 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .sparkline {
+      width: 180px;
+      height: 40px;
+      padding: 4px 6px;
+      border-radius: 8px;
+      background: rgba(0,0,0,0.22);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-sizing: border-box;
+    }
+    .spark-svg { width: 100%; height: 100%; display: block; }
+    .spark-empty { font-size: 11px; color: #777; padding: 8px 0; }
+    .spark-meta { font-size: 11px; color: #888; display: flex; gap: 10px; flex-wrap: wrap; }
+    .spark-meta b { color: #cbd5e1; font-weight: 600; }
 
     /* Tasks (Kanban) */
     .task-board {
@@ -1056,6 +1070,54 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return '';
     }
 
+    function sparkSvg(series, opts) {
+      const pts = Array.isArray(series) ? series : [];
+      if (pts.length < 2) return '';
+      const w = (opts && isNum(opts.w)) ? opts.w : 160;
+      const h = (opts && isNum(opts.h)) ? opts.h : 28;
+      const threshold = (opts && isNum(opts.threshold)) ? opts.threshold : null;
+      const ratios = pts.map(p => (p && isNum(p.context_ratio)) ? p.context_ratio : 0);
+      const maxSeen = ratios.reduce((m, v) => Math.max(m, v), 0);
+      const yMax = Math.max(maxSeen * 1.05, threshold || 0, 0.01);
+      const x = (i) => (pts.length <= 1 ? 0 : (w * i / (pts.length - 1)));
+      const y = (r) => h - clamp((r / yMax) * h, 0, h);
+      const poly = ratios.map((r, i) => `${x(i).toFixed(2)},${y(r).toFixed(2)}`).join(' ');
+      const thrLine = (threshold !== null && threshold <= yMax)
+        ? `<line x1="0" y1="${y(threshold).toFixed(2)}" x2="${w}" y2="${y(threshold).toFixed(2)}" stroke="rgba(251,191,36,0.55)" stroke-width="1" stroke-dasharray="4 3" />`
+        : '';
+      const marks = pts.map((p, i) => {
+        const isHandoff = !!(p && p.handoff);
+        if (!isHandoff) return '';
+        return `<circle cx="${x(i).toFixed(2)}" cy="${y(ratios[i]).toFixed(2)}" r="2.3" fill="#fbbf24" />`;
+      }).join('');
+      return `
+        <svg class="spark-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+          <polyline points="${poly}" fill="none" stroke="rgba(34,211,238,0.9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          ${thrLine}
+          ${marks}
+        </svg>
+      `.trim();
+    }
+
+    function etaTurns(series, threshold) {
+      const pts = Array.isArray(series) ? series : [];
+      if (pts.length < 3) return null;
+      if (!isNum(threshold)) return null;
+      const last = pts[pts.length - 1] || {};
+      const lastR = last.context_ratio;
+      if (!isNum(lastR)) return null;
+      if (lastR >= threshold) return 0;
+      const n = Math.min(10, pts.length);
+      const first = pts[pts.length - n] || {};
+      const firstR = first.context_ratio;
+      if (!isNum(firstR)) return null;
+      const slope = (lastR - firstR) / Math.max(1, (n - 1));
+      if (!(slope > 0)) return null;
+      const eta = Math.ceil((threshold - lastR) / slope);
+      if (!isFinite(eta) || eta < 0) return null;
+      return Math.min(eta, 9999);
+    }
+
     function updateKeepers(data) {
       const list = document.getElementById('keeper-list');
       if (!list) return;
@@ -1083,7 +1145,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
           ? '<span class="pill">keepalive</span>'
           : '<span class="pill bad">no-keepalive</span>';
         const zombiePill = zombie ? '<span class="pill bad">zombie</span>' : '';
-        const handoffSoon = isNum(ratio) && ratio >= 0.80 ? '<span class="pill warn">handoff-soon</span>' : '';
+        const handoffTh = isNum(k.handoff_threshold) ? k.handoff_threshold : 0.85;
+        const handoffSoon = (isNum(ratio) && isNum(handoffTh) && ratio >= handoffTh * 0.95)
+          ? '<span class="pill warn">handoff-soon</span>' : '';
 
         const modelUsed = k.last_model_used || '-';
         const cascade = fmtCascade(k.models);
@@ -1096,6 +1160,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const age = fmtSecShort(k.keeper_age_s);
         const last = isNum(k.last_turn_ago_s) ? (fmtSecShort(k.last_turn_ago_s) + ' ago') : 'never';
         const ctxText = (isNum(tokens) && isNum(max) && max > 0) ? `${pct} (${tokens}/${max})` : pct;
+
+        const series = Array.isArray(k.metrics_series) ? k.metrics_series : [];
+        const spark = sparkSvg(series, { threshold: handoffTh });
+        const eta = etaTurns(series, handoffTh);
+        const etaText = (eta === 0) ? 'now'
+          : (isNum(eta) ? (`~${eta} turns`) : '-');
+        const seriesText = series.length > 0 ? `${series.length} pts` : 'no metrics';
+        const handoffPct = isNum(handoffTh) ? (Math.round(handoffTh * 100) + '%') : '-';
 
         return `
           <div class="live-agent">
@@ -1118,6 +1190,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <span>compactions ${k.compaction_count || 0}</span>
               </div>
               <div class="ctx-bar"><div class="ctx-fill ${fillClass}" style="width:${fillPct}%"></div></div>
+              <div class="ctx-spark">
+                <div class="sparkline">${spark || '<div class=\"spark-empty\">no series</div>'}</div>
+                <div class="spark-meta">
+                  <span><b>handoff</b> ${handoffPct}</span>
+                  <span><b>eta</b> ${etaText}</span>
+                  <span>${seriesText}</span>
+                </div>
+              </div>
             </div>
           </div>
         `;

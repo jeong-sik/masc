@@ -1148,6 +1148,10 @@ type sse_conn_info = {
 
 let sse_conn_by_session : (string, sse_conn_info) Hashtbl.t = Hashtbl.create 128
 
+let set_sse_active_connections_metric () =
+  Masc_mcp.Prometheus.set_gauge "masc_sse_connections_active"
+    (float_of_int (Sse.client_count ()))
+
 let close_sse_conn info =
   if not info.closed then begin
     info.closed <- true;
@@ -1158,7 +1162,8 @@ let close_sse_conn info =
          Printf.eprintf "[DEBUG] close_sse_conn: %s\n%!" (Printexc.to_string exn));
     (* Critical: unregister from Sse module to prevent client count leak.
        unregister_if_current is idempotent (checks client_id match). *)
-    Sse.unregister_if_current info.session_id info.client_id
+    Sse.unregister_if_current info.session_id info.client_id;
+    set_sse_active_connections_metric ()
   end
 
 let stop_sse_session session_id =
@@ -1175,11 +1180,15 @@ let close_all_sse_connections () =
   List.iter (fun session_id ->
     stop_sse_session session_id
   ) sessions;
+  set_sse_active_connections_metric ();
   Printf.eprintf "🚀 MASC MCP: Closed %d SSE connections\n%!" (List.length sessions)
 
 let send_raw info data =
   if info.closed || !(info.stop) || Httpun.Body.Writer.is_closed info.writer then
-    (close_sse_conn info; false)
+    (Masc_mcp.Prometheus.inc_counter "masc_sse_write_failures_total"
+       ~labels:[("reason", "closed_writer")] ();
+     close_sse_conn info;
+     false)
   else
     try
       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
@@ -1190,6 +1199,8 @@ let send_raw info data =
       true
     with _exn ->
       (* Expected during client disconnect - silent close *)
+      Masc_mcp.Prometheus.inc_counter "masc_sse_write_failures_total"
+        ~labels:[("reason", "write_exception")] ();
       close_sse_conn info;
       false
 
@@ -1199,7 +1210,16 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let last_event_id = get_last_event_id request in
 
+  let endpoint_label =
+    match legacy_messages_endpoint with
+    | Some _ -> "legacy_sse"
+    | None -> "mcp"
+  in
+
   (* Replace existing connection for session_id *)
+  if Hashtbl.mem sse_conn_by_session session_id then
+    Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
+      ~labels:[("endpoint", endpoint_label)] ();
   stop_sse_session session_id;
 
   let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
@@ -1218,7 +1238,10 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
   in
   (* Clean up writer for evicted session *)
   (match evicted with
-   | Some evicted_sid -> stop_sse_session evicted_sid
+   | Some evicted_sid ->
+       Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
+         ~labels:[("endpoint", endpoint_label)] ();
+       stop_sse_session evicted_sid
    | None -> ());
   let info = {
     session_id;
@@ -1230,6 +1253,7 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
   } in
   info_ref := Some info;
   Hashtbl.replace sse_conn_by_session session_id info;
+  set_sse_active_connections_metric ();
 
   (* Send priming event first *)
   ignore (send_raw info (sse_prime_event ()));
@@ -1359,6 +1383,7 @@ let handle_delete_mcp request reqd =
   | Some session_id ->
       stop_sse_session session_id;
       Sse.unregister session_id;
+      set_sse_active_connections_metric ();
       Hashtbl.remove protocol_version_by_session session_id;
       Printf.printf "🔚 Session terminated: %s\n%!" session_id;
       let headers = Httpun.Headers.of_list (
@@ -1402,6 +1427,9 @@ let make_routes ~port ~host =
        let room_id = Option.value ~default:"default" (query_param request "room") in
        let last_event_id = get_last_event_id request in
 
+       if Hashtbl.mem sse_conn_by_session session_id then
+         Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
+           ~labels:[("endpoint", "ag_ui")] ();
        stop_sse_session session_id;
 
        let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
@@ -1439,7 +1467,10 @@ let make_routes ~port ~host =
            ~last_event_id:(Option.value ~default:0 last_event_id)
        in
        (match evicted with
-        | Some evicted_sid -> stop_sse_session evicted_sid
+        | Some evicted_sid ->
+            Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
+              ~labels:[("endpoint", "ag_ui")] ();
+            stop_sse_session evicted_sid
         | None -> ());
        let info = {
          session_id;
@@ -1451,6 +1482,7 @@ let make_routes ~port ~host =
        } in
        info_ref := Some info;
        Hashtbl.replace sse_conn_by_session session_id info;
+       set_sse_active_connections_metric ();
 
        (* Send AG-UI priming: RUN_STARTED event *)
        let prime = Masc_mcp.Ag_ui.(
@@ -1988,6 +2020,7 @@ let run_server ~sw ~env ~port ~base_path =
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~base_path in
   server_state := Some state;
   Mcp_server.set_sse_callback state Sse.broadcast;
+  set_sse_active_connections_metric ();
 
   (* Keepers are meant to be long-lived. Start their keepalive fibers on startup
      so liveness/last_seen stays up-to-date even if no tool calls happen. *)
@@ -2023,15 +2056,19 @@ let run_server ~sw ~env ~port ~base_path =
    | None ->
        Printf.eprintf "[Board_listener] Skipped (not using PostgreSQL backend)\n%!");
 
-  (* Periodic SSE stale-client reaper — every 60s, evict connections older than 30min *)
+  (* Periodic SSE stale-client reaper — every 60s, evict idle connections older than 30min *)
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 60.0;
       let stale_sids = Masc_mcp.Sse.cleanup_stale () in
+      let stale_count = List.length stale_sids in
       List.iter stop_sse_session stale_sids;
-      if stale_sids <> [] then
+      if stale_count > 0 then begin
+        Masc_mcp.Prometheus.inc_counter "masc_sse_idle_evictions_total"
+          ~delta:(float_of_int stale_count) ();
         Printf.eprintf "[SSE] Reaped %d stale connections (active: %d)\n%!"
-          (List.length stale_sids) (Masc_mcp.Sse.client_count ());
+          stale_count (Masc_mcp.Sse.client_count ())
+      end;
       loop ()
     in
     loop ());

@@ -212,7 +212,8 @@ let test_to_prometheus_text_has_sse_metrics () =
   check bool "has sse active gauge" true (has "masc_sse_connections_active");
   check bool "has sse reconnect counter" true (has "masc_sse_reconnects_total");
   check bool "has sse idle eviction counter" true (has "masc_sse_idle_evictions_total");
-  check bool "has sse write failure counter" true (has "masc_sse_write_failures_total")
+  check bool "has sse write failure counter" true (has "masc_sse_write_failures_total");
+  check bool "has sse reject counter" true (has "masc_sse_rejects_total")
 
 (* ============================================================
    Convenience Functions Tests

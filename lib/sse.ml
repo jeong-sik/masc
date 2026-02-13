@@ -11,10 +11,14 @@ type client = {
   push: string -> unit;
   mutable last_event_id: int;
   created_at: float;
+  mutable last_seen_at: float;
 }
 
 (** Client registry - maps session_id to client *)
 let clients : (string, client) Hashtbl.t = Hashtbl.create 16
+
+let mark_seen (client : client) =
+  client.last_seen_at <- Time_compat.now ()
 
 (** Monotonic client id for safe replacement/unregister *)
 let client_id_counter = Atomic.make 0
@@ -78,8 +82,9 @@ let register session_id ~push ~last_event_id =
       | None -> None
     else None
   in
+  let now = Time_compat.now () in
   let new_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
-  let client = { id = new_id; push; last_event_id; created_at = Time_compat.now () } in
+  let client = { id = new_id; push; last_event_id; created_at = now; last_seen_at = now } in
   Hashtbl.replace clients session_id client;
   (client.id, evicted)
 
@@ -99,10 +104,18 @@ let unregister_if_current session_id client_id =
 let exists session_id =
   Hashtbl.mem clients session_id
 
+(** Mark a client as recently active *)
+let touch session_id =
+  match Hashtbl.find_opt clients session_id with
+  | Some client -> mark_seen client
+  | None -> ()
+
 (** Update client's last event ID *)
 let update_last_event_id session_id event_id =
   match Hashtbl.find_opt clients session_id with
-  | Some client -> client.last_event_id <- event_id
+  | Some client ->
+      client.last_event_id <- event_id;
+      mark_seen client
   | None -> ()
 
 (** Broadcast event to all connected clients
@@ -152,15 +165,19 @@ let close_all_clients () =
   List.iter (Hashtbl.remove clients) sessions;
   List.length sessions
 
-(** Remove stale clients older than max_age_s (default 30 min).
+(** Remove clients idle longer than max_age_s (default 30 min).
     Returns list of evicted session_ids so caller can clean up writers. *)
 let cleanup_stale ?(max_age_s=1800.0) () =
   let now = Time_compat.now () in
   let stale = Hashtbl.fold (fun sid c acc ->
-    if now -. c.created_at > max_age_s then sid :: acc else acc
+    if now -. c.last_seen_at > max_age_s then sid :: acc else acc
   ) clients [] in
   List.iter (fun sid ->
-    Printf.eprintf "[SSE] TTL evict: %s (age %.0fs)\n%!" sid (now -. (Hashtbl.find clients sid).created_at);
+    (match Hashtbl.find_opt clients sid with
+     | Some client ->
+         Printf.eprintf "[SSE] idle evict: %s (idle %.0fs)\n%!"
+           sid (now -. client.last_seen_at)
+     | None -> ());
     Hashtbl.remove clients sid
   ) stale;
   stale

@@ -1292,9 +1292,49 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let fetchDataTimer = null;
     let fetchBoardTimer = null;
     let periodicRefreshId = null;
+    let sseSource = null;
+    let sseReconnectTimer = null;
+    let sseReconnectAttempts = 0;
+    const sseReconnectBaseMs = 1000;
+    const sseReconnectMaxMs = 15000;
+    const sseSessionStorageKey = 'masc_dashboard_sse_session_id';
     const connStatus = document.getElementById('connection-status');
     const connText = document.getElementById('conn-text');
     const eventCounter = document.getElementById('event-counter');
+
+    function createSseSessionId() {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return 'dash_' + window.crypto.randomUUID();
+      }
+      return 'dash_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+    }
+
+    function getOrCreateSseSessionId() {
+      let sid = sessionStorage.getItem(sseSessionStorageKey);
+      if (!sid) {
+        sid = createSseSessionId();
+        sessionStorage.setItem(sseSessionStorageKey, sid);
+      }
+      return sid;
+    }
+
+    function clearSseReconnectTimer() {
+      if (sseReconnectTimer) {
+        clearTimeout(sseReconnectTimer);
+        sseReconnectTimer = null;
+      }
+    }
+
+    function scheduleSseReconnect() {
+      if (sseReconnectTimer) return;
+      sseReconnectAttempts++;
+      const exp = Math.min(sseReconnectAttempts, 5);
+      const delay = Math.min(sseReconnectMaxMs, sseReconnectBaseMs * Math.pow(2, exp));
+      sseReconnectTimer = setTimeout(() => {
+        sseReconnectTimer = null;
+        connectSSE();
+      }, delay);
+    }
 
     function startPeriodicRefresh() {
       if (periodicRefreshId) return;
@@ -1332,19 +1372,32 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     // SSE for real-time updates
     function connectSSE() {
+      clearSseReconnectTimer();
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+
       const sseParams = new URLSearchParams();
       if (agent) sseParams.set('agent', agent);
       if (token) sseParams.set('token', token);
+      sseParams.set('session_id', getOrCreateSseSessionId());
       const sseUrl = sseParams.toString() ? ('/sse?' + sseParams.toString()) : '/sse';
       const es = new EventSource(sseUrl);
+      sseSource = es;
       es.onopen = () => {
+        if (sseSource !== es) return;
+        sseReconnectAttempts = 0;
         updateConnectionStatus(true);
         console.log('SSE connected');
       };
       es.onerror = () => {
+        if (sseSource !== es) return;
         updateConnectionStatus(false);
         showToast('Connection lost. Reconnecting...', 'warning');
-        setTimeout(connectSSE, 3000);
+        es.close();
+        sseSource = null;
+        scheduleSseReconnect();
       };
       es.onmessage = (e) => {
         try {
@@ -2269,6 +2322,13 @@ let cached_html = lazy ({|<!DOCTYPE html>
     startPeriodicRefresh();
     fetchData();
     connectSSE();
+    window.addEventListener('beforeunload', () => {
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+      clearSseReconnectTimer();
+    });
 
 
   </script>

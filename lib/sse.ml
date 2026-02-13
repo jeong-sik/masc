@@ -173,8 +173,11 @@ let cleanup_stale ?(max_age_s=1800.0) () =
     if now -. c.last_seen_at > max_age_s then sid :: acc else acc
   ) clients [] in
   List.iter (fun sid ->
-    Printf.eprintf "[SSE] idle evict: %s (idle %.0fs)\n%!"
-      sid (now -. (Hashtbl.find clients sid).last_seen_at);
+    (match Hashtbl.find_opt clients sid with
+     | Some client ->
+         Printf.eprintf "[SSE] idle evict: %s (idle %.0fs)\n%!"
+           sid (now -. client.last_seen_at)
+     | None -> ());
     Hashtbl.remove clients sid
   ) stale;
   stale

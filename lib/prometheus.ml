@@ -123,7 +123,8 @@ let init () =
   add "masc_sse_reconnects_total" "Total SSE reconnects (same session reattached)" Counter;
   add "masc_sse_idle_evictions_total" "Total SSE clients evicted by idle reaper" Counter;
   add "masc_sse_capacity_evictions_total" "Total SSE clients evicted due to max client capacity" Counter;
-  add "masc_sse_write_failures_total" "Total SSE write failures by reason" Counter
+  add "masc_sse_write_failures_total" "Total SSE write failures by reason" Counter;
+  add "masc_sse_rejects_total" "Total SSE connections rejected by storm guard" Counter
 
 let start_time = Time_compat.now ()
 

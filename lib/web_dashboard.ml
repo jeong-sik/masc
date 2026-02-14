@@ -3019,6 +3019,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
+            <div class="keeper-chart-title">Metric Formula</div>
+            <div class="keeper-chart-meta">
+              <span><b>model fallback</b> ${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} = ${fmtInt(modelFallbackCount)} / ${fmtInt(interactionPoints)} (turn+proactive)</span>
+              <span><b>template fallback</b> ${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)} = ${fmtInt(proactiveTemplateFallbackCount)} / ${fmtInt(proactivePoints)} (proactive only)</span>
+              <span><b>similarity avg/max</b> ${proactiveSimilarityText}</span>
+              <span><b>similarity pairs</b> ${fmtInt(proactivePreviewPairCount)} from ${fmtInt(proactivePreviewSampleCount)} samples (window <= 8)</span>
+              <span><b>similarity method</b> Jaccard(adjacent proactive preview text)</span>
+              <span><b>warn/bad threshold</b> template ${fmtPct1(alertThresholds.proactive_fallback_warn)}/${fmtPct1(alertThresholds.proactive_fallback_bad)}, similarity ${fmtPct1(alertThresholds.proactive_similarity_warn)}/${fmtPct1(alertThresholds.proactive_similarity_bad)}</span>
+            </div>
+          </div>
+          <div class="keeper-chart-card">
             <div class="keeper-chart-title">Work & Equipment</div>
             <div class="keeper-chart-meta">
               <span><b>top work</b> ${escHtml(topWorkText)}</span>

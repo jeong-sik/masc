@@ -8,6 +8,18 @@ open Alcotest
 
 module Web_dashboard = Masc_mcp.Web_dashboard
 
+let contains_re re s =
+  try
+    let _ = Str.search_forward (Str.regexp re) s 0 in
+    true
+  with Not_found -> false
+
+let contains_re_ci re s =
+  try
+    let _ = Str.search_forward (Str.regexp_case_fold re) s 0 in
+    true
+  with Not_found -> false
+
 (* ============================================================
    html Tests
    ============================================================ *)
@@ -32,32 +44,17 @@ let test_html_contains_body () =
 let test_html_contains_title () =
   let html = Web_dashboard.html () in
   check bool "has MASC title" true
-    (String.length html > 0 && (
-      try
-        let _ = Str.search_forward (Str.regexp "MASC") html 0 in
-        true
-      with Not_found -> false
-    ))
+    (String.length html > 0 && contains_re "MASC" html)
 
 let test_html_contains_style () =
   let html = Web_dashboard.html () in
   check bool "has style" true
-    (String.length html > 0 && (
-      try
-        let _ = Str.search_forward (Str.regexp "<style>") html 0 in
-        true
-      with Not_found -> false
-    ))
+    (String.length html > 0 && contains_re "<style>" html)
 
 let test_html_contains_script () =
   let html = Web_dashboard.html () in
   check bool "has script" true
-    (String.length html > 0 && (
-      try
-        let _ = Str.search_forward (Str.regexp "<script>") html 0 in
-        true
-      with Not_found -> false
-    ))
+    (String.length html > 0 && contains_re "<script>" html)
 
 let test_html_valid_length () =
   let html = Web_dashboard.html () in
@@ -75,12 +72,28 @@ let test_html_contains_sse () =
   let html = Web_dashboard.html () in
   (* Dashboard should reference SSE for real-time updates *)
   check bool "references SSE" true
-    (String.length html > 0 && (
-      try
-        let _ = Str.search_forward (Str.regexp_case_fold "sse\\|eventsource") html 0 in
-        true
-      with Not_found -> false
-    ))
+    (String.length html > 0 && contains_re_ci "sse\\|eventsource" html)
+
+let test_html_contains_keeper_state_query_params () =
+  let html = Web_dashboard.html () in
+  check bool "keeper query params" true
+    (String.length html > 0
+    && contains_re "keeper_field_query" html
+    && contains_re "keeper_kpi" html)
+
+let test_html_contains_keeper_kpi_interaction () =
+  let html = Web_dashboard.html () in
+  check bool "keeper kpi interaction" true
+    (String.length html > 0
+    && contains_re "setKeeperSelectedKpi" html
+    && contains_re "keeper-kpi\\.selected" html)
+
+let test_html_contains_meta_localizer () =
+  let html = Web_dashboard.html () in
+  check bool "keeper meta localizer" true
+    (String.length html > 0
+    && contains_re "localizeKeeperMetaLabels" html
+    && contains_re "keeperMetaLabelKo" html)
 
 (* ============================================================
    Test Runners
@@ -99,5 +112,8 @@ let () =
       test_case "valid length" `Quick test_html_valid_length;
       test_case "ends with html" `Quick test_html_ends_with_html_tag;
       test_case "contains sse" `Quick test_html_contains_sse;
+      test_case "keeper query params" `Quick test_html_contains_keeper_state_query_params;
+      test_case "keeper kpi interaction" `Quick test_html_contains_keeper_kpi_interaction;
+      test_case "keeper meta localizer" `Quick test_html_contains_meta_localizer;
     ];
   ]

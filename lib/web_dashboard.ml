@@ -2381,6 +2381,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const ratioColor = keeperColorByRatio(ratio);
       const primaryModel = windowStats.primary_model || keeper.primary_model || ((Array.isArray(keeper.models) && keeper.models[0]) ? keeper.models[0] : '-');
       const metricGlossary = {
+        context_ratio: 'Context shows current context usage ratio and tokens used/max for this keeper.',
+        handoff_threshold: 'Handoff threshold is the context ratio limit where handoff is recommended/triggered.',
+        handoff_risk: 'Handoff risk is a composite score (0-100) from context pressure, trend, and recent growth.',
+        risk_confidence: 'Risk confidence indicates how stable the risk estimate is given recent window signal quality.',
+        handoff_eta: 'Handoff ETA estimates remaining turns until threshold breach based on recent context growth trend.',
         display_zoom: 'Display zoom applies to chart rendering only (last N points); backend metrics_window aggregation does not change.',
         metrics_window: 'Metrics window is built from recent keeper metric rows loaded from file with max_lines/max_bytes caps.',
         window_points: 'Window points = sampled rows in the current metrics window. Breakdown is turn/proactive/heartbeat channels.',
@@ -2388,8 +2393,20 @@ let cached_html = lazy ({|<!DOCTYPE html>
         proactive_template_fallback: 'Proactive template fallback rate = proactive_template_fallback_count / proactive_template_fallback_denominator. Denominator uses proactive points only.',
         proactive_similarity: 'Proactive similarity compares adjacent proactive preview texts. High similarity implies repetitive proactive responses.',
         drift_window: 'Drift window rate = drift_applied_count / window_interactions in the same metrics window.',
+        intervention_share: 'Intervention share is proactive_points / window_interactions. Per-turn is proactive_points / turn_points.',
+        top_drift_reason: 'Top drift reason is the most frequent drift trigger reason in current metrics window.',
+        top_compaction_trigger: 'Top compact trigger is the most frequent compaction trigger reason in current metrics window.',
         window_handoff_compaction: 'Window handoff/compaction counts show how many handoffs and compactions occurred inside the current metrics window.',
         window_compaction_saved: 'Window compaction saved = total tokens reduced by compaction events in the current metrics window.',
+        compaction_efficiency: 'Compaction efficiency = compaction_saved_tokens / compaction_before_tokens in current metrics window.',
+        memory_pass: 'Memory pass rate = memory_passed / memory_checks for recall checks in current metrics window.',
+        memory_score: 'Memory score is average final recall score compared against memory_threshold.',
+        weather_recall: 'Weather recall rate uses only memory checks tagged as expected_topic=weather.',
+        memory_corrections: 'Corrections show applied recall corrections and how many succeeded.',
+        memory_notes: 'Memory notes shows long-term note count and notes newly added in current metrics window.',
+        memory_compact: 'Memory compact shows note-level compaction events and dropped note counts.',
+        memory_trim_rate: 'Memory trim rate = memory_compaction_dropped_notes / memory_compaction_before_notes.',
+        tool_calls: 'Tool calls is total tool invocation count observed in current metrics window.',
       };
       const glossaryTip = (key) => {
         const v = metricGlossary[key];
@@ -2910,10 +2927,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Next Model</div><div class="keeper-kpi-value">${escHtml(nextModel)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Primary Model</div><div class="keeper-kpi-value">${escHtml(primaryModel || '-')}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Skill Route</div><div class="keeper-kpi-value">${escHtml(skillRouteText)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Context</div><div class="keeper-kpi-value">${escHtml(ratioPct)} (${fmtInt(ctx.context_tokens)}/${fmtInt(ctx.context_max)})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Handoff Threshold</div><div class="keeper-kpi-value">${Math.round(th * 100)}%</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Handoff Risk</div><div class="keeper-kpi-value">${riskText} (${riskLevelText})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Risk Confidence</div><div class="keeper-kpi-value">${escHtml(confidenceText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Context', 'context_ratio')}<div class="keeper-kpi-value">${escHtml(ratioPct)} (${fmtInt(ctx.context_tokens)}/${fmtInt(ctx.context_max)})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Handoff Threshold', 'handoff_threshold')}<div class="keeper-kpi-value">${Math.round(th * 100)}%</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Handoff Risk', 'handoff_risk')}<div class="keeper-kpi-value">${riskText} (${riskLevelText})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Risk Confidence', 'risk_confidence')}<div class="keeper-kpi-value">${escHtml(confidenceText)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Total Turns</div><div class="keeper-kpi-value">${fmtInt(keeper.total_turns)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Input / Output</div><div class="keeper-kpi-value">${fmtInt(keeper.total_input_tokens)} / ${fmtInt(keeper.total_output_tokens)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Total Tokens</div><div class="keeper-kpi-value">${fmtInt(keeper.total_tokens)}</div></div>
@@ -2930,31 +2947,31 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi">${kpiLabelHtml('Proactive Template Fallback', 'proactive_template_fallback')}<div class="${proactiveFallbackKpiClass}" title="formula: proactive_template_fallback_count / proactive_template_fallback_denominator">${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)}) ${proactiveFallbackBadge}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Proactive Similarity', 'proactive_similarity')}<div class="${proactiveSimilarityKpiClass}" title="formula: ${escHtml(proactivePreviewSimilarityMethodLabel)}, window<=${fmtInt(proactivePreviewSimilarityWindow)}">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; pairs ${fmtInt(proactivePreviewPairCount)}) ${proactiveSimilarityBadge}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Drift Window', 'drift_window')}<div class="keeper-kpi-value">${fmtInt(driftAppliedCount)} / ${fmtInt(interactionPoints)} (${driftAppliedRate === null ? '-' : fmtPct1(driftAppliedRate)})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Intervention Share</div><div class="keeper-kpi-value">${interventionShare === null ? '-' : fmtPct1(interventionShare)} (per-turn ${interventionPerTurn === null ? '-' : interventionPerTurn.toFixed(2)})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Top Drift Reason</div><div class="keeper-kpi-value">${escHtml(topDriftReason)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Top Compact Trigger</div><div class="keeper-kpi-value">${escHtml(topCompactionTrigger)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Intervention Share', 'intervention_share')}<div class="keeper-kpi-value">${interventionShare === null ? '-' : fmtPct1(interventionShare)} (per-turn ${interventionPerTurn === null ? '-' : interventionPerTurn.toFixed(2)})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Top Drift Reason', 'top_drift_reason')}<div class="keeper-kpi-value">${escHtml(topDriftReason)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Top Compact Trigger', 'top_compaction_trigger')}<div class="keeper-kpi-value">${escHtml(topCompactionTrigger)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Window Handoff/Compaction', 'window_handoff_compaction')}<div class="keeper-kpi-value">${fmtInt(windowStats.handoff_count)}/${fmtInt(windowStats.compaction_events)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Window Compaction Saved', 'window_compaction_saved')}<div class="keeper-kpi-value">${fmtInt(windowStats.compaction_saved_tokens)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Compaction Efficiency</div><div class="keeper-kpi-value">${compactionSavedRatio === null ? '-' : fmtPct1(compactionSavedRatio)} (${avgCompactionSaved === null ? '-' : fmtInt(avgCompactionSaved) + '/event'})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Compaction Efficiency', 'compaction_efficiency')}<div class="keeper-kpi-value">${compactionSavedRatio === null ? '-' : fmtPct1(compactionSavedRatio)} (${avgCompactionSaved === null ? '-' : fmtInt(avgCompactionSaved) + '/event'})</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Model Fallback Rate', 'model_fallback')}<div class="keeper-kpi-value" title="formula: model_fallback_count / model_fallback_denominator">${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} (${fmtInt(modelFallbackNumerator)}/${fmtInt(modelFallbackDenominator)})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Pass</div><div class="keeper-kpi-value">${memoryPassRate === null ? '-' : fmtPct1(memoryPassRate)} (${fmtInt(memoryPassed)}/${fmtInt(memoryChecks)})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Score</div><div class="keeper-kpi-value">${memoryAvgScore === null ? '-' : (Math.round(memoryAvgScore * 1000) / 1000).toFixed(3)} / ${memoryThreshold.toFixed(2)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Weather Recall</div><div class="keeper-kpi-value">${memoryWeatherPassRate === null ? '-' : fmtPct1(memoryWeatherPassRate)} (${fmtInt(memoryWeatherPassed)}/${fmtInt(memoryWeatherChecks)})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Corrections</div><div class="keeper-kpi-value">${fmtInt(memoryCorrections)} / ${fmtInt(memoryCorrectionSuccess)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Notes</div><div class="keeper-kpi-value">${fmtInt(memoryNoteCount)} (+${fmtInt(memoryNotesAddedWindow)} window)</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Compact</div><div class="keeper-kpi-value">${fmtInt(memoryCompactionEvents)} events / ${fmtInt(memoryCompactionDroppedNotes)} dropped</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Trim Rate</div><div class="keeper-kpi-value">${memoryCompactionDropRatio === null ? '-' : fmtPct1(memoryCompactionDropRatio)} (${memoryCompactionDropAvg === null ? '-' : fmtInt(memoryCompactionDropAvg) + '/event'})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Memory Pass', 'memory_pass')}<div class="keeper-kpi-value">${memoryPassRate === null ? '-' : fmtPct1(memoryPassRate)} (${fmtInt(memoryPassed)}/${fmtInt(memoryChecks)})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Memory Score', 'memory_score')}<div class="keeper-kpi-value">${memoryAvgScore === null ? '-' : (Math.round(memoryAvgScore * 1000) / 1000).toFixed(3)} / ${memoryThreshold.toFixed(2)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Weather Recall', 'weather_recall')}<div class="keeper-kpi-value">${memoryWeatherPassRate === null ? '-' : fmtPct1(memoryWeatherPassRate)} (${fmtInt(memoryWeatherPassed)}/${fmtInt(memoryWeatherChecks)})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Corrections', 'memory_corrections')}<div class="keeper-kpi-value">${fmtInt(memoryCorrections)} / ${fmtInt(memoryCorrectionSuccess)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Memory Notes', 'memory_notes')}<div class="keeper-kpi-value">${fmtInt(memoryNoteCount)} (+${fmtInt(memoryNotesAddedWindow)} window)</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Memory Compact', 'memory_compact')}<div class="keeper-kpi-value">${fmtInt(memoryCompactionEvents)} events / ${fmtInt(memoryCompactionDroppedNotes)} dropped</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Memory Trim Rate', 'memory_trim_rate')}<div class="keeper-kpi-value">${memoryCompactionDropRatio === null ? '-' : fmtPct1(memoryCompactionDropRatio)} (${memoryCompactionDropAvg === null ? '-' : fmtInt(memoryCompactionDropAvg) + '/event'})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Focus</div><div class="keeper-kpi-value">${escHtml(memoryTopKind)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Most Work</div><div class="keeper-kpi-value">${escHtml(topWorkName)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Most Model</div><div class="keeper-kpi-value">${escHtml(topModelName)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Most Tool</div><div class="keeper-kpi-value">${escHtml(topToolName)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Tool Calls</div><div class="keeper-kpi-value">${fmtInt(toolCallCount)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Tool Calls', 'tool_calls')}<div class="keeper-kpi-value">${fmtInt(toolCallCount)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Window Points', 'window_points')}<div class="keeper-kpi-value">${fmtInt(windowSamplePoints)} total · ${fmtInt(turnPoints)}t / ${fmtInt(proactivePoints)}p / ${fmtInt(heartbeatPoints)}h</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Conversation Rows</div><div class="keeper-kpi-value">${fmtInt(conversationTailCount)} / raw ${fmtInt(conversationRawCount)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Conversation Fragments</div><div class="keeper-kpi-value">${escHtml(fragmentBadgeText)}${conversationFragmentFilterEnabled ? ` (filtered ${fmtInt(conversationFragmentFilteredCount)})` : ''}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">K2K Edges</div><div class="keeper-kpi-value">${fmtInt(k2kCount)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">K2K Mentions</div><div class="keeper-kpi-value">${escHtml(k2kMentionsText)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Handoff ETA</div><div class="keeper-kpi-value">${escHtml(etaText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Handoff ETA', 'handoff_eta')}<div class="keeper-kpi-value">${escHtml(etaText)}</div></div>
         </div>
         ${compareHtml}
         <div class="keeper-chart-card keeper-handoff-timeline">
@@ -3226,7 +3243,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const agent = k.agent || {};
         const exists = !!agent.exists;
         const zombie = !!agent.is_zombie;
-        const statusClass = (exists && !zombie) ? 'active' : 'inactive';
+        const keepalive = !!k.keepalive_running;
+        const nowUnix = Date.now() / 1000;
+        const lastTurnAgoS = isNum(k.last_turn_ago_s) ? Number(k.last_turn_ago_s) : null;
+        const lastProactiveAgoS = isNum(k.last_proactive_ago_s) ? Number(k.last_proactive_ago_s) : null;
 
         const ctx = k.context || {};
         const ratio = ctx.context_ratio;
@@ -3236,10 +3256,26 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const fillPct = isNum(ratio) ? clamp(ratio * 100, 0, 100) : 0;
         const fillClass = ctxClass(ratio);
 
-        const keepalive = !!k.keepalive_running;
+        const seriesForLiveness = Array.isArray(k.metrics_series) ? k.metrics_series : [];
+        const latestSeriesTs = (() => {
+          if (seriesForLiveness.length === 0) return null;
+          const lastRow = seriesForLiveness[seriesForLiveness.length - 1];
+          return (lastRow && isNum(lastRow.ts_unix)) ? Number(lastRow.ts_unix) : null;
+        })();
+        const latestSeriesAgoS = (latestSeriesTs !== null) ? Math.max(0, nowUnix - latestSeriesTs) : null;
+        const recentSignal =
+          (lastTurnAgoS !== null && lastTurnAgoS <= 600)
+          || (lastProactiveAgoS !== null && lastProactiveAgoS <= 600)
+          || (latestSeriesAgoS !== null && latestSeriesAgoS <= 600);
+        const statusClass = (!zombie && (exists || keepalive || recentSignal)) ? 'active' : 'inactive';
+
         const keepalivePill = keepalive
           ? '<span class="pill">keepalive</span>'
           : '<span class="pill bad">no-keepalive</span>';
+        const runtimePill =
+          (!exists && (keepalive || recentSignal))
+            ? '<span class="pill">keeper-runtime</span>'
+            : '';
         const zombiePill = zombie ? '<span class="pill bad">zombie</span>' : '';
         const handoffTh = isNum(k.handoff_threshold) ? k.handoff_threshold : 0.85;
         const handoffSoon = (isNum(ratio) && isNum(handoffTh) && ratio >= handoffTh * 0.95)
@@ -3405,6 +3441,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <span class="live-agent-sub">${k.agent_name || ''}</span>
                 ${genPill}
                 ${keepalivePill}
+                ${runtimePill}
                 ${zombiePill}
                 ${handoffSoon}
               </div>

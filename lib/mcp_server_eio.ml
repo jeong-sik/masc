@@ -2352,6 +2352,67 @@ Time: %s
 
 (** {1 Eio-Native JSON-RPC Handlers} *)
 
+let int_of_env_default name ~default ~min_v ~max_v =
+  let parsed =
+    match Sys.getenv_opt name with
+    | None -> default
+    | Some raw ->
+        (try int_of_string (String.trim raw) with _ -> default)
+  in
+  max min_v (min max_v parsed)
+
+let bool_of_env_default name ~(default : bool) =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw ->
+      let v = String.trim raw |> String.lowercase_ascii in
+      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then true
+      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
+      else default
+
+type tool_timeout_config = {
+  timeout_sec: float;
+  env_key: string;
+}
+
+let tool_timeout_config_of_name (tool_name : string) : tool_timeout_config option =
+  match tool_name with
+  | "masc_keeper_msg" ->
+      Some
+        {
+          timeout_sec =
+            float_of_int
+              (int_of_env_default
+                 "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
+                 ~default:45
+                 ~min_v:10
+                 ~max_v:300);
+          env_key = "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC";
+        }
+  | "masc_keeper_status" ->
+      Some
+        {
+          timeout_sec =
+            float_of_int
+              (int_of_env_default
+                 "MASC_TOOL_TIMEOUT_KEEPER_STATUS_SEC"
+                 ~default:55
+                 ~min_v:10
+                 ~max_v:300);
+          env_key = "MASC_TOOL_TIMEOUT_KEEPER_STATUS_SEC";
+        }
+  | _ -> None
+
+let tool_slow_log_ms () =
+  int_of_env_default
+    "MASC_TOOL_SLOW_LOG_MS"
+    ~default:1500
+    ~min_v:100
+    ~max_v:600000
+
+let tool_timing_verbose () =
+  bool_of_env_default "MASC_TOOL_TIMING_VERBOSE" ~default:false
+
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
 let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params =
   let open Yojson.Safe.Util in
@@ -2360,8 +2421,59 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
+  let timeout_hit = ref false in
+  let timeout_cfg = tool_timeout_config_of_name name in
+  let timeout_limit_sec =
+    match timeout_cfg with
+    | Some cfg -> cfg.timeout_sec
+    | None -> 0.0
+  in
+  let keeper_name = Safe_ops.json_string ~default:"" "name" arguments in
+  if tool_timing_verbose () then
+    Log.Mcp.info
+      "[tool-timing] start tool=%s keeper=%s timeout_limit_sec=%.0f"
+      name
+      keeper_name
+      timeout_limit_sec;
   let (success, message) =
-    try execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
+    try
+      match timeout_cfg with
+      | None ->
+          execute_tool_eio
+            ~sw
+            ~clock
+            ?mcp_session_id
+            ?auth_token
+            state
+            ~name
+            ~arguments
+      | Some cfg ->
+          (try
+             Eio.Time.with_timeout_exn
+               clock
+               cfg.timeout_sec
+               (fun () ->
+                 execute_tool_eio
+                   ~sw
+                   ~clock
+                   ?mcp_session_id
+                   ?auth_token
+                   state
+                   ~name
+                   ~arguments)
+           with Eio.Time.Timeout ->
+             timeout_hit := true;
+             Log.Mcp.error
+               "tools/call timeout: %s after %.0fs (env=%s)"
+               name
+               cfg.timeout_sec
+               cfg.env_key;
+             ( false,
+               Printf.sprintf
+                 "❌ Tool timed out after %.0fs: %s (env: %s)"
+                 cfg.timeout_sec
+                 name
+                 cfg.env_key ))
     with exn ->
       (* Never let a tool exception crash the MCP server. *)
       let err = Printexc.to_string exn in
@@ -2375,13 +2487,32 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
   let agent_name =
     Safe_ops.json_string ~default:"unknown" "agent_name" arguments
   in
+  let audit_detail =
+    Printf.sprintf
+      "%s|timeout=%d|duration_ms=%d|limit_sec=%.0f"
+      name
+      (if !timeout_hit then 1 else 0)
+      duration_ms
+      timeout_limit_sec
+  in
   append_audit_event state.Mcp_server.room_config {
     timestamp = Time_compat.now ();
     agent = agent_name;
     event_type = "tool_call";
     success;
-    detail = Some name;
+    detail = Some audit_detail;
   };
+
+  let slow_ms = tool_slow_log_ms () in
+  if !timeout_hit || duration_ms >= slow_ms then
+    Log.Mcp.info
+      "[tool-timing] done tool=%s keeper=%s duration_ms=%d timeout=%b timeout_limit_sec=%.0f success=%b"
+      name
+      keeper_name
+      duration_ms
+      !timeout_hit
+      timeout_limit_sec
+      success;
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled =

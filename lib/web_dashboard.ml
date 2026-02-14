@@ -18,7 +18,13 @@
     Changes only when server is rebuilt, enabling 304 responses. *)
 let etag () =
   let v = Version.version in
-  let hash = Digest.string v |> Digest.to_hex in
+  let build_marker =
+    try
+      let st = Unix.stat Sys.executable_name in
+      string_of_int (int_of_float st.Unix.st_mtime)
+    with _ -> "0"
+  in
+  let hash = Digest.string (v ^ ":" ^ build_marker) |> Digest.to_hex in
   String.sub hash 0 12
 
 (** Cached dashboard HTML - computed once per process lifetime *)

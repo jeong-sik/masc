@@ -1402,6 +1402,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
             <button id="keeper-zoom-120" class="keeper-zoom-btn" onclick="setKeeperZoom(120)">120 turns</button>
           </div>
           <div class="keeper-toolbar-group">
+            <span class="keeper-toolbar-label">Field Lang</span>
+            <button id="keeper-lang-ko" class="keeper-zoom-btn" onclick="setKeeperFieldLang('ko')">한국어</button>
+            <button id="keeper-lang-en" class="keeper-zoom-btn" onclick="setKeeperFieldLang('en')">English</button>
+          </div>
+          <div class="keeper-toolbar-group">
             <span class="keeper-toolbar-label">Compare</span>
             <select id="keeper-compare-select" class="keeper-select" onchange="setKeeperCompare(this.value)">
               <option value="">Select keeper</option>
@@ -1561,6 +1566,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
     const compareKeeperParam = params.get('compare_keeper');
     const handoffGenParam = params.get('handoff_gen');
     const handoffModelParam = params.get('handoff_model');
+    const keeperLangParam = (params.get('keeper_lang') || '').trim().toLowerCase();
+    const browserLang =
+      (typeof navigator !== 'undefined' && typeof navigator.language === 'string')
+        ? navigator.language.toLowerCase()
+        : '';
+    const defaultKeeperFieldLang = browserLang.startsWith('ko') ? 'ko' : 'en';
     let selectedKeeperName = keeperParam && keeperParam.trim() !== '' ? keeperParam.trim() : null;
     let keeperZoomTurns = [20, 50, 120].includes(keeperZoomParam) ? keeperZoomParam : 50;
     let compareKeeperName = compareKeeperParam && compareKeeperParam.trim() !== '' ? compareKeeperParam.trim() : null;
@@ -1568,6 +1579,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
       handoffGenParam && handoffGenParam.trim() !== '' ? handoffGenParam.trim() : 'all';
     let keeperHandoffModelFilter =
       handoffModelParam && handoffModelParam.trim() !== '' ? handoffModelParam.trim() : 'all';
+    let keeperFieldLang = ['ko', 'en'].includes(keeperLangParam)
+      ? keeperLangParam
+      : defaultKeeperFieldLang;
     let _dashboardLatest = null;
     const keeperAlertMemory = new Map();
 
@@ -2032,6 +2046,36 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (v.endsWith(':latest')) v = v.slice(0, -7);
       return v;
     }
+    const keeperLangText = {
+      en: {
+        metric_glossary: 'Metric Glossary',
+        field_dictionary_detailed: 'Field Dictionary (Detailed)',
+        definition: 'Definition',
+        formula: 'Formula',
+        source: 'Source',
+        interpret: 'Interpret',
+      },
+      ko: {
+        metric_glossary: '메트릭 요약',
+        field_dictionary_detailed: '필드 사전 (상세)',
+        definition: '정의',
+        formula: '계산식',
+        source: '데이터 소스',
+        interpret: '해석',
+      },
+    };
+    function keeperText(key) {
+      const lang =
+        keeperFieldLang === 'ko'
+          ? keeperLangText.ko
+          : keeperLangText.en;
+      const fallback = keeperLangText.en;
+      const v = lang ? lang[key] : null;
+      if (typeof v === 'string' && v.trim() !== '') return v;
+      const vf = fallback ? fallback[key] : null;
+      if (typeof vf === 'string' && vf.trim() !== '') return vf;
+      return key;
+    }
     function setKeeperQueryState() {
       const url = new URL(window.location.href);
       if (selectedKeeperName) url.searchParams.set('keeper', selectedKeeperName);
@@ -2052,6 +2096,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
         url.searchParams.set('handoff_model', keeperHandoffModelFilter);
       } else {
         url.searchParams.delete('handoff_model');
+      }
+      if (keeperFieldLang && keeperFieldLang !== defaultKeeperFieldLang) {
+        url.searchParams.set('keeper_lang', keeperFieldLang);
+      } else {
+        url.searchParams.delete('keeper_lang');
       }
       history.replaceState(history.state || {}, '', url.pathname + url.search + url.hash);
     }
@@ -2091,11 +2140,26 @@ let cached_html = lazy ({|<!DOCTYPE html>
       setKeeperQueryState();
       renderKeeperDetail();
     }
+    function setKeeperFieldLang(lang) {
+      const next = String(lang || '').trim().toLowerCase();
+      if (!['ko', 'en'].includes(next)) return;
+      if (keeperFieldLang === next) return;
+      keeperFieldLang = next;
+      setKeeperQueryState();
+      renderKeeperDetail();
+    }
     function applyKeeperZoomButtons() {
       [20, 50, 120].forEach((n) => {
         const el = document.getElementById('keeper-zoom-' + n);
         if (!el) return;
         el.classList.toggle('active', keeperZoomTurns === n);
+      });
+    }
+    function applyKeeperLangButtons() {
+      ['ko', 'en'].forEach((lang) => {
+        const el = document.getElementById('keeper-lang-' + lang);
+        if (!el) return;
+        el.classList.toggle('active', keeperFieldLang === lang);
       });
     }
     function windowSeries(series) {
@@ -2367,6 +2431,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const compareSelect = document.getElementById('keeper-compare-select');
       if (!modal || !title || !sub || !content) return;
       applyKeeperZoomButtons();
+      applyKeeperLangButtons();
       if (!selectedKeeperName) {
         content.innerHTML = '<div class="empty">No keeper selected</div>';
         if (etaPill) etaPill.textContent = 'ETA -';
@@ -2884,9 +2949,355 @@ let cached_html = lazy ({|<!DOCTYPE html>
           interpretation: 'Shows which peers this keeper interacts with most.',
         },
       };
+      const metricGlossaryKo = {
+        context_ratio: {
+          label: '컨텍스트',
+          short: '현재 컨텍스트 사용률과 사용 토큰/최대 토큰입니다.',
+          definition: '현재 세대 키퍼의 라이브 컨텍스트가 얼마나 찼는지 나타냅니다.',
+          interpretation: `낮을수록 안전합니다. 70% 이상은 주시, 임계치(${Math.round(th * 100)}%) 근처는 고위험입니다.`,
+        },
+        handoff_threshold: {
+          label: '핸드오프 임계치',
+          short: '핸드오프를 권장하거나 트리거하는 컨텍스트 비율 한계입니다.',
+          definition: '안전한 컨텍스트 점유를 위한 상한 비율 설정값입니다.',
+          interpretation: '이 값을 넘기면 후계 세대로 즉시 승계하는 것이 좋습니다.',
+        },
+        handoff_risk: {
+          label: '핸드오프 위험도',
+          short: '핸드오프 압력을 0-100 점수로 합성한 값입니다.',
+          definition: '컨텍스트 비율, 최근 증가 추세, 임계치 근접도를 조합한 점수입니다.',
+          interpretation: '0-39 낮음, 40-64 주시, 65-79 높음, 80 이상 긴급으로 봅니다.',
+        },
+        risk_confidence: {
+          label: '위험도 신뢰도',
+          short: '현재 위험도 추정의 신호 신뢰도입니다.',
+          definition: '최근 윈도우 샘플 품질에 기반한 위험도 점수의 신뢰 수준입니다.',
+          interpretation: '신뢰도가 낮으면 표본이 적거나 노이즈가 높을 수 있어 해석에 주의가 필요합니다.',
+        },
+        handoff_eta: {
+          label: '핸드오프 ETA',
+          short: '임계치 도달까지 남은 예상 턴 수입니다.',
+          definition: '최근 증가 추세를 기반으로 임계치 초과까지 남은 턴을 추정합니다.',
+          interpretation: 'ETA가 now 이거나 3턴 이하면 즉시 승계 구간으로 봅니다.',
+        },
+        display_zoom: {
+          label: '표시 줌',
+          short: '차트에서 마지막 N개 포인트만 보여주는 표시 범위입니다.',
+          definition: '차트와 비교 시각화에만 적용되는 UI 줌입니다.',
+          interpretation: '백엔드 집계 윈도우는 바뀌지 않고 화면 표시만 바뀝니다.',
+        },
+        metrics_window: {
+          label: '메트릭 윈도우',
+          short: '소스 캡 기준으로 로드된 최근 메트릭 행 집합입니다.',
+          definition: 'KPI 집계와 차트 계산에 쓰는 윈도우 데이터셋입니다.',
+          interpretation: '윈도우가 너무 작으면 비율 지표 변동성이 커질 수 있습니다.',
+        },
+        window_points: {
+          label: '윈도우 포인트',
+          short: '현재 윈도우에 포함된 샘플 행 개수입니다.',
+          definition: 'turn/proactive/heartbeat 포인트 합계입니다.',
+          interpretation: '포인트가 많을수록 지표가 안정적이며, 적으면 왜곡되기 쉽습니다.',
+        },
+        model_fallback: {
+          label: '모델 폴백 비율',
+          short: '기본 라우트에서 이탈한 모델 사용 비율입니다.',
+          definition: '현재 상호작용 포인트 기준 모델 폴백 비율입니다.',
+          interpretation: '높으면 라우팅 불안정 또는 모델 가용성 압력을 의심할 수 있습니다.',
+        },
+        proactive_template_fallback: {
+          label: '프로액티브 템플릿 폴백',
+          short: '프로액티브 경로에서 템플릿 폴백된 비율입니다.',
+          definition: '프로액티브 생성이 정상 경로 대신 템플릿으로 내려간 빈도입니다.',
+          interpretation: `warn ${fmtPct1(alertThresholds.proactive_fallback_warn)} 이상, bad ${fmtPct1(alertThresholds.proactive_fallback_bad)} 이상으로 봅니다.`,
+        },
+        proactive_similarity: {
+          label: '프로액티브 유사도',
+          short: '인접 프로액티브 프리뷰 텍스트의 유사도입니다.',
+          definition: '프로액티브 출력의 반복성을 평균/최대 유사도로 측정합니다.',
+          interpretation: `warn ${fmtPct1(alertThresholds.proactive_similarity_warn)} 이상, bad ${fmtPct1(alertThresholds.proactive_similarity_bad)} 이상으로 봅니다.`,
+        },
+        drift_window: {
+          label: '드리프트 윈도우',
+          short: '현재 상호작용 구간에서 드리프트 적용 비율입니다.',
+          definition: 'turn/proactive 상호작용에서 드리프트 정책이 적용된 빈도입니다.',
+          interpretation: '증가는 적응일 수 있지만 불안정 신호일 수도 있어 사유와 함께 봐야 합니다.',
+        },
+        intervention_share: {
+          label: '개입 비중',
+          short: '상호작용 대비 proactive 비중입니다.',
+          definition: '최근 작업에서 키퍼가 얼마나 선제적으로 개입하는지 나타냅니다.',
+          interpretation: '비중이 높을수록 선제 행동이 많으며, 과하면 노이즈가 늘 수 있습니다.',
+        },
+        top_drift_reason: {
+          label: '주요 드리프트 사유',
+          short: '현재 윈도우에서 가장 빈번한 드리프트 트리거 사유입니다.',
+          definition: '드리프트를 가장 많이 유발한 원인 카테고리입니다.',
+          interpretation: '드리프트 비율과 함께 보면 가드레일 튜닝 포인트를 찾기 쉽습니다.',
+        },
+        top_compaction_trigger: {
+          label: '주요 컴팩션 트리거',
+          short: '현재 윈도우에서 가장 빈번한 컴팩션 트리거 사유입니다.',
+          definition: '컴팩션 이벤트를 가장 많이 유발한 원인 카테고리입니다.',
+          interpretation: '임계치 기반인지 정책 기반인지 운영 성격을 확인할 수 있습니다.',
+        },
+        window_handoff_compaction: {
+          label: '윈도우 핸드오프/컴팩션',
+          short: '현재 윈도우의 핸드오프와 컴팩션 이벤트 수입니다.',
+          definition: '승계와 압축의 이벤트 볼륨을 함께 보여줍니다.',
+          interpretation: '핸드오프 없이 컴팩션이 많다면 압축으로 압력을 해소 중일 수 있습니다.',
+        },
+        window_compaction_saved: {
+          label: '윈도우 컴팩션 절감 토큰',
+          short: '현재 윈도우에서 컴팩션으로 줄인 토큰 총합입니다.',
+          definition: '컴팩션 이벤트로 절감된 컨텍스트 토큰의 절대량입니다.',
+          interpretation: '이벤트 수 대비 절감량이 크면 고효율 컴팩션입니다.',
+        },
+        compaction_efficiency: {
+          label: '컴팩션 효율',
+          short: '컴팩션 전 토큰 대비 절감 비율입니다.',
+          definition: '컴팩션이 얼마나 강하게 토큰을 줄였는지 나타냅니다.',
+          interpretation: '높을수록 강한 압축입니다. 과도하면 기억 연속성이 약해질 수 있습니다.',
+        },
+        memory_pass: {
+          label: '메모리 패스율',
+          short: '현재 윈도우의 메모리 회상 검사 통과율입니다.',
+          definition: '회상 검증에서 정답으로 판정된 비율입니다.',
+          interpretation: '낮으면 회상 드리프트 또는 노트 품질 저하를 의심할 수 있습니다.',
+        },
+        memory_score: {
+          label: '메모리 점수',
+          short: '평균 회상 점수와 임계치 비교값입니다.',
+          definition: '최종 회상 점수 평균이 threshold 대비 어떤 수준인지 나타냅니다.',
+          interpretation: '임계치 이하가 지속되면 회상 품질 저하로 판단합니다.',
+        },
+        weather_recall: {
+          label: '날씨 회상',
+          short: 'expected_topic=weather 에 한정한 회상 통과율입니다.',
+          definition: '날씨 주제에 대한 토픽 한정 회상 품질 지표입니다.',
+          interpretation: '특정 토픽 프로브이므로 전체 메모리 품질과 동일시하면 안 됩니다.',
+        },
+        memory_corrections: {
+          label: '보정',
+          short: '회상 보정 시도 횟수와 성공 횟수입니다.',
+          definition: '회상 불일치 후 보정 정책이 적용된 횟수와 성공 결과입니다.',
+          interpretation: '시도 대비 성공이 낮으면 보정 정책 튜닝이 필요합니다.',
+        },
+        memory_notes: {
+          label: '메모리 노트',
+          short: '장기 메모리 노트 총량과 윈도우 증가량입니다.',
+          definition: '현재 메모리 뱅크 크기와 최근 증가 추세를 함께 보여줍니다.',
+          interpretation: '증가 속도가 빠른데 컴팩션이 없으면 이후 컨텍스트 압력이 커집니다.',
+        },
+        memory_compact: {
+          label: '메모리 컴팩트',
+          short: '노트 단위 컴팩션 실행 횟수와 제거 노트 수입니다.',
+          definition: '메모리 노트 정리 작업이 얼마나 자주 수행됐는지 보여줍니다.',
+          interpretation: '과도한 노트 정리는 컨텍스트 보호에 유리하지만 회상 범위를 줄일 수 있습니다.',
+        },
+        memory_trim_rate: {
+          label: '메모리 트림 비율',
+          short: '메모리 컴팩션에서 제거된 노트 비율입니다.',
+          definition: '노트 정리 강도를 상대 비율로 나타낸 지표입니다.',
+          interpretation: '높을수록 공격적 정리입니다. 패스율과 함께 보며 균형을 잡아야 합니다.',
+        },
+        tool_calls: {
+          label: '도구 호출 수',
+          short: '현재 윈도우에서 관측된 총 도구 호출 횟수입니다.',
+          definition: '이 키퍼가 외부 도구를 실행한 총량입니다.',
+          interpretation: '급격한 증가 시 워크로드 변화나 재시도 루프 가능성을 확인하세요.',
+        },
+        soul_profile: {
+          label: 'SOUL 프로필',
+          short: '현재 키퍼에 적용된 행동 프로필입니다.',
+          definition: '스타일과 우선순위를 규정하는 페르소나/제어 프로필입니다.',
+          interpretation: '프로필 변화는 행동 방향 드리프트의 선행 신호일 수 있습니다.',
+        },
+        will: {
+          label: '의지',
+          short: '현재 키퍼의 핵심 의지 문장입니다.',
+          definition: '행동 과정에서 유지하려는 중심 목적입니다.',
+          interpretation: '의지가 크게 바뀌면 곧 행동 방향이 달라질 가능성이 큽니다.',
+        },
+        needs: {
+          label: '니즈',
+          short: '현재 키퍼가 선언한 운영상 필요 조건입니다.',
+          definition: '안정 동작이나 진행을 위해 필요한 단기 요구사항입니다.',
+          interpretation: '도구, 컨텍스트, 안전 제약 같은 즉시 조건을 파악할 수 있습니다.',
+        },
+        desires: {
+          label: '욕구',
+          short: '현재 키퍼의 선호/욕구 방향입니다.',
+          definition: '운영 니즈를 넘어선 선호 기반 추진 방향입니다.',
+          interpretation: '프로액티브 강도와 탐색 성향에 영향을 줍니다.',
+        },
+        active_model: {
+          label: '활성 모델',
+          short: '가장 최근 턴에서 실제 사용된 모델입니다.',
+          definition: '현재 응답 처리를 담당하는 라이브 모델입니다.',
+          interpretation: '여기 변화는 즉각적인 라우팅 변화의 신호입니다.',
+        },
+        next_model: {
+          label: '다음 모델',
+          short: '라우터가 제안한 다음 모델 힌트입니다.',
+          definition: '다음 턴에서 전환 가능성이 있는 모델 경로입니다.',
+          interpretation: '사전 경고 지표로 활용해 모델 전환을 예측할 수 있습니다.',
+        },
+        primary_model: {
+          label: '기본 모델',
+          short: '현재 윈도우에서 기준으로 보는 기본 모델입니다.',
+          definition: '폴백 해석 기준이 되는 우선 모델입니다.',
+          interpretation: '폴백 비율은 이 모델 대비 이탈 정도로 해석합니다.',
+        },
+        skill_route: {
+          label: '스킬 라우트',
+          short: '현재 스킬 라우팅 경로입니다.',
+          definition: '주/보조 스킬 조합으로 구성된 실행 경로입니다.',
+          interpretation: '라우트 변화는 도구 사용 패턴과 출력 스타일 변화를 유발할 수 있습니다.',
+        },
+        total_turns: {
+          label: '총 턴 수',
+          short: '현재 생애 구간에서 처리한 누적 턴 수입니다.',
+          definition: '키퍼가 처리한 전체 턴 볼륨입니다.',
+          interpretation: '값이 커질수록 메모리 압력과 드리프트 가능성이 커집니다.',
+        },
+        io_tokens: {
+          label: '입력/출력 토큰',
+          short: '누적 입력 토큰과 출력 토큰입니다.',
+          definition: '프롬프트 소비량과 생성량의 누적합입니다.',
+          interpretation: '입출력 비율로 업무 성격을 빠르게 파악할 수 있습니다.',
+        },
+        total_tokens: {
+          label: '총 토큰',
+          short: '누적 토큰 소비 총합입니다.',
+          definition: '모든 턴의 토큰 사용량을 합친 값입니다.',
+          interpretation: '핸드오프 압력의 장기 지표로 활용하기 좋습니다.',
+        },
+        total_cost: {
+          label: '총 비용',
+          short: '누적 모델 비용 추정치입니다.',
+          definition: '모델 사용량 기반 누적 비용입니다.',
+          interpretation: '토큰과 함께 보면 비싼 라우팅 패턴을 찾기 쉽습니다.',
+        },
+        born_at: {
+          label: '생성 시각',
+          short: '현재 세대 키퍼가 시작된 시각입니다.',
+          definition: '세대 시작 타임스탬프입니다.',
+          interpretation: 'age 와 함께 보면 라이프사이클 단계 파악이 쉽습니다.',
+        },
+        updated_at: {
+          label: '업데이트 시각',
+          short: '가장 최근 상태 저장 시각입니다.',
+          definition: '키퍼 상태가 마지막으로 갱신된 시점입니다.',
+          interpretation: 'heartbeat 대비 갱신이 오래되면 상태 반영 지연일 수 있습니다.',
+        },
+        handoffs_total: {
+          label: '총 핸드오프',
+          short: '완료된 승계 횟수 누적치입니다.',
+          definition: '후계 세대로 전환된 총 횟수입니다.',
+          interpretation: '급격히 증가하면 압력 과다 또는 회전 정책 과민 가능성이 있습니다.',
+        },
+        compactions_total: {
+          label: '총 컴팩션',
+          short: '컴팩션 실행 누적 횟수입니다.',
+          definition: '컨텍스트/메모리 압축 작업의 누적 실행량입니다.',
+          interpretation: '횟수가 많은데 효율이 낮으면 정책 재조정이 필요합니다.',
+        },
+        compaction_profile: {
+          label: '컴팩션 프로필',
+          short: '적용 중인 컴팩션 정책 프로필입니다.',
+          definition: '정리 강도와 조건을 정의한 전략 프리셋입니다.',
+          interpretation: '프로필 전환은 메모리 연속성과 정리 강도에 큰 영향을 줍니다.',
+        },
+        proactive_total: {
+          label: '총 프로액티브',
+          short: '프로액티브 개입 누적 횟수입니다.',
+          definition: '키퍼가 선제적으로 수행한 행동의 총량입니다.',
+          interpretation: '값이 높으면 주도적 성향의 운영 궤적입니다.',
+        },
+        drift_total: {
+          label: '총 드리프트',
+          short: '드리프트 적용 누적 횟수입니다.',
+          definition: '정책/행동 드리프트가 누적 적용된 횟수입니다.',
+          interpretation: '주요 드리프트 사유와 함께 보면 적응 방향을 파악하기 쉽습니다.',
+        },
+        last_proactive: {
+          label: '마지막 프로액티브',
+          short: '최근 프로액티브 이후 경과 시간입니다.',
+          definition: '프로액티브 활동 최신성 지표입니다.',
+          interpretation: '간격이 길면 proactive 정체 신호일 수 있습니다.',
+        },
+        last_drift: {
+          label: '마지막 드리프트',
+          short: '가장 최근 드리프트 턴과 사유입니다.',
+          definition: '최근 드리프트 위치와 원인을 함께 보여줍니다.',
+          interpretation: '최근 사유는 행동 변화 해석의 핵심 단서가 됩니다.',
+        },
+        memory_focus: {
+          label: '메모리 포커스',
+          short: '현재 가장 우세한 메모리 종류입니다.',
+          definition: '메모리 뱅크/윈도우에서 가장 빈번한 kind 입니다.',
+          interpretation: '지금 이 키퍼가 무엇을 중요하게 기억하는지 보여줍니다.',
+        },
+        most_work: {
+          label: '주요 작업',
+          short: '현재 윈도우에서 가장 빈번한 작업 종류입니다.',
+          definition: '최근 실행된 업무 카테고리의 최빈값입니다.',
+          interpretation: '최근 워크로드 방향을 빠르게 파악하는 지표입니다.',
+        },
+        most_model: {
+          label: '주요 모델',
+          short: '현재 윈도우에서 가장 많이 사용한 모델입니다.',
+          definition: '최근 사용 모델의 최빈값입니다.',
+          interpretation: '설정값이 아니라 실제 사용 우위를 보여줍니다.',
+        },
+        most_tool: {
+          label: '주요 도구',
+          short: '현재 윈도우에서 가장 많이 호출한 도구입니다.',
+          definition: '최근 도구 호출의 최빈값입니다.',
+          interpretation: '주요 실행 경로나 병목 지점을 빠르게 파악할 수 있습니다.',
+        },
+        conversation_rows: {
+          label: '대화 행 수',
+          short: '표시되는 tail 행 수와 raw 행 수 비교입니다.',
+          definition: '현재 화면에 보여주는 대화량과 원본 수집량의 차이를 나타냅니다.',
+          interpretation: '격차가 크면 표시 단계에서 절단/필터링이 많이 발생한 상태입니다.',
+        },
+        conversation_fragments: {
+          label: '대화 프래그먼트',
+          short: '프래그먼트 파싱/필터 상태 지표입니다.',
+          definition: '분절된 대화 조각의 발생과 필터링 상태를 보여줍니다.',
+          interpretation: '필터 프래그먼트가 많으면 회상 추적 가독성이 떨어질 수 있습니다.',
+        },
+        k2k_edges: {
+          label: 'K2K 엣지',
+          short: '키퍼 간 릴레이 연결 수입니다.',
+          definition: '대화에서 감지된 inter-keeper 연결 밀도입니다.',
+          interpretation: '값이 높을수록 에이전트 간 상호작용이 활발합니다.',
+        },
+        k2k_mentions: {
+          label: 'K2K 멘션',
+          short: 'K2K 로그에서 자주 언급된 대상입니다.',
+          definition: '릴레이 경로에서 빈번히 호출된 키퍼 목록입니다.',
+          interpretation: '어떤 피어와 가장 자주 상호작용하는지 보여줍니다.',
+        },
+      };
       const glossaryEntry = (key) => {
-        const v = metricGlossary[key];
-        return (v && typeof v === 'object') ? v : null;
+        const base = metricGlossary[key];
+        if (!(base && typeof base === 'object')) return null;
+        if (keeperFieldLang !== 'ko') return base;
+        const ko = metricGlossaryKo[key];
+        if (!(ko && typeof ko === 'object')) return base;
+        return {
+          ...base,
+          label: (typeof ko.label === 'string' && ko.label.trim() !== '') ? ko.label : base.label,
+          short: (typeof ko.short === 'string' && ko.short.trim() !== '') ? ko.short : base.short,
+          definition: (typeof ko.definition === 'string' && ko.definition.trim() !== '') ? ko.definition : base.definition,
+          formula: (typeof ko.formula === 'string' && ko.formula.trim() !== '') ? ko.formula : base.formula,
+          source: (typeof ko.source === 'string' && ko.source.trim() !== '') ? ko.source : base.source,
+          interpretation: (typeof ko.interpretation === 'string' && ko.interpretation.trim() !== '')
+            ? ko.interpretation
+            : base.interpretation,
+        };
       };
       const glossaryTip = (key) => {
         const entry = glossaryEntry(key);
@@ -2911,10 +3322,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
             ? entry.label.trim()
             : key;
           const body = [
-            glossaryFieldItemHtml('Definition', entry.definition),
-            glossaryFieldItemHtml('Formula', entry.formula),
-            glossaryFieldItemHtml('Source', entry.source),
-            glossaryFieldItemHtml('Interpret', entry.interpretation),
+            glossaryFieldItemHtml(keeperText('definition'), entry.definition),
+            glossaryFieldItemHtml(keeperText('formula'), entry.formula),
+            glossaryFieldItemHtml(keeperText('source'), entry.source),
+            glossaryFieldItemHtml(keeperText('interpret'), entry.interpretation),
           ].filter((x) => x !== '').join('');
           if (body === '') return '';
           return `<div class="keeper-field-row"><div class="keeper-field-head"><span class="keeper-field-title">${escHtml(label)}</span><code class="keeper-field-key">${escHtml(key)}</code></div>${body}</div>`;
@@ -3704,7 +4115,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Metric Glossary</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('metric_glossary'))}</div>
             <div class="keeper-chart-meta">
               <span><b>display zoom</b> ${escHtml(glossaryTip('display_zoom'))}</span>
               <span><b>metrics window</b> ${escHtml(glossaryTip('metrics_window'))}</span>
@@ -3718,7 +4129,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Field Dictionary (Detailed)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('field_dictionary_detailed'))}</div>
             <div class="keeper-field-dictionary">
               ${glossaryDetailHtml}
             </div>

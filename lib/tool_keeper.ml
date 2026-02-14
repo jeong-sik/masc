@@ -715,17 +715,19 @@ let mkdir_p path =
   in
   go path
 
-let keeper_dir config =
-  let d = Filename.concat (Room.masc_dir config) "perpetual-keepers" in
+let keeper_dir (config : Room.config) =
+  (* Keepers are global — never scoped to cluster/room.
+     Use base_path directly, consistent with perpetual_loop.ml. *)
+  let d = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
   mkdir_p d;
   d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
-let session_base_dir config =
-  (* Keep consistent with Perpetual_loop.default_config. *)
-  Filename.concat (Room.masc_dir config) "perpetual"
+let session_base_dir (config : Room.config) =
+  (* Cluster-independent, consistent with Perpetual_loop.default_config. *)
+  Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
 
 let keeper_agent_name name =
   (* Make it look like a generated nickname so Room.join uses it as-is. *)

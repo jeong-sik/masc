@@ -621,6 +621,8 @@ let keeper_metrics_24h_json
            ("proactive_points", `Int b.proactive_points);
            ("proactive_fallback_count", `Int b.proactive_fallback_count);
            ("proactive_fallback_rate", `Float proactive_fallback_rate);
+           ("proactive_template_fallback_count", `Int b.proactive_fallback_count);
+           ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
          ])
   in
   let bucket_count = List.length rows in
@@ -643,6 +645,8 @@ let keeper_metrics_24h_json
       ("proactive_points", `Int !proactive_points);
       ("proactive_fallback_count", `Int !proactive_fallback_count);
       ("proactive_fallback_rate", `Float proactive_fallback_rate);
+      ("proactive_template_fallback_count", `Int !proactive_fallback_count);
+      ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
     ]
   in
   (`List rows, summary)
@@ -1444,8 +1448,12 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               ("avg_compaction_saved_tokens", `Float avg_compaction_saved_tokens);
               ("fallback_count", `Int !fallback_count);
               ("fallback_rate", `Float fallback_rate);
+              ("model_fallback_count", `Int !fallback_count);
+              ("model_fallback_rate", `Float fallback_rate);
               ("proactive_fallback_count", `Int !proactive_fallback_count);
               ("proactive_fallback_rate", `Float proactive_fallback_rate);
+              ("proactive_template_fallback_count", `Int !proactive_fallback_count);
+              ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
               ("intervention_share", `Float intervention_share);
               ("intervention_per_turn", `Float intervention_per_turn);
               ("drift_applied_count", `Int !drift_applied_count);

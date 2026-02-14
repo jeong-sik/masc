@@ -543,39 +543,6 @@ let keeper_msg_slow_ms () : int =
 let keeper_msg_timing_log_default () : bool =
   bool_of_env_default "MASC_KEEPER_MSG_TIMING_LOG" ~default:false
 
-type stage_timing = {
-  stage: string;
-  elapsed_ms: int;
-}
-
-let make_stage_timer () =
-  let last_mark_ts = ref (Time_compat.now ()) in
-  let timings_rev : stage_timing list ref = ref [] in
-  let mark (stage : string) =
-    let now_ts = Time_compat.now () in
-    let elapsed_ms =
-      int_of_float (max 0.0 ((now_ts -. !last_mark_ts) *. 1000.0))
-    in
-    timings_rev := { stage; elapsed_ms } :: !timings_rev;
-    last_mark_ts := now_ts
-  in
-  let snapshot () = List.rev !timings_rev in
-  (mark, snapshot)
-
-let stage_timings_total_ms (timings : stage_timing list) : int =
-  List.fold_left (fun acc t -> acc + t.elapsed_ms) 0 timings
-
-let stage_timings_to_json (timings : stage_timing list) : Yojson.Safe.t =
-  `List
-    (List.map
-       (fun t ->
-         `Assoc [ ("stage", `String t.stage); ("elapsed_ms", `Int t.elapsed_ms) ])
-       timings)
-
-let stage_timings_to_text (timings : stage_timing list) : string =
-  timings
-  |> List.map (fun t -> Printf.sprintf "%s=%dms" t.stage t.elapsed_ms)
-  |> String.concat "; "
 let keeper_compact_ratio () : float =
   float_of_env_default
     "MASC_KEEPER_COMPACT_RATIO"
@@ -4850,8 +4817,7 @@ let handle_keeper_msg ctx args : tool_result =
     let include_timing = get_bool args "include_timing" false in
     let timing_log = get_bool args "timing_log" (keeper_msg_timing_log_default ()) in
     let msg_slow_ms = keeper_msg_slow_ms () in
-    let msg_started_ts = Time_compat.now () in
-    let (mark_stage, snapshot_stage_timings) = make_stage_timer () in
+    let (mark_stage, msg_total_ms, snapshot_stage_timings) = make_stage_timer () in
     let inline_goal = get_string_opt args "goal" in
     let inline_instructions = get_string_opt args "instructions" in
     let inline_will = parse_self_model_opt args "will" in
@@ -5448,11 +5414,10 @@ let handle_keeper_msg ctx args : tool_result =
 	              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
               let build_timing_payload ~model_used () =
                 let stage_timings = snapshot_stage_timings () in
-                let stage_total_ms = stage_timings_total_ms stage_timings in
-                let total_elapsed_ms =
-                  int_of_float
-                    (max 0.0 ((Time_compat.now () -. msg_started_ts) *. 1000.0))
+                let stage_total_ms =
+                  List.fold_left (fun acc (_label, ms) -> acc + ms) 0 stage_timings
                 in
+                let total_elapsed_ms = msg_total_ms () in
                 if timing_log || total_elapsed_ms >= msg_slow_ms then
                   Printf.eprintf
                     "[keeper:%s] masc_keeper_msg timing total=%dms slow_ms=%d slow=%b model=%s stages=[%s]\n%!"

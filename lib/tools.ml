@@ -667,7 +667,7 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
   (* Git Worktree Integration - v2 Agent Isolation *)
   {
     name = "masc_worktree_create";
-    description = "Create an isolated Git worktree for your work. Each agent works in its own worktree to avoid conflicts. The worktree is created at .worktrees/{agent}-{task}/ with a new branch. This is BETTER than file locks: you get complete isolation and can work in parallel. After work, create a PR with `gh pr create` and remove the worktree.";
+    description = "Create an isolated Git worktree for your work. This requires the active MASC base repository to have `.git` (resolved with git root detection) and always creates worktrees under `<repo_root>/.worktrees/{agent}-{task}/` with a new branch. If you are in a workspace with multiple repos, run MASC from the target repo root. This is BETTER than file locks: you get complete isolation and can work in parallel. After work, create a PR with `gh pr create` and remove the worktree.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -2248,6 +2248,67 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
         ("target_agent", `Assoc [
           ("type", `String "string");
           ("description", `String "Agent to spawn: 'claude'|'gemini'|'codex'|'ollama' (default: claude)");
+        ]);
+        ("async", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true (default), return immediately and run handoff as background saga.");
+          ("default", `Bool true);
+        ]);
+        ("verify", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true (default), run LLM verifier on handoff result and store it in saga payload.");
+          ("default", `Bool true);
+        ]);
+        ("verifier_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Verifier model list (provider:model). Default: ['ollama:glm-4.7-flash'].");
+        ]);
+        ("verifier_perspectives", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional perspective labels matched by index to verifier_models.");
+        ]);
+        ("verifier_profile", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "abc_neutral"; `String "abc_strict"; `String "abc_lenient"]);
+          ("description", `String "Use fixed A/B/C perspective templates when verifier_perspectives is omitted.");
+          ("default", `String "abc_neutral");
+        ]);
+        ("verifier_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional verifier goal prompt override.");
+        ]);
+        ("verification_policy", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "advisory"; `String "gate"]);
+          ("description", `String "advisory: never block handoff result. gate: require verifier consensus.");
+          ("default", `String "advisory");
+        ]);
+        ("verification_min_judges", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Minimum number of verifier checks required for gate pass (default: 3, clamped to available verifier_models count).");
+          ("default", `Int 3);
+        ]);
+        ("verification_pass_ratio", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Required pass ratio for consensus (default: 2/3 ~= 0.6667).");
+          ("default", `Float 0.6666666666666666);
+        ]);
+        ("verification_min_agreement", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Required inter-judge agreement ratio for consensus (default: 2/3 ~= 0.6667).");
+          ("default", `Float 0.6666666666666666);
+        ]);
+        ("verification_judge_timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Per-judge verifier timeout in seconds (default: 60). Timeout verdict becomes WARN.");
+          ("default", `Float 60.0);
+        ]);
+        ("verification_saga_timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Async handoff saga max wall-time in seconds (default: 180). On timeout saga fails.");
+          ("default", `Float 180.0);
         ]);
       ]);
       ("required", `List [`String "context_ratio"]);
@@ -4174,6 +4235,103 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
         ]);
       ]);
       ("required", `List [`String "query"]);
+    ];
+  };
+
+  {
+    name = "masc_verify_request";
+    description = "Request verification of task output.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID to verify");
+        ]);
+        ("output", `Assoc [
+          ("description", `String "Task output payload to verify");
+        ]);
+        ("criteria", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [
+            ("type", `String "object");
+            ("description", `String "Verification criteria definition");
+          ]);
+          ("description", `String "Optional list of verification criteria");
+        ]);
+        ("verifier", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional verifier agent");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"]);
+    ];
+  };
+
+  {
+    name = "masc_verify_submit";
+    description = "Submit a verification verdict for a task request.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("verification_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Verification request ID");
+        ]);
+        ("verdict", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "pass"; `String "fail"; `String "partial"]);
+          ("description", `String "Verification result");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for the verdict");
+        ]);
+        ("score", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Score for partial verdict");
+        ]);
+      ]);
+      ("required", `List [`String "verification_id"; `String "verdict"]);
+    ];
+  };
+
+  {
+    name = "masc_verify_status";
+    description = "Check verification status by request ID.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("verification_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Verification request ID");
+        ]);
+      ]);
+      ("required", `List [`String "verification_id"]);
+    ];
+  };
+
+  {
+    name = "masc_verify_pending";
+    description = "List pending verification requests for the current agent.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  {
+    name = "masc_verify_auto";
+    description = "Run automated verification for a request.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("verification_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Verification request ID");
+        ]);
+      ]);
+      ("required", `List [`String "verification_id"]);
     ];
   };
 ]

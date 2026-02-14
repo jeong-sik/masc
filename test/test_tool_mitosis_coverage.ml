@@ -174,6 +174,144 @@ let test_mitosis_handoff_spawn_timeout_configurable () =
   | None -> fail "expected Some for mitosis_handoff"
 
 (* ============================================================
+   Verifier / Consensus Gate Tests
+   ============================================================ *)
+
+let parse_json_or_fail s =
+  try Yojson.Safe.from_string s
+  with exn -> fail ("invalid json response: " ^ Printexc.to_string exn)
+
+let test_handoff_verifier_advisory_with_invalid_model () =
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool true);
+    ("verification_policy", `String "advisory");
+    ("verification_min_judges", `Int 1);
+    ("verifier_models", `List [`String "invalid-model-spec"]);
+    ("verifier_perspectives", `List [`String "continuity"]);
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (true, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let gate = json |> member "verification_gate_passed" |> to_bool_option in
+      check bool "advisory gate pass" true (Option.value ~default:false gate);
+      let overall = json |> member "verification" |> member "overall" |> to_string_option in
+      check string "invalid model becomes warn" "warn" (Option.value ~default:"" overall)
+  | Some (false, msg) -> fail ("advisory mode should not fail: " ^ msg)
+  | None -> fail "expected Some for mitosis_handoff"
+
+let test_handoff_verifier_gate_blocks_with_invalid_model () =
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool true);
+    ("verification_policy", `String "gate");
+    ("verification_min_judges", `Int 1);
+    ("verification_pass_ratio", `Float 1.0);
+    ("verifier_models", `List [`String "invalid-model-spec"]);
+    ("verifier_perspectives", `List [`String "risk_guardrail"]);
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (false, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let gate = json |> member "verification_gate_passed" |> to_bool_option in
+      check bool "gate blocked" false (Option.value ~default:true gate)
+  | Some (true, _) -> fail "gate mode should fail when consensus does not pass"
+  | None -> fail "expected Some for mitosis_handoff"
+
+let test_handoff_verifier_gate_bypassed_when_verify_false () =
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+    ("verification_policy", `String "gate");
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (true, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let gate = json |> member "verification_gate_passed" |> to_bool_option in
+      check bool "verify false bypasses gate" true (Option.value ~default:false gate)
+  | Some (false, msg) -> fail ("verify=false should bypass gate: " ^ msg)
+  | None -> fail "expected Some for mitosis_handoff"
+
+let test_handoff_verifier_profile_and_research_metrics () =
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool true);
+    ("verification_policy", `String "advisory");
+    ("verifier_profile", `String "abc_neutral");
+    ("verifier_models", `List [
+      `String "invalid-a";
+      `String "invalid-b";
+      `String "invalid-c";
+    ]);
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (true, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let profile = json |> member "verification" |> member "profile" |> to_string_option in
+      check string "profile set" "abc_neutral" (Option.value ~default:"" profile);
+      let checks_len =
+        try json |> member "verification" |> member "checks" |> to_list |> List.length
+        with _ -> 0
+      in
+      check int "3 checks for 3 models" 3 checks_len;
+      let agreement =
+        json |> member "verification" |> member "research_metrics"
+        |> member "inter_judge_agreement" |> to_float_option
+      in
+      check bool "agreement metric exists" true (Option.is_some agreement);
+      let evidence =
+        json |> member "verification" |> member "research_metrics"
+        |> member "evidence_completeness" |> to_float_option
+      in
+      check bool "evidence metric exists" true (Option.is_some evidence);
+      check bool "action-aware evidence completeness"
+        true
+        (Option.value ~default:0.0 evidence >= 0.5)
+  | Some (false, msg) -> fail ("profile/research metrics should succeed: " ^ msg)
+  | None -> fail "expected Some for mitosis_handoff"
+
+let test_handoff_verifier_min_judges_clamped_to_available_models () =
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool true);
+    ("verification_policy", `String "gate");
+    ("verification_min_judges", `Int 3);
+    ("verifier_models", `List [`String "gemini:gemini-2.5-flash"]);
+    ("verifier_profile", `String "abc_neutral");
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (_ok, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let configured =
+        json |> member "verification" |> member "min_judges" |> to_int_option
+      in
+      let effective =
+        json |> member "verification" |> member "effective_min_judges" |> to_int_option
+      in
+      let total_checks =
+        json |> member "verification" |> member "counts" |> member "total" |> to_int_option
+      in
+      check int "configured min_judges kept" 3 (Option.value ~default:0 configured);
+      check int "effective min_judges clamped" 1 (Option.value ~default:0 effective);
+      check int "single model check count" 1 (Option.value ~default:0 total_checks)
+  | None -> fail "expected Some for mitosis_handoff"
+
+(* ============================================================
    Metrics Tools Tests (P1-4)
    ============================================================ *)
 
@@ -246,5 +384,13 @@ let () =
     "timeout_config", [
       test_case "defaults is 600" `Quick test_mitosis_defaults_spawn_timeout_is_600;
       test_case "handoff configurable" `Quick test_mitosis_handoff_spawn_timeout_configurable;
+    ];
+    "verifier", [
+      test_case "advisory invalid model" `Quick test_handoff_verifier_advisory_with_invalid_model;
+      test_case "gate blocks invalid model" `Quick test_handoff_verifier_gate_blocks_with_invalid_model;
+      test_case "gate bypass when verify=false" `Quick test_handoff_verifier_gate_bypassed_when_verify_false;
+      test_case "profile + research metrics" `Quick test_handoff_verifier_profile_and_research_metrics;
+      test_case "min_judges clamp to model count" `Quick
+        test_handoff_verifier_min_judges_clamped_to_available_models;
     ];
   ]

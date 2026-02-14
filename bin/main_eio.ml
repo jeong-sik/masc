@@ -18,6 +18,7 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
+module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
 module Tempo = Masc_mcp.Tempo
@@ -359,6 +360,146 @@ let float_of_env_default name ~default ~min_v ~max_v =
         (try float_of_string (String.trim s) with _ -> default)
   in
   max min_v (min max_v v)
+
+let bool_of_tag_value (raw : string) : bool =
+  let v = String.trim raw |> String.lowercase_ascii in
+  v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
+
+let parse_tool_call_detail (detail_opt : string option)
+  : string * bool * int option =
+  match detail_opt with
+  | None -> ("unknown", false, None)
+  | Some raw ->
+      let parts = String.split_on_char '|' raw |> List.map String.trim in
+      let tool_name =
+        match parts with
+        | head :: _ when head <> "" -> head
+        | _ -> "unknown"
+      in
+      let timeout = ref false in
+      let duration_ms = ref None in
+      let parse_kv token =
+        match String.split_on_char '=' token with
+        | [k; v] -> Some (String.trim k, String.trim v)
+        | _ -> None
+      in
+      let tags =
+        match parts with
+        | _ :: tl -> tl
+        | [] -> []
+      in
+      List.iter
+        (fun token ->
+          match parse_kv token with
+          | Some ("timeout", v) ->
+              timeout := bool_of_tag_value v
+          | Some ("duration_ms", v) ->
+              (try duration_ms := Some (max 0 (int_of_string v)) with _ -> ())
+          | _ -> ())
+        tags;
+      (tool_name, !timeout, !duration_ms)
+
+let percentile_int (values : int list) ~(pct : float) : int option =
+  match List.sort compare values with
+  | [] -> None
+  | sorted ->
+      let n = List.length sorted in
+      let idx =
+        int_of_float (ceil (pct *. float_of_int n) -. 1.0)
+        |> max 0
+        |> min (n - 1)
+      in
+      Some (List.nth sorted idx)
+
+let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
+  let window_hours =
+    float_of_env_default
+      "MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS"
+      ~default:1.0
+      ~min_v:0.1
+      ~max_v:168.0
+  in
+  let since = Masc_mcp.Time_compat.now () -. (window_hours *. 3600.0) in
+  let events = Tool_audit.read_audit_events config ~since in
+  let total = ref 0 in
+  let failures = ref 0 in
+  let timeouts = ref 0 in
+  let durations_rev = ref [] in
+  let duration_count = ref 0 in
+  let duration_sum = ref 0 in
+  let keeper_status_calls = ref 0 in
+  let keeper_status_failures = ref 0 in
+  let keeper_status_timeouts = ref 0 in
+  let keeper_msg_calls = ref 0 in
+  let keeper_msg_failures = ref 0 in
+  let keeper_msg_timeouts = ref 0 in
+  List.iter
+    (fun (e : Tool_audit.audit_event) ->
+      if e.event_type = "tool_call" then begin
+        incr total;
+        if not e.success then incr failures;
+        let (tool_name, timeout_now, duration_ms_opt) =
+          parse_tool_call_detail e.detail
+        in
+        if timeout_now then incr timeouts;
+        (match duration_ms_opt with
+         | Some d ->
+             incr duration_count;
+             duration_sum := !duration_sum + d;
+             durations_rev := d :: !durations_rev
+         | None -> ());
+        if tool_name = "masc_keeper_status" then begin
+          incr keeper_status_calls;
+          if not e.success then incr keeper_status_failures;
+          if timeout_now then incr keeper_status_timeouts;
+        end else if tool_name = "masc_keeper_msg" then begin
+          incr keeper_msg_calls;
+          if not e.success then incr keeper_msg_failures;
+          if timeout_now then incr keeper_msg_timeouts;
+        end
+      end)
+    events;
+  let total_f = float_of_int !total in
+  let failure_rate =
+    if !total = 0 then 0.0 else float_of_int !failures /. total_f
+  in
+  let timeout_rate =
+    if !total = 0 then 0.0 else float_of_int !timeouts /. total_f
+  in
+  let avg_duration_ms =
+    if !duration_count = 0 then 0.0
+    else float_of_int !duration_sum /. float_of_int !duration_count
+  in
+  let p95_duration_ms = percentile_int !durations_rev ~pct:0.95 in
+  let keeper_msg_timeout_sec =
+    int_of_env_default
+      "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
+      ~default:45
+      ~min_v:10
+      ~max_v:300
+  in
+  `Assoc [
+    ("window_hours", `Float window_hours);
+    ("tool_calls", `Int !total);
+    ("failures", `Int !failures);
+    ("timeouts", `Int !timeouts);
+    ("failure_rate", `Float failure_rate);
+    ("timeout_rate", `Float timeout_rate);
+    ("duration_sample_count", `Int !duration_count);
+    ("avg_duration_ms", `Float avg_duration_ms);
+    ("p95_duration_ms", match p95_duration_ms with Some v -> `Int v | None -> `Null);
+    ("keeper_msg_timeout_sec", `Int keeper_msg_timeout_sec);
+    ("keeper_status", `Assoc [
+      ("calls", `Int !keeper_status_calls);
+      ("failures", `Int !keeper_status_failures);
+      ("timeouts", `Int !keeper_status_timeouts);
+    ]);
+    ("keeper_msg", `Assoc [
+      ("calls", `Int !keeper_msg_calls);
+      ("failures", `Int !keeper_msg_failures);
+      ("timeouts", `Int !keeper_msg_timeouts);
+    ]);
+  ]
 
 type keeper_gen_window_stats = {
   mutable turns: int;
@@ -1826,6 +1967,7 @@ let dashboard_batch_json (config : Room.config) : Yojson.Safe.t =
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
+      ("tool_call_health", tool_call_health_json config);
       ("alert_thresholds", `Assoc [
         ("proactive_fallback_warn", `Float proactive_fallback_warn);
         ("proactive_fallback_bad", `Float (max proactive_fallback_warn proactive_fallback_bad));

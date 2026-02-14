@@ -120,6 +120,10 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
           ("type", `String "integer");
           ("description", `String "Token count gate for compaction (0 disables this gate). Overrides preset when set.");
         ]);
+        ("continuity_compaction_cooldown_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Minimum seconds to wait after a [STATE] continuity update before compaction. 0 disables the reflection hold.");
+        ]);
         ("auto_handoff", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If true, automatically rotate trace_id when context gets large (default: true).");
@@ -166,6 +170,30 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
         ("tail_bytes", `Assoc [
           ("type", `String "integer");
           ("description", `String "How many bytes from the end of files to scan for tails (default: 60000).");
+        ]);
+        ("fast", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable fast mode (skip heavy sections unless explicitly enabled).");
+        ]);
+        ("include_context", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include checkpoint-derived context stats (default: !fast).");
+        ]);
+        ("include_metrics_overview", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include metrics overview + skill route scan (default: !fast).");
+        ]);
+        ("include_memory_bank", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include memory bank summary (default: !fast).");
+        ]);
+        ("include_history_tail", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include recent history tail + fragment counters (default: !fast).");
+        ]);
+        ("include_compaction_history", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include recent compaction history tail (default: !fast).");
         ]);
       ]);
       ("required", `List [`String "name"]);
@@ -342,6 +370,15 @@ let bool_default_true_of_env name =
       let v = String.trim v |> String.lowercase_ascii in
       not (v = "0" || v = "false" || v = "no" || v = "n")
 
+let bool_of_env_default name ~(default : bool) =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw ->
+      let v = String.trim raw |> String.lowercase_ascii in
+      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then true
+      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
+      else default
+
 let validate_name name =
   (* Same rule as keeper script: conservative handle chars only. *)
   let re = Str.regexp "^[A-Za-z0-9._-]+$" in
@@ -491,11 +528,24 @@ let keeper_turn_max_tokens () : int =
     ~min_v:256
     ~max_v:4096
 
+let keeper_status_fast_default () : bool =
+  bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
+
 let keeper_followup_max_tokens (turn_max_tokens : int) : int =
-  clamp_int (turn_max_tokens / 2) ~min_v:320 ~max_v:1200
+  (* Thinking models (e.g. Gemini 2.5) consume internal thinking tokens
+     from this budget, so follow-up needs a generous allocation.
+     Use same budget as the initial turn since the system prompt is minimal. *)
+  clamp_int turn_max_tokens ~min_v:600 ~max_v:4096
 
 let keeper_correction_max_tokens (turn_max_tokens : int) : int =
   clamp_int (turn_max_tokens / 2) ~min_v:280 ~max_v:900
+
+let keeper_msg_postpass_budget_ms () : int =
+  int_of_env_default
+    "MASC_KEEPER_MSG_POSTPASS_BUDGET_MS"
+    ~default:12000
+    ~min_v:0
+    ~max_v:120000
 
 let keeper_compact_ratio () : float =
   float_of_env_default
@@ -518,6 +568,13 @@ let keeper_compact_max_tokens () : int =
     ~min_v:0
     ~max_v:5000000
 
+let keeper_continuity_compaction_cooldown_sec () : int =
+  int_of_env_default
+    "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
+    ~default:90
+    ~min_v:0
+    ~max_v:172800
+
 let keeper_compaction_policy_from_env () : (float * int * int) =
   ( keeper_compact_ratio (),
     keeper_compact_max_messages (),
@@ -531,6 +588,9 @@ let normalize_compaction_message_gate (v : int) : int =
 
 let normalize_compaction_token_gate (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:5000000
+
+let normalize_continuity_compaction_cooldown_sec (v : int) : int =
+  clamp_int v ~min_v:0 ~max_v:172800
 
 let default_compaction_profile = "custom"
 
@@ -715,17 +775,19 @@ let mkdir_p path =
   in
   go path
 
-let keeper_dir config =
-  let d = Filename.concat (Room.masc_dir config) "perpetual-keepers" in
+let keeper_dir (config : Room.config) =
+  (* Keepers are global — never scoped to cluster/room.
+     Use base_path directly, consistent with perpetual_loop.ml. *)
+  let d = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
   mkdir_p d;
   d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
-let session_base_dir config =
-  (* Keep consistent with Perpetual_loop.default_config. *)
-  Filename.concat (Room.masc_dir config) "perpetual"
+let session_base_dir (config : Room.config) =
+  (* Cluster-independent, consistent with Perpetual_loop.default_config. *)
+  Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
 
 let keeper_agent_name name =
   (* Make it look like a generated nickname so Room.join uses it as-is. *)
@@ -759,6 +821,7 @@ type keeper_meta = {
   compaction_ratio_gate: float;
   compaction_message_gate: int;
   compaction_token_gate: int;
+  continuity_compaction_cooldown_sec: int;
   auto_handoff: bool;
   handoff_threshold: float;
   handoff_cooldown_sec: int;
@@ -785,6 +848,10 @@ type keeper_meta = {
   last_proactive_ts: float;
   last_proactive_reason: string;
   last_proactive_preview: string;
+  last_compaction_check_ts: float;
+  last_compaction_decision: string;
+  last_continuity_update_ts: float;
+  continuity_summary: string;
 }
 
 let now_iso () = Types.now_iso ()
@@ -818,6 +885,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("compaction_ratio_gate", `Float m.compaction_ratio_gate);
     ("compaction_message_gate", `Int m.compaction_message_gate);
     ("compaction_token_gate", `Int m.compaction_token_gate);
+    ("continuity_compaction_cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
     ("auto_handoff", `Bool m.auto_handoff);
     ("handoff_threshold", `Float m.handoff_threshold);
     ("handoff_cooldown_sec", `Int m.handoff_cooldown_sec);
@@ -844,6 +912,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("last_proactive_ts", `Float m.last_proactive_ts);
     ("last_proactive_reason", `String m.last_proactive_reason);
     ("last_proactive_preview", `String m.last_proactive_preview);
+    ("last_compaction_check_ts", `Float m.last_compaction_check_ts);
+    ("last_compaction_decision", `String m.last_compaction_decision);
+    ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
+    ("continuity_summary", `String m.continuity_summary);
   ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
@@ -919,6 +991,12 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
       |> normalize_compaction_token_gate
     in
+    let continuity_compaction_cooldown_sec =
+      Safe_ops.json_int
+        ~default:(keeper_continuity_compaction_cooldown_sec ())
+        "continuity_compaction_cooldown_sec" json
+      |> normalize_continuity_compaction_cooldown_sec
+    in
     let auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
     let handoff_threshold = Safe_ops.json_float ~default:0.85 "handoff_threshold" json in
     let handoff_cooldown_sec = Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json in
@@ -945,6 +1023,18 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let last_proactive_ts = Safe_ops.json_float ~default:0.0 "last_proactive_ts" json in
     let last_proactive_reason = Safe_ops.json_string ~default:"" "last_proactive_reason" json in
     let last_proactive_preview = Safe_ops.json_string ~default:"" "last_proactive_preview" json in
+    let last_compaction_check_ts = Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json in
+    let last_compaction_decision =
+      Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
+    in
+    let continuity_summary = Safe_ops.json_string ~default:"" "continuity_summary" json in
+    let last_continuity_update_ts =
+      let parsed_ts = Safe_ops.json_float ~default:0.0 "last_continuity_update_ts" json in
+      if parsed_ts <= 0.0 && String.trim continuity_summary <> "" then
+        Time_compat.now ()
+      else
+        parsed_ts
+    in
     if not (validate_name name) then
       Error "invalid keeper meta (bad name)"
     else if not (validate_name trace_id) then
@@ -978,6 +1068,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         compaction_ratio_gate;
         compaction_message_gate;
         compaction_token_gate;
+        continuity_compaction_cooldown_sec;
         auto_handoff;
         handoff_threshold;
         handoff_cooldown_sec;
@@ -1004,6 +1095,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         last_proactive_ts;
         last_proactive_reason;
         last_proactive_preview;
+        last_compaction_check_ts;
+        last_compaction_decision;
+        last_continuity_update_ts;
+        continuity_summary;
       }
   with exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
@@ -1022,6 +1117,7 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
 
 let read_meta config name : (keeper_meta option, string) result =
   let path = keeper_meta_path config name in
+  Printf.eprintf "[KEEPER-DEBUG] read_meta name=%s path=%s exists=%b\n%!" name path (Sys.file_exists path);
   if not (Sys.file_exists path) then Ok None
   else
     match Safe_ops.read_json_file_safe path with
@@ -1211,6 +1307,97 @@ let parse_state_snapshot_from_reply (reply : string) : keeper_state_snapshot opt
         None
       else
         Some snapshot
+
+let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : string =
+  let maybe_line match_fn label =
+    match match_fn () with
+    | None -> None
+    | Some value -> Some (Printf.sprintf "%s: %s" label value)
+  in
+  let lines =
+    [
+      maybe_line
+        (fun () ->
+           match snapshot.goal with
+           | Some v when String.trim v <> "" -> Some (String.trim v)
+           | _ -> None)
+        "Goal";
+      maybe_line
+        (fun () ->
+           match snapshot.progress with
+           | Some v when String.trim v <> "" -> Some (String.trim v)
+           | _ -> None)
+        "Progress";
+      maybe_line
+        (fun () ->
+           match snapshot.next_items with
+           | [] -> None
+           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+        "Next";
+      maybe_line
+        (fun () ->
+           match snapshot.decisions with
+           | [] -> None
+           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+        "Decisions";
+      maybe_line
+        (fun () ->
+           match snapshot.open_questions with
+           | [] -> None
+           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+        "OpenQuestions";
+      maybe_line
+        (fun () ->
+           match snapshot.constraints with
+           | [] -> None
+           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+        "Constraints";
+    ]
+    |> List.filter_map (fun x -> x)
+  in
+  if lines = [] then "No continuity snapshot available." else String.concat "\n" lines
+
+let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Safe.t =
+  `Assoc [
+    ("goal", match snapshot.goal with Some s -> `String s | None -> `Null);
+    ("progress", match snapshot.progress with Some s -> `String s | None -> `Null);
+    ("next_items", `List (List.map (fun s -> `String s) snapshot.next_items));
+    ("decisions", `List (List.map (fun s -> `String s) snapshot.decisions));
+    ("open_questions", `List (List.map (fun s -> `String s) snapshot.open_questions));
+    ("constraints", `List (List.map (fun s -> `String s) snapshot.constraints));
+  ]
+
+let latest_state_snapshot_from_messages (messages : Llm_client.message list) :
+    keeper_state_snapshot option =
+  let rec loop (msgs : Llm_client.message list) =
+    match msgs with
+    | [] -> None
+    | msg :: rest ->
+      match parse_state_snapshot_from_reply msg.content with
+      | None -> loop rest
+      | Some snapshot -> Some snapshot
+  in
+  loop (List.rev messages)
+
+let append_continuity_context_prompt
+    ~(base_prompt : string)
+    (snapshot : keeper_state_snapshot option)
+    ~(continuity_summary : string) : string =
+  let fallback_summary =
+    let trimmed = String.trim continuity_summary in
+    if trimmed = "" then "No continuity snapshot available." else trimmed
+  in
+  let summary =
+    match snapshot with
+    | None -> fallback_summary
+    | Some s -> keeper_state_snapshot_to_summary_text s
+  in
+  if summary = "No continuity snapshot available." then base_prompt
+  else
+    Printf.sprintf
+      "%s\n\nRecent continuity snapshot:\n%s"
+      base_prompt
+      summary
 
 let priority_for_kind ~soul_profile ~(kind : string) : int =
   match soul_profile, kind with
@@ -2118,8 +2305,12 @@ let memory_eval_to_json
     (e : memory_recall_eval)
     ~(correction_applied : bool)
     ~(correction_success : bool)
+    ~(correction_skipped_budget : bool)
     ~(prompt_fallback_applied : bool)
     ~(prompt_fallback_success : bool)
+    ~(prompt_fallback_skipped_budget : bool)
+    ~(postpass_budget_ms : int)
+    ~(postpass_budget_remaining_ms : int)
     ~(recall_fallback_applied : bool) : Yojson.Safe.t =
   `Assoc [
     ("performed", `Bool e.performed);
@@ -2133,8 +2324,12 @@ let memory_eval_to_json
     ("best_match", match e.best_match with Some m -> `String m | None -> `Null);
     ("correction_applied", `Bool correction_applied);
     ("correction_success", `Bool correction_success);
+    ("correction_skipped_budget", `Bool correction_skipped_budget);
     ("prompt_fallback_applied", `Bool prompt_fallback_applied);
     ("prompt_fallback_success", `Bool prompt_fallback_success);
+    ("prompt_fallback_skipped_budget", `Bool prompt_fallback_skipped_budget);
+    ("postpass_budget_ms", `Int postpass_budget_ms);
+    ("postpass_budget_remaining_ms", `Int postpass_budget_remaining_ms);
     ("deterministic_fallback_applied", `Bool recall_fallback_applied);
     ("recall_fallback_applied", `Bool recall_fallback_applied);
   ]
@@ -2191,6 +2386,47 @@ let keeper_llm_tools : Llm_client.tool_def list = [
       ("properties", `Assoc [
         ("location", `Assoc [("type", `String "string")]);
       ]);
+    ];
+  };
+  (* Board tools — allow keepers to post/read MASC Board *)
+  {
+    tool_name = "keeper_board_post";
+    tool_description =
+      "Create a post on the MASC Board. Use hearth to target a topic channel.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
+        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. trpg, code-review)")]);
+        ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID (optional)")]);
+      ]);
+      ("required", `List [`String "content"]);
+    ];
+  };
+  {
+    tool_name = "keeper_board_list";
+    tool_description =
+      "List recent posts on the MASC Board. Filter by hearth to see topic-specific posts.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. trpg)")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
+        ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort: recent (newest), hot (score+recency), updated (most active)")]);
+      ]);
+    ];
+  };
+  {
+    tool_name = "keeper_board_comment";
+    tool_description =
+      "Add a comment/reply to an existing Board post.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to comment on")]);
+        ("content", `Assoc [("type", `String "string"); ("description", `String "Comment content")]);
+      ]);
+      ("required", `List [`String "post_id"; `String "content"]);
     ];
   };
 ]
@@ -2514,6 +2750,14 @@ let execute_keeper_tool_call
         ("now_unix", `Float now_ts);
       ])
   | "keeper_context_status" ->
+      let continuity = latest_state_snapshot_from_messages ctx_work.messages in
+      let continuity_summary =
+        match continuity with
+        | None ->
+            let trimmed = String.trim meta.continuity_summary in
+            if trimmed = "" then "No continuity snapshot available." else trimmed
+        | Some snapshot -> keeper_state_snapshot_to_summary_text snapshot
+      in
       Yojson.Safe.to_string (`Assoc [
         ("name", `String meta.name);
         ("trace_id", `String meta.trace_id);
@@ -2523,6 +2767,13 @@ let execute_keeper_tool_call
         ("context_max", `Int ctx_work.max_tokens);
         ("message_count", `Int (List.length ctx_work.messages));
         ("last_model_used", `String meta.last_model_used);
+        ("continuity_state",
+          match continuity with
+          | None -> `Null
+          | Some snapshot -> keeper_state_snapshot_to_json snapshot);
+        ("continuity_summary",
+          `String
+            continuity_summary)
       ])
   | "keeper_memory_search" ->
       let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
@@ -2555,16 +2806,60 @@ let execute_keeper_tool_call
         ("note", `String "This keeper cannot fetch live weather by itself.");
         ("recent_weather_questions", `List recent_weather_questions);
       ])
+  (* Board tools — delegate to Tool_board with keeper name as author *)
+  | "keeper_board_post" ->
+      let author = meta.name in
+      Printf.eprintf "[TRPG-TRACE] keeper_board_post called by %s, raw args: %s\n%!"
+        author (Yojson.Safe.to_string args);
+      let board_args = match args with
+        | `Assoc fields ->
+            (* Inject author from keeper meta, override if LLM set it *)
+            let fields' = List.filter (fun (k, _) -> k <> "author") fields in
+            `Assoc (("author", `String author) :: fields')
+        | other -> other
+      in
+      Printf.eprintf "[TRPG-TRACE] board_args: %s\n%!" (Yojson.Safe.to_string board_args);
+      let (ok, msg) = Tool_board.handle_tool "masc_board_post" board_args in
+      Printf.eprintf "[TRPG-TRACE] handle_tool result: ok=%b msg=%s\n%!" ok
+        (if String.length msg > 200 then String.sub msg 0 200 ^ "..." else msg);
+      if ok then msg else Yojson.Safe.to_string (`Assoc [("error", `String msg)])
+  | "keeper_board_list" ->
+      let (ok, msg) = Tool_board.handle_tool "masc_board_list" args in
+      if ok then msg else Yojson.Safe.to_string (`Assoc [("error", `String msg)])
+  | "keeper_board_comment" ->
+      let author = meta.name in
+      let board_args = match args with
+        | `Assoc fields ->
+            let fields' = List.filter (fun (k, _) -> k <> "author") fields in
+            `Assoc (("author", `String author) :: fields')
+        | other -> other
+      in
+      let (ok, msg) = Tool_board.handle_tool "masc_board_comment" board_args in
+      if ok then msg else Yojson.Safe.to_string (`Assoc [("error", `String msg)])
   | other ->
       Yojson.Safe.to_string (`Assoc [
         ("error", `String "unknown_tool");
         ("tool", `String other);
       ])
 
+(** Build system prompt for tool-loop follow-up calls.
+    Includes the agent's identity/character context but strips skill-routing
+    instructions that confuse the model into outputting SKILL: prefixes. *)
+let keeper_tool_loop_system_prompt ~(character_context : string) : string =
+  Printf.sprintf
+    "%s\n\n\
+     TOOL-LOOP INSTRUCTIONS:\n\
+     When you have all the information needed, produce a final text answer.\n\
+     When you still need more data or actions, call the appropriate tool.\n\
+     Never output SKILL: prefixes. Use function calling only.\n\
+     Stay in character when writing content."
+    character_context
+
 let keeper_tool_followup_prompt
     ~(user_message : string)
     ~(draft_reply : string)
-    ~(tool_outputs : (Llm_client.tool_call * string) list) : string =
+    ~(tool_outputs : (Llm_client.tool_call * string) list)
+    ~(already_executed : string list) : string =
   let rendered =
     tool_outputs
     |> List.map (fun ((tc : Llm_client.tool_call), output) ->
@@ -2575,16 +2870,35 @@ let keeper_tool_followup_prompt
            output)
     |> String.concat "\n"
   in
+  let has_write =
+    List.exists (fun name ->
+      name = "keeper_board_post"
+    ) already_executed
+  in
+  let rules =
+    if has_write then
+      "RULES (follow strictly):\n\
+       You have already posted to the board. ALL required actions are DONE.\n\
+       Produce a brief final text answer confirming what you did. Do NOT call any more tools."
+    else
+      "RULES (follow strictly):\n\
+       1. If the user asked you to POST, WRITE, or UPDATE something, you MUST call \
+          the appropriate tool (e.g. keeper_board_post). Do NOT return the content as text.\n\
+       2. If you still need information, call the appropriate read/list tool.\n\
+       3. Only produce a final text answer when ALL required actions (reads AND writes) are done.\n\
+       4. Use tool outputs as source of truth.\n\
+       5. Reply in user's language and stay concise."
+  in
   Printf.sprintf
-    "You requested tools. Produce the final answer using these tool results.\n\
+    "You called tools. Here are the results.\n\n\
      User message: %s\n\
      Draft reply: %s\n\
-     Tool results:\n%s\n\n\
-     Requirements:\n\
-     - Use tool outputs as source of truth when relevant.\n\
-     - If data is unavailable, say so explicitly.\n\
-     - Reply in user's language and stay concise.\n"
+     Tool results:\n%s\n\
+     Previously executed: [%s]\n\n\
+     %s\n"
     user_message draft_reply rendered
+    (String.concat ", " already_executed)
+    rules
 
 let memory_correction_prompt
     ~(user_message : string)
@@ -3345,14 +3659,36 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
 
 let compact_if_needed
     ~(meta : keeper_meta)
+    ~(now_ts : float)
     (ctx : Context_manager.working_context) :
-    Context_manager.working_context * string option =
+    Context_manager.working_context * string option * string =
   let ratio = Context_manager.context_ratio ctx in
   let message_count = List.length ctx.messages in
   let token_count = ctx.token_count in
   let (ratio_gate, message_gate, token_gate) = compaction_policy_of_keeper meta in
+  let cooldown = Float.of_int meta.continuity_compaction_cooldown_sec in
+  let last_reflection_ts = max meta.last_continuity_update_ts meta.last_proactive_ts in
+  let reflection_ready =
+    last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown
+  in
+  let hold_s =
+    if cooldown <= 0.0 then
+      0.0
+    else if last_reflection_ts <= 0.0 then
+      Float.of_int meta.continuity_compaction_cooldown_sec
+    else
+      max
+        0.0
+        (Float.of_int meta.continuity_compaction_cooldown_sec -. (now_ts -. last_reflection_ts))
+  in
   let trigger_reason =
-    if ratio >= ratio_gate then
+    if not reflection_ready then
+      Some
+        (Printf.sprintf
+           "skipped:continuity_reflection(%0.0fs<%ds)"
+           hold_s
+           meta.continuity_compaction_cooldown_sec)
+    else if ratio >= ratio_gate then
       Some
         (Printf.sprintf
            "ratio(%.4f>=%.4f)"
@@ -3374,21 +3710,28 @@ let compact_if_needed
       None
   in
   match trigger_reason with
-  | None -> (ctx, None)
+  | None -> (ctx, None, "blocked:below_thresholds")
   | Some reason ->
+      if String.starts_with ~prefix:"skipped:" reason then
+        (ctx, None, reason)
+      else
       let compacted_ctx =
         Context_manager.compact
           ctx
           Context_manager.[PruneToolOutputs; MergeContiguous; DropLowImportance; SummarizeOld]
       in
-      (compacted_ctx, Some reason)
+      (compacted_ctx, Some reason, "applied:" ^ reason)
 
 let generate_trace_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rnd = Random.int 99999 in
   Printf.sprintf "trace-%d-%05d" ts rnd
 
-let proactive_prompt_for_keeper ~(meta : keeper_meta) ~(idle_seconds : int) : string =
+let proactive_prompt_for_keeper
+    ~(meta : keeper_meta)
+    ~(idle_seconds : int)
+    (snapshot : keeper_state_snapshot option)
+    (continuity_summary : string) : string =
   let seed = proactive_seed_for_soul_profile meta.soul_profile in
   let profile =
     canonical_soul_profile meta.soul_profile
@@ -3398,11 +3741,23 @@ let proactive_prompt_for_keeper ~(meta : keeper_meta) ~(idle_seconds : int) : st
     if String.trim meta.last_proactive_preview = "" then "none"
     else meta.last_proactive_preview
   in
+  let continuity_snapshot =
+    match snapshot with
+    | None -> "No continuity snapshot available."
+    | Some s -> keeper_state_snapshot_to_summary_text s
+  in
+  let continuity_snapshot =
+    if continuity_snapshot = "No continuity snapshot available." then
+      let fallback = String.trim continuity_summary in
+      if fallback = "" then continuity_snapshot else fallback
+    else continuity_snapshot
+  in
   Printf.sprintf
     "Autonomous proactive turn (no new user message) after %d seconds idle.\n\
      Keeper SOUL profile: %s.\n\
      Goal: %s\n\
      Last proactive preview (avoid repeating): %s\n\
+     Continuity snapshot:\n%s\n\
      SOUL perspective hint: %s\n\
      Guidance (strict):\n\
      - Prefer the same language as the recent conversation.\n\
@@ -3411,7 +3766,7 @@ let proactive_prompt_for_keeper ~(meta : keeper_meta) ~(idle_seconds : int) : st
      - For this proactive turn only, do NOT output [STATE] blocks.\n\
      - Output exactly one line using this format:\n\
        CHECKIN: <single complete sentence ending with punctuation>"
-    idle_seconds profile meta.goal last_preview seed
+    idle_seconds profile meta.goal last_preview continuity_snapshot seed
 
 type proactive_generation_result = {
   reply: string;
@@ -3592,8 +3947,12 @@ let run_proactive_generation
     ~(primary : Llm_client.model_spec)
     ~(ctx_work : Context_manager.working_context)
     ~(meta : keeper_meta)
+    ~(continuity_snapshot : keeper_state_snapshot option)
+    ~(continuity_summary : string)
     ~(idle_seconds : int) : proactive_generation_result option =
-  let base_prompt = proactive_prompt_for_keeper ~meta ~idle_seconds in
+  let base_prompt =
+    proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
+  in
   let zero_usage : Llm_client.token_usage =
     { Llm_client.input_tokens = 0; output_tokens = 0; total_tokens = 0 }
   in
@@ -3754,15 +4113,41 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                match ctx_opt with
                | None -> meta
                | Some ctx_work ->
+                   let continuity_snapshot = latest_state_snapshot_from_messages ctx_work.messages in
+                   let continuity_summary =
+                     match continuity_snapshot with
+                     | Some s -> keeper_state_snapshot_to_summary_text s
+                     | None -> (
+                         let trimmed = String.trim meta.continuity_summary in
+                         if trimmed = "" then "No continuity snapshot available." else trimmed)
+                   in
+                   let continuity_summary = String.trim continuity_summary in
+                   let last_continuity_update_ts =
+                     if
+                       continuity_summary <> ""
+                       && String.trim meta.continuity_summary <> continuity_summary
+                     then
+                       now_ts
+                     else
+                       meta.last_continuity_update_ts
+                   in
+                   let meta_for_compaction =
+                     { meta with
+                       continuity_summary;
+                       last_continuity_update_ts
+                     }
+                   in
                    match
                      run_proactive_generation
                        ~specs
                        ~primary
                        ~ctx_work
                        ~meta
+                       ~continuity_snapshot
+                       ~continuity_summary
                        ~idle_seconds
                    with
-                   | None -> meta
+                       | None -> meta
 	                   | Some generated ->
 	                       let model_used =
 	                         let m = String.trim generated.model_used in
@@ -3778,8 +4163,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 	                       let ctx_work = Context_manager.append ctx_work assistant_msg in
                        Context_manager.persist_message session assistant_msg;
                        let before_compact_tokens = ctx_work.token_count in
-                       let (ctx_work, compaction_trigger) =
-                        compact_if_needed ~meta ctx_work
+                       let (ctx_work, compaction_trigger, compaction_decision) =
+                        compact_if_needed ~meta:meta_for_compaction ~now_ts ctx_work
                        in
                        let after_compact_tokens = ctx_work.token_count in
                        let compacted = after_compact_tokens < before_compact_tokens in
@@ -3793,9 +4178,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 	                           generated.attempts
 	                           (if generated.fallback_applied then 1 else 0)
 	                       in
-                       let updated =
-                         {
-                           meta with
+                           let updated =
+                             {
+                               meta with
                            updated_at = now_iso ();
                            total_turns = meta.total_turns + 1;
                            total_input_tokens =
@@ -3812,6 +4197,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                            last_latency_ms = generated.latency_ms;
                            compaction_count =
                              meta.compaction_count + if compacted then 1 else 0;
+                           last_compaction_check_ts = now_ts;
+                           last_compaction_decision = compaction_decision;
                            last_compaction_ts =
                              if compacted then now_ts else meta.last_compaction_ts;
                            last_compaction_before_tokens =
@@ -3825,8 +4212,10 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                            proactive_count_total = meta.proactive_count_total + 1;
                            last_proactive_ts = now_ts;
                            last_proactive_reason = proactive_reason;
-                           last_proactive_preview = short_preview safe_reply;
-                         }
+                               last_proactive_preview = short_preview safe_reply;
+                               continuity_summary;
+                               last_continuity_update_ts;
+                             }
                        in
                        (match write_meta ctx.config updated with
                         | Ok () -> ()
@@ -3860,11 +4249,12 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                 ("compacted", `Bool compacted);
                                 ("compaction_before_tokens", `Int before_compact_tokens);
                                 ("compaction_after_tokens", `Int after_compact_tokens);
-                                ( "compaction_trigger",
-                                  match compaction_trigger with
-                                  | Some reason -> `String reason
-                                  | None -> `Null );
-	                                ("work_kind", `String "proactive_checkin");
+                                  ( "compaction_trigger",
+                                    match compaction_trigger with
+                                    | Some reason -> `String reason
+                                    | None -> `Null );
+                                ("compaction_decision", `String compaction_decision);
+                                ("work_kind", `String "proactive_checkin");
 	                                ("tool_call_count", `Int 0);
 	                                ("tools_used", `List []);
 	                                ("skill_primary", `String proactive_skill_route.primary_skill);
@@ -3950,6 +4340,14 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                (match ctx_opt with
                 | None -> ()
                 | Some c ->
+                    let continuity_snapshot = latest_state_snapshot_from_messages c.messages in
+                    let continuity_summary =
+                      match continuity_snapshot with
+                      | Some s -> keeper_state_snapshot_to_summary_text s
+                      | None ->
+                          let trimmed = String.trim meta_current.continuity_summary in
+                          if trimmed = "" then "No continuity snapshot available." else trimmed
+                    in
                     let snapshot = `Assoc [
                       ("ts", `String (now_iso ()));
                       ("ts_unix", `Float now_ts);
@@ -3970,6 +4368,12 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                       ("context_tokens", `Int c.token_count);
                       ("context_max", `Int c.max_tokens);
                       ("message_count", `Int (List.length c.messages));
+                      ("continuity_state",
+                        match continuity_snapshot with
+                        | None -> `Null
+                        | Some s -> keeper_state_snapshot_to_json s);
+                      ("continuity_summary",
+                        `String continuity_summary);
                       ("compacted", `Bool false);
                       ("compaction_before_tokens", `Int c.token_count);
                       ("compaction_after_tokens", `Int c.token_count);
@@ -4032,6 +4436,9 @@ let handle_keeper_up ctx args : tool_result =
     let compaction_ratio_gate_opt = Safe_ops.json_float_opt "compaction_ratio_gate" args in
     let compaction_message_gate_opt = Safe_ops.json_int_opt "compaction_message_gate" args in
     let compaction_token_gate_opt = Safe_ops.json_int_opt "compaction_token_gate" args in
+    let continuity_compaction_cooldown_sec_opt =
+      Safe_ops.json_int_opt "continuity_compaction_cooldown_sec" args
+    in
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
@@ -4042,8 +4449,9 @@ let handle_keeper_up ctx args : tool_result =
     let desires_opt = parse_self_model_opt args "desires" in
     match read_meta ctx.config name with
     | Error e -> (false, Printf.sprintf "❌ %s" e)
-    | Ok None ->
+  | Ok None ->
       (* Create new keeper *)
+      let now_ts = Time_compat.now () in
       let goal = Option.value ~default:"" goal_opt in
       if goal = "" then
         (false, "❌ goal is required when creating a keeper")
@@ -4082,6 +4490,12 @@ let handle_keeper_up ctx args : tool_result =
         let instructions = Option.value ~default:"" instructions_opt in
         let (env_ratio_gate, env_message_gate, env_token_gate) =
           keeper_compaction_policy_from_env ()
+        in
+        let continuity_compaction_cooldown_sec =
+          Option.value
+            ~default:(keeper_continuity_compaction_cooldown_sec ())
+            continuity_compaction_cooldown_sec_opt
+          |> normalize_continuity_compaction_cooldown_sec
         in
         let (compaction_profile, compaction_ratio_gate, compaction_message_gate, compaction_token_gate) =
           resolve_compaction_policy
@@ -4141,6 +4555,7 @@ let handle_keeper_up ctx args : tool_result =
                compaction_ratio_gate;
                compaction_message_gate;
                compaction_token_gate;
+               continuity_compaction_cooldown_sec;
                auto_handoff;
                handoff_threshold;
                handoff_cooldown_sec;
@@ -4163,10 +4578,14 @@ let handle_keeper_up ctx args : tool_result =
                last_compaction_ts = 0.0;
                last_compaction_before_tokens = 0;
                last_compaction_after_tokens = 0;
+               last_compaction_check_ts = now_ts;
+               last_compaction_decision = "initialized";
                proactive_count_total = 0;
                last_proactive_ts = 0.0;
-               last_proactive_reason = "";
-               last_proactive_preview = "";
+                last_proactive_reason = "";
+                last_proactive_preview = "";
+                last_continuity_update_ts = now_ts;
+                continuity_summary = "";
              } in
              match write_meta ctx.config meta with
              | Error e -> (false, "❌ " ^ e)
@@ -4240,6 +4659,11 @@ let handle_keeper_up ctx args : tool_result =
         compaction_ratio_gate;
         compaction_message_gate;
         compaction_token_gate;
+        continuity_compaction_cooldown_sec =
+          Option.value
+            ~default:old.continuity_compaction_cooldown_sec
+            continuity_compaction_cooldown_sec_opt
+          |> normalize_continuity_compaction_cooldown_sec;
         auto_handoff = Option.value ~default:old.auto_handoff auto_handoff_opt;
         handoff_threshold = Option.value ~default:old.handoff_threshold handoff_threshold_opt;
         handoff_cooldown_sec = Option.value ~default:old.handoff_cooldown_sec handoff_cooldown_sec_opt;
@@ -4266,23 +4690,52 @@ let handle_keeper_status ctx args : tool_result =
       let tail_messages = max 0 (get_int args "tail_messages" 5) in
       let tail_compactions = max 0 (get_int args "tail_compactions" 10) in
       let tail_bytes = max 1_000 (get_int args "tail_bytes" 60_000) in
+      let fast = get_bool args "fast" (keeper_status_fast_default ()) in
+      let include_context = get_bool args "include_context" (not fast) in
+      let include_metrics_overview =
+        get_bool args "include_metrics_overview" (not fast)
+      in
+      let include_memory_bank = get_bool args "include_memory_bank" (not fast) in
+      let include_history_tail = get_bool args "include_history_tail" (not fast) in
+      let include_compaction_history =
+        get_bool args "include_compaction_history" (not fast)
+      in
       let models = m.models in
       (match model_specs_of_strings models with
        | Error e -> (false, "❌ " ^ e)
        | Ok specs ->
          let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
          let base_dir = session_base_dir ctx.config in
-         let (_session, ctx_opt) = load_context_from_checkpoint
-           ~trace_id:m.trace_id ~primary_model_max_tokens:primary.max_context ~base_dir in
-         let ctx_stats = match ctx_opt with
-           | None -> `Assoc [("has_checkpoint", `Bool false)]
-           | Some c -> `Assoc [
-               ("has_checkpoint", `Bool true);
-               ("context_ratio", `Float (Context_manager.context_ratio c));
-               ("context_tokens", `Int c.token_count);
-               ("context_max", `Int c.max_tokens);
-               ("message_count", `Int (List.length c.messages));
+         let ctx_opt =
+           if include_context then
+             let (_session, ctx_opt) =
+               load_context_from_checkpoint
+                 ~trace_id:m.trace_id
+                 ~primary_model_max_tokens:primary.max_context
+                 ~base_dir
+             in
+             ctx_opt
+           else
+             None
+         in
+         let ctx_stats =
+           if not include_context then
+             `Assoc [
+               ("skipped", `Bool true);
+               ("reason", `String "fast_or_disabled");
+               ("has_checkpoint", `Null);
              ]
+           else
+             match ctx_opt with
+             | None -> `Assoc [("has_checkpoint", `Bool false)]
+             | Some c ->
+               `Assoc [
+                 ("has_checkpoint", `Bool true);
+                 ("context_ratio", `Float (Context_manager.context_ratio c));
+                 ("context_tokens", `Int c.token_count);
+                 ("context_max", `Int c.max_tokens);
+                 ("message_count", `Int (List.length c.messages));
+               ]
          in
          let keepalive_running = `Bool (Hashtbl.mem keepalives m.name) in
          let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
@@ -4322,210 +4775,248 @@ let handle_keeper_status ctx args : tool_result =
          let history_path = keeper_history_path ctx.config m.trace_id in
 
          let metrics_tail =
-           let lines = read_file_tail_lines metrics_path
-             ~max_bytes:tail_bytes ~max_lines:tail_turns in
-           `List (List.filter_map (fun line ->
-             try Some (Yojson.Safe.from_string line) with _ -> None
-           ) lines)
+           let lines =
+             read_file_tail_lines metrics_path
+               ~max_bytes:tail_bytes
+               ~max_lines:tail_turns
+           in
+           `List
+             (List.filter_map
+                (fun line ->
+                  try Some (Yojson.Safe.from_string line) with _ -> None)
+                lines)
          in
-	         let metrics_window_lines =
-	           read_file_tail_lines metrics_path
-	             ~max_bytes:tail_bytes ~max_lines:(max tail_turns 200)
-	         in
-	         let metrics_overview =
-	           summarize_metrics_lines metrics_window_lines ~default_generation:m.generation
-	         in
-	         let last_skill_route =
-	           let open Yojson.Safe.Util in
-	           let rec find_latest = function
-	             | [] -> None
-	             | line :: tl ->
-	                 (try
-	                    let j = Yojson.Safe.from_string line in
-	                    match Safe_ops.json_string_opt "skill_primary" j with
-	                    | Some primary when String.trim primary <> "" ->
-	                        let secondary =
-	                          match j |> member "skill_secondary" with
-	                          | `List xs ->
-	                              xs
-	                              |> List.filter_map (fun v ->
-	                                   match v with
-	                                   | `String s when String.trim s <> "" -> Some s
-	                                   | _ -> None)
-	                          | _ -> []
-	                        in
-	                        let reason = Safe_ops.json_string_opt "skill_reason" j in
-	                        Some (`Assoc [
-	                          ("primary", `String primary);
-	                          ("secondary", `List (List.map (fun s -> `String s) secondary));
-	                          ("reason", match reason with Some s -> `String s | None -> `Null);
-	                        ])
-	                    | _ -> find_latest tl
-	                  with _ -> find_latest tl)
-	           in
-	           find_latest (List.rev metrics_window_lines)
-	         in
-	         let memory_bank_summary =
-	           read_keeper_memory_summary
-	             ctx.config
-             ~name:m.name
-             ~max_bytes:tail_bytes
-             ~max_lines:(max (tail_turns * 10) 400)
-             ~recent_limit:8
+         let metrics_window_lines =
+           if include_metrics_overview then
+             read_file_tail_lines metrics_path
+               ~max_bytes:tail_bytes
+               ~max_lines:(max tail_turns 200)
+           else
+             []
+         in
+         let metrics_overview =
+           if include_metrics_overview then
+             summarize_metrics_lines
+               metrics_window_lines
+               ~default_generation:m.generation
+           else
+             empty_metrics_summary
+         in
+         let last_skill_route =
+           if not include_metrics_overview then
+             None
+           else
+             let open Yojson.Safe.Util in
+             let rec find_latest = function
+               | [] -> None
+               | line :: tl ->
+                 (try
+                    let j = Yojson.Safe.from_string line in
+                    match Safe_ops.json_string_opt "skill_primary" j with
+                    | Some primary when String.trim primary <> "" ->
+                      let secondary =
+                        match j |> member "skill_secondary" with
+                        | `List xs ->
+                          xs
+                          |> List.filter_map (fun v ->
+                               match v with
+                               | `String s when String.trim s <> "" -> Some s
+                               | _ -> None)
+                        | _ -> []
+                      in
+                      let reason = Safe_ops.json_string_opt "skill_reason" j in
+                      Some
+                        (`Assoc
+                           [
+                             ("primary", `String primary);
+                             ( "secondary",
+                               `List (List.map (fun s -> `String s) secondary) );
+                             ( "reason",
+                               match reason with
+                               | Some s -> `String s
+                               | None -> `Null );
+                           ])
+                    | _ -> find_latest tl
+                  with _ -> find_latest tl)
+             in
+             find_latest (List.rev metrics_window_lines)
+         in
+         let memory_bank_summary =
+           if include_memory_bank then
+             read_keeper_memory_summary
+               ctx.config
+               ~name:m.name
+               ~max_bytes:tail_bytes
+               ~max_lines:(max (tail_turns * 10) 400)
+               ~recent_limit:8
+           else
+             {
+               total_notes = 0;
+               last_ts_unix = 0.0;
+               top_kind = None;
+               kind_counts = [];
+               recent_notes = [];
+             }
          in
 
          let history_filter_fragments =
            bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
          in
          let (history_tail, history_raw_count, history_fragment_count, history_fragment_filtered_count) =
-           let lines =
-             read_file_tail_lines history_path
-               ~max_bytes:tail_bytes
-               ~max_lines:tail_messages
-           in
-           let open Yojson.Safe.Util in
-           let (items_rev, raw_count, fragment_count, filtered_count) =
-             List.fold_left
-               (fun (acc, raw_count, fragment_count, filtered_count) line ->
-                 try
-                   let j = Yojson.Safe.from_string line in
-                   let role =
-                     j |> member "role" |> to_string_option
-                     |> Option.value ~default:"unknown"
-                   in
-                   let content =
-                     j |> member "content" |> to_string_option
-                     |> Option.value ~default:""
-                   in
-                   let ts_unix =
-                     let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-                     if ts0 > 0.0 then ts0
-                     else Safe_ops.json_float ~default:0.0 "timestamp" j
-                   in
-                   let age_s =
-                     if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix))
-                     else None
-                   in
-                   let role_lc = String.lowercase_ascii role in
-                   let entry_kind =
-                     match role_lc with
-                     | "assistant" -> "self_talk"
-                     | "user" -> "input"
-                     | "tool" -> "tool_result"
-                     | "system" -> "system"
-                     | _ -> "other"
-                   in
-                   let is_fragment =
-                     role_lc = "assistant"
-                     && looks_fragmentary_history_text content
-                   in
-                   let should_filter = history_filter_fragments && is_fragment in
-                   let preview =
-                     if String.length content > 200 then
-                       utf8_safe_prefix_bytes content ~max_bytes:200 ^ "..."
-                     else content
-                   in
-                   let item =
-                     `Assoc [
-                       ("role", `String role);
-                       ("kind", `String entry_kind);
-                       ("is_fragment", `Bool is_fragment);
-                       ("ts_unix", `Float ts_unix);
-                       ("age_s", match age_s with Some v -> `Float v | None -> `Null);
-                       ("content", `String preview);
-                     ]
-                   in
-                   let acc = if should_filter then acc else item :: acc in
-                   let filtered_count =
-                     filtered_count + if should_filter then 1 else 0
-                   in
-                   ( acc,
-                     raw_count + 1,
-                     fragment_count + (if is_fragment then 1 else 0),
-                     filtered_count )
-                 with _ -> (acc, raw_count, fragment_count, filtered_count))
-               ([], 0, 0, 0) lines
-           in
-           (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
-         in
-
-         let compaction_history_tail =
-           let lines =
-             read_file_tail_lines metrics_path
-               ~max_bytes:tail_bytes
-               ~max_lines:(max 200 (tail_compactions * 20))
-           in
-           let events_rev =
-             List.fold_left
-               (fun acc line ->
-                 try
-                   let j = Yojson.Safe.from_string line in
-                   let compacted = Safe_ops.json_bool ~default:false "compacted" j in
-                   let memory_compaction_performed =
-                     Safe_ops.json_bool ~default:false "memory_compaction_performed" j
-                   in
-                   if (not compacted) && (not memory_compaction_performed) then acc
-                   else
-                     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+           if not include_history_tail then
+             (`List [], 0, 0, 0)
+           else
+             let lines =
+               read_file_tail_lines history_path
+                 ~max_bytes:tail_bytes
+                 ~max_lines:tail_messages
+             in
+             let open Yojson.Safe.Util in
+             let (items_rev, raw_count, fragment_count, filtered_count) =
+               List.fold_left
+                 (fun (acc, raw_count, fragment_count, filtered_count) line ->
+                   try
+                     let j = Yojson.Safe.from_string line in
+                     let role =
+                       j |> member "role" |> to_string_option
+                       |> Option.value ~default:"unknown"
+                     in
+                     let content =
+                       j |> member "content" |> to_string_option
+                       |> Option.value ~default:""
+                     in
+                     let ts_unix =
+                       let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+                       if ts0 > 0.0 then ts0
+                       else Safe_ops.json_float ~default:0.0 "timestamp" j
+                     in
                      let age_s =
-                       if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix)) else None
+                       if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix))
+                       else None
                      in
-                     let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
-                     let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
-                     let saved_tokens = max 0 (before_tokens - after_tokens) in
-                     let memory_before_notes =
-                       Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j
+                     let role_lc = String.lowercase_ascii role in
+                     let entry_kind =
+                       match role_lc with
+                       | "assistant" -> "self_talk"
+                       | "user" -> "input"
+                       | "tool" -> "tool_result"
+                       | "system" -> "system"
+                       | _ -> "other"
                      in
-                     let memory_after_notes =
-                       Safe_ops.json_int ~default:0 "memory_compaction_after_notes" j
+                     let is_fragment =
+                       role_lc = "assistant"
+                       && looks_fragmentary_history_text content
                      in
-                     let memory_dropped_notes =
-                       Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j
-                     in
-                     let memory_invalid_dropped =
-                       Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
-                     in
-                     let event_kind =
-                       if compacted && memory_compaction_performed then "context+memory"
-                       else if compacted then "context"
-                       else "memory"
+                     let should_filter = history_filter_fragments && is_fragment in
+                     let preview =
+                       if String.length content > 200 then
+                         utf8_safe_prefix_bytes content ~max_bytes:200 ^ "..."
+                       else content
                      in
                      let item =
                        `Assoc [
-                         ("kind", `String event_kind);
-                         ("channel", `String (Safe_ops.json_string ~default:"turn" "channel" j));
+                         ("role", `String role);
+                         ("kind", `String entry_kind);
+                         ("is_fragment", `Bool is_fragment);
                          ("ts_unix", `Float ts_unix);
                          ("age_s", match age_s with Some v -> `Float v | None -> `Null);
-                         ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
-                         ("generation", `Int (Safe_ops.json_int ~default:m.generation "generation" j));
-                         ("context_ratio", `Float (Safe_ops.json_float ~default:0.0 "context_ratio" j));
-                         ("context_before_tokens", `Int before_tokens);
-                         ("context_after_tokens", `Int after_tokens);
-                         ("context_saved_tokens", `Int saved_tokens);
-                         ( "context_trigger",
-                           match Safe_ops.json_string_opt "compaction_trigger" j with
-                           | Some reason when String.trim reason <> "" -> `String reason
-                           | _ -> `Null );
-                         ("memory_compaction_performed", `Bool memory_compaction_performed);
-                         ("memory_before_notes", `Int memory_before_notes);
-                         ("memory_after_notes", `Int memory_after_notes);
-                         ("memory_dropped_notes", `Int memory_dropped_notes);
-                         ("memory_invalid_dropped", `Int memory_invalid_dropped);
-                         ( "memory_reason",
-                           match Safe_ops.json_string_opt "memory_compaction_reason" j with
-                           | Some reason when String.trim reason <> "" -> `String reason
-                           | _ -> `Null );
+                         ("content", `String preview);
                        ]
                      in
-                     item :: acc
-                 with _ -> acc)
-               [] lines
-           in
-           let events = List.rev events_rev in
-           let total = List.length events in
-           let start = max 0 (total - tail_compactions) in
-           let tail = List.filteri (fun i _ -> i >= start) events in
-           (`List tail, total)
+                     let acc = if should_filter then acc else item :: acc in
+                     let filtered_count =
+                       filtered_count + if should_filter then 1 else 0
+                     in
+                     ( acc,
+                       raw_count + 1,
+                       fragment_count + (if is_fragment then 1 else 0),
+                       filtered_count )
+                   with _ -> (acc, raw_count, fragment_count, filtered_count))
+                 ([], 0, 0, 0) lines
+             in
+             (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
+         in
+
+         let compaction_history_tail =
+           if not include_compaction_history then
+             (`List [], 0)
+           else
+             let lines =
+               read_file_tail_lines metrics_path
+                 ~max_bytes:tail_bytes
+                 ~max_lines:(max 200 (tail_compactions * 20))
+             in
+             let events_rev =
+               List.fold_left
+                 (fun acc line ->
+                   try
+                     let j = Yojson.Safe.from_string line in
+                     let compacted = Safe_ops.json_bool ~default:false "compacted" j in
+                     let memory_compaction_performed =
+                       Safe_ops.json_bool ~default:false "memory_compaction_performed" j
+                     in
+                     if (not compacted) && (not memory_compaction_performed) then acc
+                     else
+                       let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+                       let age_s =
+                         if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix)) else None
+                       in
+                       let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
+                       let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
+                       let saved_tokens = max 0 (before_tokens - after_tokens) in
+                       let memory_before_notes =
+                         Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j
+                       in
+                       let memory_after_notes =
+                         Safe_ops.json_int ~default:0 "memory_compaction_after_notes" j
+                       in
+                       let memory_dropped_notes =
+                         Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j
+                       in
+                       let memory_invalid_dropped =
+                         Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
+                       in
+                       let event_kind =
+                         if compacted && memory_compaction_performed then "context+memory"
+                         else if compacted then "context"
+                         else "memory"
+                       in
+                       let item =
+                         `Assoc [
+                           ("kind", `String event_kind);
+                           ("channel", `String (Safe_ops.json_string ~default:"turn" "channel" j));
+                           ("ts_unix", `Float ts_unix);
+                           ("age_s", match age_s with Some v -> `Float v | None -> `Null);
+                           ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
+                           ("generation", `Int (Safe_ops.json_int ~default:m.generation "generation" j));
+                           ("context_ratio", `Float (Safe_ops.json_float ~default:0.0 "context_ratio" j));
+                           ("context_before_tokens", `Int before_tokens);
+                           ("context_after_tokens", `Int after_tokens);
+                           ("context_saved_tokens", `Int saved_tokens);
+                           ( "context_trigger",
+                             match Safe_ops.json_string_opt "compaction_trigger" j with
+                             | Some reason when String.trim reason <> "" -> `String reason
+                             | _ -> `Null );
+                           ("memory_compaction_performed", `Bool memory_compaction_performed);
+                           ("memory_before_notes", `Int memory_before_notes);
+                           ("memory_after_notes", `Int memory_after_notes);
+                           ("memory_dropped_notes", `Int memory_dropped_notes);
+                           ("memory_invalid_dropped", `Int memory_invalid_dropped);
+                           ( "memory_reason",
+                             match Safe_ops.json_string_opt "memory_compaction_reason" j with
+                             | Some reason when String.trim reason <> "" -> `String reason
+                             | _ -> `Null );
+                         ]
+                       in
+                       item :: acc
+                   with _ -> acc)
+                 [] lines
+             in
+             let events = List.rev events_rev in
+             let total = List.length events in
+             let start = max 0 (total - tail_compactions) in
+             let tail = List.filteri (fun i _ -> i >= start) events in
+             (`List tail, total)
          in
 
          let json = `Assoc [
@@ -4589,6 +5080,14 @@ let handle_keeper_status ctx args : tool_result =
              ("token_gate", `Int compact_token_gate);
              ("token_gate_enabled", `Bool (compact_token_gate > 0));
            ]);
+           ("status_options", `Assoc [
+             ("fast", `Bool fast);
+             ("include_context", `Bool include_context);
+             ("include_metrics_overview", `Bool include_metrics_overview);
+             ("include_memory_bank", `Bool include_memory_bank);
+             ("include_history_tail", `Bool include_history_tail);
+             ("include_compaction_history", `Bool include_compaction_history);
+           ]);
 	           ("models_resolved", models_resolved);
 	           ("context", ctx_stats);
 	           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
@@ -4647,11 +5146,12 @@ let handle_keeper_msg ctx args : tool_result =
       match read_meta ctx.config name with
       | Error e -> Error e
       | Ok (Some m) -> Ok m
-      | Ok None ->
-        let goal = Option.value ~default:"" inline_goal in
-        if goal = "" then Error "keeper not found and goal not provided"
-        else if inline_models = [] then Error "keeper not found and models not provided"
-        else
+  | Ok None ->
+          let goal = Option.value ~default:"" inline_goal in
+          if goal = "" then Error "keeper not found and goal not provided"
+          else if inline_models = [] then Error "keeper not found and models not provided"
+          else
+          let now_ts = Time_compat.now () in
           let trace_id = generate_trace_id () in
           let soul_profile =
             Option.value ~default:default_soul_profile inline_soul_profile
@@ -4668,6 +5168,10 @@ let handle_keeper_msg ctx args : tool_result =
           in
           let (env_ratio_gate, env_message_gate, env_token_gate) =
             keeper_compaction_policy_from_env ()
+          in
+          let continuity_compaction_cooldown_sec =
+            keeper_continuity_compaction_cooldown_sec ()
+            |> normalize_continuity_compaction_cooldown_sec
           in
           let instructions = Option.value ~default:"" inline_instructions in
           let meta = {
@@ -4698,6 +5202,7 @@ let handle_keeper_msg ctx args : tool_result =
             compaction_ratio_gate = env_ratio_gate;
             compaction_message_gate = env_message_gate;
             compaction_token_gate = env_token_gate;
+            continuity_compaction_cooldown_sec;
             auto_handoff = true;
             handoff_threshold = 0.85;
             handoff_cooldown_sec = 300;
@@ -4720,10 +5225,14 @@ let handle_keeper_msg ctx args : tool_result =
             last_compaction_ts = 0.0;
             last_compaction_before_tokens = 0;
             last_compaction_after_tokens = 0;
+            last_compaction_check_ts = now_ts;
+            last_compaction_decision = "initialized";
             proactive_count_total = 0;
             last_proactive_ts = 0.0;
             last_proactive_reason = "";
             last_proactive_preview = "";
+            last_continuity_update_ts = now_ts;
+            continuity_summary = "";
           } in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;
@@ -4854,29 +5363,56 @@ let handle_keeper_msg ctx args : tool_result =
                     ~needs:meta.needs
 	                    ~desires:meta.desires
 	                    ~instructions:meta.instructions)
-	            in
-	            let fallback_skill_route =
-	              route_keeper_skill ~soul_profile:meta.soul_profile ~message
-	            in
-	            let skill_selection_mode = keeper_skill_selection_mode () in
-	            let turn_system_prompt =
-	              match skill_selection_mode with
-	              | SkillSelectHeuristic ->
-	                  skill_route_system_prompt_heuristic
-	                    ~base_system_prompt:ctx_work.system_prompt
-	                    ~route:fallback_skill_route
-	              | SkillSelectAgent ->
-	                  skill_route_system_prompt_agent
-	                    ~base_system_prompt:ctx_work.system_prompt
-	                    ~fallback_route:fallback_skill_route
-	                    ~soul_profile:meta.soul_profile
-	            in
+            in
+            let fallback_skill_route =
+              route_keeper_skill ~soul_profile:meta.soul_profile ~message
+            in
+            let skill_selection_mode = keeper_skill_selection_mode () in
+            let continuity_snapshot = latest_state_snapshot_from_messages ctx_work.messages in
+            let continuity_summary =
+              match continuity_snapshot with
+              | Some s -> keeper_state_snapshot_to_summary_text s
+              | None -> (
+                  let trimmed = String.trim meta.continuity_summary in
+                  if trimmed = "" then "No continuity snapshot available." else trimmed)
+            in
+            let base_turn_system_prompt =
+              match skill_selection_mode with
+              | SkillSelectHeuristic ->
+                  skill_route_system_prompt_heuristic
+                    ~base_system_prompt:ctx_work.system_prompt
+                    ~route:fallback_skill_route
+              | SkillSelectAgent ->
+                  skill_route_system_prompt_agent
+                    ~base_system_prompt:ctx_work.system_prompt
+                    ~fallback_route:fallback_skill_route
+                    ~soul_profile:meta.soul_profile
+            in
+            let turn_system_prompt =
+              append_continuity_context_prompt
+                ~base_prompt:base_turn_system_prompt
+                continuity_snapshot
+                ~continuity_summary
+            in
 	            let user_msg = Llm_client.user_msg message in
 	            let ctx_work = Context_manager.append ctx_work user_msg in
 	            Context_manager.persist_message session user_msg;
             let turn_max_tokens = keeper_turn_max_tokens () in
             let followup_max_tokens = keeper_followup_max_tokens turn_max_tokens in
             let correction_max_tokens = keeper_correction_max_tokens turn_max_tokens in
+            let postpass_budget_ms = keeper_msg_postpass_budget_ms () in
+            let turn_started_ts = Time_compat.now () in
+            let postpass_elapsed_ms () =
+              int_of_float
+                (max 0.0 ((Time_compat.now () -. turn_started_ts) *. 1000.0))
+            in
+            let postpass_remaining_ms () =
+              if postpass_budget_ms <= 0 then max_int
+              else max 0 (postpass_budget_ms - postpass_elapsed_ms ())
+            in
+            let has_postpass_budget () =
+              postpass_budget_ms <= 0 || postpass_remaining_ms () > 0
+            in
 
             (* Single-turn LLM call with cascade *)
 	            let requests =
@@ -4904,68 +5440,114 @@ let handle_keeper_msg ctx args : tool_result =
                 |> Option.value ~default:primary
               in
               let cost0 = cost_usd_of_usage resp0.usage used_model0 in
-              let tools_used0 =
-                List.map (fun (tc : Llm_client.tool_call) -> tc.call_name) resp0.tool_calls
-              in
-              let (base_content, base_usage, base_model_used, base_latency_ms,
-                   base_cost_usd, tools_used) =
-                if resp0.tool_calls = [] then
-                  ( resp0.content, resp0.usage, resp0.model_used, resp0.latency_ms,
-                    cost0, tools_used0 )
-                else
-                  let tool_outputs =
-                    List.map (fun (tc : Llm_client.tool_call) ->
-                      let output =
-                        try execute_keeper_tool_call ~meta ~ctx_work tc
-                        with exn ->
-                          Yojson.Safe.to_string (`Assoc [
-                            ("error", `String (Printexc.to_string exn));
-                            ("tool", `String tc.call_name);
-                          ])
-                      in
-                      (tc, output)
-                    ) resp0.tool_calls
+              (* Multi-round tool calling loop: up to 3 rounds *)
+              let max_tool_rounds = 3 in
+              let _trunc s n = if String.length s > n then String.sub s 0 n ^ "..." else s in
+              let execute_tool_calls tcs =
+                List.map (fun (tc : Llm_client.tool_call) ->
+                  Printf.eprintf "[TRPG-TRACE] Executing tool: %s args: %s\n%!"
+                    tc.call_name (_trunc tc.call_arguments 200);
+                  let output =
+                    try
+                      let r = execute_keeper_tool_call ~meta ~ctx_work tc in
+                      Printf.eprintf "[TRPG-TRACE] Tool %s OK: %s\n%!" tc.call_name (_trunc r 200);
+                      r
+                    with exn ->
+                      Printf.eprintf "[TRPG-TRACE] Tool %s EXCEPTION: %s\n%!"
+                        tc.call_name (Printexc.to_string exn);
+                      Yojson.Safe.to_string (`Assoc [
+                        ("error", `String (Printexc.to_string exn));
+                        ("tool", `String tc.call_name);
+                      ])
                   in
+                  (tc, output)
+                ) tcs
+              in
+              let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
+                  ~acc_tools_used ~last_resp =
+                if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
+                  (* Terminal: no more tool calls or hit round limit *)
+                  let content =
+                    let c = String.trim last_resp.Llm_client.content in
+                    if c = "" && acc_tools_used <> [] then
+                      Printf.sprintf "(tools executed: %s)"
+                        (String.concat ", " acc_tools_used)
+                    else last_resp.Llm_client.content
+                  in
+                  ( content, acc_usage, last_resp.Llm_client.model_used,
+                    acc_latency, acc_cost, acc_tools_used )
+                else begin
+                  Printf.eprintf "[TRPG-TRACE] Tool round %d/%d: %d tool calls\n%!"
+                    round max_tool_rounds
+                    (List.length last_resp.Llm_client.tool_calls);
+                  let round_tools =
+                    List.map (fun (tc : Llm_client.tool_call) -> tc.call_name)
+                      last_resp.Llm_client.tool_calls
+                  in
+                  let all_tools_so_far = acc_tools_used @ round_tools in
+                  let tool_outputs = execute_tool_calls last_resp.Llm_client.tool_calls in
                   let followup_prompt =
                     keeper_tool_followup_prompt
                       ~user_message:message
-                      ~draft_reply:resp0.content
+                      ~draft_reply:last_resp.Llm_client.content
                       ~tool_outputs
+                      ~already_executed:all_tools_so_far
+                  in
+                  (* Once a write tool has been executed, strip tools from the
+                     next request to force the model to produce a text answer. *)
+                  let write_done =
+                    List.exists (fun n -> n = "keeper_board_post") all_tools_so_far
+                  in
+                  let next_tools =
+                    if write_done then [] else keeper_llm_tools
                   in
                   let followup_requests =
                     List.map (fun (model : Llm_client.model_spec) ->
-	                      ({
-	                        Llm_client.model;
-	                        messages = [
-	                          Llm_client.system_msg turn_system_prompt;
-	                          Llm_client.user_msg followup_prompt;
-	                        ];
+                      ({
+                        Llm_client.model;
+                        messages = [
+                          Llm_client.system_msg (keeper_tool_loop_system_prompt
+                            ~character_context:ctx_work.system_prompt);
+                          Llm_client.user_msg followup_prompt;
+                        ];
                         temperature = 0.3;
                         max_tokens = followup_max_tokens;
-                        tools = [];
+                        tools = next_tools;
                         response_format = `Text;
                       } : Llm_client.completion_request)
                     ) specs
                   in
                   match Llm_client.cascade followup_requests with
                   | Error _ ->
-                    ( resp0.content, resp0.usage, resp0.model_used, resp0.latency_ms,
-                      cost0, tools_used0 )
-                  | Ok resp1 ->
-                    let used_model1 =
-                      model_spec_for_used specs resp1.model_used
+                    (* Cascade failed — return what we have *)
+                    ( last_resp.Llm_client.content, acc_usage,
+                      last_resp.Llm_client.model_used, acc_latency,
+                      acc_cost, acc_tools_used @ round_tools )
+                  | Ok resp_next ->
+                    Printf.eprintf "[TRPG-TRACE] Follow-up round %d resp: tool_calls=%d content_len=%d model=%s\n%!"
+                      round
+                      (List.length resp_next.Llm_client.tool_calls)
+                      (String.length resp_next.Llm_client.content)
+                      resp_next.Llm_client.model_used;
+                    let used_model_next =
+                      model_spec_for_used specs resp_next.model_used
                       |> Option.value ~default:primary
                     in
-                    let cost1 = cost_usd_of_usage resp1.usage used_model1 in
-                    let merged_usage = merge_usage resp0.usage resp1.usage in
-                    let content1 =
-                      let c = String.trim resp1.content in
-                      if c = "" then resp0.content else resp1.content
-                    in
-                    ( content1, merged_usage, resp1.model_used,
-                      resp0.latency_ms + resp1.latency_ms,
-                      cost0 +. cost1,
-                      tools_used0 )
+                    let cost_next = cost_usd_of_usage resp_next.usage used_model_next in
+                    tool_loop
+                      ~round:(round + 1)
+                      ~acc_usage:(merge_usage acc_usage resp_next.usage)
+                      ~acc_latency:(acc_latency + resp_next.latency_ms)
+                      ~acc_cost:(acc_cost +. cost_next)
+                      ~acc_tools_used:(acc_tools_used @ round_tools)
+                      ~last_resp:resp_next
+                end
+              in
+              let (base_content, base_usage, base_model_used, base_latency_ms,
+                   base_cost_usd, tools_used) =
+                tool_loop ~round:1 ~acc_usage:resp0.usage
+                  ~acc_latency:resp0.latency_ms ~acc_cost:cost0
+                  ~acc_tools_used:[] ~last_resp:resp0
               in
               let eval0 =
                 evaluate_memory_recall
@@ -4979,11 +5561,15 @@ let handle_keeper_msg ctx args : tool_result =
               let (content_after_correction, usage_after_correction,
                    model_after_correction, latency_after_correction,
                    eval_after_correction, correction_applied_after_correction,
-                   correction_success_after_correction, cost_after_correction,
-                   tools_used) =
+                   correction_success_after_correction,
+                   correction_skipped_budget_after_correction,
+                   cost_after_correction, tools_used) =
                 if not correction_needed then
                   ( base_content, base_usage, base_model_used, base_latency_ms,
-                    eval0, false, false, base_cost_usd, tools_used )
+                    eval0, false, false, false, base_cost_usd, tools_used )
+                else if not (has_postpass_budget ()) then
+                  ( base_content, base_usage, base_model_used, base_latency_ms,
+                    eval0, false, false, true, base_cost_usd, tools_used )
                 else
                   let correction_prompt =
                     memory_correction_prompt
@@ -5010,7 +5596,7 @@ let handle_keeper_msg ctx args : tool_result =
                   match Llm_client.cascade correction_requests with
                   | Error _ ->
                     ( base_content, base_usage, base_model_used, base_latency_ms,
-                      eval0, true, false, base_cost_usd, tools_used )
+                      eval0, true, false, false, base_cost_usd, tools_used )
                   | Ok corr ->
                     let used_model1 =
                       model_spec_for_used specs corr.model_used
@@ -5027,7 +5613,7 @@ let handle_keeper_msg ctx args : tool_result =
                     let merged_usage = merge_usage base_usage corr.usage in
                     ( corr.content, merged_usage, corr.model_used,
                       base_latency_ms + corr.latency_ms,
-                      evalf, true, evalf.passed, base_cost_usd +. cost1,
+                      evalf, true, evalf.passed, false, base_cost_usd +. cost1,
                       tools_used )
               in
               let prompt_fallback_needed =
@@ -5038,11 +5624,16 @@ let handle_keeper_msg ctx args : tool_result =
               let (content_after_prompt_fallback, usage_after_prompt_fallback,
                    model_after_prompt_fallback, latency_after_prompt_fallback,
                    eval_after_prompt_fallback, prompt_fallback_applied,
-                   prompt_fallback_success, cost_after_prompt_fallback) =
+                   prompt_fallback_success, prompt_fallback_skipped_budget,
+                   cost_after_prompt_fallback) =
                 if not prompt_fallback_needed then
                   ( content_after_correction, usage_after_correction,
                     model_after_correction, latency_after_correction,
-                    eval_after_correction, false, false, cost_after_correction )
+                    eval_after_correction, false, false, false, cost_after_correction )
+                else if not (has_postpass_budget ()) then
+                  ( content_after_correction, usage_after_correction,
+                    model_after_correction, latency_after_correction,
+                    eval_after_correction, false, false, true, cost_after_correction )
                 else
                   let forced_prompt =
                     memory_forced_grounding_prompt
@@ -5070,7 +5661,7 @@ let handle_keeper_msg ctx args : tool_result =
                   | Error _ ->
                       ( content_after_correction, usage_after_correction,
                         model_after_correction, latency_after_correction,
-                        eval_after_correction, true, false, cost_after_correction )
+                        eval_after_correction, true, false, false, cost_after_correction )
                   | Ok forced ->
                       let used_model2 =
                         model_spec_for_used specs forced.model_used
@@ -5092,11 +5683,11 @@ let handle_keeper_msg ctx args : tool_result =
                       let eval2 = { eval2 with initial_score = eval_after_correction.final_score } in
                       if eval2.passed then
                         ( grounded_content, merged_usage, forced.model_used,
-                          merged_latency, eval2, true, true,
+                          merged_latency, eval2, true, true, false,
                           cost_after_correction +. cost2 )
                       else
                         ( content_after_correction, merged_usage, model_after_correction,
-                          merged_latency, eval_after_correction, true, false,
+                          merged_latency, eval_after_correction, true, false, false,
                           cost_after_correction +. cost2 )
               in
               let (final_content, final_usage, final_model_used, final_latency_ms,
@@ -5120,6 +5711,21 @@ let handle_keeper_msg ctx args : tool_result =
                       model_after_prompt_fallback, latency_after_prompt_fallback,
                       fallback_eval, true, fallback_eval.passed, true,
                       cost_after_prompt_fallback )
+              in
+              let postpass_budget_remaining_ms =
+                if postpass_budget_ms <= 0 then -1 else postpass_remaining_ms ()
+              in
+              let memory_check_json =
+                memory_eval_to_json final_eval
+                  ~correction_applied
+                  ~correction_success
+                  ~correction_skipped_budget:correction_skipped_budget_after_correction
+                  ~prompt_fallback_applied
+                  ~prompt_fallback_success
+                  ~prompt_fallback_skipped_budget
+                  ~postpass_budget_ms
+                  ~postpass_budget_remaining_ms
+                  ~recall_fallback_applied
               in
 	              let work_kind = work_kind_of_eval final_eval in
 	              let tool_call_count = List.length tools_used in
@@ -5149,11 +5755,33 @@ let handle_keeper_msg ctx args : tool_result =
               let ctx_work = Context_manager.append ctx_work assistant_msg in
               Context_manager.persist_message session assistant_msg;
               let now_ts = Time_compat.now () in
+              let continuity_summary_from_reply =
+                match parse_state_snapshot_from_reply safe_reply with
+                | None -> meta.continuity_summary
+                | Some snapshot -> keeper_state_snapshot_to_summary_text snapshot
+              in
+              let continuity_summary_from_reply = String.trim continuity_summary_from_reply in
+              let last_continuity_update_ts =
+                if
+                  continuity_summary_from_reply <> ""
+                  && String.trim meta.continuity_summary <> continuity_summary_from_reply
+                then
+                  now_ts
+                else
+                  meta.last_continuity_update_ts
+              in
+              let meta_for_compaction =
+                {
+                  meta with
+                  continuity_summary = continuity_summary_from_reply;
+                  last_continuity_update_ts;
+                }
+              in
 
               (* Compact opportunistically to control growth. *)
               let before_compact_tokens = ctx_work.token_count in
-              let (ctx_work, compaction_trigger) =
-                compact_if_needed ~meta ctx_work
+              let (ctx_work, compaction_trigger, compaction_decision) =
+                compact_if_needed ~meta:meta_for_compaction ~now_ts ctx_work
               in
               let after_compact_tokens = ctx_work.token_count in
               let compacted = after_compact_tokens < before_compact_tokens in
@@ -5163,6 +5791,8 @@ let handle_keeper_msg ctx args : tool_result =
                 updated_at = now_iso ();
                 total_turns = meta.total_turns + 1;
                 total_input_tokens = meta.total_input_tokens + final_usage.input_tokens;
+                continuity_summary = continuity_summary_from_reply;
+                last_continuity_update_ts;
                 total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
                 total_tokens = meta.total_tokens + final_usage.total_tokens;
                 total_cost_usd = meta.total_cost_usd +. total_cost_usd_turn;
@@ -5178,6 +5808,8 @@ let handle_keeper_msg ctx args : tool_result =
                   (if compacted then before_compact_tokens else meta.last_compaction_before_tokens);
                 last_compaction_after_tokens =
                   (if compacted then after_compact_tokens else meta.last_compaction_after_tokens);
+                last_compaction_check_ts = now_ts;
+                last_compaction_decision = compaction_decision;
               } in
               let (meta_turn, drift_applied, drift_reason) =
                 apply_self_model_drift
@@ -5247,6 +5879,7 @@ let handle_keeper_msg ctx args : tool_result =
                        match compaction_trigger with
                        | Some reason -> `String reason
                        | None -> `Null );
+                     ("compaction_decision", `String compaction_decision);
 	                     ("work_kind", `String work_kind);
 	                     ("tool_call_count", `Int tool_call_count);
 	                     ("tools_used", `List (List.map (fun s -> `String s) tools_used));
@@ -5254,13 +5887,7 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 		                     ("skill_reason", `String effective_skill_route.reason);
-                     ("memory_check",
-                       memory_eval_to_json final_eval
-                         ~correction_applied
-                         ~correction_success
-                         ~prompt_fallback_applied
-                         ~prompt_fallback_success
-                         ~recall_fallback_applied);
+                     ("memory_check", memory_check_json);
                      ("drift", `Assoc [
                        ("enabled", `Bool meta_turn.drift_enabled);
                        ("applied", `Bool drift_applied);
@@ -5329,13 +5956,7 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 		                  ("skill_reason", `String effective_skill_route.reason);
-	                  ("memory_check",
-	                    memory_eval_to_json final_eval
-	                      ~correction_applied
-                      ~correction_success
-                      ~prompt_fallback_applied
-                      ~prompt_fallback_success
-                      ~recall_fallback_applied);
+	                  ("memory_check", memory_check_json);
                   ("drift", `Assoc [
                     ("enabled", `Bool meta_turn.drift_enabled);
                     ("applied", `Bool drift_applied);
@@ -5453,13 +6074,7 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 		                     ("skill_reason", `String effective_skill_route.reason);
-	                     ("memory_check",
-	                       memory_eval_to_json final_eval
-	                         ~correction_applied
-                         ~correction_success
-                         ~prompt_fallback_applied
-                         ~prompt_fallback_success
-                         ~recall_fallback_applied);
+	                     ("memory_check", memory_check_json);
                      ("drift", `Assoc [
                        ("enabled", `Bool meta_turn.drift_enabled);
                        ("applied", `Bool drift_applied);
@@ -5527,13 +6142,7 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 		                  ("skill_reason", `String effective_skill_route.reason);
-	                  ("memory_check",
-	                    memory_eval_to_json final_eval
-	                      ~correction_applied
-                      ~correction_success
-                      ~prompt_fallback_applied
-                      ~prompt_fallback_success
-                      ~recall_fallback_applied);
+	                  ("memory_check", memory_check_json);
                   ("drift", `Assoc [
                     ("enabled", `Bool meta_turn.drift_enabled);
                     ("applied", `Bool drift_applied);
@@ -5700,6 +6309,19 @@ let handle_keeper_list ctx args : tool_result =
               | row :: _ -> Some row.text
               | [] -> None
             in
+            let continuity_reflection_hold_s =
+              let cooldown = Float.of_int m.continuity_compaction_cooldown_sec in
+              let last_reflection_ts =
+                max m.last_continuity_update_ts m.last_proactive_ts
+              in
+              if cooldown <= 0.0 then
+                0.0
+              else if last_reflection_ts <= 0.0 then
+                cooldown
+              else
+                let elapsed = now_ts -. last_reflection_ts in
+                max 0.0 (cooldown -. elapsed)
+            in
 	            let context_json =
 	              match last_metrics with
 	              | None -> `Assoc [("source", `String "none")]
@@ -5760,6 +6382,10 @@ let handle_keeper_list ctx args : tool_result =
               ("proactive_idle_sec", `Int m.proactive_idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive_cooldown_sec);
               ("proactive_count_total", `Int m.proactive_count_total);
+              ("last_compaction_check_ts", `Float m.last_compaction_check_ts);
+              ("last_compaction_decision",
+                if String.trim m.last_compaction_decision = "" then `Null
+                else `String m.last_compaction_decision);
               ("last_proactive_ts", `Float m.last_proactive_ts);
               ("last_proactive_reason",
                 if String.trim m.last_proactive_reason = ""
@@ -5769,6 +6395,13 @@ let handle_keeper_list ctx args : tool_result =
                 if String.trim m.last_proactive_preview = ""
                 then `Null
                 else `String m.last_proactive_preview);
+              ("continuity_summary",
+                if String.trim m.continuity_summary = ""
+                then `Null
+                else `String m.continuity_summary);
+              ("continuity_compaction_cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
+              ("continuity_reflection_hold_s", `Float continuity_reflection_hold_s);
+              ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
               ("drift_enabled", `Bool m.drift_enabled);
               ("drift_min_turn_gap", `Int m.drift_min_turn_gap);
               ("drift_count_total", `Int m.drift_count_total);

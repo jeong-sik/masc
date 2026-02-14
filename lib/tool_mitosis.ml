@@ -14,22 +14,30 @@
 *)
 
 (** Tool handler context - extensible for future features *)
+type any_clock = Clock : _ Eio.Time.clock -> any_clock
+
 type context = {
   config: Room.config;
   logger: (string -> unit) option;  (** Optional logging callback *)
   sw: Eio.Switch.t option;
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  clock: any_clock option;
 }
 
 (** Create context with just config (backward compatible) *)
-let make_context config : context = { config; logger = None; sw = None; proc_mgr = None }
+let make_context config : context = { config; logger = None; sw = None; proc_mgr = None; clock = None }
 
 (** Create context with config and logger *)
-let make_context_with_logger config logger : context = { config; logger = Some logger; sw = None; proc_mgr = None }
+let make_context_with_logger config logger : context =
+  { config; logger = Some logger; sw = None; proc_mgr = None; clock = None }
 
 (** Create context with sw and proc_mgr for non-blocking spawn *)
-let make_context_with_eio ~config ~sw ~proc_mgr : context =
-  { config; logger = None; sw = Some sw; proc_mgr }
+let make_context_with_eio
+    ~config
+    ~sw
+    ~proc_mgr
+    ~(clock : _ Eio.Time.clock) : context =
+  { config; logger = None; sw = Some sw; proc_mgr; clock = Some (Clock clock) }
 
 (** Internal logging helper *)
 let log ctx msg =
@@ -115,6 +123,38 @@ let queue_episode ~base_path ~session_id ~agent_name ~generation
     Printf.eprintf "[EPISODE/ERROR] Failed to queue episode: %s\n%!" (Printexc.to_string exn);
     None
 
+(** Saga status tracking for async handoff *)
+let mitosis_saga_dir base_path =
+  Filename.concat base_path ".masc/mitosis_sagas"
+
+let generate_saga_id () =
+  let ts = Time_compat.now () in
+  let rand = Random.int 100000 in
+  Printf.sprintf "saga-%d-%05d" (int_of_float (ts *. 1000.0)) rand
+
+let ensure_dir dir =
+  try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+
+let write_saga_state ~base_path ~saga_id ~status ~payload : string option =
+  let dir = mitosis_saga_dir base_path in
+  ensure_dir dir;
+  let file = Filename.concat dir (saga_id ^ ".json") in
+  let json = `Assoc [
+    ("saga_id", `String saga_id);
+    ("status", `String status);
+    ("updated_at", `String (now_iso ()));
+    ("payload", payload);
+  ] in
+  try
+    let oc = open_out file in
+    Common.protect ~module_name:"tool_mitosis" ~finally_label:"finalizer"
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc (Yojson.Safe.pretty_to_string json));
+    Some file
+  with exn ->
+    Printf.eprintf "[MITOSIS/SAGA] Failed writing %s: %s\n%!" file (Printexc.to_string exn);
+    None
+
 (** Get current session ID from environment or generate *)
 let get_session_id () =
   match Sys.getenv_opt "TERM_SESSION_ID" with
@@ -154,6 +194,534 @@ let get_bool args key default =
        | None -> default)
   | _ -> default
 
+let set_bool_arg args key value =
+  match args with
+  | `Assoc fields ->
+      let fields' = List.filter (fun (k, _) -> k <> key) fields in
+      `Assoc ((key, `Bool value) :: fields')
+  | _ ->
+      `Assoc [ (key, `Bool value) ]
+
+let get_string_list args key default =
+  match args with
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`List xs) ->
+           let vals =
+             List.filter_map (function
+               | `String s ->
+                   let v = String.trim s in
+                   if v = "" then None else Some v
+               | _ -> None
+             ) xs
+           in
+           if vals = [] then default else vals
+       | Some _ ->
+           Printf.eprintf "[MITOSIS/WARN] %s: type mismatch\n%!" key;
+           default
+       | None -> default)
+  | _ -> default
+
+let default_verifier_models = [
+  "ollama:glm-4.7-flash";
+  "ollama:glm-4.7-flash";
+  "ollama:glm-4.7-flash";
+]
+
+let default_verifier_perspectives = [
+  "A: continuity archivist (value-neutral)";
+  "B: progress assessor (value-neutral)";
+  "C: risk observer (value-neutral)";
+]
+
+let verifier_profile_name s =
+  String.lowercase_ascii (String.trim s)
+
+let perspectives_for_profile profile =
+  match verifier_profile_name profile with
+  | "abc_neutral" -> [
+      "A: continuity archivist (value-neutral)";
+      "B: progress assessor (value-neutral)";
+      "C: risk observer (value-neutral)";
+    ]
+  | "abc_strict" -> [
+      "A: continuity archivist (strict on memory continuity)";
+      "B: progress assessor (strict on goal movement)";
+      "C: risk observer (strict on regression risk)";
+    ]
+  | "abc_lenient" -> [
+      "A: continuity archivist (lenient)";
+      "B: progress assessor (lenient)";
+      "C: risk observer (lenient)";
+    ]
+  | _ -> default_verifier_perspectives
+
+let resolve_verifier_perspectives args =
+  let explicit = get_string_list args "verifier_perspectives" [] in
+  if explicit <> [] then
+    ("custom", explicit)
+  else
+    let profile = get_string args "verifier_profile" "abc_neutral" in
+    let normalized = verifier_profile_name profile in
+    (normalized, perspectives_for_profile normalized)
+
+let perspective_at perspectives idx =
+  match List.nth_opt perspectives idx with
+  | Some p when String.trim p <> "" -> p
+  | _ ->
+      (match default_verifier_perspectives with
+       | p :: _ -> p
+       | [] -> "continuity")
+
+let assoc_get fields key =
+  match List.assoc_opt key fields with
+  | Some v -> v
+  | None -> `Null
+
+let json_value_present = function
+  | `Null -> false
+  | `String s -> String.trim s <> ""
+  | `List xs -> xs <> []
+  | `Assoc xs -> xs <> []
+  | _ -> true
+
+let evidence_action fields =
+  match List.assoc_opt "action" fields with
+  | Some (`String s) -> String.lowercase_ascii (String.trim s)
+  | _ -> "unknown"
+
+let expected_evidence_keys = function
+  | "none" -> [
+      "action";
+      "context_ratio";
+      "message";
+      "threshold_prepare";
+      "threshold_handoff";
+    ]
+  | "prepared" -> [
+      "action";
+      "context_ratio";
+      "message";
+      "phase";
+      "dna_length";
+      "dna_quality";
+      "threshold_handoff";
+    ]
+  | "handoff" -> [
+      "action";
+      "success";
+      "context_ratio";
+      "message";
+      "target_agent";
+      "selected_agent";
+      "previous_generation";
+      "new_generation";
+      "elapsed_ms";
+      "spawn";
+    ]
+  | "fallback" -> [
+      "action";
+      "success";
+      "context_ratio";
+      "message";
+      "target_agent";
+      "selected_agent";
+      "spawn";
+    ]
+  | _ -> [
+      "action";
+      "raw_result";
+    ]
+
+let extract_handoff_evidence (parsed_result : Yojson.Safe.t) : Yojson.Safe.t =
+  match parsed_result with
+  | `Assoc fields ->
+      let spawn_evidence =
+        match assoc_get fields "spawn_attempts" with
+        | `List attempts ->
+            let total = List.length attempts in
+            let (successes, failures, failed_agents) =
+              List.fold_left (fun (s, f, agents) j ->
+                match j with
+                | `Assoc af ->
+                    let ok =
+                      match List.assoc_opt "success" af with
+                      | Some (`Bool b) -> b
+                      | _ -> false
+                    in
+                    let agent =
+                      match List.assoc_opt "agent" af with
+                      | Some (`String a) -> a
+                      | _ -> "unknown"
+                    in
+                    if ok then (s + 1, f, agents) else (s, f + 1, agent :: agents)
+                | _ -> (s, f, agents)
+              ) (0, 0, []) attempts
+            in
+            `Assoc [
+              ("total", `Int total);
+              ("successes", `Int successes);
+              ("failures", `Int failures);
+              ("failed_agents", `List (List.rev_map (fun a -> `String a) failed_agents));
+            ]
+        | _ -> `Null
+      in
+      `Assoc [
+        ("action", assoc_get fields "action");
+        ("success", assoc_get fields "success");
+        ("context_ratio", assoc_get fields "context_ratio");
+        ("message", assoc_get fields "message");
+        ("threshold_prepare", assoc_get fields "threshold_prepare");
+        ("threshold_handoff", assoc_get fields "threshold_handoff");
+        ("phase", assoc_get fields "phase");
+        ("dna_length", assoc_get fields "dna_length");
+        ("dna_quality", assoc_get fields "dna_quality");
+        ("target_agent", assoc_get fields "target_agent");
+        ("selected_agent", assoc_get fields "selected_agent");
+        ("previous_generation", assoc_get fields "previous_generation");
+        ("new_generation", assoc_get fields "new_generation");
+        ("elapsed_ms", assoc_get fields "elapsed_ms");
+        ("spawn", spawn_evidence);
+      ]
+  | other ->
+      `Assoc [ ("raw_result", other) ]
+
+let evidence_completeness_ratio (evidence : Yojson.Safe.t) : float =
+  match evidence with
+  | `Assoc fields ->
+      let expected = expected_evidence_keys (evidence_action fields) in
+      let total = List.length expected in
+      if total = 0 then 0.0
+      else
+        let present =
+          List.fold_left (fun acc key ->
+            match List.assoc_opt key fields with
+            | Some v when json_value_present v -> acc + 1
+            | _ -> acc
+          ) 0 expected
+        in
+        Float.of_int present /. Float.of_int total
+  | _ -> 0.0
+
+let max3 a b c = max a (max b c)
+
+let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.Safe.t option * bool) =
+  let verify_enabled = get_bool args "verify" true in
+  if not verify_enabled then
+    (None, true)
+  else
+    let model_strs = get_string_list args "verifier_models" default_verifier_models in
+    let (perspective_profile, perspectives) = resolve_verifier_perspectives args in
+    let goal =
+      get_string args "verifier_goal"
+        "Judge whether handoff outcome preserved continuity and moved work forward."
+    in
+    let policy =
+      String.lowercase_ascii (String.trim (get_string args "verification_policy" "advisory"))
+    in
+    let judge_timeout_sec = max 0.0 (get_float args "verification_judge_timeout_sec" 60.0) in
+    let pass_ratio_threshold = get_float args "verification_pass_ratio" (2.0 /. 3.0) in
+    let min_agreement = get_float args "verification_min_agreement" (2.0 /. 3.0) in
+    let min_judges = max 1 (int_of_float (get_float args "verification_min_judges" 3.0)) in
+    let full_context = get_string args "full_context" "" in
+    let context_summary =
+      if full_context = "" then
+        "No full_context provided"
+      else
+        Mitosis.safe_sub full_context 0 600
+    in
+    let evidence = extract_handoff_evidence parsed_result in
+    let evidence_text = Yojson.Safe.pretty_to_string evidence in
+    let pass_count = ref 0 in
+    let warn_count = ref 0 in
+    let fail_count = ref 0 in
+    let checks =
+      List.mapi (fun idx model_str ->
+        let perspective = perspective_at perspectives idx in
+        match Llm_client.model_spec_of_string model_str with
+        | Error err ->
+            incr warn_count;
+            `Assoc [
+              ("model", `String model_str);
+              ("perspective", `String perspective);
+              ("verdict", `String "WARN: model_parse_error");
+              ("status", `String "warn");
+              ("reason", `String err);
+            ]
+        | Ok model ->
+            let req = Verifier.{
+              action_description =
+                Printf.sprintf "masc_mitosis_handoff outcome review (%s)" perspective;
+              action_result = evidence_text;
+              goal = Printf.sprintf "%s Perspective: %s." goal perspective;
+              context_summary;
+            } in
+            let verdict_result =
+              try
+                let verdict =
+                  match ctx.clock with
+                  | Some (Clock clock) when judge_timeout_sec > 0.0 ->
+                      Eio.Time.with_timeout_exn clock judge_timeout_sec (fun () ->
+                        Verifier.verify ~model req)
+                  | _ ->
+                      Verifier.verify ~model req
+                in
+                `Verdict verdict
+              with
+              | Eio.Time.Timeout ->
+                  `Timeout
+              | exn ->
+                  `Error (Printexc.to_string exn)
+            in
+            (match verdict_result with
+             | `Verdict verdict ->
+                 let status =
+                   match verdict with
+                   | Verifier.Pass -> incr pass_count; "pass"
+                   | Verifier.Warn _ -> incr warn_count; "warn"
+                   | Verifier.Fail _ -> incr fail_count; "fail"
+                 in
+                 `Assoc [
+                   ("model", `String model_str);
+                   ("perspective", `String perspective);
+                   ("verdict", `String (Verifier.verdict_to_string verdict));
+                   ("status", `String status);
+                 ]
+             | `Timeout ->
+                 incr warn_count;
+                 `Assoc [
+                   ("model", `String model_str);
+                   ("perspective", `String perspective);
+                   ("verdict", `String "WARN: verifier_timeout");
+                   ("status", `String "warn");
+                   ("reason",
+                    `String (Printf.sprintf "judge timeout after %.1fs" judge_timeout_sec));
+                 ]
+             | `Error err ->
+                 incr warn_count;
+                 `Assoc [
+                   ("model", `String model_str);
+                   ("perspective", `String perspective);
+                   ("verdict", `String "WARN: verifier_error");
+                   ("status", `String "warn");
+                   ("reason", `String err);
+                 ])
+      ) model_strs
+    in
+    let total = List.length checks in
+    let effective_min_judges =
+      if total <= 0 then min_judges else min min_judges total
+    in
+    let pass_ratio =
+      if total = 0 then 0.0 else Float.of_int !pass_count /. Float.of_int total
+    in
+    let agreement_ratio =
+      if total = 0 then 0.0
+      else
+        Float.of_int (max3 !pass_count !warn_count !fail_count)
+        /. Float.of_int total
+    in
+    let evidence_ratio = evidence_completeness_ratio evidence in
+    let consensus_pass =
+      total >= effective_min_judges
+      && !fail_count = 0
+      && pass_ratio >= pass_ratio_threshold
+      && agreement_ratio >= min_agreement
+    in
+    let overall =
+      if consensus_pass then "pass"
+      else if !fail_count > 0 then "fail"
+      else "warn"
+    in
+    let gate_pass =
+      match policy with
+      | "gate" | "hard_gate" -> consensus_pass
+      | _ -> true
+    in
+    (Some (`Assoc [
+      ("enabled", `Bool true);
+      ("policy", `String policy);
+      ("profile", `String perspective_profile);
+      ("overall", `String overall);
+      ("goal", `String goal);
+      ("judge_timeout_sec", `Float judge_timeout_sec);
+      ("min_judges", `Int min_judges);
+      ("effective_min_judges", `Int effective_min_judges);
+      ("pass_ratio", `Float pass_ratio);
+      ("pass_ratio_threshold", `Float pass_ratio_threshold);
+      ("agreement_ratio", `Float agreement_ratio);
+      ("agreement_threshold", `Float min_agreement);
+      ("consensus_pass", `Bool consensus_pass);
+      ("counts", `Assoc [
+        ("pass", `Int !pass_count);
+        ("warn", `Int !warn_count);
+        ("fail", `Int !fail_count);
+        ("total", `Int total);
+      ]);
+      ("evidence", evidence);
+      ("research_metrics", `Assoc [
+        ("inter_judge_agreement", `Float agreement_ratio);
+        ("evidence_completeness", `Float evidence_ratio);
+        ("consensus_margin", `Float (pass_ratio -. pass_ratio_threshold));
+      ]);
+      ("checks", `List checks);
+    ]), gate_pass)
+
+(** Normalize agent names for fallback selection *)
+let normalize_agent_name agent =
+  String.lowercase_ascii (String.trim agent)
+
+let dedup_preserve_order xs =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+        if x = "" || List.mem x seen then
+          loop seen acc rest
+        else
+          loop (x :: seen) (x :: acc) rest
+  in
+  loop [] [] xs
+
+let cascade_agents preferred =
+  dedup_preserve_order [
+    normalize_agent_name preferred;
+    "claude";
+    "codex";
+    "gemini";
+    "ollama";
+  ]
+
+let spawn_attempts_to_json attempts =
+  `List (List.map (fun (agent, result) ->
+    `Assoc [
+      ("agent", `String agent);
+      ("success", `Bool result.Spawn.success);
+      ("exit_code", `Int result.Spawn.exit_code);
+      ("elapsed_ms", `Int result.Spawn.elapsed_ms);
+      ("output", `String (Mitosis.safe_sub result.Spawn.output 0 300));
+    ]) attempts)
+
+let now_s () = Time_compat.now ()
+
+let min_attempt_timeout_s = 5
+let max_tool_window_s = 40
+
+let failed_spawn_result ~msg ~exit_code : Spawn.spawn_result =
+  {
+    Spawn.success = false;
+    output = msg;
+    exit_code;
+    elapsed_ms = 0;
+    input_tokens = None;
+    output_tokens = None;
+    cache_creation_tokens = None;
+    cache_read_tokens = None;
+    cost_usd = None;
+  }
+
+let command_available cmd =
+  Sys.command (Printf.sprintf "command -v %s >/dev/null 2>&1" cmd) = 0
+
+let port_listening port =
+  Sys.command (Printf.sprintf "lsof -iTCP:%d -sTCP:LISTEN -t >/dev/null 2>&1" port) = 0
+
+let readiness_check agent =
+  match agent with
+  | "claude" ->
+      if command_available "claude" then Ok () else Error "claude CLI not found"
+  | "codex" ->
+      if command_available "codex" then Ok () else Error "codex CLI not found"
+  | "gemini" ->
+      if command_available "gemini" then Ok () else Error "gemini CLI not found"
+  | "ollama" ->
+      if not (command_available "ollama") then Error "ollama CLI not found"
+      else if not (port_listening 11434) then Error "ollama port 11434 not listening"
+      else Ok ()
+  | _ -> Ok ()
+
+let breaker_agent_id agent = "spawn:" ^ agent
+
+let spawn_with_cascade ~ctx ~preferred_agent ~total_timeout_seconds ~prompt =
+  let agents = cascade_agents preferred_agent in
+  let start_ts = now_s () in
+  let total_budget = max 1 (min max_tool_window_s total_timeout_seconds) in
+  let rec loop attempts remaining_agents = function
+    | [] ->
+        let fallback_result, selected =
+          match attempts with
+          | (agent, result) :: _ -> (result, agent)
+          | [] ->
+              ({ Spawn.success = false;
+                 output = "No spawn candidates available";
+                 exit_code = 1;
+                 elapsed_ms = 0;
+                 input_tokens = None;
+                 output_tokens = None;
+                 cache_creation_tokens = None;
+                 cache_read_tokens = None;
+                 cost_usd = None }, normalize_agent_name preferred_agent)
+        in
+        (fallback_result, selected, List.rev attempts)
+    | agent :: rest ->
+        let attempts_agent_left = max 1 remaining_agents in
+        let elapsed = int_of_float (now_s () -. start_ts) in
+        let remaining = total_budget - elapsed in
+        if remaining <= 0 then
+          let fallback_result, selected =
+            match attempts with
+            | (a, r) :: _ -> (r, a)
+            | [] ->
+                ({ Spawn.success = false;
+                   output = "Cascade timeout budget exhausted";
+                   exit_code = 124;
+                   elapsed_ms = total_budget * 1000;
+                   input_tokens = None;
+                   output_tokens = None;
+                   cache_creation_tokens = None;
+                   cache_read_tokens = None;
+                   cost_usd = None }, normalize_agent_name preferred_agent)
+          in
+          (fallback_result, selected, List.rev attempts)
+        else begin
+          match Circuit_breaker.check_global ~agent_id:(breaker_agent_id agent) with
+          | Error reason ->
+              let result = failed_spawn_result ~msg:reason ~exit_code:125 in
+              let attempts' = (agent, result) :: attempts in
+              loop attempts' (attempts_agent_left - 1) rest
+          | Ok () ->
+              begin match readiness_check agent with
+              | Error reason ->
+                  ignore (Circuit_breaker.record_failure_global
+                    ~agent_id:(breaker_agent_id agent)
+                    ~reason);
+                  let result = failed_spawn_result ~msg:reason ~exit_code:125 in
+                  let attempts' = (agent, result) :: attempts in
+                  loop attempts' (attempts_agent_left - 1) rest
+              | Ok () ->
+                  let per_attempt_timeout =
+                    max min_attempt_timeout_s (remaining / attempts_agent_left)
+                  in
+                  let spawn_fn =
+                    make_spawn_fn ~ctx ~agent_name:agent ~timeout_seconds:per_attempt_timeout
+                  in
+                  let result = spawn_fn ~prompt in
+                  if result.Spawn.success then
+                    ignore (Circuit_breaker.record_success_global
+                      ~agent_id:(breaker_agent_id agent))
+                  else
+                    ignore (Circuit_breaker.record_failure_global
+                      ~agent_id:(breaker_agent_id agent)
+                      ~reason:(if String.trim result.Spawn.output = "" then "spawn failed" else result.Spawn.output));
+                  let attempts' = (agent, result) :: attempts in
+                  if result.Spawn.success then
+                    (result, agent, List.rev attempts')
+                  else
+                    loop attempts' (attempts_agent_left - 1) rest
+              end
+        end
+  in
+  loop [] (List.length agents) agents
+
 (** {1 Individual Handlers} *)
 
 let handle_mitosis_status _ctx _args : result =
@@ -185,17 +753,40 @@ let handle_mitosis_pool _ctx _args : result =
 let handle_mitosis_divide ctx args : result =
   let summary = get_string args "summary" "" in
   let current_task = get_string args "current_task" "" in
+  let target_agent = get_string args "target_agent" "claude" in
+  let spawn_timeout =
+    int_of_float
+      (get_float args "spawn_timeout"
+         (Float.of_int Mitosis.Defaults.spawn_timeout_seconds))
+  in
   let full_context =
     if current_task = "" then summary
     else Printf.sprintf "Summary: %s\n\nCurrent Task: %s" summary current_task
   in
   let cell = !(Mcp_server.current_cell) in
   let config_mitosis = Mitosis.default_config in
-  let spawn_fn = make_spawn_fn ~ctx ~agent_name:"claude" ~timeout_seconds:Mitosis.Defaults.spawn_timeout_seconds in
-  let (spawn_result, new_cell, new_pool) =
+  let selected_agent = ref (normalize_agent_name target_agent) in
+  let spawn_attempts = ref [] in
+  let spawn_fn ~prompt =
+    let (result, actual_agent, attempts) =
+      spawn_with_cascade
+        ~ctx
+        ~preferred_agent:target_agent
+        ~total_timeout_seconds:spawn_timeout
+        ~prompt
+    in
+    selected_agent := actual_agent;
+    spawn_attempts := attempts;
+    result
+  in
+  let (spawn_result, new_cell, new_pool, handoff_dna) =
     Mitosis.execute_mitosis ~config:config_mitosis ~pool:!(Mcp_server.stem_pool)
       ~parent:cell ~full_context ~spawn_fn
   in
+  let effective_agent =
+    if !selected_agent = "" then normalize_agent_name target_agent else !selected_agent
+  in
+  let attempts_json = spawn_attempts_to_json !spawn_attempts in
   (* P0 fix: Only update state on successful spawn - no rollback needed on failure *)
   if spawn_result.Spawn.success then begin
     Mcp_server.current_cell := new_cell;
@@ -208,12 +799,12 @@ let handle_mitosis_divide ctx args : result =
     let ep_id = queue_episode
       ~base_path
       ~session_id
-      ~agent_name:"claude"
+      ~agent_name:effective_agent
       ~generation:new_cell.Mitosis.generation
       ~event_type:"mitosis_divide"
       ~summary:(Printf.sprintf "Manual mitosis divide: gen %d → gen %d"
         cell.Mitosis.generation new_cell.Mitosis.generation)
-      ~dna:full_context
+      ~dna:handoff_dna
       () in
 
     let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
@@ -221,6 +812,9 @@ let handle_mitosis_divide ctx args : result =
       ("success", `Bool true);
       ("previous_generation", `Int cell.Mitosis.generation);
       ("new_generation", `Int new_cell.Mitosis.generation);
+      ("target_agent", `String target_agent);
+      ("selected_agent", `String effective_agent);
+      ("spawn_attempts", attempts_json);
       ("successor_output", `String output_preview);
       ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
     ] in
@@ -231,6 +825,9 @@ let handle_mitosis_divide ctx args : result =
     let json = `Assoc [
       ("success", `Bool false);
       ("error", `String "Spawn failed");
+      ("target_agent", `String target_agent);
+      ("selected_agent", `String effective_agent);
+      ("spawn_attempts", attempts_json);
       ("spawn_output", `String spawn_result.Spawn.output);
       ("suggestion", `String "Check agent availability and try again, or use masc_mitosis_handoff for graceful fallback");
     ] in
@@ -325,7 +922,7 @@ let validate_context_ratio ratio =
     
     On spawn failure: Returns "fallback" with compaction suggestion instead of silent failure
 *)
-let handle_mitosis_handoff ctx args : result =
+let run_sync_handoff ctx args : result =
   let raw_ratio = get_float args "context_ratio" 0.0 in
   let context_ratio = validate_context_ratio raw_ratio in
   let full_context = get_string args "full_context" "" in
@@ -347,7 +944,20 @@ let handle_mitosis_handoff ctx args : result =
   } in
   let pool = !(Mcp_server.stem_pool) in
 
-  let spawn_fn = make_spawn_fn ~ctx ~agent_name:target_agent ~timeout_seconds:spawn_timeout in
+  let selected_agent = ref (normalize_agent_name target_agent) in
+  let spawn_attempts = ref [] in
+  let spawn_fn ~prompt =
+    let (result, actual_agent, attempts) =
+      spawn_with_cascade
+        ~ctx
+        ~preferred_agent:target_agent
+        ~total_timeout_seconds:spawn_timeout
+        ~prompt
+    in
+    selected_agent := actual_agent;
+    spawn_attempts := attempts;
+    result
+  in
   
   let result = Mitosis.auto_mitosis_check_2phase
     ~config:config_mitosis
@@ -389,26 +999,45 @@ let handle_mitosis_handoff ctx args : result =
       ] in
       (true, Yojson.Safe.pretty_to_string json)
       
-  | Mitosis.Handoff (spawn_result, new_cell, new_pool) ->
+  | Mitosis.Handoff (spawn_result, new_cell, new_pool, handoff_dna) ->
       (* P0-5: Record handoff in generational metrics *)
-      let dna_size = String.length (Option.value ~default:"" cell.Mitosis.prepared_dna) in
+      let dna_size = String.length handoff_dna in
       ignore (Generational_metrics.record_handoff
         ~from_generation:cell.Mitosis.generation
         ~to_generation:new_cell.Mitosis.generation
         ~dna_size
         ~context_ratio);
+      let effective_agent =
+        if !selected_agent = "" then normalize_agent_name target_agent else !selected_agent
+      in
+      let attempts_json = spawn_attempts_to_json !spawn_attempts in
       
       (* Check spawn success - BALTHASAR feedback: handle failures gracefully *)
       if not spawn_result.Spawn.success then begin
         (* Spawn failed! Suggest fallback to compaction instead of losing context *)
         Printf.eprintf "[MITOSIS/ERROR] Spawn failed for %s, suggesting fallback\n%!" target_agent;
+        let base_path = ctx.config.Room_utils.base_path in
+        let session_id = get_session_id () in
+        let fallback_ep = queue_episode
+          ~base_path
+          ~session_id
+          ~agent_name:effective_agent
+          ~generation:new_cell.Mitosis.generation
+          ~event_type:"mitosis_handoff_fallback"
+          ~summary:(Printf.sprintf "Mitosis handoff fallback: gen %d → gen %d (target: %s, context: %.0f%%)"
+            cell.Mitosis.generation new_cell.Mitosis.generation target_agent (context_ratio *. 100.0))
+          ~dna:handoff_dna
+          () in
         let json = `Assoc [
           ("action", `String "fallback");
           ("success", `Bool false);
           ("context_ratio", `Float context_ratio);
           ("message", `String "Spawn failed! Consider using compaction instead. Context preserved.");
           ("target_agent", `String target_agent);
+          ("selected_agent", `String effective_agent);
+          ("spawn_attempts", attempts_json);
           ("spawn_error", `String spawn_result.Spawn.output);
+          ("episode_queued", match fallback_ep with Some id -> `String id | None -> `Null);
           ("suggestion", `String "Use /compact or masc_mitosis_divide with summary for graceful degradation");
         ] in
         (true, Yojson.Safe.pretty_to_string json)
@@ -420,17 +1049,16 @@ let handle_mitosis_handoff ctx args : result =
         (* Agent Being Protocol: Queue Episode for persistence *)
         let base_path = ctx.config.Room_utils.base_path in
         let session_id = get_session_id () in
-        let dna = Option.value ~default:"" cell.Mitosis.prepared_dna in
         let summary = Printf.sprintf "Mitosis handoff: gen %d → gen %d (target: %s, context: %.0f%%)"
           cell.Mitosis.generation new_cell.Mitosis.generation target_agent (context_ratio *. 100.0) in
         let ep_id = queue_episode
           ~base_path
           ~session_id
-          ~agent_name:target_agent
+          ~agent_name:effective_agent
           ~generation:new_cell.Mitosis.generation
           ~event_type:"mitosis_handoff"
           ~summary
-          ~dna
+          ~dna:handoff_dna
           () in
 
         let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
@@ -440,6 +1068,8 @@ let handle_mitosis_handoff ctx args : result =
           ("context_ratio", `Float context_ratio);
           ("message", `String "Handoff complete! Successor agent spawned.");
           ("target_agent", `String target_agent);
+          ("selected_agent", `String effective_agent);
+          ("spawn_attempts", attempts_json);
           ("previous_generation", `Int cell.Mitosis.generation);
           ("new_generation", `Int new_cell.Mitosis.generation);
           ("successor_output", `String output_preview);
@@ -448,6 +1078,119 @@ let handle_mitosis_handoff ctx args : result =
         ] in
         (true, Yojson.Safe.pretty_to_string json)
       end
+
+let handle_mitosis_handoff ctx args : result =
+  let async_mode = get_bool args "async" true in
+  match async_mode, ctx.sw with
+  | true, Some sw ->
+      let base_path = ctx.config.Room_utils.base_path in
+      let saga_id = generate_saga_id () in
+      let args_sync = set_bool_arg args "async" false in
+      let saga_timeout_sec =
+        max 1.0 (get_float args_sync "verification_saga_timeout_sec" 180.0)
+      in
+      let status_file = write_saga_state
+        ~base_path
+        ~saga_id
+        ~status:"queued"
+        ~payload:(`Assoc [
+          ("mode", `String "async");
+          ("tool", `String "masc_mitosis_handoff");
+        ])
+      in
+      Eio.Fiber.fork ~sw (fun () ->
+        ignore (write_saga_state
+          ~base_path
+          ~saga_id
+          ~status:"running"
+          ~payload:(`Assoc [("message", `String "handoff saga running")]));
+        let started = Time_compat.now () in
+        try
+          let run_once () =
+            let (ok, body) = run_sync_handoff ctx args_sync in
+            let parsed =
+              try Yojson.Safe.from_string body
+              with _ -> `String body
+            in
+            let (verification, gate_pass) =
+              run_handoff_verifier ~ctx ~args:args_sync ~parsed_result:parsed
+            in
+            let final_ok = ok && gate_pass in
+            ignore (write_saga_state
+              ~base_path
+              ~saga_id
+              ~status:(if final_ok then "completed" else "failed")
+              ~payload:(`Assoc [
+                ("ok", `Bool final_ok);
+                ("operation_ok", `Bool ok);
+                ("verification_gate_passed", `Bool gate_pass);
+                ("elapsed_sec", `Float (Time_compat.now () -. started));
+                ("result", parsed);
+                ("verification", match verification with Some v -> v | None -> `Null);
+              ]))
+          in
+          (match ctx.clock with
+           | Some (Clock clock) ->
+               (try
+                  Eio.Time.with_timeout_exn clock saga_timeout_sec run_once
+                with Eio.Time.Timeout ->
+                  ignore (write_saga_state
+                    ~base_path
+                    ~saga_id
+                    ~status:"failed"
+                    ~payload:(`Assoc [
+                      ("ok", `Bool false);
+                      ("operation_ok", `Bool false);
+                      ("verification_gate_passed", `Bool false);
+                      ("elapsed_sec", `Float (Time_compat.now () -. started));
+                      ("error", `String "verification_saga_timeout");
+                      ("timeout_sec", `Float saga_timeout_sec);
+                    ])))
+           | None ->
+               run_once ())
+        with exn ->
+          ignore (write_saga_state
+            ~base_path
+            ~saga_id
+            ~status:"error"
+            ~payload:(`Assoc [
+              ("error", `String (Printexc.to_string exn));
+            ])));
+      let json = `Assoc [
+        ("action", `String "accepted");
+        ("async", `Bool true);
+        ("saga_id", `String saga_id);
+        ("status_file", match status_file with Some p -> `String p | None -> `Null);
+        ("message", `String "Handoff saga accepted. Check saga file for completion.");
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+  | _ ->
+      let args_sync = set_bool_arg args "async" false in
+      let (ok, body) = run_sync_handoff ctx args_sync in
+      let parsed =
+        try Yojson.Safe.from_string body
+        with _ -> `String body
+      in
+      let (verification, gate_pass) = run_handoff_verifier ~ctx ~args:args_sync ~parsed_result:parsed in
+      let final_ok = ok && gate_pass in
+      let enriched =
+        match parsed with
+        | `Assoc fields ->
+            `Assoc (
+              ("verification", match verification with Some v -> v | None -> `Null)
+              :: ("verification_gate_passed", `Bool gate_pass)
+              :: ("operation_ok", `Bool ok)
+              :: fields
+            )
+        | _ ->
+            `Assoc [
+              ("result", parsed);
+              ("verification", match verification with Some v -> v | None -> `Null);
+              ("verification_gate_passed", `Bool gate_pass);
+              ("operation_ok", `Bool ok);
+            ]
+      in
+      (final_ok, Yojson.Safe.pretty_to_string enriched)
 
 (** {1 Metrics Handlers} *)
 

@@ -385,7 +385,14 @@ let create_session ~session_id ~base_dir =
 let persist_message session msg =
   session.full_history <- session.full_history @ [msg];
   let path = Filename.concat session.session_dir "history.jsonl" in
-  let line = Yojson.Safe.to_string (message_to_json msg) ^ "\n" in
+  let now_ts = Time_compat.now () in
+  let payload =
+    match message_to_json msg with
+    | `Assoc fields ->
+      `Assoc (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
+    | j -> j
+  in
+  let line = Yojson.Safe.to_string payload ^ "\n" in
   let fd = Unix.openfile path
     [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->

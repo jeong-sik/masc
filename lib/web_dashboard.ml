@@ -1566,7 +1566,15 @@ let cached_html = lazy ({|<!DOCTYPE html>
     const compareKeeperParam = params.get('compare_keeper');
     const handoffGenParam = params.get('handoff_gen');
     const handoffModelParam = params.get('handoff_model');
+    const keeperFieldLangStorageKey = 'keeperFieldLang';
     const keeperLangParam = (params.get('keeper_lang') || '').trim().toLowerCase();
+    const storedKeeperLangParam = (() => {
+      try {
+        return (localStorage.getItem(keeperFieldLangStorageKey) || '').trim().toLowerCase();
+      } catch (_e) {
+        return '';
+      }
+    })();
     const browserLang =
       (typeof navigator !== 'undefined' && typeof navigator.language === 'string')
         ? navigator.language.toLowerCase()
@@ -1579,11 +1587,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
       handoffGenParam && handoffGenParam.trim() !== '' ? handoffGenParam.trim() : 'all';
     let keeperHandoffModelFilter =
       handoffModelParam && handoffModelParam.trim() !== '' ? handoffModelParam.trim() : 'all';
-    let keeperFieldLang = ['ko', 'en'].includes(keeperLangParam)
-      ? keeperLangParam
-      : defaultKeeperFieldLang;
+    let keeperFieldLang =
+      ['ko', 'en'].includes(keeperLangParam)
+        ? keeperLangParam
+        : (
+          ['ko', 'en'].includes(storedKeeperLangParam)
+            ? storedKeeperLangParam
+            : defaultKeeperFieldLang
+        );
     let _dashboardLatest = null;
     const keeperAlertMemory = new Map();
+    try { localStorage.setItem(keeperFieldLangStorageKey, keeperFieldLang); } catch (_e) {}
 
     function numOr(value, fallback) {
       const n = Number(value);
@@ -2143,7 +2157,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function setKeeperFieldLang(lang) {
       const next = String(lang || '').trim().toLowerCase();
       if (!['ko', 'en'].includes(next)) return;
-      if (keeperFieldLang === next) return;
+      try { localStorage.setItem(keeperFieldLangStorageKey, next); } catch (_e) {}
+      if (keeperFieldLang === next) {
+        setKeeperQueryState();
+        return;
+      }
       keeperFieldLang = next;
       setKeeperQueryState();
       renderKeeperDetail();

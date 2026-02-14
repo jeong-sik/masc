@@ -268,6 +268,14 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
           ("type", `String "integer");
           ("description", `String "Optional: replace drift min turn gap (persisted)");
         ]);
+        ("include_timing", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include stage timing info in response (default: false).");
+        ]);
+        ("timing_log", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Force server-side timing log for this call (default: env-controlled).");
+        ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);
     ];
@@ -353,6 +361,15 @@ let bool_default_true_of_env name =
   | Some v ->
       let v = String.trim v |> String.lowercase_ascii in
       not (v = "0" || v = "false" || v = "no" || v = "n")
+
+let bool_of_env_default name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw ->
+      let v = String.lowercase_ascii (String.trim raw) in
+      if v = "1" || v = "true" || v = "yes" || v = "y" then true
+      else if v = "0" || v = "false" || v = "no" || v = "n" then false
+      else default
 
 let validate_name name =
   (* Same rule as keeper script: conservative handle chars only. *)
@@ -508,6 +525,23 @@ let keeper_followup_max_tokens (turn_max_tokens : int) : int =
 
 let keeper_correction_max_tokens (turn_max_tokens : int) : int =
   clamp_int (turn_max_tokens / 2) ~min_v:280 ~max_v:900
+
+let keeper_msg_postpass_budget_ms () : int =
+  int_of_env_default
+    "MASC_KEEPER_MSG_POSTPASS_BUDGET_MS"
+    ~default:12000
+    ~min_v:0
+    ~max_v:120000
+
+let keeper_msg_slow_ms () : int =
+  int_of_env_default
+    "MASC_KEEPER_MSG_SLOW_MS"
+    ~default:4000
+    ~min_v:0
+    ~max_v:300000
+
+let keeper_msg_timing_log_default () : bool =
+  bool_of_env_default "MASC_KEEPER_MSG_TIMING_LOG" ~default:false
 
 let keeper_compact_ratio () : float =
   float_of_env_default
@@ -4780,6 +4814,10 @@ let handle_keeper_msg ctx args : tool_result =
   else if message = "" then
     (false, "❌ message is required")
   else
+    let include_timing = get_bool args "include_timing" false in
+    let timing_log = get_bool args "timing_log" (keeper_msg_timing_log_default ()) in
+    let msg_slow_ms = keeper_msg_slow_ms () in
+    let (mark_stage, msg_total_ms, snapshot_stage_timings) = make_stage_timer () in
     let inline_goal = get_string_opt args "goal" in
     let inline_instructions = get_string_opt args "instructions" in
     let inline_will = parse_self_model_opt args "will" in
@@ -4903,6 +4941,7 @@ let handle_keeper_msg ctx args : tool_result =
     match ensure_keeper () with
     | Error e -> (false, "❌ " ^ e)
     | Ok meta0 ->
+      mark_stage "ensure_keeper";
       (* Update keeper settings inline if requested. *)
       let meta =
         let goal =
@@ -4971,6 +5010,7 @@ let handle_keeper_msg ctx args : tool_result =
           ignore (write_meta ctx.config updated);
           updated
       in
+      mark_stage "meta_update";
       start_keepalive ctx meta;
       (match model_specs_of_strings meta.models with
        | Error e -> (false, "❌ " ^ e)
@@ -4978,6 +5018,7 @@ let handle_keeper_msg ctx args : tool_result =
          (match ensure_api_keys specs with
           | Error e -> (false, "❌ " ^ e)
           | Ok () ->
+            mark_stage "model_resolve";
             let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
             let base_dir = session_base_dir ctx.config in
             mkdir_p base_dir;
@@ -5027,6 +5068,7 @@ let handle_keeper_msg ctx args : tool_result =
 	                    ~fallback_route:fallback_skill_route
 	                    ~soul_profile:meta.soul_profile
 	            in
+	            mark_stage "context_load";
 	            let user_msg = Llm_client.user_msg message in
 	            let ctx_work = Context_manager.append ctx_work user_msg in
 	            Context_manager.persist_message session user_msg;
@@ -5295,13 +5337,14 @@ let handle_keeper_msg ctx args : tool_result =
 	                     | Some parsed -> parsed
 	                     | None -> fallback_skill_route)
 	              in
-	              let safe_reply =
-	                ensure_skill_route_header
-	                  ~route:effective_skill_route
-	                  safe_reply_raw
-	              in
+		              let safe_reply =
+		                ensure_skill_route_header
+		                  ~route:effective_skill_route
+		                  safe_reply_raw
+		              in
+              mark_stage "llm_pipeline";
 
-              let assistant_msg = Llm_client.assistant_msg safe_reply in
+	              let assistant_msg = Llm_client.assistant_msg safe_reply in
               let ctx_work = Context_manager.append ctx_work assistant_msg in
               Context_manager.persist_message session assistant_msg;
               let now_ts = Time_compat.now () in
@@ -5368,12 +5411,42 @@ let handle_keeper_msg ctx args : tool_result =
                 (now_ts -. meta_turn.last_handoff_ts >= float_of_int meta_turn.handoff_cooldown_sec)
               in
 
-              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
+	              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
+              let build_timing_payload ~model_used () =
+                let stage_timings = snapshot_stage_timings () in
+                let stage_total_ms =
+                  List.fold_left (fun acc (_label, ms) -> acc + ms) 0 stage_timings
+                in
+                let total_elapsed_ms = msg_total_ms () in
+                if timing_log || total_elapsed_ms >= msg_slow_ms then
+                  Printf.eprintf
+                    "[keeper:%s] masc_keeper_msg timing total=%dms slow_ms=%d slow=%b model=%s stages=[%s]\n%!"
+                    meta_turn.name
+                    total_elapsed_ms
+                    msg_slow_ms
+                    (total_elapsed_ms >= msg_slow_ms)
+                    model_used
+                    (stage_timings_to_text stage_timings);
+                let timing_json =
+                  `Assoc [
+                    ("total_ms", `Int total_elapsed_ms);
+                    ("stage_total_ms", `Int stage_total_ms);
+                    ("slow_ms", `Int msg_slow_ms);
+                    ("slow", `Bool (total_elapsed_ms >= msg_slow_ms));
+                    ("stages", stage_timings_to_json stage_timings);
+                  ]
+                in
+                (timing_json, stage_timings, total_elapsed_ms)
+              in
 
-              if not do_handoff then begin
-                (match write_meta ctx.config meta_turn with
-                 | Ok () -> ()
-                 | Error e -> Printf.eprintf "[keeper:%s] failed to write meta: %s\n%!" meta_turn.name e);
+	              if not do_handoff then begin
+                mark_stage "finalize";
+                let (timing_json, timing_stages, timing_total_ms) =
+                  build_timing_payload ~model_used:final_model_used ()
+                in
+	                (match write_meta ctx.config meta_turn with
+	                 | Ok () -> ()
+	                 | Error e -> Printf.eprintf "[keeper:%s] failed to write meta: %s\n%!" meta_turn.name e);
 
                 (try
                    let metrics_json = `Assoc [
@@ -5390,11 +5463,15 @@ let handle_keeper_msg ctx args : tool_result =
                        ("output_tokens", `Int final_usage.output_tokens);
                        ("total_tokens", `Int final_usage.total_tokens);
                      ]);
-                     ("latency_ms", `Int final_latency_ms);
-                     ("cost_usd", `Float total_cost_usd_turn);
-                     ("context_ratio", `Float ctx_ratio);
-                     ("context_tokens", `Int ctx_work.token_count);
-                     ("context_max", `Int ctx_work.max_tokens);
+	                     ("latency_ms", `Int final_latency_ms);
+	                     ("cost_usd", `Float total_cost_usd_turn);
+                     ("msg_timing_total_ms", `Int timing_total_ms);
+                     ("msg_timing_stages", stage_timings_to_json timing_stages);
+                     ("msg_timing_slow_ms", `Int msg_slow_ms);
+                     ("msg_timing_slow", `Bool (timing_total_ms >= msg_slow_ms));
+	                     ("context_ratio", `Float ctx_ratio);
+	                     ("context_tokens", `Int ctx_work.token_count);
+	                     ("context_max", `Int ctx_work.max_tokens);
                      ("message_count", `Int (List.length ctx_work.messages));
                      ("compacted", `Bool compacted);
                      ("compaction_before_tokens", `Int before_compact_tokens);
@@ -5455,10 +5532,10 @@ let handle_keeper_msg ctx args : tool_result =
                    append_jsonl_line metrics_path metrics_json
                  with _ -> ());
 
-                let json = `Assoc [
-                  ("name", `String meta_turn.name);
-                  ("trace_id", `String meta_turn.trace_id);
-                  ("generation", `Int meta_turn.generation);
+	                let json_fields = [
+	                  ("name", `String meta_turn.name);
+	                  ("trace_id", `String meta_turn.trace_id);
+	                  ("generation", `Int meta_turn.generation);
                   ("soul_profile", `String meta_turn.soul_profile);
                   ("will", if String.trim meta_turn.will = "" then `Null else `String meta_turn.will);
                   ("needs", if String.trim meta_turn.needs = "" then `Null else `String meta_turn.needs);
@@ -5521,12 +5598,17 @@ let handle_keeper_msg ctx args : tool_result =
                     | None -> `Null);
                   ("memory_compaction_target_notes", `Int memory_compaction.target_notes);
                   ("memory_compaction_before_notes", `Int memory_compaction.before_notes);
-                  ("memory_compaction_after_notes", `Int memory_compaction.after_notes);
-                  ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
-                  ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
-                  ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
-                ] in
-                (true, Yojson.Safe.pretty_to_string json)
+	                  ("memory_compaction_after_notes", `Int memory_compaction.after_notes);
+	                  ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
+	                  ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
+	                  ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
+	                ] in
+                let json_fields =
+                  if include_timing then json_fields @ [("timing", timing_json)]
+                  else json_fields
+                in
+                let json = `Assoc json_fields in
+	                (true, Yojson.Safe.pretty_to_string json)
               end else begin
                 (* Auto-handoff: hydrate successor context + rotate trace_id. *)
                 let next_model =
@@ -5565,17 +5647,21 @@ let handle_keeper_msg ctx args : tool_result =
 
                 let prev_trace_id = meta_turn.trace_id in
                 let trace_history = take 20 (prev_trace_id :: meta_turn.trace_history) in
-                let meta' = { meta_turn with
-                  trace_id = successor_trace;
-                  trace_history;
-                  generation = next_generation;
-                  last_handoff_ts = now_ts;
-                  updated_at = now_iso ();
-                } in
-                ignore (write_meta ctx.config meta');
+	                let meta' = { meta_turn with
+	                  trace_id = successor_trace;
+	                  trace_history;
+	                  generation = next_generation;
+	                  last_handoff_ts = now_ts;
+	                  updated_at = now_iso ();
+	                } in
+	                ignore (write_meta ctx.config meta');
+                mark_stage "finalize";
+                let (timing_json, timing_stages, timing_total_ms) =
+                  build_timing_payload ~model_used:final_model_used ()
+                in
 
-                (try
-                   let metrics_json = `Assoc [
+	                (try
+	                   let metrics_json = `Assoc [
                      ("ts", `String (now_iso ()));
                      ("ts_unix", `Float now_ts);
                      ("channel", `String "turn");
@@ -5589,11 +5675,15 @@ let handle_keeper_msg ctx args : tool_result =
                        ("output_tokens", `Int final_usage.output_tokens);
                        ("total_tokens", `Int final_usage.total_tokens);
                      ]);
-                     ("latency_ms", `Int final_latency_ms);
-                     ("cost_usd", `Float total_cost_usd_turn);
-                     ("context_ratio", `Float ctx_ratio);
-                     ("context_tokens", `Int ctx_work.token_count);
-                     ("context_max", `Int ctx_work.max_tokens);
+	                     ("latency_ms", `Int final_latency_ms);
+	                     ("cost_usd", `Float total_cost_usd_turn);
+                     ("msg_timing_total_ms", `Int timing_total_ms);
+                     ("msg_timing_stages", stage_timings_to_json timing_stages);
+                     ("msg_timing_slow_ms", `Int msg_slow_ms);
+                     ("msg_timing_slow", `Bool (timing_total_ms >= msg_slow_ms));
+	                     ("context_ratio", `Float ctx_ratio);
+	                     ("context_tokens", `Int ctx_work.token_count);
+	                     ("context_max", `Int ctx_work.max_tokens);
                      ("message_count", `Int (List.length ctx_work.messages));
                      ("compacted", `Bool compacted);
                      ("compaction_before_tokens", `Int before_compact_tokens);
@@ -5660,10 +5750,10 @@ let handle_keeper_msg ctx args : tool_result =
                    append_jsonl_line metrics_path metrics_json
                  with _ -> ());
 
-                let json = `Assoc [
-                  ("name", `String meta'.name);
-                  ("soul_profile", `String meta'.soul_profile);
-                  ("will", if String.trim meta'.will = "" then `Null else `String meta'.will);
+	                let json_fields = [
+	                  ("name", `String meta'.name);
+	                  ("soul_profile", `String meta'.soul_profile);
+	                  ("will", if String.trim meta'.will = "" then `Null else `String meta'.will);
                   ("needs", if String.trim meta'.needs = "" then `Null else `String meta'.needs);
                   ("desires", if String.trim meta'.desires = "" then `Null else `String meta'.desires);
                   ("reply", `String safe_reply);
@@ -5723,15 +5813,20 @@ let handle_keeper_msg ctx args : tool_result =
                   ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
                   ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
                   ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
-                  ("handoff", `Assoc [
-                    ("performed", `Bool true);
-                    ("prev_trace_id", `String prev_trace_id);
-                    ("new_trace_id", `String meta'.trace_id);
-                    ("to_model", `String next_model.model_id);
-                    ("new_generation", `Int meta'.generation);
-                  ]);
-                ] in
-                (true, Yojson.Safe.pretty_to_string json)
+	                  ("handoff", `Assoc [
+	                    ("performed", `Bool true);
+	                    ("prev_trace_id", `String prev_trace_id);
+	                    ("new_trace_id", `String meta'.trace_id);
+	                    ("to_model", `String next_model.model_id);
+	                    ("new_generation", `Int meta'.generation);
+	                  ]);
+	                ] in
+                let json_fields =
+                  if include_timing then json_fields @ [("timing", timing_json)]
+                  else json_fields
+                in
+                let json = `Assoc json_fields in
+	                (true, Yojson.Safe.pretty_to_string json)
               end))
 
 let handle_keeper_down ctx args : tool_result =

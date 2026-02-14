@@ -3406,9 +3406,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
         'k2k_mentions',
       ]);
       const kpiLabelHtml = (label, key) => {
+        const entry = glossaryEntry(key);
+        const labelText =
+          (entry && typeof entry.label === 'string' && entry.label.trim() !== '')
+            ? entry.label.trim()
+            : label;
         const tip = glossaryTip(key);
-        if (!tip) return `<div class="keeper-kpi-label">${escHtml(label)}</div>`;
-        return `<div class="keeper-kpi-label">${escHtml(label)} <span class="keeper-hint" title="${escHtml(tip)}">?</span></div>`;
+        if (!tip) return `<div class="keeper-kpi-label">${escHtml(labelText)}</div>`;
+        return `<div class="keeper-kpi-label">${escHtml(labelText)} <span class="keeper-hint" title="${escHtml(tip)}">?</span></div>`;
       };
 
       let modelFallbackCount = isNum(windowStats.model_fallback_count)

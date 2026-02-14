@@ -377,6 +377,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
       border: 1px solid rgba(148,163,184,0.18);
       border-radius: 10px;
       padding: 10px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .keeper-kpi:hover {
+      border-color: rgba(34,211,238,0.45);
+      background: rgba(34,211,238,0.08);
+    }
+    .keeper-kpi.selected {
+      border-color: rgba(74,222,128,0.55);
+      background: rgba(74,222,128,0.12);
     }
     .keeper-kpi-label {
       color: #94a3b8;
@@ -456,6 +466,61 @@ let cached_html = lazy ({|<!DOCTYPE html>
       max-height: 460px;
       overflow-y: auto;
       padding-right: 2px;
+    }
+    .keeper-field-search {
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .keeper-field-search input {
+      flex: 1 1 220px;
+      min-width: 180px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(148,163,184,0.28);
+      border-radius: 8px;
+      padding: 6px 10px;
+      color: #e2e8f0;
+      font-size: 12px;
+    }
+    .keeper-field-search input:focus {
+      outline: none;
+      border-color: rgba(34,211,238,0.55);
+    }
+    .keeper-field-search-count {
+      color: #94a3b8;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .keeper-kpi-detail-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 12px;
+    }
+    .keeper-kpi-detail-item {
+      background: rgba(2,6,23,0.35);
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .keeper-kpi-detail-label {
+      color: #94a3b8;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.35px;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .keeper-kpi-detail-value {
+      color: #e2e8f0;
+      font-size: 12px;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    @media (max-width: 760px) {
+      .keeper-kpi-detail-grid { grid-template-columns: 1fr; }
     }
     .keeper-field-row {
       background: rgba(2,6,23,0.38);
@@ -1566,6 +1631,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
     const compareKeeperParam = params.get('compare_keeper');
     const handoffGenParam = params.get('handoff_gen');
     const handoffModelParam = params.get('handoff_model');
+    const keeperFieldQueryParam = params.get('keeper_field_query');
+    const keeperKpiParam = params.get('keeper_kpi');
     const keeperFieldLangStorageKey = 'keeperFieldLang';
     const keeperLangParam = (params.get('keeper_lang') || '').trim().toLowerCase();
     const storedKeeperLangParam = (() => {
@@ -1597,6 +1664,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
         );
     let _dashboardLatest = null;
     const keeperAlertMemory = new Map();
+    let keeperFieldQuery = keeperFieldQueryParam ? String(keeperFieldQueryParam) : '';
+    let keeperSelectedKpiKey = normalizeKeeperKpiKey(keeperKpiParam) || 'context_ratio';
     try { localStorage.setItem(keeperFieldLangStorageKey, keeperFieldLang); } catch (_e) {}
 
     function numOr(value, fallback) {
@@ -1901,7 +1970,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     function generationEquipmentHtml(rows) {
       const xs = Array.isArray(rows) ? rows : [];
-      if (xs.length === 0) return '<div class="empty">No generation data</div>';
+      if (xs.length === 0) return `<div class="empty">${escHtml(keeperText('no_generation_data'))}</div>`;
       return `<div class="keeper-equipment-list">` + xs.map((row) => {
         if (!row) return '';
         const gen = isNum(row.generation) ? row.generation : '-';
@@ -1934,7 +2003,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     function keeperMemoryNotesHtml(notes) {
       const xs = Array.isArray(notes) ? notes : [];
-      if (xs.length === 0) return '<div class="empty">No long-term memory notes yet</div>';
+      if (xs.length === 0) return `<div class="empty">${escHtml(keeperText('no_long_term_memory_notes'))}</div>`;
       return `<div class="keeper-memory-list">` + xs.map((row) => {
         if (!row) return '';
         const kind = row.kind || '-';
@@ -1952,12 +2021,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     function keeperConversationHtml(rows) {
       const xs = Array.isArray(rows) ? rows : [];
-      if (xs.length === 0) return '<div class="empty">No conversation logs yet</div>';
+      if (xs.length === 0) return `<div class="empty">${escHtml(keeperText('no_conversation_logs'))}</div>`;
       return `<div class="keeper-conversation-list">` + xs.slice(-20).map((row) => {
         if (!row) return '';
         const role = String(row.role || '').trim().toLowerCase();
         const roleClass = role === 'user' ? 'user' : (role === 'assistant' ? 'assistant' : '');
-        const roleText = role || 'unknown';
+        const roleText = role || keeperText('unknown');
         const text = row.preview || row.content || '';
         const tsUnix = isNum(row.ts_unix)
           ? Number(row.ts_unix)
@@ -1985,7 +2054,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     function keeperK2kHtml(rows) {
       const xs = Array.isArray(rows) ? rows : [];
-      if (xs.length === 0) return '<div class="empty">No K2K relay logs in recent window</div>';
+      if (xs.length === 0) return `<div class="empty">${escHtml(keeperText('no_k2k_logs_recent_window'))}</div>`;
       return `<div class="keeper-k2k-list">` + xs.slice(-20).map((row) => {
         if (!row) return '';
         const keeper = row.keeper || '-';
@@ -1998,7 +2067,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const timeText = (tsUnix === null || tsUnix <= 0) ? '-' : `${fmtTs(tsUnix)} · ${timeAgo(tsUnix)}`;
         return `
           <div class="keeper-k2k-item">
-            <div class="keeper-k2k-route">${escHtml(keeper)} mentions ${escHtml(mentioned)} (${escHtml(role)}) · ${escHtml(timeText)}</div>
+            <div class="keeper-k2k-route">${escHtml(keeper)} ${escHtml(keeperText('mentions'))} ${escHtml(mentioned)} (${escHtml(role)}) · ${escHtml(timeText)}</div>
             <div class="keeper-k2k-text">${escHtml(text)}</div>
           </div>
         `;
@@ -2064,6 +2133,64 @@ let cached_html = lazy ({|<!DOCTYPE html>
       en: {
         metric_glossary: 'Metric Glossary',
         field_dictionary_detailed: 'Field Dictionary (Detailed)',
+        field_search_placeholder: 'Search by field key, label, formula...',
+        filtered_count: '{shown} / {total} shown',
+        clear: 'Clear',
+        no_match: 'No fields match the current search',
+        kpi_detail: 'KPI Detail',
+        selected_field: 'Selected Field',
+        current_value: 'Current Value',
+        numerator: 'Numerator',
+        denominator: 'Denominator',
+        trend_24h: '24h Trend',
+        no_24h_data: 'No 24h data',
+        unknown: 'unknown',
+        mentions: 'mentions',
+        no_generation_data: 'No generation data',
+        no_long_term_memory_notes: 'No long-term memory notes yet',
+        no_conversation_logs: 'No conversation logs yet',
+        no_k2k_logs_recent_window: 'No K2K relay logs in recent window',
+        no_series: 'no series',
+        not_enough_points_for_compare: 'not enough points for compare',
+        no_handoff_compaction_events: 'No handoff/compaction events yet',
+        no_handoff_events_for_selected_filters: 'No handoff events for selected filters',
+        event_handoff_to_next_generation: 'handoff to next generation (gen {gen})',
+        event_context_compaction_at: 'context compaction at {ratio}%',
+        event_memory_compaction_dropped: 'memory compaction dropped {dropped}/{before} notes',
+        no_keeper_selected: 'No keeper selected',
+        keeper_data_not_available: 'Keeper data is not available yet. Wait for next refresh.',
+        select_keeper: 'Select keeper',
+        compare_context_ratio: 'Compare (Context Ratio)',
+        compare_select_other: 'Select another keeper from the compare dropdown.',
+        handoff_timeline: 'Handoff Timeline',
+        chart_context_ratio_threshold: 'Context Ratio (with handoff threshold)',
+        chart_context_tokens: 'Context Tokens',
+        chart_turn_io_tokens: 'Turn I/O Tokens (input vs output)',
+        chart_memory_recall_score: 'Memory Recall Score',
+        chart_drift_applied: 'Drift Applied (0/1)',
+        chart_intervention_vs_drift: 'Intervention vs Drift (0/1)',
+        chart_compaction_timeline: 'Compaction Timeline (Events + Saved Tokens)',
+        chart_24h_trend: '24h Trend (Hourly)',
+        chart_lifecycle: 'Lifecycle',
+        chart_metric_formula: 'Metric Formula',
+        chart_work_equipment: 'Work & Equipment',
+        chart_memory_bank: 'Long-term Memory Bank',
+        chart_recent_conversation: 'Recent Conversation (User/Assistant)',
+        chart_k2k_relay_trail: 'K2K Relay Trail',
+        chart_recent_lifecycle_events: 'Recent Lifecycle Events',
+        trend_latest_delta: 'latest {latest} · Δ {delta}',
+        all_generations: 'All generations',
+        all_models: 'All models',
+        from_gen: 'From Gen',
+        model: 'Model',
+        events: 'events',
+        filtered: 'filtered',
+        latest: 'latest',
+        last_model: 'last model',
+        threshold: 'threshold',
+        window: 'window',
+        delta: 'delta',
+        risk: 'risk',
         definition: 'Definition',
         formula: 'Formula',
         source: 'Source',
@@ -2072,6 +2199,64 @@ let cached_html = lazy ({|<!DOCTYPE html>
       ko: {
         metric_glossary: '메트릭 요약',
         field_dictionary_detailed: '필드 사전 (상세)',
+        field_search_placeholder: '필드 키/라벨/공식으로 검색...',
+        filtered_count: '{shown} / {total} 표시',
+        clear: '초기화',
+        no_match: '현재 검색 조건과 일치하는 필드가 없습니다',
+        kpi_detail: 'KPI 상세',
+        selected_field: '선택 필드',
+        current_value: '현재 값',
+        numerator: '분자',
+        denominator: '분모',
+        trend_24h: '최근 24시간 추이',
+        no_24h_data: '24시간 데이터 없음',
+        unknown: '알수없음',
+        mentions: '언급',
+        no_generation_data: '세대 데이터가 없습니다',
+        no_long_term_memory_notes: '장기 메모리 노트가 아직 없습니다',
+        no_conversation_logs: '대화 로그가 아직 없습니다',
+        no_k2k_logs_recent_window: '최근 윈도우에 K2K 릴레이 로그가 없습니다',
+        no_series: '시계열 데이터 없음',
+        not_enough_points_for_compare: '비교용 포인트가 부족합니다',
+        no_handoff_compaction_events: '핸드오프/컴팩션 이벤트가 아직 없습니다',
+        no_handoff_events_for_selected_filters: '선택한 필터에 해당하는 핸드오프 이벤트가 없습니다',
+        event_handoff_to_next_generation: '다음 세대로 핸드오프 (gen {gen})',
+        event_context_compaction_at: '컨텍스트 컴팩션 @ {ratio}%',
+        event_memory_compaction_dropped: '메모리 컴팩션으로 노트 {dropped}/{before} 제거',
+        no_keeper_selected: '선택된 키퍼가 없습니다',
+        keeper_data_not_available: '키퍼 데이터가 아직 없습니다. 다음 갱신을 기다려주세요.',
+        select_keeper: '키퍼 선택',
+        compare_context_ratio: '비교 (컨텍스트 비율)',
+        compare_select_other: '비교 드롭다운에서 다른 키퍼를 선택하세요.',
+        handoff_timeline: '핸드오프 타임라인',
+        chart_context_ratio_threshold: '컨텍스트 비율 (핸드오프 임계치 포함)',
+        chart_context_tokens: '컨텍스트 토큰',
+        chart_turn_io_tokens: '턴 I/O 토큰 (입력 vs 출력)',
+        chart_memory_recall_score: '메모리 회상 점수',
+        chart_drift_applied: '드리프트 적용 (0/1)',
+        chart_intervention_vs_drift: '개입 vs 드리프트 (0/1)',
+        chart_compaction_timeline: '컴팩션 타임라인 (이벤트 + 절감 토큰)',
+        chart_24h_trend: '24시간 추이 (시간별)',
+        chart_lifecycle: '라이프사이클',
+        chart_metric_formula: '메트릭 계산식',
+        chart_work_equipment: '작업 & 장비',
+        chart_memory_bank: '장기 메모리 뱅크',
+        chart_recent_conversation: '최근 대화 (User/Assistant)',
+        chart_k2k_relay_trail: 'K2K 릴레이 트레일',
+        chart_recent_lifecycle_events: '최근 라이프사이클 이벤트',
+        trend_latest_delta: '최근 {latest} · Δ {delta}',
+        all_generations: '모든 세대',
+        all_models: '모든 모델',
+        from_gen: '출발 세대',
+        model: '모델',
+        events: '이벤트',
+        filtered: '필터 적용',
+        latest: '최신',
+        last_model: '마지막 모델',
+        threshold: '임계치',
+        window: '윈도우',
+        delta: '차이',
+        risk: '위험도',
         definition: '정의',
         formula: '계산식',
         source: '데이터 소스',
@@ -2089,6 +2274,126 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const vf = fallback ? fallback[key] : null;
       if (typeof vf === 'string' && vf.trim() !== '') return vf;
       return key;
+    }
+    function keeperFormat(key, vars = {}) {
+      let out = keeperText(key);
+      Object.entries(vars).forEach(([k, v]) => {
+        out = out.replaceAll(`{${k}}`, String(v == null ? '' : v));
+      });
+      return out;
+    }
+    function normalizeKeeperKpiKey(value) {
+      const v = String(value == null ? '' : value).trim();
+      if (!v) return '';
+      return /^[a-z0-9_]+$/.test(v) ? v : '';
+    }
+    const keeperMetaLabelKo = {
+      events: '이벤트',
+      filtered: '필터 적용',
+      latest: '최신',
+      'last model': '마지막 모델',
+      threshold: '임계치',
+      window: '윈도우',
+      delta: '차이',
+      risk: '위험도',
+      current: '현재',
+      max: '최대',
+      source: '소스',
+      'input total': '입력 합계',
+      'output total': '출력 합계',
+      'last turn': '마지막 턴',
+      'model fallback': '모델 폴백',
+      'memory pass': '메모리 통과',
+      weather: '날씨 회상',
+      work: '작업',
+      'tool calls': '도구 호출',
+      primary: '주 모델',
+      avg: '평균',
+      pass: '통과',
+      fail: '실패',
+      correct: '정정',
+      'window drift': '윈도우 드리프트',
+      rate: '비율',
+      enabled: '활성화',
+      gap: '간격',
+      'top reason': '주요 이유',
+      reasons: '이유 분포',
+      'proactive points': '사전개입 포인트',
+      'intervention share': '개입 비중',
+      'per-turn': '턴당',
+      'drift points': '드리프트 포인트',
+      saved: '절감',
+      'avg/event': '이벤트당 평균',
+      'top trigger': '주요 트리거',
+      spread: '분포',
+      profile: '프로필',
+      gate: '게이트',
+      buckets: '버킷',
+      points: '포인트',
+      coverage: '커버리지',
+      range: '범위',
+      state: '상태',
+      'warn/bad': '경고/위험',
+      trace: '트레이스',
+      keepalive: '하트비트',
+      born: '생성',
+      updated: '갱신',
+      age: '가동 시간',
+      'last handoff': '마지막 핸드오프',
+      'last compaction': '마지막 컴팩션',
+      proactive: '사전개입',
+      'last proactive': '최근 사전개입',
+      'proactive reason': '개입 이유',
+      'proactive preview': '개입 프리뷰',
+      drift: '드리프트',
+      'drift total': '드리프트 누적',
+      'last drift reason': '최근 드리프트 이유',
+      'skill route': '스킬 라우트',
+      'skill reason': '스킬 이유',
+      'proactive template fallback': '사전개입 템플릿 폴백',
+      'proactive similarity': '사전개입 유사도',
+      'last handoff model': '최근 핸드오프 모델',
+      'last compaction saved': '최근 컴팩션 절감',
+      'compaction efficiency': '컴팩션 효율',
+      'compaction gate': '컴팩션 게이트',
+      'top compaction trigger': '주요 컴팩션 트리거',
+      'trigger spread': '트리거 분포',
+      'risk confidence': '위험도 신뢰도',
+      'window interactions': '윈도우 상호작용',
+      'template fallback': '템플릿 폴백',
+      'similarity avg/max': '유사도 평균/최대',
+      'similarity pairs': '유사도 페어',
+      'similarity method': '유사도 방식',
+      'metrics window': '메트릭 윈도우',
+      'window source cap': '윈도우 수집 제한',
+      'display zoom': '표시 줌',
+      'window points': '윈도우 포인트',
+      'window handoff/compaction': '윈도우 핸드오프/컴팩션',
+      'window compaction saved': '윈도우 컴팩션 절감',
+      'top work': '주요 작업',
+      'top model': '주요 모델',
+      'top tool': '주요 도구',
+      'memory window': '메모리 윈도우',
+      'memory bank': '메모리 뱅크',
+      notes: '노트',
+      'top kind': '주요 종류',
+      'window kinds': '윈도우 종류',
+      'auto compact': '자동 컴팩션',
+      trimmed: '정리됨',
+      rows: '행 수',
+      raw: '원본',
+      fragments: '조각',
+      'k2k edges': 'K2K 엣지',
+      mentions: '멘션',
+      edges: '엣지',
+    };
+    function localizeKeeperMetaLabels(rootEl) {
+      if (!rootEl || keeperFieldLang !== 'ko') return;
+      Array.from(rootEl.querySelectorAll('.keeper-chart-meta b')).forEach((el) => {
+        const raw = String(el.textContent || '').trim().toLowerCase();
+        const translated = keeperMetaLabelKo[raw];
+        if (translated) el.textContent = translated;
+      });
     }
     function setKeeperQueryState() {
       const url = new URL(window.location.href);
@@ -2115,6 +2420,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
         url.searchParams.set('keeper_lang', keeperFieldLang);
       } else {
         url.searchParams.delete('keeper_lang');
+      }
+      const fieldQuery = String(keeperFieldQuery || '').trim();
+      if (fieldQuery !== '') url.searchParams.set('keeper_field_query', fieldQuery);
+      else url.searchParams.delete('keeper_field_query');
+      if (keeperSelectedKpiKey && keeperSelectedKpiKey !== 'context_ratio') {
+        url.searchParams.set('keeper_kpi', keeperSelectedKpiKey);
+      } else {
+        url.searchParams.delete('keeper_kpi');
       }
       history.replaceState(history.state || {}, '', url.pathname + url.search + url.hash);
     }
@@ -2166,6 +2479,25 @@ let cached_html = lazy ({|<!DOCTYPE html>
       setKeeperQueryState();
       renderKeeperDetail();
     }
+    function setKeeperFieldQuery(value) {
+      keeperFieldQuery = String(value == null ? '' : value);
+      setKeeperQueryState();
+      renderKeeperDetail();
+    }
+    function clearKeeperFieldQuery() {
+      if (!keeperFieldQuery) return;
+      keeperFieldQuery = '';
+      setKeeperQueryState();
+      renderKeeperDetail();
+    }
+    function setKeeperSelectedKpi(key) {
+      const next = normalizeKeeperKpiKey(key);
+      if (!next) return;
+      if (keeperSelectedKpiKey === next) return;
+      keeperSelectedKpiKey = next;
+      setKeeperQueryState();
+      renderKeeperDetail();
+    }
     function applyKeeperZoomButtons() {
       [20, 50, 120].forEach((n) => {
         const el = document.getElementById('keeper-zoom-' + n);
@@ -2194,7 +2526,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (typeof v === 'boolean') return v ? 1 : 0;
         return 0;
       });
-      if (values.length < 2) return '<div class="spark-empty">no series</div>';
+      if (values.length < 2) return `<div class="spark-empty">${escHtml(keeperText('no_series'))}</div>`;
       const w = 860;
       const h = 150;
       const threshold = opts && isNum(opts.threshold) ? Number(opts.threshold) : null;
@@ -2240,7 +2572,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       };
       const aVals = pts.map((p) => readVal(p, keyA));
       const bVals = pts.map((p) => readVal(p, keyB));
-      if (aVals.length < 2) return '<div class="spark-empty">no series</div>';
+      if (aVals.length < 2) return `<div class="spark-empty">${escHtml(keeperText('no_series'))}</div>`;
       const w = 860;
       const h = 150;
       const maxV = Math.max(
@@ -2270,7 +2602,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function keeperCompareRatioSvg(primarySeries, compareSeries, opts) {
       const aPts = Array.isArray(primarySeries) ? primarySeries : [];
       const bPts = Array.isArray(compareSeries) ? compareSeries : [];
-      if (aPts.length < 2 || bPts.length < 2) return '<div class="spark-empty">not enough points for compare</div>';
+      if (aPts.length < 2 || bPts.length < 2) return `<div class="spark-empty">${escHtml(keeperText('not_enough_points_for_compare'))}</div>`;
       const aVals = aPts.map(p => (p && isNum(p.context_ratio)) ? Number(p.context_ratio) : 0);
       const bVals = bPts.map(p => (p && isNum(p.context_ratio)) ? Number(p.context_ratio) : 0);
       const w = 860;
@@ -2311,14 +2643,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
           events.push({
             type: 'handoff',
             ts: isNum(p.ts_unix) ? p.ts_unix : 0,
-            text: `handoff to next generation (gen ${isNum(p.generation) ? p.generation + 1 : '?'})`
+            text: keeperFormat('event_handoff_to_next_generation', {
+              gen: (isNum(p.generation) ? p.generation + 1 : '?'),
+            })
           });
         }
         if (p.compacted) {
           events.push({
             type: 'compaction',
             ts: isNum(p.ts_unix) ? p.ts_unix : 0,
-            text: `context compaction at ${(isNum(p.context_ratio) ? Math.round(p.context_ratio * 100) : '?')}%`
+            text: keeperFormat('event_context_compaction_at', {
+              ratio: (isNum(p.context_ratio) ? Math.round(p.context_ratio * 100) : '?'),
+            })
           });
         }
         if (p.memory_compaction_performed) {
@@ -2327,11 +2663,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
           events.push({
             type: 'compaction',
             ts: isNum(p.ts_unix) ? p.ts_unix : 0,
-            text: `memory compaction dropped ${dropped}/${before} notes`
+            text: keeperFormat('event_memory_compaction_dropped', { dropped, before })
           });
         }
       });
-      if (events.length === 0) return '<div class="empty">No handoff/compaction events yet</div>';
+      if (events.length === 0) return `<div class="empty">${escHtml(keeperText('no_handoff_compaction_events'))}</div>`;
       events.sort((a, b) => b.ts - a.ts);
       return events.slice(0, 20).map(e => `
         <div class="keeper-event ${e.type}">
@@ -2406,7 +2742,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .sort((a, b) => b.ts - a.ts);
 
       if (events.length === 0) {
-        return '<div class="empty">No handoff events for selected filters</div>';
+        return `<div class="empty">${escHtml(keeperText('no_handoff_events_for_selected_filters'))}</div>`;
       }
       return `<div class="keeper-handoff-list">` + events.slice(0, limit).map((ev) => `
         <details class="keeper-handoff-row">
@@ -2451,7 +2787,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       applyKeeperZoomButtons();
       applyKeeperLangButtons();
       if (!selectedKeeperName) {
-        content.innerHTML = '<div class="empty">No keeper selected</div>';
+        content.innerHTML = `<div class="empty">${escHtml(keeperText('no_keeper_selected'))}</div>`;
         if (etaPill) etaPill.textContent = 'ETA -';
         return;
       }
@@ -2462,9 +2798,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (!keeper) {
         title.textContent = 'Keeper Detail';
         sub.textContent = selectedKeeperName;
-        content.innerHTML = '<div class="empty">Keeper data is not available yet. Wait for next refresh.</div>';
+        content.innerHTML = `<div class="empty">${escHtml(keeperText('keeper_data_not_available'))}</div>`;
         if (etaPill) etaPill.textContent = 'ETA -';
-        if (compareSelect) compareSelect.innerHTML = '<option value="">Select keeper</option>';
+        if (compareSelect) compareSelect.innerHTML = `<option value="">${escHtml(keeperText('select_keeper'))}</option>`;
         return;
       }
 
@@ -2475,7 +2811,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         compareKeeperName = null;
       }
       if (compareSelect) {
-        const options = ['<option value="">Select keeper</option>'].concat(
+        const options = [`<option value="">${escHtml(keeperText('select_keeper'))}</option>`].concat(
           compareCandidates.map(name =>
             `<option value="${escHtml(name)}"${compareKeeperName === name ? ' selected' : ''}>${escHtml(name)}</option>`
           )
@@ -3348,7 +3684,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           if (body === '') return '';
           return `<div class="keeper-field-row"><div class="keeper-field-head"><span class="keeper-field-title">${escHtml(label)}</span><code class="keeper-field-key">${escHtml(key)}</code></div>${body}</div>`;
         }).filter((x) => x !== '').join('');
-      const glossaryDetailHtml = glossaryFieldDetailHtml([
+      const glossaryKeys = [
         'context_ratio',
         'handoff_threshold',
         'handoff_risk',
@@ -3404,7 +3740,31 @@ let cached_html = lazy ({|<!DOCTYPE html>
         'conversation_fragments',
         'k2k_edges',
         'k2k_mentions',
-      ]);
+      ];
+      const fieldQueryNormalized = String(keeperFieldQuery || '').trim().toLowerCase();
+      const glossaryVisibleKeys = glossaryKeys.filter((key) => {
+        if (!fieldQueryNormalized) return true;
+        const entry = glossaryEntry(key);
+        if (!entry) return false;
+        const haystack = [
+          key,
+          entry.label || '',
+          entry.short || '',
+          entry.definition || '',
+          entry.formula || '',
+          entry.source || '',
+          entry.interpretation || '',
+        ].join('\n').toLowerCase();
+        return haystack.includes(fieldQueryNormalized);
+      });
+      const glossaryDetailHtml =
+        glossaryVisibleKeys.length > 0
+          ? glossaryFieldDetailHtml(glossaryVisibleKeys)
+          : `<div class="empty">${escHtml(keeperText('no_match'))}</div>`;
+      const glossaryCountText = keeperFormat('filtered_count', {
+        shown: fmtInt(glossaryVisibleKeys.length),
+        total: fmtInt(glossaryKeys.length),
+      });
       const kpiLabelHtml = (label, key) => {
         const entry = glossaryEntry(key);
         const labelText =
@@ -3412,8 +3772,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
             ? entry.label.trim()
             : label;
         const tip = glossaryTip(key);
-        if (!tip) return `<div class="keeper-kpi-label">${escHtml(labelText)}</div>`;
-        return `<div class="keeper-kpi-label">${escHtml(labelText)} <span class="keeper-hint" title="${escHtml(tip)}">?</span></div>`;
+        const keyAttr = escHtml(String(key || ''));
+        if (!tip) return `<div class="keeper-kpi-label" data-kpi-key="${keyAttr}">${escHtml(labelText)}</div>`;
+        return `<div class="keeper-kpi-label" data-kpi-key="${keyAttr}">${escHtml(labelText)} <span class="keeper-hint" title="${escHtml(tip)}">?</span></div>`;
       };
 
       let modelFallbackCount = isNum(windowStats.model_fallback_count)
@@ -3825,7 +4186,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             || modelValue === keeperHandoffModelFilter;
         return genOk && modelOk;
       }).length;
-      const handoffGenOptionsHtml = ['<option value="all">All generations</option>']
+      const handoffGenOptionsHtml = [`<option value="all">${escHtml(keeperText('all_generations'))}</option>`]
         .concat(handoffFromGenerations.map((fromGen) => {
           const row =
             handoffEventsAll.find((p) => isNum(p.generation) && String(Number(p.generation)) === fromGen)
@@ -3839,7 +4200,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           return `<option value="${escHtml(fromGen)}"${selected}>${escHtml(label)}</option>`;
         }))
         .join('');
-      const handoffModelOptionsHtml = ['<option value="all">All models</option>']
+      const handoffModelOptionsHtml = [`<option value="all">${escHtml(keeperText('all_models'))}</option>`]
         .concat(handoffModels.map((model) => {
           const selected = keeperHandoffModelFilter === model ? ' selected' : '';
           return `<option value="${escHtml(model)}"${selected}>${escHtml(model)}</option>`;
@@ -3864,6 +4225,97 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const riskText = (risk.score === null) ? 'Risk -/100' : `Risk ${risk.score}/100`;
       const riskLevelText = (risk.level || 'unknown').toUpperCase();
       const confidenceText = (risk.confidence === null) ? '-' : (risk.confidence + '%');
+      const metrics24hFirstRow = metrics24h.length > 0 ? (metrics24h[0] || {}) : {};
+      const metrics24hLastRow = metrics24h.length > 0 ? (metrics24h[metrics24h.length - 1] || {}) : {};
+      const trendSummaryText = (latest, first, formatter) => {
+        if (!isNum(latest) || !isNum(first)) return keeperText('no_24h_data');
+        const delta = Number(latest) - Number(first);
+        const sign = delta > 0 ? '+' : '';
+        return keeperFormat('trend_latest_delta', {
+          latest: formatter(Number(latest)),
+          delta: `${sign}${formatter(delta)}`,
+        });
+      };
+      const trendPct1 = (v) => `${(Math.round(Number(v) * 1000) / 10).toFixed(1)}%`;
+      const trendPoint = (v) => `${(Math.round(Number(v) * 1000) / 10).toFixed(1)}pp`;
+      const contextTrend24hText = trendSummaryText(
+        metrics24hLastRow.context_ratio_avg,
+        metrics24hFirstRow.context_ratio_avg,
+        trendPoint,
+      );
+      const proactiveFallbackTrend24hText = trendSummaryText(
+        metrics24hLastRow.proactive_template_fallback_rate,
+        metrics24hFirstRow.proactive_template_fallback_rate,
+        trendPct1,
+      );
+      const kpiSnapshot = {
+        context_ratio: { current: ratioPct, numerator: fmtInt(ctx.context_tokens), denominator: fmtInt(ctx.context_max), trend24h: contextTrend24hText },
+        handoff_threshold: { current: `${Math.round(th * 100)}%`, numerator: '-', denominator: '-', trend24h: keeperText('no_24h_data') },
+        handoff_risk: { current: `${riskText} (${riskLevelText})`, numerator: '-', denominator: '-', trend24h: keeperText('no_24h_data') },
+        risk_confidence: { current: confidenceText, numerator: '-', denominator: '-', trend24h: keeperText('no_24h_data') },
+        handoff_eta: { current: etaText, numerator: '-', denominator: '-', trend24h: keeperText('no_24h_data') },
+        model_fallback: { current: modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate), numerator: fmtInt(modelFallbackNumerator), denominator: fmtInt(modelFallbackDenominator), trend24h: keeperText('no_24h_data') },
+        proactive_template_fallback: { current: proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate), numerator: fmtInt(proactiveTemplateFallbackNumerator), denominator: fmtInt(proactiveTemplateFallbackDenominator), trend24h: proactiveFallbackTrend24hText },
+        proactive_similarity: { current: proactiveSimilarityText, numerator: fmtInt(proactivePreviewPairCount), denominator: fmtInt(proactivePreviewSampleCount), trend24h: keeperText('no_24h_data') },
+        drift_window: { current: driftAppliedRate === null ? '-' : fmtPct1(driftAppliedRate), numerator: fmtInt(driftAppliedCount), denominator: fmtInt(interactionPoints), trend24h: keeperText('no_24h_data') },
+        intervention_share: { current: interventionShare === null ? '-' : fmtPct1(interventionShare), numerator: fmtInt(proactivePoints), denominator: fmtInt(interactionPoints), trend24h: keeperText('no_24h_data') },
+        window_handoff_compaction: { current: `${fmtInt(windowStats.handoff_count)} / ${fmtInt(windowStats.compaction_events)}`, numerator: fmtInt(windowStats.handoff_count), denominator: fmtInt(windowStats.compaction_events), trend24h: keeperText('no_24h_data') },
+        window_compaction_saved: { current: fmtInt(windowStats.compaction_saved_tokens), numerator: fmtInt(windowStats.compaction_saved_tokens), denominator: '-', trend24h: keeperText('no_24h_data') },
+        compaction_efficiency: { current: compactionSavedRatio === null ? '-' : fmtPct1(compactionSavedRatio), numerator: fmtInt(compactionSavedTokens), denominator: fmtInt(compactionBeforeTokens), trend24h: keeperText('no_24h_data') },
+        memory_pass: { current: memoryPassRate === null ? '-' : fmtPct1(memoryPassRate), numerator: fmtInt(memoryPassed), denominator: fmtInt(memoryChecks), trend24h: keeperText('no_24h_data') },
+        memory_score: { current: memoryAvgScore === null ? '-' : (Math.round(memoryAvgScore * 1000) / 1000).toFixed(3), numerator: memoryAvgScore === null ? '-' : (Math.round(memoryAvgScore * 1000) / 1000).toFixed(3), denominator: memoryThreshold.toFixed(3), trend24h: keeperText('no_24h_data') },
+        weather_recall: { current: memoryWeatherPassRate === null ? '-' : fmtPct1(memoryWeatherPassRate), numerator: fmtInt(memoryWeatherPassed), denominator: fmtInt(memoryWeatherChecks), trend24h: keeperText('no_24h_data') },
+        memory_corrections: { current: `${fmtInt(memoryCorrections)} / ${fmtInt(memoryCorrectionSuccess)}`, numerator: fmtInt(memoryCorrections), denominator: fmtInt(memoryCorrectionSuccess), trend24h: keeperText('no_24h_data') },
+        memory_notes: { current: `${fmtInt(memoryNoteCount)} (+${fmtInt(memoryNotesAddedWindow)} window)`, numerator: fmtInt(memoryNoteCount), denominator: '-', trend24h: keeperText('no_24h_data') },
+        memory_compact: { current: `${fmtInt(memoryCompactionEvents)} events / ${fmtInt(memoryCompactionDroppedNotes)} dropped`, numerator: fmtInt(memoryCompactionDroppedNotes), denominator: fmtInt(memoryCompactionBeforeNotes), trend24h: keeperText('no_24h_data') },
+        memory_trim_rate: { current: memoryCompactionDropRatio === null ? '-' : fmtPct1(memoryCompactionDropRatio), numerator: fmtInt(memoryCompactionDroppedNotes), denominator: fmtInt(memoryCompactionBeforeNotes), trend24h: keeperText('no_24h_data') },
+        tool_calls: { current: fmtInt(toolCallCount), numerator: fmtInt(toolCallCount), denominator: '-', trend24h: keeperText('no_24h_data') },
+        window_points: { current: `${fmtInt(windowSamplePoints)} total`, numerator: fmtInt(windowSamplePoints), denominator: '-', trend24h: keeperText('no_24h_data') },
+        conversation_rows: { current: `${fmtInt(conversationTailCount)} / raw ${fmtInt(conversationRawCount)}`, numerator: fmtInt(conversationTailCount), denominator: fmtInt(conversationRawCount), trend24h: keeperText('no_24h_data') },
+        k2k_edges: { current: fmtInt(k2kCount), numerator: fmtInt(k2kCount), denominator: '-', trend24h: keeperText('no_24h_data') },
+      };
+      if (!glossaryKeys.includes(keeperSelectedKpiKey)) {
+        keeperSelectedKpiKey = 'context_ratio';
+        setKeeperQueryState();
+      }
+      const selectedKpiEntry = glossaryEntry(keeperSelectedKpiKey) || glossaryEntry('context_ratio');
+      const selectedKpiData = kpiSnapshot[keeperSelectedKpiKey] || {
+        current: '-',
+        numerator: '-',
+        denominator: '-',
+        trend24h: keeperText('no_24h_data'),
+      };
+      const kpiDetailHtml = `
+        <div class="keeper-chart-card">
+          <div class="keeper-chart-title">${escHtml(keeperText('kpi_detail'))}</div>
+          <div class="keeper-kpi-detail-grid">
+            <div class="keeper-kpi-detail-item">
+              <div class="keeper-kpi-detail-label">${escHtml(keeperText('selected_field'))}</div>
+              <div class="keeper-kpi-detail-value">${escHtml((selectedKpiEntry && selectedKpiEntry.label) ? selectedKpiEntry.label : keeperSelectedKpiKey)} <code class="keeper-field-key">${escHtml(keeperSelectedKpiKey)}</code></div>
+            </div>
+            <div class="keeper-kpi-detail-item">
+              <div class="keeper-kpi-detail-label">${escHtml(keeperText('current_value'))}</div>
+              <div class="keeper-kpi-detail-value">${escHtml(selectedKpiData.current || '-')}</div>
+            </div>
+            <div class="keeper-kpi-detail-item">
+              <div class="keeper-kpi-detail-label">${escHtml(keeperText('numerator'))}</div>
+              <div class="keeper-kpi-detail-value">${escHtml(selectedKpiData.numerator || '-')}</div>
+            </div>
+            <div class="keeper-kpi-detail-item">
+              <div class="keeper-kpi-detail-label">${escHtml(keeperText('denominator'))}</div>
+              <div class="keeper-kpi-detail-value">${escHtml(selectedKpiData.denominator || '-')}</div>
+            </div>
+            <div class="keeper-kpi-detail-item">
+              <div class="keeper-kpi-detail-label">${escHtml(keeperText('formula'))}</div>
+              <div class="keeper-kpi-detail-value">${escHtml((selectedKpiEntry && selectedKpiEntry.formula) ? selectedKpiEntry.formula : '-')}</div>
+            </div>
+            <div class="keeper-kpi-detail-item">
+              <div class="keeper-kpi-detail-label">${escHtml(keeperText('trend_24h'))}</div>
+              <div class="keeper-kpi-detail-value">${escHtml(selectedKpiData.trend24h || keeperText('no_24h_data'))}</div>
+            </div>
+          </div>
+        </div>
+      `;
       if (risk.score !== null && risk.score >= 80) etaClass += ' now';
       else if (risk.score !== null && risk.score >= 65) etaClass += ' warn';
       if (etaPill) {
@@ -3876,8 +4328,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
       let compareHtml = `
         <div class="keeper-chart-card keeper-compare-block">
-          <div class="keeper-chart-title">Compare (Context Ratio)</div>
-          <div class="empty">Select another keeper from the compare dropdown.</div>
+          <div class="keeper-chart-title">${escHtml(keeperText('compare_context_ratio'))}</div>
+          <div class="empty">${escHtml(keeperText('compare_select_other'))}</div>
         </div>
       `;
       if (compareKeeperName) {
@@ -3901,14 +4353,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
             : (deltaPct === 0 ? '0pp' : (deltaPct > 0 ? `+${deltaPct}pp` : `${deltaPct}pp`));
           compareHtml = `
             <div class="keeper-chart-card keeper-compare-block">
-              <div class="keeper-chart-title">Compare (Context Ratio): ${escHtml(keeper.name || selectedKeeperName)} vs ${escHtml(compareKeeperName)}</div>
+              <div class="keeper-chart-title">${escHtml(keeperText('compare_context_ratio'))}: ${escHtml(keeper.name || selectedKeeperName)} vs ${escHtml(compareKeeperName)}</div>
               <div class="keeper-chart">${compareChart}</div>
               <div class="keeper-chart-meta">
                 <span><b>${escHtml(keeper.name || selectedKeeperName)}</b> ${lastPrimary === null ? '-' : (Math.round(lastPrimary * 100) + '%')}</span>
                 <span><b>${escHtml(compareKeeperName)}</b> ${lastCompare === null ? '-' : (Math.round(lastCompare * 100) + '%')}</span>
-                <span><b>delta</b> ${deltaText}</span>
-                <span><b>risk</b> ${risk.score === null ? '-' : risk.score} vs ${compareRisk.score === null ? '-' : compareRisk.score}</span>
-                <span><b>window</b> ${keeperZoomTurns} turns</span>
+                <span><b>${escHtml(keeperText('delta'))}</b> ${deltaText}</span>
+                <span><b>${escHtml(keeperText('risk'))}</b> ${risk.score === null ? '-' : risk.score} vs ${compareRisk.score === null ? '-' : compareRisk.score}</span>
+                <span><b>${escHtml(keeperText('window'))}</b> ${keeperZoomTurns} turns</span>
               </div>
             </div>
           `;
@@ -3971,29 +4423,30 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi">${kpiLabelHtml('K2K Mentions', 'k2k_mentions')}<div class="keeper-kpi-value">${escHtml(k2kMentionsText)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Handoff ETA', 'handoff_eta')}<div class="keeper-kpi-value">${escHtml(etaText)}</div></div>
         </div>
+        ${kpiDetailHtml}
         ${compareHtml}
         <div class="keeper-chart-card keeper-handoff-timeline">
-          <div class="keeper-chart-title">Handoff Timeline</div>
+          <div class="keeper-chart-title">${escHtml(keeperText('handoff_timeline'))}</div>
           <div class="keeper-chart-meta">
-            <span><b>events</b> ${fmtInt(handoffTimelineCount)}</span>
-            <span><b>filtered</b> ${fmtInt(handoffTimelineFilteredCount)}</span>
-            <span><b>latest</b> ${handoffLatestTs === null ? '-' : fmtTs(handoffLatestTs)}</span>
-            <span><b>last model</b> ${escHtml((keeper.last_handoff_event || {}).to_model || '-')}</span>
-            <span><b>threshold</b> ${Math.round(th * 100)}%</span>
-            <span><b>window</b> ${keeperZoomTurns} turns</span>
+            <span><b>${escHtml(keeperText('events'))}</b> ${fmtInt(handoffTimelineCount)}</span>
+            <span><b>${escHtml(keeperText('filtered'))}</b> ${fmtInt(handoffTimelineFilteredCount)}</span>
+            <span><b>${escHtml(keeperText('latest'))}</b> ${handoffLatestTs === null ? '-' : fmtTs(handoffLatestTs)}</span>
+            <span><b>${escHtml(keeperText('last_model'))}</b> ${escHtml((keeper.last_handoff_event || {}).to_model || '-')}</span>
+            <span><b>${escHtml(keeperText('threshold'))}</b> ${Math.round(th * 100)}%</span>
+            <span><b>${escHtml(keeperText('window'))}</b> ${keeperZoomTurns} turns</span>
           </div>
           <div class="keeper-handoff-controls">
-            <span class="keeper-toolbar-label">From Gen</span>
+            <span class="keeper-toolbar-label">${escHtml(keeperText('from_gen'))}</span>
             <select class="keeper-select" onchange="setKeeperHandoffGenFilter(this.value)">${handoffGenOptionsHtml}</select>
-            <span class="keeper-toolbar-label">Model</span>
+            <span class="keeper-toolbar-label">${escHtml(keeperText('model'))}</span>
             <select class="keeper-select" onchange="setKeeperHandoffModelFilter(this.value)">${handoffModelOptionsHtml}</select>
-            <button class="keeper-toolbar-btn" onclick="clearKeeperHandoffFilters()">Clear</button>
+            <button class="keeper-toolbar-btn" onclick="clearKeeperHandoffFilters()">${escHtml(keeperText('clear'))}</button>
           </div>
           ${handoffTimelineHtml}
         </div>
         <div class="keeper-detail-grid">
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Context Ratio (with handoff threshold)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_context_ratio_threshold'))}</div>
             <div class="keeper-chart">${contextRatioChart}</div>
             <div class="keeper-chart-meta">
               <span><b>threshold</b> ${Math.round(th * 100)}%</span>
@@ -4002,7 +4455,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Context Tokens</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_context_tokens'))}</div>
             <div class="keeper-chart">${contextTokenChart}</div>
             <div class="keeper-chart-meta">
               <span><b>current</b> ${fmtInt(ctx.context_tokens)}</span>
@@ -4011,7 +4464,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Turn I/O Tokens (input vs output)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_turn_io_tokens'))}</div>
             <div class="keeper-chart">${ioChart}</div>
             <div class="keeper-chart-meta">
               <span><b>input total</b> ${fmtInt(keeper.total_input_tokens)}</span>
@@ -4026,7 +4479,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Memory Recall Score</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_memory_recall_score'))}</div>
             <div class="keeper-chart">${memoryChart}</div>
             <div class="keeper-chart-meta">
               <span><b>threshold</b> ${(Math.round(memoryThreshold * 1000) / 1000).toFixed(3)}</span>
@@ -4037,7 +4490,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Drift Applied (0/1)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_drift_applied'))}</div>
             <div class="keeper-chart">${driftChart}</div>
             <div class="keeper-chart-meta">
               <span><b>window drift</b> ${fmtInt(driftAppliedCount)} / ${fmtInt(interactionPoints)}</span>
@@ -4049,7 +4502,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Intervention vs Drift (0/1)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_intervention_vs_drift'))}</div>
             <div class="keeper-chart">${interventionChart}</div>
             <div class="keeper-chart-meta">
               <span><b>proactive points</b> ${fmtInt(proactivePoints)}</span>
@@ -4059,7 +4512,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Compaction Timeline (Events + Saved Tokens)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_compaction_timeline'))}</div>
             <div class="keeper-chart">${compactionEventChart}</div>
             <div class="keeper-chart-meta">
               <span><b>events</b> ${fmtInt(windowStats.compaction_events)}</span>
@@ -4075,7 +4528,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">24h Trend (Hourly)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_24h_trend'))}</div>
             <div class="keeper-chart">${metrics24hRatioChart}</div>
             <div class="keeper-chart-meta">
               <span><b>buckets</b> ${fmtInt(metrics24hBuckets)}</span>
@@ -4092,7 +4545,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Lifecycle</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_lifecycle'))}</div>
             <div class="keeper-chart-meta">
               <span><b>trace</b> ${escHtml(keeper.trace_id || '-')}</span>
               <span><b>keepalive</b> ${(keeper.keepalive_running ? 'on' : 'off')}</span>
@@ -4124,7 +4577,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Metric Formula</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_metric_formula'))}</div>
             <div class="keeper-chart-meta">
               <span><b>model fallback</b> ${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} = ${fmtInt(modelFallbackNumerator)} / ${fmtInt(modelFallbackDenominator)}</span>
               <span><b>template fallback</b> ${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)} = ${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)}</span>
@@ -4153,12 +4606,22 @@ let cached_html = lazy ({|<!DOCTYPE html>
           </div>
           <div class="keeper-chart-card">
             <div class="keeper-chart-title">${escHtml(keeperText('field_dictionary_detailed'))}</div>
+            <div class="keeper-field-search">
+              <input
+                type="text"
+                value="${escHtml(keeperFieldQuery)}"
+                placeholder="${escHtml(keeperText('field_search_placeholder'))}"
+                oninput="setKeeperFieldQuery(this.value)"
+              />
+              <button class="keeper-toolbar-btn" onclick="clearKeeperFieldQuery()">${escHtml(keeperText('clear'))}</button>
+              <span class="keeper-field-search-count">${escHtml(glossaryCountText)}</span>
+            </div>
             <div class="keeper-field-dictionary">
               ${glossaryDetailHtml}
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Work & Equipment</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_work_equipment'))}</div>
             <div class="keeper-chart-meta">
               <span><b>top work</b> ${escHtml(topWorkText)}</span>
               <span><b>top model</b> ${escHtml(topModelText)}</span>
@@ -4173,7 +4636,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Long-term Memory Bank</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_memory_bank'))}</div>
             <div class="keeper-chart-meta">
               <span><b>notes</b> ${fmtInt(memoryNoteCount)}</span>
               <span><b>top kind</b> ${escHtml(memoryTopKind)}</span>
@@ -4187,7 +4650,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">Recent Conversation (User/Assistant)</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_recent_conversation'))}</div>
             <div class="keeper-chart-meta">
               <span><b>rows</b> ${fmtInt(conversationTailCount)}</span>
               <span><b>raw</b> ${fmtInt(conversationRawCount)}</span>
@@ -4201,7 +4664,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
           </div>
           <div class="keeper-chart-card">
-            <div class="keeper-chart-title">K2K Relay Trail</div>
+            <div class="keeper-chart-title">${escHtml(keeperText('chart_k2k_relay_trail'))}</div>
             <div class="keeper-chart-meta">
               <span><b>edges</b> ${fmtInt(k2kCount)}</span>
               <span><b>window</b> recent history tail</span>
@@ -4212,10 +4675,26 @@ let cached_html = lazy ({|<!DOCTYPE html>
           </div>
         </div>
         <div class="keeper-events">
-          <div class="keeper-chart-title">Recent Lifecycle Events</div>
+          <div class="keeper-chart-title">${escHtml(keeperText('chart_recent_lifecycle_events'))}</div>
           <div class="keeper-events-list">${eventsHtml}</div>
         </div>
       `;
+      Array.from(content.querySelectorAll('.keeper-kpi')).forEach((card) => {
+        const labelEl = card.querySelector('.keeper-kpi-label[data-kpi-key]');
+        if (!labelEl) return;
+        const key = String(labelEl.getAttribute('data-kpi-key') || '').trim();
+        if (!key) return;
+        card.classList.toggle('selected', key === keeperSelectedKpiKey);
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+        card.addEventListener('click', () => setKeeperSelectedKpi(key));
+        card.addEventListener('keydown', (ev) => {
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          ev.preventDefault();
+          setKeeperSelectedKpi(key);
+        });
+      });
+      localizeKeeperMetaLabels(content);
     }
     function openKeeperDetail(name) {
       if (!name) return;

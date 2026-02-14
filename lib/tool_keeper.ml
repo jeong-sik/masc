@@ -402,6 +402,24 @@ let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
       if cut <= 0 then ""
       else String.sub s 0 cut
 
+let utf8_repair_string (s : string) : string =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len then ()
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then (
+        Buffer.add_substring buf s i dlen;
+        loop (i + dlen))
+      else (
+        Buffer.add_string buf "\xEF\xBF\xBD";
+        loop (i + 1))
+  in
+  loop 0;
+  Buffer.contents buf
+
 let normalize_self_model_text ?(max_len = default_drift_max_chars) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
@@ -1050,7 +1068,7 @@ let keeper_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) "history.jsonl"
 
 let append_jsonl_line path (json : Yojson.Safe.t) =
-  let line = Yojson.Safe.to_string json ^ "\n" in
+  let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
   let fd = Unix.openfile path
     [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
@@ -1514,7 +1532,7 @@ let write_memory_bank_rows
       (fun () ->
         List.iter
           (fun (row : keeper_memory_row_raw) ->
-            output_string oc (Yojson.Safe.to_string row.json);
+            output_string oc (utf8_repair_string (Yojson.Safe.to_string row.json));
             output_char oc '\n')
           rows);
     Sys.rename tmp path;

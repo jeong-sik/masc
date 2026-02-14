@@ -851,9 +851,10 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
           let (metrics_24h, metrics_24h_summary) =
             keeper_metrics_24h_json ~metrics_path ~now_ts
           in
-          let metrics_lines =
-            Tool_keeper.read_file_tail_lines
-              metrics_path ~max_bytes:200000 ~max_lines:series_points
+            let metrics_window_max_bytes = 200000 in
+            let metrics_lines =
+              Tool_keeper.read_file_tail_lines
+              metrics_path ~max_bytes:metrics_window_max_bytes ~max_lines:series_points
           in
           let parsed_metrics =
             List.filter_map (fun line ->
@@ -1439,11 +1440,17 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
             in
             let summary = `Assoc [
               ("sample_points", `Int sample_points);
+              ("window_sample_points", `Int sample_points);
               ("turn_points", `Int turn_points_int);
+              ("window_turn_points", `Int turn_points_int);
               ("heartbeat_points", `Int !heartbeat_points);
+              ("window_heartbeat_points", `Int !heartbeat_points);
               ("proactive_points", `Int proactive_points_int);
+              ("window_proactive_points", `Int proactive_points_int);
               ("window_interactions", `Int interaction_points_int);
               ("window_turns", `Int turn_points_int);
+              ("window_series_max_lines", `Int series_points);
+              ("window_series_max_bytes", `Int metrics_window_max_bytes);
               ("primary_model", `String primary_model);
               ("handoff_count", `Int !handoff_count);
               ("compaction_events", `Int !compaction_events);

@@ -449,6 +449,62 @@ let cached_html = lazy ({|<!DOCTYPE html>
     .keeper-chart-meta b { color: #e2e8f0; font-weight: 600; }
     .keeper-chart-meta .warn-metric { color: #fbbf24; font-weight: 700; }
     .keeper-chart-meta .bad-metric { color: #f87171; font-weight: 700; }
+    .keeper-field-dictionary {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 460px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+    .keeper-field-row {
+      background: rgba(2,6,23,0.38);
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .keeper-field-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .keeper-field-title {
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .keeper-field-key {
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 10px;
+      color: #67e8f9;
+      border: 1px solid rgba(34,211,238,0.28);
+      border-radius: 999px;
+      background: rgba(34,211,238,0.14);
+      padding: 2px 6px;
+    }
+    .keeper-field-item {
+      display: grid;
+      grid-template-columns: 90px minmax(0, 1fr);
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .keeper-field-item-label {
+      color: #94a3b8;
+      font-size: 10px;
+      letter-spacing: 0.35px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .keeper-field-item-value {
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    @media (max-width: 680px) {
+      .keeper-field-item { grid-template-columns: 1fr; gap: 3px; }
+    }
     .keeper-handoff-timeline { margin-bottom: 12px; }
     .keeper-handoff-list {
       margin-top: 8px;
@@ -2387,37 +2443,539 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const ratioColor = keeperColorByRatio(ratio);
       const primaryModel = windowStats.primary_model || keeper.primary_model || ((Array.isArray(keeper.models) && keeper.models[0]) ? keeper.models[0] : '-');
       const metricGlossary = {
-        context_ratio: 'Context shows current context usage ratio and tokens used/max for this keeper.',
-        handoff_threshold: 'Handoff threshold is the context ratio limit where handoff is recommended/triggered.',
-        handoff_risk: 'Handoff risk is a composite score (0-100) from context pressure, trend, and recent growth.',
-        risk_confidence: 'Risk confidence indicates how stable the risk estimate is given recent window signal quality.',
-        handoff_eta: 'Handoff ETA estimates remaining turns until threshold breach based on recent context growth trend.',
-        display_zoom: 'Display zoom applies to chart rendering only (last N points); backend metrics_window aggregation does not change.',
-        metrics_window: 'Metrics window is built from recent keeper metric rows loaded from file with max_lines/max_bytes caps.',
-        window_points: 'Window points = sampled rows in the current metrics window. Breakdown is turn/proactive/heartbeat channels.',
-        model_fallback: 'Model fallback rate = model_fallback_count / model_fallback_denominator. Denominator uses interaction points (turn + proactive) within metrics window.',
-        proactive_template_fallback: 'Proactive template fallback rate = proactive_template_fallback_count / proactive_template_fallback_denominator. Denominator uses proactive points only.',
-        proactive_similarity: 'Proactive similarity compares adjacent proactive preview texts. High similarity implies repetitive proactive responses.',
-        drift_window: 'Drift window rate = drift_applied_count / window_interactions in the same metrics window.',
-        intervention_share: 'Intervention share is proactive_points / window_interactions. Per-turn is proactive_points / turn_points.',
-        top_drift_reason: 'Top drift reason is the most frequent drift trigger reason in current metrics window.',
-        top_compaction_trigger: 'Top compact trigger is the most frequent compaction trigger reason in current metrics window.',
-        window_handoff_compaction: 'Window handoff/compaction counts show how many handoffs and compactions occurred inside the current metrics window.',
-        window_compaction_saved: 'Window compaction saved = total tokens reduced by compaction events in the current metrics window.',
-        compaction_efficiency: 'Compaction efficiency = compaction_saved_tokens / compaction_before_tokens in current metrics window.',
-        memory_pass: 'Memory pass rate = memory_passed / memory_checks for recall checks in current metrics window.',
-        memory_score: 'Memory score is average final recall score compared against memory_threshold.',
-        weather_recall: 'Weather recall rate uses only memory checks tagged as expected_topic=weather.',
-        memory_corrections: 'Corrections show applied recall corrections and how many succeeded.',
-        memory_notes: 'Memory notes shows long-term note count and notes newly added in current metrics window.',
-        memory_compact: 'Memory compact shows note-level compaction events and dropped note counts.',
-        memory_trim_rate: 'Memory trim rate = memory_compaction_dropped_notes / memory_compaction_before_notes.',
-        tool_calls: 'Tool calls is total tool invocation count observed in current metrics window.',
+        context_ratio: {
+          label: 'Context',
+          short: 'Current context usage ratio and tokens used/max for this keeper.',
+          definition: 'How full the live context window is for the current keeper generation.',
+          formula: 'context_tokens / context_max',
+          source: 'keeper.context.context_tokens, keeper.context.context_max',
+          interpretation: `Lower is safer. Watch >= 70%, high pressure near threshold (${Math.round(th * 100)}%).`,
+        },
+        handoff_threshold: {
+          label: 'Handoff Threshold',
+          short: 'Context ratio limit where handoff is recommended/triggered.',
+          definition: 'Configured upper bound for safe context occupancy.',
+          formula: 'keeper.handoff_threshold (fallback 0.85)',
+          source: 'keeper.handoff_threshold',
+          interpretation: 'Crossing this value means successor handoff should happen immediately.',
+        },
+        handoff_risk: {
+          label: 'Handoff Risk',
+          short: 'Composite handoff pressure score (0-100).',
+          definition: 'Risk score from context ratio, recent growth trend, and proximity to threshold.',
+          formula: 'handoffRiskMetrics(series, threshold).score',
+          source: 'windowSeries + handoffRiskMetrics()',
+          interpretation: '0-39 low, 40-64 watch, 65-79 high, >=80 urgent.',
+        },
+        risk_confidence: {
+          label: 'Risk Confidence',
+          short: 'Signal confidence of current risk estimate.',
+          definition: 'Reliability of risk score based on sample quality in the recent window.',
+          formula: 'handoffRiskMetrics(series, threshold).confidence',
+          source: 'windowSeries + handoffRiskMetrics()',
+          interpretation: 'Low confidence means sparse/noisy window data; use trend with caution.',
+        },
+        handoff_eta: {
+          label: 'Handoff ETA',
+          short: 'Estimated turns until threshold breach.',
+          definition: 'Projected turns remaining before context crosses threshold using recent growth.',
+          formula: 'handoffRiskMetrics(series, threshold).eta',
+          source: 'windowSeries + handoffRiskMetrics()',
+          interpretation: 'ETA now or <=3 turns should be treated as immediate handoff zone.',
+        },
+        display_zoom: {
+          label: 'Display Zoom',
+          short: 'Chart-only sampling range (last N points).',
+          definition: 'UI zoom level for charts and visual comparisons.',
+          formula: 'keeperZoomTurns',
+          source: 'dashboard query state',
+          interpretation: 'Affects rendering only; backend metrics window aggregation stays unchanged.',
+        },
+        metrics_window: {
+          label: 'Metrics Window',
+          short: 'Recent keeper metric rows loaded under source caps.',
+          definition: 'Windowed dataset used for KPI aggregation and charts.',
+          formula: 'windowSeries(fullSeries) with max_lines/max_bytes caps',
+          source: 'keeper.metrics_series + metrics_window caps',
+          interpretation: 'If window is too small, rates can swing heavily between refreshes.',
+        },
+        window_points: {
+          label: 'Window Points',
+          short: 'Sampled rows in current metrics window.',
+          definition: 'Total count of turn/proactive/heartbeat points included in calculations.',
+          formula: 'window_sample_points = turn_points + proactive_points + heartbeat_points',
+          source: 'keeper.metrics_window.*_points',
+          interpretation: 'More points mean more stable ratios; very low points can distort percentages.',
+        },
+        model_fallback: {
+          label: 'Model Fallback Rate',
+          short: 'How often model selection diverged from primary route.',
+          definition: 'Fallback ratio for interaction points in current window.',
+          formula: 'model_fallback_count / model_fallback_denominator',
+          source: 'keeper.metrics_window.model_fallback_*',
+          interpretation: 'High fallback means routing instability or model availability pressure.',
+        },
+        proactive_template_fallback: {
+          label: 'Proactive Template Fallback',
+          short: 'Fallback rate in proactive generation path only.',
+          definition: 'How often proactive generation fell back to template instead of normal path.',
+          formula: 'proactive_template_fallback_count / proactive_template_fallback_denominator',
+          source: 'keeper.metrics_window.proactive_template_fallback_*',
+          interpretation: `Warn >= ${fmtPct1(alertThresholds.proactive_fallback_warn)}, bad >= ${fmtPct1(alertThresholds.proactive_fallback_bad)}.`,
+        },
+        proactive_similarity: {
+          label: 'Proactive Similarity',
+          short: 'Similarity between adjacent proactive preview texts.',
+          definition: 'Repetition detector for proactive outputs (avg/max pair similarity).',
+          formula: 'similarity(avg,max) over adjacent proactive preview pairs',
+          source: 'keeper.metrics_window.proactive_preview_similarity_*',
+          interpretation: `Warn >= ${fmtPct1(alertThresholds.proactive_similarity_warn)}, bad >= ${fmtPct1(alertThresholds.proactive_similarity_bad)}.`,
+        },
+        drift_window: {
+          label: 'Drift Window',
+          short: 'Drift applied ratio in current interaction window.',
+          definition: 'Frequency of drift policy application on turn/proactive interactions.',
+          formula: 'drift_applied_count / window_interactions',
+          source: 'keeper.metrics_window.drift_applied_*',
+          interpretation: 'Rising drift can be healthy adaptation or unstable behavior, check top reason.',
+        },
+        intervention_share: {
+          label: 'Intervention Share',
+          short: 'Proactive share among interaction points.',
+          definition: 'How proactively the keeper acts relative to interactive workload.',
+          formula: 'proactive_points / window_interactions (per-turn = proactive_points / turn_points)',
+          source: 'keeper.metrics_window.proactive_points, turn_points',
+          interpretation: 'Higher share means more proactive behavior; too high may look noisy.',
+        },
+        top_drift_reason: {
+          label: 'Top Drift Reason',
+          short: 'Most frequent drift trigger reason in current window.',
+          definition: 'Dominant cause category for drift applications.',
+          formula: 'argmax(top_drift_reasons.count)',
+          source: 'keeper.metrics_window.top_drift_reasons[]',
+          interpretation: 'Use together with drift rate to decide if guardrail or policy tuning is needed.',
+        },
+        top_compaction_trigger: {
+          label: 'Top Compact Trigger',
+          short: 'Most frequent compaction trigger reason in current window.',
+          definition: 'Dominant reason category that caused compaction events.',
+          formula: 'argmax(top_compaction_triggers.count)',
+          source: 'keeper.metrics_window.top_compaction_triggers[]',
+          interpretation: 'Helps verify whether compaction is threshold-driven or policy-driven.',
+        },
+        window_handoff_compaction: {
+          label: 'Window Handoff/Compaction',
+          short: 'Handoff and compaction event counts in current window.',
+          definition: 'Event volume view for handoff and compaction activity.',
+          formula: 'handoff_count / compaction_events',
+          source: 'keeper.metrics_window.handoff_count, compaction_events',
+          interpretation: 'Compaction without handoff may indicate successful pressure relief.',
+        },
+        window_compaction_saved: {
+          label: 'Window Compaction Saved',
+          short: 'Total tokens removed by compaction in current window.',
+          definition: 'Absolute amount of context tokens reduced by compaction events.',
+          formula: 'sum(compaction_saved_tokens)',
+          source: 'keeper.metrics_window.compaction_saved_tokens',
+          interpretation: 'Large saved tokens with low event count means high-impact compaction.',
+        },
+        compaction_efficiency: {
+          label: 'Compaction Efficiency',
+          short: 'Token reduction efficiency of compaction.',
+          definition: 'How much of pre-compaction tokens were removed.',
+          formula: 'compaction_saved_tokens / compaction_before_tokens',
+          source: 'keeper.metrics_window.compaction_*_tokens',
+          interpretation: 'Higher is stronger compression; too high can degrade memory continuity.',
+        },
+        memory_pass: {
+          label: 'Memory Pass',
+          short: 'Recall check pass rate in current window.',
+          definition: 'Accuracy rate for memory recall validations.',
+          formula: 'memory_passed / memory_checks',
+          source: 'keeper.metrics_window.memory_checks, memory_passed',
+          interpretation: 'Low pass rate suggests recall drift or weak note quality.',
+        },
+        memory_score: {
+          label: 'Memory Score',
+          short: 'Average recall score vs pass threshold.',
+          definition: 'Mean final memory score compared against configured threshold.',
+          formula: 'memory_avg_score vs memory_threshold',
+          source: 'keeper.metrics_window.memory_avg_score, memory_threshold',
+          interpretation: 'Score consistently below threshold implies recall quality regression.',
+        },
+        weather_recall: {
+          label: 'Weather Recall',
+          short: 'Recall pass rate for weather-tagged checks only.',
+          definition: 'Topic-specific recall quality for expected_topic=weather.',
+          formula: 'memory_weather_passed / memory_weather_checks',
+          source: 'keeper.metrics_window.memory_weather_*',
+          interpretation: 'Use as a narrow topic probe; not representative of all memory topics.',
+        },
+        memory_corrections: {
+          label: 'Corrections',
+          short: 'Recall correction attempts and successes.',
+          definition: 'Count of corrective actions applied after recall mismatch detection.',
+          formula: 'memory_corrections / memory_correction_success',
+          source: 'keeper.metrics_window.memory_corrections, memory_correction_success',
+          interpretation: 'High attempts with low success means correction policy needs tuning.',
+        },
+        memory_notes: {
+          label: 'Memory Notes',
+          short: 'Total long-term notes plus notes added in window.',
+          definition: 'Current memory-bank size with incremental growth in this window.',
+          formula: 'memory_note_count (+ memory_notes_added)',
+          source: 'keeper.memory_note_count, keeper.metrics_window.memory_notes_added',
+          interpretation: 'Fast growth without compaction usually raises future context pressure.',
+        },
+        memory_compact: {
+          label: 'Memory Compact',
+          short: 'Note-level compaction events and dropped note counts.',
+          definition: 'How often memory-note compaction ran and how many notes it trimmed.',
+          formula: 'memory_compaction_events / memory_compaction_dropped_notes',
+          source: 'keeper.metrics_window.memory_compaction_*',
+          interpretation: 'Frequent note trimming may protect context but can reduce recall coverage.',
+        },
+        memory_trim_rate: {
+          label: 'Memory Trim Rate',
+          short: 'Ratio of dropped notes during memory compaction.',
+          definition: 'Relative aggressiveness of note compaction.',
+          formula: 'memory_compaction_dropped_notes / memory_compaction_before_notes',
+          source: 'keeper.metrics_window.memory_compaction_before_notes, memory_compaction_dropped_notes',
+          interpretation: 'Higher trim rate means stronger pruning; watch memory pass for side effects.',
+        },
+        tool_calls: {
+          label: 'Tool Calls',
+          short: 'Total tool invocations observed in current metrics window.',
+          definition: 'Execution volume of external/tool operations by this keeper.',
+          formula: 'tool_call_count',
+          source: 'keeper.metrics_window.tool_call_count',
+          interpretation: 'Sudden spikes can indicate workload changes or retry loops.',
+        },
+        soul_profile: {
+          label: 'SOUL Profile',
+          short: 'Behavior profile currently applied to this keeper.',
+          definition: 'Configured persona/control profile guiding style and priorities.',
+          formula: 'keeper.soul_profile',
+          source: 'keeper.soul_profile',
+          interpretation: 'Treat this as the operating stance that influences behavior drift.',
+        },
+        will: {
+          label: 'Will (의지)',
+          short: 'Current will statement of the keeper.',
+          definition: 'Primary intent that the keeper is trying to preserve while acting.',
+          formula: 'keeper.will',
+          source: 'keeper.will',
+          interpretation: 'Large will shifts often appear before behavioral direction changes.',
+        },
+        needs: {
+          label: 'Needs (니즈)',
+          short: 'Current operational needs declared by keeper.',
+          definition: 'Short-term requirements needed for stable operation or progress.',
+          formula: 'keeper.needs',
+          source: 'keeper.needs',
+          interpretation: 'Use this to infer immediate constraints (tools, context, safety).',
+        },
+        desires: {
+          label: 'Desires (욕구)',
+          short: 'Current desire statement of keeper.',
+          definition: 'Preference-level direction beyond strict operational needs.',
+          formula: 'keeper.desires',
+          source: 'keeper.desires',
+          interpretation: 'Drives proactive behavior intensity and exploration tendency.',
+        },
+        active_model: {
+          label: 'Active Model',
+          short: 'Model used on the latest turn/operation.',
+          definition: 'Current live model handling responses for this keeper.',
+          formula: 'keeper.active_model || keeper.last_model_used',
+          source: 'keeper.active_model, keeper.last_model_used',
+          interpretation: 'Changes here indicate immediate routing/fallback effects.',
+        },
+        next_model: {
+          label: 'Next Model',
+          short: 'Next model hint selected by router.',
+          definition: 'Planned next-hop model if routing policy changes on upcoming turn.',
+          formula: 'keeper.next_model_hint',
+          source: 'keeper.next_model_hint',
+          interpretation: 'Useful as an early warning for upcoming model transition.',
+        },
+        primary_model: {
+          label: 'Primary Model',
+          short: 'Baseline preferred model for current window.',
+          definition: 'Primary route model used as fallback baseline comparison.',
+          formula: 'metrics_window.primary_model || keeper.primary_model || keeper.models[0]',
+          source: 'keeper.metrics_window.primary_model, keeper.primary_model',
+          interpretation: 'Model fallback is interpreted relative to this primary model.',
+        },
+        skill_route: {
+          label: 'Skill Route',
+          short: 'Primary and secondary skill routing path.',
+          definition: 'Current capability routing composition for this keeper.',
+          formula: 'skill_primary (+ skill_secondary[])',
+          source: 'keeper.skill_primary, keeper.skill_secondary',
+          interpretation: 'Route drift may explain tool usage and output style changes.',
+        },
+        total_turns: {
+          label: 'Total Turns',
+          short: 'Cumulative turn count in keeper lifecycle.',
+          definition: 'Total number of turns processed by this keeper lineage segment.',
+          formula: 'keeper.total_turns',
+          source: 'keeper.total_turns',
+          interpretation: 'Higher values generally increase memory pressure and drift potential.',
+        },
+        io_tokens: {
+          label: 'Input / Output',
+          short: 'Cumulative input and output token counts.',
+          definition: 'Total prompt tokens and generated tokens consumed by this keeper.',
+          formula: 'total_input_tokens / total_output_tokens',
+          source: 'keeper.total_input_tokens, keeper.total_output_tokens',
+          interpretation: 'Input-dominant vs output-dominant balance reveals workload type.',
+        },
+        total_tokens: {
+          label: 'Total Tokens',
+          short: 'Cumulative token consumption total.',
+          definition: 'Combined token usage across all turns for this keeper.',
+          formula: 'keeper.total_tokens',
+          source: 'keeper.total_tokens',
+          interpretation: 'Strong proxy for lifecycle workload and eventual handoff pressure.',
+        },
+        total_cost: {
+          label: 'Total Cost',
+          short: 'Accumulated model cost for this keeper.',
+          definition: 'Estimated cumulative USD cost from model usage.',
+          formula: 'keeper.total_cost_usd',
+          source: 'keeper.total_cost_usd',
+          interpretation: 'Use with total tokens to spot expensive routing patterns.',
+        },
+        born_at: {
+          label: 'Born At',
+          short: 'Keeper generation birth timestamp.',
+          definition: 'Timestamp when current keeper generation started.',
+          formula: 'keeper.born_at',
+          source: 'keeper.born_at',
+          interpretation: 'Together with age, indicates lifecycle phase of this generation.',
+        },
+        updated_at: {
+          label: 'Updated At',
+          short: 'Most recent keeper state update time.',
+          definition: 'Last persisted state update timestamp.',
+          formula: 'keeper.updated_at',
+          source: 'keeper.updated_at',
+          interpretation: 'Stale timestamp with active heartbeat may indicate update lag.',
+        },
+        handoffs_total: {
+          label: 'Handoffs (Total)',
+          short: 'Total completed handoff count.',
+          definition: 'Number of successor transitions completed in lifecycle.',
+          formula: 'keeper.handoff_count_total',
+          source: 'keeper.handoff_count_total',
+          interpretation: 'Rising quickly implies high pressure or aggressive rotation policy.',
+        },
+        compactions_total: {
+          label: 'Compactions (Total)',
+          short: 'Total compaction execution count.',
+          definition: 'Number of compaction runs in keeper lifecycle.',
+          formula: 'keeper.compaction_count',
+          source: 'keeper.compaction_count',
+          interpretation: 'High count with low efficiency means tune compaction policy.',
+        },
+        compaction_profile: {
+          label: 'Compaction Profile',
+          short: 'Named compaction policy profile.',
+          definition: 'Configured strategy preset used for context/memory compaction.',
+          formula: 'keeper.compaction_profile',
+          source: 'keeper.compaction_profile',
+          interpretation: 'Profile change can shift trim aggressiveness and memory continuity.',
+        },
+        proactive_total: {
+          label: 'Proactive (Total)',
+          short: 'Total proactive action count.',
+          definition: 'Cumulative number of proactive interventions by keeper.',
+          formula: 'keeper.proactive_count_total',
+          source: 'keeper.proactive_count_total',
+          interpretation: 'High total suggests initiative-heavy behavior trajectory.',
+        },
+        drift_total: {
+          label: 'Drift (Total)',
+          short: 'Total drift application count.',
+          definition: 'Cumulative drift events applied to behavior/policy.',
+          formula: 'keeper.drift_count_total',
+          source: 'keeper.drift_count_total',
+          interpretation: 'Track with top drift reason to understand adaptation direction.',
+        },
+        last_proactive: {
+          label: 'Last Proactive',
+          short: 'Elapsed time since latest proactive action.',
+          definition: 'Recency indicator of proactive activity.',
+          formula: 'keeper.last_proactive_ago_s -> humanized text',
+          source: 'keeper.last_proactive_ago_s',
+          interpretation: 'Long gap with high proactive target may indicate proactive stall.',
+        },
+        last_drift: {
+          label: 'Last Drift',
+          short: 'Most recent drift turn and reason snapshot.',
+          definition: 'Latest drift position in turn timeline with its reason.',
+          formula: 'last_drift_turn + last_drift_reason',
+          source: 'keeper.last_drift_turn, keeper.last_drift_reason',
+          interpretation: 'Recent drift reason often explains abrupt behavior changes.',
+        },
+        memory_focus: {
+          label: 'Memory Focus',
+          short: 'Top memory kind currently dominant.',
+          definition: 'Most frequent memory kind in current memory bank/window.',
+          formula: 'memory_top_kind',
+          source: 'keeper.memory_top_kind / memory_bank.top_kind',
+          interpretation: 'Helps identify what this keeper prioritizes remembering now.',
+        },
+        most_work: {
+          label: 'Most Work',
+          short: 'Most frequent work kind in current window.',
+          definition: 'Dominant work category in recent operations.',
+          formula: 'argmax(top_work_kinds.count)',
+          source: 'keeper.metrics_window.top_work_kinds[]',
+          interpretation: 'Useful for quickly identifying recent workload orientation.',
+        },
+        most_model: {
+          label: 'Most Model',
+          short: 'Most used model in current window.',
+          definition: 'Dominant model by usage count in recent window.',
+          formula: 'argmax(top_models.count)',
+          source: 'keeper.metrics_window.top_models[]',
+          interpretation: 'Confirms practical model usage beyond configured primary model.',
+        },
+        most_tool: {
+          label: 'Most Tool',
+          short: 'Most frequently invoked tool in current window.',
+          definition: 'Dominant tool by call count in recent operations.',
+          formula: 'argmax(top_tools.count)',
+          source: 'keeper.metrics_window.top_tools[]',
+          interpretation: 'Highlights operational bottleneck or preferred execution path.',
+        },
+        conversation_rows: {
+          label: 'Conversation Rows',
+          short: 'Tail rows shown vs raw rows collected.',
+          definition: 'Displayed conversation tail volume compared to raw captured rows.',
+          formula: 'conversation_tail_count / conversation_raw_count',
+          source: 'keeper.conversation_tail_count, keeper.conversation_raw_count',
+          interpretation: 'Large gap means heavy truncation/filtering in visible conversation.',
+        },
+        conversation_fragments: {
+          label: 'Conversation Fragments',
+          short: 'Fragment parse/filter status in conversation tail.',
+          definition: 'Quality indicator for split/fragmented conversation rows.',
+          formula: 'fragment badge + filtered fragment count',
+          source: 'keeper.conversation_fragment_*',
+          interpretation: 'High filtered fragments may reduce recall trace readability.',
+        },
+        k2k_edges: {
+          label: 'K2K Edges',
+          short: 'Keeper-to-keeper relay edge count.',
+          definition: 'Number of detected inter-keeper relay edges in conversation.',
+          formula: 'k2k_count',
+          source: 'keeper.k2k_count',
+          interpretation: 'Higher values indicate stronger inter-agent interaction density.',
+        },
+        k2k_mentions: {
+          label: 'K2K Mentions',
+          short: 'Top mention targets in K2K relay data.',
+          definition: 'Most frequent keeper mentions extracted from K2K trails.',
+          formula: 'topCounts(k2k_mentions)',
+          source: 'keeper.k2k_mentions',
+          interpretation: 'Shows which peers this keeper interacts with most.',
+        },
+      };
+      const glossaryEntry = (key) => {
+        const v = metricGlossary[key];
+        return (v && typeof v === 'object') ? v : null;
       };
       const glossaryTip = (key) => {
-        const v = metricGlossary[key];
-        return (typeof v === 'string' && v.trim() !== '') ? v.trim() : '';
+        const entry = glossaryEntry(key);
+        if (!entry) return '';
+        const shortValue = (typeof entry.short === 'string' && entry.short.trim() !== '')
+          ? entry.short.trim()
+          : '';
+        if (shortValue !== '') return shortValue;
+        return (typeof entry.definition === 'string' && entry.definition.trim() !== '')
+          ? entry.definition.trim()
+          : '';
       };
+      const glossaryFieldItemHtml = (label, value) => {
+        if (typeof value !== 'string' || value.trim() === '') return '';
+        return `<div class="keeper-field-item"><span class="keeper-field-item-label">${escHtml(label)}</span><span class="keeper-field-item-value">${escHtml(value.trim())}</span></div>`;
+      };
+      const glossaryFieldDetailHtml = (keys) =>
+        keys.map((key) => {
+          const entry = glossaryEntry(key);
+          if (!entry) return '';
+          const label = (typeof entry.label === 'string' && entry.label.trim() !== '')
+            ? entry.label.trim()
+            : key;
+          const body = [
+            glossaryFieldItemHtml('Definition', entry.definition),
+            glossaryFieldItemHtml('Formula', entry.formula),
+            glossaryFieldItemHtml('Source', entry.source),
+            glossaryFieldItemHtml('Interpret', entry.interpretation),
+          ].filter((x) => x !== '').join('');
+          if (body === '') return '';
+          return `<div class="keeper-field-row"><div class="keeper-field-head"><span class="keeper-field-title">${escHtml(label)}</span><code class="keeper-field-key">${escHtml(key)}</code></div>${body}</div>`;
+        }).filter((x) => x !== '').join('');
+      const glossaryDetailHtml = glossaryFieldDetailHtml([
+        'context_ratio',
+        'handoff_threshold',
+        'handoff_risk',
+        'risk_confidence',
+        'handoff_eta',
+        'display_zoom',
+        'metrics_window',
+        'window_points',
+        'model_fallback',
+        'proactive_template_fallback',
+        'proactive_similarity',
+        'drift_window',
+        'intervention_share',
+        'top_drift_reason',
+        'top_compaction_trigger',
+        'window_handoff_compaction',
+        'window_compaction_saved',
+        'compaction_efficiency',
+        'memory_pass',
+        'memory_score',
+        'weather_recall',
+        'memory_corrections',
+        'memory_notes',
+        'memory_compact',
+        'memory_trim_rate',
+        'tool_calls',
+        'soul_profile',
+        'will',
+        'needs',
+        'desires',
+        'active_model',
+        'next_model',
+        'primary_model',
+        'skill_route',
+        'total_turns',
+        'io_tokens',
+        'total_tokens',
+        'total_cost',
+        'born_at',
+        'updated_at',
+        'handoffs_total',
+        'compactions_total',
+        'compaction_profile',
+        'proactive_total',
+        'drift_total',
+        'last_proactive',
+        'last_drift',
+        'memory_focus',
+        'most_work',
+        'most_model',
+        'most_tool',
+        'conversation_rows',
+        'conversation_fragments',
+        'k2k_edges',
+        'k2k_mentions',
+      ]);
       const kpiLabelHtml = (label, key) => {
         const tip = glossaryTip(key);
         if (!tip) return `<div class="keeper-kpi-label">${escHtml(label)}</div>`;
@@ -2925,31 +3483,31 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
       content.innerHTML = `
         <div class="keeper-kpis">
-          <div class="keeper-kpi"><div class="keeper-kpi-label">SOUL Profile</div><div class="keeper-kpi-value">${escHtml(soulProfile)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Will (의지)</div><div class="keeper-kpi-value">${escHtml(willKpi)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Needs (니즈)</div><div class="keeper-kpi-value">${escHtml(needsKpi)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Desires (욕구)</div><div class="keeper-kpi-value">${escHtml(desiresKpi)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Active Model</div><div class="keeper-kpi-value">${escHtml(modelUsed)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Next Model</div><div class="keeper-kpi-value">${escHtml(nextModel)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Primary Model</div><div class="keeper-kpi-value">${escHtml(primaryModel || '-')}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Skill Route</div><div class="keeper-kpi-value">${escHtml(skillRouteText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('SOUL Profile', 'soul_profile')}<div class="keeper-kpi-value">${escHtml(soulProfile)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Will (의지)', 'will')}<div class="keeper-kpi-value">${escHtml(willKpi)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Needs (니즈)', 'needs')}<div class="keeper-kpi-value">${escHtml(needsKpi)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Desires (욕구)', 'desires')}<div class="keeper-kpi-value">${escHtml(desiresKpi)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Active Model', 'active_model')}<div class="keeper-kpi-value">${escHtml(modelUsed)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Next Model', 'next_model')}<div class="keeper-kpi-value">${escHtml(nextModel)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Primary Model', 'primary_model')}<div class="keeper-kpi-value">${escHtml(primaryModel || '-')}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Skill Route', 'skill_route')}<div class="keeper-kpi-value">${escHtml(skillRouteText)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Context', 'context_ratio')}<div class="keeper-kpi-value">${escHtml(ratioPct)} (${fmtInt(ctx.context_tokens)}/${fmtInt(ctx.context_max)})</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Handoff Threshold', 'handoff_threshold')}<div class="keeper-kpi-value">${Math.round(th * 100)}%</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Handoff Risk', 'handoff_risk')}<div class="keeper-kpi-value">${riskText} (${riskLevelText})</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Risk Confidence', 'risk_confidence')}<div class="keeper-kpi-value">${escHtml(confidenceText)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Total Turns</div><div class="keeper-kpi-value">${fmtInt(keeper.total_turns)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Input / Output</div><div class="keeper-kpi-value">${fmtInt(keeper.total_input_tokens)} / ${fmtInt(keeper.total_output_tokens)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Total Tokens</div><div class="keeper-kpi-value">${fmtInt(keeper.total_tokens)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Total Cost</div><div class="keeper-kpi-value">${fmtUsd(keeper.total_cost_usd)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Born At</div><div class="keeper-kpi-value">${escHtml(bornAtText)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Updated At</div><div class="keeper-kpi-value">${escHtml(updatedAtText)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Handoffs (Total)</div><div class="keeper-kpi-value">${fmtInt(keeper.handoff_count_total)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Compactions (Total)</div><div class="keeper-kpi-value">${fmtInt(keeper.compaction_count)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Compaction Profile</div><div class="keeper-kpi-value">${escHtml(keeper.compaction_profile || 'custom')}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Proactive (Total)</div><div class="keeper-kpi-value">${fmtInt(keeper.proactive_count_total)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Drift (Total)</div><div class="keeper-kpi-value">${fmtInt(keeper.drift_count_total)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Last Proactive</div><div class="keeper-kpi-value">${escHtml(proactiveLastAgoText)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Last Drift</div><div class="keeper-kpi-value">${fmtInt(keeper.last_drift_turn)} / ${escHtml(shortText(keeper.last_drift_reason || '-', 36))}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Total Turns', 'total_turns')}<div class="keeper-kpi-value">${fmtInt(keeper.total_turns)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Input / Output', 'io_tokens')}<div class="keeper-kpi-value">${fmtInt(keeper.total_input_tokens)} / ${fmtInt(keeper.total_output_tokens)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Total Tokens', 'total_tokens')}<div class="keeper-kpi-value">${fmtInt(keeper.total_tokens)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Total Cost', 'total_cost')}<div class="keeper-kpi-value">${fmtUsd(keeper.total_cost_usd)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Born At', 'born_at')}<div class="keeper-kpi-value">${escHtml(bornAtText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Updated At', 'updated_at')}<div class="keeper-kpi-value">${escHtml(updatedAtText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Handoffs (Total)', 'handoffs_total')}<div class="keeper-kpi-value">${fmtInt(keeper.handoff_count_total)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Compactions (Total)', 'compactions_total')}<div class="keeper-kpi-value">${fmtInt(keeper.compaction_count)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Compaction Profile', 'compaction_profile')}<div class="keeper-kpi-value">${escHtml(keeper.compaction_profile || 'custom')}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Proactive (Total)', 'proactive_total')}<div class="keeper-kpi-value">${fmtInt(keeper.proactive_count_total)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Drift (Total)', 'drift_total')}<div class="keeper-kpi-value">${fmtInt(keeper.drift_count_total)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Last Proactive', 'last_proactive')}<div class="keeper-kpi-value">${escHtml(proactiveLastAgoText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Last Drift', 'last_drift')}<div class="keeper-kpi-value">${fmtInt(keeper.last_drift_turn)} / ${escHtml(shortText(keeper.last_drift_reason || '-', 36))}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Proactive Template Fallback', 'proactive_template_fallback')}<div class="${proactiveFallbackKpiClass}" title="formula: proactive_template_fallback_count / proactive_template_fallback_denominator">${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)}) ${proactiveFallbackBadge}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Proactive Similarity', 'proactive_similarity')}<div class="${proactiveSimilarityKpiClass}" title="formula: ${escHtml(proactivePreviewSimilarityMethodLabel)}, window<=${fmtInt(proactivePreviewSimilarityWindow)}">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; pairs ${fmtInt(proactivePreviewPairCount)}) ${proactiveSimilarityBadge}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Drift Window', 'drift_window')}<div class="keeper-kpi-value">${fmtInt(driftAppliedCount)} / ${fmtInt(interactionPoints)} (${driftAppliedRate === null ? '-' : fmtPct1(driftAppliedRate)})</div></div>
@@ -2967,16 +3525,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi">${kpiLabelHtml('Memory Notes', 'memory_notes')}<div class="keeper-kpi-value">${fmtInt(memoryNoteCount)} (+${fmtInt(memoryNotesAddedWindow)} window)</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Memory Compact', 'memory_compact')}<div class="keeper-kpi-value">${fmtInt(memoryCompactionEvents)} events / ${fmtInt(memoryCompactionDroppedNotes)} dropped</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Memory Trim Rate', 'memory_trim_rate')}<div class="keeper-kpi-value">${memoryCompactionDropRatio === null ? '-' : fmtPct1(memoryCompactionDropRatio)} (${memoryCompactionDropAvg === null ? '-' : fmtInt(memoryCompactionDropAvg) + '/event'})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Focus</div><div class="keeper-kpi-value">${escHtml(memoryTopKind)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Most Work</div><div class="keeper-kpi-value">${escHtml(topWorkName)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Most Model</div><div class="keeper-kpi-value">${escHtml(topModelName)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Most Tool</div><div class="keeper-kpi-value">${escHtml(topToolName)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Memory Focus', 'memory_focus')}<div class="keeper-kpi-value">${escHtml(memoryTopKind)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Most Work', 'most_work')}<div class="keeper-kpi-value">${escHtml(topWorkName)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Most Model', 'most_model')}<div class="keeper-kpi-value">${escHtml(topModelName)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Most Tool', 'most_tool')}<div class="keeper-kpi-value">${escHtml(topToolName)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Tool Calls', 'tool_calls')}<div class="keeper-kpi-value">${fmtInt(toolCallCount)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Window Points', 'window_points')}<div class="keeper-kpi-value">${fmtInt(windowSamplePoints)} total · ${fmtInt(turnPoints)}t / ${fmtInt(proactivePoints)}p / ${fmtInt(heartbeatPoints)}h</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Conversation Rows</div><div class="keeper-kpi-value">${fmtInt(conversationTailCount)} / raw ${fmtInt(conversationRawCount)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Conversation Fragments</div><div class="keeper-kpi-value">${escHtml(fragmentBadgeText)}${conversationFragmentFilterEnabled ? ` (filtered ${fmtInt(conversationFragmentFilteredCount)})` : ''}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">K2K Edges</div><div class="keeper-kpi-value">${fmtInt(k2kCount)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">K2K Mentions</div><div class="keeper-kpi-value">${escHtml(k2kMentionsText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Conversation Rows', 'conversation_rows')}<div class="keeper-kpi-value">${fmtInt(conversationTailCount)} / raw ${fmtInt(conversationRawCount)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Conversation Fragments', 'conversation_fragments')}<div class="keeper-kpi-value">${escHtml(fragmentBadgeText)}${conversationFragmentFilterEnabled ? ` (filtered ${fmtInt(conversationFragmentFilteredCount)})` : ''}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('K2K Edges', 'k2k_edges')}<div class="keeper-kpi-value">${fmtInt(k2kCount)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('K2K Mentions', 'k2k_mentions')}<div class="keeper-kpi-value">${escHtml(k2kMentionsText)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Handoff ETA', 'handoff_eta')}<div class="keeper-kpi-value">${escHtml(etaText)}</div></div>
         </div>
         ${compareHtml}
@@ -3157,6 +3715,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
               <span><b>drift window</b> ${escHtml(glossaryTip('drift_window'))}</span>
               <span><b>window handoff/compaction</b> ${escHtml(glossaryTip('window_handoff_compaction'))}</span>
               <span><b>window compaction saved</b> ${escHtml(glossaryTip('window_compaction_saved'))}</span>
+            </div>
+          </div>
+          <div class="keeper-chart-card">
+            <div class="keeper-chart-title">Field Dictionary (Detailed)</div>
+            <div class="keeper-field-dictionary">
+              ${glossaryDetailHtml}
             </div>
           </div>
           <div class="keeper-chart-card">

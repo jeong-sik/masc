@@ -623,6 +623,8 @@ let keeper_metrics_24h_json
            ("proactive_fallback_rate", `Float proactive_fallback_rate);
            ("proactive_template_fallback_count", `Int b.proactive_fallback_count);
            ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
+           ("proactive_template_fallback_numerator", `Int b.proactive_fallback_count);
+           ("proactive_template_fallback_denominator", `Int b.proactive_points);
          ])
   in
   let bucket_count = List.length rows in
@@ -647,6 +649,8 @@ let keeper_metrics_24h_json
       ("proactive_fallback_rate", `Float proactive_fallback_rate);
       ("proactive_template_fallback_count", `Int !proactive_fallback_count);
       ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
+      ("proactive_template_fallback_numerator", `Int !proactive_fallback_count);
+      ("proactive_template_fallback_denominator", `Int !proactive_points);
     ]
   in
   (`List rows, summary)
@@ -1326,13 +1330,14 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
                 ~min_v:0.0
                 ~max_v:1.0
             in
+            let proactive_similarity_window = 8 in
             let ( proactive_preview_sample_count,
                   proactive_preview_pair_count,
                   proactive_preview_similarity_avg,
                   proactive_preview_similarity_max,
                   proactive_preview_similarity_warn ) =
               proactive_preview_similarity_stats
-                ~window:8
+                ~window:proactive_similarity_window
                 ~warn_threshold:proactive_similarity_warn_threshold
                 proactive_previews
             in
@@ -1450,10 +1455,14 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               ("fallback_rate", `Float fallback_rate);
               ("model_fallback_count", `Int !fallback_count);
               ("model_fallback_rate", `Float fallback_rate);
+              ("model_fallback_numerator", `Int !fallback_count);
+              ("model_fallback_denominator", `Int interaction_points_int);
               ("proactive_fallback_count", `Int !proactive_fallback_count);
               ("proactive_fallback_rate", `Float proactive_fallback_rate);
               ("proactive_template_fallback_count", `Int !proactive_fallback_count);
               ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
+              ("proactive_template_fallback_numerator", `Int !proactive_fallback_count);
+              ("proactive_template_fallback_denominator", `Int proactive_points_int);
               ("intervention_share", `Float intervention_share);
               ("intervention_per_turn", `Float intervention_per_turn);
               ("drift_applied_count", `Int !drift_applied_count);
@@ -1463,6 +1472,8 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               ("proactive_preview_similarity_avg", `Float proactive_preview_similarity_avg);
               ("proactive_preview_similarity_max", `Float proactive_preview_similarity_max);
               ("proactive_preview_similarity_warn", `Bool proactive_preview_similarity_warn);
+              ("proactive_preview_similarity_method", `String "jaccard_adjacent_preview");
+              ("proactive_preview_similarity_window", `Int proactive_similarity_window);
               ("tool_call_count", `Int !tool_call_count);
               ("memory_checks", `Int !memory_checks);
               ("memory_passed", `Int !memory_passed);

@@ -2492,11 +2492,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
         ? Number(windowStats.drift_applied_count)
         : series.filter(p => p && p.drift_applied).length;
       const interactionPoints = turnPoints + proactivePoints;
+      const modelFallbackNumerator = isNum(windowStats.model_fallback_numerator)
+        ? Number(windowStats.model_fallback_numerator)
+        : modelFallbackCount;
+      const modelFallbackDenominator = isNum(windowStats.model_fallback_denominator)
+        ? Number(windowStats.model_fallback_denominator)
+        : interactionPoints;
       const modelFallbackRate = isNum(windowStats.model_fallback_rate)
         ? Number(windowStats.model_fallback_rate)
         : (isNum(windowStats.fallback_rate)
             ? Number(windowStats.fallback_rate)
-            : (interactionPoints > 0 ? (modelFallbackCount / interactionPoints) : null));
+            : (modelFallbackDenominator > 0 ? (modelFallbackNumerator / modelFallbackDenominator) : null));
       const driftAppliedRate = isNum(windowStats.drift_applied_rate)
         ? Number(windowStats.drift_applied_rate)
         : (interactionPoints > 0 ? (driftAppliedCount / interactionPoints) : null);
@@ -2521,11 +2527,19 @@ let cached_html = lazy ({|<!DOCTYPE html>
         : (isNum(windowStats.proactive_fallback_count)
             ? Number(windowStats.proactive_fallback_count)
             : series.filter(p => p && p.channel === 'proactive' && p.proactive_fallback_applied).length);
+      const proactiveTemplateFallbackNumerator = isNum(windowStats.proactive_template_fallback_numerator)
+        ? Number(windowStats.proactive_template_fallback_numerator)
+        : proactiveTemplateFallbackCount;
+      const proactiveTemplateFallbackDenominator = isNum(windowStats.proactive_template_fallback_denominator)
+        ? Number(windowStats.proactive_template_fallback_denominator)
+        : proactivePoints;
       const proactiveTemplateFallbackRate = isNum(windowStats.proactive_template_fallback_rate)
         ? Number(windowStats.proactive_template_fallback_rate)
         : (isNum(windowStats.proactive_fallback_rate)
             ? Number(windowStats.proactive_fallback_rate)
-            : (proactivePoints > 0 ? (proactiveTemplateFallbackCount / proactivePoints) : null));
+            : (proactiveTemplateFallbackDenominator > 0
+                ? (proactiveTemplateFallbackNumerator / proactiveTemplateFallbackDenominator)
+                : null));
       const proactivePreviewSampleCount = isNum(windowStats.proactive_preview_sample_count)
         ? Number(windowStats.proactive_preview_sample_count)
         : 0;
@@ -2538,6 +2552,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const proactivePreviewSimilarityMax = isNum(windowStats.proactive_preview_similarity_max)
         ? Number(windowStats.proactive_preview_similarity_max)
         : null;
+      const proactivePreviewSimilarityMethod =
+        (typeof windowStats.proactive_preview_similarity_method === 'string'
+          && windowStats.proactive_preview_similarity_method.trim() !== '')
+          ? windowStats.proactive_preview_similarity_method.trim()
+          : 'jaccard_adjacent_preview';
+      const proactivePreviewSimilarityMethodLabel =
+        proactivePreviewSimilarityMethod === 'jaccard_adjacent_preview'
+          ? 'Jaccard(adjacent proactive previews)'
+          : proactivePreviewSimilarityMethod;
+      const proactivePreviewSimilarityWindow = isNum(windowStats.proactive_preview_similarity_window)
+        ? Number(windowStats.proactive_preview_similarity_window)
+        : 8;
       const proactivePreviewSimilarityWarn =
         !!windowStats.proactive_preview_similarity_warn
         || (isNum(proactivePreviewSimilarityMax) && proactivePreviewSimilarityMax >= alertThresholds.proactive_similarity_warn);
@@ -2645,11 +2671,19 @@ let cached_html = lazy ({|<!DOCTYPE html>
                   : (isNum(row && row.proactive_fallback_count) ? Number(row.proactive_fallback_count) : 0);
                 return acc + v;
               }, 0));
+      const metrics24hFallbackNumerator = isNum(metrics24hSummary.proactive_template_fallback_numerator)
+        ? Number(metrics24hSummary.proactive_template_fallback_numerator)
+        : metrics24hFallbackCount;
+      const metrics24hFallbackDenominator = isNum(metrics24hSummary.proactive_template_fallback_denominator)
+        ? Number(metrics24hSummary.proactive_template_fallback_denominator)
+        : metrics24hProactivePoints;
       const metrics24hFallbackRate = isNum(metrics24hSummary.proactive_template_fallback_rate)
         ? Number(metrics24hSummary.proactive_template_fallback_rate)
         : (isNum(metrics24hSummary.proactive_fallback_rate)
             ? Number(metrics24hSummary.proactive_fallback_rate)
-            : (metrics24hProactivePoints > 0 ? (metrics24hFallbackCount / metrics24hProactivePoints) : null));
+            : (metrics24hFallbackDenominator > 0
+                ? (metrics24hFallbackNumerator / metrics24hFallbackDenominator)
+                : null));
       const metrics24hStartTs =
         metrics24h.length > 0 && isNum(metrics24h[0].bucket_ts_unix)
           ? Number(metrics24h[0].bucket_ts_unix)
@@ -2838,8 +2872,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Drift (Total)</div><div class="keeper-kpi-value">${fmtInt(keeper.drift_count_total)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Last Proactive</div><div class="keeper-kpi-value">${escHtml(proactiveLastAgoText)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Last Drift</div><div class="keeper-kpi-value">${fmtInt(keeper.last_drift_turn)} / ${escHtml(shortText(keeper.last_drift_reason || '-', 36))}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Proactive Template Fallback</div><div class="${proactiveFallbackKpiClass}" title="formula: proactive_template_fallback_count / proactive_points">${fmtInt(proactiveTemplateFallbackCount)} / ${fmtInt(proactivePoints)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)}) ${proactiveFallbackBadge}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Proactive Similarity</div><div class="${proactiveSimilarityKpiClass}" title="formula: Jaccard(adjacent proactive previews), window<=8">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; pairs ${fmtInt(proactivePreviewPairCount)}) ${proactiveSimilarityBadge}</div></div>
+          <div class="keeper-kpi"><div class="keeper-kpi-label">Proactive Template Fallback</div><div class="${proactiveFallbackKpiClass}" title="formula: proactive_template_fallback_count / proactive_template_fallback_denominator">${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)}) ${proactiveFallbackBadge}</div></div>
+          <div class="keeper-kpi"><div class="keeper-kpi-label">Proactive Similarity</div><div class="${proactiveSimilarityKpiClass}" title="formula: ${escHtml(proactivePreviewSimilarityMethodLabel)}, window<=${fmtInt(proactivePreviewSimilarityWindow)}">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; pairs ${fmtInt(proactivePreviewPairCount)}) ${proactiveSimilarityBadge}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Drift Window</div><div class="keeper-kpi-value">${fmtInt(driftAppliedCount)} / ${fmtInt(interactionPoints)} (${driftAppliedRate === null ? '-' : fmtPct1(driftAppliedRate)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Intervention Share</div><div class="keeper-kpi-value">${interventionShare === null ? '-' : fmtPct1(interventionShare)} (per-turn ${interventionPerTurn === null ? '-' : interventionPerTurn.toFixed(2)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Top Drift Reason</div><div class="keeper-kpi-value">${escHtml(topDriftReason)}</div></div>
@@ -2847,7 +2881,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Window H/C</div><div class="keeper-kpi-value">${fmtInt(windowStats.handoff_count)}/${fmtInt(windowStats.compaction_events)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Window Saved</div><div class="keeper-kpi-value">${fmtInt(windowStats.compaction_saved_tokens)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Compaction Efficiency</div><div class="keeper-kpi-value">${compactionSavedRatio === null ? '-' : fmtPct1(compactionSavedRatio)} (${avgCompactionSaved === null ? '-' : fmtInt(avgCompactionSaved) + '/event'})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Model Fallback Rate</div><div class="keeper-kpi-value" title="formula: model_fallback_count / (turn_points + proactive_points)">${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} (${fmtInt(modelFallbackCount)}/${fmtInt(interactionPoints)})</div></div>
+          <div class="keeper-kpi"><div class="keeper-kpi-label">Model Fallback Rate</div><div class="keeper-kpi-value" title="formula: model_fallback_count / model_fallback_denominator">${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} (${fmtInt(modelFallbackNumerator)}/${fmtInt(modelFallbackDenominator)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Pass</div><div class="keeper-kpi-value">${memoryPassRate === null ? '-' : fmtPct1(memoryPassRate)} (${fmtInt(memoryPassed)}/${fmtInt(memoryChecks)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Score</div><div class="keeper-kpi-value">${memoryAvgScore === null ? '-' : (Math.round(memoryAvgScore * 1000) / 1000).toFixed(3)} / ${memoryThreshold.toFixed(2)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Weather Recall</div><div class="keeper-kpi-value">${memoryWeatherPassRate === null ? '-' : fmtPct1(memoryWeatherPassRate)} (${fmtInt(memoryWeatherPassed)}/${fmtInt(memoryWeatherChecks)})</div></div>
@@ -2913,7 +2947,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
               <span><b>input total</b> ${fmtInt(keeper.total_input_tokens)}</span>
               <span><b>output total</b> ${fmtInt(keeper.total_output_tokens)}</span>
               <span><b>last turn</b> ${fmtInt((keeper.last_usage || {}).input_tokens)} / ${fmtInt((keeper.last_usage || {}).output_tokens)}</span>
-              <span title="formula: model_fallback_count / (turn_points + proactive_points)"><b>model fallback</b> ${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)}</span>
+              <span title="formula: model_fallback_count / model_fallback_denominator"><b>model fallback</b> ${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)}</span>
               <span><b>memory pass</b> ${memoryPassRate === null ? '-' : fmtPct1(memoryPassRate)}</span>
               <span><b>weather</b> ${memoryWeatherPassRate === null ? '-' : fmtPct1(memoryWeatherPassRate)}</span>
               <span><b>work</b> ${escHtml(topWorkName)}</span>
@@ -2982,7 +3016,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             </div>
             <div class="keeper-chart" style="margin-top:8px">${metrics24hFallbackChart}</div>
             <div class="keeper-chart-meta">
-              <span title="formula: proactive_template_fallback_count / proactive_points (24h buckets)"><b>proactive template fallback</b> <span class="${metrics24hFallbackClass}">${fmtInt(metrics24hFallbackCount)} / ${fmtInt(metrics24hProactivePoints)} (${metrics24hFallbackRate === null ? '-' : fmtPct1(metrics24hFallbackRate)})</span></span>
+              <span title="formula: proactive_template_fallback_count / proactive_template_fallback_denominator (24h buckets)"><b>proactive template fallback</b> <span class="${metrics24hFallbackClass}">${fmtInt(metrics24hFallbackNumerator)} / ${fmtInt(metrics24hFallbackDenominator)} (${metrics24hFallbackRate === null ? '-' : fmtPct1(metrics24hFallbackRate)})</span></span>
               <span><b>state</b> ${metrics24hFallbackState}</span>
               <span><b>warn/bad</b> ${fmtPct1(alertThresholds.proactive_fallback_warn)} / ${fmtPct1(alertThresholds.proactive_fallback_bad)}</span>
             </div>
@@ -3007,8 +3041,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
               <span><b>last drift reason</b> ${escHtml(shortText(keeper.last_drift_reason || '-', 60))}</span>
               <span><b>skill route</b> ${escHtml(skillRouteText)}</span>
               <span><b>skill reason</b> ${escHtml(skillReason)}</span>
-              <span title="formula: proactive_template_fallback_count / proactive_points"><b>proactive template fallback</b> <span class="${proactiveFallbackState === 'bad' ? 'bad-metric' : (proactiveFallbackState === 'warn' ? 'warn-metric' : '')}">${fmtInt(proactiveTemplateFallbackCount)} / ${fmtInt(proactivePoints)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)})</span></span>
-              <span title="formula: Jaccard(adjacent proactive previews), window<=8"><b>proactive similarity</b> <span class="${proactiveSimilarityState === 'bad' ? 'bad-metric' : (proactiveSimilarityState === 'warn' ? 'warn-metric' : '')}">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; samples ${fmtInt(proactivePreviewSampleCount)})</span></span>
+              <span title="formula: proactive_template_fallback_count / proactive_template_fallback_denominator"><b>proactive template fallback</b> <span class="${proactiveFallbackState === 'bad' ? 'bad-metric' : (proactiveFallbackState === 'warn' ? 'warn-metric' : '')}">${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)})</span></span>
+              <span title="formula: ${escHtml(proactivePreviewSimilarityMethodLabel)}, window<=${fmtInt(proactivePreviewSimilarityWindow)}"><b>proactive similarity</b> <span class="${proactiveSimilarityState === 'bad' ? 'bad-metric' : (proactiveSimilarityState === 'warn' ? 'warn-metric' : '')}">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; samples ${fmtInt(proactivePreviewSampleCount)})</span></span>
               <span><b>last handoff model</b> ${escHtml((keeper.last_handoff_event || {}).to_model || '-')}</span>
               <span><b>last compaction saved</b> ${fmtInt(keeper.last_compaction_saved_tokens)}</span>
               <span><b>compaction efficiency</b> ${compactionSavedRatio === null ? '-' : fmtPct1(compactionSavedRatio)}</span>
@@ -3021,11 +3055,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-chart-card">
             <div class="keeper-chart-title">Metric Formula</div>
             <div class="keeper-chart-meta">
-              <span><b>model fallback</b> ${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} = ${fmtInt(modelFallbackCount)} / ${fmtInt(interactionPoints)} (turn+proactive)</span>
-              <span><b>template fallback</b> ${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)} = ${fmtInt(proactiveTemplateFallbackCount)} / ${fmtInt(proactivePoints)} (proactive only)</span>
+              <span><b>model fallback</b> ${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} = ${fmtInt(modelFallbackNumerator)} / ${fmtInt(modelFallbackDenominator)}</span>
+              <span><b>template fallback</b> ${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)} = ${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)}</span>
               <span><b>similarity avg/max</b> ${proactiveSimilarityText}</span>
-              <span><b>similarity pairs</b> ${fmtInt(proactivePreviewPairCount)} from ${fmtInt(proactivePreviewSampleCount)} samples (window <= 8)</span>
-              <span><b>similarity method</b> Jaccard(adjacent proactive preview text)</span>
+              <span><b>similarity pairs</b> ${fmtInt(proactivePreviewPairCount)} from ${fmtInt(proactivePreviewSampleCount)} samples (window <= ${fmtInt(proactivePreviewSimilarityWindow)})</span>
+              <span><b>similarity method</b> ${escHtml(proactivePreviewSimilarityMethodLabel)} (${escHtml(proactivePreviewSimilarityMethod)})</span>
               <span><b>warn/bad threshold</b> template ${fmtPct1(alertThresholds.proactive_fallback_warn)}/${fmtPct1(alertThresholds.proactive_fallback_bad)}, similarity ${fmtPct1(alertThresholds.proactive_similarity_warn)}/${fmtPct1(alertThresholds.proactive_similarity_bad)}</span>
             </div>
           </div>

@@ -379,6 +379,29 @@ let cached_html = lazy ({|<!DOCTYPE html>
       text-transform: uppercase;
       letter-spacing: 0.4px;
     }
+    .keeper-hint {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      margin-left: 4px;
+      border-radius: 999px;
+      border: 1px solid rgba(34,211,238,0.45);
+      background: rgba(34,211,238,0.14);
+      color: #67e8f9;
+      font-size: 10px;
+      font-weight: 700;
+      vertical-align: middle;
+      cursor: help;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .keeper-hint:hover {
+      border-color: rgba(74,222,128,0.6);
+      color: #bbf7d0;
+      background: rgba(74,222,128,0.16);
+    }
     .keeper-kpi-value {
       color: #e2e8f0;
       font-size: 15px;
@@ -2357,6 +2380,26 @@ let cached_html = lazy ({|<!DOCTYPE html>
         : {};
       const ratioColor = keeperColorByRatio(ratio);
       const primaryModel = windowStats.primary_model || keeper.primary_model || ((Array.isArray(keeper.models) && keeper.models[0]) ? keeper.models[0] : '-');
+      const metricGlossary = {
+        display_zoom: 'Display zoom applies to chart rendering only (last N points); backend metrics_window aggregation does not change.',
+        metrics_window: 'Metrics window is built from recent keeper metric rows loaded from file with max_lines/max_bytes caps.',
+        window_points: 'Window points = sampled rows in the current metrics window. Breakdown is turn/proactive/heartbeat channels.',
+        model_fallback: 'Model fallback rate = model_fallback_count / model_fallback_denominator. Denominator uses interaction points (turn + proactive) within metrics window.',
+        proactive_template_fallback: 'Proactive template fallback rate = proactive_template_fallback_count / proactive_template_fallback_denominator. Denominator uses proactive points only.',
+        proactive_similarity: 'Proactive similarity compares adjacent proactive preview texts. High similarity implies repetitive proactive responses.',
+        drift_window: 'Drift window rate = drift_applied_count / window_interactions in the same metrics window.',
+        window_handoff_compaction: 'Window handoff/compaction counts show how many handoffs and compactions occurred inside the current metrics window.',
+        window_compaction_saved: 'Window compaction saved = total tokens reduced by compaction events in the current metrics window.',
+      };
+      const glossaryTip = (key) => {
+        const v = metricGlossary[key];
+        return (typeof v === 'string' && v.trim() !== '') ? v.trim() : '';
+      };
+      const kpiLabelHtml = (label, key) => {
+        const tip = glossaryTip(key);
+        if (!tip) return `<div class="keeper-kpi-label">${escHtml(label)}</div>`;
+        return `<div class="keeper-kpi-label">${escHtml(label)} <span class="keeper-hint" title="${escHtml(tip)}">?</span></div>`;
+      };
 
       let modelFallbackCount = isNum(windowStats.model_fallback_count)
         ? Number(windowStats.model_fallback_count)
@@ -2884,16 +2927,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Drift (Total)</div><div class="keeper-kpi-value">${fmtInt(keeper.drift_count_total)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Last Proactive</div><div class="keeper-kpi-value">${escHtml(proactiveLastAgoText)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Last Drift</div><div class="keeper-kpi-value">${fmtInt(keeper.last_drift_turn)} / ${escHtml(shortText(keeper.last_drift_reason || '-', 36))}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Proactive Template Fallback</div><div class="${proactiveFallbackKpiClass}" title="formula: proactive_template_fallback_count / proactive_template_fallback_denominator">${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)}) ${proactiveFallbackBadge}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Proactive Similarity</div><div class="${proactiveSimilarityKpiClass}" title="formula: ${escHtml(proactivePreviewSimilarityMethodLabel)}, window<=${fmtInt(proactivePreviewSimilarityWindow)}">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; pairs ${fmtInt(proactivePreviewPairCount)}) ${proactiveSimilarityBadge}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Drift Window</div><div class="keeper-kpi-value">${fmtInt(driftAppliedCount)} / ${fmtInt(interactionPoints)} (${driftAppliedRate === null ? '-' : fmtPct1(driftAppliedRate)})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Proactive Template Fallback', 'proactive_template_fallback')}<div class="${proactiveFallbackKpiClass}" title="formula: proactive_template_fallback_count / proactive_template_fallback_denominator">${fmtInt(proactiveTemplateFallbackNumerator)} / ${fmtInt(proactiveTemplateFallbackDenominator)} (${proactiveTemplateFallbackRate === null ? '-' : fmtPct1(proactiveTemplateFallbackRate)}) ${proactiveFallbackBadge}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Proactive Similarity', 'proactive_similarity')}<div class="${proactiveSimilarityKpiClass}" title="formula: ${escHtml(proactivePreviewSimilarityMethodLabel)}, window<=${fmtInt(proactivePreviewSimilarityWindow)}">${escHtml(proactiveSimilarityText)} (${proactiveSimilarityState}; pairs ${fmtInt(proactivePreviewPairCount)}) ${proactiveSimilarityBadge}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Drift Window', 'drift_window')}<div class="keeper-kpi-value">${fmtInt(driftAppliedCount)} / ${fmtInt(interactionPoints)} (${driftAppliedRate === null ? '-' : fmtPct1(driftAppliedRate)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Intervention Share</div><div class="keeper-kpi-value">${interventionShare === null ? '-' : fmtPct1(interventionShare)} (per-turn ${interventionPerTurn === null ? '-' : interventionPerTurn.toFixed(2)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Top Drift Reason</div><div class="keeper-kpi-value">${escHtml(topDriftReason)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Top Compact Trigger</div><div class="keeper-kpi-value">${escHtml(topCompactionTrigger)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Window Handoff/Compaction</div><div class="keeper-kpi-value">${fmtInt(windowStats.handoff_count)}/${fmtInt(windowStats.compaction_events)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Window Compaction Saved</div><div class="keeper-kpi-value">${fmtInt(windowStats.compaction_saved_tokens)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Window Handoff/Compaction', 'window_handoff_compaction')}<div class="keeper-kpi-value">${fmtInt(windowStats.handoff_count)}/${fmtInt(windowStats.compaction_events)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Window Compaction Saved', 'window_compaction_saved')}<div class="keeper-kpi-value">${fmtInt(windowStats.compaction_saved_tokens)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Compaction Efficiency</div><div class="keeper-kpi-value">${compactionSavedRatio === null ? '-' : fmtPct1(compactionSavedRatio)} (${avgCompactionSaved === null ? '-' : fmtInt(avgCompactionSaved) + '/event'})</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Model Fallback Rate</div><div class="keeper-kpi-value" title="formula: model_fallback_count / model_fallback_denominator">${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} (${fmtInt(modelFallbackNumerator)}/${fmtInt(modelFallbackDenominator)})</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Model Fallback Rate', 'model_fallback')}<div class="keeper-kpi-value" title="formula: model_fallback_count / model_fallback_denominator">${modelFallbackRate === null ? '-' : fmtPct1(modelFallbackRate)} (${fmtInt(modelFallbackNumerator)}/${fmtInt(modelFallbackDenominator)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Pass</div><div class="keeper-kpi-value">${memoryPassRate === null ? '-' : fmtPct1(memoryPassRate)} (${fmtInt(memoryPassed)}/${fmtInt(memoryChecks)})</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Memory Score</div><div class="keeper-kpi-value">${memoryAvgScore === null ? '-' : (Math.round(memoryAvgScore * 1000) / 1000).toFixed(3)} / ${memoryThreshold.toFixed(2)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Weather Recall</div><div class="keeper-kpi-value">${memoryWeatherPassRate === null ? '-' : fmtPct1(memoryWeatherPassRate)} (${fmtInt(memoryWeatherPassed)}/${fmtInt(memoryWeatherChecks)})</div></div>
@@ -2906,7 +2949,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Most Model</div><div class="keeper-kpi-value">${escHtml(topModelName)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Most Tool</div><div class="keeper-kpi-value">${escHtml(topToolName)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Tool Calls</div><div class="keeper-kpi-value">${fmtInt(toolCallCount)}</div></div>
-          <div class="keeper-kpi"><div class="keeper-kpi-label">Window Points</div><div class="keeper-kpi-value">${fmtInt(windowSamplePoints)} total · ${fmtInt(turnPoints)}t / ${fmtInt(proactivePoints)}p / ${fmtInt(heartbeatPoints)}h</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Window Points', 'window_points')}<div class="keeper-kpi-value">${fmtInt(windowSamplePoints)} total · ${fmtInt(turnPoints)}t / ${fmtInt(proactivePoints)}p / ${fmtInt(heartbeatPoints)}h</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Conversation Rows</div><div class="keeper-kpi-value">${fmtInt(conversationTailCount)} / raw ${fmtInt(conversationRawCount)}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">Conversation Fragments</div><div class="keeper-kpi-value">${escHtml(fragmentBadgeText)}${conversationFragmentFilterEnabled ? ` (filtered ${fmtInt(conversationFragmentFilteredCount)})` : ''}</div></div>
           <div class="keeper-kpi"><div class="keeper-kpi-label">K2K Edges</div><div class="keeper-kpi-value">${fmtInt(k2kCount)}</div></div>
@@ -3077,6 +3120,20 @@ let cached_html = lazy ({|<!DOCTYPE html>
               <span><b>window source cap</b> max_lines ${fmtInt(windowSeriesMaxLines)} / max_bytes ${fmtInt(windowSeriesMaxBytes)}</span>
               <span><b>display zoom</b> last ${fmtInt(keeperZoomTurns)} points (charts only)</span>
               <span><b>warn/bad threshold</b> template ${fmtPct1(alertThresholds.proactive_fallback_warn)}/${fmtPct1(alertThresholds.proactive_fallback_bad)}, similarity ${fmtPct1(alertThresholds.proactive_similarity_warn)}/${fmtPct1(alertThresholds.proactive_similarity_bad)}</span>
+            </div>
+          </div>
+          <div class="keeper-chart-card">
+            <div class="keeper-chart-title">Metric Glossary</div>
+            <div class="keeper-chart-meta">
+              <span><b>display zoom</b> ${escHtml(glossaryTip('display_zoom'))}</span>
+              <span><b>metrics window</b> ${escHtml(glossaryTip('metrics_window'))}</span>
+              <span><b>window points</b> ${escHtml(glossaryTip('window_points'))}</span>
+              <span><b>model fallback</b> ${escHtml(glossaryTip('model_fallback'))}</span>
+              <span><b>template fallback</b> ${escHtml(glossaryTip('proactive_template_fallback'))}</span>
+              <span><b>proactive similarity</b> ${escHtml(glossaryTip('proactive_similarity'))}</span>
+              <span><b>drift window</b> ${escHtml(glossaryTip('drift_window'))}</span>
+              <span><b>window handoff/compaction</b> ${escHtml(glossaryTip('window_handoff_compaction'))}</span>
+              <span><b>window compaction saved</b> ${escHtml(glossaryTip('window_compaction_saved'))}</span>
             </div>
           </div>
           <div class="keeper-chart-card">

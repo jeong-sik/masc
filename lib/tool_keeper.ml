@@ -167,6 +167,18 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
           ("type", `String "integer");
           ("description", `String "How many bytes from the end of files to scan for tails (default: 60000).");
         ]);
+        ("fast", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Fast status mode: skip heavy scans/context load for low-latency liveness checks.");
+        ]);
+        ("include_timing", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include stage-by-stage timing diagnostics in response.");
+        ]);
+        ("timing_log", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Force server-side timing log for this call.");
+        ]);
       ]);
       ("required", `List [`String "name"]);
     ];
@@ -522,6 +534,50 @@ let keeper_compaction_policy_from_env () : (float * int * int) =
   ( keeper_compact_ratio (),
     keeper_compact_max_messages (),
     keeper_compact_max_tokens () )
+
+let keeper_status_slow_ms () : int =
+  int_of_env_default
+    "MASC_KEEPER_STATUS_SLOW_MS"
+    ~default:1200
+    ~min_v:100
+    ~max_v:600000
+
+let keeper_status_timing_log_default () : bool =
+  match Sys.getenv_opt "MASC_KEEPER_STATUS_TIMING_LOG" with
+  | None -> false
+  | Some raw ->
+      let v = String.trim raw |> String.lowercase_ascii in
+      v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
+
+let make_stage_timer () =
+  let started = Time_compat.now () in
+  let last = ref started in
+  let stages_rev : (string * int) list ref = ref [] in
+  let mark (label : string) =
+    let now = Time_compat.now () in
+    let elapsed_ms =
+      int_of_float (max 0.0 ((now -. !last) *. 1000.0))
+    in
+    stages_rev := (label, elapsed_ms) :: !stages_rev;
+    last := now
+  in
+  let total_ms () =
+    int_of_float (max 0.0 ((Time_compat.now () -. started) *. 1000.0))
+  in
+  let stages () = List.rev !stages_rev in
+  (mark, total_ms, stages)
+
+let stage_timings_to_json (stages : (string * int) list) : Yojson.Safe.t =
+  `List
+    (List.map
+       (fun (label, ms) ->
+         `Assoc [ ("stage", `String label); ("ms", `Int ms) ])
+       stages)
+
+let stage_timings_to_text (stages : (string * int) list) : string =
+  stages
+  |> List.map (fun (label, ms) -> Printf.sprintf "%s=%dms" label ms)
+  |> String.concat ", "
 
 let normalize_compaction_ratio_gate (v : float) : float =
   max 0.1 (min 0.98 v)
@@ -4257,6 +4313,12 @@ let handle_keeper_up ctx args : tool_result =
 
 let handle_keeper_status ctx args : tool_result =
   let name = get_string args "name" "" in
+  let fast = get_bool args "fast" false in
+  let include_timing = get_bool args "include_timing" false in
+  let timing_log =
+    get_bool args "timing_log" (keeper_status_timing_log_default ())
+  in
+  let (mark_timing, total_timing_ms, stage_timings) = make_stage_timer () in
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
   else
@@ -4264,27 +4326,63 @@ let handle_keeper_status ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some m) ->
-      let tail_turns = max 0 (get_int args "tail_turns" 3) in
-      let tail_messages = max 0 (get_int args "tail_messages" 5) in
-      let tail_compactions = max 0 (get_int args "tail_compactions" 10) in
-      let tail_bytes = max 1_000 (get_int args "tail_bytes" 60_000) in
+      mark_timing "read_meta";
+      let tail_turns =
+        max 0
+          (get_int args "tail_turns" (if fast then 1 else 3))
+      in
+      let tail_messages =
+        max 0
+          (get_int args "tail_messages" (if fast then 0 else 5))
+      in
+      let tail_compactions =
+        max 0
+          (get_int args "tail_compactions" (if fast then 0 else 10))
+      in
+      let tail_bytes =
+        max 1_000
+          (get_int args "tail_bytes" (if fast then 20_000 else 60_000))
+      in
       let models = m.models in
       (match model_specs_of_strings models with
        | Error e -> (false, "❌ " ^ e)
        | Ok specs ->
+         mark_timing "resolve_models";
          let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
          let base_dir = session_base_dir ctx.config in
-         let (_session, ctx_opt) = load_context_from_checkpoint
-           ~trace_id:m.trace_id ~primary_model_max_tokens:primary.max_context ~base_dir in
-         let ctx_stats = match ctx_opt with
-           | None -> `Assoc [("has_checkpoint", `Bool false)]
-           | Some c -> `Assoc [
-               ("has_checkpoint", `Bool true);
-               ("context_ratio", `Float (Context_manager.context_ratio c));
-               ("context_tokens", `Int c.token_count);
-               ("context_max", `Int c.max_tokens);
-               ("message_count", `Int (List.length c.messages));
-             ]
+         let ctx_opt =
+           if fast then
+             None
+           else
+             let (_session, loaded) =
+               load_context_from_checkpoint
+                 ~trace_id:m.trace_id
+                 ~primary_model_max_tokens:primary.max_context
+                 ~base_dir
+             in
+             loaded
+         in
+         mark_timing (if fast then "load_context:skipped" else "load_context");
+         let ctx_stats =
+           if fast then
+             `Assoc
+               [
+                 ("skipped", `Bool true);
+                 ("reason", `String "fast");
+                 ("has_checkpoint", `Null);
+               ]
+           else
+             match ctx_opt with
+             | None -> `Assoc [("has_checkpoint", `Bool false)]
+             | Some c ->
+                 `Assoc
+                   [
+                     ("has_checkpoint", `Bool true);
+                     ("context_ratio", `Float (Context_manager.context_ratio c));
+                     ("context_tokens", `Int c.token_count);
+                     ("context_max", `Int c.max_tokens);
+                     ("message_count", `Int (List.length c.messages));
+                   ]
          in
          let keepalive_running = `Bool (Hashtbl.mem keepalives m.name) in
          let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
@@ -4330,14 +4428,25 @@ let handle_keeper_status ctx args : tool_result =
              try Some (Yojson.Safe.from_string line) with _ -> None
            ) lines)
          in
+         mark_timing "metrics_tail";
 	         let metrics_window_lines =
-	           read_file_tail_lines metrics_path
-	             ~max_bytes:tail_bytes ~max_lines:(max tail_turns 200)
+	           if fast then
+	             []
+	           else
+	             read_file_tail_lines metrics_path
+	               ~max_bytes:tail_bytes ~max_lines:(max tail_turns 200)
 	         in
 	         let metrics_overview =
-	           summarize_metrics_lines metrics_window_lines ~default_generation:m.generation
+	           if fast then
+	             empty_metrics_summary
+	           else
+	             summarize_metrics_lines metrics_window_lines ~default_generation:m.generation
 	         in
+         mark_timing (if fast then "metrics_overview:skipped" else "metrics_overview");
 	         let last_skill_route =
+           if fast then
+             None
+           else
 	           let open Yojson.Safe.Util in
 	           let rec find_latest = function
 	             | [] -> None
@@ -4368,169 +4477,187 @@ let handle_keeper_status ctx args : tool_result =
 	           find_latest (List.rev metrics_window_lines)
 	         in
 	         let memory_bank_summary =
+           if fast then
+             {
+               total_notes = 0;
+               last_ts_unix = 0.0;
+               top_kind = None;
+               kind_counts = [];
+               recent_notes = [];
+             }
+           else
 	           read_keeper_memory_summary
 	             ctx.config
-             ~name:m.name
-             ~max_bytes:tail_bytes
-             ~max_lines:(max (tail_turns * 10) 400)
-             ~recent_limit:8
+               ~name:m.name
+               ~max_bytes:tail_bytes
+               ~max_lines:(max (tail_turns * 10) 400)
+               ~recent_limit:8
          in
+         mark_timing (if fast then "memory_bank:skipped" else "memory_bank");
 
          let history_filter_fragments =
            bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
          in
          let (history_tail, history_raw_count, history_fragment_count, history_fragment_filtered_count) =
-           let lines =
-             read_file_tail_lines history_path
-               ~max_bytes:tail_bytes
-               ~max_lines:tail_messages
-           in
-           let open Yojson.Safe.Util in
-           let (items_rev, raw_count, fragment_count, filtered_count) =
-             List.fold_left
-               (fun (acc, raw_count, fragment_count, filtered_count) line ->
-                 try
-                   let j = Yojson.Safe.from_string line in
-                   let role =
-                     j |> member "role" |> to_string_option
-                     |> Option.value ~default:"unknown"
-                   in
-                   let content =
-                     j |> member "content" |> to_string_option
-                     |> Option.value ~default:""
-                   in
-                   let ts_unix =
-                     let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-                     if ts0 > 0.0 then ts0
-                     else Safe_ops.json_float ~default:0.0 "timestamp" j
-                   in
-                   let age_s =
-                     if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix))
-                     else None
-                   in
-                   let role_lc = String.lowercase_ascii role in
-                   let entry_kind =
-                     match role_lc with
-                     | "assistant" -> "self_talk"
-                     | "user" -> "input"
-                     | "tool" -> "tool_result"
-                     | "system" -> "system"
-                     | _ -> "other"
-                   in
-                   let is_fragment =
-                     role_lc = "assistant"
-                     && looks_fragmentary_history_text content
-                   in
-                   let should_filter = history_filter_fragments && is_fragment in
-                   let preview =
-                     if String.length content > 200 then
-                       utf8_safe_prefix_bytes content ~max_bytes:200 ^ "..."
-                     else content
-                   in
-                   let item =
-                     `Assoc [
-                       ("role", `String role);
-                       ("kind", `String entry_kind);
-                       ("is_fragment", `Bool is_fragment);
-                       ("ts_unix", `Float ts_unix);
-                       ("age_s", match age_s with Some v -> `Float v | None -> `Null);
-                       ("content", `String preview);
-                     ]
-                   in
-                   let acc = if should_filter then acc else item :: acc in
-                   let filtered_count =
-                     filtered_count + if should_filter then 1 else 0
-                   in
-                   ( acc,
-                     raw_count + 1,
-                     fragment_count + (if is_fragment then 1 else 0),
-                     filtered_count )
-                 with _ -> (acc, raw_count, fragment_count, filtered_count))
-               ([], 0, 0, 0) lines
-           in
-           (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
-         in
-
-         let compaction_history_tail =
-           let lines =
-             read_file_tail_lines metrics_path
-               ~max_bytes:tail_bytes
-               ~max_lines:(max 200 (tail_compactions * 20))
-           in
-           let events_rev =
-             List.fold_left
-               (fun acc line ->
-                 try
-                   let j = Yojson.Safe.from_string line in
-                   let compacted = Safe_ops.json_bool ~default:false "compacted" j in
-                   let memory_compaction_performed =
-                     Safe_ops.json_bool ~default:false "memory_compaction_performed" j
-                   in
-                   if (not compacted) && (not memory_compaction_performed) then acc
-                   else
-                     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+           if fast then
+             (`List [], 0, 0, 0)
+           else
+             let lines =
+               read_file_tail_lines history_path
+                 ~max_bytes:tail_bytes
+                 ~max_lines:tail_messages
+             in
+             let open Yojson.Safe.Util in
+             let (items_rev, raw_count, fragment_count, filtered_count) =
+               List.fold_left
+                 (fun (acc, raw_count, fragment_count, filtered_count) line ->
+                   try
+                     let j = Yojson.Safe.from_string line in
+                     let role =
+                       j |> member "role" |> to_string_option
+                       |> Option.value ~default:"unknown"
+                     in
+                     let content =
+                       j |> member "content" |> to_string_option
+                       |> Option.value ~default:""
+                     in
+                     let ts_unix =
+                       let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+                       if ts0 > 0.0 then ts0
+                       else Safe_ops.json_float ~default:0.0 "timestamp" j
+                     in
                      let age_s =
-                       if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix)) else None
+                       if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix))
+                       else None
                      in
-                     let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
-                     let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
-                     let saved_tokens = max 0 (before_tokens - after_tokens) in
-                     let memory_before_notes =
-                       Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j
+                     let role_lc = String.lowercase_ascii role in
+                     let entry_kind =
+                       match role_lc with
+                       | "assistant" -> "self_talk"
+                       | "user" -> "input"
+                       | "tool" -> "tool_result"
+                       | "system" -> "system"
+                       | _ -> "other"
                      in
-                     let memory_after_notes =
-                       Safe_ops.json_int ~default:0 "memory_compaction_after_notes" j
+                     let is_fragment =
+                       role_lc = "assistant"
+                       && looks_fragmentary_history_text content
                      in
-                     let memory_dropped_notes =
-                       Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j
-                     in
-                     let memory_invalid_dropped =
-                       Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
-                     in
-                     let event_kind =
-                       if compacted && memory_compaction_performed then "context+memory"
-                       else if compacted then "context"
-                       else "memory"
+                     let should_filter = history_filter_fragments && is_fragment in
+                     let preview =
+                       if String.length content > 200 then
+                         utf8_safe_prefix_bytes content ~max_bytes:200 ^ "..."
+                       else content
                      in
                      let item =
                        `Assoc [
-                         ("kind", `String event_kind);
-                         ("channel", `String (Safe_ops.json_string ~default:"turn" "channel" j));
+                         ("role", `String role);
+                         ("kind", `String entry_kind);
+                         ("is_fragment", `Bool is_fragment);
                          ("ts_unix", `Float ts_unix);
                          ("age_s", match age_s with Some v -> `Float v | None -> `Null);
-                         ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
-                         ("generation", `Int (Safe_ops.json_int ~default:m.generation "generation" j));
-                         ("context_ratio", `Float (Safe_ops.json_float ~default:0.0 "context_ratio" j));
-                         ("context_before_tokens", `Int before_tokens);
-                         ("context_after_tokens", `Int after_tokens);
-                         ("context_saved_tokens", `Int saved_tokens);
-                         ( "context_trigger",
-                           match Safe_ops.json_string_opt "compaction_trigger" j with
-                           | Some reason when String.trim reason <> "" -> `String reason
-                           | _ -> `Null );
-                         ("memory_compaction_performed", `Bool memory_compaction_performed);
-                         ("memory_before_notes", `Int memory_before_notes);
-                         ("memory_after_notes", `Int memory_after_notes);
-                         ("memory_dropped_notes", `Int memory_dropped_notes);
-                         ("memory_invalid_dropped", `Int memory_invalid_dropped);
-                         ( "memory_reason",
-                           match Safe_ops.json_string_opt "memory_compaction_reason" j with
-                           | Some reason when String.trim reason <> "" -> `String reason
-                           | _ -> `Null );
+                         ("content", `String preview);
                        ]
                      in
-                     item :: acc
-                 with _ -> acc)
-               [] lines
-           in
-           let events = List.rev events_rev in
-           let total = List.length events in
-           let start = max 0 (total - tail_compactions) in
-           let tail = List.filteri (fun i _ -> i >= start) events in
-           (`List tail, total)
+                     let acc = if should_filter then acc else item :: acc in
+                     let filtered_count =
+                       filtered_count + if should_filter then 1 else 0
+                     in
+                     ( acc,
+                       raw_count + 1,
+                       fragment_count + (if is_fragment then 1 else 0),
+                       filtered_count )
+                   with _ -> (acc, raw_count, fragment_count, filtered_count))
+                 ([], 0, 0, 0) lines
+             in
+             (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
          in
+         mark_timing (if fast then "history_tail:skipped" else "history_tail");
 
-         let json = `Assoc [
+         let compaction_history_tail =
+           if fast then
+             (`List [], 0)
+           else
+             let lines =
+               read_file_tail_lines metrics_path
+                 ~max_bytes:tail_bytes
+                 ~max_lines:(max 200 (tail_compactions * 20))
+             in
+             let events_rev =
+               List.fold_left
+                 (fun acc line ->
+                   try
+                     let j = Yojson.Safe.from_string line in
+                     let compacted = Safe_ops.json_bool ~default:false "compacted" j in
+                     let memory_compaction_performed =
+                       Safe_ops.json_bool ~default:false "memory_compaction_performed" j
+                     in
+                     if (not compacted) && (not memory_compaction_performed) then acc
+                     else
+                       let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+                       let age_s =
+                         if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix)) else None
+                       in
+                       let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
+                       let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
+                       let saved_tokens = max 0 (before_tokens - after_tokens) in
+                       let memory_before_notes =
+                         Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j
+                       in
+                       let memory_after_notes =
+                         Safe_ops.json_int ~default:0 "memory_compaction_after_notes" j
+                       in
+                       let memory_dropped_notes =
+                         Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j
+                       in
+                       let memory_invalid_dropped =
+                         Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
+                       in
+                       let event_kind =
+                         if compacted && memory_compaction_performed then "context+memory"
+                         else if compacted then "context"
+                         else "memory"
+                       in
+                       let item =
+                         `Assoc [
+                           ("kind", `String event_kind);
+                           ("channel", `String (Safe_ops.json_string ~default:"turn" "channel" j));
+                           ("ts_unix", `Float ts_unix);
+                           ("age_s", match age_s with Some v -> `Float v | None -> `Null);
+                           ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
+                           ("generation", `Int (Safe_ops.json_int ~default:m.generation "generation" j));
+                           ("context_ratio", `Float (Safe_ops.json_float ~default:0.0 "context_ratio" j));
+                           ("context_before_tokens", `Int before_tokens);
+                           ("context_after_tokens", `Int after_tokens);
+                           ("context_saved_tokens", `Int saved_tokens);
+                           ( "context_trigger",
+                             match Safe_ops.json_string_opt "compaction_trigger" j with
+                             | Some reason when String.trim reason <> "" -> `String reason
+                             | _ -> `Null );
+                           ("memory_compaction_performed", `Bool memory_compaction_performed);
+                           ("memory_before_notes", `Int memory_before_notes);
+                           ("memory_after_notes", `Int memory_after_notes);
+                           ("memory_dropped_notes", `Int memory_dropped_notes);
+                           ("memory_invalid_dropped", `Int memory_invalid_dropped);
+                           ( "memory_reason",
+                             match Safe_ops.json_string_opt "memory_compaction_reason" j with
+                             | Some reason when String.trim reason <> "" -> `String reason
+                             | _ -> `Null );
+                         ]
+                       in
+                       item :: acc
+                   with _ -> acc)
+                 [] lines
+             in
+             let events = List.rev events_rev in
+             let total = List.length events in
+             let start = max 0 (total - tail_compactions) in
+             let tail = List.filteri (fun i _ -> i >= start) events in
+             (`List tail, total)
+         in
+         mark_timing (if fast then "compaction_history:skipped" else "compaction_history");
+
+         let fields = [
            ("meta", meta_to_json m);
            ("soul_profile", `String m.soul_profile);
            ("will", if String.trim m.will = "" then `Null else `String m.will);
@@ -4591,11 +4718,11 @@ let handle_keeper_status ctx args : tool_result =
              ("token_gate", `Int compact_token_gate);
              ("token_gate_enabled", `Bool (compact_token_gate > 0));
            ]);
-	           ("models_resolved", models_resolved);
-	           ("context", ctx_stats);
-	           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
-	           ("metrics_overview", metrics_summary_to_json metrics_overview);
-	           ("memory_bank", memory_summary_to_json memory_bank_summary);
+		           ("models_resolved", models_resolved);
+		           ("context", ctx_stats);
+		           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
+		           ("metrics_overview", metrics_summary_to_json metrics_overview);
+		           ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
            ("history_tail_count",
@@ -4608,6 +4735,10 @@ let handle_keeper_status ctx args : tool_result =
            ("history_fragment_filter_enabled", `Bool history_filter_fragments);
            ("compaction_history_tail", fst compaction_history_tail);
            ("compaction_history_count", `Int (snd compaction_history_tail));
+           ("status_options", `Assoc [
+             ("fast", `Bool fast);
+             ("include_timing", `Bool include_timing);
+           ]);
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
              ("metrics", `String metrics_path);
@@ -4616,6 +4747,29 @@ let handle_keeper_status ctx args : tool_result =
              ("history", `String history_path);
            ]);
          ] in
+         mark_timing "assemble_json";
+         let timing_total_ms = total_timing_ms () in
+         let timing_stages = stage_timings () in
+         let timing_threshold_ms = keeper_status_slow_ms () in
+         if timing_log || timing_total_ms >= timing_threshold_ms then
+           Printf.eprintf
+             "[KEEPER-STATUS-TIMING] name=%s fast=%b total_ms=%d threshold_ms=%d stages=[%s]\n%!"
+             name
+             fast
+             timing_total_ms
+             timing_threshold_ms
+             (stage_timings_to_text timing_stages);
+         let timing_json =
+           `Assoc [
+             ("total_ms", `Int timing_total_ms);
+             ("slow_threshold_ms", `Int timing_threshold_ms);
+             ("stages", stage_timings_to_json timing_stages);
+           ]
+         in
+         let fields =
+           if include_timing then ("timing", timing_json) :: fields else fields
+         in
+         let json = `Assoc fields in
          (true, Yojson.Safe.pretty_to_string json))
 
 let handle_keeper_msg ctx args : tool_result =

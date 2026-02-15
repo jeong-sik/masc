@@ -184,6 +184,7 @@ module Trpg_engine_types = Trpg_engine_types
 module Trpg_engine_event = Trpg_engine_event
 module Trpg_engine_state_machine = Trpg_engine_state_machine
 module Trpg_engine_store = Trpg_engine_store
+module Trpg_engine_store_sqlite = Trpg_engine_store_sqlite
 module Trpg_rule = Trpg_rule
 module Trpg_rule_dnd5e_lite = Trpg_rule_dnd5e_lite
 module Trpg_engine_replay = Trpg_engine_replay

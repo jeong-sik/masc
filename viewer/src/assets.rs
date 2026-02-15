@@ -1,13 +1,3 @@
-use bevy::prelude::*;
-
-/// Tracks asset loading state for the viewer.
-#[derive(Resource, Default)]
-pub struct AssetManifest {
-    pub portraits_loaded: bool,
-    pub maps_loaded: bool,
-    pub fonts_loaded: bool,
-}
-
 /// Asset path constants for AI-generated artwork.
 pub mod paths {
     // Character portraits (512x512, oil painting style)
@@ -25,7 +15,9 @@ pub mod paths {
     pub const MAP_AREA_F: &str = "maps/area_f.png";
 
     // Fonts
+    #[allow(dead_code)]
     pub const FONT_GOTHIC: &str = "fonts/Cinzel-Regular.ttf";
+    #[allow(dead_code)]
     pub const FONT_KOREAN: &str = "fonts/NotoSansKR-Regular.ttf";
 }
 

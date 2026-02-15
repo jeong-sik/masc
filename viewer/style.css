@@ -167,6 +167,49 @@ body {
 }
 
 /* ═══════════════════════════════════════════
+   LOADING SCREEN
+   ═══════════════════════════════════════════ */
+
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a12;
+  transition: opacity 0.5s ease-out;
+}
+
+#loading-screen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #c9a55a;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-text {
+  margin-top: 16px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════
    LOBBY SCREEN
    ═══════════════════════════════════════════ */
 
@@ -849,4 +892,106 @@ body.mode-lobby #dashboard {
 
 [data-theme="parchment"] .mode-card {
     box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.15);
+}
+
+/* ═══════════════════════════════════════════
+   MODE PANELS (Monitor, Council, Social, Experiment)
+   ═══════════════════════════════════════════ */
+
+/* Mode Panels (shared) */
+.mode-panel {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-deep, #0a0a12);
+    color: var(--text-primary, #e8dcc8);
+    overflow-y: auto;
+    padding: 24px;
+    z-index: 100;
+}
+
+.mode-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-main, rgba(255,255,255,0.1));
+    margin-bottom: 24px;
+}
+
+.mode-panel-header h2 {
+    font-family: var(--font-display);
+    font-size: 24px;
+    color: var(--accent-primary, #c9a55a);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+}
+
+.back-btn {
+    background: transparent;
+    border: 1px solid var(--border-main, rgba(255,255,255,0.1));
+    color: var(--text-dim, #a09080);
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    border-radius: var(--panel-radius, 4px);
+    transition: all 0.2s;
+    font-size: 14px;
+}
+
+.back-btn:hover {
+    border-color: var(--accent-primary, #c9a55a);
+    color: var(--text-primary, #e8dcc8);
+}
+
+.mode-panel-content {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.placeholder-text {
+    color: var(--text-dim, #a09080);
+    font-style: italic;
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+/* Monitor Mode */
+.monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.monitor-card {
+    background: var(--bg-panel, rgba(255,255,255,0.03));
+    border: 1px solid var(--border-main, rgba(255,255,255,0.08));
+    border-radius: var(--panel-radius, 8px);
+    padding: 20px;
+}
+
+.monitor-card h3 {
+    font-family: var(--font-display);
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent-primary, #c9a55a);
+    margin-bottom: 12px;
+}
+
+/* Council Mode */
+.council-deliberation {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+/* Social Mode */
+.social-feed {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+/* Experiment Mode */
+.experiment-dashboard {
+    max-width: 900px;
+    margin: 0 auto;
 }

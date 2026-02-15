@@ -43,6 +43,7 @@ pub enum ViewerTheme {
 
 impl ViewerTheme {
     /// Human-readable display name.
+    #[allow(dead_code)]
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::DarkFantasy => "Dark Fantasy",
@@ -53,6 +54,7 @@ impl ViewerTheme {
     }
 
     /// All available themes for the UI theme selector.
+    #[allow(dead_code)]
     pub fn all() -> &'static [ViewerTheme] {
         &[
             Self::DarkFantasy,

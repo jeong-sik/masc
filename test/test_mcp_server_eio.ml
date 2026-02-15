@@ -25,6 +25,16 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
+
 (* ===== Unit Tests for Type Re-exports ===== *)
 
 let test_create_state () =
@@ -179,9 +189,161 @@ let test_handle_request_tools_list () =
        (match List.assoc_opt "result" fields with
         | Some (`Assoc result_fields) ->
             Alcotest.(check bool) "has tools" true
-              (List.mem_assoc "tools" result_fields)
+              (List.mem_assoc "tools" result_fields);
+            (match List.assoc_opt "tools" result_fields with
+             | Some (`List tools) ->
+                 let names =
+                   tools
+                   |> List.filter_map (function
+                        | `Assoc fields -> List.assoc_opt "name" fields
+                        | _ -> None)
+                   |> List.filter_map (function `String s -> Some s | _ -> None)
+                 in
+                 Alcotest.(check bool)
+                   "contains masc_trpg_dice_roll"
+                   true
+                   (List.mem "masc_trpg_dice_roll" names);
+                 Alcotest.(check bool)
+                   "contains masc_trpg_turn_advance"
+                   true
+                   (List.mem "masc_trpg_turn_advance" names);
+                 Alcotest.(check bool)
+                   "contains masc_trpg_stream"
+                   true
+                   (List.mem "masc_trpg_stream" names)
+             | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
+
+  cleanup_dir base_path
+
+let test_execute_tool_trpg_flow () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+  let (ok_roll, roll_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_trpg_dice_roll"
+      ~arguments:
+        (`Assoc
+          [
+            ("room_id", `String "room-mcp-e2e");
+            ("actor_id", `String "pc-1");
+            ("action", `String "perception");
+            ("stat_value", `Int 12);
+            ("dc", `Int 10);
+            ("raw_d20", `Int 15);
+          ])
+  in
+  Alcotest.(check bool) "dice_roll success" true ok_roll;
+
+  let (ok_turn, _turn_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_trpg_turn_advance"
+      ~arguments:
+        (`Assoc
+          [
+            ("room_id", `String "room-mcp-e2e");
+            ("phase", `String "round");
+          ])
+  in
+  Alcotest.(check bool) "turn_advance success" true ok_turn;
+
+  let (ok_stream, stream_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_trpg_stream"
+      ~arguments:(`Assoc [ ("room_id", `String "room-mcp-e2e") ])
+  in
+  Alcotest.(check bool) "stream success" true ok_stream;
+  let stream_json = Yojson.Safe.from_string stream_msg in
+  let count = stream_json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int in
+  Alcotest.(check bool) "stream has events" true (count >= 2);
+
+  let roll_json = Yojson.Safe.from_string roll_msg in
+  let passed = roll_json |> Yojson.Safe.Util.member "roll" |> Yojson.Safe.Util.member "passed" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "roll passed" true passed;
+
+  cleanup_dir base_path
+
+let test_execute_tool_trpg_validation () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+  let (ok_missing, msg_missing) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_trpg_turn_advance"
+      ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "missing room_id fails" false ok_missing;
+  Alcotest.(check bool)
+    "missing room_id message"
+    true
+    (contains_substring msg_missing "room_id is required");
+
+  let (ok_out_of_range, msg_out_of_range) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_trpg_dice_roll"
+      ~arguments:
+        (`Assoc
+          [
+            ("room_id", `String "room-mcp-e2e");
+            ("actor_id", `String "pc-1");
+            ("action", `String "perception");
+            ("stat_value", `Int 12);
+            ("dc", `Int 10);
+            ("raw_d20", `Int 21);
+          ])
+  in
+  Alcotest.(check bool) "raw_d20 out-of-range fails" false ok_out_of_range;
+  Alcotest.(check bool)
+    "raw_d20 out-of-range message"
+    true
+    (contains_substring msg_out_of_range "raw_d20 must be between 1 and 20");
+
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_trpg () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 9);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_trpg_dice_roll");
+      ("arguments", `Assoc [
+        ("room_id", `String "room-mcp-call");
+        ("actor_id", `String "pc-1");
+        ("action", `String "perception");
+        ("stat_value", `Int 9);
+        ("dc", `Int 8);
+        ("raw_d20", `Int 12);
+      ]);
+    ]);
+  ]) in
+
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  (match response with
+  | `Assoc fields ->
+      Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields)
+  | _ -> Alcotest.fail "response not an object");
 
   cleanup_dir base_path
 
@@ -255,6 +417,9 @@ let eio_tests = [
   "handle tools/list", `Quick, test_handle_request_tools_list;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
+  "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
+  "execute trpg flow", `Quick, test_execute_tool_trpg_flow;
+  "execute trpg validation", `Quick, test_execute_tool_trpg_validation;
 ]
 
 let () =

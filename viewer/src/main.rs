@@ -10,6 +10,7 @@ mod render;
 mod shaders;
 mod sse;
 
+use bevy::asset::{AssetMetaCheck, AssetPlugin};
 use bevy::prelude::*;
 
 use mode::ModePlugin;
@@ -19,15 +20,22 @@ fn main() {
     let default_theme = ViewerTheme::default();
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "MASC Viewer".into(),
-                canvas: Some("#bevy-canvas".into()),
-                prevent_default_event_handling: false,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "MASC Viewer".into(),
+                        canvas: Some("#bevy-canvas".into()),
+                        prevent_default_event_handling: false,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: AssetMetaCheck::Never,
+                    ..default()
+                }),
+        )
         // Initial clear color from default theme (ThemePlugin takes over on changes)
         .insert_resource(ClearColor(default_theme.clear_color()))
         // ── Mode infrastructure (always active) ──

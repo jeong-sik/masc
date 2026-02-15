@@ -384,6 +384,12 @@ let take_last_non_empty_lines ~count text =
   drop drop_n non_empty
 
 let build_continuity_anchors full_context =
+  let normalize_anchor_line s =
+    let max_len = 240 in
+    let trimmed = String.trim s in
+    if String.length trimmed <= max_len then trimmed
+    else safe_sub trimmed 0 max_len ^ "..."
+  in
   let lines = String.split_on_char '\n' full_context in
   let goal_line =
     first_line_with_prefixes
@@ -399,12 +405,15 @@ let build_continuity_anchors full_context =
   let anchor_lines =
     []
     |> fun acc ->
-    (match goal_line with Some line -> acc @ [line] | None -> acc)
+    (match goal_line with Some line -> acc @ [normalize_anchor_line line] | None -> acc)
     |> fun acc ->
-    (match task_line with Some line -> acc @ [line] | None -> acc)
+    (match task_line with Some line -> acc @ [normalize_anchor_line line] | None -> acc)
     |> fun acc ->
     if recent_lines = [] then acc
-    else acc @ ("Recent turns:" :: List.map (fun line -> "- " ^ line) recent_lines)
+    else
+      acc
+      @ ("Recent turns:"
+         :: List.map (fun line -> "- " ^ normalize_anchor_line line) recent_lines)
   in
   match anchor_lines with
   | [] -> ""

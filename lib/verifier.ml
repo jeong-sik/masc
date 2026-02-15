@@ -33,25 +33,38 @@ type verdict =
 
 (** Actions that are safe and need no verification. *)
 let read_only_patterns = [
-  "read"; "Read"; "glob"; "Glob"; "grep"; "Grep";
+  "read"; "glob"; "grep";
   "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
   "git status"; "git log"; "git diff";
   "status"; "view"; "get"; "fetch"; "query";
 ]
 
+let is_word_char c =
+  match c with
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+  | _ -> false
+
+let has_pattern_with_word_boundary ~text ~pat =
+  let tlen = String.length text in
+  let plen = String.length pat in
+  if plen = 0 || tlen < plen then false
+  else
+    let rec loop i =
+      if i > tlen - plen then false
+      else if String.sub text i plen = pat then
+        let before_ok = i = 0 || not (is_word_char text.[i - 1]) in
+        let after_idx = i + plen in
+        let after_ok = after_idx >= tlen || not (is_word_char text.[after_idx]) in
+        if before_ok && after_ok then true else loop (i + 1)
+      else
+        loop (i + 1)
+    in
+    loop 0
+
 let should_skip ~action_description =
+  let text = String.lowercase_ascii action_description in
   List.exists (fun pat ->
-    let pat_len = String.length pat in
-    String.length action_description >= pat_len &&
-    (try
-       (* Check if pattern appears at start or after a space/slash *)
-       let idx = ref (-1) in
-       for i = 0 to String.length action_description - pat_len do
-         if !idx = -1 && String.sub action_description i pat_len = pat then
-           idx := i
-       done;
-       !idx >= 0
-     with _ -> false)
+    has_pattern_with_word_boundary ~text ~pat
   ) read_only_patterns
 
 (* ================================================================ *)
@@ -144,5 +157,5 @@ let verify ~(model : Llm_client.model_spec) (req : verification_request) : verdi
     match Llm_client.complete completion_req with
     | Ok resp -> parse_verdict resp.content
     | Error e ->
-      eprintf "[verifier] LLM call failed: %s (defaulting to PASS)\n%!" e;
-      Pass  (* Fail-open: don't block on verifier failure *)
+      eprintf "[verifier] LLM call failed: %s (defaulting to WARN)\n%!" e;
+      Warn ("verifier_unavailable: " ^ e)

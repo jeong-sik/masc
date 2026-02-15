@@ -325,6 +325,24 @@ let safe_sub s start len =
     if actual_len <= 0 then ""
     else String.sub s start actual_len
 
+(* Cap handoff context to a fixed approximate token budget. *)
+let handoff_token_budget = 20000
+
+let handoff_max_chars () =
+  (* Approximate 4 chars/token for safety. *)
+  handoff_token_budget * 4
+
+let truncate_to_handoff_budget context =
+  let max_chars = handoff_max_chars () in
+  let context_len = String.length context in
+  if context_len <= max_chars then context
+  else
+    let truncated = safe_sub context (context_len - max_chars) max_chars in
+    Printf.sprintf
+      "[... context truncated to %d-token budget: showing latest context ...]\n%s"
+      handoff_token_budget
+      truncated
+
 (** Compress context into DNA for transfer *)
 let compress_to_dna ~ratio ~context =
   (* Clamp ratio to valid range [0.0, 1.0] *)
@@ -406,6 +424,9 @@ let extract_dna ~config ~parent_cell ~full_context =
     mentor_wisdom
   in
   header ^ compressed
+
+let bounded_handoff_dna ~config ~parent_cell ~full_context =
+  truncate_to_handoff_budget (extract_dna ~config ~parent_cell ~full_context)
 
 (** Extract delta context (changes since DNA was prepared)
     Quality controls:
@@ -556,8 +577,9 @@ let perform_mitosis ~config ~pool ~parent ~full_context =
         Printf.printf "[MITOSIS/DELTA] Merged DNA: prepared=%d chars + delta=%d chars\n%!"
           (String.length prepared_dna) (String.length delta);
         merged
-    | Idle -> extract_dna ~config ~parent_cell:parent ~full_context
+    | Idle -> bounded_handoff_dna ~config ~parent_cell:parent ~full_context
   in
+  let dna = truncate_to_handoff_budget dna in
 
   (* 2. Parent begins apoptosis *)
   let dying_parent = begin_apoptosis parent in
@@ -609,7 +631,7 @@ let execute_mitosis ~config ~pool ~parent ~full_context ~spawn_fn =
   Printf.printf "[MITOSIS] Cell %s (gen %d) → Cell %s (gen %d)\n%!"
     parent.id parent.generation child.id child.generation;
 
-  (spawn_result, child, new_pool)
+  (spawn_result, child, new_pool, dna)
 
 (** Update cell activity counters *)
 let record_activity ~cell ~task_done ~tool_called =
@@ -625,7 +647,7 @@ let record_activity ~cell ~task_done ~tool_called =
 type mitosis_check_result =
   | NoAction                              (* Nothing to do *)
   | Prepared of cell                      (* Phase 1: Cell prepared, DNA extracted *)
-  | Handoff of Spawn.spawn_result * cell * stem_pool  (* Phase 2: Handoff executed *)
+  | Handoff of Spawn.spawn_result * cell * stem_pool * string
 
 (** Auto-mitosis check - 2-phase approach *)
 let auto_mitosis_check_2phase ~config ~pool ~cell ~context_ratio ~full_context ~spawn_fn =
@@ -633,9 +655,9 @@ let auto_mitosis_check_2phase ~config ~pool ~cell ~context_ratio ~full_context ~
   if should_handoff ~config ~cell ~context_ratio then begin
     Printf.printf "[MITOSIS/HANDOFF] Threshold %.0f%% reached for cell %s (gen %d), executing handoff...\n%!"
       (config.handoff_threshold *. 100.0) cell.id cell.generation;
-    let (spawn_result, child, new_pool) =
+    let (spawn_result, child, new_pool, dna) =
       execute_mitosis ~config ~pool ~parent:cell ~full_context ~spawn_fn in
-    Handoff (spawn_result, child, new_pool)
+    Handoff (spawn_result, child, new_pool, dna)
   end
   (* Phase 1: Check if we should prepare *)
   else if should_prepare ~config ~cell ~context_ratio then begin

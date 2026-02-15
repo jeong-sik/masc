@@ -5,114 +5,6 @@
     Increased from 50 to 200 to handle Claude.ai MCP client reconnections. *)
 let max_clients = 200
 
-(** SSE reconnect storm guard defaults.
-    - session cooldown: minimum time between reconnects per session_id
-    - global window: max accepted new SSE connections per window *)
-let parse_float_env ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      (try float_of_string (String.trim raw) with _ -> default)
-
-let parse_int_env ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      (try int_of_string (String.trim raw) with _ -> default)
-
-let reconnect_min_interval_s =
-  max 0.0
-    (parse_float_env
-       ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S"
-       ~default:1.0)
-
-let connect_rate_window_s =
-  max 0.1
-    (parse_float_env
-       ~name:"MASC_SSE_CONNECT_WINDOW_S"
-       ~default:10.0)
-
-let connect_rate_max_in_window =
-  max 1
-    (parse_int_env
-       ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW"
-       ~default:120)
-
-type admission_reject_reason =
-  | Session_cooldown
-  | Global_rate_limit
-
-type admission =
-  | Allowed
-  | Rejected of {
-      reason: admission_reject_reason;
-      retry_ms: int;
-    }
-
-(** Sliding window for accepted SSE connections (storm guard) *)
-let accepted_connect_timestamps : float Queue.t = Queue.create ()
-
-(** Last accepted connection time per session_id *)
-let last_connect_by_session : (string, float) Hashtbl.t = Hashtbl.create 128
-
-let admission_reason_to_string = function
-  | Session_cooldown -> "session_cooldown"
-  | Global_rate_limit -> "global_rate_limit"
-
-let retry_ms_of_seconds s =
-  max 250 (int_of_float (ceil (s *. 1000.0)))
-
-let rec trim_connect_window ~now ~window_s =
-  match Queue.peek_opt accepted_connect_timestamps with
-  | Some ts when now -. ts > window_s ->
-      ignore (Queue.pop accepted_connect_timestamps);
-      trim_connect_window ~now ~window_s
-  | _ -> ()
-
-let prune_old_session_connects ~now ~ttl_s =
-  if Hashtbl.length last_connect_by_session > (max_clients * 4) then begin
-    let stale = Hashtbl.fold (fun sid ts acc ->
-      if now -. ts > ttl_s then sid :: acc else acc
-    ) last_connect_by_session [] in
-    List.iter (Hashtbl.remove last_connect_by_session) stale
-  end
-
-let admit_connection_at
-    ?(min_interval_s = reconnect_min_interval_s)
-    ?(window_s = connect_rate_window_s)
-    ?(max_in_window = connect_rate_max_in_window)
-    ~now
-    session_id
-  =
-  trim_connect_window ~now ~window_s;
-  let prune_ttl_s = max 60.0 (4.0 *. max min_interval_s window_s) in
-  prune_old_session_connects ~now ~ttl_s:prune_ttl_s;
-  match Hashtbl.find_opt last_connect_by_session session_id with
-  | Some last_ts when min_interval_s > 0.0 && now -. last_ts < min_interval_s ->
-      let wait_s = min_interval_s -. (now -. last_ts) in
-      Rejected { reason = Session_cooldown; retry_ms = retry_ms_of_seconds wait_s }
-  | _ when Queue.length accepted_connect_timestamps >= max_in_window ->
-      let retry_ms =
-        match Queue.peek_opt accepted_connect_timestamps with
-        | None -> retry_ms_of_seconds window_s
-        | Some oldest_ts ->
-            let wait_s = window_s -. (now -. oldest_ts) in
-            retry_ms_of_seconds (max 0.0 wait_s)
-      in
-      Rejected { reason = Global_rate_limit; retry_ms }
-  | _ ->
-      Queue.push now accepted_connect_timestamps;
-      Hashtbl.replace last_connect_by_session session_id now;
-      Allowed
-
-let admit_connection session_id =
-  admit_connection_at ~now:(Time_compat.now ()) session_id
-
-(** Test helper: clears in-memory storm guard state. *)
-let reset_admission_state_for_test () =
-  Queue.clear accepted_connect_timestamps;
-  Hashtbl.clear last_connect_by_session
-
 (** SSE client state *)
 type client = {
   id: int;
@@ -281,11 +173,8 @@ let cleanup_stale ?(max_age_s=1800.0) () =
     if now -. c.last_seen_at > max_age_s then sid :: acc else acc
   ) clients [] in
   List.iter (fun sid ->
-    (match Hashtbl.find_opt clients sid with
-     | Some client ->
-         Printf.eprintf "[SSE] idle evict: %s (idle %.0fs)\n%!"
-           sid (now -. client.last_seen_at)
-     | None -> ());
+    Printf.eprintf "[SSE] idle evict: %s (idle %.0fs)\n%!"
+      sid (now -. (Hashtbl.find clients sid).last_seen_at);
     Hashtbl.remove clients sid
   ) stale;
   stale

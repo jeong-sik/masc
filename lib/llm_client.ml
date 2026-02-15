@@ -12,6 +12,39 @@
 
 open Printf
 
+let contains_ci (text : string) (needle : string) : bool =
+  let hay = String.lowercase_ascii text in
+  let ndl = String.lowercase_ascii needle in
+  ndl <> ""
+  &&
+  try
+    let _ = Str.search_forward (Str.regexp_string ndl) hay 0 in
+    true
+  with Not_found -> false
+
+let int_of_env_default name ~default ~min_v ~max_v =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw ->
+      let v =
+        try int_of_string (String.trim raw)
+        with _ -> default
+      in
+      max min_v (min max_v v)
+
+let ollama_timeout_sec () =
+  int_of_env_default
+    "MASC_LLM_OLLAMA_TIMEOUT_SEC"
+    ~default:45
+    ~min_v:10
+    ~max_v:180
+
+let ollama_should_fallback_to_generate (err : string) : bool =
+  contains_ci err "404"
+  || contains_ci err "not found"
+  || contains_ci err "unsupported"
+  || contains_ci err "unknown endpoint"
+
 (* ================================================================ *)
 (* Types                                                            *)
 (* ================================================================ *)
@@ -150,6 +183,16 @@ let glm_cloud = {
   cost_per_1k_output = 0.002;
 }
 
+let gemini_pro = {
+  provider = Gemini;
+  model_id = "gemini-2.5-pro";
+  max_context = 1000000;
+  api_url = "https://generativelanguage.googleapis.com";
+  api_key_env = Some "GEMINI_API_KEY";
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
 (* ================================================================ *)
 (* Message Constructors                                             *)
 (* ================================================================ *)
@@ -198,15 +241,25 @@ let tool_def_to_openai_json (td : tool_def) : Yojson.Safe.t =
     ]);
   ]
 
-(** Build OpenAI-compatible request body (works for Ollama, GLM, OpenRouter). *)
+(** Build OpenAI-compatible request body (works for Ollama, GLM, OpenRouter).
+    Gemini's OpenAI-compat endpoint uses [max_completion_tokens] (thinking models
+    consume internal tokens from this budget, so [max_tokens] alone under-allocates). *)
 let build_openai_body (req : completion_request) : string =
   let messages_json = List.map message_to_openai_json req.messages in
+  let max_token_fields = match req.model.provider with
+    | Gemini ->
+      (* Gemini 2.5+ thinking models consume internal thinking tokens from the
+         output budget.  The OpenAI-compat endpoint uses max_completion_tokens
+         (NOT max_tokens).  Sending both causes HTTP 400. *)
+      [("max_completion_tokens", `Int req.max_tokens)]
+    | _ ->
+      [("max_tokens", `Int req.max_tokens)]
+  in
   let base = [
     ("model", `String req.model.model_id);
     ("messages", `List messages_json);
     ("temperature", `Float req.temperature);
-    ("max_tokens", `Int req.max_tokens);
-  ] in
+  ] @ max_token_fields in
   let with_tools = match req.tools with
     | [] -> base
     | tools ->
@@ -260,7 +313,13 @@ let build_claude_body (req : completion_request) : string =
 
 let parse_openai_response (json_str : string) : (completion_response, string) result =
   try
-    let json = Yojson.Safe.from_string json_str in
+    (* Gemini wraps errors in an array: [{"error": {...}}].
+       Unwrap the first element if the top-level JSON is a list. *)
+    let raw_json = Yojson.Safe.from_string json_str in
+    let json = match raw_json with
+      | `List (first :: _) -> first
+      | other -> other
+    in
     let open Yojson.Safe.Util in
     (* Check for error *)
     (match json |> member "error" with
@@ -399,7 +458,8 @@ let call_ollama_chat (req : completion_request) : (completion_response, string) 
   let url = sprintf "%s/v1/chat/completions" req.model.api_url in
   let body = build_openai_body req in
   let headers = [("Content-Type", "application/json")] in
-  match curl_post ~url ~headers ~body ~timeout_sec:120 with
+  let timeout_sec = ollama_timeout_sec () in
+  match curl_post ~url ~headers ~body ~timeout_sec with
   | Error e -> Error e
   | Ok raw -> parse_openai_response raw
 
@@ -420,7 +480,8 @@ let call_ollama_generate (req : completion_request) : (completion_response, stri
     ("stream", `Bool false);
   ]) in
   let headers = [("Content-Type", "application/json")] in
-  match curl_post ~url ~headers ~body ~timeout_sec:120 with
+  let timeout_sec = ollama_timeout_sec () in
+  match curl_post ~url ~headers ~body ~timeout_sec with
   | Error e -> Error e
   | Ok raw -> parse_ollama_generate_response raw
 
@@ -442,17 +503,27 @@ let call_claude (req : completion_request) : (completion_response, string) resul
 let call_openai_compatible (req : completion_request) : (completion_response, string) result =
   let api_key = get_api_key req.model in
   let path = match req.model.provider with
+    | Gemini -> "/v1beta/openai/chat/completions"
     | Glm_cloud -> "/api/coding/paas/v4/chat/completions"
     | _ -> "/v1/chat/completions"
   in
   let url = sprintf "%s%s" req.model.api_url path in
   let body = build_openai_body req in
+  Printf.eprintf "[llm_client] openai-compat req: model=%s max_tokens=%d tools=%d url=%s\n%!"
+    req.model.model_id req.max_tokens (List.length req.tools) url;
+  if req.tools <> [] then begin
+    let body_trunc = if String.length body > 1500 then String.sub body 0 1500 ^ "..." else body in
+    Printf.eprintf "[llm_client] openai-compat body (tools present, %d bytes): %s\n%!" (String.length body) body_trunc
+  end;
   let headers = [("Content-Type", "application/json")] @
     (if api_key <> "" then [("Authorization", sprintf "Bearer %s" api_key)] else [])
   in
   match curl_post ~url ~headers ~body ~timeout_sec:60 with
   | Error e -> Error e
-  | Ok raw -> parse_openai_response raw
+  | Ok raw ->
+    let trunc = if String.length raw > 500 then String.sub raw 0 500 ^ "..." else raw in
+    Printf.eprintf "[llm_client] openai-compat raw (%d bytes): %s\n%!" (String.length raw) trunc;
+    parse_openai_response raw
 
 (* ================================================================ *)
 (* Core: complete                                                   *)
@@ -462,10 +533,15 @@ let complete (req : completion_request) : (completion_response, string) result =
   let t0 = Time_compat.now () in
   let result = match req.model.provider with
     | Ollama ->
-      (* Try chat API first, fall back to generate *)
+      (* Try chat API first.
+         Fallback to /api/generate only for likely endpoint-support errors,
+         because retrying on timeouts doubles latency and can exceed caller deadlines. *)
       (match call_ollama_chat req with
        | Ok _ as ok -> ok
-       | Error _ -> call_ollama_generate req)
+       | Error e ->
+         if req.tools <> [] then Error e
+         else if ollama_should_fallback_to_generate e then call_ollama_generate req
+         else Error e)
     | Claude -> call_claude req
     | Gemini | Glm_cloud | OpenRouter | Custom _ ->
       call_openai_compatible req
@@ -503,25 +579,49 @@ let cascade (requests : completion_request list) : (completion_response, string)
 (* ================================================================ *)
 
 let model_spec_of_string s =
-  match String.split_on_char ':' s with
-  | ["ollama"; model_id] ->
-    Ok { ollama_glm with model_id }
-  | ["claude"; "opus"] ->
-    Ok claude_opus
-  | ["claude"; "sonnet"] ->
-    Ok claude_sonnet
-  | ["claude"; model_id] ->
-    Ok { claude_opus with model_id }
-  | ["glm"; model_id] ->
-    Ok { glm_cloud with model_id }
-  | ["openrouter"; model_id] ->
-    Ok {
-      provider = OpenRouter;
-      model_id;
-      max_context = 128000;
-      api_url = "https://openrouter.ai/api";
-      api_key_env = Some "OPENROUTER_API_KEY";
-      cost_per_1k_input = 0.001;
-      cost_per_1k_output = 0.002;
-    }
-  | _ -> Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
+  let s = String.trim s in
+  match String.index_opt s ':' with
+  | None ->
+    Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
+  | Some idx ->
+    if idx = 0 || idx >= String.length s - 1 then
+      Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
+    else
+      let provider = String.sub s 0 idx |> String.lowercase_ascii in
+      let model_id =
+        String.sub s (idx + 1) (String.length s - idx - 1)
+        |> String.trim
+      in
+      if model_id = "" then
+        Error (sprintf "Cannot parse model spec: %s (expected provider:model)" s)
+      else
+        match provider with
+        | "ollama" ->
+          Ok { ollama_glm with model_id }
+        | "gemini" | "google" ->
+          if model_id = "pro" then Ok gemini_pro
+          else if model_id = "flash" then
+            Ok { gemini_pro with model_id = "gemini-2.5-flash" }
+          else
+            Ok { gemini_pro with model_id }
+        | "claude" | "anthropic" ->
+          if model_id = "opus" then Ok claude_opus
+          else if model_id = "sonnet" then Ok claude_sonnet
+          else Ok { claude_opus with model_id }
+        | "glm" | "glm_cloud" | "zai" ->
+          Ok { glm_cloud with model_id }
+        | "openrouter" ->
+          Ok {
+            provider = OpenRouter;
+            model_id;
+            max_context = 128000;
+            api_url = "https://openrouter.ai/api";
+            api_key_env = Some "OPENROUTER_API_KEY";
+            cost_per_1k_input = 0.001;
+            cost_per_1k_output = 0.002;
+          }
+        | _ ->
+          Error
+            (sprintf
+               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, claude, gemini, glm, openrouter)"
+               s provider)

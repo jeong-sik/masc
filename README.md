@@ -27,6 +27,21 @@ make test        # 최소 검증
 make ci          # 포맷 + 테스트 (CI 동일)
 ```
 
+### CI 테스트 하네스
+
+CI에서는 `scripts/ci-run-tests.sh`를 사용해 테스트를 실행합니다.
+
+- 주기 heartbeat 로그 출력 (`[ci-heartbeat] ...`)
+- 명시적 timeout 적용
+- timeout/실패 시 진단 덤프 출력 (프로세스 스냅샷, 최근 테스트 output tail)
+
+로컬에서 동일 하네스로 재현할 수 있습니다.
+
+```bash
+CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+  scripts/ci-run-tests.sh "opam exec -- dune test"
+```
+
 ## MCP 설정
 
 `~/.mcp.json` 예시:

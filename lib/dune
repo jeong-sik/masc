@@ -187,6 +187,7 @@
    perpetual_loop
    tool_perpetual
    tool_keeper
+   tool_trpg
    trpg_engine_types
    trpg_engine_event
    trpg_engine_state_machine

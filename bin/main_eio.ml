@@ -129,8 +129,35 @@ let get_session_id_query target =
           | _ -> None)
   | _ -> None
 
+let capitalize_ascii (s : string) =
+  if s = "" then s
+  else
+    let first = Char.uppercase_ascii s.[0] |> String.make 1 in
+    let rest =
+      if String.length s > 1 then
+        String.sub s 1 (String.length s - 1) |> String.lowercase_ascii
+      else
+        ""
+    in
+    first ^ rest
+
+let title_case_header_name (header_name : string) =
+  header_name
+  |> String.split_on_char '-'
+  |> List.map capitalize_ascii
+  |> String.concat "-"
+
+let get_header_any_case (headers : Httpun.Headers.t) (name : string) =
+  match Httpun.Headers.get headers name with
+  | Some _ as value -> value
+  | None ->
+      let title_case = title_case_header_name name in
+      (match Httpun.Headers.get headers title_case with
+       | Some _ as value -> value
+       | None -> Httpun.Headers.get headers (String.uppercase_ascii name))
+
 let get_cookie_value (request : Httpun.Request.t) cookie_name =
-  match Httpun.Headers.get request.headers "cookie" with
+  match get_header_any_case request.headers "cookie" with
   | None -> None
   | Some raw ->
       raw
@@ -149,7 +176,7 @@ let get_session_id_any (request : Httpun.Request.t) =
   match get_session_id_query request.target with
   | Some _ as id -> id
   | None ->
-      (match Httpun.Headers.get request.headers "mcp-session-id" with
+      (match get_header_any_case request.headers "mcp-session-id" with
        | Some _ as id -> id
        | None -> get_cookie_value request "mcp-session-id")
 

@@ -305,6 +305,7 @@ let expected_evidence_keys = function
       "phase";
       "dna_length";
       "dna_quality";
+      "continuity_regression";
       "threshold_handoff";
     ]
   | "handoff" -> [
@@ -317,6 +318,7 @@ let expected_evidence_keys = function
       "previous_generation";
       "new_generation";
       "elapsed_ms";
+      "continuity_regression";
       "spawn";
     ]
   | "fallback" -> [
@@ -326,6 +328,7 @@ let expected_evidence_keys = function
       "message";
       "target_agent";
       "selected_agent";
+      "continuity_regression";
       "spawn";
     ]
   | _ -> [
@@ -376,6 +379,7 @@ let extract_handoff_evidence (parsed_result : Yojson.Safe.t) : Yojson.Safe.t =
         ("phase", assoc_get fields "phase");
         ("dna_length", assoc_get fields "dna_length");
         ("dna_quality", assoc_get fields "dna_quality");
+        ("continuity_regression", assoc_get fields "continuity_regression");
         ("target_agent", assoc_get fields "target_agent");
         ("selected_agent", assoc_get fields "selected_agent");
         ("previous_generation", assoc_get fields "previous_generation");
@@ -403,6 +407,18 @@ let evidence_completeness_ratio (evidence : Yojson.Safe.t) : float =
         Float.of_int present /. Float.of_int total
   | _ -> 0.0
 
+let continuity_retention_from_evidence (evidence : Yojson.Safe.t) : float option =
+  match evidence with
+  | `Assoc fields ->
+      (match List.assoc_opt "continuity_regression" fields with
+       | Some (`Assoc cfields) ->
+           (match List.assoc_opt "retention_score" cfields with
+            | Some (`Float f) -> Some f
+            | Some (`Int i) -> Some (Float.of_int i)
+            | _ -> None)
+       | _ -> None)
+  | _ -> None
+
 let max3 a b c = max a (max b c)
 
 let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.Safe.t option * bool) =
@@ -420,6 +436,10 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
       String.lowercase_ascii (String.trim (get_string args "verification_policy" "advisory"))
     in
     let judge_timeout_sec = max 0.0 (get_float args "verification_judge_timeout_sec" 60.0) in
+    let recheck_count = max 0 (int_of_float (get_float args "verification_recheck_count" 0.0)) in
+    let continuity_retention_min =
+      max 0.0 (min 1.0 (get_float args "continuity_retention_min" 0.34))
+    in
     let pass_ratio_threshold = get_float args "verification_pass_ratio" (2.0 /. 3.0) in
     let min_agreement = get_float args "verification_min_agreement" (2.0 /. 3.0) in
     let min_judges = max 1 (int_of_float (get_float args "verification_min_judges" 3.0)) in
@@ -435,6 +455,29 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
     let pass_count = ref 0 in
     let warn_count = ref 0 in
     let fail_count = ref 0 in
+    let recheck_stability_samples = ref [] in
+    let mean_or_none xs =
+      match xs with
+      | [] -> None
+      | _ ->
+          let total = List.fold_left ( +. ) 0.0 xs in
+          Some (total /. Float.of_int (List.length xs))
+    in
+    let majority_ratio statuses =
+      match statuses with
+      | [] -> 1.0
+      | _ ->
+          let pass_n =
+            List.fold_left (fun acc s -> if s = "pass" then acc + 1 else acc) 0 statuses
+          in
+          let warn_n =
+            List.fold_left (fun acc s -> if s = "warn" then acc + 1 else acc) 0 statuses
+          in
+          let fail_n =
+            List.fold_left (fun acc s -> if s = "fail" then acc + 1 else acc) 0 statuses
+          in
+          Float.of_int (max3 pass_n warn_n fail_n) /. Float.of_int (List.length statuses)
+    in
     let checks =
       List.mapi (fun idx model_str ->
         let perspective = perspective_at perspectives idx in
@@ -447,6 +490,10 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
               ("verdict", `String "WARN: model_parse_error");
               ("status", `String "warn");
               ("reason", `String err);
+              ("recheck_count_requested", `Int recheck_count);
+              ("recheck_count_completed", `Int 0);
+              ("recheck_status_samples", `List [`String "warn"]);
+              ("recheck_stability", `Float 1.0);
             ]
         | Ok model ->
             let req = Verifier.{
@@ -456,7 +503,7 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
               goal = Printf.sprintf "%s Perspective: %s." goal perspective;
               context_summary;
             } in
-            let verdict_result =
+            let run_single_verdict () =
               try
                 let verdict =
                   match ctx.clock with
@@ -473,39 +520,59 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
               | exn ->
                   `Error (Printexc.to_string exn)
             in
-            (match verdict_result with
-             | `Verdict verdict ->
-                 let status =
-                   match verdict with
-                   | Verifier.Pass -> incr pass_count; "pass"
-                   | Verifier.Warn _ -> incr warn_count; "warn"
-                   | Verifier.Fail _ -> incr fail_count; "fail"
-                 in
-                 `Assoc [
-                   ("model", `String model_str);
-                   ("perspective", `String perspective);
-                   ("verdict", `String (Verifier.verdict_to_string verdict));
-                   ("status", `String status);
-                 ]
-             | `Timeout ->
-                 incr warn_count;
-                 `Assoc [
-                   ("model", `String model_str);
-                   ("perspective", `String perspective);
-                   ("verdict", `String "WARN: verifier_timeout");
-                   ("status", `String "warn");
-                   ("reason",
-                    `String (Printf.sprintf "judge timeout after %.1fs" judge_timeout_sec));
-                 ]
-             | `Error err ->
-                 incr warn_count;
-                 `Assoc [
-                   ("model", `String model_str);
-                   ("perspective", `String perspective);
-                   ("verdict", `String "WARN: verifier_error");
-                   ("status", `String "warn");
-                   ("reason", `String err);
-                 ])
+            let status_of = function
+              | `Verdict Verifier.Pass -> "pass"
+              | `Verdict (Verifier.Warn _) -> "warn"
+              | `Verdict (Verifier.Fail _) -> "fail"
+              | `Timeout -> "warn"
+              | `Error _ -> "warn"
+            in
+            let verdict_text_of = function
+              | `Verdict v -> Verifier.verdict_to_string v
+              | `Timeout -> "WARN: verifier_timeout"
+              | `Error _ -> "WARN: verifier_error"
+            in
+            let reason_of = function
+              | `Timeout ->
+                  Some (Printf.sprintf "judge timeout after %.1fs" judge_timeout_sec)
+              | `Error err ->
+                  Some err
+              | _ ->
+                  None
+            in
+            let primary = run_single_verdict () in
+            let primary_status = status_of primary in
+            (match primary_status with
+             | "pass" -> incr pass_count
+             | "fail" -> incr fail_count
+             | _ -> incr warn_count);
+            let rec collect_rechecks n acc =
+              if n <= 0 then List.rev acc
+              else
+                let s = status_of (run_single_verdict ()) in
+                collect_rechecks (n - 1) (s :: acc)
+            in
+            let recheck_statuses = collect_rechecks recheck_count [] in
+            let status_samples = primary_status :: recheck_statuses in
+            let stability = majority_ratio status_samples in
+            if recheck_count > 0 then
+              recheck_stability_samples := stability :: !recheck_stability_samples;
+            let fields = ref [
+              ("model", `String model_str);
+              ("perspective", `String perspective);
+              ("verdict", `String (verdict_text_of primary));
+              ("status", `String primary_status);
+            ] in
+            (match reason_of primary with
+             | Some reason -> fields := !fields @ [("reason", `String reason)]
+             | None -> ());
+            fields := !fields @ [
+              ("recheck_count_requested", `Int recheck_count);
+              ("recheck_count_completed", `Int (List.length recheck_statuses));
+              ("recheck_status_samples", `List (List.map (fun s -> `String s) status_samples));
+              ("recheck_stability", `Float stability);
+            ];
+            `Assoc !fields
       ) model_strs
     in
     let total = List.length checks in
@@ -522,11 +589,19 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
         /. Float.of_int total
     in
     let evidence_ratio = evidence_completeness_ratio evidence in
+    let continuity_retention = continuity_retention_from_evidence evidence in
+    let continuity_ok =
+      match continuity_retention with
+      | Some score -> score >= continuity_retention_min
+      | None -> true
+    in
+    let panel_disagreement = max 0.0 (1.0 -. agreement_ratio) in
     let consensus_pass =
       total >= effective_min_judges
       && !fail_count = 0
       && pass_ratio >= pass_ratio_threshold
       && agreement_ratio >= min_agreement
+      && continuity_ok
     in
     let overall =
       if consensus_pass then "pass"
@@ -538,6 +613,72 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
       | "gate" | "hard_gate" -> consensus_pass
       | _ -> true
     in
+    let recheck_stability = mean_or_none !recheck_stability_samples in
+    let promotion_evidence_min = 0.8 in
+    let promotion_max_disagreement = 0.34 in
+    let promote_memory =
+      consensus_pass
+      && pass_ratio >= pass_ratio_threshold
+      && evidence_ratio >= promotion_evidence_min
+      && panel_disagreement <= promotion_max_disagreement
+      && continuity_ok
+    in
+    let next_turn_plan =
+      if !fail_count > 0 then
+        `Assoc [
+          ("action", `String "investigate_failures");
+          ("priority", `String "high");
+          ("reason", `String "At least one judge returned FAIL.");
+          ("steps", `List [
+            `String "Inspect failing judge reason";
+            `String "Add missing evidence to full_context";
+            `String "Re-run verifier panel";
+          ]);
+        ]
+      else if not continuity_ok then
+        `Assoc [
+          ("action", `String "repair_continuity_memory");
+          ("priority", `String "high");
+          ("reason", `String "Continuity retention score below threshold.");
+          ("steps", `List [
+            `String "Re-inject goal/current task summary";
+            `String "Run compaction with continuity guardrails";
+            `String "Re-run verifier after continuity improves";
+          ]);
+        ]
+      else if panel_disagreement > promotion_max_disagreement then
+        `Assoc [
+          ("action", `String "resolve_panel_disagreement");
+          ("priority", `String "medium");
+          ("reason", `String "Judge disagreement exceeded threshold.");
+          ("steps", `List [
+            `String "Collect additional continuity/progress evidence";
+            `String "Run one extra verifier pass";
+            `String "Proceed only after agreement improves";
+          ]);
+        ]
+      else if pass_ratio < pass_ratio_threshold then
+        `Assoc [
+          ("action", `String "strengthen_context_before_retry");
+          ("priority", `String "medium");
+          ("reason", `String "Pass ratio below consensus threshold.");
+          ("steps", `List [
+            `String "Include concrete work delta and outcomes";
+            `String "Retain goal/current task explicitly";
+            `String "Retry handoff verification";
+          ]);
+        ]
+      else
+        `Assoc [
+          ("action", `String "continue_execution");
+          ("priority", `String "normal");
+          ("reason", `String "Verifier consensus is acceptable.");
+          ("steps", `List [
+            `String "Promote durable memory if criteria met";
+            `String "Proceed to next planned task";
+          ]);
+        ]
+    in
     (Some (`Assoc [
       ("enabled", `Bool true);
       ("policy", `String policy);
@@ -545,12 +686,14 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
       ("overall", `String overall);
       ("goal", `String goal);
       ("judge_timeout_sec", `Float judge_timeout_sec);
+      ("recheck_count", `Int recheck_count);
       ("min_judges", `Int min_judges);
       ("effective_min_judges", `Int effective_min_judges);
       ("pass_ratio", `Float pass_ratio);
       ("pass_ratio_threshold", `Float pass_ratio_threshold);
       ("agreement_ratio", `Float agreement_ratio);
       ("agreement_threshold", `Float min_agreement);
+      ("continuity_retention_min", `Float continuity_retention_min);
       ("consensus_pass", `Bool consensus_pass);
       ("counts", `Assoc [
         ("pass", `Int !pass_count);
@@ -559,11 +702,35 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
         ("total", `Int total);
       ]);
       ("evidence", evidence);
+      ("panel_disagreement", `Float panel_disagreement);
       ("research_metrics", `Assoc [
         ("inter_judge_agreement", `Float agreement_ratio);
+        ("panel_disagreement", `Float panel_disagreement);
         ("evidence_completeness", `Float evidence_ratio);
+        ("continuity_retention", match continuity_retention with Some x -> `Float x | None -> `Null);
         ("consensus_margin", `Float (pass_ratio -. pass_ratio_threshold));
+        ("judge_recheck_stability", match recheck_stability with Some x -> `Float x | None -> `Null);
       ]);
+      ("memory_promotion", `Assoc [
+        ("from", `String "episodic");
+        ("to", `String "semantic");
+        ("decision", `String (if promote_memory then "promote" else "hold"));
+        ("criteria", `Assoc [
+          ("consensus_required", `Bool true);
+          ("pass_ratio_threshold", `Float pass_ratio_threshold);
+          ("evidence_min", `Float promotion_evidence_min);
+          ("max_disagreement", `Float promotion_max_disagreement);
+          ("continuity_retention_min", `Float continuity_retention_min);
+        ]);
+        ("signals", `Assoc [
+          ("consensus_pass", `Bool consensus_pass);
+          ("pass_ratio", `Float pass_ratio);
+          ("evidence_completeness", `Float evidence_ratio);
+          ("panel_disagreement", `Float panel_disagreement);
+          ("continuity_retention", match continuity_retention with Some x -> `Float x | None -> `Null);
+        ]);
+      ]);
+      ("next_turn_plan", next_turn_plan);
       ("checks", `List checks);
     ]), gate_pass)
 
@@ -604,7 +771,7 @@ let spawn_attempts_to_json attempts =
 let now_s () = Time_compat.now ()
 
 let min_attempt_timeout_s = 5
-let max_tool_window_s = 40
+let max_tool_window_s = 120
 
 let failed_spawn_result ~msg ~exit_code : Spawn.spawn_result =
   {
@@ -618,6 +785,29 @@ let failed_spawn_result ~msg ~exit_code : Spawn.spawn_result =
     cache_read_tokens = None;
     cost_usd = None;
   }
+
+let normalized_spawn_reason (result : Spawn.spawn_result) : string =
+  let raw = String.trim result.Spawn.output in
+  let base =
+    if raw = "" then
+      "spawn failed"
+    else
+      Mitosis.safe_sub raw 0 240
+  in
+  if result.Spawn.exit_code = 124 then
+    "spawn timeout: " ^ base
+  else
+    base
+
+let should_penalize_failure (result : Spawn.spawn_result) : bool =
+  (* Long-running CLI agents may timeout while still producing useful output.
+     Treat those as soft failures to avoid breaker-open storms in succession loops. *)
+  if result.Spawn.success then
+    false
+  else if result.Spawn.exit_code = 124 && String.trim result.Spawn.output <> "" then
+    false
+  else
+    true
 
 let command_available cmd =
   Sys.command (Printf.sprintf "command -v %s >/dev/null 2>&1" cmd) = 0
@@ -698,8 +888,15 @@ let spawn_with_cascade ~ctx ~preferred_agent ~total_timeout_seconds ~prompt =
                   let attempts' = (agent, result) :: attempts in
                   loop attempts' (attempts_agent_left - 1) rest
               | Ok () ->
-                  let per_attempt_timeout =
+                  let base_timeout =
                     max min_attempt_timeout_s (remaining / attempts_agent_left)
+                  in
+                  let per_attempt_timeout =
+                    if attempts = [] && agent = normalize_agent_name preferred_agent then
+                      (* Give preferred agent the full initial budget before cascading. *)
+                      max min_attempt_timeout_s remaining
+                    else
+                      base_timeout
                   in
                   let spawn_fn =
                     make_spawn_fn ~ctx ~agent_name:agent ~timeout_seconds:per_attempt_timeout
@@ -708,10 +905,10 @@ let spawn_with_cascade ~ctx ~preferred_agent ~total_timeout_seconds ~prompt =
                   if result.Spawn.success then
                     ignore (Circuit_breaker.record_success_global
                       ~agent_id:(breaker_agent_id agent))
-                  else
+                  else if should_penalize_failure result then
                     ignore (Circuit_breaker.record_failure_global
                       ~agent_id:(breaker_agent_id agent)
-                      ~reason:(if String.trim result.Spawn.output = "" then "spawn failed" else result.Spawn.output));
+                      ~reason:(normalized_spawn_reason result));
                   let attempts' = (agent, result) :: attempts in
                   if result.Spawn.success then
                     (result, agent, List.rev attempts')
@@ -898,6 +1095,115 @@ let validate_context_ratio ratio =
   end else
     ratio
 
+(** Continuity regression helpers (compaction/handoff before vs after) *)
+let contains_substring_ci ~haystack ~needle =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  let lh = String.length h in
+  let ln = String.length n in
+  if ln = 0 then
+    true
+  else if ln > lh then
+    false
+  else
+    let rec loop i =
+      if i + ln > lh then false
+      else if String.sub h i ln = n then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let normalize_for_overlap s =
+  let b = Buffer.create (String.length s) in
+  String.iter (fun c ->
+    let lc = Char.lowercase_ascii c in
+    if (lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9') then
+      Buffer.add_char b lc
+    else
+      Buffer.add_char b ' '
+  ) s;
+  Buffer.contents b
+
+let tokenize_overlap s =
+  String.split_on_char ' ' (normalize_for_overlap s)
+  |> List.filter (fun tok -> String.length tok >= 3)
+
+let token_overlap_ratio ~source ~target =
+  let source_tokens = tokenize_overlap source in
+  match source_tokens with
+  | [] -> 1.0
+  | _ ->
+      let matched =
+        List.fold_left (fun acc tok ->
+          if List.mem tok (tokenize_overlap target) then acc + 1 else acc
+        ) 0 source_tokens
+      in
+      Float.of_int matched /. Float.of_int (List.length source_tokens)
+
+let extract_prefixed_line ~prefix text =
+  let p = String.lowercase_ascii prefix in
+  let lp = String.length p in
+  let rec loop = function
+    | [] -> ""
+    | line :: rest ->
+        let trimmed = String.trim line in
+        let lowered = String.lowercase_ascii trimmed in
+        if String.length lowered >= lp && String.sub lowered 0 lp = p then
+          String.trim (String.sub trimmed lp (String.length trimmed - lp))
+        else
+          loop rest
+  in
+  loop (String.split_on_char '\n' text)
+
+let last_non_empty_line text =
+  let rec loop last = function
+    | [] -> last
+    | line :: rest ->
+        let trimmed = String.trim line in
+        if trimmed = "" then loop last rest else loop trimmed rest
+  in
+  loop "" (String.split_on_char '\n' text)
+
+let continuity_regression_check ~full_context ~compressed_context =
+  let goal_hint = extract_prefixed_line ~prefix:"goal:" full_context in
+  let task_hint = extract_prefixed_line ~prefix:"current task:" full_context in
+  let recent_hint = last_non_empty_line full_context in
+  let hints =
+    List.filter (fun (_, v) -> String.trim v <> "") [
+      ("goal", goal_hint);
+      ("current_task", task_hint);
+      ("recent_turn", recent_hint);
+    ]
+  in
+  let details, passed =
+    List.fold_left (fun (acc, pass_n) (name, hint) ->
+      let overlap = token_overlap_ratio ~source:hint ~target:compressed_context in
+      let retained =
+        contains_substring_ci ~haystack:compressed_context ~needle:hint
+        || overlap >= 0.6
+      in
+      let detail = `Assoc [
+        ("name", `String name);
+        ("hint", `String (Mitosis.safe_sub hint 0 120));
+        ("overlap_ratio", `Float overlap);
+        ("retained", `Bool retained);
+      ] in
+      (detail :: acc, if retained then pass_n + 1 else pass_n)
+    ) ([], 0) hints
+  in
+  let total = List.length hints in
+  let retention_score =
+    if total = 0 then 1.0
+    else Float.of_int passed /. Float.of_int total
+  in
+  `Assoc [
+    ("assessed", `Bool (total > 0));
+    ("checks_total", `Int total);
+    ("checks_passed", `Int passed);
+    ("retention_score", `Float retention_score);
+    ("details", `List (List.rev details));
+  ]
+
 (** 2-Phase auto mitosis handoff - THE CORE TOOL (v2 with BALTHASAR feedback)
 
     IMPROVEMENTS from v1:
@@ -970,10 +1276,18 @@ let run_sync_handoff ctx args : result =
   
   match result with
   | Mitosis.NoAction ->
+      let no_action_message =
+        match cell.Mitosis.phase with
+        | Mitosis.ReadyForHandoff _ ->
+            "Already prepared. Continue working until handoff threshold."
+        | Mitosis.Idle ->
+            "Context ratio below prepare threshold. Continue working."
+      in
       let json = `Assoc [
         ("action", `String "none");
         ("context_ratio", `Float context_ratio);
-        ("message", `String "Context ratio below prepare threshold. Continue working.");
+        ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
+        ("message", `String no_action_message);
         ("threshold_prepare", `Float config_mitosis.Mitosis.prepare_threshold);
         ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
       ] in
@@ -981,6 +1295,9 @@ let run_sync_handoff ctx args : result =
       
   | Mitosis.Prepared prepared_cell ->
       let dna = Option.value ~default:"" prepared_cell.Mitosis.prepared_dna in
+      let continuity =
+        continuity_regression_check ~full_context ~compressed_context:dna
+      in
       (* Validate DNA quality *)
       let dna_status = match validate_dna dna with
         | Ok _ -> "valid"
@@ -995,6 +1312,7 @@ let run_sync_handoff ctx args : result =
         ("phase", `String (Mitosis.phase_to_string prepared_cell.Mitosis.phase));
         ("dna_length", `Int (String.length dna));
         ("dna_quality", `String dna_status);
+        ("continuity_regression", continuity);
         ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
       ] in
       (true, Yojson.Safe.pretty_to_string json)
@@ -1011,6 +1329,9 @@ let run_sync_handoff ctx args : result =
         if !selected_agent = "" then normalize_agent_name target_agent else !selected_agent
       in
       let attempts_json = spawn_attempts_to_json !spawn_attempts in
+      let continuity =
+        continuity_regression_check ~full_context ~compressed_context:handoff_dna
+      in
       
       (* Check spawn success - BALTHASAR feedback: handle failures gracefully *)
       if not spawn_result.Spawn.success then begin
@@ -1037,6 +1358,7 @@ let run_sync_handoff ctx args : result =
           ("selected_agent", `String effective_agent);
           ("spawn_attempts", attempts_json);
           ("spawn_error", `String spawn_result.Spawn.output);
+          ("continuity_regression", continuity);
           ("episode_queued", match fallback_ep with Some id -> `String id | None -> `Null);
           ("suggestion", `String "Use /compact or masc_mitosis_divide with summary for graceful degradation");
         ] in
@@ -1074,6 +1396,7 @@ let run_sync_handoff ctx args : result =
           ("new_generation", `Int new_cell.Mitosis.generation);
           ("successor_output", `String output_preview);
           ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
+          ("continuity_regression", continuity);
           ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
         ] in
         (true, Yojson.Safe.pretty_to_string json)

@@ -18,16 +18,33 @@ Updated: 2026-02-15
 
 ## M1. Engine Core (in progress)
 
-- [ ] 도메인 타입(`phase`, `room_state`, `event`)
-- [ ] 상태머신(phase transition + turn rotation)
-- [ ] 이벤트 append-only 저장소
-- [ ] 스냅샷 기반 복구
+- [x] 도메인 타입(`phase`, `room_state`, `event`)
+- [x] 상태머신(phase transition + turn rotation)
+- [x] 이벤트 append-only 저장소
+- [x] 스냅샷 기반 복구
+- [x] RuleModule 인터페이스 + `dnd5e-lite` 기본 구현
+- [x] 이벤트 리플레이 기반 상태 도출기
 
 Verification:
 
 - 상태 전이 단위테스트
 - turn 순환 테스트
 - 복구 리플레이 테스트
+- dnd5e-lite 규칙 테스트(보너스/판정 티어/HP 이벤트 적용)
+
+## Scope Cut (90% 채택 / 과잉 제외)
+
+채택:
+
+- 이벤트 소싱 중심 구조(append-only + replay)
+- RuleModule 플러그인 분리(게임 규칙 교체 가능)
+- 기존 `trpg-engine.py` 규칙을 기계적으로 포팅하는 접근
+
+제외(현 단계 과잉):
+
+- 별도 Python/FastAPI 신규 런타임 도입
+- 초기부터 25개 파일 규모의 대규모 구조 분리
+- MVP 이전에 풀 CRUD/운영 엔드포인트 일괄 구현
 
 ## M2. MASC Adapter
 

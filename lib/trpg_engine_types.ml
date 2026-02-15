@@ -64,3 +64,41 @@ let initial_room_state ~room_id ~scenario_id ~dm_control ~turn_order =
     turn_order;
     current_turn_index = None;
   }
+
+let room_state_to_yojson (s : room_state) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("room_id", `String s.room_id);
+      ("scenario_id", `String s.scenario_id);
+      ("phase", `String (string_of_phase s.phase));
+      ("dm_control", `String (string_of_dm_control s.dm_control));
+      ("round", `Int s.round);
+      ("turn_order", `List (List.map (fun x -> `String x) s.turn_order));
+      ( "current_turn_index",
+        match s.current_turn_index with Some i -> `Int i | None -> `Null );
+    ]
+
+let room_state_of_yojson (json : Yojson.Safe.t) : (room_state, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let room_id = json |> member "room_id" |> to_string in
+    let scenario_id = json |> member "scenario_id" |> to_string in
+    let phase_s = json |> member "phase" |> to_string in
+    let dm_control_s = json |> member "dm_control" |> to_string in
+    let round = json |> member "round" |> to_int in
+    let turn_order = json |> member "turn_order" |> to_list |> List.map to_string in
+    let current_turn_index = json |> member "current_turn_index" |> to_int_option in
+    match phase_of_string phase_s, dm_control_of_string dm_control_s with
+    | Ok phase, Ok dm_control ->
+        Ok
+          {
+            room_id;
+            scenario_id;
+            phase;
+            dm_control;
+            round;
+            turn_order;
+            current_turn_index;
+          }
+    | Error e, _ | _, Error e -> Error e
+  with e -> Error (Printexc.to_string e)

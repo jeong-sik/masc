@@ -9,6 +9,12 @@ type event_type =
   | Keeper_unavailable
   | Metric_updated
   | Room_ended
+  | Dice_rolled
+  | Hp_changed
+  | Inventory_changed
+  | Flag_set
+  | Node_advanced
+  | Narration_posted
 
 type t = {
   seq : int;
@@ -20,6 +26,7 @@ type t = {
 }
 
 val string_of_event_type : event_type -> string
+val event_type_of_string : string -> (event_type, string) result
 
 val make :
   seq:int ->
@@ -30,3 +37,6 @@ val make :
   payload:Yojson.Safe.t ->
   unit ->
   t
+
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result

@@ -42,3 +42,6 @@ val initial_room_state :
   dm_control:dm_control ->
   turn_order:string list ->
   room_state
+
+val room_state_to_yojson : room_state -> Yojson.Safe.t
+val room_state_of_yojson : Yojson.Safe.t -> (room_state, string) result

@@ -61,6 +61,7 @@ impl ViewerMode {
     }
 
     /// Short description shown in the lobby mode selector.
+    #[allow(dead_code)]
     pub fn description(&self) -> &'static str {
         match self {
             Self::Lobby => "Select a visualization mode",
@@ -73,6 +74,7 @@ impl ViewerMode {
     }
 
     /// All selectable modes (excludes Lobby itself).
+    #[allow(dead_code)]
     pub fn selectable() -> &'static [ViewerMode] {
         &[
             Self::Trpg,
@@ -142,6 +144,14 @@ impl Plugin for ModePlugin {
             .init_resource::<ModeTransitionBuffer>()
             .add_systems(OnEnter(ViewerMode::Lobby), on_enter_lobby)
             .add_systems(OnExit(ViewerMode::Lobby), on_exit_lobby)
+            .add_systems(OnEnter(ViewerMode::Monitor), enter_monitor)
+            .add_systems(OnExit(ViewerMode::Monitor), exit_monitor)
+            .add_systems(OnEnter(ViewerMode::Council), enter_council)
+            .add_systems(OnExit(ViewerMode::Council), exit_council)
+            .add_systems(OnEnter(ViewerMode::Social), enter_social)
+            .add_systems(OnExit(ViewerMode::Social), exit_social)
+            .add_systems(OnEnter(ViewerMode::Experiment), enter_experiment)
+            .add_systems(OnExit(ViewerMode::Experiment), exit_experiment)
             .add_systems(Update, poll_mode_transition);
     }
 }
@@ -168,6 +178,14 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
 
         // Bind back-to-lobby button
         bind_back_button(&doc, &buffer.pending);
+
+        // Hide loading screen once Bevy is initialized
+        if let Some(loading) = doc.get_element_by_id("loading-screen") {
+            if let Some(html_el) = loading.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = html_el.style().set_property("opacity", "0");
+                let _ = html_el.style().set_property("pointer-events", "none");
+            }
+        }
     }
 
     // Suppress unused warning on native
@@ -287,6 +305,123 @@ fn bind_back_button(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMo
     cb.forget();
 }
 
+// ─── Monitor Mode Enter/Exit ─────────────────
+
+fn enter_monitor(buffer: Res<ModeTransitionBuffer>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "monitor-panel", "block");
+        set_element_display(&doc, "lobby-screen", "none");
+        set_element_display(&doc, "dashboard", "none");
+
+        // Bind back buttons
+        bind_back_buttons(&doc, &buffer.pending);
+    }
+    let _ = &buffer;
+}
+
+fn exit_monitor() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "monitor-panel", "none");
+    }
+}
+
+// ─── Council Mode Enter/Exit ─────────────────
+
+fn enter_council(buffer: Res<ModeTransitionBuffer>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "council-panel", "block");
+        set_element_display(&doc, "lobby-screen", "none");
+        set_element_display(&doc, "dashboard", "none");
+
+        bind_back_buttons(&doc, &buffer.pending);
+    }
+    let _ = &buffer;
+}
+
+fn exit_council() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "council-panel", "none");
+    }
+}
+
+// ─── Social Mode Enter/Exit ──────────────────
+
+fn enter_social(buffer: Res<ModeTransitionBuffer>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "social-panel", "block");
+        set_element_display(&doc, "lobby-screen", "none");
+        set_element_display(&doc, "dashboard", "none");
+
+        bind_back_buttons(&doc, &buffer.pending);
+    }
+    let _ = &buffer;
+}
+
+fn exit_social() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "social-panel", "none");
+    }
+}
+
+// ─── Experiment Mode Enter/Exit ──────────────
+
+fn enter_experiment(buffer: Res<ModeTransitionBuffer>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "experiment-panel", "block");
+        set_element_display(&doc, "lobby-screen", "none");
+        set_element_display(&doc, "dashboard", "none");
+
+        bind_back_buttons(&doc, &buffer.pending);
+    }
+    let _ = &buffer;
+}
+
+fn exit_experiment() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        set_element_display(&doc, "experiment-panel", "none");
+    }
+}
+
 // ─── DOM Helpers ─────────────────────────────
 
 /// Helper to set display style on a DOM element by ID.
@@ -296,5 +431,29 @@ fn set_element_display(doc: &web_sys::Document, id: &str, display: &str) {
         if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
             let _ = html_el.style().set_property("display", display);
         }
+    }
+}
+
+/// Binds all `.back-btn[data-back]` buttons to transition back to Lobby.
+#[cfg(target_arch = "wasm32")]
+fn bind_back_buttons(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMode>>>) {
+    let Ok(buttons) = doc.query_selector_all("[data-back]") else {
+        return;
+    };
+
+    for i in 0..buttons.length() {
+        let Some(btn) = buttons.item(i) else { continue };
+
+        let buf = pending.clone();
+        let cb = Closure::wrap(Box::new(move |_: web_sys::Event| {
+            if let Ok(mut guard) = buf.lock() {
+                *guard = Some(ViewerMode::Lobby);
+            }
+        }) as Box<dyn FnMut(web_sys::Event)>);
+
+        if let Some(target) = btn.dyn_ref::<web_sys::EventTarget>() {
+            let _ = target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+        }
+        cb.forget();
     }
 }

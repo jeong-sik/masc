@@ -59,6 +59,75 @@
         </div>
     </div>
 
+    <!-- ═══ Loading Screen ═══ -->
+    <div id="loading-screen">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Initializing viewer...</p>
+    </div>
+
+    <!-- ═══ Monitor Mode ═══ -->
+    <div id="monitor-panel" class="mode-panel" style="display: none;">
+        <div class="mode-panel-header">
+            <h2>System Monitor</h2>
+            <button class="back-btn" data-back="lobby">◂ Back</button>
+        </div>
+        <div class="mode-panel-content">
+            <div class="monitor-grid">
+                <div class="monitor-card">
+                    <h3>Agent Status</h3>
+                    <p class="placeholder-text">Connecting to MASC...</p>
+                </div>
+                <div class="monitor-card">
+                    <h3>Room Activity</h3>
+                    <p class="placeholder-text">Waiting for events...</p>
+                </div>
+                <div class="monitor-card">
+                    <h3>Task Queue</h3>
+                    <p class="placeholder-text">No active tasks</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Council Mode ═══ -->
+    <div id="council-panel" class="mode-panel" style="display: none;">
+        <div class="mode-panel-header">
+            <h2>MAGI Council</h2>
+            <button class="back-btn" data-back="lobby">◂ Back</button>
+        </div>
+        <div class="mode-panel-content">
+            <div class="council-deliberation">
+                <p class="placeholder-text">No active deliberation. Awaiting decision issues...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Social Mode ═══ -->
+    <div id="social-panel" class="mode-panel" style="display: none;">
+        <div class="mode-panel-header">
+            <h2>Lodge Social</h2>
+            <button class="back-btn" data-back="lobby">◂ Back</button>
+        </div>
+        <div class="mode-panel-content">
+            <div class="social-feed">
+                <p class="placeholder-text">Loading social feed...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Experiment Mode ═══ -->
+    <div id="experiment-panel" class="mode-panel" style="display: none;">
+        <div class="mode-panel-header">
+            <h2>Experiments</h2>
+            <button class="back-btn" data-back="lobby">◂ Back</button>
+        </div>
+        <div class="mode-panel-content">
+            <div class="experiment-dashboard">
+                <p class="placeholder-text">No active experiments. Awaiting hypothesis...</p>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ Dashboard (Active Mode View) ═══ -->
     <div id="dashboard" style="display: none;">
         <!-- Top Bar -->

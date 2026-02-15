@@ -63,6 +63,7 @@ pub struct MapState {
 pub enum ConnectionStatus {
     #[default]
     Disconnected,
+    #[allow(dead_code)]
     Connecting,
     Connected,
 }

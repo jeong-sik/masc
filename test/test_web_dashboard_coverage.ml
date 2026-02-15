@@ -136,6 +136,17 @@ let test_html_contains_trpg_round_run_controls () =
     && contains_substr "function runTrpgRound()" html
     && contains_substr "/api/v1/trpg/rounds/run" html)
 
+let test_html_contains_keeper_goal_horizon_kpis () =
+  let html = Web_dashboard.html () in
+  check bool "keeper goal horizon kpis" true
+    (String.length html > 0
+    && contains_substr "'short_goal'" html
+    && contains_substr "'mid_goal'" html
+    && contains_substr "'long_goal'" html
+    && contains_substr "Short Goal" html
+    && contains_substr "Mid Goal" html
+    && contains_substr "Long Goal" html)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -160,5 +171,6 @@ let () =
       test_case "notify uses normalized payload" `Quick test_html_notify_uses_normalized_payload;
       test_case "life state pills" `Quick test_html_life_state_pills_present;
       test_case "trpg round run controls" `Quick test_html_contains_trpg_round_run_controls;
+      test_case "keeper goal horizon kpis" `Quick test_html_contains_keeper_goal_horizon_kpis;
     ];
   ]

@@ -2245,6 +2245,18 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               ("updated_at", `String m.updated_at);
               ("trace_history_count", `Int trace_history_count);
               ("goal", if include_goals then `String m.goal else `Null);
+              ("short_goal", if include_goals then `String m.short_goal else `Null);
+              ("mid_goal", if include_goals then `String m.mid_goal else `Null);
+              ("long_goal", if include_goals then `String m.long_goal else `Null);
+              ( "goal_horizons",
+                if include_goals then
+                  `Assoc [
+                    ("short", `String m.short_goal);
+                    ("mid", `String m.mid_goal);
+                    ("long", `String m.long_goal);
+                  ]
+                else
+                  `Null );
               ("soul_profile", `String m.soul_profile);
               ("will", if String.trim m.will = "" then `Null else `String m.will);
               ("needs", if String.trim m.needs = "" then `Null else `String m.needs);

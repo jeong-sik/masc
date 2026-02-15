@@ -47,6 +47,18 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
           ("type", `String "string");
           ("description", `String "Keeper goal/system purpose (required when creating)");
         ]);
+        ("short_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: short-term goal horizon (default: goal).");
+        ]);
+        ("mid_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: mid-term goal horizon (default: goal).");
+        ]);
+        ("long_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: long-term goal horizon (default: goal).");
+        ]);
         ("instructions", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
@@ -219,6 +231,18 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
           ("type", `String "string");
           ("description", `String "Optional: set goal when creating keeper inline");
         ]);
+        ("short_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: set short-term goal horizon when creating keeper inline");
+        ]);
+        ("mid_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: set mid-term goal horizon when creating keeper inline");
+        ]);
+        ("long_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: set long-term goal horizon when creating keeper inline");
+        ]);
         ("instructions", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: set instructions when creating keeper inline");
@@ -255,6 +279,18 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
         ("new_goal", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: replace keeper goal (persisted)");
+        ]);
+        ("new_short_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: replace keeper short-term goal horizon (persisted)");
+        ]);
+        ("new_mid_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: replace keeper mid-term goal horizon (persisted)");
+        ]);
+        ("new_long_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: replace keeper long-term goal horizon (persisted)");
         ]);
         ("new_instructions", `Assoc [
           ("type", `String "string");
@@ -393,6 +429,7 @@ let default_drift_min_turn_gap = 6
 let default_keeper_will = ""
 let default_keeper_needs = ""
 let default_keeper_desires = ""
+let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6
 let default_drift_max_chars = 320
 
@@ -461,6 +498,40 @@ let normalize_self_model_text ?(max_len = default_drift_max_chars) (raw : string
   let s = String.trim raw in
   if s = "" then ""
   else utf8_safe_prefix_bytes s ~max_bytes:max_len
+
+let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
+  let s = String.trim raw in
+  if s = "" then ""
+  else utf8_safe_prefix_bytes s ~max_bytes:max_len
+
+let normalize_goal_horizon_opt (raw_opt : string option) : string option =
+  match raw_opt with
+  | None -> None
+  | Some raw ->
+    let normalized = normalize_goal_horizon_text raw in
+    if normalized = "" then None else Some normalized
+
+let parse_goal_horizon_opt args key : string option =
+  normalize_goal_horizon_opt (get_string_opt args key)
+
+let resolve_goal_horizons
+    ~(goal : string)
+    ~(short_goal_opt : string option)
+    ~(mid_goal_opt : string option)
+    ~(long_goal_opt : string option) : string * string * string =
+  let short_goal =
+    Option.value ~default:goal short_goal_opt
+    |> normalize_goal_horizon_text
+  in
+  let mid_goal =
+    Option.value ~default:goal mid_goal_opt
+    |> normalize_goal_horizon_text
+  in
+  let long_goal =
+    Option.value ~default:goal long_goal_opt
+    |> normalize_goal_horizon_text
+  in
+  (short_goal, mid_goal, long_goal)
 
 let split_semicolon_clauses (raw : string) : string list =
   raw
@@ -799,6 +870,9 @@ type keeper_meta = {
   trace_id: string;
   trace_history: string list;
   goal: string;
+  short_goal: string;
+  mid_goal: string;
+  long_goal: string;
   soul_profile: string;
   will: string;
   needs: string;
@@ -863,6 +937,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("trace_id", `String m.trace_id);
     ("trace_history", `List (List.map (fun s -> `String s) m.trace_history));
     ("goal", `String m.goal);
+    ("short_goal", `String m.short_goal);
+    ("mid_goal", `String m.mid_goal);
+    ("long_goal", `String m.long_goal);
     ("soul_profile", `String m.soul_profile);
     ("will", `String m.will);
     ("needs", `String m.needs);
@@ -926,7 +1003,17 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let trace_history =
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
     in
-    let goal = Safe_ops.json_string ~default:"" "goal" json in
+    let goal =
+      Safe_ops.json_string ~default:"" "goal" json
+      |> normalize_goal_horizon_text
+    in
+    let (short_goal, mid_goal, long_goal) =
+      resolve_goal_horizons
+        ~goal
+        ~short_goal_opt:(normalize_goal_horizon_opt (Safe_ops.json_string_opt "short_goal" json))
+        ~mid_goal_opt:(normalize_goal_horizon_opt (Safe_ops.json_string_opt "mid_goal" json))
+        ~long_goal_opt:(normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
+    in
     let soul_profile =
       Safe_ops.json_string ~default:default_soul_profile "soul_profile" json
       |> canonical_soul_profile
@@ -1046,6 +1133,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         trace_id;
         trace_history;
         goal;
+        short_goal;
+        mid_goal;
+        long_goal;
         soul_profile;
         will;
         needs;
@@ -2191,6 +2281,94 @@ let jaccard_similarity (a : string) (b : string) : float =
     let union = (List.length ta) + !uniq_b in
     if union = 0 then 0.0 else float_of_int !inter /. float_of_int union
 
+let latest_message_content_by_role
+    ~(role : Llm_client.role)
+    (messages : Llm_client.message list) : string option =
+  match
+    messages
+    |> List.rev
+    |> List.find_opt (fun (m : Llm_client.message) -> m.role = role)
+  with
+  | None -> None
+  | Some m -> trim_nonempty (String.trim m.content)
+
+let previous_assistant_message_content
+    (messages : Llm_client.message list) : string option =
+  let assistants =
+    messages
+    |> List.rev
+    |> List.filter_map (fun (m : Llm_client.message) ->
+         if m.role = Llm_client.Assistant then trim_nonempty m.content else None)
+  in
+  match assistants with
+  | _latest :: previous :: _ -> Some previous
+  | _ -> None
+
+let goal_horizon_candidates (meta : keeper_meta) : string list =
+  [meta.short_goal; meta.mid_goal; meta.long_goal; meta.goal]
+  |> List.filter_map (fun raw ->
+       raw
+       |> normalize_goal_horizon_text
+       |> trim_nonempty)
+  |> List.fold_left
+       (fun acc goal ->
+         let key = normalize_memory_text_key goal in
+         if List.exists (fun existing -> normalize_memory_text_key existing = key) acc then
+           acc
+         else
+           goal :: acc)
+       []
+  |> List.rev
+
+let best_goal_similarity ~(text : string) ~(goals : string list) : float =
+  if goals = [] then 0.0
+  else
+    let candidate = String.trim text in
+    if candidate = "" then 0.0
+    else
+      goals
+      |> List.fold_left
+           (fun best goal -> max best (jaccard_similarity candidate goal))
+           0.0
+
+let goal_alignment_score
+    ~(meta : keeper_meta)
+    ~(user_message : string option)
+    ~(assistant_reply : string option) : float =
+  let goals = goal_horizon_candidates meta in
+  if goals = [] then 0.0
+  else
+    let user_score =
+      match user_message with
+      | None -> None
+      | Some text -> Some (best_goal_similarity ~text ~goals)
+    in
+    let reply_score =
+      match assistant_reply with
+      | None -> None
+      | Some text -> Some (best_goal_similarity ~text ~goals)
+    in
+    match user_score, reply_score with
+    | None, None -> 0.0
+    | Some s, None | None, Some s -> s
+    | Some u, Some r -> (u +. r) /. 2.0
+
+let repetition_risk_score
+    ~(messages : Llm_client.message list)
+    ~(candidate_reply : string option) : float =
+  match candidate_reply with
+  | Some reply -> (
+      match latest_message_content_by_role ~role:Llm_client.Assistant messages with
+      | Some prev -> jaccard_similarity reply prev
+      | None -> 0.0)
+  | None -> (
+      match
+        previous_assistant_message_content messages,
+        latest_message_content_by_role ~role:Llm_client.Assistant messages
+      with
+      | Some prev, Some latest -> jaccard_similarity latest prev
+      | _ -> 0.0)
+
 let recent_user_messages (msgs : Llm_client.message list) ~(max_n : int) : string list =
   msgs
   |> List.rev
@@ -3159,6 +3337,10 @@ type metrics_summary = {
   memory_score_sum: float;
   memory_weather_checks: int;
   memory_weather_passed: int;
+  repetition_risk_sum: float;
+  repetition_risk_points: int;
+  goal_alignment_sum: float;
+  goal_alignment_points: int;
   last_handoff: Yojson.Safe.t option;
   last_compaction: Yojson.Safe.t option;
 }
@@ -3184,6 +3366,10 @@ let empty_metrics_summary = {
   memory_score_sum = 0.0;
   memory_weather_checks = 0;
   memory_weather_passed = 0;
+  repetition_risk_sum = 0.0;
+  repetition_risk_points = 0;
+  goal_alignment_sum = 0.0;
+  goal_alignment_points = 0;
   last_handoff = None;
   last_compaction = None;
 }
@@ -3226,6 +3412,14 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
       float_of_int s.memory_compaction_dropped_notes
       /. float_of_int s.memory_compaction_events
   in
+  let repetition_risk_avg =
+    if s.repetition_risk_points = 0 then 0.0
+    else s.repetition_risk_sum /. float_of_int s.repetition_risk_points
+  in
+  let goal_alignment_avg =
+    if s.goal_alignment_points = 0 then 0.0
+    else s.goal_alignment_sum /. float_of_int s.goal_alignment_points
+  in
   `Assoc [
     ("sample_points", `Int s.sample_points);
     ("turn_points", `Int s.turn_points);
@@ -3255,6 +3449,8 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
     ("memory_weather_checks", `Int s.memory_weather_checks);
     ("memory_weather_passed", `Int s.memory_weather_passed);
     ("memory_weather_pass_rate", `Float memory_weather_pass_rate);
+    ("repetition_risk_avg", `Float repetition_risk_avg);
+    ("goal_alignment_avg", `Float goal_alignment_avg);
     ("last_handoff", match s.last_handoff with Some j -> j | None -> `Null);
     ("last_compaction", match s.last_compaction with Some j -> j | None -> `Null);
   ]
@@ -3313,6 +3509,8 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
       let memory_is_weather =
         match memory_expected_topic with Some "weather" -> true | _ -> false
       in
+      let repetition_risk_opt = Safe_ops.json_float_opt "repetition_risk" j in
+      let goal_alignment_opt = Safe_ops.json_float_opt "goal_alignment" j in
       let handoff_json =
         if handoff_performed then
           Some (`Assoc [
@@ -3389,6 +3587,18 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
         memory_weather_passed =
           acc.memory_weather_passed
           + (if is_interaction && memory_performed && memory_is_weather && memory_passed then 1 else 0);
+        repetition_risk_sum =
+          acc.repetition_risk_sum
+          +. (match repetition_risk_opt with Some v -> v | None -> 0.0);
+        repetition_risk_points =
+          acc.repetition_risk_points
+          + (if Option.is_some repetition_risk_opt then 1 else 0);
+        goal_alignment_sum =
+          acc.goal_alignment_sum
+          +. (match goal_alignment_opt with Some v -> v | None -> 0.0);
+        goal_alignment_points =
+          acc.goal_alignment_points
+          + (if Option.is_some goal_alignment_opt then 1 else 0);
         last_handoff = handoff_json;
         last_compaction = compaction_json;
       }
@@ -3459,9 +3669,26 @@ let keeper_constitution =
    Constraints: <0-3 items separated by ';'>\n\
    [/STATE]\n"
 
-let build_keeper_system_prompt ~goal ~soul_profile ~will ~needs ~desires ~instructions =
+let build_keeper_system_prompt
+    ~goal
+    ~short_goal
+    ~mid_goal
+    ~long_goal
+    ~soul_profile
+    ~will
+    ~needs
+    ~desires
+    ~instructions =
   let profile =
     canonical_soul_profile soul_profile |> Option.value ~default:default_soul_profile
+  in
+  let goal = normalize_goal_horizon_text goal in
+  let (short_goal, mid_goal, long_goal) =
+    resolve_goal_horizons
+      ~goal
+      ~short_goal_opt:(Some short_goal)
+      ~mid_goal_opt:(Some mid_goal)
+      ~long_goal_opt:(Some long_goal)
   in
   let profile_policy = soul_profile_policy profile in
   let will =
@@ -3484,6 +3711,10 @@ let build_keeper_system_prompt ~goal ~soul_profile ~will ~needs ~desires ~instru
   Printf.sprintf
     "You are a keeper agent with persistent memory.\n\
      Goal: %s\n\
+     Goal horizons:\n\
+     - Short: %s\n\
+     - Mid: %s\n\
+     - Long: %s\n\
      \n\
      Tool guidance:\n\
      - You can call tools for time/context/memory/weather checks.\n\
@@ -3499,7 +3730,7 @@ let build_keeper_system_prompt ~goal ~soul_profile ~will ~needs ~desires ~instru
      \n\
     %s\
     %s"
-    goal will needs desires profile_policy keeper_constitution custom
+    goal short_goal mid_goal long_goal will needs desires profile_policy keeper_constitution custom
 
 let append_trait_clause ~(base : string) ~(clause : string) : string =
   let b = String.trim base in
@@ -4348,6 +4579,15 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                           let trimmed = String.trim meta_current.continuity_summary in
                           if trimmed = "" then "No continuity snapshot available." else trimmed
                     in
+                    let repetition_risk =
+                      repetition_risk_score ~messages:c.messages ~candidate_reply:None
+                    in
+                    let goal_alignment =
+                      goal_alignment_score
+                        ~meta:meta_current
+                        ~user_message:(latest_message_content_by_role ~role:Llm_client.User c.messages)
+                        ~assistant_reply:(latest_message_content_by_role ~role:Llm_client.Assistant c.messages)
+                    in
                     let snapshot = `Assoc [
                       ("ts", `String (now_iso ()));
                       ("ts_unix", `Float now_ts);
@@ -4382,6 +4622,8 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                       ("tools_used", `List []);
                       ("snapshot_source", `String "keeper_context_status");
                       ("memory_check", memory_check_default_json ());
+                      ("repetition_risk", `Float repetition_risk);
+                      ("goal_alignment", `Float goal_alignment);
                       ("handoff", `Assoc [("performed", `Bool false)]);
                     ] in
                     append_jsonl_line metrics_path snapshot)
@@ -4424,6 +4666,9 @@ let handle_keeper_up ctx args : tool_result =
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
     | Ok soul_profile_opt, Ok compaction_profile_opt ->
     let goal_opt = get_string_opt args "goal" in
+    let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
+    let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
+    let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
     let models_in = get_string_list args "models" in
     let verify_opt = get_bool_opt args "verify" in
     let presence_keepalive_opt = get_bool_opt args "presence_keepalive" in
@@ -4452,7 +4697,7 @@ let handle_keeper_up ctx args : tool_result =
   | Ok None ->
       (* Create new keeper *)
       let now_ts = Time_compat.now () in
-      let goal = Option.value ~default:"" goal_opt in
+      let goal = Option.value ~default:"" goal_opt |> normalize_goal_horizon_text in
       if goal = "" then
         (false, "❌ goal is required when creating a keeper")
       else if models_in = [] then
@@ -4487,6 +4732,13 @@ let handle_keeper_up ctx args : tool_result =
         let will = Option.value ~default:default_keeper_will will_opt in
         let needs = Option.value ~default:default_keeper_needs needs_opt in
         let desires = Option.value ~default:default_keeper_desires desires_opt in
+        let (short_goal, mid_goal, long_goal) =
+          resolve_goal_horizons
+            ~goal
+            ~short_goal_opt
+            ~mid_goal_opt
+            ~long_goal_opt
+        in
         let instructions = Option.value ~default:"" instructions_opt in
         let (env_ratio_gate, env_message_gate, env_token_gate) =
           keeper_compaction_policy_from_env ()
@@ -4522,8 +4774,17 @@ let handle_keeper_up ctx args : tool_result =
              let base_dir = session_base_dir ctx.config in
              mkdir_p base_dir;
              let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
-             let system_prompt =
-               build_keeper_system_prompt ~goal ~soul_profile ~will ~needs ~desires ~instructions
+               let system_prompt =
+                 build_keeper_system_prompt
+                   ~goal
+                   ~short_goal
+                   ~mid_goal
+                   ~long_goal
+                   ~soul_profile
+                   ~will
+                   ~needs
+                   ~desires
+                   ~instructions
              in
              let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
              ignore (save_checkpoint session ctx0 ~generation:0);
@@ -4533,6 +4794,9 @@ let handle_keeper_up ctx args : tool_result =
                trace_id;
                trace_history = [];
                goal;
+               short_goal;
+               mid_goal;
+               long_goal;
                soul_profile;
                will;
                needs;
@@ -4597,6 +4861,9 @@ let handle_keeper_up ctx args : tool_result =
                  ("trace_id", `String meta.trace_id);
                  ("generation", `Int meta.generation);
                  ("goal", `String meta.goal);
+                 ("short_goal", `String meta.short_goal);
+                 ("mid_goal", `String meta.mid_goal);
+                 ("long_goal", `String meta.long_goal);
                  ("soul_profile", `String meta.soul_profile);
                  ("will", `String meta.will);
                  ("needs", `String meta.needs);
@@ -4620,7 +4887,27 @@ let handle_keeper_up ctx args : tool_result =
                (true, Yojson.Safe.pretty_to_string json)))
     | Ok (Some old) ->
       (* Update existing keeper meta (goal/models optional) *)
-      let goal = match get_string_opt args "goal" with Some g -> g | None -> old.goal in
+      let goal_provided = Option.is_some goal_opt in
+      let goal =
+        match goal_opt with
+        | Some g -> normalize_goal_horizon_text g
+        | None -> old.goal
+      in
+      let short_goal_default = if goal_provided then goal else old.short_goal in
+      let mid_goal_default = if goal_provided then goal else old.mid_goal in
+      let long_goal_default = if goal_provided then goal else old.long_goal in
+      let short_goal =
+        Option.value ~default:short_goal_default short_goal_opt
+        |> normalize_goal_horizon_text
+      in
+      let mid_goal =
+        Option.value ~default:mid_goal_default mid_goal_opt
+        |> normalize_goal_horizon_text
+      in
+      let long_goal =
+        Option.value ~default:long_goal_default long_goal_opt
+        |> normalize_goal_horizon_text
+      in
       let models = if models_in <> [] then models_in else old.models in
       let (compaction_profile, compaction_ratio_gate, compaction_message_gate, compaction_token_gate) =
         resolve_compaction_policy
@@ -4635,6 +4922,9 @@ let handle_keeper_up ctx args : tool_result =
       in
       let updated = { old with
         goal;
+        short_goal;
+        mid_goal;
+        long_goal;
         soul_profile = Option.value ~default:old.soul_profile soul_profile_opt;
         will = Option.value ~default:old.will will_opt;
         needs = Option.value ~default:old.needs needs_opt;
@@ -5021,6 +5311,15 @@ let handle_keeper_status ctx args : tool_result =
 
          let json = `Assoc [
            ("meta", meta_to_json m);
+           ("goal", `String m.goal);
+           ("short_goal", `String m.short_goal);
+           ("mid_goal", `String m.mid_goal);
+           ("long_goal", `String m.long_goal);
+           ("goal_horizons", `Assoc [
+             ("short", `String m.short_goal);
+             ("mid", `String m.mid_goal);
+             ("long", `String m.long_goal);
+           ]);
            ("soul_profile", `String m.soul_profile);
            ("will", if String.trim m.will = "" then `Null else `String m.will);
            ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
@@ -5124,6 +5423,9 @@ let handle_keeper_msg ctx args : tool_result =
     (false, "❌ message is required")
   else
     let inline_goal = get_string_opt args "goal" in
+    let inline_short_goal = parse_goal_horizon_opt args "short_goal" in
+    let inline_mid_goal = parse_goal_horizon_opt args "mid_goal" in
+    let inline_long_goal = parse_goal_horizon_opt args "long_goal" in
     let inline_instructions = get_string_opt args "instructions" in
     let inline_will = parse_self_model_opt args "will" in
     let inline_needs = parse_self_model_opt args "needs" in
@@ -5132,6 +5434,9 @@ let handle_keeper_msg ctx args : tool_result =
     let inline_drift_min_turn_gap_opt = Safe_ops.json_int_opt "drift_min_turn_gap" args in
     let inline_soul_profile_res = parse_soul_profile_opt args "soul_profile" in
     let new_soul_profile_res = parse_soul_profile_opt args "new_soul_profile" in
+    let new_short_goal = parse_goal_horizon_opt args "new_short_goal" in
+    let new_mid_goal = parse_goal_horizon_opt args "new_mid_goal" in
+    let new_long_goal = parse_goal_horizon_opt args "new_long_goal" in
     let new_will = parse_self_model_opt args "new_will" in
     let new_needs = parse_self_model_opt args "new_needs" in
     let new_desires = parse_self_model_opt args "new_desires" in
@@ -5147,7 +5452,7 @@ let handle_keeper_msg ctx args : tool_result =
       | Error e -> Error e
       | Ok (Some m) -> Ok m
   | Ok None ->
-          let goal = Option.value ~default:"" inline_goal in
+          let goal = Option.value ~default:"" inline_goal |> normalize_goal_horizon_text in
           if goal = "" then Error "keeper not found and goal not provided"
           else if inline_models = [] then Error "keeper not found and models not provided"
           else
@@ -5173,6 +5478,13 @@ let handle_keeper_msg ctx args : tool_result =
             keeper_continuity_compaction_cooldown_sec ()
             |> normalize_continuity_compaction_cooldown_sec
           in
+          let (short_goal, mid_goal, long_goal) =
+            resolve_goal_horizons
+              ~goal
+              ~short_goal_opt:inline_short_goal
+              ~mid_goal_opt:inline_mid_goal
+              ~long_goal_opt:inline_long_goal
+          in
           let instructions = Option.value ~default:"" inline_instructions in
           let meta = {
             name;
@@ -5180,6 +5492,9 @@ let handle_keeper_msg ctx args : tool_result =
             trace_id;
             trace_history = [];
             goal;
+            short_goal;
+            mid_goal;
+            long_goal;
             soul_profile;
             will;
             needs;
@@ -5245,7 +5560,16 @@ let handle_keeper_msg ctx args : tool_result =
                 let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.ollama_glm in
                 let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
                 let system_prompt =
-                  build_keeper_system_prompt ~goal ~soul_profile ~will ~needs ~desires ~instructions
+                  build_keeper_system_prompt
+                    ~goal
+                    ~short_goal
+                    ~mid_goal
+                    ~long_goal
+                    ~soul_profile
+                    ~will
+                    ~needs
+                    ~desires
+                    ~instructions
                 in
                 let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
                 ignore (save_checkpoint session ctx0 ~generation:0);
@@ -5258,10 +5582,27 @@ let handle_keeper_msg ctx args : tool_result =
     | Ok meta0 ->
       (* Update keeper settings inline if requested. *)
       let meta =
+        let new_goal_opt = normalize_goal_horizon_opt (get_string_opt args "new_goal") in
         let goal =
-          match get_string_opt args "new_goal" with
+          match new_goal_opt with
           | None -> meta0.goal
           | Some ng -> ng
+        in
+        let goal_provided = Option.is_some new_goal_opt in
+        let short_goal_default = if goal_provided then goal else meta0.short_goal in
+        let mid_goal_default = if goal_provided then goal else meta0.mid_goal in
+        let long_goal_default = if goal_provided then goal else meta0.long_goal in
+        let short_goal =
+          Option.value ~default:short_goal_default new_short_goal
+          |> normalize_goal_horizon_text
+        in
+        let mid_goal =
+          Option.value ~default:mid_goal_default new_mid_goal
+          |> normalize_goal_horizon_text
+        in
+        let long_goal =
+          Option.value ~default:long_goal_default new_long_goal
+          |> normalize_goal_horizon_text
         in
         let soul_profile =
           match new_soul_profile with
@@ -5299,6 +5640,9 @@ let handle_keeper_msg ctx args : tool_result =
           | Some v -> normalize_drift_min_turn_gap v
         in
         if goal = meta0.goal
+           && short_goal = meta0.short_goal
+           && mid_goal = meta0.mid_goal
+           && long_goal = meta0.long_goal
            && soul_profile = meta0.soul_profile
            && will = meta0.will
            && needs = meta0.needs
@@ -5312,6 +5656,9 @@ let handle_keeper_msg ctx args : tool_result =
           let updated = {
             meta0 with
             goal;
+            short_goal;
+            mid_goal;
+            long_goal;
             soul_profile;
             will;
             needs;
@@ -5344,6 +5691,9 @@ let handle_keeper_msg ctx args : tool_result =
                   ~system_prompt:(
                     build_keeper_system_prompt
                       ~goal:meta.goal
+                      ~short_goal:meta.short_goal
+                      ~mid_goal:meta.mid_goal
+                      ~long_goal:meta.long_goal
                       ~soul_profile:meta.soul_profile
                       ~will:meta.will
                       ~needs:meta.needs
@@ -5358,6 +5708,9 @@ let handle_keeper_msg ctx args : tool_result =
                 ~system_prompt:(
                   build_keeper_system_prompt
                     ~goal:meta.goal
+                    ~short_goal:meta.short_goal
+                    ~mid_goal:meta.mid_goal
+                    ~long_goal:meta.long_goal
                     ~soul_profile:meta.soul_profile
                     ~will:meta.will
                     ~needs:meta.needs
@@ -5745,14 +6098,25 @@ let handle_keeper_msg ctx args : tool_result =
 	                     | Some parsed -> parsed
 	                     | None -> fallback_skill_route)
 	              in
-	              let safe_reply =
-	                ensure_skill_route_header
-	                  ~route:effective_skill_route
-	                  safe_reply_raw
-	              in
+		              let safe_reply =
+		                ensure_skill_route_header
+		                  ~route:effective_skill_route
+		                  safe_reply_raw
+		              in
+              let repetition_risk =
+                repetition_risk_score
+                  ~messages:ctx_work.messages
+                  ~candidate_reply:(Some safe_reply)
+              in
+              let goal_alignment =
+                goal_alignment_score
+                  ~meta
+                  ~user_message:(Some message)
+                  ~assistant_reply:(Some safe_reply)
+              in
 
-              let assistant_msg = Llm_client.assistant_msg safe_reply in
-              let ctx_work = Context_manager.append ctx_work assistant_msg in
+	              let assistant_msg = Llm_client.assistant_msg safe_reply in
+	              let ctx_work = Context_manager.append ctx_work assistant_msg in
               Context_manager.persist_message session assistant_msg;
               let now_ts = Time_compat.now () in
               let continuity_summary_from_reply =
@@ -5886,10 +6250,12 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_primary", `String effective_skill_route.primary_skill);
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-		                     ("skill_reason", `String effective_skill_route.reason);
-                     ("memory_check", memory_check_json);
-                     ("drift", `Assoc [
-                       ("enabled", `Bool meta_turn.drift_enabled);
+			                     ("skill_reason", `String effective_skill_route.reason);
+	                     ("memory_check", memory_check_json);
+                     ("repetition_risk", `Float repetition_risk);
+                     ("goal_alignment", `Float goal_alignment);
+	                     ("drift", `Assoc [
+	                       ("enabled", `Bool meta_turn.drift_enabled);
                        ("applied", `Bool drift_applied);
                        ("reason",
                          match drift_reason with
@@ -5955,10 +6321,12 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_primary", `String effective_skill_route.primary_skill);
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-		                  ("skill_reason", `String effective_skill_route.reason);
-	                  ("memory_check", memory_check_json);
-                  ("drift", `Assoc [
-                    ("enabled", `Bool meta_turn.drift_enabled);
+			                  ("skill_reason", `String effective_skill_route.reason);
+		                  ("memory_check", memory_check_json);
+                  ("repetition_risk", `Float repetition_risk);
+                  ("goal_alignment", `Float goal_alignment);
+	                  ("drift", `Assoc [
+	                    ("enabled", `Bool meta_turn.drift_enabled);
                     ("applied", `Bool drift_applied);
                     ("reason",
                       match drift_reason with
@@ -6073,10 +6441,12 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_primary", `String effective_skill_route.primary_skill);
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-		                     ("skill_reason", `String effective_skill_route.reason);
-	                     ("memory_check", memory_check_json);
-                     ("drift", `Assoc [
-                       ("enabled", `Bool meta_turn.drift_enabled);
+			                     ("skill_reason", `String effective_skill_route.reason);
+		                     ("memory_check", memory_check_json);
+                     ("repetition_risk", `Float repetition_risk);
+                     ("goal_alignment", `Float goal_alignment);
+	                     ("drift", `Assoc [
+	                       ("enabled", `Bool meta_turn.drift_enabled);
                        ("applied", `Bool drift_applied);
                        ("reason",
                          match drift_reason with
@@ -6141,10 +6511,12 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_primary", `String effective_skill_route.primary_skill);
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-		                  ("skill_reason", `String effective_skill_route.reason);
-	                  ("memory_check", memory_check_json);
-                  ("drift", `Assoc [
-                    ("enabled", `Bool meta_turn.drift_enabled);
+			                  ("skill_reason", `String effective_skill_route.reason);
+		                  ("memory_check", memory_check_json);
+                  ("repetition_risk", `Float repetition_risk);
+                  ("goal_alignment", `Float goal_alignment);
+	                  ("drift", `Assoc [
+	                    ("enabled", `Bool meta_turn.drift_enabled);
                     ("applied", `Bool drift_applied);
                     ("reason",
                       match drift_reason with
@@ -6356,10 +6728,19 @@ let handle_keeper_list ctx args : tool_result =
 	                  ]
 	            in
 	            Some (`Assoc [
-	              ("name", `String m.name);
+              ("name", `String m.name);
               ("agent_name", `String m.agent_name);
               ("trace_id", `String m.trace_id);
               ("generation", `Int m.generation);
+              ("goal", `String m.goal);
+              ("short_goal", `String m.short_goal);
+              ("mid_goal", `String m.mid_goal);
+              ("long_goal", `String m.long_goal);
+              ("goal_horizons", `Assoc [
+                ("short", `String m.short_goal);
+                ("mid", `String m.mid_goal);
+                ("long", `String m.long_goal);
+              ]);
               ("soul_profile", `String m.soul_profile);
               ("will", if String.trim m.will = "" then `Null else `String m.will);
               ("needs", if String.trim m.needs = "" then `Null else `String m.needs);

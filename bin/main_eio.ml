@@ -201,6 +201,186 @@ let bool_query_param request key ~default =
       else if v = "0" || v = "false" || v = "no" || v = "n" then false
       else default
 
+type trpg_api_error_kind = [ `Bad_request | `Internal_server_error ]
+type trpg_api_result = (Yojson.Safe.t, trpg_api_error_kind * string) result
+
+let trpg_error_json (msg : string) : Yojson.Safe.t =
+  `Assoc [ ("ok", `Bool false); ("error", `String msg) ]
+
+let trpg_rule_by_id (rule_id : string)
+  : ((module Masc_mcp.Trpg_rule.S), trpg_api_error_kind * string) result =
+  let normalized = String.trim rule_id |> String.lowercase_ascii in
+  match normalized with
+  | "" | "dnd5e-lite" -> Ok (module Masc_mcp.Trpg_rule_dnd5e_lite : Masc_mcp.Trpg_rule.S)
+  | other -> Error (`Bad_request, Printf.sprintf "unsupported rule_module: %s" other)
+
+let trpg_extract_config_from_events (events : Masc_mcp.Trpg_engine_event.t list)
+  : Yojson.Safe.t =
+  let rec find_room_created = function
+    | [] -> `Assoc []
+    | ev :: tl ->
+        (match ev.Masc_mcp.Trpg_engine_event.event_type with
+        | Masc_mcp.Trpg_engine_event.Room_created ->
+            (match ev.payload with
+            | `Assoc fields -> (
+                match List.assoc_opt "config" fields with
+                | Some cfg -> cfg
+                | None -> ev.payload)
+            | _ -> `Assoc [])
+        | _ -> find_room_created tl)
+  in
+  find_room_created events
+
+let trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter : trpg_api_result =
+  let room_id = String.trim room_id in
+  if room_id = "" then
+    Error (`Bad_request, "room_id is required")
+  else
+    let parsed_filter =
+      match event_type_filter with
+      | None -> Ok None
+      | Some raw -> (
+          match Masc_mcp.Trpg_engine_event.event_type_of_string raw with
+          | Ok et -> Ok (Some et)
+          | Error _ ->
+              Error (`Bad_request, Printf.sprintf "invalid event_type filter: %s" raw))
+    in
+    match parsed_filter with
+    | Error _ as e -> e
+    | Ok event_type_opt ->
+        let read_result =
+          if after_seq > 0 then
+            Masc_mcp.Trpg_engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq
+          else
+            Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+        in
+        (match read_result with
+        | Error e -> Error (`Internal_server_error, e)
+        | Ok events ->
+            let events =
+              match event_type_opt with
+              | None -> events
+              | Some et ->
+                  List.filter
+                    (fun (ev : Masc_mcp.Trpg_engine_event.t) -> ev.event_type = et)
+                    events
+            in
+            Ok
+              (`Assoc
+                [
+                  ("ok", `Bool true);
+                  ("room_id", `String room_id);
+                  ("after_seq", `Int after_seq);
+                  ("count", `Int (List.length events));
+                  ( "events",
+                    `List
+                      (List.map Masc_mcp.Trpg_engine_event.to_yojson events) );
+                ]))
+
+let trpg_append_event_json ~base_dir ~body_str : trpg_api_result =
+  let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
+  let parse_required_string key json =
+    match Yojson.Safe.Util.member key json with
+    | `String s when String.trim s <> "" -> Ok (String.trim s)
+    | `String _ -> Error (`Bad_request, Printf.sprintf "%s cannot be empty" key)
+    | `Null -> Error (`Bad_request, Printf.sprintf "%s is required" key)
+    | _ -> Error (`Bad_request, Printf.sprintf "%s must be string" key)
+  in
+  let parse_optional_string key json =
+    match Yojson.Safe.Util.member key json with
+    | `String s ->
+        let s = String.trim s in
+        if s = "" then Ok None else Ok (Some s)
+    | `Null -> Ok None
+    | _ -> Error (`Bad_request, Printf.sprintf "%s must be string" key)
+  in
+  let parse_optional_int key json =
+    match Yojson.Safe.Util.member key json with
+    | `Int i -> Ok (Some i)
+    | `Intlit s -> (
+        try Ok (Some (int_of_string s))
+        with _ -> Error (`Bad_request, Printf.sprintf "%s must be int" key))
+    | `Null -> Ok None
+    | _ -> Error (`Bad_request, Printf.sprintf "%s must be int" key)
+  in
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let* room_id = parse_required_string "room_id" json in
+    let* event_type_str = parse_required_string "event_type" json in
+    let* event_type =
+      match Masc_mcp.Trpg_engine_event.event_type_of_string event_type_str with
+      | Ok et -> Ok et
+      | Error e -> Error (`Bad_request, e)
+    in
+    let* actor_id = parse_optional_string "actor_id" json in
+    let* ts_opt = parse_optional_string "ts" json in
+    let* seq_opt = parse_optional_int "seq" json in
+    let payload =
+      match Yojson.Safe.Util.member "payload" json with
+      | `Null -> `Assoc []
+      | v -> v
+    in
+    let seq =
+      match seq_opt with
+      | Some s -> s
+      | None -> (
+          match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+          | Ok events ->
+              (List.fold_left
+                 (fun acc (ev : Masc_mcp.Trpg_engine_event.t) -> max acc ev.seq)
+                 0 events)
+              + 1
+          | Error _ -> 1)
+    in
+    if seq <= 0 then
+      Error (`Bad_request, "seq must be positive")
+    else
+      let ts =
+        match ts_opt with
+        | Some ts -> ts
+        | None -> Masc_mcp.Types.now_iso ()
+      in
+      let event =
+        Masc_mcp.Trpg_engine_event.make
+          ~seq ~room_id ~ts ~event_type ?actor_id ~payload ()
+      in
+      (match Masc_mcp.Trpg_engine_store_sqlite.append_event ~base_dir ~event with
+      | Ok () ->
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("event", Masc_mcp.Trpg_engine_event.to_yojson event);
+              ])
+      | Error e -> Error (`Internal_server_error, e))
+  with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+
+let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
+  let room_id = String.trim room_id in
+  if room_id = "" then
+    Error (`Bad_request, "room_id is required")
+  else
+    match trpg_rule_by_id rule_module with
+    | Error _ as e -> e
+    | Ok rule -> (
+        match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+        | Error e -> Error (`Internal_server_error, e)
+        | Ok events ->
+            let config = trpg_extract_config_from_events events in
+            let state =
+              Masc_mcp.Trpg_engine_replay.derive_state ~rule ~config ~events
+            in
+            let module R = (val rule : Masc_mcp.Trpg_rule.S) in
+            Ok
+              (`Assoc
+                [
+                  ("ok", `Bool true);
+                  ("room_id", `String room_id);
+                  ("rule_module", `String R.id);
+                  ("event_count", `Int (List.length events));
+                  ("state", state);
+                ]))
+
 let bearer_token_from_header value =
   let prefix = "Bearer " in
   let prefix_lower = "bearer " in
@@ -3097,6 +3277,56 @@ let make_routes ~port ~host =
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/events" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         let room_id = Option.value ~default:"" (query_param req "room_id") in
+         let after_seq = int_query_param req "after_seq" ~default:0 in
+         let event_type_filter = query_param req "event_type" in
+         match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
+         | Ok json ->
+             Http.Response.json (Yojson.Safe.to_string json) reqd
+         | Error (`Bad_request, msg) ->
+             Http.Response.json ~status:`Bad_request (Yojson.Safe.to_string (trpg_error_json msg)) reqd
+         | Error (`Internal_server_error, msg) ->
+             Http.Response.json ~status:`Internal_server_error
+               (Yojson.Safe.to_string (trpg_error_json msg))
+               reqd
+       ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/events" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         Http.Request.read_body_async reqd (fun body_str ->
+           match trpg_append_event_json ~base_dir ~body_str with
+           | Ok json ->
+               Http.Response.json ~status:`Created (Yojson.Safe.to_string json) reqd
+           | Error (`Bad_request, msg) ->
+               Http.Response.json ~status:`Bad_request
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+           | Error (`Internal_server_error, msg) ->
+               Http.Response.json ~status:`Internal_server_error
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+         )
+       ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/state" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         let room_id = Option.value ~default:"" (query_param req "room_id") in
+         let rule_module =
+           Option.value ~default:"dnd5e-lite" (query_param req "rule_module")
+         in
+         match trpg_derive_state_json ~base_dir ~room_id ~rule_module with
+         | Ok json ->
+             Http.Response.json (Yojson.Safe.to_string json) reqd
+         | Error (`Bad_request, msg) ->
+             Http.Response.json ~status:`Bad_request (Yojson.Safe.to_string (trpg_error_json msg)) reqd
+         | Error (`Internal_server_error, msg) ->
+             Http.Response.json ~status:`Internal_server_error
+               (Yojson.Safe.to_string (trpg_error_json msg))
+               reqd
+       ) request reqd)
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
        with_read_auth (fun state _req reqd ->
@@ -3769,6 +3999,55 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/api/v1/credits" ->
           h2_respond_json h2_reqd (Masc_mcp.Credits_dashboard.json_api ()) ~extra_headers:cors
+
+      | `GET, "/api/v1/trpg/events" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
+          let after_seq = int_query_param httpun_request "after_seq" ~default:0 in
+          let event_type_filter = query_param httpun_request "event_type" in
+          (match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
+          | Ok json ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          | Error (`Bad_request, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Bad_request ~extra_headers:cors
+          | Error (`Internal_server_error, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `POST, "/api/v1/trpg/events" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          h2_read_body h2_reqd (fun body_str ->
+            match trpg_append_event_json ~base_dir ~body_str with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status:`Created
+                  ~extra_headers:cors
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Error (`Internal_server_error, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors
+          )
+
+      | `GET, "/api/v1/trpg/state" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
+          let rule_module =
+            Option.value ~default:"dnd5e-lite" (query_param httpun_request "rule_module")
+          in
+          (match trpg_derive_state_json ~base_dir ~room_id ~rule_module with
+          | Ok json ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          | Error (`Bad_request, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Bad_request ~extra_headers:cors
+          | Error (`Internal_server_error, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Internal_server_error ~extra_headers:cors)
 
       | `GET, "/api/v1/board" ->
           let hearth = query_param httpun_request "hearth" in

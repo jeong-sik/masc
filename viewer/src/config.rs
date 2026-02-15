@@ -12,6 +12,7 @@ use crate::mode::ViewerMode;
 pub const TRPG_ENGINE_URL: &str = "http://localhost:8940";
 
 /// MASC MCP server (OCaml + Eio, SSE + JSON-RPC).
+#[allow(dead_code)]
 pub const MASC_MCP_URL: &str = "http://localhost:8935";
 
 /// Default TRPG room identifier.
@@ -19,6 +20,7 @@ pub const DEFAULT_ROOM_ID: &str = "default";
 
 /// SSE endpoint for a given viewer mode.
 /// Returns `None` for Lobby (no live data connection).
+#[allow(dead_code)]
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
         ViewerMode::Lobby => None,
@@ -34,6 +36,7 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
 }
 
 /// HTTP base URL for initial state loading in a given mode.
+#[allow(dead_code)]
 pub fn http_base_url(mode: &ViewerMode) -> &'static str {
     match mode {
         ViewerMode::Trpg => TRPG_ENGINE_URL,

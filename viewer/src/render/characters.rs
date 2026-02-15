@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::assets;
 use crate::game::components::*;
 use super::map::area_to_position;
 
@@ -15,33 +16,44 @@ fn character_color(id: &str) -> Color {
 }
 
 /// Spawns character token sprites from Actor components that lack MapToken.
+/// Uses AI-generated portrait textures when available, falls back to colored squares.
 pub fn spawn_character_sprites(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     actors: Query<(Entity, &Actor), Without<MapToken>>,
 ) {
     for (entity, actor) in &actors {
         let pos = area_to_position(&actor.area);
-        let color = character_color(&actor.id);
 
-        // Character token (circle-like sprite)
-        commands.entity(entity).insert((
+        // Use portrait texture if available, fallback to colored square
+        let sprite = if let Some(path) = assets::portrait_for(&actor.id) {
             Sprite {
-                color,
+                image: asset_server.load(path),
+                custom_size: Some(Vec2::new(64.0, 64.0)),
+                ..default()
+            }
+        } else {
+            Sprite {
+                color: character_color(&actor.id),
                 custom_size: Some(Vec2::new(40.0, 40.0)),
                 ..default()
-            },
+            }
+        };
+
+        commands.entity(entity).insert((
+            sprite,
             Transform::from_xyz(pos.x, pos.y, 1.0),
             MapToken,
         ));
 
-        // HP bar as child entity
+        // HP bar as child entity (positioned below the sprite)
         let hp_bar = commands.spawn((
             Sprite {
                 color: Color::srgb(0.2, 0.7, 0.2),
                 custom_size: Some(Vec2::new(36.0, 3.0)),
                 ..default()
             },
-            Transform::from_xyz(0.0, -26.0, 0.1),
+            Transform::from_xyz(0.0, -38.0, 0.1),
             HpBarSprite { max_width: 36.0 },
         )).id();
 

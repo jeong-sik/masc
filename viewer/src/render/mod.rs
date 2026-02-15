@@ -34,6 +34,7 @@ impl Plugin for MapRenderPlugin {
                 characters::update_hp_bars,
                 characters::apply_death_visuals,
                 map::update_map_label,
+                map::update_map_texture,
                 fx::spawn_damage_text,
                 fx::animate_floating_text,
                 transition::trigger_scene_transition,

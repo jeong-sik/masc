@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
+use crate::assets;
 use crate::game::components::{GameCamera, MapBackground};
 use crate::game::state::MapState;
-use crate::shaders::PostProcessSettings;
+use crate::theme::ViewerTheme;
 
 /// Map area → screen position mapping.
 /// Areas A-F are zones within the current scenario map.
@@ -18,31 +19,27 @@ pub fn area_to_position(area: &str) -> Vec2 {
     }
 }
 
-/// Spawns the 2D camera.
-pub fn setup_camera(mut commands: Commands) {
+/// Spawns the 2D camera with shader settings from the active theme.
+pub fn setup_camera(mut commands: Commands, theme: Res<ViewerTheme>) {
     commands.spawn((
         Camera2d,
         GameCamera,
-        PostProcessSettings {
-            kuwahara_radius: 3.0,
-            edge_strength: 0.6,
-            saturation: 0.75,
-            warmth: 0.8,
-            vignette_strength: 0.4,
-            grain_strength: 0.03,
-            time: 0.0,
-            intensity: 1.0,
-        },
+        theme.shader_settings(),
     ));
 }
 
-/// Spawns a placeholder map background.
-/// In Phase F, this will be replaced with AI-generated area art.
-pub fn setup_map_background(mut commands: Commands) {
-    // Dark background sprite as map placeholder
+/// Spawns the map background with AI-generated area art.
+pub fn setup_map_background(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    map_state: Res<MapState>,
+) {
+    let path = assets::map_for(&map_state.current_area)
+        .unwrap_or(assets::paths::MAP_AREA_A);
+    let texture = asset_server.load(path);
     commands.spawn((
         Sprite {
-            color: Color::srgb(0.06, 0.06, 0.10),
+            image: texture,
             custom_size: Some(Vec2::new(1280.0, 720.0)),
             ..default()
         },
@@ -77,3 +74,21 @@ pub fn update_map_label(map_state: Res<MapState>) {
 /// Native no-op for update_map_label.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn update_map_label(_map_state: Res<MapState>) {}
+
+/// Swaps the map background texture when the current area changes.
+pub fn update_map_texture(
+    map_state: Res<MapState>,
+    asset_server: Res<AssetServer>,
+    mut backgrounds: Query<&mut Sprite, With<MapBackground>>,
+) {
+    if !map_state.is_changed() {
+        return;
+    }
+
+    let path = assets::map_for(&map_state.current_area)
+        .unwrap_or(assets::paths::MAP_AREA_A);
+
+    for mut sprite in &mut backgrounds {
+        sprite.image = asset_server.load(path);
+    }
+}

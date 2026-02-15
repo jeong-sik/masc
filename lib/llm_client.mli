@@ -107,6 +107,7 @@ val ollama_lfm : model_spec
 val claude_opus : model_spec
 val claude_sonnet : model_spec
 val glm_cloud : model_spec
+val gemini_pro : model_spec
 
 (** Create a message. *)
 val system_msg : string -> message
@@ -117,7 +118,9 @@ val tool_msg : name:string -> call_id:string -> string -> message
 (** Estimate token count for a message list (heuristic: ~4 chars per token). *)
 val estimate_tokens : message list -> int
 
-(** Parse model spec from string like "ollama:glm-4.7-flash" or "claude:opus". *)
+(** Parse model spec from string like "ollama:glm-4.7-flash:latest",
+    "claude:opus", or "gemini:gemini-2.5-flash".
+    Splits at the first ':' only, so model IDs may contain additional ':'. *)
 val model_spec_of_string : string -> (model_spec, string) result
 
 (** String representation of provider. *)

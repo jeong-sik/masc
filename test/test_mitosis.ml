@@ -172,7 +172,7 @@ let test_auto_mitosis_handoff_at_threshold () =
   let result = Mitosis.auto_mitosis_check_2phase
     ~config ~pool ~cell ~context_ratio:0.85 ~full_context ~spawn_fn:mock_spawn_fn in
   match result with
-  | Mitosis.Handoff (spawn_result, child_cell, _new_pool) ->
+  | Mitosis.Handoff (spawn_result, child_cell, _new_pool, _handoff_dna) ->
       check Alcotest.bool "spawn success" true spawn_result.success;
       check Alcotest.int "child generation" 1 child_cell.generation
   | _ -> Alcotest.fail "expected Handoff at 85% context"
@@ -187,7 +187,7 @@ let test_auto_mitosis_handoff_from_idle () =
   let result = Mitosis.auto_mitosis_check_2phase
     ~config ~pool ~cell ~context_ratio:0.9 ~full_context ~spawn_fn:mock_spawn_fn in
   match result with
-  | Mitosis.Handoff (spawn_result, child_cell, _new_pool) ->
+  | Mitosis.Handoff (spawn_result, child_cell, _new_pool, _handoff_dna) ->
       check Alcotest.bool "spawn success" true spawn_result.success;
       check Alcotest.int "child generation" 1 child_cell.generation
   | _ -> Alcotest.fail "expected emergency Handoff at 90% from Idle"

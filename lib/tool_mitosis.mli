@@ -10,11 +10,14 @@
 *)
 
 (** Tool handler context - extensible for future features *)
+type any_clock = Clock : _ Eio.Time.clock -> any_clock
+
 type context = {
   config: Room_utils.config;
   logger: (string -> unit) option;  (** Optional logging callback *)
   sw: Eio.Switch.t option;
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  clock: any_clock option;
 }
 
 (** Create context with just config (backward compatible) *)
@@ -28,6 +31,7 @@ val make_context_with_eio :
   config:Room_utils.config ->
   sw:Eio.Switch.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
+  clock:_ Eio.Time.clock ->
   context
 
 (** Internal logging helper (for testing) *)

@@ -20,6 +20,12 @@ let contains_re_ci re s =
     true
   with Not_found -> false
 
+let contains_substr sub s =
+  try
+    let _ = Str.search_forward (Str.regexp_string sub) s 0 in
+    true
+  with Not_found -> false
+
 (* ============================================================
    html Tests
    ============================================================ *)
@@ -95,6 +101,31 @@ let test_html_contains_meta_localizer () =
     && contains_re "localizeKeeperMetaLabels" html
     && contains_re "keeperMetaLabelKo" html)
 
+let test_html_contains_life_state_normalizer () =
+  let html = Web_dashboard.html () in
+  check bool "keeper payload normalizer" true
+    (String.length html > 0
+    && contains_substr "function normalizeKeeperPayload(payload)" html
+    && contains_substr "if (Array.isArray(payload)) return payload;" html
+    && contains_substr "if (payload && Array.isArray(payload.keepers)) return payload.keepers;" html)
+
+let test_html_notify_uses_normalized_payload () =
+  let html = Web_dashboard.html () in
+  check bool "keeper notify uses normalized payload" true
+    (String.length html > 0
+    && contains_substr "notifyKeeperAlerts(normalizeKeeperPayload(data.keepers))" html
+    && contains_substr "function notifyKeeperAlerts(keepersPayload)" html
+    && contains_substr "const keepers = normalizeKeeperPayload(keepersPayload)" html)
+
+let test_html_life_state_pills_present () =
+  let html = Web_dashboard.html () in
+  check bool "life state pills in keeper cards" true
+    (String.length html > 0
+    && contains_re "lifeState\\.staleState" html
+    && contains_re "staleState === 'bad'" html
+    && contains_re "life_status" html
+    && contains_re "Life Pulse" html)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -115,5 +146,8 @@ let () =
       test_case "keeper query params" `Quick test_html_contains_keeper_state_query_params;
       test_case "keeper kpi interaction" `Quick test_html_contains_keeper_kpi_interaction;
       test_case "keeper meta localizer" `Quick test_html_contains_meta_localizer;
+      test_case "life state normalizer" `Quick test_html_contains_life_state_normalizer;
+      test_case "notify uses normalized payload" `Quick test_html_notify_uses_normalized_payload;
+      test_case "life state pills" `Quick test_html_life_state_pills_present;
     ];
   ]

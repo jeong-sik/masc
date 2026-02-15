@@ -1,0 +1,159 @@
+open Trpg_engine_types
+open Trpg_engine_event
+
+type snapshot = {
+  last_seq : int;
+  ts : string;
+  state : room_state;
+}
+
+let room_id_re = Str.regexp "^[A-Za-z0-9._-]+$"
+
+let validate_room_id (room_id : string) : (unit, string) result =
+  if room_id = "" then Error "room_id cannot be empty"
+  else if Str.string_match room_id_re room_id 0 then Ok ()
+  else Error (Printf.sprintf "invalid room_id: %s" room_id)
+
+let room_dir ~base_dir ~room_id =
+  match validate_room_id room_id with
+  | Error e -> Error e
+  | Ok () ->
+      Ok (Filename.concat (Filename.concat (Filename.concat base_dir "trpg") "rooms") room_id)
+
+let events_path ~base_dir ~room_id =
+  match room_dir ~base_dir ~room_id with
+  | Error e -> Error e
+  | Ok dir -> Ok (Filename.concat dir "events.jsonl")
+
+let snapshot_path ~base_dir ~room_id =
+  match room_dir ~base_dir ~room_id with
+  | Error e -> Error e
+  | Ok dir -> Ok (Filename.concat dir "snapshot.json")
+
+let ensure_room_dir ~base_dir ~room_id =
+  match room_dir ~base_dir ~room_id with
+  | Error _ as e -> e
+  | Ok dir ->
+      (try
+         Room_utils.mkdir_p dir;
+         Ok ()
+       with e -> Error (Printf.sprintf "failed to mkdir %s: %s" dir (Printexc.to_string e)))
+
+let append_event ~base_dir ~(event : Trpg_engine_event.t) =
+  match ensure_room_dir ~base_dir ~room_id:event.room_id with
+  | Error _ as e -> e
+  | Ok () -> (
+      match events_path ~base_dir ~room_id:event.room_id with
+      | Error _ as e -> e
+      | Ok path ->
+          let line = Yojson.Safe.to_string (Trpg_engine_event.to_yojson event) ^ "\n" in
+          try
+            let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
+            output_string oc line;
+            close_out oc;
+            Ok ()
+          with e -> Error (Printf.sprintf "append_event failed: %s" (Printexc.to_string e)))
+
+let read_event_lines (path : string) : (string list, string) result =
+  if not (Sys.file_exists path) then Ok []
+  else
+    try
+      let ic = open_in path in
+      let rec loop acc =
+        match input_line ic with
+        | line -> loop (line :: acc)
+        | exception End_of_file ->
+            close_in ic;
+            Ok (List.rev acc)
+      in
+      loop []
+    with e -> Error (Printf.sprintf "read_event_lines failed: %s" (Printexc.to_string e))
+
+let parse_events_from_lines (lines : string list) : (Trpg_engine_event.t list, string) result =
+  let rec aux idx acc = function
+    | [] -> Ok (List.rev acc)
+    | line :: rest ->
+        if String.trim line = "" then aux (idx + 1) acc rest
+        else
+          let parsed =
+            try
+              let json = Yojson.Safe.from_string line in
+              Trpg_engine_event.of_yojson json
+            with Yojson.Json_error e -> Error e
+          in
+          (match parsed with
+          | Ok ev -> aux (idx + 1) (ev :: acc) rest
+          | Error e ->
+              Error
+                (Printf.sprintf
+                   "failed to parse event line %d: %s"
+                   idx
+                   e))
+  in
+  aux 1 [] lines
+
+let read_events ~base_dir ~room_id =
+  match events_path ~base_dir ~room_id with
+  | Error _ as e -> e
+  | Ok path -> (
+      match read_event_lines path with
+      | Error _ as e -> e
+      | Ok lines -> parse_events_from_lines lines)
+
+let read_events_after ~base_dir ~room_id ~after_seq =
+  match read_events ~base_dir ~room_id with
+  | Error _ as e -> e
+  | Ok events -> Ok (List.filter (fun ev -> ev.seq > after_seq) events)
+
+let write_snapshot ~base_dir ~room_id ~last_seq ~ts ~state =
+  match ensure_room_dir ~base_dir ~room_id with
+  | Error _ as e -> e
+  | Ok () -> (
+      match snapshot_path ~base_dir ~room_id with
+      | Error _ as e -> e
+      | Ok path ->
+          let json =
+            `Assoc
+              [
+                ("last_seq", `Int last_seq);
+                ("ts", `String ts);
+                ("state", Trpg_engine_types.room_state_to_yojson state);
+              ]
+          in
+          try
+            let oc = open_out path in
+            Yojson.Safe.pretty_to_channel oc json;
+            close_out oc;
+            Ok ()
+          with e -> Error (Printf.sprintf "write_snapshot failed: %s" (Printexc.to_string e)))
+
+let read_snapshot ~base_dir ~room_id =
+  match snapshot_path ~base_dir ~room_id with
+  | Error _ as e -> e
+  | Ok path ->
+      if not (Sys.file_exists path) then Ok None
+      else
+        (match Safe_ops.read_json_file_safe path with
+        | Error e -> Error e
+        | Ok json ->
+            let open Yojson.Safe.Util in
+            try
+              let last_seq = json |> member "last_seq" |> to_int in
+              let ts = json |> member "ts" |> to_string in
+              let state_json = json |> member "state" in
+              (match Trpg_engine_types.room_state_of_yojson state_json with
+              | Ok state -> Ok (Some { last_seq; ts; state })
+              | Error e -> Error (Printf.sprintf "snapshot state parse failed: %s" e))
+            with e -> Error (Printf.sprintf "snapshot parse failed: %s" (Printexc.to_string e)))
+
+let load_recovery ~base_dir ~room_id =
+  match read_snapshot ~base_dir ~room_id with
+  | Error _ as e -> e
+  | Ok None -> (
+      match read_events ~base_dir ~room_id with
+      | Error _ as e -> e
+      | Ok events -> Ok (None, events))
+  | Ok (Some snap) -> (
+      match read_events_after ~base_dir ~room_id ~after_seq:snap.last_seq with
+      | Error _ as e -> e
+      | Ok events -> Ok (Some snap, events))

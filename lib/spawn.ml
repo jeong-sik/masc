@@ -53,6 +53,11 @@ let masc_mcp_tools = [
   "mcp__masc__masc_memento_mori";
   "mcp__masc__masc_relay_status";
   "mcp__masc__masc_relay_checkpoint";
+  (* TRPG tools *)
+  "mcp__masc__masc_trpg_dice_roll";
+  "mcp__masc__masc_trpg_turn_advance";
+  "mcp__masc__masc_trpg_stream";
+  "mcp__masc__masc_trpg_round_run";
 ]
 
 (** MASC Lifecycle Protocol - auto-appended to spawned agent prompts *)

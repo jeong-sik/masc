@@ -1094,7 +1094,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_run = { Tool_run.config } in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
-  let simple_ctx_mitosis = Tool_mitosis.make_context_with_eio ~config ~sw ~proc_mgr:state.Mcp_server.proc_mgr in
+  let simple_ctx_mitosis =
+    Tool_mitosis.make_context_with_eio
+      ~config
+      ~sw
+      ~proc_mgr:state.Mcp_server.proc_mgr
+      ~clock
+  in
   let simple_ctx_portal : Tool_portal.context = { config; agent_name } in
   let simple_ctx_worktree : Tool_worktree.context = { config; agent_name } in
   let simple_ctx_vote : Tool_vote.context = { config; agent_name } in
@@ -1138,6 +1144,30 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             loop_state.Perpetual_loop.trace_id (Printexc.to_string exn)));
   } in
   let simple_ctx_keeper : _ Tool_keeper.context = { config; sw; clock } in
+  let trpg_keeper_call ~name:keeper_name ~message ~timeout_sec :
+      Tool_trpg.keeper_call_result =
+    let keeper_args =
+      `Assoc [ ("name", `String keeper_name); ("message", `String message) ]
+    in
+    try
+      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+          match
+            Tool_keeper.dispatch simple_ctx_keeper ~name:"masc_keeper_msg"
+              ~args:keeper_args
+          with
+          | None -> `Error "masc_keeper_msg dispatch unavailable"
+          | Some (true, body) -> (
+              try `Ok (Yojson.Safe.from_string body)
+              with Yojson.Json_error e ->
+                `Error (Printf.sprintf "keeper returned invalid json: %s" e))
+          | Some (false, msg) -> `Error msg)
+    with
+    | Eio.Time.Timeout -> `Timeout
+    | exn -> `Error (Printexc.to_string exn)
+  in
+  let simple_ctx_trpg : Tool_trpg.context =
+    { config; agent_name; keeper_call = Some trpg_keeper_call }
+  in
 
   (* Chain through all extracted tool modules *)
   match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
@@ -1231,6 +1261,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_perpetual.dispatch simple_ctx_perpetual ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_trpg.dispatch simple_ctx_trpg ~name ~args:arguments with
   | Some result -> result
   | None ->
   (* Tool_gardener returns result directly, not option - wrap it *)
@@ -1547,6 +1580,9 @@ Time: %s
         ("passed", `Bool passed);
       ] in
       (true, Yojson.Safe.pretty_to_string json)
+  | "masc_verify_request" | "masc_verify_submit" | "masc_verify_status"
+  | "masc_verify_pending" | "masc_verify_auto" ->
+      Tool_verification.dispatch config agent_name name arguments
 
   (* A2A Agent Card - Discovery *)
 
@@ -1842,7 +1878,7 @@ Time: %s
               in
 
               (* Execute full mitosis *)
-              let (spawn_result, new_cell, new_pool) =
+              let (spawn_result, new_cell, new_pool, _handoff_dna) =
                 Mitosis.execute_mitosis
                   ~config:mitosis_config
                   ~pool:!(Mcp_server.stem_pool)
@@ -2209,7 +2245,8 @@ Time: %s
       result
   | "masc_board_list" | "masc_board_get"
   | "masc_board_comment" | "masc_board_vote" | "masc_board_stats"
-  | "masc_board_search" | "masc_board_comment_vote" | "masc_board_profile" ->
+  | "masc_board_search" | "masc_board_comment_vote" | "masc_board_profile"
+  | "masc_board_hearths" | "masc_board_migrate" ->
       Tool_board.handle_tool name arguments
 
   (* Lodge tools delegated to Tool_lodge module *)
@@ -2352,66 +2389,29 @@ Time: %s
 
 (** {1 Eio-Native JSON-RPC Handlers} *)
 
+(** Parse bounded int from environment variable. *)
 let int_of_env_default name ~default ~min_v ~max_v =
-  let parsed =
-    match Sys.getenv_opt name with
-    | None -> default
-    | Some raw ->
-        (try int_of_string (String.trim raw) with _ -> default)
-  in
-  max min_v (min max_v parsed)
-
-let bool_of_env_default name ~(default : bool) =
   match Sys.getenv_opt name with
   | None -> default
   | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
-      else default
+      let parsed =
+        try int_of_string (String.trim raw)
+        with _ -> default
+      in
+      max min_v (min max_v parsed)
 
-type tool_timeout_config = {
-  timeout_sec: float;
-  env_key: string;
-}
-
-let tool_timeout_config_of_name (tool_name : string) : tool_timeout_config option =
+(** Optional per-tool timeout to prevent long calls from starving the request loop. *)
+let tool_timeout_sec_opt ~(tool_name : string) : float option =
   match tool_name with
   | "masc_keeper_msg" ->
       Some
-        {
-          timeout_sec =
-            float_of_int
-              (int_of_env_default
-                 "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
-                 ~default:45
-                 ~min_v:10
-                 ~max_v:300);
-          env_key = "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC";
-        }
-  | "masc_keeper_status" ->
-      Some
-        {
-          timeout_sec =
-            float_of_int
-              (int_of_env_default
-                 "MASC_TOOL_TIMEOUT_KEEPER_STATUS_SEC"
-                 ~default:55
-                 ~min_v:10
-                 ~max_v:300);
-          env_key = "MASC_TOOL_TIMEOUT_KEEPER_STATUS_SEC";
-        }
+        (float_of_int
+           (int_of_env_default
+              "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
+              ~default:45
+              ~min_v:10
+              ~max_v:300))
   | _ -> None
-
-let tool_slow_log_ms () =
-  int_of_env_default
-    "MASC_TOOL_SLOW_LOG_MS"
-    ~default:1500
-    ~min_v:100
-    ~max_v:600000
-
-let tool_timing_verbose () =
-  bool_of_env_default "MASC_TOOL_TIMING_VERBOSE" ~default:false
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
 let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params =
@@ -2422,36 +2422,16 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
   let timeout_hit = ref false in
-  let timeout_cfg = tool_timeout_config_of_name name in
-  let timeout_limit_sec =
-    match timeout_cfg with
-    | Some cfg -> cfg.timeout_sec
-    | None -> 0.0
-  in
-  let keeper_name = Safe_ops.json_string ~default:"" "name" arguments in
-  if tool_timing_verbose () then
-    Log.Mcp.info
-      "[tool-timing] start tool=%s keeper=%s timeout_limit_sec=%.0f"
-      name
-      keeper_name
-      timeout_limit_sec;
   let (success, message) =
     try
-      match timeout_cfg with
+      match tool_timeout_sec_opt ~tool_name:name with
       | None ->
-          execute_tool_eio
-            ~sw
-            ~clock
-            ?mcp_session_id
-            ?auth_token
-            state
-            ~name
-            ~arguments
-      | Some cfg ->
+          execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
+      | Some timeout_sec ->
           (try
              Eio.Time.with_timeout_exn
                clock
-               cfg.timeout_sec
+               timeout_sec
                (fun () ->
                  execute_tool_eio
                    ~sw
@@ -2459,21 +2439,16 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
                    ?mcp_session_id
                    ?auth_token
                    state
-                   ~name
-                   ~arguments)
+                 ~name
+                 ~arguments)
            with Eio.Time.Timeout ->
              timeout_hit := true;
-             Log.Mcp.error
-               "tools/call timeout: %s after %.0fs (env=%s)"
-               name
-               cfg.timeout_sec
-               cfg.env_key;
+             Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
              ( false,
                Printf.sprintf
-                 "❌ Tool timed out after %.0fs: %s (env: %s)"
-                 cfg.timeout_sec
-                 name
-                 cfg.env_key ))
+                 "❌ Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
+                 timeout_sec
+                 name ))
     with exn ->
       (* Never let a tool exception crash the MCP server. *)
       let err = Printexc.to_string exn in
@@ -2489,11 +2464,10 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
   in
   let audit_detail =
     Printf.sprintf
-      "%s|timeout=%d|duration_ms=%d|limit_sec=%.0f"
+      "%s|timeout=%d|duration_ms=%d"
       name
       (if !timeout_hit then 1 else 0)
       duration_ms
-      timeout_limit_sec
   in
   append_audit_event state.Mcp_server.room_config {
     timestamp = Time_compat.now ();
@@ -2502,17 +2476,6 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
     success;
     detail = Some audit_detail;
   };
-
-  let slow_ms = tool_slow_log_ms () in
-  if !timeout_hit || duration_ms >= slow_ms then
-    Log.Mcp.info
-      "[tool-timing] done tool=%s keeper=%s duration_ms=%d timeout=%b timeout_limit_sec=%.0f success=%b"
-      name
-      keeper_name
-      duration_ms
-      !timeout_hit
-      timeout_limit_sec
-      success;
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled =
@@ -2582,6 +2545,7 @@ let handle_list_tools_eio state id =
     @ Tool_lodge.tools
     @ Tool_perpetual.schemas
     @ Tool_keeper.schemas
+    @ Tool_trpg.schemas
   in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
     Mode.is_tool_enabled enabled_categories schema.name

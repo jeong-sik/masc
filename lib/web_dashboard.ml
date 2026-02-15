@@ -139,6 +139,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     .agent-status.active { background: #4ade80; box-shadow: 0 0 10px #4ade80; }
     .agent-status.busy { background: #fbbf24; box-shadow: 0 0 10px #fbbf24; }
+    .agent-status.warn { background: #f97316; box-shadow: 0 0 10px #f97316; }
+    .agent-status.dead { background: #ef4444; box-shadow: 0 0 10px #ef4444; }
     .agent-status.inactive { background: #666; }
     .agent-name { font-weight: 600; flex: 1; }
     .agent-task { font-size: 12px; color: #888; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1357,6 +1359,154 @@ let cached_html = lazy ({|<!DOCTYPE html>
       color: #f8fafc;
       margin-bottom: 4px;
     }
+
+    /* TRPG Tab — Dark Fantasy */
+    .trpg-layout {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 900px) {
+      .trpg-layout { grid-template-columns: 1fr; }
+    }
+    .trpg-narrative {
+      background: rgba(139, 0, 0, 0.06);
+      border: 1px solid rgba(220, 38, 38, 0.15);
+      border-radius: 12px;
+      padding: 20px;
+      min-height: 300px;
+      max-height: 70vh;
+      overflow-y: auto;
+      font-family: 'Georgia', serif;
+      line-height: 1.8;
+      color: #e2e8f0;
+    }
+    .trpg-narrative::-webkit-scrollbar { width: 6px; }
+    .trpg-narrative::-webkit-scrollbar-track { background: transparent; }
+    .trpg-narrative::-webkit-scrollbar-thumb { background: rgba(220,38,38,0.3); border-radius: 3px; }
+    .trpg-post { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(220,38,38,0.1); }
+    .trpg-post:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .trpg-post-meta { font-size: 0.75em; color: #64748b; margin-bottom: 8px; }
+    .trpg-post-body .dice-roll {
+      display: inline-block;
+      background: rgba(251,191,36,0.15);
+      color: #fbbf24;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 0.9em;
+    }
+    .trpg-post-body .result-success { color: #4ade80; font-weight: 600; }
+    .trpg-post-body .result-fail { color: #ef4444; font-weight: 600; }
+    .trpg-post-body .result-great { color: #fbbf24; font-weight: 700; }
+    .trpg-post-body .result-catastrophe { color: #dc2626; font-weight: 700; text-shadow: 0 0 8px rgba(220,38,38,0.5); }
+    .trpg-post-body .char-name { font-weight: 700; color: #c4b5fd; }
+    .typewriter-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1.1em;
+      background: #dc2626;
+      animation: trpg-blink 0.7s step-end infinite;
+      vertical-align: text-bottom;
+      margin-left: 1px;
+    }
+    @keyframes trpg-blink { 50% { opacity: 0; } }
+    .trpg-sidebar { display: flex; flex-direction: column; gap: 12px; }
+    .trpg-room-label {
+      font-size: 0.78em;
+      color: #94a3b8;
+      font-family: 'SF Mono', Monaco, monospace;
+      background: rgba(2,6,23,0.35);
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 6px;
+      padding: 3px 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .trpg-status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .trpg-status-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(148,163,184,0.16);
+      border-radius: 8px;
+      padding: 9px 10px;
+    }
+    .trpg-status-label {
+      font-size: 0.68em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+    .trpg-status-value {
+      font-size: 0.95em;
+      color: #e2e8f0;
+      font-weight: 600;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .trpg-status-value.warn { color: #fbbf24; }
+    .trpg-status-value.bad { color: #ef4444; }
+    .trpg-party-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .trpg-party-card .char-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .trpg-party-card .char-class { font-size: 0.75em; color: #94a3b8; }
+    .trpg-hp-bar { height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+    .trpg-hp-bar .hp-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+    .trpg-hp-bar .hp-high { background: #4ade80; }
+    .trpg-hp-bar .hp-mid { background: #fbbf24; }
+    .trpg-hp-bar .hp-low { background: #ef4444; }
+    .trpg-map {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.8em;
+      line-height: 1.4;
+      color: #94a3b8;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .trpg-section-title {
+      color: #dc2626;
+      font-size: 0.85em;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    .trpg-round-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 180px;
+      overflow-y: auto;
+      margin-bottom: 6px;
+    }
+    .trpg-round-item {
+      background: rgba(255,255,255,0.03);
+      border-left: 3px solid rgba(34,211,238,0.8);
+      border-radius: 6px;
+      padding: 7px 8px;
+      font-size: 0.75em;
+      color: #cbd5e1;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .trpg-round-item.timeout { border-left-color: rgba(239,68,68,0.9); }
+    .trpg-round-item.unavailable { border-left-color: rgba(251,191,36,0.9); }
+    .trpg-round-item .meta { color: #64748b; font-size: 0.95em; }
+    .trpg-empty { text-align: center; color: #64748b; padding: 60px 20px; font-style: italic; }
   </style>
 </head>
 <body>
@@ -1383,6 +1533,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       <button class="main-tab-btn" data-tab="agents" onclick="switchMainTab('agents')">🤖 Agents</button>
       <button class="main-tab-btn" data-tab="tasks" onclick="switchMainTab('tasks')">📋 Tasks</button>
       <button class="main-tab-btn" data-tab="journal" onclick="switchMainTab('journal')">📓 Journal</button>
+      <button class="main-tab-btn" data-tab="trpg" onclick="switchMainTab('trpg')">⚔ TRPG</button>
     </div>
 
     <!-- Overview Tab -->
@@ -1403,6 +1554,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
         <div class="stat-card">
           <div class="stat-label">Status</div>
           <div class="stat-value" id="stat-locks">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tool Timeouts</div>
+          <div class="stat-value" id="stat-tool-timeouts">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Tool P95 (ms)</div>
+          <div class="stat-value" id="stat-tool-p95">-</div>
         </div>
       </div>
 
@@ -1609,6 +1768,31 @@ let cached_html = lazy ({|<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- TRPG Tab — Dark Fantasy Narrative -->
+    <div id="main-tab-trpg" class="main-tab-content" style="display:none;">
+      <div class="section">
+        <h2>⚔ 그림란드 연대기</h2>
+        <div class="trpg-layout">
+          <div class="trpg-narrative" id="trpg-narrative">
+            <div class="trpg-empty">아직 서사가 없습니다. Board hearth "trpg"에 포스팅하면 여기에 나타납니다.</div>
+          </div>
+          <div class="trpg-sidebar">
+            <div class="trpg-section-title">세션</div>
+            <div class="trpg-room-label" id="trpg-room-label">room: -</div>
+            <div class="trpg-status-grid" id="trpg-status-grid"></div>
+            <div class="trpg-section-title" style="margin-top:8px;">최근 라운드</div>
+            <div id="trpg-round-log" class="trpg-round-list">
+              <div class="trpg-empty" style="padding:18px 8px;">라운드 이벤트가 없습니다.</div>
+            </div>
+            <div class="trpg-section-title">파티 상태</div>
+            <div id="trpg-party"></div>
+            <div class="trpg-section-title" style="margin-top:12px;">맵</div>
+            <div class="trpg-map" id="trpg-map"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Journal Tab -->
     <div id="main-tab-journal" class="main-tab-content" style="display:none;">
       <div class="section">
@@ -1626,6 +1810,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     const params = new URLSearchParams(window.location.search);
     const agent = params.get('agent') || params.get('agent_name');
     const token = params.get('token');
+    const trpgRoomParam = (params.get('trpg_room') || '').trim();
     const keeperParam = params.get('keeper');
     const keeperZoomParam = parseInt(params.get('keeper_zoom') || '50', 10);
     const compareKeeperParam = params.get('compare_keeper');
@@ -1681,14 +1866,28 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const fallbackBad = clamp(numOr(raw.proactive_fallback_bad, 0.40), fallbackWarn, 1);
       const simWarn = clamp(numOr(raw.proactive_similarity_warn, 0.90), 0, 1);
       const simBad = clamp(numOr(raw.proactive_similarity_bad, 0.97), simWarn, 1);
+      const keepaliveWarn = Math.max(60, Math.round(numOr(raw.keeper_keepalive_warn_sec, 300)));
+      const keepaliveBad = Math.max(keepaliveWarn, Math.round(numOr(raw.keeper_keepalive_bad_sec, 900)));
+      const staleWarn = Math.max(60, Math.round(numOr(raw.keeper_stale_warn_sec, 600)));
+      const staleBad = Math.max(staleWarn, Math.round(numOr(raw.keeper_stale_bad_sec, 1200)));
       const toastCooldownSec = Math.max(10, Math.round(numOr(raw.toast_cooldown_sec, 300)));
       return {
         proactive_fallback_warn: fallbackWarn,
         proactive_fallback_bad: fallbackBad,
         proactive_similarity_warn: simWarn,
         proactive_similarity_bad: simBad,
+        keeper_keepalive_warn_sec: keepaliveWarn,
+        keeper_keepalive_bad_sec: keepaliveBad,
+        keeper_stale_warn_sec: staleWarn,
+        keeper_stale_bad_sec: staleBad,
         toast_cooldown_sec: toastCooldownSec,
       };
+    }
+
+    function normalizeKeeperPayload(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (payload && Array.isArray(payload.keepers)) return payload.keepers;
+      return [];
     }
 
     function authHeaders() {
@@ -1729,10 +1928,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
         updateAgents(data.agents);
         updateTasks(data.tasks);
         updateMessages(data.messages);
-        updateKeepers(data.keepers);
+        updateKeepers(normalizeKeeperPayload(data.keepers));
         updatePerpetual(data.perpetual);
         updateTempo(data.status);
-        notifyKeeperAlerts(data.keepers);
+        notifyKeeperAlerts(normalizeKeeperPayload(data.keepers));
         if (selectedKeeperName) {
           renderKeeperDetail();
           const modal = document.getElementById('keeper-detail-modal');
@@ -1756,6 +1955,26 @@ let cached_html = lazy ({|<!DOCTYPE html>
       document.getElementById('stat-in-progress').textContent =
         taskList.filter(t => t.status === 'in_progress' || t.status === 'claimed').length;
       document.getElementById('stat-locks').textContent = status.paused ? '⏸' : '✓';
+      const toolHealth = (status && status.tool_call_health) ? status.tool_call_health : {};
+      const timeoutCount = Number.isFinite(Number(toolHealth.timeouts))
+        ? Number(toolHealth.timeouts)
+        : 0;
+      const p95 = Number.isFinite(Number(toolHealth.p95_duration_ms))
+        ? Number(toolHealth.p95_duration_ms)
+        : null;
+      const windowHours = Number.isFinite(Number(toolHealth.window_hours))
+        ? Number(toolHealth.window_hours)
+        : 1;
+      const timeoutEl = document.getElementById('stat-tool-timeouts');
+      const p95El = document.getElementById('stat-tool-p95');
+      if (timeoutEl) {
+        timeoutEl.textContent = String(timeoutCount);
+        timeoutEl.title = `tool_call timeout count over last ${windowHours}h`;
+      }
+      if (p95El) {
+        p95El.textContent = p95 === null ? '-' : `${Math.round(p95)}`;
+        p95El.title = `tool_call p95 latency (ms) over last ${windowHours}h`;
+      }
     }
 
     function updateAgents(data) {
@@ -2791,9 +3010,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (etaPill) etaPill.textContent = 'ETA -';
         return;
       }
-      const keepers = (_dashboardLatest && _dashboardLatest.keepers && Array.isArray(_dashboardLatest.keepers.keepers))
-        ? _dashboardLatest.keepers.keepers
-        : [];
+      const keepers = normalizeKeeperPayload(_dashboardLatest && _dashboardLatest.keepers);
       const keeper = keepers.find(k => (k && k.name) === selectedKeeperName);
       if (!keeper) {
         title.textContent = 'Keeper Detail';
@@ -2824,6 +3041,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const ratioPct = ratio === null ? '-' : (Math.round(ratio * 100) + '%');
       const age = fmtSecShort(keeper.keeper_age_s);
       const th = isNum(keeper.handoff_threshold) ? keeper.handoff_threshold : 0.85;
+      const alertThresholds = currentAlertThresholds();
+      const lifeState = keeperLifeState(keeper, alertThresholds);
       const soulProfile = (keeper.soul_profile || 'balanced');
       const willText = (typeof keeper.will === 'string' && keeper.will.trim() !== '') ? keeper.will.trim() : '-';
       const needsText = (typeof keeper.needs === 'string' && keeper.needs.trim() !== '') ? keeper.needs.trim() : '-';
@@ -2854,7 +3073,6 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const fullSeries = Array.isArray(keeper.metrics_series) ? keeper.metrics_series : [];
       const series = windowSeries(fullSeries);
       const windowStats = keeper.metrics_window || {};
-      const alertThresholds = currentAlertThresholds();
       const metrics24h = Array.isArray(keeper.metrics_24h) ? keeper.metrics_24h : [];
       const metrics24hSummary = (keeper.metrics_24h_summary && typeof keeper.metrics_24h_summary === 'object')
         ? keeper.metrics_24h_summary
@@ -2862,6 +3080,38 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const ratioColor = keeperColorByRatio(ratio);
       const primaryModel = windowStats.primary_model || keeper.primary_model || ((Array.isArray(keeper.models) && keeper.models[0]) ? keeper.models[0] : '-');
       const metricGlossary = {
+        life_status: {
+          label: 'Life Status',
+          short: 'Overall keeper liveness and health from keepalive/staleness/probe signals.',
+          definition: 'Classifies keeper health as active, warn, dead, or inactive.',
+          formula: 'statusClass from existence/keepalive/recentSignal + stale/keepalive windows',
+          source: 'keeper.keepalive_running, keeper.last_seen_ago_s, keeper.metrics_series',
+          interpretation: 'Warn means near-threshold life conditions. Dead means no meaningful refresh in staleness or keepalive windows.',
+        },
+        life_keepalive_status: {
+          label: 'Keepalive',
+          short: 'Whether periodic keepalive is running for this keeper.',
+          definition: 'on means keepalive worker is active, off means paused or missing.',
+          formula: 'keeper.keepalive_running',
+          source: 'keeper.keepalive_running',
+          interpretation: 'off shortens life confidence, especially with stale context metrics.',
+        },
+        life_pulse: {
+          label: 'Life Pulse',
+          short: 'Recent signal activity from turns, proactive events, or metrics.',
+          definition: 'Recent activity within last 10 minutes is treated as a live pulse.',
+          formula: 'last_turn_ago_s / last_proactive_ago_s / metrics_series.ts_unix',
+          source: 'keeper.last_turn_ago_s, keeper.last_proactive_ago_s, keeper.metrics_series',
+          interpretation: 'quiet indicates that lifecycle state may rely on keepalive and staleness checks.',
+        },
+        life_stale: {
+          label: 'Last Seen',
+          short: 'How long ago the keeper was last updated.',
+          definition: 'Age at last heartbeat/turn/proactive signal.',
+          formula: 'keeper.last_seen_ago_s',
+          source: 'keeper.last_seen_ago_s',
+          interpretation: 'Large values may indicate stalled heartbeat or delayed persistence.',
+        },
         context_ratio: {
           label: 'Context',
           short: 'Current context usage ratio and tokens used/max for this keeper.',
@@ -3302,8 +3552,32 @@ let cached_html = lazy ({|<!DOCTYPE html>
           source: 'keeper.k2k_mentions',
           interpretation: 'Shows which peers this keeper interacts with most.',
         },
-      };
+        };
       const metricGlossaryKo = {
+        life_status: {
+          label: '생존 상태',
+          short: 'keepalive/최근 활동/오래된 상태 신호를 합쳐 본 생존성 지표입니다.',
+          definition: 'active/warn/dead/inactive로 키퍼의 현재 생존 상태를 표시합니다.',
+          interpretation: 'warn는 경계 구간, dead는 최근 갱신이 오래된 치명적 상태로 봅니다.',
+        },
+        life_keepalive_status: {
+          label: '키퍼 비트',
+          short: '현재 keepalive 동작 여부입니다.',
+          definition: 'on이면 주기 갱신 중, off이면 keepalive가 멈췄음을 뜻합니다.',
+          interpretation: 'off가 길어지면 생존 판단 신뢰도가 떨어집니다.',
+        },
+        life_pulse: {
+          label: '라이프 패킷',
+          short: '최근 10분 내 턴/프로액티브/메트릭 수신 유무입니다.',
+          definition: '최근 신호가 없으면 상태 반영이 정적일 수 있습니다.',
+          interpretation: 'quiet는 keepalive 기반 판단으로의 전환이 필요할 수 있습니다.',
+        },
+        life_stale: {
+          label: '최종 갱신',
+          short: '최근 상태 업데이트로부터 경과한 시간입니다.',
+          definition: 'last_seen_ago_s 기반입니다.',
+          interpretation: '값이 크면 생존성 저하 또는 반응 지연을 의심할 수 있습니다.',
+        },
         context_ratio: {
           label: '컨텍스트',
           short: '현재 컨텍스트 사용률과 사용 토큰/최대 토큰입니다.',
@@ -3685,6 +3959,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
           return `<div class="keeper-field-row"><div class="keeper-field-head"><span class="keeper-field-title">${escHtml(label)}</span><code class="keeper-field-key">${escHtml(key)}</code></div>${body}</div>`;
         }).filter((x) => x !== '').join('');
       const glossaryKeys = [
+        'life_status',
+        'life_keepalive_status',
+        'life_pulse',
+        'life_stale',
         'context_ratio',
         'handoff_threshold',
         'handoff_risk',
@@ -4324,7 +4602,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
 
       title.textContent = keeper.name || selectedKeeperName;
-      sub.textContent = `${keeper.agent_name || ''} · gen ${isNum(keeper.generation) ? keeper.generation : 0} · age ${age} · zoom ${keeperZoomTurns} turns · metrics ${fmtInt(windowSamplePoints)} pts`;
+      const lifeStatusText = lifeState.statusClass === 'dead'
+        ? `dead${lifeState.reasons.length > 0 ? `: ${lifeState.reasons.join(', ')}` : ''}`
+        : (lifeState.statusClass === 'warn'
+            ? `warn${lifeState.reasons.length > 0 ? `: ${lifeState.reasons.join(', ')}` : ''}`
+            : (lifeState.statusClass === 'active' ? 'active' : 'inactive'));
+      const lifeStatusClass = lifeState.statusClass === 'dead' ? 'bad'
+        : (lifeState.statusClass === 'warn' ? 'warn' : '');
+      const keepaliveStatusText = lifeState.keepalive ? 'on' : 'off';
+      const staleText = lifeState.staleAge === null ? '-' : `${lifeState.staleAge} ago`;
+      const lifePulseText = lifeState.recentSignal ? 'recent' : 'quiet';
+      sub.textContent = `${keeper.agent_name || ''} · gen ${isNum(keeper.generation) ? keeper.generation : 0} · age ${age} · zoom ${keeperZoomTurns} turns · metrics ${fmtInt(windowSamplePoints)} pts · life ${lifeStatusText}`;
 
       let compareHtml = `
         <div class="keeper-chart-card keeper-compare-block">
@@ -4369,6 +4657,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
       content.innerHTML = `
         <div class="keeper-kpis">
+          <div class="keeper-kpi">${kpiLabelHtml('Life Status', 'life_status')}<div class="keeper-kpi-value ${lifeStatusClass}">${escHtml(lifeStatusText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Keepalive', 'life_keepalive_status')}<div class="keeper-kpi-value">${escHtml(keepaliveStatusText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Life Pulse', 'life_pulse')}<div class="keeper-kpi-value">${escHtml(lifePulseText)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Last Seen', 'life_stale')}<div class="keeper-kpi-value">${escHtml(staleText)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('SOUL Profile', 'soul_profile')}<div class="keeper-kpi-value">${escHtml(soulProfile)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Will (의지)', 'will')}<div class="keeper-kpi-value">${escHtml(willKpi)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Needs (니즈)', 'needs')}<div class="keeper-kpi-value">${escHtml(needsKpi)}</div></div>
@@ -4713,23 +5005,116 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (modal) modal.classList.remove('active');
     }
 
+    function keeperLifeState(keeper, thresholds) {
+      const agent = (keeper && keeper.agent) ? keeper.agent : {};
+      const exists = !!agent.exists;
+      const keepalive = !!(keeper && keeper.keepalive_running);
+      const zombie = !!agent.is_zombie;
+      const lastTurnAgoS = isNum(keeper && keeper.last_turn_ago_s) ? Number(keeper.last_turn_ago_s) : null;
+      const lastProactiveAgoS = isNum(keeper && keeper.last_proactive_ago_s) ? Number(keeper.last_proactive_ago_s) : null;
+      const lastSeenSource = isNum(keeper && keeper.last_seen_ago_s)
+        ? Number(keeper.last_seen_ago_s)
+        : lastTurnAgoS;
+      const nowUnix = Date.now() / 1000;
+
+      const seriesForLiveness = Array.isArray(keeper.metrics_series) ? keeper.metrics_series : [];
+      const latestSeriesTs = (() => {
+        if (seriesForLiveness.length === 0) return null;
+        const lastRow = seriesForLiveness[seriesForLiveness.length - 1];
+        return (lastRow && isNum(lastRow.ts_unix)) ? Number(lastRow.ts_unix) : null;
+      })();
+      const latestSeriesAgoS = (latestSeriesTs !== null) ? Math.max(0, nowUnix - latestSeriesTs) : null;
+      const recentSignal =
+        (lastTurnAgoS !== null && lastTurnAgoS <= 600)
+        || (lastProactiveAgoS !== null && lastProactiveAgoS <= 600)
+        || (latestSeriesAgoS !== null && latestSeriesAgoS <= 600);
+
+      let statusClass = (exists || keepalive || recentSignal) ? 'active' : 'inactive';
+      let alertLevel = 'ok';
+      let staleState = 'ok';
+      let staleAge = null;
+      const reasons = [];
+      let keepaliveState = keepalive ? 'ok' : 'warn';
+      if (zombie) {
+        statusClass = 'dead';
+        alertLevel = 'bad';
+        reasons.push('zombie');
+      } else {
+        if (isNum(lastSeenSource)) {
+          const ageText = fmtSecShort(lastSeenSource);
+          staleAge = ageText;
+          if (lastSeenSource >= thresholds.keeper_stale_bad_sec) {
+            statusClass = 'dead';
+            alertLevel = 'bad';
+            staleState = 'bad';
+            reasons.push(`stale ${ageText}`);
+          } else if (lastSeenSource >= thresholds.keeper_stale_warn_sec) {
+            statusClass = statusClass === 'dead' ? 'dead' : 'warn';
+            alertLevel = alertLevel === 'bad' ? 'bad' : 'warn';
+            staleState = 'warn';
+            reasons.push(`stale ${ageText}`);
+          }
+        }
+        if (!keepalive) {
+          if (isNum(lastSeenSource)) {
+            const ageText = fmtSecShort(lastSeenSource);
+            if (lastSeenSource >= thresholds.keeper_keepalive_bad_sec) {
+              statusClass = 'dead';
+              alertLevel = 'bad';
+              reasons.push(`keepalive off ${ageText}`);
+              keepaliveState = 'bad';
+            } else if (lastSeenSource >= thresholds.keeper_keepalive_warn_sec) {
+              if (statusClass !== 'dead') statusClass = 'warn';
+              alertLevel = alertLevel === 'bad' ? 'bad' : 'warn';
+              reasons.push(`keepalive off ${ageText}`);
+              keepaliveState = 'warn';
+            } else {
+              keepaliveState = 'warn';
+            }
+          } else if (statusClass === 'inactive') {
+            statusClass = 'warn';
+            alertLevel = 'warn';
+            reasons.push('keepalive off');
+            keepaliveState = 'warn';
+          }
+        }
+      }
+
+      return {
+        statusClass,
+        alertLevel,
+        keepalive,
+        staleState,
+        staleAge,
+        keepaliveState,
+        exists,
+        zombie,
+        lastSeenAgoS: lastSeenSource,
+        recentSignal,
+        reasons,
+      };
+    }
+
     function updateKeepers(data) {
       const list = document.getElementById('keeper-list');
       if (!list) return;
-      const keepers = (data && data.keepers) ? data.keepers : [];
+      const keepers = normalizeKeeperPayload(data);
       if (keepers.length === 0) {
         list.innerHTML = '<div class="empty">No keepers</div>';
         return;
       }
       const alertThresholds = currentAlertThresholds();
       list.innerHTML = keepers.map(k => {
-        const agent = k.agent || {};
-        const exists = !!agent.exists;
-        const zombie = !!agent.is_zombie;
-        const keepalive = !!k.keepalive_running;
-        const nowUnix = Date.now() / 1000;
-        const lastTurnAgoS = isNum(k.last_turn_ago_s) ? Number(k.last_turn_ago_s) : null;
-        const lastProactiveAgoS = isNum(k.last_proactive_ago_s) ? Number(k.last_proactive_ago_s) : null;
+        const lifeState = keeperLifeState(k, alertThresholds);
+        const statusClass = lifeState.statusClass;
+        const exists = lifeState.exists;
+        const zombie = lifeState.zombie;
+        const keepalive = lifeState.keepalive;
+        const stalePill = lifeState.staleState === 'bad'
+          ? `<span class="pill bad">stale ${lifeState.staleAge || '-'}</span>`
+          : (lifeState.staleState === 'warn'
+              ? `<span class="pill warn">stale ${lifeState.staleAge || '-'}</span>`
+              : '');
 
         const ctx = k.context || {};
         const ratio = ctx.context_ratio;
@@ -4739,24 +5124,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const fillPct = isNum(ratio) ? clamp(ratio * 100, 0, 100) : 0;
         const fillClass = ctxClass(ratio);
 
-        const seriesForLiveness = Array.isArray(k.metrics_series) ? k.metrics_series : [];
-        const latestSeriesTs = (() => {
-          if (seriesForLiveness.length === 0) return null;
-          const lastRow = seriesForLiveness[seriesForLiveness.length - 1];
-          return (lastRow && isNum(lastRow.ts_unix)) ? Number(lastRow.ts_unix) : null;
-        })();
-        const latestSeriesAgoS = (latestSeriesTs !== null) ? Math.max(0, nowUnix - latestSeriesTs) : null;
-        const recentSignal =
-          (lastTurnAgoS !== null && lastTurnAgoS <= 600)
-          || (lastProactiveAgoS !== null && lastProactiveAgoS <= 600)
-          || (latestSeriesAgoS !== null && latestSeriesAgoS <= 600);
-        const statusClass = (!zombie && (exists || keepalive || recentSignal)) ? 'active' : 'inactive';
-
         const keepalivePill = keepalive
           ? '<span class="pill">keepalive</span>'
-          : '<span class="pill bad">no-keepalive</span>';
+          : `<span class="pill ${lifeState.keepaliveState}">no-keepalive</span>`;
         const runtimePill =
-          (!exists && (keepalive || recentSignal))
+          (!exists && lifeState.recentSignal)
             ? '<span class="pill">keeper-runtime</span>'
             : '';
         const zombiePill = zombie ? '<span class="pill bad">zombie</span>' : '';
@@ -4923,6 +5295,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <span class="live-agent-name">${k.name || 'keeper'}</span>
                 <span class="live-agent-sub">${k.agent_name || ''}</span>
                 ${genPill}
+                ${stalePill}
                 ${keepalivePill}
                 ${runtimePill}
                 ${zombiePill}
@@ -5074,9 +5447,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     function keeperAlertState(keeper, thresholds) {
+      const life = keeperLifeState(keeper, thresholds);
       const ws = (keeper && keeper.metrics_window) ? keeper.metrics_window : {};
-      const reasons = [];
-      let level = 'ok';
+      const reasons = life.reasons.map((r) => `life ${r}`);
+      let level = life.alertLevel;
       const fallbackRate = isNum(ws.proactive_template_fallback_rate)
         ? Number(ws.proactive_template_fallback_rate)
         : (isNum(ws.proactive_fallback_rate) ? Number(ws.proactive_fallback_rate) : null);
@@ -5110,9 +5484,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     function notifyKeeperAlerts(keepersPayload) {
-      const keepers = (keepersPayload && Array.isArray(keepersPayload.keepers))
-        ? keepersPayload.keepers
-        : [];
+      const keepers = normalizeKeeperPayload(keepersPayload);
       const thresholds = currentAlertThresholds();
       const cooldownMs = thresholds.toast_cooldown_sec * 1000;
       const now = Date.now();
@@ -5129,7 +5501,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
         if (st.level === 'ok') {
           if (prev.level !== 'ok') {
-            showToast(`[OK] ${name} recovered (fallback/similarity normalized)`, 'success');
+            showToast(`[OK] ${name} recovered`, 'success');
           }
         } else {
           const shouldToast =
@@ -5160,6 +5532,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let sseConnected = false;
     let fetchDataTimer = null;
     let fetchBoardTimer = null;
+    let fetchTrpgTimer = null;
     let periodicRefreshId = null;
     let sseSource = null;
     let sseReconnectTimer = null;
@@ -5212,6 +5585,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       periodicRefreshId = setInterval(() => {
         invalidateDashboardCache();
         fetchData();
+        if (currentMainTab === 'trpg') debouncedFetchTrpg();
       }, 10000);
     }
 
@@ -5237,6 +5611,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function debouncedFetchBoard() {
       if (fetchBoardTimer) return;
       fetchBoardTimer = setTimeout(() => { fetchBoard(); fetchBoardTimer = null; }, 500);
+    }
+    function debouncedFetchTrpg() {
+      if (fetchTrpgTimer) return;
+      fetchTrpgTimer = setTimeout(() => { fetchTrpg(); fetchTrpgTimer = null; }, 500);
     }
 
     // SSE for real-time updates
@@ -5304,6 +5682,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
           showToast(`📝 New post from ${agent}`, 'info');
           debouncedFetchBoard();
           setTimeout(scrollToNewPost, 500); // scroll after render
+          const trpgPanel = document.getElementById('main-tab-trpg');
+          if (trpgPanel && trpgPanel.style.display !== 'none') debouncedFetchTrpg();
         }
         else if (type === 'board_comment') {
           addJournalEntry(agent, '💬 New comment');
@@ -5311,12 +5691,13 @@ let cached_html = lazy ({|<!DOCTYPE html>
           debouncedFetchBoard();
         }
         else addJournalEntry(agent, type);
+        if (currentMainTab === 'trpg') debouncedFetchTrpg();
         // Skip fetchJournal - addJournalEntry already updates UI
       }
     }
 
     // === Hash Router ===
-    const VALID_TABS = ['overview', 'board', 'activity', 'agents', 'tasks', 'journal'];
+    const VALID_TABS = ['overview', 'board', 'activity', 'agents', 'tasks', 'journal', 'trpg'];
 
     const Router = {
       parse(hash) {
@@ -5442,6 +5823,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (tab === 'activity') fetchActivity();
         if (tab === 'overview') fetchServerHealth();
         if (tab === 'agents') fetchLodgeAgents();
+        if (tab === 'trpg') fetchTrpg();
       },
 
       applyBoardState(state) {
@@ -6196,6 +6578,370 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const modal = document.getElementById('keeper-detail-modal');
       if (modal) modal.classList.add('active');
       renderKeeperDetail();
+    }
+
+    // === TRPG — Dark Fantasy Narrative ===
+    const TRPG_ROOM_ID = trpgRoomParam || 'grimland-chronicle';
+    const TRPG_PARTY_FALLBACK = [
+      { name: '그림자', cls: '전사', hp: 30, maxHp: 30, emoji: '⚔', area: 'C' },
+      { name: '루나', cls: '마법사', hp: 13, maxHp: 15, emoji: '🔮', area: 'F' },
+      { name: '손가락', cls: '도적', hp: 15, maxHp: 18, emoji: '🗡', area: 'C' },
+      { name: '미소', cls: '성직자', hp: 14, maxHp: 20, emoji: '✝', area: 'C' },
+    ];
+    const TRPG_MAP_FALLBACK = [
+      '          [D 북쪽덤불]         ← 고블린 5마리',
+      '            ║',
+      ' [A 절벽]══[B 중앙]══[C 동쪽]  ← 그림자+손가락+미소',
+      '            ║',
+      '          [E 남쪽덤불]         ← 고블린 4마리',
+      '            ║',
+      '          [F 대장나무]         ← ★루나 + 대장 고블린',
+    ].join('\n');
+    const trpgKnownIds = new Set();
+    let trpgTyping = false;
+    let trpgLastSeq = 0;
+    let trpgEventsCache = [];
+
+    function trpgEventType(ev) {
+      return (ev && (ev.type || ev.event_type || ev.event)) || '';
+    }
+
+    function trpgEventPayload(ev) {
+      return (ev && ev.payload && typeof ev.payload === 'object' && !Array.isArray(ev.payload))
+        ? ev.payload
+        : {};
+    }
+
+    function trpgLatestPhase(events) {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const ev = events[i];
+        if (trpgEventType(ev) === 'phase.changed') {
+          const p = trpgEventPayload(ev).phase;
+          if (typeof p === 'string' && p.trim() !== '') return p.trim();
+        }
+      }
+      return '-';
+    }
+
+    function trpgLatestRound(state, events) {
+      const turn = Number(state && state.turn);
+      if (Number.isFinite(turn) && turn > 1) return Math.max(1, Math.floor(turn - 1));
+      let maxTurn = 0;
+      events.forEach((ev) => {
+        const t = Number(trpgEventPayload(ev).turn);
+        if (Number.isFinite(t) && t > maxTurn) maxTurn = t;
+      });
+      return maxTurn > 0 ? maxTurn : 1;
+    }
+
+    function trpgRoundSummary(events, round) {
+      const summary = {
+        round,
+        narrations: 0,
+        proposed: 0,
+        timeouts: 0,
+        unavailable: 0,
+      };
+      events.forEach((ev) => {
+        const payload = trpgEventPayload(ev);
+        const t = Number(payload.turn);
+        if (!Number.isFinite(t) || t !== round) return;
+        const type = trpgEventType(ev);
+        if (type === 'narration.posted') summary.narrations += 1;
+        else if (type === 'turn.action.proposed') summary.proposed += 1;
+        else if (type === 'turn.timeout') summary.timeouts += 1;
+        else if (type === 'keeper.unavailable') summary.unavailable += 1;
+      });
+      return summary;
+    }
+
+    function trpgFmtEventTime(ev) {
+      const ts = ev && (ev.ts || ev.timestamp);
+      if (!ts) return '-';
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return String(ts);
+      return d.toLocaleTimeString('ko-KR');
+    }
+
+    async function fetchTrpg() {
+      const roomLabel = document.getElementById('trpg-room-label');
+      if (roomLabel) roomLabel.textContent = `room: ${TRPG_ROOM_ID}`;
+
+      try {
+        const boardReq = fetch('/api/v1/board?hearth=trpg', { headers: authHeaders() })
+          .then(r => r.json())
+          .catch(() => ({ posts: [] }));
+        const eventsReq = fetch(
+          `/api/v1/trpg/events?room_id=${encodeURIComponent(TRPG_ROOM_ID)}&after_seq=${trpgLastSeq}`,
+          { headers: authHeaders() }
+        )
+          .then(r => r.json())
+          .catch(() => ({ events: [] }));
+        const stateReq = fetch(
+          `/api/v1/trpg/state?room_id=${encodeURIComponent(TRPG_ROOM_ID)}`,
+          { headers: authHeaders() }
+        )
+          .then(r => r.json())
+          .catch(() => ({ state: {} }));
+
+        const [boardData, eventsData, stateData] = await Promise.all([boardReq, eventsReq, stateReq]);
+        const posts = boardData.posts || boardData || [];
+        const incomingEvents = Array.isArray(eventsData.events) ? eventsData.events : [];
+        if (incomingEvents.length > 0) {
+          trpgEventsCache = trpgEventsCache.concat(incomingEvents);
+          trpgEventsCache.sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+          if (trpgEventsCache.length > 400) trpgEventsCache = trpgEventsCache.slice(-400);
+          trpgLastSeq = Math.max(
+            trpgLastSeq,
+            ...incomingEvents.map(e => Number(e.seq) || 0)
+          );
+        }
+
+        renderTrpgNarrative(posts);
+        renderTrpgState(stateData.state || {}, trpgEventsCache);
+      } catch (_) {}
+    }
+
+    function renderTrpgNarrative(posts) {
+      const el = document.getElementById('trpg-narrative');
+      if (!el) return;
+      if (!posts.length) {
+        el.innerHTML = '<div class="trpg-empty">아직 서사가 없습니다. Board hearth "trpg"에 포스팅하면 여기에 나타납니다.</div>';
+        return;
+      }
+      const sorted = posts.slice().sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+      let html = '';
+      let newIdx = -1;
+      sorted.forEach((p, idx) => {
+        const id = p.id || p.post_id || idx;
+        const isNew = !trpgKnownIds.has(id);
+        if (isNew) { trpgKnownIds.add(id); newIdx = idx; }
+        const ts = p.created_at ? new Date(p.created_at * 1000).toLocaleString('ko-KR') : '';
+        const meta = (p.author || 'DM') + ' · ' + ts;
+        html += '<div class="trpg-post" data-idx="' + idx + '">';
+        html += '<div class="trpg-post-meta">' + escapeHtml(meta) + '</div>';
+        html += '<div class="trpg-post-body">' + (isNew && !trpgTyping ? '' : formatTrpgContent(p.content || p.body || '')) + '</div>';
+        html += '</div>';
+      });
+      el.innerHTML = html;
+      if (newIdx >= 0 && !trpgTyping) {
+        const postEl = el.querySelector('[data-idx="' + newIdx + '"]');
+        if (postEl) {
+          const bodyEl = postEl.querySelector('.trpg-post-body');
+          const raw = sorted[newIdx].content || sorted[newIdx].body || '';
+          trpgTypewriter(bodyEl, raw);
+        }
+      }
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function formatTrpgContent(text) {
+      let s = escapeHtml(text);
+      s = s.replace(/🎲\s*d20=(\d+)/g, '<span class="dice-roll">🎲 d20=$1</span>');
+      s = s.replace(/(대참사|기적|대성공|부분\s*성공|실패|성공)/g, function(m) {
+        if (m === '대참사') return '<span class="result-catastrophe">' + m + '</span>';
+        if (m === '기적' || m === '대성공') return '<span class="result-great">' + m + '</span>';
+        if (m === '성공' || m.match(/부분/)) return '<span class="result-success">' + m + '</span>';
+        return '<span class="result-fail">' + m + '</span>';
+      });
+      s = s.replace(/(그림자|루나|손가락|미소)/g, '<span class="char-name">$1</span>');
+      s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/^&gt;\s*(.+)$/gm, '<blockquote>$1</blockquote>');
+      s = s.replace(/\n/g, '<br>');
+      return s;
+    }
+
+    function trpgTypewriter(bodyEl, text) {
+      if (!bodyEl) return;
+      trpgTyping = true;
+      bodyEl.innerHTML = '<span class="typewriter-cursor"></span>';
+      let i = 0;
+      function tick() {
+        if (i >= text.length) {
+          trpgTyping = false;
+          bodyEl.innerHTML = formatTrpgContent(text);
+          return;
+        }
+        const ch = text[i];
+        bodyEl.insertBefore(document.createTextNode(ch), bodyEl.querySelector('.typewriter-cursor'));
+        i++;
+        let delay = 25;
+        if (ch === '\\n') delay = 120;
+        else if ('.!?。'.includes(ch)) delay = 80;
+        else if (',，、'.includes(ch)) delay = 50;
+        setTimeout(tick, delay);
+      }
+      tick();
+    }
+
+    function renderTrpgState(state, events) {
+      const phase = trpgLatestPhase(events);
+      const round = trpgLatestRound(state, events);
+      const summary = trpgRoundSummary(events, round);
+      renderTrpgStatus(state, summary, phase);
+      renderTrpgRoundLog(events, round);
+      renderTrpgParty(state);
+      renderTrpgMap(state, summary);
+    }
+
+    function renderTrpgStatus(state, summary, phase) {
+      const el = document.getElementById('trpg-status-grid');
+      if (!el) return;
+      const node = (typeof state.current_node === 'string' && state.current_node.trim() !== '')
+        ? state.current_node.trim()
+        : '-';
+      const timeoutCls = summary.timeouts > 0 ? 'bad' : '';
+      const unavailableCls = summary.unavailable > 0 ? 'warn' : '';
+      el.innerHTML = `
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Phase</div>
+          <div class="trpg-status-value">${escapeHtml(String(phase || '-'))}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Round</div>
+          <div class="trpg-status-value">${summary.round}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Node</div>
+          <div class="trpg-status-value">${escapeHtml(node)}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Proposed</div>
+          <div class="trpg-status-value">${summary.proposed}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Timeout</div>
+          <div class="trpg-status-value ${timeoutCls}">${summary.timeouts}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Unavailable</div>
+          <div class="trpg-status-value ${unavailableCls}">${summary.unavailable}</div>
+        </div>
+      `;
+    }
+
+    function renderTrpgRoundLog(events, round) {
+      const el = document.getElementById('trpg-round-log');
+      if (!el) return;
+      const filtered = events
+        .filter((ev) => {
+          const payload = trpgEventPayload(ev);
+          const t = Number(payload.turn);
+          return Number.isFinite(t) && t === round;
+        })
+        .filter((ev) => {
+          const type = trpgEventType(ev);
+          return type === 'narration.posted'
+            || type === 'turn.action.proposed'
+            || type === 'turn.timeout'
+            || type === 'keeper.unavailable';
+        })
+        .sort((a, b) => (Number(b.seq) || 0) - (Number(a.seq) || 0))
+        .slice(0, 14);
+      if (filtered.length === 0) {
+        el.innerHTML = '<div class="trpg-empty" style="padding:18px 8px;">최근 라운드 이벤트가 없습니다.</div>';
+        return;
+      }
+      el.innerHTML = filtered.map((ev) => {
+        const payload = trpgEventPayload(ev);
+        const type = trpgEventType(ev);
+        const seq = Number(ev.seq) || 0;
+        const keeper = payload.keeper || ev.actor_id || '-';
+        let body = '-';
+        let cls = '';
+        if (type === 'narration.posted') {
+          body = payload.reply || '(narration)';
+        } else if (type === 'turn.action.proposed') {
+          body = payload.proposed_action || '(proposed action)';
+        } else if (type === 'turn.timeout') {
+          cls = 'timeout';
+          const timeoutSec = Number(payload.timeout_sec);
+          body = `timeout ${Number.isFinite(timeoutSec) ? timeoutSec + 's' : ''}`.trim();
+        } else if (type === 'keeper.unavailable') {
+          cls = 'unavailable';
+          body = payload.reason || 'unavailable';
+        }
+        return `
+          <div class="trpg-round-item ${cls}">
+            <div class="meta">#${seq} · ${escapeHtml(trpgFmtEventTime(ev))} · ${escapeHtml(String(keeper))}</div>
+            <div>${escapeHtml(String(body))}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTrpgParty(state) {
+      const el = document.getElementById('trpg-party');
+      if (!el) return;
+      const partyObj =
+        state && state.party && typeof state.party === 'object' && !Array.isArray(state.party)
+          ? state.party
+          : null;
+      const fromState = partyObj
+        ? Object.entries(partyObj).map(([actorId, raw]) => {
+            const info = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+            const hp = Number(info.hp);
+            const maxHpRaw = Number(info.max_hp ?? info.maxHp);
+            const maxHp = Number.isFinite(maxHpRaw) && maxHpRaw > 0
+              ? maxHpRaw
+              : (Number.isFinite(hp) ? hp : null);
+            const pct = (Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0)
+              ? Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)))
+              : 100;
+            return {
+              name: info.name || actorId,
+              cls: info.class || info.role || info.job || '-',
+              hp: Number.isFinite(hp) ? hp : null,
+              maxHp: Number.isFinite(maxHp) ? maxHp : null,
+              area: info.area || info.position || info.location || '-',
+              inventoryCount: Array.isArray(info.inventory) ? info.inventory.length : 0,
+              pct,
+            };
+          })
+        : [];
+      const party = fromState.length > 0 ? fromState : TRPG_PARTY_FALLBACK;
+      el.innerHTML = party.map((p) => {
+        const pct = Number.isFinite(p.pct) ? p.pct : Math.round((p.hp / p.maxHp) * 100);
+        const cls = pct > 60 ? 'hp-high' : pct > 30 ? 'hp-mid' : 'hp-low';
+        const hpText = (Number.isFinite(p.hp) && Number.isFinite(p.maxHp))
+          ? `HP ${p.hp}/${p.maxHp}`
+          : 'HP -';
+        const invText = Number.isFinite(p.inventoryCount) ? ` · 인벤토리 ${p.inventoryCount}` : '';
+        return '<div class="trpg-party-card">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;">'
+          + '<span><span class="char-name">' + escapeHtml(String(p.name)) + '</span> <span style="color:#64748b;font-size:0.85em;">' + escapeHtml(String(p.cls)) + '</span></span>'
+          + '<span style="font-size:0.85em;color:#94a3b8;">' + hpText + '</span>'
+          + '</div>'
+          + '<div class="trpg-hp-bar"><div class="' + cls + '" style="width:' + Math.max(0, Math.min(100, Number(pct) || 0)) + '%;height:100%;border-radius:3px;"></div></div>'
+          + '<div style="font-size:0.75em;color:#475569;margin-top:4px;">위치: ' + escapeHtml(String(p.area || '-')) + invText + '</div>'
+          + '</div>';
+      }).join('');
+    }
+
+    function renderTrpgMap(state, summary) {
+      const el = document.getElementById('trpg-map');
+      if (!el) return;
+      const node =
+        (state && typeof state.current_node === 'string' && state.current_node.trim() !== '')
+          ? state.current_node.trim()
+          : '-';
+      const world =
+        state && state.world && typeof state.world === 'object' && !Array.isArray(state.world)
+          ? state.world
+          : {};
+      const flags = Array.isArray(world.story_flags) ? world.story_flags.slice(0, 10) : [];
+      const lines = [
+        `현재 노드: ${node}`,
+        `라운드: ${summary.round} · 행동제안 ${summary.proposed} · 내레이션 ${summary.narrations}`,
+        `리스크: timeout ${summary.timeouts} / unavailable ${summary.unavailable}`,
+        '',
+        '[Story Flags]',
+        ...(flags.length > 0 ? flags.map(f => `- ${String(f)}`) : ['- (none)']),
+      ];
+      if (flags.length === 0) {
+        lines.push('', '[Fallback Map]', TRPG_MAP_FALLBACK);
+      }
+      el.textContent = lines.join('\n');
     }
 
     // Initial load + periodic polling (keepers/perpetual heartbeats don't emit SSE)

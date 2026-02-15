@@ -186,7 +186,16 @@
    succession
    perpetual_loop
    tool_perpetual
-   tool_keeper)
+   tool_keeper
+   tool_trpg
+   trpg_engine_types
+   trpg_engine_event
+   trpg_engine_state_machine
+   trpg_engine_store
+   trpg_engine_store_sqlite
+   trpg_rule
+   trpg_rule_dnd5e_lite
+   trpg_engine_replay)
  (libraries
    yojson
    base64

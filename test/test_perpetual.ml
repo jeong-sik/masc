@@ -52,6 +52,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
     "ollama" (Llm_client.string_of_provider Ollama);
   assert_equal "provider_string:claude"
     "claude" (Llm_client.string_of_provider Claude);
+  assert_equal "provider_string:gemini"
+    "gemini" (Llm_client.string_of_provider Gemini);
 
   (* 2. Model spec parsing *)
   (match Llm_client.model_spec_of_string "ollama:glm-4.7-flash" with
@@ -68,10 +70,42 @@ let test_llm_client () = group "LLM Client" (fun () ->
        (m.provider = Llm_client.Claude)
    | Error _ -> assert_true "parse_model:claude" false);
 
+  (match Llm_client.model_spec_of_string "gemini:gemini-2.5-flash" with
+   | Ok m ->
+     assert_equal "parse_model:gemini_id" "gemini-2.5-flash" m.model_id;
+     assert_true "parse_model:gemini_provider"
+       (m.provider = Llm_client.Gemini)
+   | Error _ -> assert_true "parse_model:gemini" false);
+
+  (match Llm_client.model_spec_of_string "ollama:glm-4.7-flash:latest" with
+   | Ok m ->
+     assert_equal "parse_model:ollama_tagged_id" "glm-4.7-flash:latest" m.model_id;
+     assert_true "parse_model:ollama_tagged_provider"
+       (m.provider = Llm_client.Ollama)
+   | Error _ -> assert_true "parse_model:ollama_tagged" false);
+
+  (match Llm_client.model_spec_of_string "anthropic:sonnet" with
+   | Ok m ->
+     assert_equal "parse_model:anthropic_alias_id" "claude-sonnet-4-5-20250929" m.model_id;
+     assert_true "parse_model:anthropic_alias_provider"
+       (m.provider = Llm_client.Claude)
+   | Error _ -> assert_true "parse_model:anthropic_alias" false);
+
+  (match Llm_client.model_spec_of_string "google:flash" with
+   | Ok m ->
+     assert_equal "parse_model:google_alias_id" "gemini-2.5-flash" m.model_id;
+     assert_true "parse_model:google_alias_provider"
+       (m.provider = Llm_client.Gemini)
+   | Error _ -> assert_true "parse_model:google_alias" false);
+
   (* 3. Invalid model spec *)
   (match Llm_client.model_spec_of_string "invalid" with
    | Error _ -> assert_true "parse_model:invalid" true
    | Ok _ -> assert_true "parse_model:invalid_should_fail" false);
+
+  (match Llm_client.model_spec_of_string "ollama:" with
+   | Error _ -> assert_true "parse_model:empty_model_rejected" true
+   | Ok _ -> assert_true "parse_model:empty_model_should_fail" false);
 
   (* 4. Message constructors *)
   let msg = Llm_client.system_msg "hello" in
@@ -94,6 +128,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
     (Llm_client.ollama_glm.max_context = 202000);
   assert_true "builtin:claude_opus_cost"
     (Llm_client.claude_opus.cost_per_1k_input > 0.0);
+  assert_true "builtin:gemini_pro_provider"
+    (Llm_client.gemini_pro.provider = Llm_client.Gemini);
 )
 
 (* ================================================================ *)

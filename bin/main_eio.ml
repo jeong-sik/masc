@@ -18,6 +18,7 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
+module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
 module Tempo = Masc_mcp.Tempo
@@ -200,6 +201,458 @@ let bool_query_param request key ~default =
       else if v = "0" || v = "false" || v = "no" || v = "n" then false
       else default
 
+type trpg_api_error_kind = [ `Bad_request | `Internal_server_error ]
+type trpg_api_result = (Yojson.Safe.t, trpg_api_error_kind * string) result
+
+let trpg_error_json (msg : string) : Yojson.Safe.t =
+  `Assoc [ ("ok", `Bool false); ("error", `String msg) ]
+
+let trpg_rule_by_id (rule_id : string)
+  : ((module Masc_mcp.Trpg_rule.S), trpg_api_error_kind * string) result =
+  let normalized = String.trim rule_id |> String.lowercase_ascii in
+  match normalized with
+  | "" | "dnd5e-lite" -> Ok (module Masc_mcp.Trpg_rule_dnd5e_lite : Masc_mcp.Trpg_rule.S)
+  | other -> Error (`Bad_request, Printf.sprintf "unsupported rule_module: %s" other)
+
+let trpg_extract_config_from_events (events : Masc_mcp.Trpg_engine_event.t list)
+  : Yojson.Safe.t =
+  let rec find_room_created = function
+    | [] -> `Assoc []
+    | ev :: tl ->
+        (match ev.Masc_mcp.Trpg_engine_event.event_type with
+        | Masc_mcp.Trpg_engine_event.Room_created ->
+            (match ev.payload with
+            | `Assoc fields -> (
+                match List.assoc_opt "config" fields with
+                | Some cfg -> cfg
+                | None -> ev.payload)
+            | _ -> `Assoc [])
+        | _ -> find_room_created tl)
+  in
+  find_room_created events
+
+let trpg_parse_required_string key json =
+  match Yojson.Safe.Util.member key json with
+  | `String s when String.trim s <> "" -> Ok (String.trim s)
+  | `String _ -> Error (`Bad_request, Printf.sprintf "%s cannot be empty" key)
+  | `Null -> Error (`Bad_request, Printf.sprintf "%s is required" key)
+  | _ -> Error (`Bad_request, Printf.sprintf "%s must be string" key)
+
+let trpg_parse_optional_string key json =
+  match Yojson.Safe.Util.member key json with
+  | `String s ->
+      let s = String.trim s in
+      if s = "" then Ok None else Ok (Some s)
+  | `Null -> Ok None
+  | _ -> Error (`Bad_request, Printf.sprintf "%s must be string" key)
+
+let trpg_parse_optional_int key json =
+  match Yojson.Safe.Util.member key json with
+  | `Int i -> Ok (Some i)
+  | `Intlit s -> (
+      try Ok (Some (int_of_string s))
+      with _ -> Error (`Bad_request, Printf.sprintf "%s must be int" key))
+  | `Null -> Ok None
+  | _ -> Error (`Bad_request, Printf.sprintf "%s must be int" key)
+
+let trpg_parse_required_int key json =
+  match Yojson.Safe.Util.member key json with
+  | `Int i -> Ok i
+  | `Intlit s -> (
+      try Ok (int_of_string s)
+      with _ -> Error (`Bad_request, Printf.sprintf "%s must be int" key))
+  | `Null -> Error (`Bad_request, Printf.sprintf "%s is required" key)
+  | _ -> Error (`Bad_request, Printf.sprintf "%s must be int" key)
+
+let trpg_parse_event_type_filter event_type_filter =
+  match event_type_filter with
+  | None -> Ok None
+  | Some raw -> (
+      match Masc_mcp.Trpg_engine_event.event_type_of_string raw with
+      | Ok et -> Ok (Some et)
+      | Error _ ->
+          Error (`Bad_request, Printf.sprintf "invalid event_type filter: %s" raw))
+
+let trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter
+  : (Masc_mcp.Trpg_engine_event.t list, trpg_api_error_kind * string) result =
+  let room_id = String.trim room_id in
+  if room_id = "" then
+    Error (`Bad_request, "room_id is required")
+  else
+    match trpg_parse_event_type_filter event_type_filter with
+    | Error _ as e -> e
+    | Ok event_type_opt ->
+        let read_result =
+          if after_seq > 0 then
+            Masc_mcp.Trpg_engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq
+          else
+            Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+        in
+        (match read_result with
+        | Error e -> Error (`Internal_server_error, e)
+        | Ok events ->
+            let events =
+              match event_type_opt with
+              | None -> events
+              | Some et ->
+                  List.filter
+                    (fun (ev : Masc_mcp.Trpg_engine_event.t) -> ev.event_type = et)
+                    events
+            in
+            Ok events)
+
+let trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter : trpg_api_result =
+  let room_id = String.trim room_id in
+  match trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter with
+  | Error _ as e -> e
+  | Ok events ->
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("after_seq", `Int after_seq);
+            ("count", `Int (List.length events));
+            ("events", `List (List.map Masc_mcp.Trpg_engine_event.to_yojson events));
+          ])
+
+let trpg_next_seq ~base_dir ~room_id =
+  match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+  | Ok events ->
+      Ok
+        (1
+        + List.fold_left
+            (fun acc (ev : Masc_mcp.Trpg_engine_event.t) -> max acc ev.seq)
+            0 events)
+  | Error e -> Error (`Internal_server_error, e)
+
+let trpg_append_event
+    ~base_dir ~room_id ~event_type ?actor_id ?ts ?seq ~payload () =
+  let room_id = String.trim room_id in
+  if room_id = "" then Error (`Bad_request, "room_id is required")
+  else
+    let seq_result =
+      match seq with
+      | Some s when s <= 0 -> Error (`Bad_request, "seq must be positive")
+      | Some s -> Ok s
+      | None -> trpg_next_seq ~base_dir ~room_id
+    in
+    match seq_result with
+    | Error _ as e -> e
+    | Ok seq ->
+        let ts = Option.value ~default:(Masc_mcp.Types.now_iso ()) ts in
+        let event =
+          Masc_mcp.Trpg_engine_event.make
+            ~seq ~room_id ~ts ~event_type ?actor_id ~payload ()
+        in
+        (match Masc_mcp.Trpg_engine_store_sqlite.append_event ~base_dir ~event with
+        | Ok () -> Ok event
+        | Error e -> Error (`Internal_server_error, e))
+
+let trpg_append_event_json ~base_dir ~body_str : trpg_api_result =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match trpg_parse_required_string "room_id" json with
+    | Error _ as e -> e
+    | Ok room_id -> (
+    match trpg_parse_required_string "event_type" json with
+    | Error _ as e -> e
+    | Ok event_type_str -> (
+      match Masc_mcp.Trpg_engine_event.event_type_of_string event_type_str with
+      | Error e -> Error (`Bad_request, e)
+      | Ok event_type -> (
+          match trpg_parse_optional_string "actor_id" json with
+          | Error _ as e -> e
+          | Ok actor_id -> (
+              match trpg_parse_optional_string "ts" json with
+              | Error _ as e -> e
+              | Ok ts_opt -> (
+                  match trpg_parse_optional_int "seq" json with
+                  | Error _ as e -> e
+                  | Ok seq_opt ->
+                      let payload =
+                        match Yojson.Safe.Util.member "payload" json with
+                        | `Null -> `Assoc []
+                        | v -> v
+                      in
+                      (match
+                         trpg_append_event
+                           ~base_dir
+                           ~room_id
+                           ~event_type
+                           ?actor_id
+                           ?ts:ts_opt
+                           ?seq:seq_opt
+                           ~payload
+                           ()
+                       with
+                      | Error _ as e -> e
+                      | Ok event ->
+                          Ok
+                            (`Assoc
+                              [
+                                ("ok", `Bool true);
+                                ("event", Masc_mcp.Trpg_engine_event.to_yojson event);
+                              ]))))))
+      )
+  with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+
+let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
+  let room_id = String.trim room_id in
+  if room_id = "" then
+    Error (`Bad_request, "room_id is required")
+  else
+    match trpg_rule_by_id rule_module with
+    | Error _ as e -> e
+    | Ok rule -> (
+        match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+        | Error e -> Error (`Internal_server_error, e)
+        | Ok events ->
+            let config = trpg_extract_config_from_events events in
+            let state =
+              Masc_mcp.Trpg_engine_replay.derive_state ~rule ~config ~events
+            in
+            let module R = (val rule : Masc_mcp.Trpg_rule.S) in
+            Ok
+              (`Assoc
+                [
+                  ("ok", `Bool true);
+                  ("room_id", `String room_id);
+                  ("rule_module", `String R.id);
+                  ("event_count", `Int (List.length events));
+                  ("state", state);
+                ]))
+
+let trpg_state_from_derived derived_json =
+  try
+    match Yojson.Safe.Util.member "state" derived_json with
+    | `Null -> `Assoc []
+    | v -> v
+  with _ -> `Assoc []
+
+let trpg_extract_state_int derived_json field ~default =
+  try
+    match Yojson.Safe.Util.member field (trpg_state_from_derived derived_json) with
+    | `Int i -> i
+    | _ -> default
+  with _ -> default
+
+let trpg_read_state_int derived_json field =
+  try
+    match Yojson.Safe.Util.member field (trpg_state_from_derived derived_json) with
+    | `Int i -> Ok i
+    | _ ->
+        Error
+          (`Internal_server_error, Printf.sprintf "state.%s must be int" field)
+  with _ ->
+    Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
+
+let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
+    let* room_id = trpg_parse_required_string "room_id" json in
+    let* actor_id = trpg_parse_required_string "actor_id" json in
+    let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
+    let* _rule = trpg_rule_by_id rule_module in
+    let* action = trpg_parse_required_string "action" json in
+    let* stat_value = trpg_parse_required_int "stat_value" json in
+    let* dc = trpg_parse_required_int "dc" json in
+    let* raw_opt = trpg_parse_optional_int "raw_d20" json in
+    let* raw_d20 =
+      match raw_opt with
+      | Some i ->
+          if i < 1 || i > 20 then
+            Error (`Bad_request, "raw_d20 must be between 1 and 20")
+          else Ok i
+      | None -> Ok (1 + Random.int 20)
+    in
+    let bonus = Masc_mcp.Trpg_rule_dnd5e_lite.stat_bonus stat_value in
+    let total = raw_d20 + bonus in
+    let classification =
+      Masc_mcp.Trpg_rule_dnd5e_lite.classify_roll ~raw_d20 ~total
+    in
+    let payload =
+      `Assoc
+        [
+          ("actor_id", `String actor_id);
+          ("action", `String action);
+          ("stat_value", `Int stat_value);
+          ("dc", `Int dc);
+          ("raw_d20", `Int raw_d20);
+          ("bonus", `Int bonus);
+          ("total", `Int total);
+          ( "tier",
+            `String
+              (Masc_mcp.Trpg_rule_dnd5e_lite.roll_tier_to_string
+                 classification.tier) );
+          ("label", `String classification.label);
+          ("passed", `Bool classification.passed);
+        ]
+    in
+    let* event =
+      trpg_append_event
+        ~base_dir
+        ~room_id
+        ~event_type:Masc_mcp.Trpg_engine_event.Dice_rolled
+        ~actor_id
+        ~payload
+        ()
+    in
+    let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+    Ok
+      (`Assoc
+        [
+          ("ok", `Bool true);
+          ("event", Masc_mcp.Trpg_engine_event.to_yojson event);
+          ( "roll",
+            `Assoc
+              [
+                ("raw_d20", `Int raw_d20);
+                ("bonus", `Int bonus);
+                ("total", `Int total);
+                ("dc", `Int dc);
+                ("passed", `Bool classification.passed);
+                ("label", `String classification.label);
+              ] );
+          ("state", trpg_state_from_derived derived);
+        ])
+  with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+
+let trpg_turn_advance_json ~base_dir ~body_str : trpg_api_result =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
+    let* room_id = trpg_parse_required_string "room_id" json in
+    let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
+    let* _rule = trpg_rule_by_id rule_module in
+    let* phase_opt = trpg_parse_optional_string "phase" json in
+    let* () =
+      match phase_opt with
+      | None -> Ok ()
+      | Some p -> (
+          match Masc_mcp.Trpg_engine_types.phase_of_string p with
+          | Ok _ -> Ok ()
+          | Error e -> Error (`Bad_request, e))
+    in
+    let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+    let* current_turn = trpg_read_state_int derived "turn" in
+    let next_turn = max 1 (current_turn + 1) in
+    let turn_payload = `Assoc [ ("turn", `Int next_turn) ] in
+    let* turn_event =
+      trpg_append_event
+        ~base_dir
+        ~room_id
+        ~event_type:Masc_mcp.Trpg_engine_event.Turn_started
+        ~payload:turn_payload
+        ()
+    in
+    let* phase_event_opt =
+      match phase_opt with
+      | None -> Ok None
+      | Some phase ->
+          let payload = `Assoc [ ("phase", `String phase) ] in
+          let* ev =
+            trpg_append_event
+              ~base_dir
+              ~room_id
+              ~event_type:Masc_mcp.Trpg_engine_event.Phase_changed
+              ~payload
+              ()
+          in
+          Ok (Some ev)
+    in
+    let* next_derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+    let events_json =
+      [ Some turn_event; phase_event_opt ]
+      |> List.filter_map (fun x -> x)
+      |> List.map Masc_mcp.Trpg_engine_event.to_yojson
+    in
+    Ok
+      (`Assoc
+        [
+          ("ok", `Bool true);
+          ("room_id", `String room_id);
+          ("turn", `Int next_turn);
+          ("events", `List events_json);
+          ("state", trpg_state_from_derived next_derived);
+        ])
+  with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+
+let trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter : trpg_api_result =
+  match trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter with
+  | Error _ as e -> e
+  | Ok events ->
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("stream", `Bool true);
+            ("room_id", `String (String.trim room_id));
+            ("after_seq", `Int after_seq);
+            ("count", `Int (List.length events));
+            ("events", `List (List.map Masc_mcp.Trpg_engine_event.to_yojson events));
+          ])
+
+let trpg_keeper_call_with_runtime
+    ~(config : Room.config)
+    ~(sw : Eio.Switch.t)
+    ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+    ~name:keeper_name
+    ~message
+    ~timeout_sec
+  : Masc_mcp.Tool_trpg.keeper_call_result =
+  let keeper_ctx : _ Masc_mcp.Tool_keeper.context = { config; sw; clock } in
+  let keeper_args =
+    `Assoc [ ("name", `String keeper_name); ("message", `String message) ]
+  in
+  try
+    Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+      match
+        Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:keeper_args
+      with
+      | None -> `Error "masc_keeper_msg dispatch unavailable"
+      | Some (true, body) -> (
+          try `Ok (Yojson.Safe.from_string body)
+          with Yojson.Json_error e ->
+            `Error (Printf.sprintf "keeper returned invalid json: %s" e))
+      | Some (false, msg) -> `Error msg)
+  with
+  | Eio.Time.Timeout -> `Timeout
+  | exn -> `Error (Printexc.to_string exn)
+
+let trpg_round_run_json
+    ~(state : Mcp_server.server_state)
+    ~(agent_name : string)
+    ~(sw : Eio.Switch.t)
+    ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+    ~body_str
+  : trpg_api_result =
+  try
+    let args = Yojson.Safe.from_string body_str in
+    let keeper_call =
+      trpg_keeper_call_with_runtime
+        ~config:state.Mcp_server.room_config
+        ~sw
+        ~clock
+    in
+    let trpg_ctx : Masc_mcp.Tool_trpg.context =
+      { config = state.Mcp_server.room_config; agent_name; keeper_call = Some keeper_call }
+    in
+    match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with
+    | None ->
+        Error (`Internal_server_error, "masc_trpg_round_run dispatch unavailable")
+    | Some (false, msg) -> Error (`Bad_request, msg)
+    | Some (true, body) -> (
+        try Ok (Yojson.Safe.from_string body)
+        with Yojson.Json_error e ->
+          Error (`Internal_server_error, Printf.sprintf "invalid tool json: %s" e))
+  with
+  | Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+  | exn -> Error (`Internal_server_error, Printexc.to_string exn)
+
 let bearer_token_from_header value =
   let prefix = "Bearer " in
   let prefix_lower = "bearer " in
@@ -359,6 +812,146 @@ let float_of_env_default name ~default ~min_v ~max_v =
         (try float_of_string (String.trim s) with _ -> default)
   in
   max min_v (min max_v v)
+
+let bool_of_tag_value (raw : string) : bool =
+  let v = String.trim raw |> String.lowercase_ascii in
+  v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
+
+let parse_tool_call_detail (detail_opt : string option)
+  : string * bool * int option =
+  match detail_opt with
+  | None -> ("unknown", false, None)
+  | Some raw ->
+      let parts = String.split_on_char '|' raw |> List.map String.trim in
+      let tool_name =
+        match parts with
+        | head :: _ when head <> "" -> head
+        | _ -> "unknown"
+      in
+      let timeout = ref false in
+      let duration_ms = ref None in
+      let parse_kv token =
+        match String.split_on_char '=' token with
+        | [k; v] -> Some (String.trim k, String.trim v)
+        | _ -> None
+      in
+      let tags =
+        match parts with
+        | _ :: tl -> tl
+        | [] -> []
+      in
+      List.iter
+        (fun token ->
+          match parse_kv token with
+          | Some ("timeout", v) ->
+              timeout := bool_of_tag_value v
+          | Some ("duration_ms", v) ->
+              (try duration_ms := Some (max 0 (int_of_string v)) with _ -> ())
+          | _ -> ())
+        tags;
+      (tool_name, !timeout, !duration_ms)
+
+let percentile_int (values : int list) ~(pct : float) : int option =
+  match List.sort compare values with
+  | [] -> None
+  | sorted ->
+      let n = List.length sorted in
+      let idx =
+        int_of_float (ceil (pct *. float_of_int n) -. 1.0)
+        |> max 0
+        |> min (n - 1)
+      in
+      Some (List.nth sorted idx)
+
+let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
+  let window_hours =
+    float_of_env_default
+      "MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS"
+      ~default:1.0
+      ~min_v:0.1
+      ~max_v:168.0
+  in
+  let since = Masc_mcp.Time_compat.now () -. (window_hours *. 3600.0) in
+  let events = Tool_audit.read_audit_events config ~since in
+  let total = ref 0 in
+  let failures = ref 0 in
+  let timeouts = ref 0 in
+  let durations_rev = ref [] in
+  let duration_count = ref 0 in
+  let duration_sum = ref 0 in
+  let keeper_status_calls = ref 0 in
+  let keeper_status_failures = ref 0 in
+  let keeper_status_timeouts = ref 0 in
+  let keeper_msg_calls = ref 0 in
+  let keeper_msg_failures = ref 0 in
+  let keeper_msg_timeouts = ref 0 in
+  List.iter
+    (fun (e : Tool_audit.audit_event) ->
+      if e.event_type = "tool_call" then begin
+        incr total;
+        if not e.success then incr failures;
+        let (tool_name, timeout_now, duration_ms_opt) =
+          parse_tool_call_detail e.detail
+        in
+        if timeout_now then incr timeouts;
+        (match duration_ms_opt with
+         | Some d ->
+             incr duration_count;
+             duration_sum := !duration_sum + d;
+             durations_rev := d :: !durations_rev
+         | None -> ());
+        if tool_name = "masc_keeper_status" then begin
+          incr keeper_status_calls;
+          if not e.success then incr keeper_status_failures;
+          if timeout_now then incr keeper_status_timeouts;
+        end else if tool_name = "masc_keeper_msg" then begin
+          incr keeper_msg_calls;
+          if not e.success then incr keeper_msg_failures;
+          if timeout_now then incr keeper_msg_timeouts;
+        end
+      end)
+    events;
+  let total_f = float_of_int !total in
+  let failure_rate =
+    if !total = 0 then 0.0 else float_of_int !failures /. total_f
+  in
+  let timeout_rate =
+    if !total = 0 then 0.0 else float_of_int !timeouts /. total_f
+  in
+  let avg_duration_ms =
+    if !duration_count = 0 then 0.0
+    else float_of_int !duration_sum /. float_of_int !duration_count
+  in
+  let p95_duration_ms = percentile_int !durations_rev ~pct:0.95 in
+  let keeper_msg_timeout_sec =
+    int_of_env_default
+      "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
+      ~default:45
+      ~min_v:10
+      ~max_v:300
+  in
+  `Assoc [
+    ("window_hours", `Float window_hours);
+    ("tool_calls", `Int !total);
+    ("failures", `Int !failures);
+    ("timeouts", `Int !timeouts);
+    ("failure_rate", `Float failure_rate);
+    ("timeout_rate", `Float timeout_rate);
+    ("duration_sample_count", `Int !duration_count);
+    ("avg_duration_ms", `Float avg_duration_ms);
+    ("p95_duration_ms", match p95_duration_ms with Some v -> `Int v | None -> `Null);
+    ("keeper_msg_timeout_sec", `Int keeper_msg_timeout_sec);
+    ("keeper_status", `Assoc [
+      ("calls", `Int !keeper_status_calls);
+      ("failures", `Int !keeper_status_failures);
+      ("timeouts", `Int !keeper_status_timeouts);
+    ]);
+    ("keeper_msg", `Assoc [
+      ("calls", `Int !keeper_msg_calls);
+      ("failures", `Int !keeper_msg_failures);
+      ("timeouts", `Int !keeper_msg_timeouts);
+    ]);
+  ]
 
 type keeper_gen_window_stats = {
   mutable turns: int;
@@ -1826,6 +2419,7 @@ let dashboard_batch_json (config : Room.config) : Yojson.Safe.t =
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
+      ("tool_call_health", tool_call_health_json config);
       ("alert_thresholds", `Assoc [
         ("proactive_fallback_warn", `Float proactive_fallback_warn);
         ("proactive_fallback_bad", `Float (max proactive_fallback_warn proactive_fallback_bad));
@@ -2425,44 +3019,6 @@ type sse_conn_info = {
 
 let sse_conn_by_session : (string, sse_conn_info) Hashtbl.t = Hashtbl.create 128
 
-let set_sse_active_connections_metric () =
-  Masc_mcp.Prometheus.set_gauge "masc_sse_connections_active"
-    (float_of_int (Sse.client_count ()))
-
-let record_sse_reject_metric ~endpoint ~reason =
-  Masc_mcp.Prometheus.inc_counter "masc_sse_rejects_total"
-    ~labels:[("endpoint", endpoint); ("reason", reason)] ()
-
-let respond_sse_rejected
-    reqd
-    ~session_id
-    ~protocol_version
-    ~origin
-    ~endpoint
-    ~(reason : Sse.admission_reject_reason)
-    ~retry_ms
-  =
-  let reason_label = Sse.admission_reason_to_string reason in
-  let retry_after_s =
-    max 1 (int_of_float (ceil (float_of_int retry_ms /. 1000.0)))
-  in
-  record_sse_reject_metric ~endpoint ~reason:reason_label;
-  let body =
-    Yojson.Safe.to_string (`Assoc [
-      ("error", `String "sse_connection_rate_limited");
-      ("reason", `String reason_label);
-      ("retry_after_ms", `Int retry_ms);
-      ("session_id", `String session_id);
-    ])
-  in
-  let headers = Httpun.Headers.of_list (
-    ("content-length", string_of_int (String.length body))
-    :: ("retry-after", string_of_int retry_after_s)
-    :: json_headers session_id protocol_version origin
-  ) in
-  let response = Httpun.Response.create ~headers `Too_many_requests in
-  Httpun.Reqd.respond_with_string reqd response body
-
 let close_sse_conn info =
   if not info.closed then begin
     info.closed <- true;
@@ -2473,8 +3029,7 @@ let close_sse_conn info =
          Printf.eprintf "[DEBUG] close_sse_conn: %s\n%!" (Printexc.to_string exn));
     (* Critical: unregister from Sse module to prevent client count leak.
        unregister_if_current is idempotent (checks client_id match). *)
-    Sse.unregister_if_current info.session_id info.client_id;
-    set_sse_active_connections_metric ()
+    Sse.unregister_if_current info.session_id info.client_id
   end
 
 let stop_sse_session session_id =
@@ -2491,15 +3046,11 @@ let close_all_sse_connections () =
   List.iter (fun session_id ->
     stop_sse_session session_id
   ) sessions;
-  set_sse_active_connections_metric ();
   Printf.eprintf "🚀 MASC MCP: Closed %d SSE connections\n%!" (List.length sessions)
 
 let send_raw info data =
   if info.closed || !(info.stop) || Httpun.Body.Writer.is_closed info.writer then
-    (Masc_mcp.Prometheus.inc_counter "masc_sse_write_failures_total"
-       ~labels:[("reason", "closed_writer")] ();
-     close_sse_conn info;
-     false)
+    (close_sse_conn info; false)
   else
     try
       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
@@ -2510,8 +3061,6 @@ let send_raw info data =
       true
     with _exn ->
       (* Expected during client disconnect - silent close *)
-      Masc_mcp.Prometheus.inc_counter "masc_sse_write_failures_total"
-        ~labels:[("reason", "write_exception")] ();
       close_sse_conn info;
       false
 
@@ -2521,112 +3070,93 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let last_event_id = get_last_event_id request in
 
-  let endpoint_label =
-    match legacy_messages_endpoint with
-    | Some _ -> "legacy_sse"
-    | None -> "mcp"
+  (* Replace existing connection for session_id *)
+  stop_sse_session session_id;
+
+  let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
+  let response = Httpun.Response.create ~headers `OK in
+  let writer = Httpun.Reqd.respond_with_streaming reqd response in
+  let mutex = Eio.Mutex.create () in
+  let info_ref : sse_conn_info option ref = ref None in
+  let push event =
+    match !info_ref with
+    | None -> ()
+    | Some info -> ignore (send_raw info event)
   in
+  let (client_id, evicted) =
+    Sse.register session_id ~push
+      ~last_event_id:(Option.value ~default:0 last_event_id)
+  in
+  (* Clean up writer for evicted session *)
+  (match evicted with
+   | Some evicted_sid -> stop_sse_session evicted_sid
+   | None -> ());
+  let info = {
+    session_id;
+    client_id;
+    writer;
+    mutex;
+    stop = ref false;
+    closed = false;
+  } in
+  info_ref := Some info;
+  Hashtbl.replace sse_conn_by_session session_id info;
 
-  match Sse.admit_connection session_id with
-  | Rejected { reason; retry_ms } ->
-      respond_sse_rejected reqd
-        ~session_id ~protocol_version ~origin
-        ~endpoint:endpoint_label ~reason ~retry_ms
-  | Allowed ->
-      (* Replace existing connection for session_id *)
-      if Hashtbl.mem sse_conn_by_session session_id then
-        Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
-          ~labels:[("endpoint", endpoint_label)] ();
-      stop_sse_session session_id;
+  (* Send priming event first *)
+  ignore (send_raw info (sse_prime_event ()));
 
-      let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
-      let response = Httpun.Response.create ~headers `OK in
-      let writer = Httpun.Reqd.respond_with_streaming reqd response in
-      let mutex = Eio.Mutex.create () in
-      let info_ref : sse_conn_info option ref = ref None in
-      let push event =
-        match !info_ref with
-        | None -> ()
-        | Some info -> ignore (send_raw info event)
-      in
-      let (client_id, evicted) =
-        Sse.register session_id ~push
-          ~last_event_id:(Option.value ~default:0 last_event_id)
-      in
-      (* Clean up writer for evicted session *)
-      (match evicted with
-       | Some evicted_sid ->
-           Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
-             ~labels:[("endpoint", endpoint_label)] ();
-           stop_sse_session evicted_sid
-       | None -> ());
-      let info = {
-        session_id;
-        client_id;
-        writer;
-        mutex;
-        stop = ref false;
-        closed = false;
-      } in
-      info_ref := Some info;
-      Hashtbl.replace sse_conn_by_session session_id info;
-      set_sse_active_connections_metric ();
+  (* Legacy SSE transport: provide messages endpoint (event: endpoint) *)
+  (match legacy_messages_endpoint with
+   | None -> ()
+   | Some f ->
+       let endpoint_url = f session_id in
+       ignore (send_raw info (Sse.format_event ~event_type:"endpoint" endpoint_url)));
 
-      (* Send priming event first *)
-      ignore (send_raw info (sse_prime_event ()));
+  (* Replay missed events if Last-Event-ID provided (MCP spec MUST) *)
+  (match last_event_id with
+   | Some last_id ->
+       let missed = Sse.get_events_after last_id in
+       List.iter (fun ev -> ignore (send_raw info ev)) missed
+   | None -> ());
 
-      (* Legacy SSE transport: provide messages endpoint (event: endpoint) *)
-      (match legacy_messages_endpoint with
-       | None -> ()
-       | Some f ->
-           let endpoint_url = f session_id in
-           ignore (send_raw info (Sse.format_event ~event_type:"endpoint" endpoint_url)));
+  (* Keep-alive ping loop *)
+  (match !current_sw, !current_clock with
+   | Some sw, Some clock ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let is_cancelled exn =
+           match exn with
+           | Eio.Cancel.Cancelled _ -> true
+           | _ -> false
+         in
+         let rec loop () =
+           if not !(info.stop) then begin
+             (try
+                Eio.Time.sleep clock sse_ping_interval_s
+              with exn ->
+                if is_cancelled exn then raise exn;
+                Printf.eprintf "[SSE] ping sleep error: %s\n%!" (Printexc.to_string exn));
+             (try
+                if info.closed then
+                  stop_sse_session info.session_id
+                else if not !(info.stop) then
+                  ignore (send_raw info ": ping\n\n")
+              with exn ->
+                if is_cancelled exn then raise exn;
+                Printf.eprintf "[SSE] ping send error: %s\n%!" (Printexc.to_string exn);
+                stop_sse_session info.session_id);
+             loop ()
+           end
+         in
+         try loop () with exn ->
+           if is_cancelled exn then ()
+           else Printf.eprintf "[SSE] ping loop error: %s\n%!" (Printexc.to_string exn))
+   | _ -> ());
 
-      (* Replay missed events if Last-Event-ID provided (MCP spec MUST) *)
-      (match last_event_id with
-       | Some last_id ->
-           let missed = Sse.get_events_after last_id in
-           List.iter (fun ev -> ignore (send_raw info ev)) missed
-       | None -> ());
-
-      (* Keep-alive ping loop *)
-      (match !current_sw, !current_clock with
-       | Some sw, Some clock ->
-           Eio.Fiber.fork ~sw (fun () ->
-             let is_cancelled exn =
-               match exn with
-               | Eio.Cancel.Cancelled _ -> true
-               | _ -> false
-             in
-             let rec loop () =
-               if not !(info.stop) then begin
-                 (try
-                    Eio.Time.sleep clock sse_ping_interval_s
-                  with exn ->
-                    if is_cancelled exn then raise exn;
-                    Printf.eprintf "[SSE] ping sleep error: %s\n%!" (Printexc.to_string exn));
-                 (try
-                    if info.closed then
-                      stop_sse_session info.session_id
-                    else if not !(info.stop) then
-                      ignore (send_raw info ": ping\n\n")
-                  with exn ->
-                    if is_cancelled exn then raise exn;
-                    Printf.eprintf "[SSE] ping send error: %s\n%!" (Printexc.to_string exn);
-                    stop_sse_session info.session_id);
-                 loop ()
-               end
-             in
-             try loop () with exn ->
-               if is_cancelled exn then ()
-               else Printf.eprintf "[SSE] ping loop error: %s\n%!" (Printexc.to_string exn))
-       | _ -> ());
-
-      (* Only log when approaching capacity or in debug mode *)
-      let client_count = Sse.client_count () in
-      if client_count > Sse.max_clients / 2 then
-        Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
-          session_id client_count Sse.max_clients
+  (* Only log when approaching capacity or in debug mode *)
+  let client_count = Sse.client_count () in
+  if client_count > Sse.max_clients / 2 then
+    Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
+      session_id client_count Sse.max_clients
 
 (** SSE simple handler - for compatibility, returns single event *)
 let sse_simple_handler request reqd =
@@ -2700,7 +3230,6 @@ let handle_delete_mcp request reqd =
   | Some session_id ->
       stop_sse_session session_id;
       Sse.unregister session_id;
-      set_sse_active_connections_metric ();
       Hashtbl.remove protocol_version_by_session session_id;
       Printf.printf "🔚 Session terminated: %s\n%!" session_id;
       let headers = Httpun.Headers.of_list (
@@ -2744,103 +3273,90 @@ let make_routes ~port ~host =
        let room_id = Option.value ~default:"default" (query_param request "room") in
        let last_event_id = get_last_event_id request in
 
-       match Sse.admit_connection session_id with
-       | Rejected { reason; retry_ms } ->
-           respond_sse_rejected reqd
-             ~session_id ~protocol_version ~origin
-             ~endpoint:"ag_ui" ~reason ~retry_ms
-       | Allowed ->
-           if Hashtbl.mem sse_conn_by_session session_id then
-             Masc_mcp.Prometheus.inc_counter "masc_sse_reconnects_total"
-               ~labels:[("endpoint", "ag_ui")] ();
-           stop_sse_session session_id;
+       stop_sse_session session_id;
 
-           let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
-           let response = Httpun.Response.create ~headers `OK in
-           let writer = Httpun.Reqd.respond_with_streaming reqd response in
-           let mutex = Eio.Mutex.create () in
-           let info_ref : sse_conn_info option ref = ref None in
-           let push event =
-             match !info_ref with
-             | None -> ()
-             | Some info ->
-               (* Translate MASC SSE data to AG-UI event format.
-                  Parse the JSON from the SSE data line and re-emit as AG-UI CUSTOM. *)
-               let ag_ui_event =
-                 try
-                   (* Extract JSON from SSE format: "id: N\nevent: type\ndata: {...}\n\n" *)
-                   let lines = String.split_on_char '\n' event in
-                   let data_line = List.find_opt (fun l ->
-                     String.length l > 6 && String.sub l 0 6 = "data: "
-                   ) lines in
-                   match data_line with
-                   | Some dl ->
-                     let json_str = String.sub dl 6 (String.length dl - 6) in
-                     let json = Yojson.Safe.from_string json_str in
-                     let ag_event = Masc_mcp.Ag_ui.of_custom ~room_id
-                       ~name:"MASC_EVENT" json in
-                     Masc_mcp.Ag_ui.event_to_sse ag_event
-                   | None -> event  (* Pass through if no data line *)
-                 with _ -> event  (* Pass through on parse error *)
-               in
-               ignore (send_raw info ag_ui_event)
+       let headers = Httpun.Headers.of_list (sse_stream_headers session_id protocol_version origin) in
+       let response = Httpun.Response.create ~headers `OK in
+       let writer = Httpun.Reqd.respond_with_streaming reqd response in
+       let mutex = Eio.Mutex.create () in
+       let info_ref : sse_conn_info option ref = ref None in
+       let push event =
+         match !info_ref with
+         | None -> ()
+         | Some info ->
+           (* Translate MASC SSE data to AG-UI event format.
+              Parse the JSON from the SSE data line and re-emit as AG-UI CUSTOM. *)
+           let ag_ui_event =
+             try
+               (* Extract JSON from SSE format: "id: N\nevent: type\ndata: {...}\n\n" *)
+               let lines = String.split_on_char '\n' event in
+               let data_line = List.find_opt (fun l ->
+                 String.length l > 6 && String.sub l 0 6 = "data: "
+               ) lines in
+               match data_line with
+               | Some dl ->
+                 let json_str = String.sub dl 6 (String.length dl - 6) in
+                 let json = Yojson.Safe.from_string json_str in
+                 let ag_event = Masc_mcp.Ag_ui.of_custom ~room_id
+                   ~name:"MASC_EVENT" json in
+                 Masc_mcp.Ag_ui.event_to_sse ag_event
+               | None -> event  (* Pass through if no data line *)
+             with _ -> event  (* Pass through on parse error *)
            in
-           let (client_id, evicted) =
-             Sse.register session_id ~push
-               ~last_event_id:(Option.value ~default:0 last_event_id)
-           in
-           (match evicted with
-            | Some evicted_sid ->
-                Masc_mcp.Prometheus.inc_counter "masc_sse_capacity_evictions_total"
-                  ~labels:[("endpoint", "ag_ui")] ();
-                stop_sse_session evicted_sid
-            | None -> ());
-           let info = {
-             session_id;
-             client_id;
-             writer;
-             mutex;
-             stop = ref false;
-             closed = false;
-           } in
-           info_ref := Some info;
-           Hashtbl.replace sse_conn_by_session session_id info;
-           set_sse_active_connections_metric ();
+           ignore (send_raw info ag_ui_event)
+       in
+       let (client_id, evicted) =
+         Sse.register session_id ~push
+           ~last_event_id:(Option.value ~default:0 last_event_id)
+       in
+       (match evicted with
+        | Some evicted_sid -> stop_sse_session evicted_sid
+        | None -> ());
+       let info = {
+         session_id;
+         client_id;
+         writer;
+         mutex;
+         stop = ref false;
+         closed = false;
+       } in
+       info_ref := Some info;
+       Hashtbl.replace sse_conn_by_session session_id info;
 
-           (* Send AG-UI priming: RUN_STARTED event *)
-           let prime = Masc_mcp.Ag_ui.(
-             make_event ~thread_id:room_id
-               ~run_id:(Some session_id)
-               Run_started
-             |> event_to_sse
-           ) in
-           ignore (send_raw info prime);
+       (* Send AG-UI priming: RUN_STARTED event *)
+       let prime = Masc_mcp.Ag_ui.(
+         make_event ~thread_id:room_id
+           ~run_id:(Some session_id)
+           Run_started
+         |> event_to_sse
+       ) in
+       ignore (send_raw info prime);
 
-           (* Replay missed events *)
-           (match last_event_id with
-            | Some last_id ->
-              let missed = Sse.get_events_after last_id in
-              List.iter (fun ev -> ignore (send_raw info ev)) missed
-            | None -> ());
+       (* Replay missed events *)
+       (match last_event_id with
+        | Some last_id ->
+          let missed = Sse.get_events_after last_id in
+          List.iter (fun ev -> ignore (send_raw info ev)) missed
+        | None -> ());
 
-           (* Keep-alive ping *)
-           (match !current_sw, !current_clock with
-            | Some sw, Some clock ->
-              Eio.Fiber.fork ~sw (fun () ->
-                let rec loop () =
-                  if not !(info.stop) then begin
-                    (try Eio.Time.sleep clock sse_ping_interval_s
-                     with _ -> ());
-                    (try
-                       if info.closed then stop_sse_session info.session_id
-                       else if not !(info.stop) then
-                         ignore (send_raw info ": ping\n\n")
-                     with _ -> stop_sse_session info.session_id);
-                    loop ()
-                  end
-                in
-                try loop () with _ -> ())
-            | _ -> ()))
+       (* Keep-alive ping *)
+       (match !current_sw, !current_clock with
+        | Some sw, Some clock ->
+          Eio.Fiber.fork ~sw (fun () ->
+            let rec loop () =
+              if not !(info.stop) then begin
+                (try Eio.Time.sleep clock sse_ping_interval_s
+                 with _ -> ());
+                (try
+                   if info.closed then stop_sse_session info.session_id
+                   else if not !(info.stop) then
+                     ignore (send_raw info ": ping\n\n")
+                 with _ -> stop_sse_session info.session_id);
+                loop ()
+              end
+            in
+            try loop () with _ -> ())
+        | _ -> ()))
   |> Http.Router.get "/dashboard" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          Http.Response.html_cached
@@ -3032,6 +3548,136 @@ let make_routes ~port ~host =
            ("total", `Int total);
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/events" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         let room_id = Option.value ~default:"" (query_param req "room_id") in
+         let after_seq = int_query_param req "after_seq" ~default:0 in
+         let event_type_filter = query_param req "event_type" in
+         match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
+         | Ok json ->
+             Http.Response.json (Yojson.Safe.to_string json) reqd
+         | Error (`Bad_request, msg) ->
+             Http.Response.json ~status:`Bad_request (Yojson.Safe.to_string (trpg_error_json msg)) reqd
+         | Error (`Internal_server_error, msg) ->
+             Http.Response.json ~status:`Internal_server_error
+               (Yojson.Safe.to_string (trpg_error_json msg))
+               reqd
+       ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/events" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         Http.Request.read_body_async reqd (fun body_str ->
+           match trpg_append_event_json ~base_dir ~body_str with
+           | Ok json ->
+               Http.Response.json ~status:`Created (Yojson.Safe.to_string json) reqd
+           | Error (`Bad_request, msg) ->
+               Http.Response.json ~status:`Bad_request
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+           | Error (`Internal_server_error, msg) ->
+               Http.Response.json ~status:`Internal_server_error
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+         )
+       ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/state" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         let room_id = Option.value ~default:"" (query_param req "room_id") in
+         let rule_module =
+           Option.value ~default:"dnd5e-lite" (query_param req "rule_module")
+         in
+         match trpg_derive_state_json ~base_dir ~room_id ~rule_module with
+         | Ok json ->
+             Http.Response.json (Yojson.Safe.to_string json) reqd
+         | Error (`Bad_request, msg) ->
+             Http.Response.json ~status:`Bad_request (Yojson.Safe.to_string (trpg_error_json msg)) reqd
+         | Error (`Internal_server_error, msg) ->
+             Http.Response.json ~status:`Internal_server_error
+               (Yojson.Safe.to_string (trpg_error_json msg))
+               reqd
+       ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/dice/roll" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         Http.Request.read_body_async reqd (fun body_str ->
+           match trpg_dice_roll_json ~base_dir ~body_str with
+           | Ok json ->
+               Http.Response.json ~status:`Created (Yojson.Safe.to_string json) reqd
+           | Error (`Bad_request, msg) ->
+               Http.Response.json ~status:`Bad_request
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+           | Error (`Internal_server_error, msg) ->
+               Http.Response.json ~status:`Internal_server_error
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+         )
+       ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/turns/advance" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         Http.Request.read_body_async reqd (fun body_str ->
+           match trpg_turn_advance_json ~base_dir ~body_str with
+           | Ok json ->
+               Http.Response.json (Yojson.Safe.to_string json) reqd
+           | Error (`Bad_request, msg) ->
+               Http.Response.json ~status:`Bad_request
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+           | Error (`Internal_server_error, msg) ->
+               Http.Response.json ~status:`Internal_server_error
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+                 reqd
+         )
+       ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/rounds/run" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let agent_name =
+             Option.value ~default:"dashboard" (agent_from_request req)
+           in
+           match !current_sw, !current_clock with
+           | Some sw, Some clock -> (
+               match
+                 trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+               with
+               | Ok json ->
+                   Http.Response.json (Yojson.Safe.to_string json) reqd
+               | Error (`Bad_request, msg) ->
+                   Http.Response.json ~status:`Bad_request
+                     (Yojson.Safe.to_string (trpg_error_json msg))
+                     reqd
+               | Error (`Internal_server_error, msg) ->
+                   Http.Response.json ~status:`Internal_server_error
+                     (Yojson.Safe.to_string (trpg_error_json msg))
+                     reqd)
+           | _ ->
+               Http.Response.json ~status:`Internal_server_error
+                 (Yojson.Safe.to_string
+                    (trpg_error_json "trpg runtime not initialized"))
+                 reqd
+         )
+       ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/stream" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         let room_id = Option.value ~default:"" (query_param req "room_id") in
+         let after_seq = int_query_param req "after_seq" ~default:0 in
+         let event_type_filter = query_param req "event_type" in
+         match trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter with
+         | Ok json ->
+             Http.Response.json (Yojson.Safe.to_string json) reqd
+         | Error (`Bad_request, msg) ->
+             Http.Response.json ~status:`Bad_request
+               (Yojson.Safe.to_string (trpg_error_json msg))
+               reqd
+         | Error (`Internal_server_error, msg) ->
+             Http.Response.json ~status:`Internal_server_error
+               (Yojson.Safe.to_string (trpg_error_json msg))
+               reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
@@ -3343,7 +3989,6 @@ let run_server ~sw ~env ~port ~base_path =
   let state = Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock ~base_path in
   server_state := Some state;
   Mcp_server.set_sse_callback state Sse.broadcast;
-  set_sse_active_connections_metric ();
 
   (* Keepers are meant to be long-lived. Start their keepalive fibers on startup
      so liveness/last_seen stays up-to-date even if no tool calls happen. *)
@@ -3379,19 +4024,15 @@ let run_server ~sw ~env ~port ~base_path =
    | None ->
        Printf.eprintf "[Board_listener] Skipped (not using PostgreSQL backend)\n%!");
 
-  (* Periodic SSE stale-client reaper — every 60s, evict idle connections older than 30min *)
+  (* Periodic SSE stale-client reaper — every 60s, evict connections older than 30min *)
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 60.0;
       let stale_sids = Masc_mcp.Sse.cleanup_stale () in
-      let stale_count = List.length stale_sids in
       List.iter stop_sse_session stale_sids;
-      if stale_count > 0 then begin
-        Masc_mcp.Prometheus.inc_counter "masc_sse_idle_evictions_total"
-          ~delta:(float_of_int stale_count) ();
+      if stale_sids <> [] then
         Printf.eprintf "[SSE] Reaped %d stale connections (active: %d)\n%!"
-          stale_count (Masc_mcp.Sse.client_count ())
-      end;
+          (List.length stale_sids) (Masc_mcp.Sse.client_count ());
       loop ()
     in
     loop ());
@@ -3710,6 +4351,134 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/api/v1/credits" ->
           h2_respond_json h2_reqd (Masc_mcp.Credits_dashboard.json_api ()) ~extra_headers:cors
+
+      | `GET, "/api/v1/trpg/events" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
+          let after_seq = int_query_param httpun_request "after_seq" ~default:0 in
+          let event_type_filter = query_param httpun_request "event_type" in
+          (match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
+          | Ok json ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          | Error (`Bad_request, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Bad_request ~extra_headers:cors
+          | Error (`Internal_server_error, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `POST, "/api/v1/trpg/events" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          h2_read_body h2_reqd (fun body_str ->
+            match trpg_append_event_json ~base_dir ~body_str with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status:`Created
+                  ~extra_headers:cors
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Error (`Internal_server_error, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors
+          )
+
+      | `GET, "/api/v1/trpg/state" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
+          let rule_module =
+            Option.value ~default:"dnd5e-lite" (query_param httpun_request "rule_module")
+          in
+          (match trpg_derive_state_json ~base_dir ~room_id ~rule_module with
+          | Ok json ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          | Error (`Bad_request, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Bad_request ~extra_headers:cors
+          | Error (`Internal_server_error, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `POST, "/api/v1/trpg/dice/roll" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          h2_read_body h2_reqd (fun body_str ->
+            match trpg_dice_roll_json ~base_dir ~body_str with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~status:`Created
+                  ~extra_headers:cors
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Error (`Internal_server_error, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors
+          )
+
+      | `POST, "/api/v1/trpg/turns/advance" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          h2_read_body h2_reqd (fun body_str ->
+            match trpg_turn_advance_json ~base_dir ~body_str with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                  ~extra_headers:cors
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Error (`Internal_server_error, msg) ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors
+          )
+
+      | `POST, "/api/v1/trpg/rounds/run" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          h2_read_body h2_reqd (fun body_str ->
+            let agent_name =
+              Option.value
+                ~default:"dashboard"
+                (agent_from_request httpun_request)
+            in
+            match !current_sw, !current_clock with
+            | Some sw, Some clock -> (
+                match
+                  trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+                with
+                | Ok json ->
+                    h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                      ~extra_headers:cors
+                | Error (`Bad_request, msg) ->
+                    h2_respond_json h2_reqd
+                      (Yojson.Safe.to_string (trpg_error_json msg))
+                      ~status:`Bad_request ~extra_headers:cors
+                | Error (`Internal_server_error, msg) ->
+                    h2_respond_json h2_reqd
+                      (Yojson.Safe.to_string (trpg_error_json msg))
+                      ~status:`Internal_server_error ~extra_headers:cors)
+            | _ ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string
+                     (trpg_error_json "trpg runtime not initialized"))
+                  ~status:`Internal_server_error ~extra_headers:cors
+          )
+
+      | `GET, "/api/v1/trpg/stream" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
+          let after_seq = int_query_param httpun_request "after_seq" ~default:0 in
+          let event_type_filter = query_param httpun_request "event_type" in
+          (match trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter with
+          | Ok json ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          | Error (`Bad_request, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Bad_request ~extra_headers:cors
+          | Error (`Internal_server_error, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Internal_server_error ~extra_headers:cors)
 
       | `GET, "/api/v1/board" ->
           let hearth = query_param httpun_request "hearth" in

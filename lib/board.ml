@@ -820,7 +820,7 @@ let load_persisted_posts store =
             let line = input_line ic in
             if String.length line > 0 then
               match Yojson.Safe.from_string line |> post_of_yojson with
-              | Some p when p.expires_at > now ->
+              | Some p when p.expires_at = 0.0 || p.expires_at > now ->
                   Hashtbl.replace store.posts (Post_id.to_string p.id) p;
                   incr loaded
               | _ -> ()

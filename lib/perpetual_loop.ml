@@ -285,9 +285,11 @@ let run_turn ~config ~state =
       in
       let used_model =
         let used =
-          match String.split_on_char ':' resp.model_used with
-          | [base; "latest"] -> base
-          | _ -> resp.model_used
+          if String.ends_with ~suffix:":latest" resp.model_used then
+            String.sub resp.model_used 0
+              (String.length resp.model_used - String.length ":latest")
+          else
+            resp.model_used
         in
         List.find_opt (fun (m : Llm_client.model_spec) ->
           m.model_id = resp.model_used || m.model_id = used

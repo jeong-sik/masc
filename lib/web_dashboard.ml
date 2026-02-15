@@ -1412,6 +1412,46 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     @keyframes trpg-blink { 50% { opacity: 0; } }
     .trpg-sidebar { display: flex; flex-direction: column; gap: 12px; }
+    .trpg-room-label {
+      font-size: 0.78em;
+      color: #94a3b8;
+      font-family: 'SF Mono', Monaco, monospace;
+      background: rgba(2,6,23,0.35);
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 6px;
+      padding: 3px 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .trpg-status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .trpg-status-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(148,163,184,0.16);
+      border-radius: 8px;
+      padding: 9px 10px;
+    }
+    .trpg-status-label {
+      font-size: 0.68em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+    .trpg-status-value {
+      font-size: 0.95em;
+      color: #e2e8f0;
+      font-weight: 600;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .trpg-status-value.warn { color: #fbbf24; }
+    .trpg-status-value.bad { color: #ef4444; }
     .trpg-party-card {
       background: rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.06);
@@ -1445,6 +1485,27 @@ let cached_html = lazy ({|<!DOCTYPE html>
       margin-bottom: 8px;
       font-weight: 600;
     }
+    .trpg-round-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 180px;
+      overflow-y: auto;
+      margin-bottom: 6px;
+    }
+    .trpg-round-item {
+      background: rgba(255,255,255,0.03);
+      border-left: 3px solid rgba(34,211,238,0.8);
+      border-radius: 6px;
+      padding: 7px 8px;
+      font-size: 0.75em;
+      color: #cbd5e1;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .trpg-round-item.timeout { border-left-color: rgba(239,68,68,0.9); }
+    .trpg-round-item.unavailable { border-left-color: rgba(251,191,36,0.9); }
+    .trpg-round-item .meta { color: #64748b; font-size: 0.95em; }
     .trpg-empty { text-align: center; color: #64748b; padding: 60px 20px; font-style: italic; }
   </style>
 </head>
@@ -1716,6 +1777,13 @@ let cached_html = lazy ({|<!DOCTYPE html>
             <div class="trpg-empty">아직 서사가 없습니다. Board hearth "trpg"에 포스팅하면 여기에 나타납니다.</div>
           </div>
           <div class="trpg-sidebar">
+            <div class="trpg-section-title">세션</div>
+            <div class="trpg-room-label" id="trpg-room-label">room: -</div>
+            <div class="trpg-status-grid" id="trpg-status-grid"></div>
+            <div class="trpg-section-title" style="margin-top:8px;">최근 라운드</div>
+            <div id="trpg-round-log" class="trpg-round-list">
+              <div class="trpg-empty" style="padding:18px 8px;">라운드 이벤트가 없습니다.</div>
+            </div>
             <div class="trpg-section-title">파티 상태</div>
             <div id="trpg-party"></div>
             <div class="trpg-section-title" style="margin-top:12px;">맵</div>
@@ -1742,6 +1810,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     const params = new URLSearchParams(window.location.search);
     const agent = params.get('agent') || params.get('agent_name');
     const token = params.get('token');
+    const trpgRoomParam = (params.get('trpg_room') || '').trim();
     const keeperParam = params.get('keeper');
     const keeperZoomParam = parseInt(params.get('keeper_zoom') || '50', 10);
     const compareKeeperParam = params.get('compare_keeper');
@@ -5463,6 +5532,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let sseConnected = false;
     let fetchDataTimer = null;
     let fetchBoardTimer = null;
+    let fetchTrpgTimer = null;
     let periodicRefreshId = null;
     let sseSource = null;
     let sseReconnectTimer = null;
@@ -5515,6 +5585,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       periodicRefreshId = setInterval(() => {
         invalidateDashboardCache();
         fetchData();
+        if (currentMainTab === 'trpg') debouncedFetchTrpg();
       }, 10000);
     }
 
@@ -5540,6 +5611,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function debouncedFetchBoard() {
       if (fetchBoardTimer) return;
       fetchBoardTimer = setTimeout(() => { fetchBoard(); fetchBoardTimer = null; }, 500);
+    }
+    function debouncedFetchTrpg() {
+      if (fetchTrpgTimer) return;
+      fetchTrpgTimer = setTimeout(() => { fetchTrpg(); fetchTrpgTimer = null; }, 500);
     }
 
     // SSE for real-time updates
@@ -5608,7 +5683,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           debouncedFetchBoard();
           setTimeout(scrollToNewPost, 500); // scroll after render
           const trpgPanel = document.getElementById('main-tab-trpg');
-          if (trpgPanel && trpgPanel.style.display !== 'none') setTimeout(fetchTrpg, 400);
+          if (trpgPanel && trpgPanel.style.display !== 'none') debouncedFetchTrpg();
         }
         else if (type === 'board_comment') {
           addJournalEntry(agent, '💬 New comment');
@@ -5616,6 +5691,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           debouncedFetchBoard();
         }
         else addJournalEntry(agent, type);
+        if (currentMainTab === 'trpg') debouncedFetchTrpg();
         // Skip fetchJournal - addJournalEntry already updates UI
       }
     }
@@ -6505,13 +6581,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     // === TRPG — Dark Fantasy Narrative ===
-    const TRPG_PARTY = [
+    const TRPG_ROOM_ID = trpgRoomParam || 'grimland-chronicle';
+    const TRPG_PARTY_FALLBACK = [
       { name: '그림자', cls: '전사', hp: 30, maxHp: 30, emoji: '⚔', area: 'C' },
       { name: '루나', cls: '마법사', hp: 13, maxHp: 15, emoji: '🔮', area: 'F' },
       { name: '손가락', cls: '도적', hp: 15, maxHp: 18, emoji: '🗡', area: 'C' },
       { name: '미소', cls: '성직자', hp: 14, maxHp: 20, emoji: '✝', area: 'C' },
     ];
-    const TRPG_MAP = [
+    const TRPG_MAP_FALLBACK = [
       '          [D 북쪽덤불]         ← 고블린 5마리',
       '            ║',
       ' [A 절벽]══[B 중앙]══[C 동쪽]  ← 그림자+손가락+미소',
@@ -6519,20 +6596,110 @@ let cached_html = lazy ({|<!DOCTYPE html>
       '          [E 남쪽덤불]         ← 고블린 4마리',
       '            ║',
       '          [F 대장나무]         ← ★루나 + 대장 고블린',
-    ].join('\\n');
+    ].join('\n');
     const trpgKnownIds = new Set();
     let trpgTyping = false;
+    let trpgLastSeq = 0;
+    let trpgEventsCache = [];
 
-    function fetchTrpg() {
-      fetch('/api/v1/board?hearth=trpg')
-        .then(r => r.json())
-        .then(data => {
-          const posts = data.posts || data || [];
-          renderTrpgNarrative(posts);
-          renderTrpgParty();
-          renderTrpgMap();
-        })
-        .catch(() => {});
+    function trpgEventType(ev) {
+      return (ev && (ev.type || ev.event_type || ev.event)) || '';
+    }
+
+    function trpgEventPayload(ev) {
+      return (ev && ev.payload && typeof ev.payload === 'object' && !Array.isArray(ev.payload))
+        ? ev.payload
+        : {};
+    }
+
+    function trpgLatestPhase(events) {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const ev = events[i];
+        if (trpgEventType(ev) === 'phase.changed') {
+          const p = trpgEventPayload(ev).phase;
+          if (typeof p === 'string' && p.trim() !== '') return p.trim();
+        }
+      }
+      return '-';
+    }
+
+    function trpgLatestRound(state, events) {
+      const turn = Number(state && state.turn);
+      if (Number.isFinite(turn) && turn > 1) return Math.max(1, Math.floor(turn - 1));
+      let maxTurn = 0;
+      events.forEach((ev) => {
+        const t = Number(trpgEventPayload(ev).turn);
+        if (Number.isFinite(t) && t > maxTurn) maxTurn = t;
+      });
+      return maxTurn > 0 ? maxTurn : 1;
+    }
+
+    function trpgRoundSummary(events, round) {
+      const summary = {
+        round,
+        narrations: 0,
+        proposed: 0,
+        timeouts: 0,
+        unavailable: 0,
+      };
+      events.forEach((ev) => {
+        const payload = trpgEventPayload(ev);
+        const t = Number(payload.turn);
+        if (!Number.isFinite(t) || t !== round) return;
+        const type = trpgEventType(ev);
+        if (type === 'narration.posted') summary.narrations += 1;
+        else if (type === 'turn.action.proposed') summary.proposed += 1;
+        else if (type === 'turn.timeout') summary.timeouts += 1;
+        else if (type === 'keeper.unavailable') summary.unavailable += 1;
+      });
+      return summary;
+    }
+
+    function trpgFmtEventTime(ev) {
+      const ts = ev && (ev.ts || ev.timestamp);
+      if (!ts) return '-';
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return String(ts);
+      return d.toLocaleTimeString('ko-KR');
+    }
+
+    async function fetchTrpg() {
+      const roomLabel = document.getElementById('trpg-room-label');
+      if (roomLabel) roomLabel.textContent = `room: ${TRPG_ROOM_ID}`;
+
+      try {
+        const boardReq = fetch('/api/v1/board?hearth=trpg', { headers: authHeaders() })
+          .then(r => r.json())
+          .catch(() => ({ posts: [] }));
+        const eventsReq = fetch(
+          `/api/v1/trpg/events?room_id=${encodeURIComponent(TRPG_ROOM_ID)}&after_seq=${trpgLastSeq}`,
+          { headers: authHeaders() }
+        )
+          .then(r => r.json())
+          .catch(() => ({ events: [] }));
+        const stateReq = fetch(
+          `/api/v1/trpg/state?room_id=${encodeURIComponent(TRPG_ROOM_ID)}`,
+          { headers: authHeaders() }
+        )
+          .then(r => r.json())
+          .catch(() => ({ state: {} }));
+
+        const [boardData, eventsData, stateData] = await Promise.all([boardReq, eventsReq, stateReq]);
+        const posts = boardData.posts || boardData || [];
+        const incomingEvents = Array.isArray(eventsData.events) ? eventsData.events : [];
+        if (incomingEvents.length > 0) {
+          trpgEventsCache = trpgEventsCache.concat(incomingEvents);
+          trpgEventsCache.sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+          if (trpgEventsCache.length > 400) trpgEventsCache = trpgEventsCache.slice(-400);
+          trpgLastSeq = Math.max(
+            trpgLastSeq,
+            ...incomingEvents.map(e => Number(e.seq) || 0)
+          );
+        }
+
+        renderTrpgNarrative(posts);
+        renderTrpgState(stateData.state || {}, trpgEventsCache);
+      } catch (_) {}
     }
 
     function renderTrpgNarrative(posts) {
@@ -6607,27 +6774,174 @@ let cached_html = lazy ({|<!DOCTYPE html>
       tick();
     }
 
-    function renderTrpgParty() {
+    function renderTrpgState(state, events) {
+      const phase = trpgLatestPhase(events);
+      const round = trpgLatestRound(state, events);
+      const summary = trpgRoundSummary(events, round);
+      renderTrpgStatus(state, summary, phase);
+      renderTrpgRoundLog(events, round);
+      renderTrpgParty(state);
+      renderTrpgMap(state, summary);
+    }
+
+    function renderTrpgStatus(state, summary, phase) {
+      const el = document.getElementById('trpg-status-grid');
+      if (!el) return;
+      const node = (typeof state.current_node === 'string' && state.current_node.trim() !== '')
+        ? state.current_node.trim()
+        : '-';
+      const timeoutCls = summary.timeouts > 0 ? 'bad' : '';
+      const unavailableCls = summary.unavailable > 0 ? 'warn' : '';
+      el.innerHTML = `
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Phase</div>
+          <div class="trpg-status-value">${escapeHtml(String(phase || '-'))}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Round</div>
+          <div class="trpg-status-value">${summary.round}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Node</div>
+          <div class="trpg-status-value">${escapeHtml(node)}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Proposed</div>
+          <div class="trpg-status-value">${summary.proposed}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Timeout</div>
+          <div class="trpg-status-value ${timeoutCls}">${summary.timeouts}</div>
+        </div>
+        <div class="trpg-status-card">
+          <div class="trpg-status-label">Unavailable</div>
+          <div class="trpg-status-value ${unavailableCls}">${summary.unavailable}</div>
+        </div>
+      `;
+    }
+
+    function renderTrpgRoundLog(events, round) {
+      const el = document.getElementById('trpg-round-log');
+      if (!el) return;
+      const filtered = events
+        .filter((ev) => {
+          const payload = trpgEventPayload(ev);
+          const t = Number(payload.turn);
+          return Number.isFinite(t) && t === round;
+        })
+        .filter((ev) => {
+          const type = trpgEventType(ev);
+          return type === 'narration.posted'
+            || type === 'turn.action.proposed'
+            || type === 'turn.timeout'
+            || type === 'keeper.unavailable';
+        })
+        .sort((a, b) => (Number(b.seq) || 0) - (Number(a.seq) || 0))
+        .slice(0, 14);
+      if (filtered.length === 0) {
+        el.innerHTML = '<div class="trpg-empty" style="padding:18px 8px;">최근 라운드 이벤트가 없습니다.</div>';
+        return;
+      }
+      el.innerHTML = filtered.map((ev) => {
+        const payload = trpgEventPayload(ev);
+        const type = trpgEventType(ev);
+        const seq = Number(ev.seq) || 0;
+        const keeper = payload.keeper || ev.actor_id || '-';
+        let body = '-';
+        let cls = '';
+        if (type === 'narration.posted') {
+          body = payload.reply || '(narration)';
+        } else if (type === 'turn.action.proposed') {
+          body = payload.proposed_action || '(proposed action)';
+        } else if (type === 'turn.timeout') {
+          cls = 'timeout';
+          const timeoutSec = Number(payload.timeout_sec);
+          body = `timeout ${Number.isFinite(timeoutSec) ? timeoutSec + 's' : ''}`.trim();
+        } else if (type === 'keeper.unavailable') {
+          cls = 'unavailable';
+          body = payload.reason || 'unavailable';
+        }
+        return `
+          <div class="trpg-round-item ${cls}">
+            <div class="meta">#${seq} · ${escapeHtml(trpgFmtEventTime(ev))} · ${escapeHtml(String(keeper))}</div>
+            <div>${escapeHtml(String(body))}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTrpgParty(state) {
       const el = document.getElementById('trpg-party');
       if (!el) return;
-      el.innerHTML = TRPG_PARTY.map(p => {
-        const pct = Math.round(p.hp / p.maxHp * 100);
+      const partyObj =
+        state && state.party && typeof state.party === 'object' && !Array.isArray(state.party)
+          ? state.party
+          : null;
+      const fromState = partyObj
+        ? Object.entries(partyObj).map(([actorId, raw]) => {
+            const info = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+            const hp = Number(info.hp);
+            const maxHpRaw = Number(info.max_hp ?? info.maxHp);
+            const maxHp = Number.isFinite(maxHpRaw) && maxHpRaw > 0
+              ? maxHpRaw
+              : (Number.isFinite(hp) ? hp : null);
+            const pct = (Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0)
+              ? Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)))
+              : 100;
+            return {
+              name: info.name || actorId,
+              cls: info.class || info.role || info.job || '-',
+              hp: Number.isFinite(hp) ? hp : null,
+              maxHp: Number.isFinite(maxHp) ? maxHp : null,
+              area: info.area || info.position || info.location || '-',
+              inventoryCount: Array.isArray(info.inventory) ? info.inventory.length : 0,
+              pct,
+            };
+          })
+        : [];
+      const party = fromState.length > 0 ? fromState : TRPG_PARTY_FALLBACK;
+      el.innerHTML = party.map((p) => {
+        const pct = Number.isFinite(p.pct) ? p.pct : Math.round((p.hp / p.maxHp) * 100);
         const cls = pct > 60 ? 'hp-high' : pct > 30 ? 'hp-mid' : 'hp-low';
+        const hpText = (Number.isFinite(p.hp) && Number.isFinite(p.maxHp))
+          ? `HP ${p.hp}/${p.maxHp}`
+          : 'HP -';
+        const invText = Number.isFinite(p.inventoryCount) ? ` · 인벤토리 ${p.inventoryCount}` : '';
         return '<div class="trpg-party-card">'
           + '<div style="display:flex;justify-content:space-between;align-items:center;">'
-          + '<span>' + p.emoji + ' <span class="char-name">' + p.name + '</span> <span style="color:#64748b;font-size:0.85em;">' + p.cls + '</span></span>'
-          + '<span style="font-size:0.85em;color:#94a3b8;">HP ' + p.hp + '/' + p.maxHp + '</span>'
+          + '<span><span class="char-name">' + escapeHtml(String(p.name)) + '</span> <span style="color:#64748b;font-size:0.85em;">' + escapeHtml(String(p.cls)) + '</span></span>'
+          + '<span style="font-size:0.85em;color:#94a3b8;">' + hpText + '</span>'
           + '</div>'
-          + '<div class="trpg-hp-bar"><div class="' + cls + '" style="width:' + pct + '%;height:100%;border-radius:3px;"></div></div>'
-          + '<div style="font-size:0.75em;color:#475569;margin-top:4px;">위치: ' + p.area + '</div>'
+          + '<div class="trpg-hp-bar"><div class="' + cls + '" style="width:' + Math.max(0, Math.min(100, Number(pct) || 0)) + '%;height:100%;border-radius:3px;"></div></div>'
+          + '<div style="font-size:0.75em;color:#475569;margin-top:4px;">위치: ' + escapeHtml(String(p.area || '-')) + invText + '</div>'
           + '</div>';
       }).join('');
     }
 
-    function renderTrpgMap() {
+    function renderTrpgMap(state, summary) {
       const el = document.getElementById('trpg-map');
       if (!el) return;
-      el.textContent = TRPG_MAP;
+      const node =
+        (state && typeof state.current_node === 'string' && state.current_node.trim() !== '')
+          ? state.current_node.trim()
+          : '-';
+      const world =
+        state && state.world && typeof state.world === 'object' && !Array.isArray(state.world)
+          ? state.world
+          : {};
+      const flags = Array.isArray(world.story_flags) ? world.story_flags.slice(0, 10) : [];
+      const lines = [
+        `현재 노드: ${node}`,
+        `라운드: ${summary.round} · 행동제안 ${summary.proposed} · 내레이션 ${summary.narrations}`,
+        `리스크: timeout ${summary.timeouts} / unavailable ${summary.unavailable}`,
+        '',
+        '[Story Flags]',
+        ...(flags.length > 0 ? flags.map(f => `- ${String(f)}`) : ['- (none)']),
+      ];
+      if (flags.length === 0) {
+        lines.push('', '[Fallback Map]', TRPG_MAP_FALLBACK);
+      }
+      el.textContent = lines.join('\n');
     }
 
     // Initial load + periodic polling (keepers/perpetual heartbeats don't emit SSE)

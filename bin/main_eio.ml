@@ -596,6 +596,63 @@ let trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter : trpg_api
             ("events", `List (List.map Masc_mcp.Trpg_engine_event.to_yojson events));
           ])
 
+let trpg_keeper_call_with_runtime
+    ~(config : Room.config)
+    ~(sw : Eio.Switch.t)
+    ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+    ~name:keeper_name
+    ~message
+    ~timeout_sec
+  : Masc_mcp.Tool_trpg.keeper_call_result =
+  let keeper_ctx : _ Masc_mcp.Tool_keeper.context = { config; sw; clock } in
+  let keeper_args =
+    `Assoc [ ("name", `String keeper_name); ("message", `String message) ]
+  in
+  try
+    Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+      match
+        Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:keeper_args
+      with
+      | None -> `Error "masc_keeper_msg dispatch unavailable"
+      | Some (true, body) -> (
+          try `Ok (Yojson.Safe.from_string body)
+          with Yojson.Json_error e ->
+            `Error (Printf.sprintf "keeper returned invalid json: %s" e))
+      | Some (false, msg) -> `Error msg)
+  with
+  | Eio.Time.Timeout -> `Timeout
+  | exn -> `Error (Printexc.to_string exn)
+
+let trpg_round_run_json
+    ~(state : Mcp_server.server_state)
+    ~(agent_name : string)
+    ~(sw : Eio.Switch.t)
+    ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+    ~body_str
+  : trpg_api_result =
+  try
+    let args = Yojson.Safe.from_string body_str in
+    let keeper_call =
+      trpg_keeper_call_with_runtime
+        ~config:state.Mcp_server.room_config
+        ~sw
+        ~clock
+    in
+    let trpg_ctx : Masc_mcp.Tool_trpg.context =
+      { config = state.Mcp_server.room_config; agent_name; keeper_call = Some keeper_call }
+    in
+    match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with
+    | None ->
+        Error (`Internal_server_error, "masc_trpg_round_run dispatch unavailable")
+    | Some (false, msg) -> Error (`Bad_request, msg)
+    | Some (true, body) -> (
+        try Ok (Yojson.Safe.from_string body)
+        with Yojson.Json_error e ->
+          Error (`Internal_server_error, Printf.sprintf "invalid tool json: %s" e))
+  with
+  | Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+  | exn -> Error (`Internal_server_error, Printexc.to_string exn)
+
 let bearer_token_from_header value =
   let prefix = "Bearer " in
   let prefix_lower = "bearer " in
@@ -3576,6 +3633,34 @@ let make_routes ~port ~host =
                  reqd
          )
        ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/rounds/run" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let agent_name =
+             Option.value ~default:"dashboard" (agent_from_request req)
+           in
+           match !current_sw, !current_clock with
+           | Some sw, Some clock -> (
+               match
+                 trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+               with
+               | Ok json ->
+                   Http.Response.json (Yojson.Safe.to_string json) reqd
+               | Error (`Bad_request, msg) ->
+                   Http.Response.json ~status:`Bad_request
+                     (Yojson.Safe.to_string (trpg_error_json msg))
+                     reqd
+               | Error (`Internal_server_error, msg) ->
+                   Http.Response.json ~status:`Internal_server_error
+                     (Yojson.Safe.to_string (trpg_error_json msg))
+                     reqd)
+           | _ ->
+               Http.Response.json ~status:`Internal_server_error
+                 (Yojson.Safe.to_string
+                    (trpg_error_json "trpg runtime not initialized"))
+                 reqd
+         )
+       ) request reqd)
   |> Http.Router.get "/api/v1/trpg/stream" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_dir = state.Mcp_server.room_config.base_path in
@@ -4345,6 +4430,37 @@ let run_server ~sw ~env ~port ~base_path =
                   ~status:`Bad_request ~extra_headers:cors
             | Error (`Internal_server_error, msg) ->
                 h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors
+          )
+
+      | `POST, "/api/v1/trpg/rounds/run" ->
+          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          h2_read_body h2_reqd (fun body_str ->
+            let agent_name =
+              Option.value
+                ~default:"dashboard"
+                (agent_from_request httpun_request)
+            in
+            match !current_sw, !current_clock with
+            | Some sw, Some clock -> (
+                match
+                  trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+                with
+                | Ok json ->
+                    h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                      ~extra_headers:cors
+                | Error (`Bad_request, msg) ->
+                    h2_respond_json h2_reqd
+                      (Yojson.Safe.to_string (trpg_error_json msg))
+                      ~status:`Bad_request ~extra_headers:cors
+                | Error (`Internal_server_error, msg) ->
+                    h2_respond_json h2_reqd
+                      (Yojson.Safe.to_string (trpg_error_json msg))
+                      ~status:`Internal_server_error ~extra_headers:cors)
+            | _ ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string
+                     (trpg_error_json "trpg runtime not initialized"))
                   ~status:`Internal_server_error ~extra_headers:cors
           )
 

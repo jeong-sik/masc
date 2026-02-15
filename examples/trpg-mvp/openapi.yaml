@@ -28,8 +28,8 @@ x-mcp-tools:
   masc_trpg_round_run:
     requestSchema: '#/components/schemas/TrpgRoundRunRequest'
     equivalentHttp:
-      method: MCP_ONLY
-      path: masc_trpg_round_run
+      method: POST
+      path: /api/v1/trpg/rounds/run
 paths:
   /api/v1/trpg/events:
     get:
@@ -167,6 +167,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StreamResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/trpg/rounds/run:
+    post:
+      summary: Run one keeper-driven TRPG round (DM then players)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrpgRoundRunRequest'
+      responses:
+        '200':
+          description: Round executed with status summary and appended events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoundRunResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -416,6 +437,80 @@ components:
           type: number
           default: 30
       required: [room_id, dm_keeper, player_keepers]
+
+    RoundRunParticipantStatus:
+      type: object
+      properties:
+        actor_id:
+          type: string
+        role:
+          type: string
+          enum: [dm, player]
+        keeper:
+          type: string
+        status:
+          type: string
+          enum: [ok, timeout, unavailable, invalid_response]
+        timeout_sec:
+          type: number
+        error:
+          type: string
+        reply:
+          type: string
+      required: [actor_id, role, keeper, status]
+
+    RoundRunSummary:
+      type: object
+      properties:
+        participants:
+          type: integer
+        successes:
+          type: integer
+        timeouts:
+          type: integer
+        unavailable:
+          type: integer
+      required: [participants, successes, timeouts, unavailable]
+
+    RoundRunResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        room_id:
+          type: string
+        phase:
+          type: string
+        turn_before:
+          type: integer
+        turn_after:
+          type: integer
+        timeout_sec:
+          type: number
+        statuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoundRunParticipantStatus'
+        summary:
+          $ref: '#/components/schemas/RoundRunSummary'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventEnvelope'
+        state:
+          $ref: '#/components/schemas/StateObject'
+      required:
+        - ok
+        - room_id
+        - phase
+        - turn_before
+        - turn_after
+        - timeout_sec
+        - statuses
+        - summary
+        - events
+        - state
 
     EventsResponse:
       type: object

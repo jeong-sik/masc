@@ -16,7 +16,7 @@ impl Plugin for SsePlugin {
     fn build(&self, app: &mut App) {
         app
             .add_systems(OnEnter(ViewerMode::Trpg), client::setup_sse)
-            .add_systems(Update, bridge::poll_sse_events.run_if(in_state(ViewerMode::Trpg)));
-        // TODO: OnExit(Trpg) — close EventSource, clean up SseReceiver
+            .add_systems(Update, bridge::poll_sse_events.run_if(in_state(ViewerMode::Trpg)))
+            .add_systems(OnExit(ViewerMode::Trpg), client::teardown_sse);
     }
 }

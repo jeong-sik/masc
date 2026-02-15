@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::game::components::GameCamera;
+use crate::game::components::{GameCamera, MapBackground};
 use crate::game::state::MapState;
 use crate::shaders::PostProcessSettings;
 
@@ -47,10 +47,12 @@ pub fn setup_map_background(mut commands: Commands) {
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, -10.0),
+        MapBackground,
     ));
 }
 
 /// Updates the map label overlay when the area changes.
+#[cfg(target_arch = "wasm32")]
 pub fn update_map_label(map_state: Res<MapState>) {
     if !map_state.is_changed() {
         return;
@@ -71,3 +73,7 @@ pub fn update_map_label(map_state: Res<MapState>) {
 
     label.set_text_content(Some(&area_text));
 }
+
+/// Native no-op for update_map_label.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn update_map_label(_map_state: Res<MapState>) {}

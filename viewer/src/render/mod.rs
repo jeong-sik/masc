@@ -5,8 +5,11 @@ pub mod transition;
 
 use bevy::prelude::*;
 
+use crate::game::components::{
+    FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken,
+};
 use crate::mode::ViewerMode;
-use crate::render::transition::SceneTransition;
+use crate::render::transition::{FadeOverlay, SceneTransition};
 
 /// Plugin for 2D scene rendering: map backgrounds, character tokens, HP bars, effects.
 ///
@@ -35,7 +38,38 @@ impl Plugin for MapRenderPlugin {
                 fx::animate_floating_text,
                 transition::trigger_scene_transition,
                 transition::animate_scene_transition,
-            ).run_if(in_state(ViewerMode::Trpg)));
-        // TODO: OnExit(Trpg) — despawn camera, map entities, character sprites
+            ).run_if(in_state(ViewerMode::Trpg)))
+            // Cleanup: despawn all TRPG scene entities and reset resources
+            .add_systems(OnExit(ViewerMode::Trpg), cleanup_trpg_scene);
     }
+}
+
+/// Despawns all entities owned by the TRPG scene and resets transient resources.
+///
+/// Each entity type is identified by its marker component — this is why every
+/// spawned entity in the TRPG scene must carry at least one marker.
+fn cleanup_trpg_scene(
+    mut commands: Commands,
+    trpg_entities: Query<
+        Entity,
+        Or<(
+            With<GameCamera>,
+            With<MapToken>,
+            With<MapBackground>,
+            With<FadeOverlay>,
+            With<FloatingText>,
+            With<HpBarSprite>,
+        )>,
+    >,
+    mut scene_transition: ResMut<SceneTransition>,
+) {
+    let count = trpg_entities.iter().count();
+    for entity in &trpg_entities {
+        commands.entity(entity).despawn();
+    }
+
+    // Reset the scene transition resource so re-entering Trpg starts clean
+    *scene_transition = SceneTransition::default();
+
+    log::info!("TRPG scene cleanup: despawned {} entities", count);
 }

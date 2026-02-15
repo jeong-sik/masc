@@ -46,3 +46,7 @@ pub struct FloatingText {
 /// Marker for the 2D camera.
 #[derive(Component, Debug)]
 pub struct GameCamera;
+
+/// Marker for the map background sprite (needed for OnExit despawn).
+#[derive(Component, Debug)]
+pub struct MapBackground;

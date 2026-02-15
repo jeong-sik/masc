@@ -90,6 +90,12 @@
  (modules test_common)
  (libraries masc_mcp alcotest))
 
+; TRPG engine state machine tests
+(test
+ (name test_trpg_engine_state_machine)
+ (modules test_trpg_engine_state_machine)
+ (libraries masc_mcp alcotest))
+
 ; Dispatch chain evidence test
 (test
  (name test_dispatch_chain_evidence)

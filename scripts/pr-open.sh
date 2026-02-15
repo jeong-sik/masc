@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/pr-open.sh [options]
+
+Options:
+  -r, --repo <owner/repo>     GitHub repository (default: gh repo view)
+  -b, --base <branch>         Base branch (default: main)
+  -t, --title <title>         PR title (default: gh --fill)
+  -B, --body-file <path>      PR body markdown file
+  -l, --labels <a,b,c>        Extra labels to add
+      --no-watch              Skip `gh pr checks --watch`
+  -h, --help                  Show help
+
+Behavior:
+  1) push current branch
+  2) create draft PR if absent
+  3) auto-label docs/enhancement by changed files
+  4) add extra labels
+  5) optionally watch checks
+USAGE
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "missing command: $1" >&2
+    exit 1
+  }
+}
+
+is_doc_path() {
+  case "$1" in
+    docs/*|examples/trpg-mvp/*|README.md|*.md) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+repo=""
+base="main"
+title=""
+body_file=""
+extra_labels=""
+watch_checks=1
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -r|--repo) repo="$2"; shift 2 ;;
+    -b|--base) base="$2"; shift 2 ;;
+    -t|--title) title="$2"; shift 2 ;;
+    -B|--body-file) body_file="$2"; shift 2 ;;
+    -l|--labels) extra_labels="$2"; shift 2 ;;
+    --no-watch) watch_checks=0; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; usage; exit 1 ;;
+  esac
+done
+
+require_cmd git
+require_cmd gh
+require_cmd jq
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+  echo "refusing to open PR from branch '$branch'" >&2
+  exit 1
+fi
+
+if [[ -z "$repo" ]]; then
+  repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+fi
+
+git push -u origin "$branch"
+
+existing_pr="$(gh pr list --repo "$repo" --head "$branch" --state open --json number --jq '.[0].number // empty')"
+
+if [[ -n "$existing_pr" ]]; then
+  pr_number="$existing_pr"
+else
+  create_args=(pr create --repo "$repo" --draft --base "$base" --head "$branch")
+  if [[ -n "$title" ]]; then
+    create_args+=(--title "$title")
+  else
+    create_args+=(--fill)
+  fi
+  if [[ -n "$body_file" ]]; then
+    create_args+=(--body-file "$body_file")
+  fi
+
+  pr_url="$(gh "${create_args[@]}")"
+  pr_number="$(gh pr view "$pr_url" --repo "$repo" --json number --jq .number)"
+fi
+
+mapfile -t changed_files < <(git diff --name-only "origin/$base...HEAD" 2>/dev/null || true)
+if [[ ${#changed_files[@]} -eq 0 ]]; then
+  mapfile -t changed_files < <(git diff --name-only "HEAD~1..HEAD" || true)
+fi
+
+docs_only=1
+has_docs=0
+for f in "${changed_files[@]}"; do
+  if [[ -z "$f" ]]; then
+    continue
+  fi
+  if is_doc_path "$f"; then
+    has_docs=1
+  else
+    docs_only=0
+  fi
+done
+
+labels=()
+if [[ $has_docs -eq 1 ]]; then
+  labels+=("docs")
+fi
+if [[ $docs_only -eq 0 || ${#changed_files[@]} -eq 0 ]]; then
+  labels+=("enhancement")
+fi
+
+if [[ -n "$extra_labels" ]]; then
+  IFS=',' read -r -a extra <<< "$extra_labels"
+  for lb in "${extra[@]}"; do
+    lb="$(echo "$lb" | xargs)"
+    [[ -n "$lb" ]] && labels+=("$lb")
+  done
+fi
+
+if [[ ${#labels[@]} -gt 0 ]]; then
+  label_json="$(printf '%s\n' "${labels[@]}" | awk 'NF' | sort -u | jq -R . | jq -s '{labels: .}')"
+  gh api "repos/$repo/issues/$pr_number/labels" --method POST --input - <<< "$label_json" >/dev/null
+fi
+
+pr_url="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
+echo "PR: $pr_url"
+
+if [[ $watch_checks -eq 1 ]]; then
+  gh pr checks "$pr_number" --repo "$repo" --watch || true
+fi

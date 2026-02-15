@@ -2450,6 +2450,39 @@ let keeper_auto_rule_eval_to_json (e : keeper_auto_rule_eval) : Yojson.Safe.t =
     ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
   ]
 
+let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson.Safe.t =
+  let actions_rev = [] in
+  let actions_rev =
+    if e.reflect then `String "reflect" :: actions_rev else actions_rev
+  in
+  let actions_rev =
+    if e.plan then `String "plan" :: actions_rev else actions_rev
+  in
+  let actions_rev =
+    if e.compact then `String "compact" :: actions_rev else actions_rev
+  in
+  let actions_rev =
+    if e.handoff then `String "handoff" :: actions_rev else actions_rev
+  in
+  let actions_rev =
+    if e.guardrail_stop then `String "guardrail_stop" :: actions_rev else actions_rev
+  in
+  let has_action = actions_rev <> [] in
+  `Assoc [
+    ("triggered", `Bool has_action);
+    ("actions", `List (List.rev actions_rev));
+    ("guardrail_stop", `Bool e.guardrail_stop);
+    ("guardrail_reason",
+      match e.guardrail_reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("goal_drift", `Float e.goal_drift);
+    ("repetition_risk", `Float e.repetition_risk);
+    ("goal_alignment", `Float e.goal_alignment);
+    ("response_alignment", `Float e.response_alignment);
+    ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
+  ]
+
 let evaluate_keeper_auto_rules
     ~(meta : keeper_meta)
     ~(context_ratio : float)
@@ -4958,8 +4991,9 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                       ("tool_call_count", `Int 0);
                       ("tools_used", `List []);
                       ("snapshot_source", `String "keeper_context_status");
-	                      ("memory_check", memory_check_default_json ());
+                      ("memory_check", memory_check_default_json ());
                       ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                      ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
                       ("auto_reflect", `Bool auto_rules.reflect);
                       ("auto_plan", `Bool auto_rules.plan);
                       ("auto_compact", `Bool auto_rules.compact);
@@ -6629,6 +6663,7 @@ let handle_keeper_msg ctx args : tool_result =
 			                     ("skill_reason", `String effective_skill_route.reason);
 		                     ("memory_check", memory_check_json);
                      ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                     ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
                      ("auto_reflect", `Bool auto_rules.reflect);
                      ("auto_plan", `Bool auto_rules.plan);
                      ("auto_compact", `Bool auto_rules.compact);
@@ -6712,6 +6747,7 @@ let handle_keeper_msg ctx args : tool_result =
 			                  ("skill_reason", `String effective_skill_route.reason);
 			                  ("memory_check", memory_check_json);
                   ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                  ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
                   ("auto_reflect", `Bool auto_rules.reflect);
                   ("auto_plan", `Bool auto_rules.plan);
                   ("auto_compact", `Bool auto_rules.compact);
@@ -6844,6 +6880,7 @@ let handle_keeper_msg ctx args : tool_result =
 			                     ("skill_reason", `String effective_skill_route.reason);
 			                     ("memory_check", memory_check_json);
                      ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                     ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
                      ("auto_reflect", `Bool auto_rules.reflect);
                      ("auto_plan", `Bool auto_rules.plan);
                      ("auto_compact", `Bool auto_rules.compact);
@@ -6926,6 +6963,7 @@ let handle_keeper_msg ctx args : tool_result =
 			                  ("skill_reason", `String effective_skill_route.reason);
 			                  ("memory_check", memory_check_json);
                   ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                  ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
                   ("auto_reflect", `Bool auto_rules.reflect);
                   ("auto_plan", `Bool auto_rules.plan);
                   ("auto_compact", `Bool auto_rules.compact);

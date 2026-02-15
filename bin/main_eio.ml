@@ -1979,6 +1979,7 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
                     match response_alignment_opt with Some v -> `Float v | None -> `Null);
                   ("goal_drift",
                     match goal_drift_opt with Some v -> `Float v | None -> `Null);
+                  ("reflection", j |> member "reflection");
                   ("memory_performed", `Bool memory_performed);
                   ("memory_query_kind", `String memory_query_kind);
                   ("memory_passed", `Bool memory_passed_now);

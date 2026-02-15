@@ -265,6 +265,23 @@ let test_execute_tool_trpg_flow () =
   let count = stream_json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int in
   Alcotest.(check bool) "stream has events" true (count >= 2);
 
+  let (ok_stream_dice, stream_dice_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_trpg_stream"
+      ~arguments:
+        (`Assoc
+          [
+            ("room_id", `String "room-mcp-e2e");
+            ("event_type", `String "dice.rolled");
+          ])
+  in
+  Alcotest.(check bool) "stream event_type filter success" true ok_stream_dice;
+  let stream_dice_json = Yojson.Safe.from_string stream_dice_msg in
+  let dice_count =
+    stream_dice_json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check int) "dice-only event count" 1 dice_count;
+
   let roll_json = Yojson.Safe.from_string roll_msg in
   let passed = roll_json |> Yojson.Safe.Util.member "roll" |> Yojson.Safe.Util.member "passed" |> Yojson.Safe.Util.to_bool in
   Alcotest.(check bool) "roll passed" true passed;
@@ -311,6 +328,22 @@ let test_execute_tool_trpg_validation () =
     "raw_d20 out-of-range message"
     true
     (contains_substring msg_out_of_range "raw_d20 must be between 1 and 20");
+
+  let (ok_bad_event_type, msg_bad_event_type) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_trpg_stream"
+      ~arguments:
+        (`Assoc
+          [
+            ("room_id", `String "room-mcp-e2e");
+            ("event_type", `String "totally.invalid");
+          ])
+  in
+  Alcotest.(check bool) "invalid event_type fails" false ok_bad_event_type;
+  Alcotest.(check bool)
+    "invalid event_type message"
+    true
+    (contains_substring msg_bad_event_type "invalid event_type");
 
   cleanup_dir base_path
 

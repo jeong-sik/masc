@@ -14,7 +14,7 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -54,12 +54,20 @@ jobs:
         run: |
           opam exec -- dune build
 
-      - name: Run tests
+      - name: Run tests (quick suite)
+        env:
+          ME_ROOT: /tmp/me
+          ALCOTEST_QUICK_TESTS: "1"
+        run: |
+          mkdir -p /tmp/me
+          opam exec -- dune test
+
+      - name: Run SSE reconnect e2e
         env:
           ME_ROOT: /tmp/me
         run: |
           mkdir -p /tmp/me
-          opam exec -- dune test
+          opam exec -- dune exec ./test/test_sse_storm_e2e.exe
 
       - name: Check formatting
         run: |

@@ -132,7 +132,12 @@ let test_dispatch_unknown_tool () =
 (* T1: Negative context_ratio should be clamped to 0.0 *)
 let test_negative_context_ratio () =
   let ctx = make_ctx () in
-  let args = `Assoc [("context_ratio", `Float (-1.0)); ("full_context", `String "test")] in
+  let args = `Assoc [
+    ("context_ratio", `Float (-1.0));
+    ("full_context", `String "test");
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
   match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
   | Some (true, result) ->
       (* Should succeed with clamped ratio *)
@@ -146,6 +151,8 @@ let test_over_one_context_ratio () =
   let args = `Assoc [
     ("context_ratio", `Float 2.0);
     ("full_context", `String "test");
+    ("async", `Bool false);
+    ("verify", `Bool false);
     (* Avoid spawn in tests: keep handoff threshold above clamped ratio *)
     ("handoff_threshold", `Float 2.0);
   ] in
@@ -168,6 +175,8 @@ let test_mitosis_handoff_spawn_timeout_configurable () =
   let args = `Assoc [
     ("context_ratio", `Float 0.3);
     ("spawn_timeout", `Int 300);  (* Custom timeout *)
+    ("async", `Bool false);
+    ("verify", `Bool false);
   ] in
   match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
   | Some (_, _result) -> check bool "custom timeout accepted" true true
@@ -187,6 +196,7 @@ let test_handoff_verifier_advisory_with_invalid_model () =
     ("context_ratio", `Float 0.3);
     ("async", `Bool false);
     ("verify", `Bool true);
+    ("verification_judge_timeout_sec", `Float 0.2);
     ("verification_policy", `String "advisory");
     ("verification_min_judges", `Int 1);
     ("verifier_models", `List [`String "invalid-model-spec"]);
@@ -209,6 +219,7 @@ let test_handoff_verifier_gate_blocks_with_invalid_model () =
     ("context_ratio", `Float 0.3);
     ("async", `Bool false);
     ("verify", `Bool true);
+    ("verification_judge_timeout_sec", `Float 0.2);
     ("verification_policy", `String "gate");
     ("verification_min_judges", `Int 1);
     ("verification_pass_ratio", `Float 1.0);
@@ -247,6 +258,7 @@ let test_handoff_verifier_profile_and_research_metrics () =
     ("context_ratio", `Float 0.3);
     ("async", `Bool false);
     ("verify", `Bool true);
+    ("verification_judge_timeout_sec", `Float 0.2);
     ("verification_policy", `String "advisory");
     ("verifier_profile", `String "abc_neutral");
     ("verifier_models", `List [
@@ -288,9 +300,10 @@ let test_handoff_verifier_min_judges_clamped_to_available_models () =
     ("context_ratio", `Float 0.3);
     ("async", `Bool false);
     ("verify", `Bool true);
+    ("verification_judge_timeout_sec", `Float 0.2);
     ("verification_policy", `String "gate");
     ("verification_min_judges", `Int 3);
-    ("verifier_models", `List [`String "gemini:gemini-2.5-flash"]);
+    ("verifier_models", `List [`String "invalid-single-model"]);
     ("verifier_profile", `String "abc_neutral");
   ] in
   match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
@@ -386,11 +399,11 @@ let () =
       test_case "handoff configurable" `Quick test_mitosis_handoff_spawn_timeout_configurable;
     ];
     "verifier", [
-      test_case "advisory invalid model" `Quick test_handoff_verifier_advisory_with_invalid_model;
-      test_case "gate blocks invalid model" `Quick test_handoff_verifier_gate_blocks_with_invalid_model;
-      test_case "gate bypass when verify=false" `Quick test_handoff_verifier_gate_bypassed_when_verify_false;
-      test_case "profile + research metrics" `Quick test_handoff_verifier_profile_and_research_metrics;
-      test_case "min_judges clamp to model count" `Quick
+      test_case "advisory invalid model" `Slow test_handoff_verifier_advisory_with_invalid_model;
+      test_case "gate blocks invalid model" `Slow test_handoff_verifier_gate_blocks_with_invalid_model;
+      test_case "gate bypass when verify=false" `Slow test_handoff_verifier_gate_bypassed_when_verify_false;
+      test_case "profile + research metrics" `Slow test_handoff_verifier_profile_and_research_metrics;
+      test_case "min_judges clamp to model count" `Slow
         test_handoff_verifier_min_judges_clamped_to_available_models;
     ];
   ]

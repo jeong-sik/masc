@@ -6,8 +6,21 @@
 //!
 //! Themes are a Resource (not a State) because switching themes should not
 //! trigger entity despawn/respawn — only visual parameter changes.
+//!
+//! DOM `<select>` elements (`#theme-selector`, `#theme-selector-inline`) write to a
+//! shared `ThemeTransitionBuffer`. A Bevy `Update` system polls the buffer and
+//! updates the `ViewerTheme` resource, which triggers `apply_theme_changes`.
 
 use bevy::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use std::sync::{Arc, Mutex};
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 use crate::shaders::post_process::PostProcessSettings;
 
@@ -57,6 +70,17 @@ impl ViewerTheme {
             Self::Cyberpunk => "cyberpunk",
             Self::Terminal => "terminal",
             Self::Parchment => "parchment",
+        }
+    }
+
+    /// Parse from the `<select>` option `value` attribute.
+    pub fn from_css_value(s: &str) -> Option<ViewerTheme> {
+        match s {
+            "dark-fantasy" => Some(Self::DarkFantasy),
+            "cyberpunk" => Some(Self::Cyberpunk),
+            "terminal" => Some(Self::Terminal),
+            "parchment" => Some(Self::Parchment),
+            _ => None,
         }
     }
 
@@ -117,15 +141,145 @@ impl ViewerTheme {
     }
 }
 
+// ─── Shared Buffer Resource ──────────────────
+
+/// Holds pending theme transitions from JS change events.
+/// The JS closure writes here; a Bevy Update system drains it.
+#[derive(Resource)]
+pub struct ThemeTransitionBuffer {
+    #[cfg(target_arch = "wasm32")]
+    pending: Arc<Mutex<Option<ViewerTheme>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    _phantom: (),
+}
+
+impl Default for ThemeTransitionBuffer {
+    fn default() -> Self {
+        Self {
+            #[cfg(target_arch = "wasm32")]
+            pending: Arc::new(Mutex::new(None)),
+            #[cfg(not(target_arch = "wasm32"))]
+            _phantom: (),
+        }
+    }
+}
+
+// ─── Plugin ──────────────────────────────────
+
 /// Plugin that manages the viewer theme lifecycle.
 pub struct ThemePlugin;
 
 impl Plugin for ThemePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewerTheme>()
-            .add_systems(Update, apply_theme_changes);
+            .init_resource::<ThemeTransitionBuffer>()
+            .add_systems(Startup, bind_theme_selectors)
+            .add_systems(Update, (poll_theme_transition, apply_theme_changes));
     }
 }
+
+// ─── Theme Selector Binding ─────────────────
+
+/// Startup system: binds change listeners to both theme `<select>` elements.
+fn bind_theme_selectors(buffer: Res<ThemeTransitionBuffer>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        // Bind both theme selectors (lobby + inline dashboard)
+        for selector_id in &["theme-selector", "theme-selector-inline"] {
+            bind_single_theme_selector(&doc, selector_id, &buffer.pending);
+        }
+    }
+
+    let _ = &buffer;
+}
+
+/// Binds a `change` event listener to a single `<select>` element by ID.
+#[cfg(target_arch = "wasm32")]
+fn bind_single_theme_selector(
+    doc: &web_sys::Document,
+    id: &str,
+    pending: &Arc<Mutex<Option<ViewerTheme>>>,
+) {
+    let Some(el) = doc.get_element_by_id(id) else {
+        return;
+    };
+    let Some(select) = el.dyn_ref::<web_sys::HtmlSelectElement>() else {
+        return;
+    };
+
+    let buf = pending.clone();
+    let cb = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        let Some(target) = e.target() else { return };
+        let Some(select_el) = target.dyn_ref::<web_sys::HtmlSelectElement>() else {
+            return;
+        };
+        let value = select_el.value();
+        if let Some(theme) = ViewerTheme::from_css_value(&value) {
+            if let Ok(mut guard) = buf.lock() {
+                *guard = Some(theme);
+            }
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+
+    let _ = select
+        .dyn_ref::<web_sys::EventTarget>()
+        .map(|target| {
+            target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
+        });
+
+    cb.forget(); // Lives for app lifetime
+}
+
+// ─── Theme Transition Polling ───────────────
+
+/// Polls the shared buffer each frame. When a theme selector changes,
+/// updates the `ViewerTheme` resource (which triggers `apply_theme_changes`).
+fn poll_theme_transition(
+    buffer: Res<ThemeTransitionBuffer>,
+    mut theme: ResMut<ViewerTheme>,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let requested = {
+            let Ok(mut buf) = buffer.pending.lock() else {
+                return;
+            };
+            buf.take()
+        };
+
+        if let Some(new_theme) = requested {
+            if *theme != new_theme {
+                log::info!("Theme transition: {:?} → {:?}", *theme, new_theme);
+                *theme = new_theme;
+
+                // Sync both selectors to the new value
+                if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                    sync_theme_selectors(&doc, new_theme.css_value());
+                }
+            }
+        }
+    }
+
+    let _ = (&buffer, &mut theme);
+}
+
+/// Keeps both `<select>` elements in sync when theme changes.
+#[cfg(target_arch = "wasm32")]
+fn sync_theme_selectors(doc: &web_sys::Document, css_value: &str) {
+    for id in &["theme-selector", "theme-selector-inline"] {
+        if let Some(el) = doc.get_element_by_id(id) {
+            if let Some(select) = el.dyn_ref::<web_sys::HtmlSelectElement>() {
+                select.set_value(css_value);
+            }
+        }
+    }
+}
+
+// ─── Theme Application ──────────────────────
 
 /// Reacts to theme changes by updating shader settings, clear color, and DOM attributes.
 fn apply_theme_changes(

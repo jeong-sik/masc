@@ -303,7 +303,8 @@ let test_handoff_verifier_min_judges_clamped_to_available_models () =
     ("verification_judge_timeout_sec", `Float 0.2);
     ("verification_policy", `String "gate");
     ("verification_min_judges", `Int 3);
-    ("verifier_models", `List [`String "invalid-single-model"]);
+    (* Keep CI deterministic: avoid live network-backed model calls in coverage tests. *)
+    ("verifier_models", `List [`String "invalid-model-spec"]);
     ("verifier_profile", `String "abc_neutral");
   ] in
   match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with

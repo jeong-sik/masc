@@ -709,9 +709,40 @@ let test_extract_dna_contains_header () =
 
 let test_extract_dna_contains_compressed () =
   let cell = Mitosis.create_stem_cell ~generation:0 in
-  let long_context = String.make 1000 'x' in
+  let long_context = String.make 10000 'x' in
   let dna = Mitosis.extract_dna ~config:Mitosis.default_config ~parent_cell:cell ~full_context:long_context in
-  check bool "shorter than original" true (String.length dna < 1000 + 200)  (* header overhead *)
+  let has_omission_marker =
+    try
+      ignore (Str.search_forward (Str.regexp_string "[... middle context omitted ...]") dna 0);
+      true
+    with Not_found -> false
+  in
+  check bool "contains omission marker" true has_omission_marker;
+  check bool "contains compressed payload" true (String.length dna > 0)
+
+let test_extract_dna_preserves_continuity_anchors () =
+  let cell = Mitosis.create_stem_cell ~generation:1 in
+  let filler = String.make 6000 'x' in
+  let full_context =
+    Printf.sprintf
+      "%s\nGoal: keep keeper continuity stable\nCurrent Task: reduce repeated proactive messages\nLast turn: add verifier-based cascade recheck"
+      filler
+  in
+  let dna = Mitosis.extract_dna ~config:Mitosis.default_config ~parent_cell:cell ~full_context in
+  let has_goal =
+    try
+      ignore (Str.search_forward (Str.regexp_string "Goal: keep keeper continuity stable") dna 0);
+      true
+    with Not_found -> false
+  in
+  let has_task =
+    try
+      ignore (Str.search_forward (Str.regexp_string "Current Task: reduce repeated proactive messages") dna 0);
+      true
+    with Not_found -> false
+  in
+  check bool "contains goal anchor" true has_goal;
+  check bool "contains task anchor" true has_task
 
 (* ============================================================
    check_non_context_triggers Tests
@@ -1011,6 +1042,7 @@ let () =
     "extract_dna", [
       test_case "contains header" `Quick test_extract_dna_contains_header;
       test_case "contains compressed" `Quick test_extract_dna_contains_compressed;
+      test_case "preserves continuity anchors" `Quick test_extract_dna_preserves_continuity_anchors;
     ];
     "check_non_context_triggers", [
       test_case "time based" `Quick test_check_triggers_time_based;

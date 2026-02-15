@@ -343,15 +343,98 @@ let truncate_to_handoff_budget context =
       handoff_token_budget
       truncated
 
+let starts_with_ci ~prefix s =
+  let p = String.lowercase_ascii prefix in
+  let t = String.lowercase_ascii (String.trim s) in
+  let lp = String.length p in
+  String.length t >= lp && String.sub t 0 lp = p
+
+let first_line_with_prefixes ~prefixes lines =
+  let rec loop = function
+    | [] -> None
+    | line :: rest ->
+        let trimmed = String.trim line in
+        if trimmed = "" then
+          loop rest
+        else if List.exists (fun p -> starts_with_ci ~prefix:p trimmed) prefixes then
+          Some trimmed
+        else
+          loop rest
+  in
+  loop lines
+
+let take_last_non_empty_lines ~count text =
+  let non_empty =
+    String.split_on_char '\n' text
+    |> List.fold_left (fun acc line ->
+      let trimmed = String.trim line in
+      if trimmed = "" then acc else trimmed :: acc
+    ) []
+    |> List.rev
+  in
+  let len = List.length non_empty in
+  let drop_n = max 0 (len - count) in
+  let rec drop n xs =
+    if n <= 0 then xs
+    else
+      match xs with
+      | [] -> []
+      | _ :: rest -> drop (n - 1) rest
+  in
+  drop drop_n non_empty
+
+let build_continuity_anchors full_context =
+  let lines = String.split_on_char '\n' full_context in
+  let goal_line =
+    first_line_with_prefixes
+      ~prefixes:["goal:"; "goal -"; "objective:"; "north star:"]
+      lines
+  in
+  let task_line =
+    first_line_with_prefixes
+      ~prefixes:["current task:"; "current_task:"; "task:"; "now:"]
+      lines
+  in
+  let recent_lines = take_last_non_empty_lines ~count:3 full_context in
+  let anchor_lines =
+    []
+    |> fun acc ->
+    (match goal_line with Some line -> acc @ [line] | None -> acc)
+    |> fun acc ->
+    (match task_line with Some line -> acc @ [line] | None -> acc)
+    |> fun acc ->
+    if recent_lines = [] then acc
+    else acc @ ("Recent turns:" :: List.map (fun line -> "- " ^ line) recent_lines)
+  in
+  match anchor_lines with
+  | [] -> ""
+  | _ ->
+      String.concat "\n" (
+        ["=== CONTINUITY ANCHORS ==="] @ anchor_lines @ ["=== END CONTINUITY ANCHORS ==="; ""]
+      )
+
 (** Compress context into DNA for transfer *)
 let compress_to_dna ~ratio ~context =
   (* Clamp ratio to valid range [0.0, 1.0] *)
   let ratio = Float.max 0.0 (Float.min 1.0 ratio) in
-  (* Simple compression: take first N% of context *)
+  (* Continuity-aware compression: keep both head and tail *)
   let len = String.length context in
   let target_len = int_of_float (float_of_int len *. ratio) in
-  if target_len >= len then context
-  else safe_sub context 0 target_len
+  if target_len <= 0 then
+    ""
+  else if target_len >= len then
+    context
+  else if target_len < 200 then
+    safe_sub context 0 target_len
+  else
+    let head_len = max 1 (int_of_float (float_of_int target_len *. 0.6)) in
+    let tail_len = max 1 (target_len - head_len) in
+    if head_len + tail_len >= len then
+      context
+    else
+      let head = safe_sub context 0 head_len in
+      let tail = safe_sub context (len - tail_len) tail_len in
+      String.concat "\n\n" [head; "[... middle context omitted ...]"; tail]
 
 (** Generate mentor wisdom for successor - Agent Being Protocol
     Analyzes parent's experience and generates advice for the child.
@@ -409,6 +492,7 @@ let generate_mentor_wisdom ~parent_cell =
 
 (** Extract DNA from dying cell for child *)
 let extract_dna ~config ~parent_cell ~full_context =
+  let continuity_anchors = build_continuity_anchors full_context in
   let compressed = compress_to_dna ~ratio:config.dna_compression_ratio ~context:full_context in
 
   (* Agent Being Protocol: Include mentor wisdom in DNA *)
@@ -423,7 +507,7 @@ let extract_dna ~config ~parent_cell ~full_context =
     parent_cell.born_at
     mentor_wisdom
   in
-  header ^ compressed
+  header ^ continuity_anchors ^ compressed
 
 let bounded_handoff_dna ~config ~parent_cell ~full_context =
   truncate_to_handoff_budget (extract_dna ~config ~parent_cell ~full_context)

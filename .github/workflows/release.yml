@@ -4,9 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -19,6 +24,7 @@ jobs:
             arch: linux-x64
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +41,9 @@ jobs:
           opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
           opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
           opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
+          opam pin add neo4j_packstream https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
+          opam pin add neo4j_bolt https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
+          opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 
       - name: Install libpq (macOS)
         if: runner.os == 'macOS'
@@ -45,7 +54,15 @@ jobs:
 
       - name: Install dependencies
         run: |
-          opam install . --deps-only -y
+          for attempt in 1 2 3; do
+            opam install . --deps-only -y && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
 
       - name: Build
         run: opam exec -- dune build --release bin/main_eio.exe
@@ -65,6 +82,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 15
 
     steps:
       - name: Download all artifacts

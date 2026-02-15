@@ -201,6 +201,20 @@ let test_to_prometheus_text_has_uptime () =
       let _ = Str.search_forward (Str.regexp "masc_uptime_seconds") text 0 in true
     with Not_found -> false)
 
+let test_to_prometheus_text_has_sse_metrics () =
+  let text = Prometheus.to_prometheus_text () in
+  let has metric =
+    try
+      let _ = Str.search_forward (Str.regexp metric) text 0 in
+      true
+    with Not_found -> false
+  in
+  check bool "has sse active gauge" true (has "masc_sse_connections_active");
+  check bool "has sse reconnect counter" true (has "masc_sse_reconnects_total");
+  check bool "has sse idle eviction counter" true (has "masc_sse_idle_evictions_total");
+  check bool "has sse write failure counter" true (has "masc_sse_write_failures_total");
+  check bool "has sse reject counter" true (has "masc_sse_rejects_total")
+
 (* ============================================================
    Convenience Functions Tests
    ============================================================ *)
@@ -349,6 +363,7 @@ let () =
       test_case "has HELP" `Quick test_to_prometheus_text_has_help;
       test_case "has TYPE" `Quick test_to_prometheus_text_has_type;
       test_case "has uptime" `Quick test_to_prometheus_text_has_uptime;
+      test_case "has sse metrics" `Quick test_to_prometheus_text_has_sse_metrics;
     ];
     "convenience", [
       test_case "record_request" `Quick test_record_request;

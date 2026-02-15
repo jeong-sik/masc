@@ -6,10 +6,15 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -35,7 +40,15 @@ jobs:
 
       - name: Install dependencies
         run: |
-          opam install . --deps-only --with-test --yes
+          for attempt in 1 2 3; do
+            opam install . --deps-only --with-test --yes && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
 
       - name: Build
         run: |
@@ -56,6 +69,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -79,7 +93,15 @@ jobs:
 
       - name: Install dependencies
         run: |
-          opam install . --deps-only --yes
+          for attempt in 1 2 3; do
+            opam install . --deps-only --yes && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
 
       - name: Build with warnings as errors
         run: |
@@ -91,6 +113,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -114,8 +137,24 @@ jobs:
 
       - name: Install dependencies
         run: |
-          opam install . --deps-only --with-doc --yes
-          opam install odoc --yes
+          for attempt in 1 2 3; do
+            opam install . --deps-only --with-doc --yes && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install --with-doc failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install --with-doc failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
+          for attempt in 1 2 3; do
+            opam install odoc --yes && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install odoc failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install odoc failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
 
       - name: Build documentation
         run: |

@@ -1,0 +1,48 @@
+pub mod components;
+pub mod events;
+pub mod http;
+pub mod state;
+pub mod systems;
+
+use bevy::prelude::*;
+use events::*;
+use state::*;
+
+use crate::mode::ViewerMode;
+
+/// Plugin that registers game state resources, events, and systems.
+///
+/// Resources and events are registered unconditionally (type registrations, zero cost).
+/// All runtime systems are gated on `ViewerMode::Trpg`.
+pub struct GameStatePlugin;
+
+impl Plugin for GameStatePlugin {
+    fn build(&self, app: &mut App) {
+        app
+            // Resources (always registered — inert when not in TRPG mode)
+            .init_resource::<RoomState>()
+            .init_resource::<MapState>()
+            .init_resource::<ConnectionStatus>()
+            // Events (type registrations — always available)
+            .add_message::<DiceRolled>()
+            .add_message::<HpChanged>()
+            .add_message::<NarrativeReceived>()
+            .add_message::<AreaMoved>()
+            .add_message::<TurnAdvanced>()
+            .add_message::<ChoiceAvailable>()
+            .add_message::<ChoiceResolved>()
+            .add_message::<ItemAcquired>()
+            .add_message::<CharacterDied>()
+            .add_message::<CombatStarted>()
+            // ── TRPG-gated systems ──
+            .add_systems(OnEnter(ViewerMode::Trpg), http::fetch_initial_state)
+            .add_systems(Update, (
+                http::apply_initial_state,
+                systems::apply_hp_change,
+                systems::apply_area_move,
+                systems::apply_turn_advance,
+                systems::apply_item_acquired,
+                systems::apply_character_death,
+            ).run_if(in_state(ViewerMode::Trpg)));
+    }
+}

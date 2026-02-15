@@ -4,16 +4,26 @@
     - masc_trpg_dice_roll
     - masc_trpg_turn_advance
     - masc_trpg_stream
+    - masc_trpg_round_run
 *)
 
 open Yojson.Safe.Util
 
 type result = bool * string
 
+type keeper_call_result = [ `Ok of Yojson.Safe.t | `Timeout | `Error of string ]
+
 type context = {
   config : Room.config;
   agent_name : string;
+  keeper_call :
+    (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
+    option;
 }
+
+type trpg_role = [ `Dm | `Player ]
+
+let role_to_string = function `Dm -> "dm" | `Player -> "player"
 
 let schemas : Types.tool_schema list =
   [
@@ -87,6 +97,37 @@ let schemas : Types.tool_schema list =
             ("required", `List [ `String "room_id" ]);
           ];
     };
+    {
+      name = "masc_trpg_round_run";
+      description =
+        "Run one TRPG round by messaging DM keeper then player keepers. \
+         Records strict timeout/unavailable events. \
+         Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 30).";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("dm_keeper", `Assoc [ ("type", `String "string") ]);
+                  ( "player_keepers",
+                    `Assoc
+                      [
+                        ("type", `String "object");
+                        ("additionalProperties", `Assoc [ ("type", `String "string") ]);
+                      ] );
+                  ("phase", `Assoc [ ("type", `String "string") ]);
+                  ("rule_module", `Assoc [ ("type", `String "string") ]);
+                  ("timeout_sec", `Assoc [ ("type", `String "number") ]);
+                ] );
+            ( "required",
+              `List
+                [ `String "room_id"; `String "dm_keeper"; `String "player_keepers" ] );
+          ];
+    };
   ]
 
 let ok_json json = (true, Yojson.Safe.to_string json)
@@ -125,6 +166,22 @@ let get_optional_int args key =
       with _ -> Error (Printf.sprintf "%s must be int" key))
   | `Null -> Ok None
   | _ -> Error (Printf.sprintf "%s must be int" key)
+
+let get_optional_float args key ~default =
+  match args |> member key with
+  | `Float f -> Ok f
+  | `Int i -> Ok (float_of_int i)
+  | `Intlit s -> (
+      try Ok (float_of_string s)
+      with _ -> Error (Printf.sprintf "%s must be number" key))
+  | `Null -> Ok default
+  | _ -> Error (Printf.sprintf "%s must be number" key)
+
+let get_required_assoc args key =
+  match args |> member key with
+  | `Assoc fields -> Ok fields
+  | `Null -> Error (Printf.sprintf "%s is required" key)
+  | _ -> Error (Printf.sprintf "%s must be object" key)
 
 let validate_rule_module = function
   | "" | "dnd5e-lite" -> Ok ()
@@ -205,6 +262,175 @@ let read_state_turn derived =
   match state_of_derived derived |> member "turn" with
   | `Int i -> Ok i
   | _ -> Error "state.turn must be int"
+
+let parse_player_keepers args =
+  let ( let* ) = Result.bind in
+  let* fields = get_required_assoc args "player_keepers" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (actor_id, `String keeper_name) :: tl ->
+        let actor_id = String.trim actor_id in
+        let keeper_name = String.trim keeper_name in
+        if actor_id = "" then Error "player_keepers contains empty actor_id"
+        else if keeper_name = "" then
+          Error (Printf.sprintf "player_keepers.%s cannot be empty" actor_id)
+        else loop ((actor_id, keeper_name) :: acc) tl
+    | (actor_id, _) :: _ ->
+        Error (Printf.sprintf "player_keepers.%s must be string" actor_id)
+  in
+  loop [] fields
+
+let parse_keeper_reply keeper_json =
+  match keeper_json |> member "reply" with
+  | `String s ->
+      let s = String.trim s in
+      if s = "" then Error "keeper response reply is empty" else Ok s
+  | _ -> Error "keeper response missing string field: reply"
+
+let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json =
+  let role_s = role_to_string role in
+  Printf.sprintf
+    "TRPG execution request.\n\
+     room_id=%s\n\
+     phase=%s\n\
+     turn=%d\n\
+     role=%s\n\
+     actor_id=%s\n\
+     \n\
+     visible_state_json:\n\
+     %s\n\
+     \n\
+     Return your response as normal text. \
+     If you can provide structured_action, include it in your reply JSON field."
+    room_id
+    phase
+    turn
+    role_s
+    actor_id
+    (Yojson.Safe.pretty_to_string state_json)
+
+let call_keeper ctx ~name ~message ~timeout_sec =
+  match ctx.keeper_call with
+  | None -> `Error "keeper_call is not available in this runtime"
+  | Some f -> f ~name ~message ~timeout_sec
+
+let append_timeout_and_unavailable_events
+    ~base_dir
+    ~room_id
+    ~phase
+    ~turn
+    ~role
+    ~actor_id
+    ~keeper_name
+    ~timeout_sec
+    =
+  let ( let* ) = Result.bind in
+  let timeout_payload =
+    `Assoc
+      [
+        ("phase", `String phase);
+        ("turn", `Int turn);
+        ("role", `String (role_to_string role));
+        ("actor_id", `String actor_id);
+        ("keeper", `String keeper_name);
+        ("timeout_sec", `Float timeout_sec);
+        ("stage", `String "masc_keeper_msg");
+      ]
+  in
+  let* timeout_event =
+    append_event
+      ~base_dir
+      ~room_id
+      ~event_type:Trpg_engine_event.Turn_timeout
+      ~actor_id
+      ~payload:timeout_payload
+      ()
+  in
+  let unavailable_payload =
+    `Assoc
+      [
+        ("phase", `String phase);
+        ("turn", `Int turn);
+        ("role", `String (role_to_string role));
+        ("actor_id", `String actor_id);
+        ("keeper", `String keeper_name);
+        ("reason", `String "timeout");
+      ]
+  in
+  let* unavailable_event =
+    append_event
+      ~base_dir
+      ~room_id
+      ~event_type:Trpg_engine_event.Keeper_unavailable
+      ~actor_id
+      ~payload:unavailable_payload
+      ()
+  in
+  Ok [ timeout_event; unavailable_event ]
+
+let append_unavailable_event
+    ~base_dir ~room_id ~phase ~turn ~role ~actor_id ~keeper_name ~reason () =
+  let payload =
+    `Assoc
+      [
+        ("phase", `String phase);
+        ("turn", `Int turn);
+        ("role", `String (role_to_string role));
+        ("actor_id", `String actor_id);
+        ("keeper", `String keeper_name);
+        ("reason", `String reason);
+      ]
+  in
+  append_event
+    ~base_dir
+    ~room_id
+    ~event_type:Trpg_engine_event.Keeper_unavailable
+    ~actor_id
+    ~payload
+    ()
+
+let append_keeper_reply_event
+    ~base_dir
+    ~room_id
+    ~phase
+    ~turn
+    ~role
+    ~actor_id
+    ~keeper_name
+    ~reply
+    =
+  let (event_type, payload) =
+    match role with
+    | `Dm ->
+        ( Trpg_engine_event.Narration_posted,
+          `Assoc
+            [
+              ("phase", `String phase);
+              ("turn", `Int turn);
+              ("role", `String "dm");
+              ("actor_id", `String actor_id);
+              ("keeper", `String keeper_name);
+              ("reply", `String reply);
+            ] )
+    | `Player ->
+        ( Trpg_engine_event.Turn_action_proposed,
+          `Assoc
+            [
+              ("phase", `String phase);
+              ("turn", `Int turn);
+              ("role", `String "player");
+              ("actor_id", `String actor_id);
+              ("keeper", `String keeper_name);
+              ("proposed_action", `String reply);
+            ] )
+  in
+  append_event
+    ~base_dir
+    ~room_id
+    ~event_type
+    ~actor_id
+    ~payload
+    ()
 
 let handle_dice_roll ctx args : result =
   let ( let* ) = Result.bind in
@@ -375,9 +601,218 @@ let handle_stream ctx args : result =
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
+let handle_round_run ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* dm_keeper = get_required_string args "dm_keeper" in
+    let* player_keepers = parse_player_keepers args in
+    let* timeout_sec = get_optional_float args "timeout_sec" ~default:30.0 in
+    if timeout_sec <= 0.0 then Error "timeout_sec must be > 0"
+    else
+      let* rule_opt = get_optional_string args "rule_module" in
+      let* phase_opt = get_optional_string args "phase" in
+      let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+      let phase = Option.value ~default:"round" phase_opt in
+      let* () =
+        match ctx.keeper_call with
+        | Some _ -> Ok ()
+        | None -> Error "keeper_call is not available in this runtime"
+      in
+      let* () = validate_rule_module rule_module in
+      let* () =
+        match Trpg_engine_types.phase_of_string phase with
+        | Ok _ -> Ok ()
+        | Error e -> Error e
+      in
+      let* derived = derive_state ~base_dir ~room_id ~rule_module in
+      let state = state_of_derived derived in
+      let* turn_before = read_state_turn derived in
+      let next_turn = max 1 (turn_before + 1) in
+
+      let* phase_event =
+        append_event
+          ~base_dir
+          ~room_id
+          ~event_type:Trpg_engine_event.Phase_changed
+          ~payload:(`Assoc [ ("phase", `String phase) ])
+          ()
+      in
+
+      let appended_events = ref [ phase_event ] in
+      let statuses = ref [] in
+      let success_count = ref 0 in
+      let unavailable_count = ref 0 in
+      let timeout_count = ref 0 in
+
+      let process_one ~role ~actor_id ~keeper_name =
+        let prompt =
+          build_keeper_prompt
+            ~room_id
+            ~phase
+            ~turn:turn_before
+            ~role
+            ~actor_id
+            ~state_json:state
+        in
+        match call_keeper ctx ~name:keeper_name ~message:prompt ~timeout_sec with
+        | `Timeout ->
+            let* timeout_events =
+              append_timeout_and_unavailable_events
+                ~base_dir
+                ~room_id
+                ~phase
+                ~turn:turn_before
+                ~role
+                ~actor_id
+                ~keeper_name
+                ~timeout_sec
+            in
+            timeout_count := !timeout_count + 1;
+            unavailable_count := !unavailable_count + 1;
+            appended_events := !appended_events @ timeout_events;
+            statuses :=
+              `Assoc
+                [
+                  ("actor_id", `String actor_id);
+                  ("role", `String (role_to_string role));
+                  ("keeper", `String keeper_name);
+                  ("status", `String "timeout");
+                  ("timeout_sec", `Float timeout_sec);
+                ]
+              :: !statuses;
+            Ok ()
+        | `Error keeper_error ->
+            let* unavailable_event =
+              append_unavailable_event
+                ~base_dir
+                ~room_id
+                ~phase
+                ~turn:turn_before
+                ~role
+                ~actor_id
+                ~keeper_name
+                ~reason:keeper_error
+                ()
+            in
+            unavailable_count := !unavailable_count + 1;
+            appended_events := !appended_events @ [ unavailable_event ];
+            statuses :=
+              `Assoc
+                [
+                  ("actor_id", `String actor_id);
+                  ("role", `String (role_to_string role));
+                  ("keeper", `String keeper_name);
+                  ("status", `String "unavailable");
+                  ("error", `String keeper_error);
+                ]
+              :: !statuses;
+            Ok ()
+        | `Ok keeper_json -> (
+            match parse_keeper_reply keeper_json with
+            | Error parse_error ->
+                let* unavailable_event =
+                  append_unavailable_event
+                    ~base_dir
+                    ~room_id
+                    ~phase
+                    ~turn:turn_before
+                    ~role
+                    ~actor_id
+                    ~keeper_name
+                    ~reason:parse_error
+                    ()
+                in
+                unavailable_count := !unavailable_count + 1;
+                appended_events := !appended_events @ [ unavailable_event ];
+                statuses :=
+                  `Assoc
+                    [
+                      ("actor_id", `String actor_id);
+                      ("role", `String (role_to_string role));
+                      ("keeper", `String keeper_name);
+                      ("status", `String "invalid_response");
+                      ("error", `String parse_error);
+                    ]
+                  :: !statuses;
+                Ok ()
+            | Ok reply ->
+                let* reply_event =
+                  append_keeper_reply_event
+                    ~base_dir
+                    ~room_id
+                    ~phase
+                    ~turn:turn_before
+                    ~role
+                    ~actor_id
+                    ~keeper_name
+                    ~reply
+                in
+                success_count := !success_count + 1;
+                appended_events := !appended_events @ [ reply_event ];
+                statuses :=
+                  `Assoc
+                    [
+                      ("actor_id", `String actor_id);
+                      ("role", `String (role_to_string role));
+                      ("keeper", `String keeper_name);
+                      ("status", `String "ok");
+                      ("reply", `String reply);
+                    ]
+                  :: !statuses;
+                Ok () )
+      in
+
+      let* () = process_one ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper in
+      let* () =
+        List.fold_left
+          (fun acc (actor_id, keeper_name) ->
+            let* () = acc in
+            process_one ~role:`Player ~actor_id ~keeper_name)
+          (Ok ())
+          player_keepers
+      in
+      let* turn_event =
+        append_event
+          ~base_dir
+          ~room_id
+          ~event_type:Trpg_engine_event.Turn_started
+          ~payload:(`Assoc [ ("turn", `Int next_turn) ])
+          ()
+      in
+      appended_events := !appended_events @ [ turn_event ];
+      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      let statuses = List.rev !statuses in
+      let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("phase", `String phase);
+            ("turn_before", `Int turn_before);
+            ("turn_after", `Int next_turn);
+            ("timeout_sec", `Float timeout_sec);
+            ("statuses", `List statuses);
+            ( "summary",
+              `Assoc
+                [
+                  ("participants", `Int (1 + List.length player_keepers));
+                  ("successes", `Int !success_count);
+                  ("timeouts", `Int !timeout_count);
+                  ("unavailable", `Int !unavailable_count);
+                ] );
+            ("events", `List events_json);
+            ("state", state_of_derived next_derived);
+          ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_trpg_dice_roll" -> Some (handle_dice_roll ctx args)
   | "masc_trpg_turn_advance" -> Some (handle_turn_advance ctx args)
   | "masc_trpg_stream" -> Some (handle_stream ctx args)
+  | "masc_trpg_round_run" -> Some (handle_round_run ctx args)
   | _ -> None

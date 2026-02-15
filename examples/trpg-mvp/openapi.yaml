@@ -5,7 +5,8 @@ info:
   description: |
     Runtime contract for TRPG endpoints implemented in `bin/main_eio.ml`.
     Request schemas are aligned with MCP TRPG tool inputs in `lib/tool_trpg.ml`
-    (`masc_trpg_dice_roll`, `masc_trpg_turn_advance`, `masc_trpg_stream`).
+    (`masc_trpg_dice_roll`, `masc_trpg_turn_advance`, `masc_trpg_stream`,
+    `masc_trpg_round_run`).
 servers:
   - url: http://127.0.0.1:8935
 x-mcp-tools:
@@ -24,6 +25,11 @@ x-mcp-tools:
     equivalentHttp:
       method: GET
       path: /api/v1/trpg/stream
+  masc_trpg_round_run:
+    requestSchema: '#/components/schemas/TrpgRoundRunRequest'
+    equivalentHttp:
+      method: MCP_ONLY
+      path: masc_trpg_round_run
 paths:
   /api/v1/trpg/events:
     get:
@@ -389,6 +395,27 @@ components:
         event_type:
           $ref: '#/components/schemas/EventTypeString'
       required: [room_id]
+
+    TrpgRoundRunRequest:
+      type: object
+      properties:
+        room_id:
+          type: string
+        dm_keeper:
+          type: string
+        player_keepers:
+          type: object
+          additionalProperties:
+            type: string
+        phase:
+          type: string
+          default: round
+        rule_module:
+          $ref: '#/components/schemas/RuleModule'
+        timeout_sec:
+          type: number
+          default: 30
+      required: [room_id, dm_keeper, player_keepers]
 
     EventsResponse:
       type: object

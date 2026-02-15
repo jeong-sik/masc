@@ -36,3 +36,4 @@ Each scenario file follows this shape:
   - `masc_trpg_dice_roll` <-> `POST /api/v1/trpg/dice/roll`
   - `masc_trpg_turn_advance` <-> `POST /api/v1/trpg/turns/advance`
   - `masc_trpg_stream` <-> `GET /api/v1/trpg/stream`
+  - `masc_trpg_round_run` <-> MCP-only orchestration call (no direct HTTP endpoint yet)

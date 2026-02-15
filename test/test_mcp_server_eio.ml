@@ -210,7 +210,11 @@ let test_handle_request_tools_list () =
                  Alcotest.(check bool)
                    "contains masc_trpg_stream"
                    true
-                   (List.mem "masc_trpg_stream" names)
+                   (List.mem "masc_trpg_stream" names);
+                 Alcotest.(check bool)
+                   "contains masc_trpg_round_run"
+                   true
+                   (List.mem "masc_trpg_round_run" names)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");

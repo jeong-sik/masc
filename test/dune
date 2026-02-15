@@ -111,6 +111,11 @@
  (modules test_trpg_engine_store_sqlite)
  (libraries masc_mcp alcotest unix))
 
+(test
+ (name test_tool_trpg_coverage)
+ (modules test_tool_trpg_coverage)
+ (libraries masc_mcp alcotest yojson unix))
+
 ; Dispatch chain evidence test
 (test
  (name test_dispatch_chain_evidence)

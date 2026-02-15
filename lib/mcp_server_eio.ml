@@ -1144,7 +1144,30 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             loop_state.Perpetual_loop.trace_id (Printexc.to_string exn)));
   } in
   let simple_ctx_keeper : _ Tool_keeper.context = { config; sw; clock } in
-  let simple_ctx_trpg : Tool_trpg.context = { config; agent_name } in
+  let trpg_keeper_call ~name:keeper_name ~message ~timeout_sec :
+      Tool_trpg.keeper_call_result =
+    let keeper_args =
+      `Assoc [ ("name", `String keeper_name); ("message", `String message) ]
+    in
+    try
+      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+          match
+            Tool_keeper.dispatch simple_ctx_keeper ~name:"masc_keeper_msg"
+              ~args:keeper_args
+          with
+          | None -> `Error "masc_keeper_msg dispatch unavailable"
+          | Some (true, body) -> (
+              try `Ok (Yojson.Safe.from_string body)
+              with Yojson.Json_error e ->
+                `Error (Printf.sprintf "keeper returned invalid json: %s" e))
+          | Some (false, msg) -> `Error msg)
+    with
+    | Eio.Time.Timeout -> `Timeout
+    | exn -> `Error (Printexc.to_string exn)
+  in
+  let simple_ctx_trpg : Tool_trpg.context =
+    { config; agent_name; keeper_call = Some trpg_keeper_call }
+  in
 
   (* Chain through all extracted tool modules *)
   match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with

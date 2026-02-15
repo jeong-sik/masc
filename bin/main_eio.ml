@@ -1523,6 +1523,19 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
             let heartbeat_points = ref 0 in
             let proactive_points = ref 0 in
             let drift_applied_count = ref 0 in
+            let auto_reflect_count = ref 0 in
+            let auto_plan_count = ref 0 in
+            let auto_compact_count = ref 0 in
+            let auto_handoff_count = ref 0 in
+            let guardrail_stop_count = ref 0 in
+            let repetition_risk_sum = ref 0.0 in
+            let repetition_risk_points = ref 0 in
+            let goal_alignment_sum = ref 0.0 in
+            let goal_alignment_points = ref 0 in
+            let response_alignment_sum = ref 0.0 in
+            let response_alignment_points = ref 0 in
+            let goal_drift_sum = ref 0.0 in
+            let goal_drift_points = ref 0 in
             let memory_checks = ref 0 in
             let memory_passed = ref 0 in
             let memory_corrections = ref 0 in
@@ -1650,6 +1663,41 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
                      | Some s when s <> "" -> Some s
                      | _ -> None
                 in
+                let auto_rules_obj = j |> member "auto_rules" in
+                let auto_reflect_now =
+                  Safe_ops.json_bool
+                    ~default:(Safe_ops.json_bool ~default:false "reflect" auto_rules_obj)
+                    "auto_reflect"
+                    j
+                in
+                let auto_plan_now =
+                  Safe_ops.json_bool
+                    ~default:(Safe_ops.json_bool ~default:false "plan" auto_rules_obj)
+                    "auto_plan"
+                    j
+                in
+                let auto_compact_now =
+                  Safe_ops.json_bool
+                    ~default:(Safe_ops.json_bool ~default:false "compact" auto_rules_obj)
+                    "auto_compact"
+                    j
+                in
+                let auto_handoff_now =
+                  Safe_ops.json_bool
+                    ~default:(Safe_ops.json_bool ~default:false "handoff" auto_rules_obj)
+                    "auto_handoff"
+                    j
+                in
+                let guardrail_stop_now =
+                  Safe_ops.json_bool
+                    ~default:(Safe_ops.json_bool ~default:false "guardrail_stop" auto_rules_obj)
+                    "guardrail_stop"
+                    j
+                in
+                let repetition_risk_opt = Safe_ops.json_float_opt "repetition_risk" j in
+                let goal_alignment_opt = Safe_ops.json_float_opt "goal_alignment" j in
+                let response_alignment_opt = Safe_ops.json_float_opt "response_alignment" j in
+                let goal_drift_opt = Safe_ops.json_float_opt "goal_drift" j in
                 let memory_notes_added_now =
                   Safe_ops.json_int ~default:0 "memory_notes_added" j
                 in
@@ -1768,6 +1816,31 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
                        proactive_previews_rev := preview :: !proactive_previews_rev
                    | None -> ());
                 if is_interaction then begin
+                  if auto_reflect_now then incr auto_reflect_count;
+                  if auto_plan_now then incr auto_plan_count;
+                  if auto_compact_now then incr auto_compact_count;
+                  if auto_handoff_now then incr auto_handoff_count;
+                  if guardrail_stop_now then incr guardrail_stop_count;
+                  (match repetition_risk_opt with
+                   | Some v ->
+                       repetition_risk_sum := !repetition_risk_sum +. v;
+                       incr repetition_risk_points
+                   | None -> ());
+                  (match goal_alignment_opt with
+                   | Some v ->
+                       goal_alignment_sum := !goal_alignment_sum +. v;
+                       incr goal_alignment_points
+                   | None -> ());
+                  (match response_alignment_opt with
+                   | Some v ->
+                       response_alignment_sum := !response_alignment_sum +. v;
+                       incr response_alignment_points
+                   | None -> ());
+                  (match goal_drift_opt with
+                   | Some v ->
+                       goal_drift_sum := !goal_drift_sum +. v;
+                       incr goal_drift_points
+                   | None -> ());
                   if drift_applied_now then begin
                     incr drift_applied_count;
                     (match drift_reason_now with
@@ -1893,6 +1966,19 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
                     match drift_reason_now with
                     | Some s -> `String s
                     | None -> `Null);
+                  ("auto_reflect", `Bool auto_reflect_now);
+                  ("auto_plan", `Bool auto_plan_now);
+                  ("auto_compact", `Bool auto_compact_now);
+                  ("auto_handoff", `Bool auto_handoff_now);
+                  ("guardrail_stop", `Bool guardrail_stop_now);
+                  ("repetition_risk",
+                    match repetition_risk_opt with Some v -> `Float v | None -> `Null);
+                  ("goal_alignment",
+                    match goal_alignment_opt with Some v -> `Float v | None -> `Null);
+                  ("response_alignment",
+                    match response_alignment_opt with Some v -> `Float v | None -> `Null);
+                  ("goal_drift",
+                    match goal_drift_opt with Some v -> `Float v | None -> `Null);
                   ("memory_performed", `Bool memory_performed);
                   ("memory_query_kind", `String memory_query_kind);
                   ("memory_passed", `Bool memory_passed_now);
@@ -1942,6 +2028,26 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
             let drift_applied_rate =
               if interaction_points_int = 0 then 0.0
               else float_of_int !drift_applied_count /. float_of_int interaction_points_int
+            in
+            let auto_reflect_rate =
+              if interaction_points_int = 0 then 0.0
+              else float_of_int !auto_reflect_count /. float_of_int interaction_points_int
+            in
+            let auto_plan_rate =
+              if interaction_points_int = 0 then 0.0
+              else float_of_int !auto_plan_count /. float_of_int interaction_points_int
+            in
+            let auto_compact_rate =
+              if interaction_points_int = 0 then 0.0
+              else float_of_int !auto_compact_count /. float_of_int interaction_points_int
+            in
+            let auto_handoff_rate =
+              if interaction_points_int = 0 then 0.0
+              else float_of_int !auto_handoff_count /. float_of_int interaction_points_int
+            in
+            let guardrail_stop_rate =
+              if interaction_points_int = 0 then 0.0
+              else float_of_int !guardrail_stop_count /. float_of_int interaction_points_int
             in
             let proactive_previews = List.rev !proactive_previews_rev in
             let proactive_similarity_warn_threshold =
@@ -1996,6 +2102,22 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               else
                 float_of_int !memory_weather_passed
                 /. float_of_int !memory_weather_checks
+            in
+            let repetition_risk_avg =
+              if !repetition_risk_points = 0 then 0.0
+              else !repetition_risk_sum /. float_of_int !repetition_risk_points
+            in
+            let goal_alignment_avg =
+              if !goal_alignment_points = 0 then 0.0
+              else !goal_alignment_sum /. float_of_int !goal_alignment_points
+            in
+            let response_alignment_avg =
+              if !response_alignment_points = 0 then 0.0
+              else !response_alignment_sum /. float_of_int !response_alignment_points
+            in
+            let goal_drift_avg =
+              if !goal_drift_points = 0 then 0.0
+              else !goal_drift_sum /. float_of_int !goal_drift_points
             in
             let top_work_kinds =
               top_counts_json ~limit:5 ~name_key:"kind" work_kind_counts
@@ -2092,8 +2214,22 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
               ("proactive_template_fallback_denominator", `Int proactive_points_int);
               ("intervention_share", `Float intervention_share);
               ("intervention_per_turn", `Float intervention_per_turn);
+              ("auto_reflect_count", `Int !auto_reflect_count);
+              ("auto_plan_count", `Int !auto_plan_count);
+              ("auto_compact_count", `Int !auto_compact_count);
+              ("auto_handoff_count", `Int !auto_handoff_count);
+              ("guardrail_stop_count", `Int !guardrail_stop_count);
+              ("auto_reflect_rate", `Float auto_reflect_rate);
+              ("auto_plan_rate", `Float auto_plan_rate);
+              ("auto_compact_rate", `Float auto_compact_rate);
+              ("auto_handoff_rate", `Float auto_handoff_rate);
+              ("guardrail_stop_rate", `Float guardrail_stop_rate);
               ("drift_applied_count", `Int !drift_applied_count);
               ("drift_applied_rate", `Float drift_applied_rate);
+              ("repetition_risk_avg", `Float repetition_risk_avg);
+              ("goal_alignment_avg", `Float goal_alignment_avg);
+              ("response_alignment_avg", `Float response_alignment_avg);
+              ("goal_drift_avg", `Float goal_drift_avg);
               ("proactive_preview_sample_count", `Int proactive_preview_sample_count);
               ("proactive_preview_pair_count", `Int proactive_preview_pair_count);
               ("proactive_preview_similarity_avg", `Float proactive_preview_similarity_avg);

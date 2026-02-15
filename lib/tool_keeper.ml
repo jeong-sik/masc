@@ -740,6 +740,55 @@ let normalize_proactive_cooldown_sec (v : int) : int =
 let normalize_drift_min_turn_gap (v : int) : int =
   clamp_int v ~min_v:1 ~max_v:500
 
+let keeper_rule_reflect_repetition_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_RULE_REFLECT_REPETITION"
+    ~default:0.86
+    ~min_v:0.0
+    ~max_v:1.0
+
+let keeper_rule_plan_goal_alignment_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX"
+    ~default:0.06
+    ~min_v:0.0
+    ~max_v:1.0
+
+let keeper_rule_plan_response_alignment_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX"
+    ~default:0.10
+    ~min_v:0.0
+    ~max_v:1.0
+
+let keeper_rule_guardrail_repetition_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_RULE_GUARDRAIL_REPETITION"
+    ~default:0.90
+    ~min_v:0.0
+    ~max_v:1.0
+
+let keeper_rule_guardrail_goal_alignment_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX"
+    ~default:0.04
+    ~min_v:0.0
+    ~max_v:1.0
+
+let keeper_rule_guardrail_response_alignment_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX"
+    ~default:0.08
+    ~min_v:0.0
+    ~max_v:1.0
+
+let keeper_rule_guardrail_context_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN"
+    ~default:0.70
+    ~min_v:0.0
+    ~max_v:1.0
+
 let short_preview ?(max_len = 220) (s : string) : string =
   let s = String.trim s in
   if String.length s <= max_len then s
@@ -2369,6 +2418,155 @@ let repetition_risk_score
       | Some prev, Some latest -> jaccard_similarity latest prev
       | _ -> 0.0)
 
+type keeper_auto_rule_eval = {
+  repetition_risk: float;
+  goal_alignment: float;
+  response_alignment: float;
+  goal_drift: float;
+  reflect: bool;
+  plan: bool;
+  compact: bool;
+  handoff: bool;
+  guardrail_stop: bool;
+  guardrail_reason: string option;
+  reasons: string list;
+}
+
+let keeper_auto_rule_eval_to_json (e : keeper_auto_rule_eval) : Yojson.Safe.t =
+  `Assoc [
+    ("repetition_risk", `Float e.repetition_risk);
+    ("goal_alignment", `Float e.goal_alignment);
+    ("response_alignment", `Float e.response_alignment);
+    ("goal_drift", `Float e.goal_drift);
+    ("reflect", `Bool e.reflect);
+    ("plan", `Bool e.plan);
+    ("compact", `Bool e.compact);
+    ("handoff", `Bool e.handoff);
+    ("guardrail_stop", `Bool e.guardrail_stop);
+    ("guardrail_reason",
+      match e.guardrail_reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
+  ]
+
+let evaluate_keeper_auto_rules
+    ~(meta : keeper_meta)
+    ~(context_ratio : float)
+    ~(message_count : int)
+    ~(token_count : int)
+    ~(repetition_risk : float)
+    ~(goal_alignment : float)
+    ~(response_alignment : float) : keeper_auto_rule_eval =
+  let ratio_gate = meta.compaction_ratio_gate in
+  let message_gate = meta.compaction_message_gate in
+  let token_gate = meta.compaction_token_gate in
+  let reflect_threshold = keeper_rule_reflect_repetition_threshold () in
+  let plan_goal_alignment_threshold = keeper_rule_plan_goal_alignment_threshold () in
+  let plan_response_alignment_threshold = keeper_rule_plan_response_alignment_threshold () in
+  let guardrail_repetition_threshold = keeper_rule_guardrail_repetition_threshold () in
+  let guardrail_goal_alignment_threshold = keeper_rule_guardrail_goal_alignment_threshold () in
+  let guardrail_response_alignment_threshold = keeper_rule_guardrail_response_alignment_threshold () in
+  let guardrail_context_threshold =
+    max ratio_gate (keeper_rule_guardrail_context_threshold ())
+  in
+  let goal_drift =
+    1.0 -. max 0.0 (min 1.0 (max goal_alignment response_alignment))
+    |> max 0.0
+    |> min 1.0
+  in
+  let reflect = repetition_risk >= reflect_threshold in
+  let plan =
+    goal_alignment <= plan_goal_alignment_threshold
+    && response_alignment <= plan_response_alignment_threshold
+  in
+  let compact =
+    context_ratio >= ratio_gate
+    || (message_gate > 0 && message_count >= message_gate)
+    || (token_gate > 0 && token_count >= token_gate)
+  in
+  let handoff = meta.auto_handoff && context_ratio >= meta.handoff_threshold in
+  let guardrail_stop =
+    repetition_risk >= guardrail_repetition_threshold
+    && goal_alignment <= guardrail_goal_alignment_threshold
+    && response_alignment <= guardrail_response_alignment_threshold
+    && context_ratio >= guardrail_context_threshold
+  in
+  let guardrail_reason =
+    if guardrail_stop then
+      Some
+        (Printf.sprintf
+           "guardrail_stop(rep=%.3f>=%.3f,goal=%.3f<=%.3f,response=%.3f<=%.3f,ctx=%.3f>=%.3f)"
+           repetition_risk
+           guardrail_repetition_threshold
+           goal_alignment
+           guardrail_goal_alignment_threshold
+           response_alignment
+           guardrail_response_alignment_threshold
+           context_ratio
+           guardrail_context_threshold)
+    else
+      None
+  in
+  let reasons = [] in
+  let reasons =
+    if reflect then
+      (Printf.sprintf
+         "reflect(repetition_risk=%.3f>=%.3f)"
+         repetition_risk
+         reflect_threshold)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    if plan then
+      (Printf.sprintf
+         "plan(goal_alignment=%.3f<=%.3f,response_alignment=%.3f<=%.3f)"
+         goal_alignment
+         plan_goal_alignment_threshold
+         response_alignment
+         plan_response_alignment_threshold)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    if compact then
+      (Printf.sprintf
+         "compact(ctx=%.3f,msg=%d,tokens=%d)"
+         context_ratio
+         message_count
+         token_count)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    if handoff then
+      (Printf.sprintf
+         "handoff(ctx=%.3f>=%.3f)"
+         context_ratio
+         meta.handoff_threshold)
+      :: reasons
+    else reasons
+  in
+  let reasons =
+    match guardrail_reason with
+    | Some reason -> reason :: reasons
+    | None -> reasons
+  in
+  {
+    repetition_risk;
+    goal_alignment;
+    response_alignment;
+    goal_drift;
+    reflect;
+    plan;
+    compact;
+    handoff;
+    guardrail_stop;
+    guardrail_reason;
+    reasons = List.rev reasons;
+  }
+
 let recent_user_messages (msgs : Llm_client.message list) ~(max_n : int) : string list =
   msgs
   |> List.rev
@@ -3321,6 +3519,11 @@ type metrics_summary = {
   turn_points: int;
   heartbeat_points: int;
   proactive_points: int;
+  auto_reflect_count: int;
+  auto_plan_count: int;
+  auto_compact_count: int;
+  auto_handoff_count: int;
+  guardrail_stop_count: int;
   drift_applied_count: int;
   handoff_count: int;
   compaction_events: int;
@@ -3341,6 +3544,10 @@ type metrics_summary = {
   repetition_risk_points: int;
   goal_alignment_sum: float;
   goal_alignment_points: int;
+  response_alignment_sum: float;
+  response_alignment_points: int;
+  goal_drift_sum: float;
+  goal_drift_points: int;
   last_handoff: Yojson.Safe.t option;
   last_compaction: Yojson.Safe.t option;
 }
@@ -3350,6 +3557,11 @@ let empty_metrics_summary = {
   turn_points = 0;
   heartbeat_points = 0;
   proactive_points = 0;
+  auto_reflect_count = 0;
+  auto_plan_count = 0;
+  auto_compact_count = 0;
+  auto_handoff_count = 0;
+  guardrail_stop_count = 0;
   drift_applied_count = 0;
   handoff_count = 0;
   compaction_events = 0;
@@ -3370,6 +3582,10 @@ let empty_metrics_summary = {
   repetition_risk_points = 0;
   goal_alignment_sum = 0.0;
   goal_alignment_points = 0;
+  response_alignment_sum = 0.0;
+  response_alignment_points = 0;
+  goal_drift_sum = 0.0;
+  goal_drift_points = 0;
   last_handoff = None;
   last_compaction = None;
 }
@@ -3387,6 +3603,26 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
   let drift_applied_rate =
     if interaction_points = 0 then 0.0
     else float_of_int s.drift_applied_count /. float_of_int interaction_points
+  in
+  let auto_reflect_rate =
+    if interaction_points = 0 then 0.0
+    else float_of_int s.auto_reflect_count /. float_of_int interaction_points
+  in
+  let auto_plan_rate =
+    if interaction_points = 0 then 0.0
+    else float_of_int s.auto_plan_count /. float_of_int interaction_points
+  in
+  let auto_compact_rate =
+    if interaction_points = 0 then 0.0
+    else float_of_int s.auto_compact_count /. float_of_int interaction_points
+  in
+  let auto_handoff_rate =
+    if interaction_points = 0 then 0.0
+    else float_of_int s.auto_handoff_count /. float_of_int interaction_points
+  in
+  let guardrail_stop_rate =
+    if interaction_points = 0 then 0.0
+    else float_of_int s.guardrail_stop_count /. float_of_int interaction_points
   in
   let memory_pass_rate =
     if s.memory_checks = 0 then 0.0
@@ -3420,6 +3656,14 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
     if s.goal_alignment_points = 0 then 0.0
     else s.goal_alignment_sum /. float_of_int s.goal_alignment_points
   in
+  let response_alignment_avg =
+    if s.response_alignment_points = 0 then 0.0
+    else s.response_alignment_sum /. float_of_int s.response_alignment_points
+  in
+  let goal_drift_avg =
+    if s.goal_drift_points = 0 then 0.0
+    else s.goal_drift_sum /. float_of_int s.goal_drift_points
+  in
   `Assoc [
     ("sample_points", `Int s.sample_points);
     ("turn_points", `Int s.turn_points);
@@ -3428,6 +3672,16 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
     ("window_interactions", `Int interaction_points);
     ("intervention_share", `Float intervention_share);
     ("intervention_per_turn", `Float intervention_per_turn);
+    ("auto_reflect_count", `Int s.auto_reflect_count);
+    ("auto_plan_count", `Int s.auto_plan_count);
+    ("auto_compact_count", `Int s.auto_compact_count);
+    ("auto_handoff_count", `Int s.auto_handoff_count);
+    ("guardrail_stop_count", `Int s.guardrail_stop_count);
+    ("auto_reflect_rate", `Float auto_reflect_rate);
+    ("auto_plan_rate", `Float auto_plan_rate);
+    ("auto_compact_rate", `Float auto_compact_rate);
+    ("auto_handoff_rate", `Float auto_handoff_rate);
+    ("guardrail_stop_rate", `Float guardrail_stop_rate);
     ("drift_applied_count", `Int s.drift_applied_count);
     ("drift_applied_rate", `Float drift_applied_rate);
     ("handoff_count", `Int s.handoff_count);
@@ -3451,6 +3705,8 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
     ("memory_weather_pass_rate", `Float memory_weather_pass_rate);
     ("repetition_risk_avg", `Float repetition_risk_avg);
     ("goal_alignment_avg", `Float goal_alignment_avg);
+    ("response_alignment_avg", `Float response_alignment_avg);
+    ("goal_drift_avg", `Float goal_drift_avg);
     ("last_handoff", match s.last_handoff with Some j -> j | None -> `Null);
     ("last_compaction", match s.last_compaction with Some j -> j | None -> `Null);
   ]
@@ -3509,8 +3765,41 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
       let memory_is_weather =
         match memory_expected_topic with Some "weather" -> true | _ -> false
       in
+      let auto_rules = j |> member "auto_rules" in
+      let auto_reflect_now =
+        Safe_ops.json_bool
+          ~default:(Safe_ops.json_bool ~default:false "reflect" auto_rules)
+          "auto_reflect"
+          j
+      in
+      let auto_plan_now =
+        Safe_ops.json_bool
+          ~default:(Safe_ops.json_bool ~default:false "plan" auto_rules)
+          "auto_plan"
+          j
+      in
+      let auto_compact_now =
+        Safe_ops.json_bool
+          ~default:(Safe_ops.json_bool ~default:false "compact" auto_rules)
+          "auto_compact"
+          j
+      in
+      let auto_handoff_now =
+        Safe_ops.json_bool
+          ~default:(Safe_ops.json_bool ~default:false "handoff" auto_rules)
+          "auto_handoff"
+          j
+      in
+      let guardrail_stop_now =
+        Safe_ops.json_bool
+          ~default:(Safe_ops.json_bool ~default:false "guardrail_stop" auto_rules)
+          "guardrail_stop"
+          j
+      in
       let repetition_risk_opt = Safe_ops.json_float_opt "repetition_risk" j in
       let goal_alignment_opt = Safe_ops.json_float_opt "goal_alignment" j in
+      let response_alignment_opt = Safe_ops.json_float_opt "response_alignment" j in
+      let goal_drift_opt = Safe_ops.json_float_opt "goal_drift" j in
       let handoff_json =
         if handoff_performed then
           Some (`Assoc [
@@ -3549,6 +3838,16 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
         turn_points = acc.turn_points + (if is_turn then 1 else 0);
         heartbeat_points = acc.heartbeat_points + (if is_heartbeat then 1 else 0);
         proactive_points = acc.proactive_points + (if is_proactive then 1 else 0);
+        auto_reflect_count =
+          acc.auto_reflect_count + (if is_interaction && auto_reflect_now then 1 else 0);
+        auto_plan_count =
+          acc.auto_plan_count + (if is_interaction && auto_plan_now then 1 else 0);
+        auto_compact_count =
+          acc.auto_compact_count + (if is_interaction && auto_compact_now then 1 else 0);
+        auto_handoff_count =
+          acc.auto_handoff_count + (if is_interaction && auto_handoff_now then 1 else 0);
+        guardrail_stop_count =
+          acc.guardrail_stop_count + (if is_interaction && guardrail_stop_now then 1 else 0);
         drift_applied_count =
           acc.drift_applied_count + (if is_interaction && drift_applied_now then 1 else 0);
         handoff_count = acc.handoff_count + (if is_interaction && handoff_performed then 1 else 0);
@@ -3599,6 +3898,18 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
         goal_alignment_points =
           acc.goal_alignment_points
           + (if Option.is_some goal_alignment_opt then 1 else 0);
+        response_alignment_sum =
+          acc.response_alignment_sum
+          +. (if is_interaction then Option.value ~default:0.0 response_alignment_opt else 0.0);
+        response_alignment_points =
+          acc.response_alignment_points
+          + (if is_interaction && Option.is_some response_alignment_opt then 1 else 0);
+        goal_drift_sum =
+          acc.goal_drift_sum
+          +. (if is_interaction then Option.value ~default:0.0 goal_drift_opt else 0.0);
+        goal_drift_points =
+          acc.goal_drift_points
+          + (if is_interaction && Option.is_some goal_drift_opt then 1 else 0);
         last_handoff = handoff_json;
         last_compaction = compaction_json;
       }
@@ -4568,27 +4879,53 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                    ~primary_model_max_tokens:primary_model.max_context
                    ~base_dir
                in
-               (match ctx_opt with
-                | None -> ()
-                | Some c ->
-                    let continuity_snapshot = latest_state_snapshot_from_messages c.messages in
-                    let continuity_summary =
-                      match continuity_snapshot with
-                      | Some s -> keeper_state_snapshot_to_summary_text s
-                      | None ->
-                          let trimmed = String.trim meta_current.continuity_summary in
-                          if trimmed = "" then "No continuity snapshot available." else trimmed
+	               (match ctx_opt with
+	                | None -> ()
+	                | Some c ->
+                    let latest_user_message =
+                      latest_message_content_by_role
+                        ~role:Llm_client.User
+                        c.messages
                     in
-                    let repetition_risk =
-                      repetition_risk_score ~messages:c.messages ~candidate_reply:None
+                    let latest_assistant_message =
+                      latest_message_content_by_role
+                        ~role:Llm_client.Assistant
+                        c.messages
                     in
-                    let goal_alignment =
-                      goal_alignment_score
+	                    let continuity_snapshot = latest_state_snapshot_from_messages c.messages in
+	                    let continuity_summary =
+	                      match continuity_snapshot with
+	                      | Some s -> keeper_state_snapshot_to_summary_text s
+	                      | None ->
+	                          let trimmed = String.trim meta_current.continuity_summary in
+	                          if trimmed = "" then "No continuity snapshot available." else trimmed
+	                    in
+	                    let repetition_risk =
+	                      repetition_risk_score ~messages:c.messages ~candidate_reply:None
+	                    in
+	                    let goal_alignment =
+	                      goal_alignment_score
+	                        ~meta:meta_current
+	                        ~user_message:latest_user_message
+	                        ~assistant_reply:latest_assistant_message
+	                    in
+                    let response_alignment =
+                      match latest_user_message, latest_assistant_message with
+                      | Some user_message, Some assistant_message ->
+                        jaccard_similarity user_message assistant_message
+                      | _ -> 0.0
+                    in
+                    let auto_rules =
+                      evaluate_keeper_auto_rules
                         ~meta:meta_current
-                        ~user_message:(latest_message_content_by_role ~role:Llm_client.User c.messages)
-                        ~assistant_reply:(latest_message_content_by_role ~role:Llm_client.Assistant c.messages)
+                        ~context_ratio:(Context_manager.context_ratio c)
+                        ~message_count:(List.length c.messages)
+                        ~token_count:c.token_count
+                        ~repetition_risk
+                        ~goal_alignment
+                        ~response_alignment
                     in
-                    let snapshot = `Assoc [
+	                    let snapshot = `Assoc [
                       ("ts", `String (now_iso ()));
                       ("ts_unix", `Float now_ts);
                       ("channel", `String "heartbeat");
@@ -4621,11 +4958,23 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                       ("tool_call_count", `Int 0);
                       ("tools_used", `List []);
                       ("snapshot_source", `String "keeper_context_status");
-                      ("memory_check", memory_check_default_json ());
-                      ("repetition_risk", `Float repetition_risk);
-                      ("goal_alignment", `Float goal_alignment);
-                      ("handoff", `Assoc [("performed", `Bool false)]);
-                    ] in
+	                      ("memory_check", memory_check_default_json ());
+                      ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                      ("auto_reflect", `Bool auto_rules.reflect);
+                      ("auto_plan", `Bool auto_rules.plan);
+                      ("auto_compact", `Bool auto_rules.compact);
+                      ("auto_handoff", `Bool auto_rules.handoff);
+	                      ("repetition_risk", `Float repetition_risk);
+	                      ("goal_alignment", `Float goal_alignment);
+                      ("response_alignment", `Float response_alignment);
+                      ("goal_drift", `Float auto_rules.goal_drift);
+                      ("guardrail_stop", `Bool auto_rules.guardrail_stop);
+                      ("guardrail_stop_reason",
+                        match auto_rules.guardrail_reason with
+                        | Some reason -> `String reason
+                        | None -> `Null);
+	                      ("handoff", `Assoc [("performed", `Bool false)]);
+	                    ] in
                     append_jsonl_line metrics_path snapshot)
              with _ -> ());
             last_snapshot_ts := now_ts
@@ -6108,14 +6457,15 @@ let handle_keeper_msg ctx args : tool_result =
                   ~messages:ctx_work.messages
                   ~candidate_reply:(Some safe_reply)
               in
-              let goal_alignment =
-                goal_alignment_score
-                  ~meta
-                  ~user_message:(Some message)
-                  ~assistant_reply:(Some safe_reply)
-              in
+	              let goal_alignment =
+	                goal_alignment_score
+	                  ~meta
+	                  ~user_message:(Some message)
+	                  ~assistant_reply:(Some safe_reply)
+	              in
+              let response_alignment = jaccard_similarity message safe_reply in
 
-	              let assistant_msg = Llm_client.assistant_msg safe_reply in
+		              let assistant_msg = Llm_client.assistant_msg safe_reply in
 	              let ctx_work = Context_manager.append ctx_work assistant_msg in
               Context_manager.persist_message session assistant_msg;
               let now_ts = Time_compat.now () in
@@ -6202,13 +6552,39 @@ let handle_keeper_msg ctx args : tool_result =
 
               ignore (save_checkpoint session ctx_work ~generation:meta_turn.generation);
 
-              let do_handoff =
-                meta_turn.auto_handoff &&
-                ctx_ratio >= meta_turn.handoff_threshold &&
-                (now_ts -. meta_turn.last_handoff_ts >= float_of_int meta_turn.handoff_cooldown_sec)
-              in
+		              let handoff_eval =
+                let auto_rules =
+                  evaluate_keeper_auto_rules
+                    ~meta:meta_turn
+                    ~context_ratio:ctx_ratio
+                    ~message_count:(List.length ctx_work.messages)
+                    ~token_count:ctx_work.token_count
+                    ~repetition_risk
+                    ~goal_alignment
+                    ~response_alignment
+                in
+                (if auto_rules.guardrail_stop then
+                   (try
+                      ignore
+                        (Room.broadcast
+                           ctx.config
+                           ~from_agent:meta_turn.agent_name
+                           ~content:
+                             (Printf.sprintf
+                                "🛑 keeper guardrail_stop: %s"
+                                (Option.value
+                                   ~default:"policy threshold exceeded"
+                                   auto_rules.guardrail_reason)))
+                    with _ -> ()));
+                let do_handoff =
+                  auto_rules.handoff &&
+		                (now_ts -. meta_turn.last_handoff_ts >= float_of_int meta_turn.handoff_cooldown_sec)
+		              in
+                (do_handoff, auto_rules)
+	              in
+	              let (do_handoff, auto_rules) = handoff_eval in
 
-              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
+	              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
 
               if not do_handoff then begin
                 (match write_meta ctx.config meta_turn with
@@ -6251,10 +6627,22 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                     ("skill_reason", `String effective_skill_route.reason);
-	                     ("memory_check", memory_check_json);
-                     ("repetition_risk", `Float repetition_risk);
-                     ("goal_alignment", `Float goal_alignment);
-	                     ("drift", `Assoc [
+		                     ("memory_check", memory_check_json);
+                     ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                     ("auto_reflect", `Bool auto_rules.reflect);
+                     ("auto_plan", `Bool auto_rules.plan);
+                     ("auto_compact", `Bool auto_rules.compact);
+                     ("auto_handoff", `Bool auto_rules.handoff);
+                     ("guardrail_stop", `Bool auto_rules.guardrail_stop);
+                     ("guardrail_stop_reason",
+                       match auto_rules.guardrail_reason with
+                       | Some reason -> `String reason
+                       | None -> `Null);
+	                     ("repetition_risk", `Float repetition_risk);
+	                     ("goal_alignment", `Float goal_alignment);
+                     ("response_alignment", `Float response_alignment);
+                     ("goal_drift", `Float auto_rules.goal_drift);
+		                     ("drift", `Assoc [
 	                       ("enabled", `Bool meta_turn.drift_enabled);
                        ("applied", `Bool drift_applied);
                        ("reason",
@@ -6322,10 +6710,22 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                  ("skill_reason", `String effective_skill_route.reason);
-		                  ("memory_check", memory_check_json);
-                  ("repetition_risk", `Float repetition_risk);
-                  ("goal_alignment", `Float goal_alignment);
-	                  ("drift", `Assoc [
+			                  ("memory_check", memory_check_json);
+                  ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                  ("auto_reflect", `Bool auto_rules.reflect);
+                  ("auto_plan", `Bool auto_rules.plan);
+                  ("auto_compact", `Bool auto_rules.compact);
+                  ("auto_handoff", `Bool auto_rules.handoff);
+                  ("guardrail_stop", `Bool auto_rules.guardrail_stop);
+                  ("guardrail_stop_reason",
+                    match auto_rules.guardrail_reason with
+                    | Some reason -> `String reason
+                    | None -> `Null);
+	                  ("repetition_risk", `Float repetition_risk);
+	                  ("goal_alignment", `Float goal_alignment);
+                  ("response_alignment", `Float response_alignment);
+                  ("goal_drift", `Float auto_rules.goal_drift);
+		                  ("drift", `Assoc [
 	                    ("enabled", `Bool meta_turn.drift_enabled);
                     ("applied", `Bool drift_applied);
                     ("reason",
@@ -6442,10 +6842,22 @@ let handle_keeper_msg ctx args : tool_result =
 		                     ("skill_secondary",
 		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                     ("skill_reason", `String effective_skill_route.reason);
-		                     ("memory_check", memory_check_json);
-                     ("repetition_risk", `Float repetition_risk);
-                     ("goal_alignment", `Float goal_alignment);
-	                     ("drift", `Assoc [
+			                     ("memory_check", memory_check_json);
+                     ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                     ("auto_reflect", `Bool auto_rules.reflect);
+                     ("auto_plan", `Bool auto_rules.plan);
+                     ("auto_compact", `Bool auto_rules.compact);
+                     ("auto_handoff", `Bool auto_rules.handoff);
+                     ("guardrail_stop", `Bool auto_rules.guardrail_stop);
+                     ("guardrail_stop_reason",
+                       match auto_rules.guardrail_reason with
+                       | Some reason -> `String reason
+                       | None -> `Null);
+	                     ("repetition_risk", `Float repetition_risk);
+	                     ("goal_alignment", `Float goal_alignment);
+                     ("response_alignment", `Float response_alignment);
+                     ("goal_drift", `Float auto_rules.goal_drift);
+		                     ("drift", `Assoc [
 	                       ("enabled", `Bool meta_turn.drift_enabled);
                        ("applied", `Bool drift_applied);
                        ("reason",
@@ -6512,10 +6924,22 @@ let handle_keeper_msg ctx args : tool_result =
 		                  ("skill_secondary",
 		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
 			                  ("skill_reason", `String effective_skill_route.reason);
-		                  ("memory_check", memory_check_json);
-                  ("repetition_risk", `Float repetition_risk);
-                  ("goal_alignment", `Float goal_alignment);
-	                  ("drift", `Assoc [
+			                  ("memory_check", memory_check_json);
+                  ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
+                  ("auto_reflect", `Bool auto_rules.reflect);
+                  ("auto_plan", `Bool auto_rules.plan);
+                  ("auto_compact", `Bool auto_rules.compact);
+                  ("auto_handoff", `Bool auto_rules.handoff);
+                  ("guardrail_stop", `Bool auto_rules.guardrail_stop);
+                  ("guardrail_stop_reason",
+                    match auto_rules.guardrail_reason with
+                    | Some reason -> `String reason
+                    | None -> `Null);
+	                  ("repetition_risk", `Float repetition_risk);
+	                  ("goal_alignment", `Float goal_alignment);
+                  ("response_alignment", `Float response_alignment);
+                  ("goal_drift", `Float auto_rules.goal_drift);
+		                  ("drift", `Assoc [
 	                    ("enabled", `Bool meta_turn.drift_enabled);
                     ("applied", `Bool drift_applied);
                     ("reason",

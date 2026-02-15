@@ -1,0 +1,198 @@
+openapi: 3.0.3
+info:
+  title: TRPG Engine API (MVP Draft)
+  version: 0.1.0
+  description: |
+    External TRPG Engine contract.
+    Engine orchestrates DM and players through MASC keeper calls.
+servers:
+  - url: http://127.0.0.1:8940
+paths:
+  /rooms:
+    post:
+      summary: Create a room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoomRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomState'
+  /rooms/{roomId}/start:
+    post:
+      summary: Start room flow (lobby -> briefing -> round)
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomState'
+  /rooms/{roomId}/input:
+    post:
+      summary: Inject operator/human input
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actorId:
+                  type: string
+                content:
+                  type: string
+              required: [content]
+      responses:
+        '202':
+          description: Accepted
+  /rooms/{roomId}/dm/input:
+    post:
+      summary: Inject human DM narrative or adjudication
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                adjudication:
+                  type: object
+                  additionalProperties: true
+              required: [content]
+      responses:
+        '202':
+          description: Accepted
+  /rooms/{roomId}/dm/act:
+    post:
+      summary: Force DM turn execution (debug/manual control)
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: DM action result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventEnvelope'
+  /rooms/{roomId}/state:
+    get:
+      summary: Get current room state
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Current state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomState'
+  /rooms/{roomId}/events:
+    get:
+      summary: Fetch incremental events
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - in: query
+          name: afterSeq
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Events list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventEnvelope'
+  /rooms/{roomId}/stream:
+    get:
+      summary: SSE stream of room events
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: text/event-stream
+components:
+  parameters:
+    RoomId:
+      in: path
+      name: roomId
+      required: true
+      schema:
+        type: string
+  schemas:
+    CreateRoomRequest:
+      type: object
+      properties:
+        scenarioId:
+          type: string
+        seed:
+          type: integer
+        dmControl:
+          type: string
+          enum: [keeper, human]
+          default: keeper
+        keepers:
+          type: object
+          additionalProperties:
+            type: string
+      required: [scenarioId]
+    RoomState:
+      type: object
+      properties:
+        roomId:
+          type: string
+        scenarioId:
+          type: string
+        phase:
+          type: string
+          enum: [lobby, briefing, round, resolution, end]
+        round:
+          type: integer
+        currentTurnActor:
+          type: string
+        dmControl:
+          type: string
+          enum: [keeper, human]
+        seq:
+          type: integer
+    EventEnvelope:
+      type: object
+      properties:
+        seq:
+          type: integer
+        room_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+        actor_id:
+          type: string
+        generation:
+          type: integer
+        payload:
+          type: object
+          additionalProperties: true
+      required: [seq, room_id, ts, type, payload]

@@ -3155,6 +3155,25 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const alertThresholds = currentAlertThresholds();
       const lifeState = keeperLifeState(keeper, alertThresholds);
       const soulProfile = (keeper.soul_profile || 'balanced');
+      const goalBaseText =
+        (typeof keeper.goal === 'string' && keeper.goal.trim() !== '')
+          ? keeper.goal.trim()
+          : '-';
+      const shortGoalText =
+        (typeof keeper.short_goal === 'string' && keeper.short_goal.trim() !== '')
+          ? keeper.short_goal.trim()
+          : goalBaseText;
+      const midGoalText =
+        (typeof keeper.mid_goal === 'string' && keeper.mid_goal.trim() !== '')
+          ? keeper.mid_goal.trim()
+          : goalBaseText;
+      const longGoalText =
+        (typeof keeper.long_goal === 'string' && keeper.long_goal.trim() !== '')
+          ? keeper.long_goal.trim()
+          : goalBaseText;
+      const shortGoalKpi = shortText(shortGoalText, 72);
+      const midGoalKpi = shortText(midGoalText, 72);
+      const longGoalKpi = shortText(longGoalText, 72);
       const willText = (typeof keeper.will === 'string' && keeper.will.trim() !== '') ? keeper.will.trim() : '-';
       const needsText = (typeof keeper.needs === 'string' && keeper.needs.trim() !== '') ? keeper.needs.trim() : '-';
       const desiresText = (typeof keeper.desires === 'string' && keeper.desires.trim() !== '') ? keeper.desires.trim() : '-';
@@ -3462,6 +3481,30 @@ let cached_html = lazy ({|<!DOCTYPE html>
           formula: 'keeper.desires',
           source: 'keeper.desires',
           interpretation: 'Drives proactive behavior intensity and exploration tendency.',
+        },
+        short_goal: {
+          label: 'Short Goal',
+          short: 'Immediate execution target in current keeper horizon.',
+          definition: 'Near-term objective the keeper should complete in the next turns.',
+          formula: 'keeper.short_goal (fallback keeper.goal)',
+          source: 'keeper.short_goal, keeper.goal',
+          interpretation: 'Use this to validate tactical focus and short-loop continuity.',
+        },
+        mid_goal: {
+          label: 'Mid Goal',
+          short: 'Mid-range mission objective for this keeper lifecycle.',
+          definition: 'Bridge objective between immediate actions and long-term identity.',
+          formula: 'keeper.mid_goal (fallback keeper.goal)',
+          source: 'keeper.mid_goal, keeper.goal',
+          interpretation: 'Shows whether day-scale planning aligns with active work.',
+        },
+        long_goal: {
+          label: 'Long Goal',
+          short: 'Long-horizon purpose keeper should preserve across handoffs.',
+          definition: 'Persistent strategic direction expected to survive compaction/handoff.',
+          formula: 'keeper.long_goal (fallback keeper.goal)',
+          source: 'keeper.long_goal, keeper.goal',
+          interpretation: 'Use as continuity anchor across generations and drift checks.',
         },
         active_model: {
           label: 'Active Model',
@@ -3869,6 +3912,24 @@ let cached_html = lazy ({|<!DOCTYPE html>
           definition: '운영 니즈를 넘어선 선호 기반 추진 방향입니다.',
           interpretation: '프로액티브 강도와 탐색 성향에 영향을 줍니다.',
         },
+        short_goal: {
+          label: '단기 목표',
+          short: '현재 구간에서 바로 달성해야 하는 실행 목표입니다.',
+          definition: '다음 몇 턴 안에 완료되어야 하는 근거리 목표입니다.',
+          interpretation: '전술적 집중도와 단기 연속성 점검에 사용합니다.',
+        },
+        mid_goal: {
+          label: '중기 목표',
+          short: '단기 실행과 장기 방향을 잇는 중간 목적입니다.',
+          definition: '현재 생애 구간에서 유지할 중간 범위의 진행 목표입니다.',
+          interpretation: '일 단위 계획과 실제 행동의 정렬 상태를 보여줍니다.',
+        },
+        long_goal: {
+          label: '장기 목표',
+          short: '승계/컴팩팅 이후에도 유지해야 하는 장기 목적입니다.',
+          definition: '세대 전환을 거쳐도 보존되어야 하는 전략적 방향입니다.',
+          interpretation: '세대 간 연속성 검증의 기준점으로 사용합니다.',
+        },
         active_model: {
           label: '활성 모델',
           short: '가장 최근 턴에서 실제 사용된 모델입니다.',
@@ -4104,6 +4165,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
         'will',
         'needs',
         'desires',
+        'short_goal',
+        'mid_goal',
+        'long_goal',
         'active_model',
         'next_model',
         'primary_model',
@@ -4776,6 +4840,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="keeper-kpi">${kpiLabelHtml('Will (의지)', 'will')}<div class="keeper-kpi-value">${escHtml(willKpi)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Needs (니즈)', 'needs')}<div class="keeper-kpi-value">${escHtml(needsKpi)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Desires (욕구)', 'desires')}<div class="keeper-kpi-value">${escHtml(desiresKpi)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Short Goal', 'short_goal')}<div class="keeper-kpi-value">${escHtml(shortGoalKpi)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Mid Goal', 'mid_goal')}<div class="keeper-kpi-value">${escHtml(midGoalKpi)}</div></div>
+          <div class="keeper-kpi">${kpiLabelHtml('Long Goal', 'long_goal')}<div class="keeper-kpi-value">${escHtml(longGoalKpi)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Active Model', 'active_model')}<div class="keeper-kpi-value">${escHtml(modelUsed)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Next Model', 'next_model')}<div class="keeper-kpi-value">${escHtml(nextModel)}</div></div>
           <div class="keeper-kpi">${kpiLabelHtml('Primary Model', 'primary_model')}<div class="keeper-kpi-value">${escHtml(primaryModel || '-')}</div></div>

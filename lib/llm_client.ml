@@ -423,6 +423,29 @@ let parse_ollama_generate_response (json_str : string) : (completion_response, s
   with exn ->
     Error (sprintf "Ollama parse error: %s" (Printexc.to_string exn))
 
+(** Parse native Ollama /api/chat response.
+    Format: { "message": { "content": "..." }, "done": true,
+              "eval_count": N, "prompt_eval_count": N, "model": "..." } *)
+let parse_ollama_chat_response (json_str : string) : (completion_response, string) result =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    let open Yojson.Safe.Util in
+    let msg = json |> member "message" in
+    let content = msg |> member "content" |> to_string_option
+                  |> Option.value ~default:"" in
+    let eval_count = try json |> member "eval_count" |> to_int with _ -> 0 in
+    let prompt_eval_count = try json |> member "prompt_eval_count" |> to_int with _ -> 0 in
+    let model_used = json |> member "model" |> to_string_option
+                     |> Option.value ~default:"unknown" in
+    let usage = {
+      input_tokens = prompt_eval_count;
+      output_tokens = eval_count;
+      total_tokens = prompt_eval_count + eval_count;
+    } in
+    Ok { content; tool_calls = []; usage; model_used; latency_ms = 0 }
+  with exn ->
+    Error (sprintf "Ollama chat parse error: %s" (Printexc.to_string exn))
+
 (* ================================================================ *)
 (* HTTP Execution via curl subprocess                               *)
 (* ================================================================ *)
@@ -454,14 +477,30 @@ let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
 (* Provider-Specific Execution                                      *)
 (* ================================================================ *)
 
+(** Build native Ollama /api/chat request body with think:false.
+    Uses the same message format as OpenAI but adds Ollama-specific fields. *)
+let build_ollama_chat_body (req : completion_request) : string =
+  let messages_json = List.map message_to_openai_json req.messages in
+  let body = [
+    ("model", `String req.model.model_id);
+    ("messages", `List messages_json);
+    ("stream", `Bool false);
+    ("think", `Bool false);
+    ("options", `Assoc [
+      ("temperature", `Float req.temperature);
+      ("num_predict", `Int req.max_tokens);
+    ]);
+  ] in
+  Yojson.Safe.to_string (`Assoc body)
+
 let call_ollama_chat (req : completion_request) : (completion_response, string) result =
-  let url = sprintf "%s/v1/chat/completions" req.model.api_url in
-  let body = build_openai_body req in
+  let url = sprintf "%s/api/chat" req.model.api_url in
+  let body = build_ollama_chat_body req in
   let headers = [("Content-Type", "application/json")] in
   let timeout_sec = ollama_timeout_sec () in
   match curl_post ~url ~headers ~body ~timeout_sec with
   | Error e -> Error e
-  | Ok raw -> parse_openai_response raw
+  | Ok raw -> parse_ollama_chat_response raw
 
 (** Ollama fallback: /api/generate for models without chat support. *)
 let call_ollama_generate (req : completion_request) : (completion_response, string) result =

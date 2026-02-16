@@ -8,6 +8,7 @@ description = "Multi-mode MASC visualization platform — WebGPU rendered via Be
 bevy = { version = "0.18", default-features = false, features = [
     "2d",
     "webgpu",
+    "jpeg",
 ] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

@@ -6,13 +6,13 @@ pub mod paths {
     pub const PORTRAIT_SONGARAK: &str = "portraits/songarak.png";
     pub const PORTRAIT_MISO: &str = "portraits/miso.png";
 
-    // Area backgrounds (1920x1080, painterly gothic)
-    pub const MAP_AREA_A: &str = "maps/area_a.png";
-    pub const MAP_AREA_B: &str = "maps/area_b.png";
-    pub const MAP_AREA_C: &str = "maps/area_c.png";
-    pub const MAP_AREA_D: &str = "maps/area_d.png";
-    pub const MAP_AREA_E: &str = "maps/area_e.png";
-    pub const MAP_AREA_F: &str = "maps/area_f.png";
+    // Area backgrounds (1920x1080, oil painting style, JPEG for size efficiency)
+    pub const MAP_AREA_A: &str = "maps/area_a.jpg";
+    pub const MAP_AREA_B: &str = "maps/area_b.jpg";
+    pub const MAP_AREA_C: &str = "maps/area_c.jpg";
+    pub const MAP_AREA_D: &str = "maps/area_d.jpg";
+    pub const MAP_AREA_E: &str = "maps/area_e.jpg";
+    pub const MAP_AREA_F: &str = "maps/area_f.jpg";
 
     // Fonts
     #[allow(dead_code)]

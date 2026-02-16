@@ -589,6 +589,10 @@ body.mode-lobby #dashboard {
     font-style: italic;
 }
 
+#narrative-log {
+    margin-top: 12px;
+}
+
 /* Character cards */
 .character-card {
     background: var(--bg-panel-alt);
@@ -596,6 +600,11 @@ body.mode-lobby #dashboard {
     border-radius: var(--panel-radius);
     padding: 10px;
     margin-bottom: 6px;
+}
+
+#character-panel {
+    display: flex;
+    flex-direction: column;
 }
 
 .character-card.dead {
@@ -707,6 +716,9 @@ body.mode-lobby #dashboard {
     align-items: center;
     gap: 24px;
     width: 100%;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-main);
 }
 
 .turn-number {
@@ -746,6 +758,10 @@ body.mode-lobby #dashboard {
 .phase.completed {
     background: var(--bg-panel-alt);
     color: var(--text-primary);
+}
+
+#dice-log {
+    min-height: 100%;
 }
 
 /* ═══════════════════════════════════════════

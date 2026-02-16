@@ -1716,6 +1716,83 @@ let cached_html = lazy ({|<!DOCTYPE html>
       line-height: 1.35;
       margin-top: 2px;
     }
+    .trpg-selection-summary {
+      border: 1px solid rgba(148,163,184,0.22);
+      border-radius: 8px;
+      background: rgba(2,6,23,0.35);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .trpg-selection-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .trpg-selection-badge {
+      border: 1px solid rgba(148,163,184,0.35);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.68em;
+      color: #cbd5e1;
+      background: rgba(15,23,42,0.72);
+      white-space: nowrap;
+    }
+    .trpg-selection-badge.ok {
+      border-color: rgba(74,222,128,0.42);
+      color: #bbf7d0;
+      background: rgba(20,83,45,0.35);
+    }
+    .trpg-selection-badge.warn {
+      border-color: rgba(245,158,11,0.48);
+      color: #fde68a;
+      background: rgba(120,53,15,0.35);
+    }
+    .trpg-selection-meta {
+      font-size: 0.72em;
+      color: #94a3b8;
+      text-align: right;
+    }
+    .trpg-selection-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .trpg-selection-chip {
+      border: 1px solid rgba(148,163,184,0.3);
+      border-radius: 999px;
+      padding: 1px 6px;
+      font-size: 0.67em;
+      color: #cbd5e1;
+      background: rgba(15,23,42,0.65);
+      white-space: nowrap;
+    }
+    .trpg-selection-chip.dm {
+      border-color: rgba(251,191,36,0.48);
+      color: #fde68a;
+      background: rgba(113,63,18,0.35);
+    }
+    .trpg-selection-chip.player {
+      border-color: rgba(34,211,238,0.48);
+      color: #a5f3fc;
+      background: rgba(8,47,73,0.38);
+    }
+    .trpg-selection-chip.actor {
+      border-color: rgba(167,139,250,0.45);
+      color: #ddd6fe;
+      background: rgba(76,29,149,0.33);
+    }
+    .trpg-selection-issues {
+      margin: 0;
+      padding-left: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 0.72em;
+      color: #fecaca;
+    }
     .trpg-keeper-quick {
       display: flex;
       flex-direction: column;
@@ -2227,6 +2304,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
                     <div class="trpg-empty-inline">Keeper 목록을 불러오는 중...</div>
                   </div>
                   <div class="trpg-control-help">배지 의미: DM(던전마스터), PLAYER(이미 파티 사용중), LEASE(actor 점유).</div>
+                </div>
+                <div class="trpg-control-field full">
+                  <label>세션 선택 요약</label>
+                  <div id="trpg-selection-summary" class="trpg-selection-summary">
+                    <div class="trpg-empty-inline">DM/Player 선택 상태를 계산 중...</div>
+                  </div>
                 </div>
               </div>
               <div class="trpg-action-row">
@@ -7926,6 +8009,62 @@ let cached_html = lazy ({|<!DOCTYPE html>
       };
     }
 
+    function renderTrpgSelectionSummary(state, events) {
+      const el = document.getElementById('trpg-selection-summary');
+      if (!el) return;
+      const dmKeeper = String((document.getElementById('trpg-dm-keeper-input') || {}).value || '').trim();
+      const playerRaw = String((document.getElementById('trpg-player-keepers-input') || {}).value || '');
+      const parsed = parseTrpgPlayerKeepers(playerRaw);
+      const resolved = trpgResolvePlayerKeeperMapping(state, events, playerRaw);
+      const mapping = resolved.ok ? resolved.mapping : (parsed.ok ? parsed.mapping : {});
+      const players = trpgUniqueStrings(Object.values(mapping || {}));
+      const expectedActors = resolved.expectedActors || trpgPartyActorsFromStateOrEvents(state, events);
+      const missingActors = resolved.ok ? (resolved.missingActors || []) : [];
+      const unknownActors = resolved.ok ? (resolved.unknownActors || []) : [];
+      const issues = [];
+
+      if (!dmKeeper) issues.push('DM keeper가 비어 있습니다.');
+      if (!parsed.ok) issues.push(String(parsed.error || 'Player keeper 입력 형식을 확인하세요.'));
+      if (dmKeeper && players.includes(dmKeeper)) {
+        issues.push(`DM keeper(${dmKeeper})가 Player keeper 목록과 중복됩니다.`);
+      }
+      if (expectedActors.length > 0 && resolved.ok) {
+        if (missingActors.length > 0) issues.push(`파티 actor 누락: ${missingActors.join(', ')}`);
+        if (unknownActors.length > 0) issues.push(`파티 외 actor 입력: ${unknownActors.join(', ')}`);
+      }
+
+      const ready =
+        issues.length === 0
+        && dmKeeper !== ''
+        && players.length > 0
+        && (expectedActors.length === 0 || (resolved.ok && missingActors.length === 0 && unknownActors.length === 0));
+
+      const badgeClass = ready ? 'ok' : 'warn';
+      const badgeText = ready ? 'READY' : 'CHECK REQUIRED';
+      const playerChips = players.length > 0
+        ? players.map((name) => `<span class="trpg-selection-chip player">${escapeHtml(name)}</span>`).join('')
+        : '<span class="trpg-selection-chip">player 없음</span>';
+      const actorChip = expectedActors.length > 0
+        ? `<span class="trpg-selection-chip actor">actors ${escapeHtml(String(expectedActors.length))}</span>`
+        : '<span class="trpg-selection-chip actor">actors 미확정</span>';
+      const issueList = issues.length > 0
+        ? `<ul class="trpg-selection-issues">${issues.map((msg) => `<li>${escapeHtml(msg)}</li>`).join('')}</ul>`
+        : '';
+
+      el.innerHTML = `
+        <div class="trpg-selection-head">
+          <div class="trpg-selection-badge ${badgeClass}">${badgeText}</div>
+          <div class="trpg-selection-meta">DM 1 / Player ${players.length} / Actor ${expectedActors.length || '-'}</div>
+        </div>
+        <div class="trpg-selection-row">
+          <span class="trpg-selection-chip dm">${dmKeeper ? `DM ${escapeHtml(dmKeeper)}` : 'DM 미지정'}</span>
+          ${actorChip}
+        </div>
+        <div class="trpg-selection-row">${playerChips}</div>
+        ${issueList}
+      `;
+    }
+
     function trpgPartyActorNameMap(state, events) {
       const out = {};
       const partyObj =
@@ -8181,6 +8320,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
       trpgRenderAssignmentEditor(trpgStateCache, trpgCurrentSessionEvents(trpgEventsCache));
       renderTrpgKeeperQuickList();
+      renderTrpgSelectionSummary(trpgStateCache, trpgCurrentSessionEvents(trpgEventsCache));
     }
 
     function trpgPopulateKeeperSelectors(force = false) {
@@ -9546,6 +9686,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       renderTrpgSessionMeta(state, viewEvents, summary, phase);
       renderTrpgPartyAssignment(state, viewEvents);
       trpgRenderAssignmentEditor(state, viewEvents);
+      renderTrpgSelectionSummary(state, viewEvents);
       trpgUpdateNextAction(state, viewEvents);
       renderTrpgStatus(state, summary, phase);
       renderTrpgRoundLog(viewEvents, round);

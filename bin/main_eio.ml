@@ -732,6 +732,10 @@ let cors_headers origin = [
   ("access-control-allow-credentials", "true");
 ]
 
+let respond_json_with_cors ?(status = `OK) request reqd body =
+  let origin = get_origin request in
+  Http.Response.json ~status ~extra_headers:(cors_headers origin) body reqd
+
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
   let origin = get_origin request in
@@ -3850,13 +3854,13 @@ let make_routes ~port ~host =
          let event_type_filter = query_param req "event_type" in
          match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
          | Ok json ->
-             Http.Response.json (Yojson.Safe.to_string json) reqd
+             respond_json_with_cors request reqd (Yojson.Safe.to_string json)
          | Error (`Bad_request, msg) ->
-             Http.Response.json ~status:`Bad_request (Yojson.Safe.to_string (trpg_error_json msg)) reqd
-         | Error (`Internal_server_error, msg) ->
-             Http.Response.json ~status:`Internal_server_error
+             respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
-               reqd
+         | Error (`Internal_server_error, msg) ->
+             respond_json_with_cors ~status:`Internal_server_error request reqd
+               (Yojson.Safe.to_string (trpg_error_json msg))
        ) request reqd)
   |> Http.Router.post "/api/v1/trpg/events" (fun request reqd ->
        with_public_read (fun state _req reqd ->
@@ -3864,15 +3868,14 @@ let make_routes ~port ~host =
          Http.Request.read_body_async reqd (fun body_str ->
            match trpg_append_event_json ~base_dir ~body_str with
            | Ok json ->
-               Http.Response.json ~status:`Created (Yojson.Safe.to_string json) reqd
+               respond_json_with_cors ~status:`Created request reqd
+                 (Yojson.Safe.to_string json)
            | Error (`Bad_request, msg) ->
-               Http.Response.json ~status:`Bad_request
+               respond_json_with_cors ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string (trpg_error_json msg))
-                 reqd
            | Error (`Internal_server_error, msg) ->
-               Http.Response.json ~status:`Internal_server_error
+               respond_json_with_cors ~status:`Internal_server_error request reqd
                  (Yojson.Safe.to_string (trpg_error_json msg))
-                 reqd
          )
        ) request reqd)
   |> Http.Router.get "/api/v1/trpg/state" (fun request reqd ->
@@ -3884,13 +3887,13 @@ let make_routes ~port ~host =
          in
          match trpg_derive_state_json ~base_dir ~room_id ~rule_module with
          | Ok json ->
-             Http.Response.json (Yojson.Safe.to_string json) reqd
+             respond_json_with_cors request reqd (Yojson.Safe.to_string json)
          | Error (`Bad_request, msg) ->
-             Http.Response.json ~status:`Bad_request (Yojson.Safe.to_string (trpg_error_json msg)) reqd
-         | Error (`Internal_server_error, msg) ->
-             Http.Response.json ~status:`Internal_server_error
+             respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
-               reqd
+         | Error (`Internal_server_error, msg) ->
+             respond_json_with_cors ~status:`Internal_server_error request reqd
+               (Yojson.Safe.to_string (trpg_error_json msg))
        ) request reqd)
   |> Http.Router.post "/api/v1/trpg/dice/roll" (fun request reqd ->
        with_public_read (fun state _req reqd ->
@@ -3898,15 +3901,14 @@ let make_routes ~port ~host =
          Http.Request.read_body_async reqd (fun body_str ->
            match trpg_dice_roll_json ~base_dir ~body_str with
            | Ok json ->
-               Http.Response.json ~status:`Created (Yojson.Safe.to_string json) reqd
+               respond_json_with_cors ~status:`Created request reqd
+                 (Yojson.Safe.to_string json)
            | Error (`Bad_request, msg) ->
-               Http.Response.json ~status:`Bad_request
+               respond_json_with_cors ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string (trpg_error_json msg))
-                 reqd
            | Error (`Internal_server_error, msg) ->
-               Http.Response.json ~status:`Internal_server_error
+               respond_json_with_cors ~status:`Internal_server_error request reqd
                  (Yojson.Safe.to_string (trpg_error_json msg))
-                 reqd
          )
        ) request reqd)
   |> Http.Router.post "/api/v1/trpg/turns/advance" (fun request reqd ->
@@ -3915,15 +3917,13 @@ let make_routes ~port ~host =
          Http.Request.read_body_async reqd (fun body_str ->
            match trpg_turn_advance_json ~base_dir ~body_str with
            | Ok json ->
-               Http.Response.json (Yojson.Safe.to_string json) reqd
+               respond_json_with_cors request reqd (Yojson.Safe.to_string json)
            | Error (`Bad_request, msg) ->
-               Http.Response.json ~status:`Bad_request
+               respond_json_with_cors ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string (trpg_error_json msg))
-                 reqd
            | Error (`Internal_server_error, msg) ->
-               Http.Response.json ~status:`Internal_server_error
+               respond_json_with_cors ~status:`Internal_server_error request reqd
                  (Yojson.Safe.to_string (trpg_error_json msg))
-                 reqd
          )
        ) request reqd)
   |> Http.Router.post "/api/v1/trpg/rounds/run" (fun request reqd ->
@@ -3938,20 +3938,17 @@ let make_routes ~port ~host =
                  trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
                with
                | Ok json ->
-                   Http.Response.json (Yojson.Safe.to_string json) reqd
+                   respond_json_with_cors request reqd (Yojson.Safe.to_string json)
                | Error (`Bad_request, msg) ->
-                   Http.Response.json ~status:`Bad_request
+                   respond_json_with_cors ~status:`Bad_request request reqd
                      (Yojson.Safe.to_string (trpg_error_json msg))
-                     reqd
                | Error (`Internal_server_error, msg) ->
-                   Http.Response.json ~status:`Internal_server_error
-                     (Yojson.Safe.to_string (trpg_error_json msg))
-                     reqd)
+                   respond_json_with_cors ~status:`Internal_server_error request reqd
+                     (Yojson.Safe.to_string (trpg_error_json msg)))
            | _ ->
-               Http.Response.json ~status:`Internal_server_error
+               respond_json_with_cors ~status:`Internal_server_error request reqd
                  (Yojson.Safe.to_string
                     (trpg_error_json "trpg runtime not initialized"))
-                 reqd
          )
        ) request reqd)
   |> Http.Router.get "/api/v1/trpg/stream" (fun request reqd ->
@@ -3962,15 +3959,13 @@ let make_routes ~port ~host =
          let event_type_filter = query_param req "event_type" in
          match trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter with
          | Ok json ->
-             Http.Response.json (Yojson.Safe.to_string json) reqd
+             respond_json_with_cors request reqd (Yojson.Safe.to_string json)
          | Error (`Bad_request, msg) ->
-             Http.Response.json ~status:`Bad_request
+             respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
-               reqd
          | Error (`Internal_server_error, msg) ->
-             Http.Response.json ~status:`Internal_server_error
+             respond_json_with_cors ~status:`Internal_server_error request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
-               reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)

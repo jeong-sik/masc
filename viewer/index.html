@@ -170,26 +170,42 @@
             <!-- Primary Zone: Bevy Canvas -->
             <section id="primary-zone">
                 <canvas id="bevy-canvas"></canvas>
-                <div id="zone-label" class="overlay-label"></div>
+                <div id="map-label" class="overlay-label"></div>
             </section>
 
             <!-- Secondary Zone: Mode-specific panels (DOM) -->
             <section id="secondary-zone">
-                <h2 class="panel-title" id="secondary-title">—</h2>
-                <div id="secondary-content" class="scrollable"></div>
+                <h2 class="panel-title" id="secondary-title">Narrative</h2>
+                <div id="secondary-content" class="scrollable">
+                    <div id="turn-phase" class="phase-indicator">
+                        <div class="turn-number">TURN <span id="turn-num">1</span></div>
+                        <div class="phase-track">
+                            <div class="phase active" data-phase="dm_narration">DM</div>
+                            <div class="phase" data-phase="party_discussion">Discuss</div>
+                            <div class="phase" data-phase="action_declaration">Action</div>
+                            <div class="phase" data-phase="dice_resolution">Dice</div>
+                            <div class="phase" data-phase="outcome_narration">Outcome</div>
+                            <div class="phase" data-phase="state_update">Update</div>
+                            <div class="phase" data-phase="transition">Move</div>
+                        </div>
+                    </div>
+                    <div id="narrative-log"></div>
+                </div>
             </section>
 
             <!-- Tertiary Zone: Side panel (DOM) -->
             <aside id="tertiary-zone">
-                <h2 class="panel-title" id="tertiary-title">—</h2>
-                <div id="tertiary-content" class="scrollable"></div>
+                <h2 class="panel-title" id="tertiary-title">Party</h2>
+                <div id="tertiary-content" class="scrollable">
+                    <div id="character-panel"></div>
+                </div>
             </aside>
         </main>
 
         <!-- Bottom Zone -->
         <footer id="bottom-zone">
-            <h2 class="panel-title" id="bottom-title">—</h2>
-            <div id="bottom-content" class="scrollable horizontal"></div>
+            <h2 class="panel-title" id="bottom-title">Dice Log</h2>
+            <div id="dice-log" class="scrollable horizontal"></div>
         </footer>
     </div>
 

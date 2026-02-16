@@ -260,3 +260,20 @@ let remove_consumer t name =
   let before = List.length t.consumers in
   t.consumers <- List.filter (fun (module C : Consumer) -> C.name <> name) t.consumers;
   List.length t.consumers < before
+
+(* ── Testing helpers ───────────────────────────────────────────── *)
+
+module For_testing = struct
+  let is_quiet_hour_at ~hour ~quiet_range =
+    let (qs, qe) = quiet_range in
+    if qs <= qe then hour >= qs && hour < qe
+    else hour >= qs || hour < qe
+
+  let effective_interval_at ~hour rhythm =
+    let quiet = is_quiet_hour_at ~hour ~quiet_range:rhythm.quiet in
+    let base =
+      if quiet then rhythm.base_s *. 3.0
+      else rhythm.base_s
+    in
+    Float.max rhythm.min_s (Float.min rhythm.max_s base)
+end

@@ -63,6 +63,26 @@ pub fn apply_item_acquired(
     }
 }
 
+/// Apply weather change events to OverlayState.
+pub fn apply_weather_change(
+    mut events: MessageReader<WeatherChanged>,
+    mut overlay_state: ResMut<OverlayState>,
+) {
+    for WeatherChanged(payload) in events.read() {
+        overlay_state.weather = payload.weather.clone();
+    }
+}
+
+/// Apply mood change events to OverlayState.
+pub fn apply_mood_change(
+    mut events: MessageReader<MoodChanged>,
+    mut overlay_state: ResMut<OverlayState>,
+) {
+    for MoodChanged(payload) in events.read() {
+        overlay_state.mood = payload.mood.clone();
+    }
+}
+
 /// Apply character death events.
 pub fn apply_character_death(
     mut events: MessageReader<CharacterDied>,

@@ -50,3 +50,11 @@ pub struct GameCamera;
 /// Marker for the map background sprite (needed for OnExit despawn).
 #[derive(Component, Debug)]
 pub struct MapBackground;
+
+/// Marker for the full-screen weather overlay sprite (z = -9.0).
+#[derive(Component, Debug)]
+pub struct WeatherOverlay;
+
+/// Marker for the full-screen mood overlay sprite (z = -8.0).
+#[derive(Component, Debug)]
+pub struct MoodOverlay;

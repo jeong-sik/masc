@@ -274,7 +274,7 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional: set models when creating keeper inline");
+          ("description", `String "Optional: set models when creating keeper inline. If keeper already exists, this acts as a runtime-only cascade override for this message call.");
         ]);
         ("ollama_timeout_sec", `Assoc [
           ("type", `String "number");
@@ -6065,7 +6065,10 @@ let handle_keeper_msg ctx args : tool_result =
           updated
       in
       start_keepalive ctx meta;
-      (match model_specs_of_strings meta.models with
+      let effective_models =
+        if inline_models <> [] then inline_models else meta.models
+      in
+      (match model_specs_of_strings effective_models with
        | Error e -> (false, "❌ " ^ e)
        | Ok specs ->
          (match ensure_api_keys specs with

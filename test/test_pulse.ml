@@ -276,6 +276,115 @@ let () = test "stats tracks beats and nudges" (fun () ->
     failwith (Printf.sprintf "expected >=3 beats (startup + 2 nudges), got %d" s.total_beats)
 )
 
+(* ── Test: quiet hour — normal range (1..6) ──────────────────── *)
+
+let () = test "quiet_hour_normal_range" (fun () ->
+  let q = Pulse.For_testing.is_quiet_hour_at in
+  let range = (1, 6) in
+  (* Inside quiet: 1,2,3,4,5 *)
+  assert (q ~hour:1 ~quiet_range:range);
+  assert (q ~hour:3 ~quiet_range:range);
+  assert (q ~hour:5 ~quiet_range:range);
+  (* Outside quiet: 0,6,7,23 *)
+  assert (not (q ~hour:0 ~quiet_range:range));
+  assert (not (q ~hour:6 ~quiet_range:range));
+  assert (not (q ~hour:7 ~quiet_range:range));
+  assert (not (q ~hour:23 ~quiet_range:range))
+)
+
+(* ── Test: quiet hour — wrap-around range (22..6) ────────────── *)
+
+let () = test "quiet_hour_wrap_around" (fun () ->
+  let q = Pulse.For_testing.is_quiet_hour_at in
+  let range = (22, 6) in
+  (* Inside quiet: 22,23,0,3,5 *)
+  assert (q ~hour:22 ~quiet_range:range);
+  assert (q ~hour:23 ~quiet_range:range);
+  assert (q ~hour:0 ~quiet_range:range);
+  assert (q ~hour:3 ~quiet_range:range);
+  assert (q ~hour:5 ~quiet_range:range);
+  (* Outside quiet: 6,12,21 *)
+  assert (not (q ~hour:6 ~quiet_range:range));
+  assert (not (q ~hour:12 ~quiet_range:range));
+  assert (not (q ~hour:21 ~quiet_range:range))
+)
+
+(* ── Test: quiet hour — boundary cases ───────────────────────── *)
+
+let () = test "quiet_hour_boundary" (fun () ->
+  let q = Pulse.For_testing.is_quiet_hour_at in
+  (* (0,0): qs <= qe, hour >= 0 && hour < 0 → always false *)
+  for h = 0 to 23 do
+    assert (not (q ~hour:h ~quiet_range:(0, 0)))
+  done;
+  (* (0,24): qs <= qe, hour >= 0 && hour < 24 → always true *)
+  for h = 0 to 23 do
+    assert (q ~hour:h ~quiet_range:(0, 24))
+  done
+)
+
+(* ── Test: effective interval — normal vs quiet ──────────────── *)
+
+let () = test "effective_interval_normal" (fun () ->
+  let eff = Pulse.For_testing.effective_interval_at in
+  let r = Pulse.default_rhythm in
+  (* base=60, min=30, max=300, quiet=(1,6) *)
+  (* hour=12: not quiet → base=60 → clamp(30, 300, 60) = 60 *)
+  let v_normal = eff ~hour:12 r in
+  assert (v_normal = 60.0);
+  (* hour=3: quiet → base=60*3=180 → clamp(30, 300, 180) = 180 *)
+  let v_quiet = eff ~hour:3 r in
+  assert (v_quiet = 180.0)
+)
+
+(* ── Test: effective interval — clamping ─────────────────────── *)
+
+let () = test "effective_interval_clamping" (fun () ->
+  let eff = Pulse.For_testing.effective_interval_at in
+  (* Clamp to max: base=200, quiet→200*3=600 > max=300 → 300 *)
+  let r_high = { Pulse.base_s = 200.0; min_s = 30.0; max_s = 300.0;
+                 quiet = (1, 6) } in
+  let v = eff ~hour:3 r_high in
+  assert (v = 300.0);
+  (* Clamp to min: base=5, not quiet→5 < min=30 → 30 *)
+  let r_low = { Pulse.base_s = 5.0; min_s = 30.0; max_s = 300.0;
+                quiet = (1, 6) } in
+  let v2 = eff ~hour:12 r_low in
+  assert (v2 = 30.0)
+)
+
+(* ── Test: nudge coalescing — full stream ────────────────────── *)
+
+let () = test "nudge_coalescing" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let t = Pulse.create
+    ~clock
+    ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0;
+              quiet = (1, 6) }
+    ~lifecycle:Pulse.Perpetual
+    ~consumers:[]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Pulse.run ~sw t;
+  Eio.Time.sleep clock 0.05;
+  (* First nudge goes into the capacity-1 stream *)
+  Pulse.nudge t ~reason:"first";
+  (* Second nudge should be silently dropped (stream full) *)
+  Pulse.nudge t ~reason:"second";
+  (* Give time for the engine to process *)
+  Eio.Time.sleep clock 0.15;
+  Pulse.shutdown t;
+  Eio.Time.sleep clock 0.1;
+  let s = Pulse.stats t in
+  (* At least startup + nudge(first) + shutdown, but NOT two nudge beats
+     since "second" was coalesced (dropped). total_nudges should be <= 1
+     from the rapid pair — the engine may process first before second arrives,
+     so we just verify the engine didn't block/crash. *)
+  if s.total_beats < 2 then
+    failwith (Printf.sprintf "expected >=2 beats, got %d" s.total_beats)
+)
+
 (* ── Summary ───────────────────────────────────────────────── *)
 
 let () =

@@ -1,0 +1,6 @@
+
+(executable
+ (name game_harness)
+ (public_name game_harness)
+ (libraries masc_mcp.game masc_mcp.bridge unix yojson str)
+ (modules game_harness))

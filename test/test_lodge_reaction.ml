@@ -35,7 +35,7 @@ let test_reaction_type_roundtrip () =
   List.iter (fun t ->
     let s = Lodge_reaction.reaction_type_to_string t in
     let t' = Lodge_reaction.reaction_type_of_string s in
-    check bool (Printf.sprintf "roundtrip %s" s) true (t = t')
+    check bool (Printf.sprintf "roundtrip %s" s) true (t = Result.get_ok t')
   ) types
 
 let test_reaction_type_strings () =

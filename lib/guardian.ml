@@ -1,4 +1,5 @@
-(** Internal guardian loops (no external watchdog dependency). *)
+(** Internal guardian loops (no external watchdog dependency).
+    Migrated to Pulse tick engine for unified timer/cancellation. *)
 
 open Printf
 
@@ -46,6 +47,11 @@ let last_gc_result : string option ref = ref None
 let last_lodge_result : (bool * string) option ref = ref None
 let lodge_running = ref false
 
+(* Pulse instances — stored for nudge/shutdown/stats access. *)
+let zombie_pulse : Pulse.t option ref = ref None
+let gc_pulse : Pulse.t option ref = ref None
+let lodge_pulse_inst : Pulse.t option ref = ref None
+
 let log msg =
   eprintf "[guardian] %s\n%!" msg
 
@@ -60,6 +66,81 @@ let is_quiet_hours () =
     let quiet_start = Env_config.LodgeV2.quiet_start in
     let quiet_end = Env_config.LodgeV2.quiet_end in
     quiet_start < quiet_end && hour >= quiet_start && hour < quiet_end
+
+(* ── Pulse helpers ─────────────────────────────────────────── *)
+
+(** Fixed-interval rhythm with no quiet hours. *)
+let fixed_rhythm base_s =
+  { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = (0, 0) }
+
+(* ── Pulse Consumer Factories ──────────────────────────────── *)
+
+let make_zombie_consumer config : (module Pulse.Consumer) =
+  (module struct
+    let name = "guardian-zombie"
+    let should_act _beat = true
+    let on_beat _beat =
+      try
+        let result = Room.cleanup_zombies config in
+        last_zombie_result := Some result;
+        set_last last_zombie_cleanup;
+        log result;
+        Ok ()
+      with exn ->
+        let msg = sprintf "zombie cleanup failed: %s" (Printexc.to_string exn) in
+        log msg;
+        Error msg
+  end)
+
+let make_gc_consumer config : (module Pulse.Consumer) =
+  (module struct
+    let name = "guardian-gc"
+    let should_act _beat = true
+    let on_beat _beat =
+      try
+        let result = Room.gc config ~days:gc_days () in
+        last_gc_result := Some result;
+        set_last last_gc;
+        log (sprintf "gc: %s" result);
+        Ok ()
+      with exn ->
+        let msg = sprintf "gc failed: %s" (Printexc.to_string exn) in
+        log msg;
+        Error msg
+  end)
+
+let make_lodge_consumer ~net : (module Pulse.Consumer) =
+  (module struct
+    let name = "guardian-lodge"
+
+    let should_act _beat =
+      if is_quiet_hours () then begin
+        log "quiet hours - skipping lodge loop";
+        false
+      end else
+        true
+
+    let on_beat _beat =
+      lodge_running := true;
+      let args = `Assoc [
+        ("iterations", `Int lodge_iterations);
+        ("delay_ms", `Int lodge_delay_ms);
+        ("verbose", `Bool lodge_verbose);
+      ] in
+      let result =
+        try Tool_lodge.autonomous_loop ~net args
+        with exn ->
+          (false, sprintf "exception: %s" (Printexc.to_string exn))
+      in
+      last_lodge_result := Some result;
+      set_last last_lodge;
+      lodge_running := false;
+      match result with
+      | (true, msg) -> log (sprintf "lodge loop ok: %s" msg); Ok ()
+      | (false, msg) -> log (sprintf "lodge loop failed: %s" msg); Error msg
+  end)
+
+(* ── Status ────────────────────────────────────────────────── *)
 
 let status_json () : Yojson.Safe.t =
   let assoc = ref [
@@ -99,41 +180,33 @@ let status_json () : Yojson.Safe.t =
        ]) :: !assoc);
   `Assoc (List.rev !assoc)
 
+(* ── Start ─────────────────────────────────────────────────── *)
+
 let start_masc_loops ~sw ~clock config =
   if not masc_enabled then begin
     log "masc guardian disabled";
     ()
   end else begin
-    if zombie_interval_s > 0.0 then
-      Eio.Fiber.fork ~sw (fun () ->
-        let rec loop () =
-          (try
-             let result = Room.cleanup_zombies config in
-             last_zombie_result := Some result;
-             set_last last_zombie_cleanup;
-             log result
-           with exn ->
-             log (sprintf "zombie cleanup failed: %s" (Printexc.to_string exn)));
-          Eio.Time.sleep clock zombie_interval_s;
-          loop ()
-        in
-        loop ()
-      );
-    if gc_interval_s > 0.0 then
-      Eio.Fiber.fork ~sw (fun () ->
-        let rec loop () =
-          (try
-             let result = Room.gc config ~days:gc_days () in
-             last_gc_result := Some result;
-             set_last last_gc;
-             log (sprintf "gc: %s" result)
-           with exn ->
-             log (sprintf "gc failed: %s" (Printexc.to_string exn)));
-          Eio.Time.sleep clock gc_interval_s;
-          loop ()
-        in
-        loop ()
-      )
+    if zombie_interval_s > 0.0 then begin
+      let p = Pulse.create
+        ~clock
+        ~rhythm:(fixed_rhythm zombie_interval_s)
+        ~lifecycle:Perpetual
+        ~consumers:[make_zombie_consumer config]
+      in
+      zombie_pulse := Some p;
+      Pulse.run ~sw p
+    end;
+    if gc_interval_s > 0.0 then begin
+      let p = Pulse.create
+        ~clock
+        ~rhythm:(fixed_rhythm gc_interval_s)
+        ~lifecycle:Perpetual
+        ~consumers:[make_gc_consumer config]
+      in
+      gc_pulse := Some p;
+      Pulse.run ~sw p
+    end
   end
 
 let start_lodge_loop ~sw ~clock ~net =
@@ -143,35 +216,16 @@ let start_lodge_loop ~sw ~clock ~net =
   end else if lodge_interval_s <= 0.0 || lodge_iterations <= 0 then begin
     log "lodge guardian disabled by interval/iterations";
     ()
-  end else
-    Eio.Fiber.fork ~sw (fun () ->
-      let rec loop () =
-        if is_quiet_hours () then begin
-          log "quiet hours - skipping lodge loop";
-        end else begin
-          lodge_running := true;
-          let args = `Assoc [
-            ("iterations", `Int lodge_iterations);
-            ("delay_ms", `Int lodge_delay_ms);
-            ("verbose", `Bool lodge_verbose);
-          ] in
-          let result =
-            try Tool_lodge.autonomous_loop ~net args
-            with exn ->
-              (false, sprintf "exception: %s" (Printexc.to_string exn))
-          in
-          last_lodge_result := Some result;
-          set_last last_lodge;
-          lodge_running := false;
-          (match result with
-           | (true, msg) -> log (sprintf "lodge loop ok: %s" msg)
-           | (false, msg) -> log (sprintf "lodge loop failed: %s" msg))
-        end;
-        Eio.Time.sleep clock lodge_interval_s;
-        loop ()
-      in
-      loop ()
-    )
+  end else begin
+    let p = Pulse.create
+      ~clock
+      ~rhythm:(fixed_rhythm lodge_interval_s)
+      ~lifecycle:Perpetual
+      ~consumers:[make_lodge_consumer ~net]
+    in
+    lodge_pulse_inst := Some p;
+    Pulse.run ~sw p
+  end
 
 let start ~sw ~clock ~net room_config =
   if not enabled then begin

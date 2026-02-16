@@ -152,7 +152,7 @@ masc_leave(agent_name: "codex")
 │ Agents │ Votes  │ Planner│ Consensus        │
 ├────────┴────────┴────────┴──────────────────┤
 │  Backend: FileSystem (.masc/) or PostgreSQL │
-│  + Neo4j (agent graph) + Qdrant (vectors)   │
+│  + Neo4j (agent graph) + Supabase pgvector  │
 └─────────────────────────────────────────────┘
 ```
 

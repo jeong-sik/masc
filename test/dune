@@ -360,6 +360,12 @@
  (modules test_agent_ecosystem)
  (libraries masc_mcp alcotest str))
 
+; Pulse module tests (Space heartbeat engine — Eio real clock)
+(test
+ (name test_pulse)
+ (modules test_pulse)
+ (libraries masc_mcp eio eio_main unix))
+
 ; Perpetual Agent Runtime tests (infinite context system)
 (test
  (name test_perpetual)

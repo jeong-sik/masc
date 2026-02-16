@@ -92,6 +92,7 @@
    planning_eio
    process_eio
    progress
+   pulse
    relay
    resilience
    response

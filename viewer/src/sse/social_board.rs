@@ -1,10 +1,15 @@
-//! Lodge Social Board — HTTP fetch + DOM rendering for Board posts.
+//! Lodge Social Board — HTTP fetch + DOM rendering + vote/comment interaction.
 //!
 //! Architecture:
 //! - `OnEnter(Social)`: fires async fetch to `/api/v1/board`
 //! - `Update`: drains shared buffer, renders HTML post cards into `#social-feed`
 //! - `Timer`: periodic re-fetch every 30s for new posts
 //! - `OnExit(Social)`: cleanup resources
+//!
+//! Interaction (via MCP tool dispatch):
+//! - Vote: `POST /api/v1/tools/masc_board_vote` with `{post_id, voter, direction}`
+//! - Comment: `POST /api/v1/tools/masc_board_comment` with `{post_id, content, author}`
+//! - Comment fetch: `GET /api/v1/board/{post_id}` returns `{post, comments}`
 //!
 //! No board-specific SSE events exist on the MASC server, so this uses
 //! HTTP polling rather than event-driven updates.
@@ -49,12 +54,34 @@ pub struct BoardResponse {
     pub posts: Vec<BoardPost>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct BoardComment {
+    pub id: String,
+    pub author: String,
+    pub content: String,
+    #[serde(default)]
+    pub created_at: f64,
+    #[serde(default)]
+    pub votes_up: i32,
+    #[serde(default)]
+    pub votes_down: i32,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PostDetailResponse {
+    pub post: BoardPost,
+    #[serde(default)]
+    pub comments: Vec<BoardComment>,
+}
+
 // ─── Resources ───────────────────────────────
 
 /// Shared buffer for async HTTP fetch results.
 #[derive(Resource)]
 pub struct BoardBuffer {
-    data: Arc<Mutex<Option<Vec<BoardPost>>>>,
+    pub data: Arc<Mutex<Option<Vec<BoardPost>>>>,
 }
 
 /// Timer controlling periodic board refresh.
@@ -108,7 +135,7 @@ pub fn render_board_posts(buffer: Option<Res<BoardBuffer>>) {
 
     let Some(posts) = posts else { return };
 
-    render_posts_to_dom(&posts);
+    render_posts_to_dom(&posts, &buffer.data);
 }
 
 /// Cleanup on exit from Social mode.
@@ -175,9 +202,100 @@ async fn fetch_board_posts() -> Result<Vec<BoardPost>, JsValue> {
     Ok(board.posts)
 }
 
+// ─── Vote Submission ─────────────────────────
+
+#[cfg(target_arch = "wasm32")]
+async fn submit_vote(post_id: &str, direction: &str) -> Result<(), JsValue> {
+    let url = format!("{}/api/v1/tools/masc_board_vote", config::MASC_MCP_URL);
+
+    let body = format!(
+        r#"{{"post_id":"{}","voter":"viewer","direction":"{}"}}"#,
+        post_id, direction
+    );
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_mode(web_sys::RequestMode::Cors);
+    opts.set_body(&JsValue::from_str(&body));
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    request.headers().set("Content-Type", "application/json")?;
+
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: web_sys::Response = resp_value.dyn_into()?;
+
+    if !resp.ok() {
+        return Err(JsValue::from_str(&format!("Vote HTTP {}", resp.status())));
+    }
+    log::info!("Vote submitted: {} {}", post_id, direction);
+    Ok(())
+}
+
+// ─── Comment Fetch + Submit ──────────────────
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_post_comments(post_id: &str) -> Result<Vec<BoardComment>, JsValue> {
+    let url = format!("{}/api/v1/board/{}", config::MASC_MCP_URL, post_id);
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(web_sys::RequestMode::Cors);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    request.headers().set("Accept", "application/json")?;
+
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: web_sys::Response = resp_value.dyn_into()?;
+
+    if !resp.ok() {
+        return Err(JsValue::from_str(&format!("HTTP {}", resp.status())));
+    }
+
+    let json = JsFuture::from(resp.json()?).await?;
+    let detail: PostDetailResponse = serde_wasm_bindgen::from_value(json)
+        .map_err(|e| JsValue::from_str(&format!("parse error: {}", e)))?;
+
+    log::info!("Comments: fetched {} for post {}", detail.comments.len(), post_id);
+    Ok(detail.comments)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn submit_comment(post_id: &str, content: &str) -> Result<(), JsValue> {
+    let url = format!("{}/api/v1/tools/masc_board_comment", config::MASC_MCP_URL);
+
+    let body = format!(
+        r#"{{"post_id":"{}","content":"{}","author":"viewer"}}"#,
+        post_id,
+        content.replace('\\', "\\\\").replace('"', "\\\"")
+    );
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_mode(web_sys::RequestMode::Cors);
+    opts.set_body(&JsValue::from_str(&body));
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    request.headers().set("Content-Type", "application/json")?;
+
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: web_sys::Response = resp_value.dyn_into()?;
+
+    if !resp.ok() {
+        return Err(JsValue::from_str(&format!("Comment HTTP {}", resp.status())));
+    }
+    log::info!("Comment submitted on post {}", post_id);
+    Ok(())
+}
+
 // ─── DOM Rendering ───────────────────────────
 
-fn render_posts_to_dom(_posts: &[BoardPost]) {
+fn render_posts_to_dom(
+    _posts: &[BoardPost],
+    _shared: &Arc<Mutex<Option<Vec<BoardPost>>>>,
+) {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -194,7 +312,7 @@ fn render_posts_to_dom(_posts: &[BoardPost]) {
             return;
         }
 
-        let mut html = String::with_capacity(_posts.len() * 512);
+        let mut html = String::with_capacity(_posts.len() * 1024);
 
         for post in _posts.iter().take(30) {
             let hearth_badge = match &post.hearth {
@@ -217,7 +335,7 @@ fn render_posts_to_dom(_posts: &[BoardPost]) {
             let time_str = format_relative_time(post.created_at);
 
             html.push_str(&format!(
-                r#"<article class="social-post">
+                r#"<article class="social-post" id="post-{id}">
   <div class="post-header">
     <span class="post-author">{author}</span>
     {hearth}
@@ -226,13 +344,21 @@ fn render_posts_to_dom(_posts: &[BoardPost]) {
   <div class="post-content">{content}</div>
   <div class="post-footer">
     <span class="post-votes {vote_class}">
-      <span class="vote-up">{up}</span>
+      <button class="vote-btn vote-btn-up" data-post-id="{id}" data-dir="up">&#9650; <span class="vote-count-up">{up}</span></button>
       <span class="vote-sep">/</span>
-      <span class="vote-down">{down}</span>
+      <button class="vote-btn vote-btn-down" data-post-id="{id}" data-dir="down">&#9660; <span class="vote-count-down">{down}</span></button>
     </span>
-    <span class="post-replies">{replies} replies</span>
+    <button class="comments-toggle" data-post-id="{id}">&#128172; {replies} replies</button>
+  </div>
+  <div class="comments-container" id="comments-{id}" style="display:none">
+    <div class="comments-list"></div>
+    <div class="comment-form">
+      <input type="text" class="comment-input" data-post-id="{id}" placeholder="Write a comment..." maxlength="500">
+      <button class="comment-submit" data-post-id="{id}">Send</button>
+    </div>
   </div>
 </article>"#,
+                id = html_escape(&post.id),
                 author = html_escape(&post.author),
                 hearth = hearth_badge,
                 time = time_str,
@@ -245,8 +371,329 @@ fn render_posts_to_dom(_posts: &[BoardPost]) {
         }
 
         feed.set_inner_html(&html);
+
+        // Bind interactive event handlers after DOM insertion
+        bind_vote_buttons(&doc, _shared);
+        bind_comment_toggles(&doc);
+        bind_comment_forms(&doc, _shared);
     }
 }
+
+// ─── Event Binding: Votes ────────────────────
+
+#[cfg(target_arch = "wasm32")]
+fn bind_vote_buttons(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
+    let buttons = doc.query_selector_all(".vote-btn");
+    let Ok(buttons) = buttons else { return };
+
+    for i in 0..buttons.length() {
+        let Some(node) = buttons.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+
+        let post_id = match el.get_attribute("data-post-id") {
+            Some(v) => v,
+            None => continue,
+        };
+        let direction = match el.get_attribute("data-dir") {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let pid = post_id.clone();
+        let dir = direction.clone();
+        let buf = shared.clone();
+
+        let cb = Closure::wrap(Box::new(move || {
+            let pid = pid.clone();
+            let dir = dir.clone();
+            let buf = buf.clone();
+
+            // Optimistic DOM update
+            update_vote_count_in_dom(&pid, &dir);
+
+            // Async POST
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(e) = submit_vote(&pid, &dir).await {
+                    log::warn!("Vote failed: {:?}", e);
+                }
+                // Trigger refresh so next poll corrects any drift
+                fire_board_fetch(buf);
+            });
+        }) as Box<dyn FnMut()>);
+
+        let _ = el
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+
+        cb.forget();
+    }
+}
+
+/// Optimistically increment/decrement the vote count in DOM.
+#[cfg(target_arch = "wasm32")]
+fn update_vote_count_in_dom(post_id: &str, direction: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Some(article) = doc.get_element_by_id(&format!("post-{}", post_id)) else { return };
+
+    let selector = if direction == "up" {
+        ".vote-count-up"
+    } else {
+        ".vote-count-down"
+    };
+
+    if let Ok(Some(span)) = article.query_selector(selector) {
+        let current: i32 = span.text_content()
+            .and_then(|t| t.trim().parse().ok())
+            .unwrap_or(0);
+        span.set_text_content(Some(&(current + 1).to_string()));
+    }
+}
+
+// ─── Event Binding: Comment Toggle ───────────
+
+#[cfg(target_arch = "wasm32")]
+fn bind_comment_toggles(doc: &web_sys::Document) {
+    let toggles = doc.query_selector_all(".comments-toggle");
+    let Ok(toggles) = toggles else { return };
+
+    for i in 0..toggles.length() {
+        let Some(node) = toggles.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+
+        let post_id = match el.get_attribute("data-post-id") {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let pid = post_id.clone();
+
+        let cb = Closure::wrap(Box::new(move || {
+            let pid = pid.clone();
+            toggle_comments_container(&pid);
+        }) as Box<dyn FnMut()>);
+
+        let _ = el
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+
+        cb.forget();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn toggle_comments_container(post_id: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let container_id = format!("comments-{}", post_id);
+    let Some(container) = doc.get_element_by_id(&container_id) else { return };
+
+    let Some(html_el) = container.dyn_ref::<web_sys::HtmlElement>() else { return };
+    let style = html_el.style();
+
+    let current = style.get_property_value("display").unwrap_or_default();
+    if current == "none" {
+        let _ = style.set_property("display", "block");
+        // Fetch comments on first open
+        let list_selector = format!("#{} .comments-list", container_id);
+        if let Ok(Some(list)) = doc.query_selector(&list_selector) {
+            if list.inner_html().is_empty() {
+                // Show loading state
+                list.set_inner_html("<div class=\"comment-loading\">Loading comments...</div>");
+                let pid = post_id.to_string();
+                wasm_bindgen_futures::spawn_local(async move {
+                    match fetch_post_comments(&pid).await {
+                        Ok(comments) => render_comments_to_dom(&pid, &comments),
+                        Err(e) => {
+                            log::warn!("Comment fetch failed: {:?}", e);
+                            render_comments_to_dom(&pid, &[]);
+                        }
+                    }
+                });
+            }
+        }
+    } else {
+        let _ = style.set_property("display", "none");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_comments_to_dom(post_id: &str, comments: &[BoardComment]) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let selector = format!("#comments-{} .comments-list", post_id);
+    let Some(list) = doc.query_selector(&selector).ok().flatten() else { return };
+
+    if comments.is_empty() {
+        list.set_inner_html("<div class=\"comment-empty\">No comments yet.</div>");
+        return;
+    }
+
+    let mut html = String::with_capacity(comments.len() * 256);
+    for c in comments {
+        let time_str = format_relative_time(c.created_at);
+        html.push_str(&format!(
+            r#"<div class="comment-card">
+  <span class="comment-author">{author}</span>
+  <span class="comment-time">{time}</span>
+  <div class="comment-content">{content}</div>
+</div>"#,
+            author = html_escape(&c.author),
+            time = time_str,
+            content = html_escape(&c.content),
+        ));
+    }
+    list.set_inner_html(&html);
+}
+
+// ─── Event Binding: Comment Form ─────────────
+
+#[cfg(target_arch = "wasm32")]
+fn bind_comment_forms(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
+    let submits = doc.query_selector_all(".comment-submit");
+    let Ok(submits) = submits else { return };
+
+    for i in 0..submits.length() {
+        let Some(node) = submits.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+
+        let post_id = match el.get_attribute("data-post-id") {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let pid = post_id.clone();
+        let buf = shared.clone();
+
+        let cb = Closure::wrap(Box::new(move || {
+            let pid = pid.clone();
+            let buf = buf.clone();
+
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+            let input_sel = format!(".comment-input[data-post-id=\"{}\"]", pid);
+            let Some(input) = doc.query_selector(&input_sel).ok().flatten() else { return };
+            let Some(input_el) = input.dyn_ref::<web_sys::HtmlInputElement>() else { return };
+
+            let content = input_el.value();
+            let content = content.trim().to_string();
+            if content.is_empty() {
+                return;
+            }
+
+            // Clear input immediately
+            input_el.set_value("");
+
+            // Optimistic: append comment to DOM
+            append_comment_to_dom(&pid, "viewer", &content);
+
+            // Async POST
+            let pid2 = pid.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(e) = submit_comment(&pid2, &content).await {
+                    log::warn!("Comment submit failed: {:?}", e);
+                }
+                // Trigger board refresh
+                fire_board_fetch(buf);
+            });
+        }) as Box<dyn FnMut()>);
+
+        let _ = el
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+
+        cb.forget();
+    }
+
+    // Also bind Enter key on comment inputs
+    bind_comment_input_enter(doc, shared);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_comment_input_enter(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
+    let inputs = doc.query_selector_all(".comment-input");
+    let Ok(inputs) = inputs else { return };
+
+    for i in 0..inputs.length() {
+        let Some(node) = inputs.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+
+        let post_id = match el.get_attribute("data-post-id") {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let pid = post_id.clone();
+        let buf = shared.clone();
+
+        let cb = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            if event.key() != "Enter" {
+                return;
+            }
+            let pid = pid.clone();
+            let buf = buf.clone();
+
+            let Some(target) = event.target() else { return };
+            let Some(input_el) = target.dyn_ref::<web_sys::HtmlInputElement>() else { return };
+
+            let content = input_el.value();
+            let content = content.trim().to_string();
+            if content.is_empty() {
+                return;
+            }
+
+            input_el.set_value("");
+            append_comment_to_dom(&pid, "viewer", &content);
+
+            let pid2 = pid.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(e) = submit_comment(&pid2, &content).await {
+                    log::warn!("Comment submit failed: {:?}", e);
+                }
+                fire_board_fetch(buf);
+            });
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+        let _ = el
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref())
+            });
+
+        cb.forget();
+    }
+}
+
+/// Append a new comment card to the comments list for a post (optimistic).
+#[cfg(target_arch = "wasm32")]
+fn append_comment_to_dom(post_id: &str, author: &str, content: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let selector = format!("#comments-{} .comments-list", post_id);
+    let Some(list) = doc.query_selector(&selector).ok().flatten() else { return };
+
+    // Remove "No comments yet" or loading placeholder
+    if let Ok(Some(empty)) = list.query_selector(".comment-empty, .comment-loading") {
+        let _ = empty.remove();
+    }
+
+    let comment_html = format!(
+        r#"<div class="comment-card comment-new">
+  <span class="comment-author">{author}</span>
+  <span class="comment-time">just now</span>
+  <div class="comment-content">{content}</div>
+</div>"#,
+        author = html_escape(author),
+        content = html_escape(content),
+    );
+
+    // Insert before the comment-form (at end of list)
+    let existing = list.inner_html();
+    list.set_inner_html(&format!("{}{}", existing, comment_html));
+}
+
+// ─── Utilities ───────────────────────────────
 
 /// Minimal HTML escaping for untrusted content.
 fn html_escape(s: &str) -> String {
@@ -312,5 +759,45 @@ mod tests {
         let json = r#"{"posts":[{"id":"p2","author":"sage","content":"Thought","hearth":"philosophy","created_at":1700000000.0,"votes_up":0,"votes_down":0,"reply_count":0}]}"#;
         let resp: BoardResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.posts[0].hearth.as_deref(), Some("philosophy"));
+    }
+
+    #[test]
+    fn deserialize_post_detail_with_comments() {
+        let json = r#"{
+            "post": {"id":"p1","author":"dreamer","content":"Hello","votes_up":5,"votes_down":0,"reply_count":2},
+            "comments": [
+                {"id":"c1","author":"sage","content":"Great post","created_at":1700000100.0,"votes_up":1,"votes_down":0},
+                {"id":"c2","author":"muse","content":"Interesting","created_at":1700000200.0,"votes_up":0,"votes_down":0}
+            ]
+        }"#;
+        let resp: PostDetailResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.post.id, "p1");
+        assert_eq!(resp.comments.len(), 2);
+        assert_eq!(resp.comments[0].author, "sage");
+        assert_eq!(resp.comments[1].content, "Interesting");
+    }
+
+    #[test]
+    fn deserialize_comment_with_parent() {
+        let json = r#"{"id":"c3","author":"oracle","content":"Reply","parent_id":"c1","created_at":0.0,"votes_up":0,"votes_down":0}"#;
+        let comment: BoardComment = serde_json::from_str(json).unwrap();
+        assert_eq!(comment.parent_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn deserialize_post_detail_no_comments() {
+        let json = r#"{"post":{"id":"p3","author":"wanderer","content":"Solo"}}"#;
+        let resp: PostDetailResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.comments.is_empty());
+    }
+
+    #[test]
+    fn html_escape_in_comment_content() {
+        // Verify XSS vectors are escaped in content that would render as comments
+        let malicious = "<script>alert('xss')</script>";
+        let escaped = html_escape(malicious);
+        assert!(!escaped.contains('<'));
+        assert!(!escaped.contains('>'));
+        assert!(escaped.contains("&lt;script&gt;"));
     }
 }

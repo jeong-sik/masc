@@ -1249,6 +1249,174 @@ body.mode-lobby #dashboard {
     color: var(--text-dim);
 }
 
+/* ─── Vote Buttons ───────────────────────── */
+
+.vote-btn {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    padding: 2px 8px;
+    border-radius: var(--card-radius);
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+    line-height: 1;
+}
+
+.vote-btn:hover {
+    border-color: var(--border-highlight);
+    background: var(--bg-card-hover);
+}
+
+.vote-btn-up:hover {
+    color: var(--status-connected);
+}
+
+.vote-btn-down:hover {
+    color: var(--status-disconnected);
+}
+
+.vote-btn.voted {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary-dim);
+    background: var(--accent-glow);
+}
+
+/* ─── Comments Toggle ────────────────────── */
+
+.comments-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    padding: 2px 6px;
+    border-radius: var(--card-radius);
+    transition: color 0.2s, background 0.2s;
+}
+
+.comments-toggle:hover {
+    color: var(--text-primary);
+    background: var(--bg-card-hover);
+}
+
+/* ─── Comments Container ─────────────────── */
+
+.comments-container {
+    margin-top: 8px;
+    padding-left: 12px;
+    border-left: 2px solid var(--border-highlight);
+}
+
+.comments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.comment-card {
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border-main);
+    border-radius: var(--card-radius);
+    padding: 8px 10px;
+    font-size: 0.88rem;
+}
+
+.comment-card .post-author {
+    font-size: 0.8rem;
+}
+
+.comment-card .post-content {
+    margin-top: 4px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.comment-card .post-time {
+    font-size: 0.75rem;
+}
+
+/* ─── Comment Form ───────────────────────── */
+
+.comment-form {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    align-items: center;
+}
+
+.comment-input {
+    flex: 1;
+    background: var(--bg-deep);
+    border: 1px solid var(--border-main);
+    border-radius: var(--card-radius);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    padding: 6px 10px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.comment-input::placeholder {
+    color: var(--text-dim);
+}
+
+.comment-input:focus {
+    border-color: var(--accent-primary-dim);
+}
+
+.comment-submit {
+    background: var(--bg-card);
+    border: 1px solid var(--border-highlight);
+    border-radius: var(--card-radius);
+    color: var(--accent-primary);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    padding: 6px 14px;
+    transition: background 0.2s, color 0.2s;
+    white-space: nowrap;
+}
+
+.comment-submit:hover {
+    background: var(--accent-glow);
+    color: var(--text-bright);
+}
+
+/* ─── Comment States ─────────────────────── */
+
+.comment-loading {
+    color: var(--text-dim);
+    font-style: italic;
+    padding: 8px 0;
+    font-size: 0.85rem;
+}
+
+.comment-empty {
+    color: var(--text-dim);
+    font-style: italic;
+    padding: 6px 0;
+    font-size: 0.85rem;
+}
+
+.comment-new {
+    animation: comment-fade-in 0.4s ease-out;
+}
+
+@keyframes comment-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* ─── Monitor Event Feed ─────────────────── */
 
 .monitor-event-feed {

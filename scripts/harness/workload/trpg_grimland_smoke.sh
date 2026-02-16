@@ -3,6 +3,7 @@ set -euo pipefail
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 SESSION_ID="${SESSION_ID:-smoke-grimland-$(date +%s)}"
+ROOM_ID="${ROOM_ID:-}"
 ROUNDS="${ROUNDS:-2}"
 RUN_ROUND="${RUN_ROUND:-0}"  # 0: bootstrap only, 1: include trpg.round.run
 
@@ -39,7 +40,13 @@ r_party="$(call_tool 3002 "trpg.party.select" "$args_party")"
 party="$(printf "%s" "$r_party" | payload | jq -c '.party')"
 
 echo "[bootstrap] trpg.session.start"
-args_start="$(jq -cn --arg sid "$SESSION_ID" --argjson party "$party" '{session_id:$sid,party:$party,phase:"briefing"}')"
+args_start="$(jq -cn --arg sid "$SESSION_ID" --arg room "$ROOM_ID" --argjson party "$party" '
+  if $room == "" then
+    {session_id:$sid,party:$party,phase:"briefing"}
+  else
+    {session_id:$sid,room_id:$room,party:$party,phase:"briefing"}
+  end
+')"
 r_start="$(call_tool 3003 "trpg.session.start" "$args_start")"
 room_id="$(printf "%s" "$r_start" | payload | jq -r '.room_id')"
 round_template="$(printf "%s" "$r_start" | payload | jq -c '.round_run_template')"

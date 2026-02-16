@@ -20,6 +20,9 @@ type event_type =
   | World_event
   | Session_started
   | Party_selected
+  | Actor_spawned
+  | Actor_claimed
+  | Actor_released
   | Intervention_submitted
   | Intervention_applied
 
@@ -54,6 +57,9 @@ let string_of_event_type = function
   | World_event -> "world.event"
   | Session_started -> "session.started"
   | Party_selected -> "party.selected"
+  | Actor_spawned -> "actor.spawned"
+  | Actor_claimed -> "actor.claimed"
+  | Actor_released -> "actor.released"
   | Intervention_submitted -> "intervention.submitted"
   | Intervention_applied -> "intervention.applied"
 
@@ -79,6 +85,9 @@ let event_type_of_string = function
   | "world.event" -> Ok World_event
   | "session.started" -> Ok Session_started
   | "party.selected" -> Ok Party_selected
+  | "actor.spawned" -> Ok Actor_spawned
+  | "actor.claimed" -> Ok Actor_claimed
+  | "actor.released" -> Ok Actor_released
   | "intervention.submitted" -> Ok Intervention_submitted
   | "intervention.applied" -> Ok Intervention_applied
   | s -> Error (Printf.sprintf "unknown event_type: %s" s)

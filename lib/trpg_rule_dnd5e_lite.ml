@@ -82,6 +82,7 @@ let init_state ~config =
       ("turn", `Int 1);
       ("current_node", `Null);
       ("party", if party = `Null then `Assoc [] else party);
+      ("actor_control", `Assoc []);
       ("world", world);
       ("dice_log", `List []);
       ("narration_log", `List []);
@@ -112,37 +113,61 @@ let update_party_actor state actor_id f =
       `Assoc (assoc_put "party" next_party fields)
   | _ -> state
 
+let update_actor_control state actor_id keeper_name_opt =
+  match state with
+  | `Assoc fields ->
+      let control_fields =
+        match assoc_get "actor_control" fields with
+        | Some (`Assoc xs) -> xs
+        | _ -> []
+      in
+      let next_control =
+        match keeper_name_opt with
+        | Some keeper_name -> `Assoc (assoc_put actor_id (`String keeper_name) control_fields)
+        | None -> `Assoc (List.remove_assoc actor_id control_fields)
+      in
+      `Assoc (assoc_put "actor_control" next_control fields)
+  | _ -> state
+
+let resolve_actor_id payload event =
+  match get_string_opt "actor_id" payload with
+  | Some id when String.trim id <> "" -> Some (String.trim id)
+  | _ -> event.Trpg_engine_event.actor_id
+
 let apply_hp_changed ~state ~event =
   let payload = event.Trpg_engine_event.payload in
-  let actor_id =
-    match get_string_opt "actor_id" payload with
-    | Some id -> Some id
-    | None -> event.actor_id
-  in
+  let actor_id = resolve_actor_id payload event in
   match actor_id with
   | None -> state
   | Some actor_id ->
-      update_party_actor state actor_id (fun actor_json ->
-          let old_hp = actor_json |> member "hp" |> to_int_option |> Option.value ~default:0 in
-          let max_hp = actor_json |> member "max_hp" |> to_int_option |> Option.value ~default:old_hp in
-          let delta = get_int_opt "delta" payload |> Option.value ~default:0 in
-          let computed_hp = clamp_int 0 max_hp (old_hp + delta) in
-          let new_hp = get_int_opt "new_hp" payload |> Option.value ~default:computed_hp in
-          let alive = get_bool_opt "alive" payload |> Option.value ~default:(new_hp > 0) in
-          let actor_fields = assoc_fields_or_empty actor_json in
-          `Assoc
-            (actor_fields
-            |> assoc_put "hp" (`Int new_hp)
-            |> assoc_put "max_hp" (`Int max_hp)
-            |> assoc_put "alive" (`Bool alive)))
+      let next_state =
+        update_party_actor state actor_id (fun actor_json ->
+            let old_hp = actor_json |> member "hp" |> to_int_option |> Option.value ~default:0 in
+            let max_hp =
+              actor_json |> member "max_hp" |> to_int_option |> Option.value ~default:old_hp
+            in
+            let delta = get_int_opt "delta" payload |> Option.value ~default:0 in
+            let computed_hp = clamp_int 0 max_hp (old_hp + delta) in
+            let new_hp = get_int_opt "new_hp" payload |> Option.value ~default:computed_hp in
+            let alive = get_bool_opt "alive" payload |> Option.value ~default:(new_hp > 0) in
+            let actor_fields = assoc_fields_or_empty actor_json in
+            `Assoc
+              (actor_fields
+              |> assoc_put "hp" (`Int new_hp)
+              |> assoc_put "max_hp" (`Int max_hp)
+              |> assoc_put "alive" (`Bool alive)))
+      in
+      let alive_after =
+        next_state |> member "party" |> member actor_id |> member "alive"
+        |> to_bool_option
+        |> Option.value ~default:true
+      in
+      if alive_after then next_state
+      else update_actor_control next_state actor_id None
 
 let apply_inventory_changed ~state ~event =
   let payload = event.Trpg_engine_event.payload in
-  let actor_id =
-    match get_string_opt "actor_id" payload with
-    | Some id -> Some id
-    | None -> event.actor_id
-  in
+  let actor_id = resolve_actor_id payload event in
   match actor_id with
   | None -> state
   | Some actor_id ->
@@ -172,6 +197,73 @@ let apply_inventory_changed ~state ~event =
               | _ -> inv @ [ `String item ]
             in
             `Assoc (assoc_put "inventory" (`List updated) actor_fields))
+
+let apply_actor_spawned ~state ~event =
+  let payload = event.Trpg_engine_event.payload in
+  match resolve_actor_id payload event with
+  | None -> state
+  | Some actor_id ->
+      let actor_json =
+        match payload |> member "actor" with
+        | `Assoc _ as actor -> actor
+        | _ -> `Assoc []
+      in
+      let actor_fields =
+        actor_json
+        |> assoc_fields_or_empty
+        |> assoc_put "name"
+             (`String
+               (get_string_opt "name" actor_json
+               |> Option.value ~default:actor_id))
+        |> assoc_put "role"
+             (`String
+               (get_string_opt "role" actor_json
+               |> Option.value ~default:"player"))
+      in
+      let max_hp =
+        match List.assoc_opt "max_hp" actor_fields with
+        | Some (`Int v) when v > 0 -> v
+        | _ -> 10
+      in
+      let hp =
+        match List.assoc_opt "hp" actor_fields with
+        | Some (`Int v) -> clamp_int 0 max_hp v
+        | _ -> max_hp
+      in
+      let alive =
+        match List.assoc_opt "alive" actor_fields with
+        | Some (`Bool b) -> b
+        | _ -> hp > 0
+      in
+      update_party_actor state actor_id (fun _existing ->
+          `Assoc
+            (actor_fields
+            |> assoc_put "max_hp" (`Int max_hp)
+            |> assoc_put "hp" (`Int hp)
+            |> assoc_put "alive" (`Bool alive)
+            |> assoc_put "inventory"
+                 (match List.assoc_opt "inventory" actor_fields with
+                 | Some (`List _ as inv) -> inv
+                 | _ -> `List [])))
+
+let apply_actor_claimed ~state ~event =
+  let payload = event.Trpg_engine_event.payload in
+  let actor_id = resolve_actor_id payload event in
+  let keeper_name =
+    match get_string_opt "keeper_name" payload with
+    | Some keeper when String.trim keeper <> "" -> Some (String.trim keeper)
+    | _ -> None
+  in
+  match actor_id, keeper_name with
+  | Some actor_id, Some keeper_name ->
+      update_actor_control state actor_id (Some keeper_name)
+  | _ -> state
+
+let apply_actor_released ~state ~event =
+  let payload = event.Trpg_engine_event.payload in
+  match resolve_actor_id payload event with
+  | Some actor_id -> update_actor_control state actor_id None
+  | None -> state
 
 let apply_flag_set ~state ~event =
   let payload = event.Trpg_engine_event.payload in
@@ -240,6 +332,9 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Inventory_changed -> apply_inventory_changed ~state ~event
   | Trpg_engine_event.Flag_set -> apply_flag_set ~state ~event
   | Trpg_engine_event.Node_advanced -> apply_node_advanced ~state ~event
+  | Trpg_engine_event.Actor_spawned -> apply_actor_spawned ~state ~event
+  | Trpg_engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
+  | Trpg_engine_event.Actor_released -> apply_actor_released ~state ~event
   | Trpg_engine_event.Phase_changed
   | Trpg_engine_event.Turn_action_proposed
   | Trpg_engine_event.Turn_timeout

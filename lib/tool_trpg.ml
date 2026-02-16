@@ -9,6 +9,9 @@
     - masc_trpg_pool_generate
     - masc_trpg_party_select
     - masc_trpg_session_start
+    - masc_trpg_actor_spawn
+    - masc_trpg_actor_claim
+    - masc_trpg_actor_release
     - masc_trpg_intervention_submit
 *)
 
@@ -216,7 +219,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 30), lang(ko|en).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 30), lang(ko|en), require_claim(boolean).";
       input_schema =
         `Assoc
           [
@@ -235,6 +238,7 @@ let schemas : Types.tool_schema list =
                   ("phase", `Assoc [ ("type", `String "string") ]);
                   ("rule_module", `Assoc [ ("type", `String "string") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "number") ]);
+                  ("require_claim", `Assoc [ ("type", `String "boolean") ]);
                   ("lang", `Assoc [ ("type", `String "string") ]);
                 ] );
             ( "required",
@@ -450,6 +454,76 @@ let schemas : Types.tool_schema list =
           ];
     };
     {
+      name = "masc_trpg_actor_spawn";
+      description =
+        "Spawn an actor entity in room state. \
+         Required: room_id, actor_id. \
+         Optional: role(dm|player|npc), name, archetype, persona, hp, max_hp, alive, traits, skills.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("role", `Assoc [ ("type", `String "string") ]);
+                  ("name", `Assoc [ ("type", `String "string") ]);
+                  ("archetype", `Assoc [ ("type", `String "string") ]);
+                  ("persona", `Assoc [ ("type", `String "string") ]);
+                  ("hp", `Assoc [ ("type", `String "integer") ]);
+                  ("max_hp", `Assoc [ ("type", `String "integer") ]);
+                  ("alive", `Assoc [ ("type", `String "boolean") ]);
+                  ("traits", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("skills", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                ] );
+            ("required", `List [ `String "room_id"; `String "actor_id" ]);
+          ];
+    };
+    {
+      name = "masc_trpg_actor_claim";
+      description =
+        "Claim an actor lease for a keeper. \
+         Required: room_id, actor_id, keeper_name. \
+         Enforces one keeper -> one actor and denies claim when actor is dead.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("keeper_name", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ( "required",
+              `List [ `String "room_id"; `String "actor_id"; `String "keeper_name" ] );
+          ];
+    };
+    {
+      name = "masc_trpg_actor_release";
+      description =
+        "Release an actor lease held by a keeper. \
+         Required: room_id, actor_id, keeper_name. Optional: reason.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("keeper_name", `Assoc [ ("type", `String "string") ]);
+                  ("reason", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ( "required",
+              `List [ `String "room_id"; `String "actor_id"; `String "keeper_name" ] );
+          ];
+    };
+    {
       name = "masc_trpg_intervention_submit";
       description =
         "Submit a human intervention to apply before next AI round run. \
@@ -558,6 +632,12 @@ let get_string_list_from_json = function
            xs)
   | _ -> Error "value must be string array"
 
+let get_optional_string_list args key =
+  match args |> member key with
+  | `Null -> Ok []
+  | `List _ as list_json -> get_string_list_from_json list_json
+  | _ -> Error (Printf.sprintf "%s must be string array" key)
+
 let dedupe_keep_order xs =
   let rec loop seen acc = function
     | [] -> List.rev acc
@@ -586,6 +666,10 @@ let sanitize_room_id (s : string) =
 let validate_rule_module = function
   | "" | "dnd5e-lite" -> Ok ()
   | other -> Error (Printf.sprintf "unsupported rule_module: %s" other)
+
+let validate_actor_role = function
+  | "player" | "npc" | "dm" -> Ok ()
+  | other -> Error (Printf.sprintf "role must be one of: player, npc, dm (got %s)" other)
 
 let extract_config_from_events (events : Trpg_engine_event.t list) : Yojson.Safe.t =
   let rec loop = function
@@ -657,6 +741,42 @@ let derive_state ~base_dir ~room_id ~rule_module =
 
 let state_of_derived derived =
   match derived |> member "state" with `Null -> `Assoc [] | v -> v
+
+let state_party_fields state =
+  match state |> member "party" with
+  | `Assoc fields -> fields
+  | _ -> []
+
+let actor_exists_in_state state actor_id =
+  state_party_fields state |> List.mem_assoc actor_id
+
+let actor_alive_in_state state actor_id =
+  match state_party_fields state |> List.assoc_opt actor_id with
+  | Some actor_json ->
+      actor_json |> member "alive" |> to_bool_option |> Option.value ~default:true
+  | None -> false
+
+let state_actor_control_fields state =
+  match state |> member "actor_control" with
+  | `Assoc fields ->
+      fields
+      |> List.filter_map (function
+           | actor_id, `String keeper_name ->
+               let actor_id = String.trim actor_id in
+               let keeper_name = String.trim keeper_name in
+               if actor_id = "" || keeper_name = "" then None
+               else Some (actor_id, keeper_name)
+           | _ -> None)
+  | _ -> []
+
+let owner_for_actor state actor_id =
+  state_actor_control_fields state |> List.assoc_opt actor_id
+
+let actor_for_keeper state keeper_name =
+  let keeper_key = normalize_keeper_name keeper_name in
+  state_actor_control_fields state
+  |> List.find_map (fun (actor_id, owner) ->
+         if normalize_keeper_name owner = keeper_key then Some actor_id else None)
 
 let read_state_turn derived =
   match state_of_derived derived |> member "turn" with
@@ -1601,6 +1721,207 @@ let handle_session_start ctx args : result =
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
+let actor_payload_from_spawn_args args ~actor_id =
+  let ( let* ) = Result.bind in
+  let* role_opt = get_optional_string args "role" in
+  let role = Option.value ~default:"player" role_opt |> String.lowercase_ascii in
+  let* () = validate_actor_role role in
+  let* name_opt = get_optional_string args "name" in
+  let* archetype_opt = get_optional_string args "archetype" in
+  let* persona_opt = get_optional_string args "persona" in
+  let* hp_opt = get_optional_int args "hp" in
+  let* max_hp_opt = get_optional_int args "max_hp" in
+  let* alive = get_optional_bool args "alive" ~default:true in
+  let* traits = get_optional_string_list args "traits" in
+  let* skills = get_optional_string_list args "skills" in
+  let max_hp = Option.value ~default:10 max_hp_opt in
+  if max_hp <= 0 then Error "max_hp must be > 0"
+  else
+    let hp = Option.value ~default:max_hp hp_opt in
+    if hp < 0 then Error "hp must be >= 0"
+    else
+      let hp = min hp max_hp in
+      let actor_json =
+        `Assoc
+          [
+            ("name", `String (Option.value ~default:actor_id name_opt));
+            ("role", `String role);
+            ("archetype", Option.fold ~none:`Null ~some:(fun v -> `String v) archetype_opt);
+            ("persona", Option.fold ~none:`Null ~some:(fun v -> `String v) persona_opt);
+            ("hp", `Int hp);
+            ("max_hp", `Int max_hp);
+            ("alive", `Bool alive);
+            ("traits", json_of_strings traits);
+            ("skills", json_of_strings skills);
+            ("inventory", `List []);
+          ]
+      in
+      Ok actor_json
+
+let handle_actor_spawn ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* actor_id = get_required_string args "actor_id" in
+    let* rule_opt = get_optional_string args "rule_module" in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+    let* () = validate_rule_module rule_module in
+    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let state = state_of_derived derived in
+    if actor_exists_in_state state actor_id then
+      Error (Printf.sprintf "actor already exists: %s" actor_id)
+    else
+      let* actor_json = actor_payload_from_spawn_args args ~actor_id in
+      let payload =
+        `Assoc
+          [
+            ("actor_id", `String actor_id);
+            ("actor", actor_json);
+            ("spawned_by", `String ctx.agent_name);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Actor_spawned
+          ~actor_id ~payload ()
+      in
+      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("event", Trpg_engine_event.to_yojson event);
+            ("state", state_of_derived next_derived);
+          ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_actor_claim ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* actor_id = get_required_string args "actor_id" in
+    let* keeper_name = get_required_string args "keeper_name" in
+    let* rule_opt = get_optional_string args "rule_module" in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+    let* () = validate_rule_module rule_module in
+    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let state = state_of_derived derived in
+    if not (actor_exists_in_state state actor_id) then
+      Error (Printf.sprintf "unknown actor_id: %s" actor_id)
+    else if not (actor_alive_in_state state actor_id) then
+      Error (Printf.sprintf "actor is not alive: %s" actor_id)
+    else
+      let normalized_keeper = normalize_keeper_name keeper_name in
+      match owner_for_actor state actor_id with
+      | Some owner when normalize_keeper_name owner = normalized_keeper ->
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("room_id", `String room_id);
+                ("actor_id", `String actor_id);
+                ("keeper_name", `String owner);
+                ("status", `String "already_claimed");
+                ("state", state);
+              ])
+      | Some owner ->
+          Error
+            (Printf.sprintf
+               "actor already claimed: actor_id=%s owner=%s"
+               actor_id owner)
+      | None -> (
+          match actor_for_keeper state keeper_name with
+          | Some current_actor ->
+              Error
+                (Printf.sprintf
+                   "keeper already controls actor: keeper=%s actor_id=%s"
+                   keeper_name current_actor)
+          | None ->
+              let payload =
+                `Assoc
+                  [
+                    ("actor_id", `String actor_id);
+                    ("keeper_name", `String keeper_name);
+                    ("claimed_by", `String ctx.agent_name);
+                  ]
+              in
+              let* event =
+                append_event ~base_dir ~room_id
+                  ~event_type:Trpg_engine_event.Actor_claimed
+                  ~actor_id ~payload ()
+              in
+              let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+              Ok
+                (`Assoc
+                  [
+                    ("ok", `Bool true);
+                    ("room_id", `String room_id);
+                    ("actor_id", `String actor_id);
+                    ("keeper_name", `String keeper_name);
+                    ("status", `String "claimed");
+                    ("event", Trpg_engine_event.to_yojson event);
+                    ("state", state_of_derived next_derived);
+                  ]) )
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_actor_release ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* actor_id = get_required_string args "actor_id" in
+    let* keeper_name = get_required_string args "keeper_name" in
+    let* reason_opt = get_optional_string args "reason" in
+    let* rule_opt = get_optional_string args "rule_module" in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+    let* () = validate_rule_module rule_module in
+    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let state = state_of_derived derived in
+    let normalized_keeper = normalize_keeper_name keeper_name in
+    match owner_for_actor state actor_id with
+    | None ->
+        Error (Printf.sprintf "actor is not claimed: %s" actor_id)
+    | Some owner when normalize_keeper_name owner <> normalized_keeper ->
+        Error
+          (Printf.sprintf
+             "actor is claimed by another keeper: actor_id=%s owner=%s"
+             actor_id owner)
+    | Some owner ->
+        let payload =
+          `Assoc
+            [
+              ("actor_id", `String actor_id);
+              ("keeper_name", `String owner);
+              ("reason", Option.fold ~none:`Null ~some:(fun v -> `String v) reason_opt);
+              ("released_by", `String ctx.agent_name);
+            ]
+        in
+        let* event =
+          append_event ~base_dir ~room_id
+            ~event_type:Trpg_engine_event.Actor_released
+            ~actor_id ~payload ()
+        in
+        let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+        Ok
+          (`Assoc
+            [
+              ("ok", `Bool true);
+              ("room_id", `String room_id);
+              ("actor_id", `String actor_id);
+              ("keeper_name", `String owner);
+              ("status", `String "released");
+              ("event", Trpg_engine_event.to_yojson event);
+              ("state", state_of_derived next_derived);
+            ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
 let handle_intervention_submit ctx args : result =
   let ( let* ) = Result.bind in
   let base_dir = ctx.config.base_path in
@@ -1665,6 +1986,7 @@ let handle_round_run ctx args : result =
       let* rule_opt = get_optional_string args "rule_module" in
       let* phase_opt = get_optional_string args "phase" in
       let* lang_opt = get_optional_string args "lang" in
+      let* require_claim = get_optional_bool args "require_claim" ~default:false in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
@@ -1710,6 +2032,53 @@ let handle_round_run ctx args : result =
       let timeout_count = ref 0 in
 
       let process_one ~role ~actor_id ~keeper_name =
+        let record_unavailable_status ~status ~error =
+          let* unavailable_event =
+            append_unavailable_event
+              ~base_dir
+              ~room_id
+              ~phase
+              ~turn:turn_before
+              ~role
+              ~actor_id
+              ~keeper_name
+              ~reason:error
+              ()
+          in
+          unavailable_count := !unavailable_count + 1;
+          appended_events := !appended_events @ [ unavailable_event ];
+          statuses :=
+            `Assoc
+              [
+                ("actor_id", `String actor_id);
+                ("role", `String (role_to_string role));
+                ("keeper", `String keeper_name);
+                ("status", `String status);
+                ("error", `String error);
+              ]
+            :: !statuses;
+          Ok ()
+        in
+        let lease_check =
+          match role with
+          | `Dm -> Ok ()
+          | `Player -> (
+              match owner_for_actor state actor_id with
+              | Some owner when normalize_keeper_name owner <> normalize_keeper_name keeper_name ->
+                  Error
+                    (Printf.sprintf
+                       "actor lease mismatch: actor_id=%s owner=%s requested=%s"
+                       actor_id owner keeper_name)
+              | None when require_claim ->
+                  Error
+                    (Printf.sprintf
+                       "actor must be claimed before round_run: actor_id=%s"
+                       actor_id)
+              | _ -> Ok () )
+        in
+        match lease_check with
+        | Error lease_error -> record_unavailable_status ~status:"lease_denied" ~error:lease_error
+        | Ok () ->
         let prompt =
           build_keeper_prompt
             ~room_id
@@ -1748,59 +2117,11 @@ let handle_round_run ctx args : result =
               :: !statuses;
             Ok ()
         | `Error keeper_error ->
-            let* unavailable_event =
-              append_unavailable_event
-                ~base_dir
-                ~room_id
-                ~phase
-                ~turn:turn_before
-                ~role
-                ~actor_id
-                ~keeper_name
-                ~reason:keeper_error
-                ()
-            in
-            unavailable_count := !unavailable_count + 1;
-            appended_events := !appended_events @ [ unavailable_event ];
-            statuses :=
-              `Assoc
-                [
-                  ("actor_id", `String actor_id);
-                  ("role", `String (role_to_string role));
-                  ("keeper", `String keeper_name);
-                  ("status", `String "unavailable");
-                  ("error", `String keeper_error);
-                ]
-              :: !statuses;
-            Ok ()
+            record_unavailable_status ~status:"unavailable" ~error:keeper_error
         | `Ok keeper_json -> (
             match parse_keeper_reply keeper_json with
             | Error parse_error ->
-                let* unavailable_event =
-                  append_unavailable_event
-                    ~base_dir
-                    ~room_id
-                    ~phase
-                    ~turn:turn_before
-                    ~role
-                    ~actor_id
-                    ~keeper_name
-                    ~reason:parse_error
-                    ()
-                in
-                unavailable_count := !unavailable_count + 1;
-                appended_events := !appended_events @ [ unavailable_event ];
-                statuses :=
-                  `Assoc
-                    [
-                      ("actor_id", `String actor_id);
-                      ("role", `String (role_to_string role));
-                      ("keeper", `String keeper_name);
-                      ("status", `String "invalid_response");
-                      ("error", `String parse_error);
-                    ]
-                  :: !statuses;
-                Ok ()
+                record_unavailable_status ~status:"invalid_response" ~error:parse_error
             | Ok reply ->
                 let* reply_event =
                   append_keeper_reply_event
@@ -1998,6 +2319,9 @@ let dispatch ctx ~name ~args : result option =
   | "masc_trpg_pool_generate" -> Some (handle_pool_generate ctx args)
   | "masc_trpg_party_select" -> Some (handle_party_select ctx args)
   | "masc_trpg_session_start" -> Some (handle_session_start ctx args)
+  | "masc_trpg_actor_spawn" -> Some (handle_actor_spawn ctx args)
+  | "masc_trpg_actor_claim" -> Some (handle_actor_claim ctx args)
+  | "masc_trpg_actor_release" -> Some (handle_actor_release ctx args)
   | "masc_trpg_intervention_submit" -> Some (handle_intervention_submit ctx args)
   | "masc_trpg_round_run" -> Some (handle_round_run ctx args)
   | "masc_trpg_scene_transition" -> Some (handle_scene_transition ctx args)

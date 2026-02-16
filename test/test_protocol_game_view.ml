@@ -164,6 +164,193 @@ let test_trpg_action_submit_persists_events () =
       in
       check bool "events appended" true (List.length events >= 2))
 
+let test_trpg_world_query_requires_open () =
+  let base_dir = temp_dir () in
+  let _, ctx = mk_ctx base_dir in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let ok, body =
+        dispatch_exn ctx ~name:"trpg.world.query"
+          ~args:(`Assoc [ ("session_id", `String "wq-precond-1") ])
+      in
+      check bool "world.query should fail before open" false ok;
+      check string "error code"
+        "PRECONDITION_REQUIRED"
+        (body |> parse_json |> member "payload" |> member "code" |> to_string))
+
+let test_trpg_world_query_default_room_and_skills () =
+  let base_dir = temp_dir () in
+  let _, ctx = mk_ctx base_dir in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let _ =
+        dispatch_exn ctx ~name:"client.session.open"
+          ~args:(`Assoc [ ("session_id", `String "wq-default-1") ])
+      in
+      let ok, body =
+        dispatch_exn ctx ~name:"trpg.world.query"
+          ~args:(`Assoc [ ("session_id", `String "wq-default-1") ])
+      in
+      check bool "world.query ok" true ok;
+      let json = parse_json body in
+      check string "default room_id"
+        "session-wq-default-1"
+        (json |> member "payload" |> member "room_id" |> to_string);
+      check string "self name"
+        "tester"
+        (json |> member "payload" |> member "self" |> member "name" |> to_string);
+      let skills =
+        json
+        |> member "payload"
+        |> member "available_skills"
+        |> to_list |> List.map to_string
+      in
+      check bool "fallback skill includes observe" true (List.mem "observe" skills))
+
+let next_jsonl_seq_or_fail base_dir room_id =
+  match Trpg_engine_store.read_events ~base_dir ~room_id with
+  | Ok [] -> 1
+  | Ok events ->
+      List.fold_left
+        (fun acc (ev : Trpg_engine_event.t) -> max acc ev.seq)
+        0 events
+      + 1
+  | Error e -> fail ("read_events failed: " ^ e)
+
+let test_trpg_world_query_merge_and_visibility () =
+  let base_dir = temp_dir () in
+  let config, ctx = mk_ctx base_dir in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      finalize_for_session ctx ~session_id:"wq-merge-1";
+      let room_id = "session-wq-merge-1" in
+      let _ =
+        dispatch_exn ctx ~name:"client.session.open"
+          ~args:(`Assoc [ ("session_id", `String "wq-merge-1") ])
+      in
+      let ok_turn, _ =
+        dispatch_exn ctx ~name:"trpg.turn.advance"
+          ~args:
+            (`Assoc
+              [ ("room_id", `String room_id); ("phase", `String "round") ])
+      in
+      check bool "turn.advance ok" true ok_turn;
+      let ok_action, _ =
+        dispatch_exn ctx ~name:"trpg.action.submit"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String "wq-merge-1");
+                ("room_id", `String room_id);
+                ("action", `String "harvest");
+              ])
+      in
+      check bool "action.submit ok" true ok_action;
+      let injected_seq = next_jsonl_seq_or_fail config.base_path room_id in
+      let injected =
+        Trpg_engine_event.make ~seq:injected_seq ~room_id ~ts:(Types.now_iso ())
+          ~event_type:Trpg_engine_event.World_event ~actor_id:"npc-1"
+          ~payload:
+            (`Assoc
+              [
+                ("public_note", `String "wind rises");
+                ("secret_token", `String "hidden");
+                ("private_note", `String "hidden-too");
+                ("risk_ack", `String "internal-only");
+              ])
+          ()
+      in
+      (match Trpg_engine_store.append_event ~base_dir:config.base_path ~event:injected with
+      | Ok () -> ()
+      | Error e -> fail ("append injected event failed: " ^ e));
+      let ok, body =
+        dispatch_exn ctx ~name:"trpg.world.query"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String "wq-merge-1");
+                ("room_id", `String room_id);
+                ("after_seq", `Int 0);
+                ("event_limit", `Int 10);
+              ])
+      in
+      check bool "world.query ok" true ok;
+      let json = parse_json body in
+      check bool "source jsonl >= 3" true
+        ((json
+         |> member "payload"
+         |> member "source_counts"
+         |> member "jsonl"
+         |> to_int)
+        >= 3);
+      check bool "source sqlite >= 1" true
+        ((json
+         |> member "payload"
+         |> member "source_counts"
+         |> member "sqlite"
+         |> to_int)
+        >= 1);
+      let events =
+        json |> member "payload" |> member "events_since" |> to_list
+      in
+      let world_event =
+        events
+        |> List.find_opt (fun ev ->
+               ev |> member "type" |> to_string = "world.event")
+      in
+      check bool "world.event exists" true (Option.is_some world_event);
+      (match world_event with
+      | Some ev -> (
+          match ev |> member "payload" with
+          | `Assoc fields ->
+              check bool "secret removed" false (List.mem_assoc "secret_token" fields);
+              check bool "private removed" false (List.mem_assoc "private_note" fields);
+              check bool "risk_ack removed" false (List.mem_assoc "risk_ack" fields)
+          | _ -> fail "payload should be object")
+      | None -> ());
+      let ok_after, body_after =
+        dispatch_exn ctx ~name:"trpg.world.query"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String "wq-merge-1");
+                ("room_id", `String room_id);
+                ("after_seq", `Int 999);
+                ("event_limit", `Int 10);
+              ])
+      in
+      check bool "world.query after_seq ok" true ok_after;
+      check int "after_seq filters all"
+        0
+        ( body_after
+        |> parse_json
+        |> member "payload"
+        |> member "events_since"
+        |> to_list
+        |> List.length );
+      let ok_limited, body_limited =
+        dispatch_exn ctx ~name:"trpg.world.query"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String "wq-merge-1");
+                ("room_id", `String room_id);
+                ("event_limit", `Int 1);
+              ])
+      in
+      check bool "world.query event_limit ok" true ok_limited;
+      check bool "event_limit applies" true
+        (( body_limited
+         |> parse_json
+         |> member "payload"
+         |> member "events_since"
+         |> to_list
+         |> List.length )
+        <= 1))
+
 let test_client_session_open_success () =
   let base_dir = temp_dir () in
   let config, ctx = mk_ctx base_dir in
@@ -448,6 +635,12 @@ let () =
             test_legacy_alias_experiment_start_passthrough;
           test_case "trpg.action.submit persists events" `Quick
             test_trpg_action_submit_persists_events;
+          test_case "trpg.world.query requires open" `Quick
+            test_trpg_world_query_requires_open;
+          test_case "trpg.world.query default room + skills" `Quick
+            test_trpg_world_query_default_room_and_skills;
+          test_case "trpg.world.query merge + visibility" `Quick
+            test_trpg_world_query_merge_and_visibility;
           test_case "client.session.open success" `Quick
             test_client_session_open_success;
           test_case "client.session.open idempotent refresh" `Quick

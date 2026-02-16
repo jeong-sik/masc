@@ -81,7 +81,13 @@ let json_string_list xs = `List (List.map (fun s -> `String s) xs)
 let default_trpg_room_id = "default"
 
 let supported_client_topics =
-  [ "trpg.events"; "trpg.state"; "experiment.events"; "experiment.state" ]
+  [
+    "trpg.events";
+    "trpg.state";
+    "trpg.world";
+    "experiment.events";
+    "experiment.state";
+  ]
 
 let split_topics requested =
   let accepted, rejected =
@@ -124,6 +130,15 @@ let pull_fallback_for_topics topics =
           [
             ("http", `String "/api/v1/trpg/state?room_id=default");
             ("room_id", `String default_trpg_room_id);
+          ] )
+      :: !fields;
+  if List.mem "trpg.world" topics then
+    fields :=
+      ( "trpg.world",
+        `Assoc
+          [
+            ("tool", `String "trpg.world.query");
+            ("note", `String "requires session_id");
           ] )
       :: !fields;
   if List.mem "experiment.state" topics then
@@ -281,6 +296,39 @@ let experiment_summary_payload (e : Tool_experiment.experiment) =
       ("assignments", `Int (List.length e.assignments));
       ("observations", `Int (List.length e.observations));
     ]
+
+let world_agent_payload (a : Trpg_world_projection.agent_state) =
+  `Assoc
+    [
+      ("name", `String a.name);
+      ("status", `String (Trpg_world_projection.string_of_agent_status a.status));
+      ("last_action", Option.fold ~none:`Null ~some:(fun v -> `String v) a.last_action);
+    ]
+
+let json_strings = function
+  | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
+  | _ -> []
+
+let capabilities_for_agent config ~agent_name =
+  try
+    match Room.get_agents_status config |> member "agents" with
+    | `List items ->
+        items
+        |> List.find_map (fun item ->
+               match item |> member "name" with
+               | `String n when n = agent_name ->
+                   Some (json_strings (item |> member "capabilities"))
+               | _ -> None)
+        |> Option.value ~default:[]
+    | _ -> []
+  with _ -> []
+
+let default_world_skills =
+  [ "observe"; "deliberate"; "act"; "negotiate" ]
+
+let skills_for_world_query config ~agent_name =
+  let caps = capabilities_for_agent config ~agent_name in
+  if caps = [] then default_world_skills else dedupe_keep_order caps
 
 let latest_decision_for_session config ~session_id =
   let score (d : Game_view_state.decision) =
@@ -565,6 +613,72 @@ let handle_trpg_action_submit (ctx : context) ~canonical_tool args :
                 ]
             in
             Ok (ok_json ~canonical_tool payload)))
+
+let handle_trpg_world_query (ctx : context) ~canonical_tool args :
+    (tool_result, tool_result) result =
+  let* session_id = require_session_id args ~canonical_tool in
+  let room_id =
+    get_string_opt args "room_id"
+    |> Option.value
+         ~default:(sanitize_room_id (Printf.sprintf "session-%s" session_id))
+  in
+  let after_seq = max 0 (get_int args "after_seq" 0) in
+  let event_limit = get_int args "event_limit" 20 |> max 1 |> min 100 in
+  match Game_view_state.get_client_session ctx.config ~session_id with
+  | None ->
+      Error
+        (err_json ~canonical_tool ~code:"PRECONDITION_REQUIRED"
+           ~message:"client.session.open required before trpg.world.query" ())
+  | Some session ->
+      let viewer_agent =
+        get_string_opt args "agent"
+        |> Option.value ~default:session.agent_name
+        |> String.trim
+      in
+      let viewer_agent =
+        if viewer_agent = "" then session.agent_name else viewer_agent
+      in
+      let _ =
+        Game_view_state.open_client_session ctx.config ~session_id ~trace_id:None
+          ~agent_name:ctx.agent_name
+      in
+      let skills = skills_for_world_query ctx.config ~agent_name:viewer_agent in
+      (match Trpg_world_projection.build ~base_dir:ctx.config.base_path ~room_id with
+      | Error msg ->
+          Error
+            (err_json ~canonical_tool ~code:"IO_ERROR"
+               ~message:(Printf.sprintf "failed to build world projection: %s" msg)
+               ())
+      | Ok world ->
+          let view =
+            Trpg_visibility.filter ~agent_name:viewer_agent ~after_seq
+              ~event_limit ~available_skills:skills world
+          in
+          let payload =
+            `Assoc
+              [
+                ("session_id", `String session_id);
+                ("room_id", `String room_id);
+                ("agent", `String viewer_agent);
+                ("scope", `String "visible");
+                ("round", `Int view.round);
+                ("phase", `String view.phase);
+                ("self", world_agent_payload view.self);
+                ("visible_agents", `List (List.map world_agent_payload view.visible_agents));
+                ("events_since", `List (List.map Trpg_engine_event.to_yojson view.events_since));
+                ("available_skills", json_string_list view.available_skills);
+                ( "source_counts",
+                  `Assoc
+                    [
+                      ("jsonl", `Int world.source_counts.jsonl);
+                      ("sqlite", `Int world.source_counts.sqlite);
+                      ("merged", `Int world.source_counts.merged);
+                    ] );
+                ("server_time", `Float (Time_compat.now ()));
+                ("protocol_version", `String protocol_version);
+              ]
+          in
+          Ok (ok_json ~canonical_tool payload))
 
 let handle_trpg_canonical (ctx : context) ~canonical_tool ~legacy_name args :
     tool_result =
@@ -956,6 +1070,11 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
         (match handle_trpg_action_submit ctx ~canonical_tool:name args with
         | Ok r -> r
         | Error e -> e)
+  | "trpg.world.query" ->
+      Some
+        (match handle_trpg_world_query ctx ~canonical_tool:name args with
+        | Ok r -> r
+        | Error e -> e)
   | "trpg.dice.roll" ->
       Some (handle_trpg_canonical ctx ~canonical_tool:name ~legacy_name:"masc_trpg_dice_roll" args)
   | "trpg.turn.advance" ->
@@ -1139,6 +1258,17 @@ let schemas : Types.tool_schema list =
            ("action", string_schema);
            ("intent", string_schema);
            ("stakes", string_schema);
+         ]);
+    schema "trpg.world.query"
+      "Query agent-visible world projection for TRPG room."
+      (object_schema
+         ~required:[ "session_id" ]
+         [
+           ("session_id", string_schema);
+           ("agent", string_schema);
+           ("room_id", string_schema);
+           ("after_seq", int_schema);
+           ("event_limit", int_schema);
          ]);
     schema "trpg.dice.roll"
       "Canonical alias of masc_trpg_dice_roll."

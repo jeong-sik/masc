@@ -196,6 +196,8 @@
    trpg_engine_state_machine
    trpg_engine_store
    trpg_engine_store_sqlite
+   trpg_world_projection
+   trpg_visibility
    trpg_rule
    trpg_rule_dnd5e_lite
    trpg_engine_replay)

@@ -1921,7 +1921,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 </div>
                 <div class="trpg-control-field">
                   <label for="trpg-timeout-sec-input">Timeout (sec)</label>
-                  <input id="trpg-timeout-sec-input" type="number" min="1" step="1" value="30">
+                  <input id="trpg-timeout-sec-input" type="number" min="1" step="1" value="90">
                 </div>
                 <div class="trpg-control-field full">
                   <label for="trpg-player-keepers-input">Player Keepers (actor=keeper, one per line)</label>
@@ -7015,11 +7015,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function parseTrpgToolText(name, text) {
       const raw = String(text || '').trim();
       if (raw === '') return {};
+      let parsed = {};
       try {
-        return JSON.parse(raw);
+        parsed = JSON.parse(raw);
       } catch (_) {
         throw new Error(`${name} 응답이 JSON이 아닙니다: ${trpgShortText(raw, 180)}`);
       }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          && Object.prototype.hasOwnProperty.call(parsed, 'payload')) {
+        const payload = parsed.payload;
+        if (payload !== null && payload !== undefined) return payload;
+      }
+      return parsed;
     }
 
     function parseMcpRpcFromSse(toolName, rawBody) {
@@ -7034,12 +7041,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
           .map((line) => line.slice(5).trimStart());
         if (dataLines.length === 0) continue;
         const dataText = dataLines.join('\n').trim();
-        if (dataText === '') continue;
+        if (dataText === '' || dataText === '[DONE]') continue;
         try {
           const parsed = JSON.parse(dataText);
           if (parsed && typeof parsed === 'object') return parsed;
         } catch (_) {
-          // keep scanning older chunks
+          // keep scanning older frames
         }
       }
       throw new Error(`${toolName} SSE 응답 파싱 실패: ${trpgShortText(raw, 220)}`);
@@ -7124,7 +7131,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function updateTrpgButtons() {
       const runBtn = document.getElementById('trpg-run-round-btn');
       if (runBtn) {
-        runBtn.disabled = trpgRoundRunning || trpgBootstrapping;
+        runBtn.disabled = trpgRoundRunning;
         runBtn.textContent = trpgRoundRunning ? '실행 중...' : '라운드 실행';
       }
       const bootstrapBtn = document.getElementById('trpg-bootstrap-btn');
@@ -7292,11 +7299,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const mapping = {};
       for (const line of lines) {
         const eqIdx = line.indexOf('=');
-        if (eqIdx <= 0 || eqIdx === line.length - 1) {
-          return { ok: false, error: `잘못된 player keeper 형식: ${line}` };
+        let actorId = '';
+        let keeperName = '';
+        if (eqIdx < 0) {
+          actorId = line;
+          keeperName = line;
+        } else {
+          if (eqIdx <= 0 || eqIdx === line.length - 1) {
+            return { ok: false, error: `잘못된 player keeper 형식: ${line}` };
+          }
+          actorId = line.slice(0, eqIdx).trim();
+          keeperName = line.slice(eqIdx + 1).trim();
         }
-        const actorId = line.slice(0, eqIdx).trim();
-        const keeperName = line.slice(eqIdx + 1).trim();
         if (!actorId || !keeperName) {
           return { ok: false, error: `actor/keeper 값이 비어 있습니다: ${line}` };
         }
@@ -7322,13 +7336,13 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     async function runTrpgRound() {
-      if (trpgRoundRunning || trpgBootstrapping) return;
+      if (trpgRoundRunning) return;
       ensureTrpgControlDefaults();
       const roomId = applyTrpgRoomFromInput();
       const dmKeeper = String((document.getElementById('trpg-dm-keeper-input') || {}).value || '').trim();
       const phase = String((document.getElementById('trpg-phase-select') || {}).value || 'round').trim() || 'round';
       const timeoutRaw = Number((document.getElementById('trpg-timeout-sec-input') || {}).value);
-      const timeoutSec = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 30;
+      const timeoutSec = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 90;
       const playerRaw = String((document.getElementById('trpg-player-keepers-input') || {}).value || '');
       if (!dmKeeper) {
         setTrpgRoundRunStatus('오류: DM keeper를 입력하세요.', 'error');

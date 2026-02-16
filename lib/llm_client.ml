@@ -564,6 +564,29 @@ let call_openai_compatible (req : completion_request) : (completion_response, st
     Printf.eprintf "[llm_client] openai-compat raw (%d bytes): %s\n%!" (String.length raw) trunc;
     parse_openai_response raw
 
+(** GLM Cloud call with pool-based load balancing.
+    Uses Glm_pool.with_model to select best available model and track usage. *)
+let call_glm_cloud_with_pool (req : completion_request) : (completion_response, string) result =
+  (* Check if the requested model is in our pool for load balancing *)
+  let preferred_model =
+    if Glm_pool.is_pool_model req.model.model_id then
+      Some req.model.model_id
+    else
+      None
+  in
+  (* Use pool selection - will pick best available or use preferred if has capacity *)
+  Glm_pool.with_model preferred_model (fun pool_model_id ->
+    (* Create modified request with pool-selected model *)
+    let modified_model = { req.model with model_id = pool_model_id } in
+    let modified_req = { req with model = modified_model } in
+    (* Make the actual API call *)
+    match call_openai_compatible modified_req with
+    | Ok resp ->
+      (* Return response with pool model_id reflected in model_used *)
+      Ok { resp with model_used = pool_model_id }
+    | Error e -> Error e
+  )
+
 (* ================================================================ *)
 (* Core: complete                                                   *)
 (* ================================================================ *)
@@ -583,7 +606,8 @@ let complete ?ollama_timeout_sec (req : completion_request) : (completion_respon
            call_ollama_generate ?timeout_sec:ollama_timeout_sec req
          else Error e)
     | Claude -> call_claude req
-    | Gemini | Glm_cloud | OpenRouter | Custom _ ->
+    | Glm_cloud -> call_glm_cloud_with_pool req
+    | Gemini | OpenRouter | Custom _ ->
       call_openai_compatible req
   in
   let elapsed_ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in

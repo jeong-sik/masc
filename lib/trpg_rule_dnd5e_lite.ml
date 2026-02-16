@@ -113,6 +113,18 @@ let update_party_actor state actor_id f =
       `Assoc (assoc_put "party" next_party fields)
   | _ -> state
 
+let remove_party_actor state actor_id =
+  match state with
+  | `Assoc fields ->
+      let party_fields =
+        match assoc_get "party" fields with
+        | Some (`Assoc pf) -> pf
+        | _ -> []
+      in
+      let next_party = `Assoc (List.remove_assoc actor_id party_fields) in
+      `Assoc (assoc_put "party" next_party fields)
+  | _ -> state
+
 let update_actor_control state actor_id keeper_name_opt =
   match state with
   | `Assoc fields ->
@@ -265,6 +277,77 @@ let apply_actor_released ~state ~event =
   | Some actor_id -> update_actor_control state actor_id None
   | None -> state
 
+let apply_actor_updated ~state ~event =
+  let payload = event.Trpg_engine_event.payload in
+  match resolve_actor_id payload event with
+  | None -> state
+  | Some actor_id ->
+      let patch_fields =
+        match payload |> member "actor_patch" with
+        | `Assoc fields -> fields
+        | _ -> []
+      in
+      if patch_fields = [] then state
+      else
+        let next_state =
+          update_party_actor state actor_id (fun actor_json ->
+              let actor_fields = assoc_fields_or_empty actor_json in
+              let merged_fields =
+                List.fold_left
+                  (fun acc (k, v) -> assoc_put k v acc)
+                  actor_fields patch_fields
+              in
+              let max_hp =
+                match List.assoc_opt "max_hp" merged_fields with
+                | Some (`Int v) when v > 0 -> v
+                | _ -> 10
+              in
+              let hp =
+                match List.assoc_opt "hp" merged_fields with
+                | Some (`Int v) -> clamp_int 0 max_hp v
+                | _ -> max_hp
+              in
+              let alive =
+                match List.assoc_opt "alive" merged_fields with
+                | Some (`Bool b) -> b
+                | _ -> hp > 0
+              in
+              `Assoc
+                (merged_fields
+                |> assoc_put "name"
+                     (`String
+                       (match List.assoc_opt "name" merged_fields with
+                       | Some (`String s) when String.trim s <> "" -> s
+                       | _ -> actor_id))
+                |> assoc_put "role"
+                     (`String
+                       (match List.assoc_opt "role" merged_fields with
+                       | Some (`String s) when String.trim s <> "" -> s
+                       | _ -> "player"))
+                |> assoc_put "max_hp" (`Int max_hp)
+                |> assoc_put "hp" (`Int hp)
+                |> assoc_put "alive" (`Bool alive)
+                |> assoc_put "inventory"
+                     (match List.assoc_opt "inventory" merged_fields with
+                     | Some (`List _ as inv) -> inv
+                     | _ -> `List [])))
+        in
+        let alive_after =
+          next_state |> member "party" |> member actor_id |> member "alive"
+          |> to_bool_option
+          |> Option.value ~default:true
+        in
+        if alive_after then next_state
+        else update_actor_control next_state actor_id None
+
+let apply_actor_deleted ~state ~event =
+  let payload = event.Trpg_engine_event.payload in
+  match resolve_actor_id payload event with
+  | None -> state
+  | Some actor_id ->
+      let s = remove_party_actor state actor_id in
+      update_actor_control s actor_id None
+
 let apply_flag_set ~state ~event =
   let payload = event.Trpg_engine_event.payload in
   let scope = get_string_opt "scope" payload |> Option.value ~default:"world" in
@@ -333,6 +416,8 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Flag_set -> apply_flag_set ~state ~event
   | Trpg_engine_event.Node_advanced -> apply_node_advanced ~state ~event
   | Trpg_engine_event.Actor_spawned -> apply_actor_spawned ~state ~event
+  | Trpg_engine_event.Actor_updated -> apply_actor_updated ~state ~event
+  | Trpg_engine_event.Actor_deleted -> apply_actor_deleted ~state ~event
   | Trpg_engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
   | Trpg_engine_event.Actor_released -> apply_actor_released ~state ~event
   | Trpg_engine_event.Phase_changed

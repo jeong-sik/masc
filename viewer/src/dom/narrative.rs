@@ -34,6 +34,39 @@ fn sanitize_text(raw: &str) -> String {
         .collect()
 }
 
+fn is_debug_narrative(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("[timeout]") || lower.contains("[unavailable]")
+}
+
+fn debug_mode_enabled(document: &web_sys::Document) -> bool {
+    document
+        .get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-debug"))
+        .map(|mode| mode != "off")
+        .unwrap_or(true)
+}
+
+fn apply_debug_visibility(el: &web_sys::Element, debug_enabled: bool, is_debug_entry: bool) {
+    let display = if !debug_enabled && is_debug_entry {
+        "none"
+    } else {
+        "block"
+    };
+    if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+        let _ = html_el.style().set_property("display", display);
+    }
+}
+
+fn trim_narrative_log(log_el: &web_sys::Element, max_entries: u32) {
+    while log_el.child_element_count() > max_entries {
+        let Some(first) = log_el.first_element_child() else {
+            break;
+        };
+        let _ = log_el.remove_child(&first);
+    }
+}
+
 fn toggle_selected_class(el: &web_sys::Element) {
     let current = el.class_name();
     let has_selected = current.split_whitespace().any(|cls| cls == "selected");
@@ -59,6 +92,7 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
     let Some(log_el) = document.get_element_by_id("narrative-log") else {
         return;
     };
+    let debug_enabled = debug_mode_enabled(&document);
 
     for NarrativeReceived(payload) in events.read() {
         let Ok(entry) = document.create_element("div") else {
@@ -70,6 +104,11 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         let _ = entry.set_attribute("role", "button");
         let _ = entry.set_attribute("tabindex", "0");
         let _ = entry.set_attribute("title", "클릭하면 이 내러티브를 강조합니다.");
+        let clean_text = sanitize_text(&payload.text);
+        let is_debug_entry = is_debug_narrative(&clean_text);
+        if is_debug_entry {
+            let _ = entry.set_attribute("data-debug-entry", "1");
+        }
 
         let speaker = payload
             .speaker
@@ -99,9 +138,8 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         }
         if let Ok(text_el) = document.create_element("span") {
             text_el.set_class_name("narrative-text");
-            let clean_text = sanitize_text(&payload.text);
             let text = if speaker.is_some() {
-                format!(" {}", clean_text)
+                format!(" {}", clean_text.clone())
             } else {
                 clean_text
             };
@@ -119,6 +157,8 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         click_cb.forget();
 
         let _ = log_el.append_child(&entry);
+        apply_debug_visibility(&entry, debug_enabled, is_debug_entry);
+        trim_narrative_log(&log_el, 180);
 
         // Auto-scroll to the newest entry
         if let Ok(html_el) = entry.dyn_into::<web_sys::HtmlElement>() {

@@ -35,30 +35,28 @@ impl Plugin for MapRenderPlugin {
                 transition::setup_fade_overlay,
                 ui::setup_ui,
             ))
-            // Update systems (all gated on Trpg state)
-            .add_systems(
-                Update,
-                (
-                    characters::spawn_character_sprites,
-                    characters::update_character_positions,
-                    characters::update_hp_bars,
-                    characters::handle_drag_start,
-                    characters::handle_drag,
-                    characters::handle_drag_end,
-                    map::update_map_label,
-                    map::update_map_texture,
-                    fx::spawn_damage_text,
-                    fx::animate_floating_text,
-                    overlay::update_weather_overlay,
-                    overlay::update_mood_overlay,
-                    overlay::spawn_prop_notification,
-                    transition::trigger_scene_transition,
-                    transition::animate_scene_transition,
-                    ui::handle_button_interactions,
-                    ui::manage_menus,
-                    ui::handle_menu_item_clicks,
-                ).chain().run_if(in_state(ViewerMode::Trpg)),
-            )
+            // Update: character sprites, positions, HP bars, effects, transitions, UI
+            .add_systems(Update, (
+                characters::spawn_character_sprites,
+                characters::update_character_positions,
+                characters::update_hp_bars,
+                characters::apply_death_visuals,
+                characters::handle_drag_start,
+                characters::handle_drag,
+                characters::handle_drag_end,
+                map::update_map_label,
+                map::update_map_texture,
+                fx::spawn_damage_text,
+                fx::animate_floating_text,
+                overlay::update_weather_overlay,
+                overlay::update_mood_overlay,
+                overlay::spawn_prop_notification,
+                transition::trigger_scene_transition,
+                transition::animate_scene_transition,
+                ui::handle_button_interactions,
+                ui::manage_menus,
+                ui::handle_menu_item_clicks,
+            ).run_if(in_state(ViewerMode::Trpg)))
             // Cleanup: despawn all TRPG scene entities and reset resources
             .add_systems(OnExit(ViewerMode::Trpg), cleanup_trpg_scene);
     }

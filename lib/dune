@@ -203,7 +203,8 @@
    trpg_visibility
    trpg_rule
    trpg_rule_dnd5e_lite
-   trpg_engine_replay)
+   trpg_engine_replay
+   json_util)
  (libraries
    yojson
    base64

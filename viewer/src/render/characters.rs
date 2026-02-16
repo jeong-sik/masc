@@ -241,3 +241,14 @@ pub fn handle_drag_end(
 
     drag_state.dragged_entity = None;
 }
+
+/// Applies grayscale effect to dead actors.
+pub fn apply_death_visuals(
+    mut actors: Query<(&Actor, &mut Sprite), (With<MapToken>, Changed<Actor>)>,
+) {
+    for (actor, mut sprite) in &mut actors {
+        if actor.is_dead {
+            sprite.color = Color::srgb(0.3, 0.3, 0.3);
+        }
+    }
+}

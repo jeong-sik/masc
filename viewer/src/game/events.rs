@@ -3,9 +3,9 @@ use serde::Deserialize;
 
 // ─── SSE Payload Types ────────────────────
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiceRollPayload {
+    #[allow(dead_code)]
     pub turn: u32,
     pub character: String,
     pub action: String,
@@ -18,12 +18,12 @@ pub struct DiceRollPayload {
     pub note: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct HpChangePayload {
     pub target: String,
     pub amount: i32,
     pub remaining_hp: i32,
+    #[allow(dead_code)]
     pub source: String,
 }
 
@@ -35,10 +35,10 @@ pub struct NarrativePayload {
     pub speaker: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct AreaMovePayload {
     pub character: String,
+    #[allow(dead_code)]
     pub from_area: String,
     pub to_area: String,
 }
@@ -64,10 +64,10 @@ pub struct ItemPayload {
     pub item: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeathPayload {
     pub character: String,
+    #[allow(dead_code)]
     pub cause: String,
 }
 
@@ -81,7 +81,6 @@ pub struct CombatPayload {
 
 // ─── Bevy Events ──────────────────────────
 
-#[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct DiceRolled(pub DiceRollPayload);
 

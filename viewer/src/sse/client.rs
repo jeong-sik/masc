@@ -98,12 +98,96 @@ fn value_to_u32(v: Option<&Value>, default: u32) -> u32 {
         .unwrap_or(default)
 }
 
+fn value_to_string_vec(v: Option<&Value>) -> Vec<String> {
+    match v.and_then(Value::as_array) {
+        Some(xs) => xs
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
+    payload
+        .get("actor_id")
+        .and_then(Value::as_str)
+        .or(actor_id)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn map_turn_progress_event(
+    event_type: &str,
+    actor_id: Option<&str>,
+    payload: &Value,
+    state: &TrpgMapperState,
+) -> Option<(String, String)> {
+    let turn = value_to_u32(payload.get("turn"), state.last_turn);
+    let phase = payload
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or(&state.last_phase)
+        .to_string();
+
+    let mapped = match event_type {
+        "session.started" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase,
+            "dm_keeper": payload.get("dm_keeper").and_then(Value::as_str).unwrap_or("")
+        }),
+        "party.selected" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase,
+            "selected_player_ids": value_to_string_vec(payload.get("selected_player_ids"))
+        }),
+        "phase.changed" | "turn.started" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase
+        }),
+        "narration.posted" | "turn.action.proposed" | "turn.timeout" | "keeper.unavailable" => {
+            json!({
+                "event_type": event_type,
+                "turn": turn,
+                "phase": phase,
+                "actor_id": resolve_actor_id(payload, actor_id),
+                "keeper": payload.get("keeper").and_then(Value::as_str).unwrap_or(""),
+                "role": payload.get("role").and_then(Value::as_str).unwrap_or(""),
+                "reason": payload.get("reason").and_then(Value::as_str).unwrap_or("")
+            })
+        }
+        "room.started" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase,
+            "room_status": "active"
+        }),
+        "room.ended" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase,
+            "room_status": "ended"
+        }),
+        _ => return None,
+    };
+
+    Some(("turn_progress".to_string(), mapped.to_string()))
+}
+
 fn map_trpg_event(
     event_type: &str,
     actor_id: Option<&str>,
     payload: &Value,
     state: &mut TrpgMapperState,
-) -> Option<(String, String)> {
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+
     match event_type {
         "dice.rolled" => {
             let mapped = json!({
@@ -116,7 +200,7 @@ fn map_trpg_event(
                 "dc": value_to_i32(payload.get("dc"), 0),
                 "result": payload.get("label").and_then(Value::as_str).unwrap_or("unknown")
             });
-            Some(("dice_roll".to_string(), mapped.to_string()))
+            out.push(("dice_roll".to_string(), mapped.to_string()));
         }
         "hp.changed" => {
             let mapped = json!({
@@ -125,7 +209,7 @@ fn map_trpg_event(
                 "remaining_hp": value_to_i32(payload.get("remaining_hp"), 0),
                 "source": payload.get("source").and_then(Value::as_str).unwrap_or("system")
             });
-            Some(("hp_change".to_string(), mapped.to_string()))
+            out.push(("hp_change".to_string(), mapped.to_string()));
         }
         "narration.posted" => {
             let text = payload
@@ -139,10 +223,11 @@ fn map_trpg_event(
                 "speaker": payload
                     .get("speaker")
                     .and_then(Value::as_str)
-                    .or_else(|| payload.get("keeper").and_then(Value::as_str))
+                    .or_else(|| payload.get("actor_id").and_then(Value::as_str))
                     .or(actor_id)
+                    .or_else(|| payload.get("keeper").and_then(Value::as_str))
             });
-            Some(("narrative".to_string(), mapped.to_string()))
+            out.push(("narrative".to_string(), mapped.to_string()));
         }
         "turn.action.proposed" => {
             let proposed = payload
@@ -158,7 +243,7 @@ fn map_trpg_event(
                     .and_then(Value::as_str)
                     .or(actor_id)
             });
-            Some(("narrative".to_string(), mapped.to_string()))
+            out.push(("narrative".to_string(), mapped.to_string()));
         }
         "turn.timeout" => {
             let actor = payload
@@ -176,7 +261,7 @@ fn map_trpg_event(
                 "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
                 "speaker": payload.get("keeper").and_then(Value::as_str)
             });
-            Some(("narrative".to_string(), mapped.to_string()))
+            out.push(("narrative".to_string(), mapped.to_string()));
         }
         "keeper.unavailable" => {
             let actor = payload
@@ -193,7 +278,7 @@ fn map_trpg_event(
                 "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
                 "speaker": payload.get("keeper").and_then(Value::as_str)
             });
-            Some(("narrative".to_string(), mapped.to_string()))
+            out.push(("narrative".to_string(), mapped.to_string()));
         }
         "turn.started" => {
             let turn = value_to_u32(payload.get("turn"), state.last_turn);
@@ -212,7 +297,7 @@ fn map_trpg_event(
                 "turn": state.last_turn,
                 "phase": state.last_phase
             });
-            Some(("turn_advance".to_string(), mapped.to_string()))
+            out.push(("turn_advance".to_string(), mapped.to_string()));
         }
         "phase.changed" => {
             let phase = payload
@@ -231,7 +316,7 @@ fn map_trpg_event(
                 "turn": state.last_turn,
                 "phase": state.last_phase
             });
-            Some(("turn_advance".to_string(), mapped.to_string()))
+            out.push(("turn_advance".to_string(), mapped.to_string()));
         }
         "node.advanced" => {
             let mapped = json!({
@@ -239,14 +324,14 @@ fn map_trpg_event(
                 "from_area": payload.get("from_area").and_then(Value::as_str).unwrap_or(""),
                 "to_area": payload.get("to_area").and_then(Value::as_str).unwrap_or(""),
             });
-            Some(("area_move".to_string(), mapped.to_string()))
+            out.push(("area_move".to_string(), mapped.to_string()));
         }
         "inventory.changed" => {
             let mapped = json!({
                 "character": payload.get("character").and_then(Value::as_str).or(actor_id).unwrap_or("unknown"),
                 "item": payload.get("item").and_then(Value::as_str).unwrap_or("item")
             });
-            Some(("item_acquired".to_string(), mapped.to_string()))
+            out.push(("item_acquired".to_string(), mapped.to_string()));
         }
         "turn.action.resolved" => {
             let narrative = payload
@@ -261,10 +346,16 @@ fn map_trpg_event(
                 "phase": state.last_phase,
                 "speaker": actor_id
             });
-            Some(("narrative".to_string(), mapped.to_string()))
+            out.push(("narrative".to_string(), mapped.to_string()));
         }
-        _ => None,
+        _ => {}
     }
+
+    if let Some(progress) = map_turn_progress_event(event_type, actor_id, payload, state) {
+        out.push(progress);
+    }
+
+    out
 }
 
 fn decode_stream_events(
@@ -279,11 +370,12 @@ fn decode_stream_events(
         if ev.seq > max_seq {
             max_seq = ev.seq;
         }
-        if let Some(mapped) =
-            map_trpg_event(&ev.event_type, ev.actor_id.as_deref(), &ev.payload, state)
-        {
-            out.push(mapped);
-        }
+        out.extend(map_trpg_event(
+            &ev.event_type,
+            ev.actor_id.as_deref(),
+            &ev.payload,
+            state,
+        ));
     }
 
     Ok((max_seq, out))
@@ -476,16 +568,28 @@ mod tests {
             decode_stream_events(body, &mut state).expect("decode should succeed");
 
         assert_eq!(max_seq, 3);
-        assert_eq!(mapped.len(), 3);
-        assert_eq!(mapped[0].0, "turn_advance");
-        assert_eq!(mapped[1].0, "turn_advance");
-        assert_eq!(mapped[2].0, "dice_roll");
+        let turn_events: Vec<&(String, String)> = mapped
+            .iter()
+            .filter(|(event_type, _)| event_type == "turn_advance")
+            .collect();
+        assert_eq!(turn_events.len(), 2);
+        let dice_event = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "dice_roll")
+            .expect("dice_roll should exist");
+        let progress_events: Vec<&(String, String)> = mapped
+            .iter()
+            .filter(|(event_type, _)| event_type == "turn_progress")
+            .collect();
+        assert_eq!(progress_events.len(), 2);
 
-        let turn_payload: Value = serde_json::from_str(&mapped[1].1).expect("turn payload json");
+        let turn_payload: Value =
+            serde_json::from_str(&turn_events[1].1).expect("turn payload json");
         assert_eq!(turn_payload["turn"], 3);
         assert_eq!(turn_payload["phase"], "player_action");
 
-        let dice_payload: Value = serde_json::from_str(&mapped[2].1).expect("dice payload json");
+        let dice_payload: Value =
+            serde_json::from_str(&dice_event.1).expect("dice payload json");
         assert_eq!(dice_payload["character"], "grimja");
         assert_eq!(dice_payload["d20"], 17);
     }
@@ -499,10 +603,13 @@ mod tests {
         }"#;
         let mut state = TrpgMapperState::default();
         let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
-        assert_eq!(mapped.len(), 1);
-        assert_eq!(mapped[0].0, "narrative");
+        let narrative_event = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "narrative")
+            .expect("narrative should exist");
 
-        let payload: Value = serde_json::from_str(&mapped[0].1).expect("narrative payload json");
+        let payload: Value =
+            serde_json::from_str(&narrative_event.1).expect("narrative payload json");
         assert_eq!(payload["text"], "문이 열린다");
         assert_eq!(payload["speaker"], "dm");
     }
@@ -516,12 +623,24 @@ mod tests {
         }"#;
         let mut state = TrpgMapperState::default();
         let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
-        assert_eq!(mapped.len(), 1);
-        assert_eq!(mapped[0].0, "narrative");
+        let narrative_event = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "narrative")
+            .expect("narrative should exist");
 
-        let payload: Value = serde_json::from_str(&mapped[0].1).expect("narrative payload json");
+        let payload: Value =
+            serde_json::from_str(&narrative_event.1).expect("narrative payload json");
         assert_eq!(payload["text"], "안개가 짙어집니다.");
-        assert_eq!(payload["speaker"], "dm-keeper");
+        assert_eq!(payload["speaker"], "dm");
+
+        let progress_event = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "turn_progress")
+            .expect("turn_progress should exist");
+        let progress_payload: Value =
+            serde_json::from_str(&progress_event.1).expect("turn_progress payload json");
+        assert_eq!(progress_payload["event_type"], "narration.posted");
+        assert_eq!(progress_payload["actor_id"], "dm");
     }
 
     #[test]
@@ -534,12 +653,19 @@ mod tests {
         }"#;
         let mut state = TrpgMapperState::default();
         let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
-        assert_eq!(mapped.len(), 2);
-        assert_eq!(mapped[0].0, "narrative");
-        assert_eq!(mapped[1].0, "narrative");
+        let narrative_events: Vec<&(String, String)> = mapped
+            .iter()
+            .filter(|(event_type, _)| event_type == "narrative")
+            .collect();
+        assert_eq!(narrative_events.len(), 2);
+        let progress_events: Vec<&(String, String)> = mapped
+            .iter()
+            .filter(|(event_type, _)| event_type == "turn_progress")
+            .collect();
+        assert_eq!(progress_events.len(), 2);
 
         let timeout_payload: Value =
-            serde_json::from_str(&mapped[0].1).expect("timeout narrative payload json");
+            serde_json::from_str(&narrative_events[0].1).expect("timeout narrative payload json");
         assert!(
             timeout_payload["text"]
                 .as_str()
@@ -548,7 +674,7 @@ mod tests {
         );
 
         let unavailable_payload: Value =
-            serde_json::from_str(&mapped[1].1).expect("unavailable narrative payload json");
+            serde_json::from_str(&narrative_events[1].1).expect("unavailable narrative payload json");
         assert_eq!(unavailable_payload["text"], "[unavailable] p02: LLM failed");
     }
 }

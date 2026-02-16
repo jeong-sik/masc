@@ -5,6 +5,7 @@ module Time_compat = Time_compat
 
 module Version = Version
 module Common = Common
+module Json_util = Json_util
 module Log = Log
 module Types = Types
 module Nickname = Nickname

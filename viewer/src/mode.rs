@@ -153,7 +153,10 @@ impl Plugin for ModePlugin {
             .add_systems(OnExit(ViewerMode::Social), exit_masc_panel)
             .add_systems(OnEnter(ViewerMode::Experiment), enter_masc_panel)
             .add_systems(OnExit(ViewerMode::Experiment), exit_masc_panel)
-            .add_systems(Update, refresh_trpg_widget_status.run_if(in_state(ViewerMode::Trpg)))
+            .add_systems(
+                Update,
+                refresh_trpg_widget_status.run_if(in_state(ViewerMode::Trpg)),
+            )
             .add_systems(Update, poll_mode_transition);
     }
 }
@@ -221,17 +224,35 @@ fn enter_trpg() {
         set_element_display(&doc, "new-game-panel", "none");
         bind_debug_controls(&doc);
         bind_new_game_controls(&doc);
+        let room = crate::config::current_room_id();
+        set_current_room_id(&doc, &room);
+        bind_room_controls(&doc);
 
-        if let Some(dashboard) = doc.get_element_by_id("dashboard") {
-            let room = dashboard
-                .get_attribute("data-room-id")
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if room.is_empty() {
-                let _ = dashboard.set_attribute("data-room-id", crate::config::DEFAULT_ROOM_ID);
-            }
+        if let Some(pill) = doc.get_element_by_id("room-status") {
+            pill.set_text_content(Some(&format!("room {} · 목록 불러오는 중...", room)));
         }
+        let doc_for_rooms = doc.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            match refresh_rooms_from_server(&doc_for_rooms).await {
+                Ok(rooms) => {
+                    let room_now = crate::config::current_room_id();
+                    if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
+                        pill.set_text_content(Some(&format!(
+                            "room {} · 목록 {}",
+                            room_now,
+                            rooms.len()
+                        )));
+                    }
+                }
+                Err(e) => {
+                    log::warn!("room 목록 로딩 실패: {}", e);
+                    let room_now = crate::config::current_room_id();
+                    if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
+                        pill.set_text_content(Some(&format!("room {} · 목록 로딩 실패", room_now)));
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -324,9 +345,9 @@ fn bind_mode_cards(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMod
             }
         }) as Box<dyn FnMut()>);
 
-        let _ = el
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
 
         cb.forget(); // Lives for app lifetime
     }
@@ -351,22 +372,25 @@ fn bind_back_button(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMo
         }
     }) as Box<dyn FnMut()>);
 
-    let _ = btn
-        .dyn_ref::<web_sys::EventTarget>()
-        .map(|target| target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
+    let _ = btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+    });
 
     cb.forget();
 }
 
 #[cfg(target_arch = "wasm32")]
 fn apply_debug_visibility_in_dom(doc: &web_sys::Document, enabled: bool) {
-    let Ok(entries) = doc.query_selector_all("#narrative-log .narrative-entry[data-debug-entry=\"1\"]")
+    let Ok(entries) =
+        doc.query_selector_all("#narrative-log .narrative-entry[data-debug-entry=\"1\"]")
     else {
         return;
     };
 
     for i in 0..entries.length() {
-        let Some(node) = entries.item(i) else { continue };
+        let Some(node) = entries.item(i) else {
+            continue;
+        };
         let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
             continue;
         };
@@ -414,9 +438,9 @@ fn bind_debug_controls(doc: &web_sys::Document) {
         set_debug_state(&doc, !enabled);
     }) as Box<dyn FnMut()>);
 
-    let _ = toggle
-        .dyn_ref::<web_sys::EventTarget>()
-        .map(|target| target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
+    let _ = toggle.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+    });
 
     cb.forget();
 }
@@ -446,9 +470,13 @@ fn set_new_game_status(doc: &web_sys::Document, message: &str) {
 
 #[cfg(target_arch = "wasm32")]
 fn set_current_room_id(doc: &web_sys::Document, room_id: &str) {
+    crate::config::set_current_room_id(room_id);
+    let room = crate::config::current_room_id();
     if let Some(dashboard) = doc.get_element_by_id("dashboard") {
-        let _ = dashboard.set_attribute("data-room-id", room_id);
+        let _ = dashboard.set_attribute("data-room-id", &room);
     }
+    remember_recent_room(&room);
+    sync_room_controls(doc, &room);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -464,32 +492,6 @@ fn clear_trpg_dom(doc: &web_sys::Document) {
     }
     if let Some(el) = doc.get_element_by_id("turn-num") {
         el.set_text_content(Some("1"));
-    }
-    if let Some(el) = doc.get_element_by_id("turn-runtime") {
-        el.set_inner_html("");
-    }
-    for hidden_id in &["claimed-actor-id", "claimed-keeper"] {
-        if let Some(input) = doc
-            .get_element_by_id(hidden_id)
-            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-        {
-            input.set_value("");
-        }
-    }
-    if let Some(el) = doc.get_element_by_id("player-actor-id") {
-        el.set_text_content(Some(""));
-    }
-    if let Some(join_panel) = doc
-        .get_element_by_id("join-panel")
-        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().cloned())
-    {
-        let _ = join_panel.style().set_property("display", "block");
-    }
-    if let Some(action_panel) = doc
-        .get_element_by_id("action-panel")
-        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().cloned())
-    {
-        let _ = action_panel.style().set_property("display", "none");
     }
 }
 
@@ -507,20 +509,292 @@ fn unique_non_empty(mut values: Vec<String>) -> Vec<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
+#[cfg(target_arch = "wasm32")]
+const KNOWN_ROOMS_STORAGE_KEY: &str = "masc_viewer_known_rooms";
+
+#[cfg(target_arch = "wasm32")]
+fn load_recent_rooms() -> Vec<String> {
+    let raw = web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(RECENT_ROOMS_STORAGE_KEY).ok().flatten())
+        .unwrap_or_default();
+    unique_non_empty(
+        raw.split('\n')
+            .filter_map(crate::config::sanitize_room_id)
+            .collect::<Vec<_>>(),
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_recent_rooms(rooms: &[String]) {
+    let value = rooms.join("\n");
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(RECENT_ROOMS_STORAGE_KEY, &value);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remember_recent_room(room_id: &str) {
+    let Some(room) = crate::config::sanitize_room_id(room_id) else {
+        return;
+    };
+    let mut rooms = load_recent_rooms();
+    rooms.retain(|existing| existing != &room);
+    rooms.insert(0, room);
+    if rooms.len() > 12 {
+        rooms.truncate(12);
+    }
+    save_recent_rooms(&rooms);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_known_rooms() -> Vec<String> {
+    let raw = web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(KNOWN_ROOMS_STORAGE_KEY).ok().flatten())
+        .unwrap_or_default();
+    unique_non_empty(
+        raw.split('\n')
+            .filter_map(crate::config::sanitize_room_id)
+            .collect::<Vec<_>>(),
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_known_rooms(rooms: &[String]) {
+    let value = rooms.join("\n");
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(KNOWN_ROOMS_STORAGE_KEY, &value);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remember_known_rooms(extra_rooms: &[String]) {
+    let mut rooms = load_known_rooms();
+    for raw in extra_rooms {
+        let Some(room) = crate::config::sanitize_room_id(raw) else {
+            continue;
+        };
+        if rooms.iter().any(|existing| existing == &room) {
+            continue;
+        }
+        rooms.push(room);
+    }
+    rooms = unique_non_empty(rooms);
+    if rooms.len() > 64 {
+        rooms = rooms.split_off(rooms.len() - 64);
+    }
+    save_known_rooms(&rooms);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
+    let selected = crate::config::sanitize_room_id(selected_room)
+        .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
+    let mut rooms = vec![selected.clone(), crate::config::DEFAULT_ROOM_ID.to_string()];
+    rooms.extend(load_known_rooms());
+    rooms.extend(load_recent_rooms());
+    let rooms = unique_non_empty(rooms);
+
+    if let Some(select) = doc
+        .get_element_by_id("room-selector-inline")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    {
+        let html = rooms
+            .iter()
+            .map(|room| {
+                let safe = html_escape(room);
+                format!(r#"<option value="{safe}">{safe}</option>"#)
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        select.set_inner_html(&html);
+        select.set_value(&selected);
+    }
+    if let Some(input) = doc
+        .get_element_by_id("room-input-inline")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value(&selected);
+    }
+    if let Some(pill) = doc.get_element_by_id("room-status") {
+        pill.set_text_content(Some(&format!("room {}", selected)));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
+    let Some(room) = crate::config::sanitize_room_id(raw_room) else {
+        log::warn!("Ignoring invalid room id from UI: {}", raw_room);
+        return;
+    };
+    remember_known_rooms(std::slice::from_ref(&room));
+    set_current_room_id(doc, &room);
+    clear_trpg_dom(doc);
+    log::info!("Viewer room switched to {}", room);
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<String>, String> {
+    let payload = mcp_tool_call("masc_rooms_list", json!({})).await?;
+
+    let mut rooms = payload
+        .get("rooms")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|row| {
+                    row.get("id")
+                        .and_then(Value::as_str)
+                        .or_else(|| row.as_str())
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if let Some(current) = payload
+        .get("current_room")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    {
+        rooms.push(current);
+    }
+
+    let rooms = unique_non_empty(rooms);
+    if rooms.is_empty() {
+        return Err("서버 room 목록이 비어 있습니다.".to_string());
+    }
+
+    remember_known_rooms(&rooms);
+    let current = crate::config::current_room_id();
+    sync_room_controls(doc, &current);
+    Ok(rooms)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_room_controls(doc: &web_sys::Document) {
+    let Some(select_el) = doc.get_element_by_id("room-selector-inline") else {
+        return;
+    };
+    let room_now = crate::config::current_room_id();
+    sync_room_controls(doc, &room_now);
+
+    if select_el.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = select_el.set_attribute("data-bound", "1");
+
+    let select_cb = Closure::wrap(Box::new(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let selected = doc
+            .get_element_by_id("room-selector-inline")
+            .and_then(|el| {
+                el.dyn_ref::<web_sys::HtmlSelectElement>()
+                    .map(|s| s.value())
+            })
+            .unwrap_or_default();
+        if selected.trim().is_empty() {
+            return;
+        }
+        apply_room_switch_from_ui(&doc, &selected);
+    }) as Box<dyn FnMut()>);
+    let _ = select_el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("change", select_cb.as_ref().unchecked_ref())
+    });
+    select_cb.forget();
+
+    if let Some(apply_btn) = doc.get_element_by_id("room-apply-btn") {
+        let apply_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let typed = doc
+                .get_element_by_id("room-input-inline")
+                .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
+                .unwrap_or_default();
+            apply_room_switch_from_ui(&doc, &typed);
+        }) as Box<dyn FnMut()>);
+        let _ = apply_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", apply_cb.as_ref().unchecked_ref())
+        });
+        apply_cb.forget();
+    }
+
+    if let Some(input_el) = doc.get_element_by_id("room-input-inline") {
+        let key_cb = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+            if event.key() != "Enter" {
+                return;
+            }
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let typed = doc
+                .get_element_by_id("room-input-inline")
+                .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
+                .unwrap_or_default();
+            apply_room_switch_from_ui(&doc, &typed);
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+        let _ = input_el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("keydown", key_cb.as_ref().unchecked_ref())
+        });
+        key_cb.forget();
+    }
+
+    if let Some(refresh_btn) = doc.get_element_by_id("room-refresh-btn") {
+        let refresh_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            if let Some(pill) = doc.get_element_by_id("room-status") {
+                let current = crate::config::current_room_id();
+                pill.set_text_content(Some(&format!("room {} · 목록 불러오는 중...", current)));
+            }
+            let doc_for_fetch = doc.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match refresh_rooms_from_server(&doc_for_fetch).await {
+                    Ok(rooms) => {
+                        let current = crate::config::current_room_id();
+                        if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
+                            pill.set_text_content(Some(&format!(
+                                "room {} · 목록 {}",
+                                current,
+                                rooms.len()
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("room 목록 새로고침 실패: {}", e);
+                        let current = crate::config::current_room_id();
+                        if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
+                            pill.set_text_content(Some(&format!(
+                                "room {} · 목록 로딩 실패",
+                                current
+                            )));
+                        }
+                    }
+                }
+            });
+        }) as Box<dyn FnMut()>);
+        let _ = refresh_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", refresh_cb.as_ref().unchecked_ref())
+        });
+        refresh_cb.forget();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn parse_keeper_models(raw: &str) -> Vec<String> {
     unique_non_empty(
         raw.split(',')
             .map(|part| part.trim().to_string())
             .collect::<Vec<_>>(),
     )
-}
-
-#[cfg(target_arch = "wasm32")]
-fn default_keeper_models() -> Vec<String> {
-    vec![
-        "glm:glm-4.7".to_string(),
-        "gemini:gemini-2.5-flash".to_string(),
-    ]
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -723,7 +997,13 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         .unwrap_or_default();
     keepers = unique_non_empty(keepers);
     if keepers.is_empty() {
-        return Err("사용 가능한 keeper가 없습니다. 먼저 keeper를 실행하세요.".to_string());
+        keepers = vec![
+            "dm-keeper".to_string(),
+            "grimja".to_string(),
+            "luna".to_string(),
+            "songarak".to_string(),
+            "miso".to_string(),
+        ];
     }
 
     let dm_default = keepers
@@ -788,7 +1068,10 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
 
     let dm_keeper = doc
         .get_element_by_id("new-game-dm-select")
-        .and_then(|el| el.dyn_ref::<web_sys::HtmlSelectElement>().map(|s| s.value()))
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlSelectElement>()
+                .map(|s| s.value())
+        })
         .unwrap_or_default()
         .trim()
         .to_string();
@@ -808,10 +1091,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .get_element_by_id("new-game-models")
         .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
         .unwrap_or_default();
-    let mut models = parse_keeper_models(&model_text);
-    if models.is_empty() {
-        models = default_keeper_models();
-    }
+    let models = parse_keeper_models(&model_text);
 
     let preset_catalog = mcp_tool_call(
         "trpg.preset.list",
@@ -1058,9 +1338,9 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
             }
         });
     }) as Box<dyn FnMut()>);
-    let _ = open_btn
-        .dyn_ref::<web_sys::EventTarget>()
-        .map(|target| target.add_event_listener_with_callback("click", open_cb.as_ref().unchecked_ref()));
+    let _ = open_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", open_cb.as_ref().unchecked_ref())
+    });
     open_cb.forget();
 
     if let Some(close_btn) = doc.get_element_by_id("new-game-close") {
@@ -1070,9 +1350,9 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
             };
             set_element_display(&doc, "new-game-panel", "none");
         }) as Box<dyn FnMut()>);
-        let _ = close_btn
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| target.add_event_listener_with_callback("click", close_cb.as_ref().unchecked_ref()));
+        let _ = close_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", close_cb.as_ref().unchecked_ref())
+        });
         close_cb.forget();
     }
 
@@ -1088,9 +1368,9 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
                 room_input.set_value(&generate_room_id());
             }
         }) as Box<dyn FnMut()>);
-        let _ = regen_btn
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| target.add_event_listener_with_callback("click", regen_cb.as_ref().unchecked_ref()));
+        let _ = regen_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", regen_cb.as_ref().unchecked_ref())
+        });
         regen_cb.forget();
     }
 
@@ -1113,9 +1393,9 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
                 }
             });
         }) as Box<dyn FnMut()>);
-        let _ = refresh_btn
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| target.add_event_listener_with_callback("click", refresh_cb.as_ref().unchecked_ref()));
+        let _ = refresh_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", refresh_cb.as_ref().unchecked_ref())
+        });
         refresh_cb.forget();
     }
 
@@ -1145,9 +1425,9 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
                 }
             });
         }) as Box<dyn FnMut()>);
-        let _ = start_btn
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| target.add_event_listener_with_callback("click", start_cb.as_ref().unchecked_ref()));
+        let _ = start_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", start_cb.as_ref().unchecked_ref())
+        });
         start_cb.forget();
     }
 }
@@ -1186,8 +1466,12 @@ fn refresh_trpg_widget_status() {
 fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuffer>) {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(panel_id) = mode.get().panel_id() else { return };
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+        let Some(panel_id) = mode.get().panel_id() else {
+            return;
+        };
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
 
         set_panel_active(&doc, panel_id, true);
         set_element_display(&doc, "lobby-screen", "none");
@@ -1204,8 +1488,15 @@ fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuff
 fn exit_masc_panel() {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-        for panel_id in &["monitor-panel", "council-panel", "social-panel", "experiment-panel"] {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        for panel_id in &[
+            "monitor-panel",
+            "council-panel",
+            "social-panel",
+            "experiment-panel",
+        ] {
             set_panel_active(&doc, panel_id, false);
         }
     }
@@ -1229,20 +1520,12 @@ fn set_element_display(doc: &web_sys::Document, id: &str, display: &str) {
 #[cfg(target_arch = "wasm32")]
 fn set_panel_active(doc: &web_sys::Document, id: &str, active: bool) {
     if let Some(el) = doc.get_element_by_id(id) {
-        let class_name = el.get_attribute("class").unwrap_or_default();
-        let mut parts = class_name
-            .split_whitespace()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        let has_active = parts.iter().any(|v| v == "active");
+        let class_list = el.class_list();
         if active {
-            if !has_active {
-                parts.push("active".to_string());
-            }
-        } else if has_active {
-            parts.retain(|v| v != "active");
+            let _ = class_list.add_1("active");
+        } else {
+            let _ = class_list.remove_1("active");
         }
-        let _ = el.set_attribute("class", &parts.join(" "));
     }
 }
 

@@ -152,13 +152,22 @@
             <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
             <span id="mode-title">—</span>
             <div class="top-bar-right">
+                <div class="room-switch-inline">
+                    <select id="room-selector-inline" class="inline-select" title="TRPG room 목록">
+                        <option value="default" selected>default</option>
+                    </select>
+                    <input id="room-input-inline" class="inline-input" type="text" value="default" placeholder="room-id" maxlength="64" />
+                    <button id="room-apply-btn" class="inline-toggle" type="button">Room 적용</button>
+                    <button id="room-refresh-btn" class="inline-toggle" type="button">목록 새로고침</button>
+                    <span id="room-status" class="widget-pill">room default</span>
+                </div>
+                <button id="new-game-toggle" class="inline-toggle" type="button">새 게임</button>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>
                     <option value="terminal">Terminal</option>
                     <option value="parchment">Parchment</option>
                 </select>
-                <button id="new-game-toggle" class="inline-button" type="button">새 게임</button>
                 <button id="debug-log-toggle" class="inline-toggle" type="button" aria-pressed="true">Debug ON</button>
                 <span id="debug-log-status" class="widget-pill">DEBUG ON</span>
                 <span id="widget-status" class="widget-pill">Widgets N:0 P:0 D:0</span>
@@ -168,6 +177,47 @@
                 </div>
             </div>
         </header>
+
+        <section id="new-game-panel" class="new-game-panel" style="display: none;">
+            <div class="new-game-panel-head">
+                <strong>새 게임 시작</strong>
+                <button id="new-game-close" class="inline-toggle" type="button">닫기</button>
+            </div>
+            <div class="new-game-grid">
+                <label class="new-game-field">
+                    <span>Room ID</span>
+                    <div class="new-game-inline">
+                        <input id="new-game-room-id" type="text" maxlength="64" placeholder="adventure-..." />
+                        <button id="new-game-room-regenerate" class="inline-toggle" type="button">재생성</button>
+                    </div>
+                </label>
+
+                <label class="new-game-field">
+                    <span>DM Keeper</span>
+                    <select id="new-game-dm-select">
+                        <option value="">로딩 중...</option>
+                    </select>
+                </label>
+
+                <label class="new-game-field">
+                    <span>Player Keepers (다중 선택)</span>
+                    <select id="new-game-player-select" multiple size="6">
+                        <option value="">로딩 중...</option>
+                    </select>
+                </label>
+
+                <label class="new-game-field">
+                    <span>Keeper Models (comma-separated)</span>
+                    <input id="new-game-models" type="text" value="ollama:glm-4.7-flash" />
+                </label>
+            </div>
+
+            <div class="new-game-actions">
+                <button id="new-game-refresh" class="inline-toggle" type="button">Keeper 새로고침</button>
+                <button id="new-game-start" class="inline-toggle primary" type="button">세션 시작</button>
+            </div>
+            <div id="new-game-status" class="new-game-status">버튼을 눌러 준비하세요.</div>
+        </section>
 
         <!-- Main Content Grid -->
         <main id="content">
@@ -193,6 +243,7 @@
                             <div class="phase" data-phase="transition">Move</div>
                         </div>
                     </div>
+                    <!-- Turn Runtime: live game status grid (populated by turn_runtime.rs) -->
                     <div id="turn-runtime"></div>
                     <!-- Turn Controls: advance turn (Keeper/GM only) -->
                     <div id="turn-controls" style="display:none">
@@ -250,41 +301,6 @@
             <h2 class="panel-title" id="bottom-title">Dice Log</h2>
             <div id="dice-log" class="scrollable horizontal"></div>
         </footer>
-
-        <div id="new-game-panel" style="display: none;">
-            <div class="new-game-card">
-                <div class="new-game-head">
-                    <h3>새 게임 시작</h3>
-                    <button id="new-game-close" type="button">닫기</button>
-                </div>
-
-                <label class="new-game-label" for="new-game-room-id">Room ID</label>
-                <div class="new-game-row">
-                    <input id="new-game-room-id" type="text" placeholder="room id (auto)" />
-                    <button id="new-game-room-regenerate" type="button">재생성</button>
-                </div>
-
-                <label class="new-game-label" for="new-game-dm-select">DM Keeper</label>
-                <select id="new-game-dm-select"></select>
-
-                <label class="new-game-label" for="new-game-player-select">AI Player Keepers (다중 선택)</label>
-                <select id="new-game-player-select" multiple size="6"></select>
-
-                <label class="new-game-label" for="new-game-models">Models (빠른 우선)</label>
-                <input
-                    id="new-game-models"
-                    type="text"
-                    value="glm:glm-4.7,gemini:gemini-2.5-flash"
-                    placeholder="glm:glm-4.7,gemini:gemini-2.5-flash"
-                />
-
-                <div class="new-game-actions">
-                    <button id="new-game-refresh" type="button">Keeper 새로고침</button>
-                    <button id="new-game-start" type="button">시작</button>
-                </div>
-                <div id="new-game-status"></div>
-            </div>
-        </div>
     </div>
 
 </body>

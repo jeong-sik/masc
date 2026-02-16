@@ -52,7 +52,6 @@ pub enum ViewerMode {
 impl ViewerMode {
     /// Human-readable display name for UI rendering.
     /// Used by `poll_mode_transition` (wasm32 only).
-    #[allow(dead_code)]
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Lobby => "MASC Viewer",
@@ -64,34 +63,20 @@ impl ViewerMode {
         }
     }
 
-    /// Short description shown in the lobby mode selector.
-    #[allow(dead_code)]
-    pub fn description(&self) -> &'static str {
+    /// DOM panel element ID for MASC mode panels.
+    /// Returns `None` for Lobby and Trpg (they use different layout).
+    pub fn panel_id(&self) -> Option<&'static str> {
         match self {
-            Self::Lobby => "Select a visualization mode",
-            Self::Trpg => "Dark fantasy TRPG — 5 AI agents play D&D 5e",
-            Self::Experiment => "Live experiment metrics and flow visualization",
-            Self::Monitor => "Agent health, keeper metrics, system dashboard",
-            Self::Council => "MAGI deliberation — consensus and debate viewer",
-            Self::Social => "Lodge social feed — posts, votes, discussions",
+            Self::Monitor => Some("monitor-panel"),
+            Self::Council => Some("council-panel"),
+            Self::Social => Some("social-panel"),
+            Self::Experiment => Some("experiment-panel"),
+            _ => None,
         }
-    }
-
-    /// All selectable modes (excludes Lobby itself).
-    #[allow(dead_code)]
-    pub fn selectable() -> &'static [ViewerMode] {
-        &[
-            Self::Trpg,
-            Self::Experiment,
-            Self::Monitor,
-            Self::Council,
-            Self::Social,
-        ]
     }
 
     /// CSS class name applied to the HTML body for mode-specific DOM styling.
     /// Used by `poll_mode_transition` (wasm32 only).
-    #[allow(dead_code)]
     pub fn css_class(&self) -> &'static str {
         match self {
             Self::Lobby => "mode-lobby",
@@ -105,7 +90,6 @@ impl ViewerMode {
 
     /// Parse from the HTML `data-mode` attribute value.
     /// Used by `bind_mode_cards` (wasm32 only).
-    #[allow(dead_code)]
     pub fn from_data_attr(s: &str) -> Option<ViewerMode> {
         match s {
             "trpg" => Some(Self::Trpg),
@@ -152,14 +136,14 @@ impl Plugin for ModePlugin {
             .init_resource::<ModeTransitionBuffer>()
             .add_systems(OnEnter(ViewerMode::Lobby), on_enter_lobby)
             .add_systems(OnExit(ViewerMode::Lobby), on_exit_lobby)
-            .add_systems(OnEnter(ViewerMode::Monitor), enter_monitor)
-            .add_systems(OnExit(ViewerMode::Monitor), exit_monitor)
-            .add_systems(OnEnter(ViewerMode::Council), enter_council)
-            .add_systems(OnExit(ViewerMode::Council), exit_council)
-            .add_systems(OnEnter(ViewerMode::Social), enter_social)
-            .add_systems(OnExit(ViewerMode::Social), exit_social)
-            .add_systems(OnEnter(ViewerMode::Experiment), enter_experiment)
-            .add_systems(OnExit(ViewerMode::Experiment), exit_experiment)
+            .add_systems(OnEnter(ViewerMode::Monitor), enter_masc_panel)
+            .add_systems(OnExit(ViewerMode::Monitor), exit_masc_panel)
+            .add_systems(OnEnter(ViewerMode::Council), enter_masc_panel)
+            .add_systems(OnExit(ViewerMode::Council), exit_masc_panel)
+            .add_systems(OnEnter(ViewerMode::Social), enter_masc_panel)
+            .add_systems(OnExit(ViewerMode::Social), exit_masc_panel)
+            .add_systems(OnEnter(ViewerMode::Experiment), enter_masc_panel)
+            .add_systems(OnExit(ViewerMode::Experiment), exit_masc_panel)
             .add_systems(Update, refresh_trpg_widget_status.run_if(in_state(ViewerMode::Trpg)))
             .add_systems(Update, poll_mode_transition);
     }
@@ -263,6 +247,14 @@ fn poll_mode_transition(
 /// Each click writes the target ViewerMode into the shared buffer.
 #[cfg(target_arch = "wasm32")]
 fn bind_mode_cards(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMode>>>) {
+    // Guard: only bind once to prevent closure accumulation on repeated lobby entries
+    if let Some(container) = doc.get_element_by_id("mode-cards") {
+        if container.get_attribute("data-bound").as_deref() == Some("1") {
+            return;
+        }
+        let _ = container.set_attribute("data-bound", "1");
+    }
+
     let cards = doc.query_selector_all(".mode-card[data-mode]");
     let Ok(cards) = cards else { return };
 
@@ -300,6 +292,11 @@ fn bind_back_button(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMo
     let Some(btn) = doc.get_element_by_id("back-to-lobby") else {
         return;
     };
+    // Guard: only bind once
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
 
     let buf = pending.clone();
     let cb = Closure::wrap(Box::new(move || {
@@ -386,131 +383,61 @@ fn refresh_trpg_widget_status() {
     }
 }
 
-// ─── Monitor Mode Enter/Exit ─────────────────
+// ─── Generic MASC Panel Enter/Exit ───────────
 
-fn enter_monitor(buffer: Res<ModeTransitionBuffer>) {
+/// Generic enter handler for MASC mode panels (Monitor, Council, Social, Experiment).
+/// Shows the mode's panel, hides lobby and dashboard, binds back navigation.
+fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuffer>) {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
+        let Some(panel_id) = mode.get().panel_id() else { return };
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
 
-        set_element_display(&doc, "monitor-panel", "block");
-        set_element_display(&doc, "lobby-screen", "none");
-        set_element_display(&doc, "dashboard", "none");
-
-        // Bind back buttons
-        bind_back_buttons(&doc, &buffer.pending);
-    }
-    let _ = &buffer;
-}
-
-fn exit_monitor() {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        set_element_display(&doc, "monitor-panel", "none");
-    }
-}
-
-// ─── Council Mode Enter/Exit ─────────────────
-
-fn enter_council(buffer: Res<ModeTransitionBuffer>) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        set_element_display(&doc, "council-panel", "block");
+        set_panel_active(&doc, panel_id, true);
         set_element_display(&doc, "lobby-screen", "none");
         set_element_display(&doc, "dashboard", "none");
 
         bind_back_buttons(&doc, &buffer.pending);
     }
-    let _ = &buffer;
+    let _ = (&mode, &buffer);
 }
 
-fn exit_council() {
+/// Generic exit handler for MASC mode panels.
+/// Hides all mode panels rather than determining which one — State<> may already
+/// reflect the new state during OnExit, and the cost of 4 getElementById calls is negligible.
+fn exit_masc_panel() {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        set_element_display(&doc, "council-panel", "none");
-    }
-}
-
-// ─── Social Mode Enter/Exit ──────────────────
-
-fn enter_social(buffer: Res<ModeTransitionBuffer>) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        set_element_display(&doc, "social-panel", "block");
-        set_element_display(&doc, "lobby-screen", "none");
-        set_element_display(&doc, "dashboard", "none");
-
-        bind_back_buttons(&doc, &buffer.pending);
-    }
-    let _ = &buffer;
-}
-
-fn exit_social() {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        set_element_display(&doc, "social-panel", "none");
-    }
-}
-
-// ─── Experiment Mode Enter/Exit ──────────────
-
-fn enter_experiment(buffer: Res<ModeTransitionBuffer>) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        set_element_display(&doc, "experiment-panel", "block");
-        set_element_display(&doc, "lobby-screen", "none");
-        set_element_display(&doc, "dashboard", "none");
-
-        bind_back_buttons(&doc, &buffer.pending);
-    }
-    let _ = &buffer;
-}
-
-fn exit_experiment() {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        set_element_display(&doc, "experiment-panel", "none");
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+        for panel_id in &["monitor-panel", "council-panel", "social-panel", "experiment-panel"] {
+            set_panel_active(&doc, panel_id, false);
+        }
     }
 }
 
 // ─── DOM Helpers ─────────────────────────────
 
 /// Helper to set display style on a DOM element by ID.
+/// Used for lobby-screen (flex) and dashboard (grid/none) which don't use CSS transitions.
 #[cfg(target_arch = "wasm32")]
 fn set_element_display(doc: &web_sys::Document, id: &str, display: &str) {
     if let Some(el) = doc.get_element_by_id(id) {
         if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
             let _ = html_el.style().set_property("display", display);
+        }
+    }
+}
+
+/// Toggles the `active` CSS class on a mode panel for animated show/hide.
+/// CSS `.mode-panel` uses opacity+visibility transitions; `.mode-panel.active` makes it visible.
+#[cfg(target_arch = "wasm32")]
+fn set_panel_active(doc: &web_sys::Document, id: &str, active: bool) {
+    if let Some(el) = doc.get_element_by_id(id) {
+        let class_list = el.class_list();
+        if active {
+            let _ = class_list.add_1("active");
+        } else {
+            let _ = class_list.remove_1("active");
         }
     }
 }
@@ -525,6 +452,14 @@ fn bind_back_buttons(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerM
     for i in 0..buttons.length() {
         let Some(btn) = buttons.item(i) else { continue };
 
+        // Guard: skip buttons already bound to prevent closure accumulation
+        if let Some(el) = btn.dyn_ref::<web_sys::Element>() {
+            if el.get_attribute("data-bound").as_deref() == Some("1") {
+                continue;
+            }
+            let _ = el.set_attribute("data-bound", "1");
+        }
+
         let buf = pending.clone();
         let cb = Closure::wrap(Box::new(move |_: web_sys::Event| {
             if let Ok(mut guard) = buf.lock() {
@@ -536,5 +471,24 @@ fn bind_back_buttons(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerM
             let _ = target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
         }
         cb.forget();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_id_returns_correct_ids_for_masc_modes() {
+        assert_eq!(ViewerMode::Monitor.panel_id(), Some("monitor-panel"));
+        assert_eq!(ViewerMode::Council.panel_id(), Some("council-panel"));
+        assert_eq!(ViewerMode::Social.panel_id(), Some("social-panel"));
+        assert_eq!(ViewerMode::Experiment.panel_id(), Some("experiment-panel"));
+    }
+
+    #[test]
+    fn panel_id_returns_none_for_non_panel_modes() {
+        assert_eq!(ViewerMode::Lobby.panel_id(), None);
+        assert_eq!(ViewerMode::Trpg.panel_id(), None);
     }
 }

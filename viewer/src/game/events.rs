@@ -49,7 +49,6 @@ pub struct TurnAdvancePayload {
     pub phase: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChoicePayload {
     pub character: String,
@@ -71,7 +70,6 @@ pub struct DeathPayload {
     pub cause: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct CombatPayload {
     pub area: String,
@@ -106,11 +104,9 @@ pub struct AreaMoved(pub AreaMovePayload);
 #[derive(Message, Debug, Clone)]
 pub struct TurnAdvanced(pub TurnAdvancePayload);
 
-#[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct ChoiceAvailable(pub ChoicePayload);
 
-#[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct ChoiceResolved(pub ChoicePayload);
 
@@ -120,7 +116,6 @@ pub struct ItemAcquired(pub ItemPayload);
 #[derive(Message, Debug, Clone)]
 pub struct CharacterDied(pub DeathPayload);
 
-#[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct CombatStarted(pub CombatPayload);
 

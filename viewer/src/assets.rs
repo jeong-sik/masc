@@ -49,11 +49,6 @@ pub mod paths {
     pub const PROP_JOURNAL: &str = "props/journal_open.png";
     pub const PROP_MAPS: &str = "props/maps_recursive.png";
 
-    // Fonts
-    #[allow(dead_code)]
-    pub const FONT_GOTHIC: &str = "fonts/Cinzel-Regular.ttf";
-    #[allow(dead_code)]
-    pub const FONT_KOREAN: &str = "fonts/NotoSansKR-Regular.ttf";
 }
 
 /// Returns the portrait asset path for a given character ID.

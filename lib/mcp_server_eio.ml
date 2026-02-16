@@ -673,7 +673,7 @@ let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
     let created_at = match Json_util.get_float json "created_at" with Some v -> v | None -> raise Not_found in
     let last_seen = match Json_util.get_float json "last_seen" with Some v -> v | None -> raise Not_found in
     Some { id; agent_name; created_at; last_seen }
-  with Yojson.Safe.Util.Type_error _ -> None
+  with Not_found | Yojson.Safe.Util.Type_error _ -> None
 
 let load_mcp_sessions (config : Room.config) : mcp_session_record list =
   let path = mcp_sessions_path config in

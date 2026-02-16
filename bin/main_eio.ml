@@ -4266,8 +4266,6 @@ let run_server ~sw ~env ~port ~base_path =
     ~https_connector:(Masc_mcp.Eio_context.get_https_connector ())
     net;
   Masc_mcp.Process_eio.init ~proc_mgr ~clock;
-  (* Initialize Lodge after Eio context is ready (requires net for GraphQL) *)
-  Masc_mcp.Tool_lodge.init ();
 
   (* Create Caqti-compatible stdenv adapter
      Note: net type coercion from [Generic|Unix] to [Generic] is safe
@@ -4357,6 +4355,12 @@ let run_server ~sw ~env ~port ~base_path =
   Printf.printf "   GET  /sse → legacy SSE stream (event: endpoint)\n%!";
   Printf.printf "   POST /messages → legacy client->server messages\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
+
+  (* Defer Lodge init slightly to avoid startup race when GRAPHQL_URL points
+     to local /graphql on this same process. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Time.sleep clock 1.0;
+    Masc_mcp.Tool_lodge.init ());
 
   let is_cancelled exn =
     match exn with

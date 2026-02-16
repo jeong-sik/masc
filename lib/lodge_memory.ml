@@ -40,33 +40,54 @@ let truncate s n =
     in
     String.sub s 0 (find_boundary n)
 
+(** Use local GraphQL by default for local MCP runs.
+    Set GRAPHQL_URL explicitly to force remote endpoint. *)
+let default_graphql_url () =
+  let port = Sys.getenv_opt "MASC_MCP_PORT" |> Option.value ~default:"8935" in
+  Printf.sprintf "http://127.0.0.1:%s/graphql" port
+
+(** Keep auth token out of argv so process errors don't leak secrets. *)
+let with_auth_header_file api_key f =
+  if api_key = "" then f None
+  else
+    let path = Filename.temp_file "masc-gql-auth-" ".hdr" in
+    Fun.protect
+      ~finally:(fun () -> try Sys.remove path with _ -> ())
+      (fun () ->
+         let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
+         let oc = Unix.out_channel_of_descr fd in
+         output_string oc ("Authorization: Bearer " ^ api_key ^ "\n");
+         close_out oc;
+         f (Some path))
+
 (** curl-based GraphQL request — reliable DNS resolution in Railway containers *)
 let graphql_request_curl body : (string, string) Stdlib.result =
-  let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
+  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  let argv =
-    [ "curl"; "-s"; "-m"; "10"; url;
-      "-H"; "Content-Type: application/json"
-    ]
-    |> fun base ->
-    if api_key = "" then base else base @ [ "-H"; "Authorization: Bearer " ^ api_key ]
-    |> fun with_auth ->
-    (* Read request body from stdin to avoid quoting/escaping issues. *)
-    with_auth @ [ "-d"; "@-" ]
-  in
-  try
-    let output =
-      Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
-    in
-    if String.length output = 0 then Error "curl: empty response" else Ok output
-  with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn))
+  with_auth_header_file api_key (fun auth_header_file ->
+      let argv =
+        [ "curl"; "-s"; "-m"; "10"; url;
+          "-H"; "Content-Type: application/json"
+        ]
+        |> fun base ->
+        match auth_header_file with
+        | None -> base
+        | Some header_file -> base @ [ "-H"; "@" ^ header_file ]
+        |> fun with_auth ->
+        (* Read request body from stdin to avoid quoting/escaping issues. *)
+        with_auth @ [ "-d"; "@-" ]
+      in
+      try
+        let output =
+          Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
+        in
+        if String.length output = 0 then Error "curl: empty response" else Ok output
+      with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
 
 (** GraphQL request via Cohttp_eio with curl fallback.
     Falls back to curl if Cohttp fails (Railway DNS issues). *)
 let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
-  let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
+  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
   let max_response_bytes = 1_000_000 in
   let suppress_body _s = "body suppressed" in

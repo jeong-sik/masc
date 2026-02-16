@@ -421,39 +421,55 @@ let sb_path () =
       | Some home -> Printf.sprintf "%s/me/scripts/sb" home
       | None -> "./scripts/sb")
 
+(** Use local GraphQL by default for local MCP runs.
+    Set GRAPHQL_URL explicitly to force remote endpoint. *)
+let default_graphql_url () =
+  let port = Sys.getenv_opt "MASC_MCP_PORT" |> Option.value ~default:"8935" in
+  Printf.sprintf "http://127.0.0.1:%s/graphql" port
+
+(** Keep auth token out of argv so process errors don't leak secrets. *)
+let with_auth_header_file api_key f =
+  if api_key = "" then f None
+  else
+    let path = Filename.temp_file "masc-gql-auth-" ".hdr" in
+    Fun.protect
+      ~finally:(fun () -> try Sys.remove path with _ -> ())
+      (fun () ->
+         let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
+         let oc = Unix.out_channel_of_descr fd in
+         output_string oc ("Authorization: Bearer " ^ api_key ^ "\n");
+         close_out oc;
+         f (Some path))
+
 (** curl-based GraphQL request — reliable DNS resolution in Railway containers *)
 let graphql_request_curl body : (string, string) Stdlib.result =
-  let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
+  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  if api_key = "" then
-    Error "GRAPHQL_API_KEY not set"
-  else
-  let argv =
-    [ "curl"; "-s"; "-m"; "10"; url;
-      "-H"; "Content-Type: application/json"
-    ]
-    |> fun base -> base @ [ "-H"; "Authorization: Bearer " ^ api_key ]
-    |> fun with_auth ->
-    (* Read request body from stdin to avoid quoting/escaping issues. *)
-    with_auth @ [ "-d"; "@-" ]
-  in
-  try
-    let output =
-      Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
-    in
-    if String.length output = 0 then Error "curl: empty response" else Ok output
-  with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn))
+  with_auth_header_file api_key (fun auth_header_file ->
+      let argv =
+        [ "curl"; "-s"; "-m"; "10"; url;
+          "-H"; "Content-Type: application/json"
+        ]
+        |> fun base ->
+        match auth_header_file with
+        | None -> base
+        | Some header_file -> base @ [ "-H"; "@" ^ header_file ]
+        |> fun with_auth ->
+        (* Read request body from stdin to avoid quoting/escaping issues. *)
+        with_auth @ [ "-d"; "@-" ]
+      in
+      try
+        let output =
+          Process_eio.run_argv_with_stdin ~timeout_sec:15.0 ~stdin_content:body argv
+        in
+        if String.length output = 0 then Error "curl: empty response" else Ok output
+      with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
 
 (** GraphQL request via Cohttp_eio with curl fallback.
     Falls back to curl if Cohttp fails (Railway DNS issues). *)
 let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
-  let default_url = "https://second-brain-graphql-production.up.railway.app/graphql" in
-  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:default_url in
+  let url = Sys.getenv_opt "GRAPHQL_URL" |> Option.value ~default:(default_graphql_url ()) in
   let api_key = Sys.getenv_opt "GRAPHQL_API_KEY" |> Option.value ~default:"" in
-  if api_key = "" then
-    Error "GRAPHQL_API_KEY not set"
-  else
   let max_response_bytes = 1_000_000 in
   let suppress_body _s = "body suppressed" in
   let cohttp_result = match Eio_context.get_net_opt () with
@@ -617,6 +633,55 @@ type agent = {
   activity_level: float;
 }
 
+let builtin_core_agents () : agent list =
+  [
+    {
+      name = "dreamer";
+      preferred_hours = [9; 10; 11; 20; 21; 22];
+      peak_hour = Some 21;
+      traits = ["creative"; "imaginative"; "speculative"];
+      interests = ["vision"; "story"; "future"];
+      personality_hint = None;
+      activity_level = 0.7;
+    };
+    {
+      name = "skeptic";
+      preferred_hours = [10; 11; 14; 15; 16];
+      peak_hour = Some 15;
+      traits = ["critical"; "risk-aware"; "evidence-first"];
+      interests = ["risk"; "verification"; "failure-mode"];
+      personality_hint = None;
+      activity_level = 0.65;
+    };
+    {
+      name = "historian";
+      preferred_hours = [8; 9; 10; 13; 14];
+      peak_hour = Some 10;
+      traits = ["contextual"; "archival"; "pattern-aware"];
+      interests = ["history"; "lineage"; "memory"];
+      personality_hint = None;
+      activity_level = 0.6;
+    };
+    {
+      name = "pragmatist";
+      preferred_hours = [9; 10; 13; 14; 17; 18];
+      peak_hour = Some 14;
+      traits = ["execution-focused"; "concise"; "outcome-driven"];
+      interests = ["delivery"; "ops"; "reliability"];
+      personality_hint = None;
+      activity_level = 0.75;
+    };
+    {
+      name = "connector";
+      preferred_hours = [11; 12; 15; 16; 19; 20];
+      peak_hour = Some 16;
+      traits = ["social"; "integrative"; "bridge-builder"];
+      interests = ["collaboration"; "handoff"; "coordination"];
+      personality_hint = None;
+      activity_level = 0.7;
+    };
+  ]
+
 (** Why an agent is being checked in *)
 type checkin_trigger =
   | Scheduled                    (** Round-robin turn *)
@@ -709,32 +774,39 @@ let load_agents_from_neo4j () =
           |> Yojson.Safe.Util.member "edges"
           |> Yojson.Safe.Util.to_list
         in
-        List.filter_map (fun edge ->
-          try
-            let node = Yojson.Safe.Util.member "node" edge in
-            let name = Yojson.Safe.Util.(member "name" node |> to_string) in
-            let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
-            let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
-            let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
-            let activity_level =
-              match Yojson.Safe.Util.(member "activityLevel" node) with
-              | `Null -> 0.5
-              | v -> Yojson.Safe.Util.to_float v
-            in
-            (* Client-side filter: only agents with preferredHours *)
-            let interests =
-              try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
-              with Yojson.Safe.Util.Type_error _ | Failure _ -> []
-            in
-            if preferred_hours <> [] then
-              Some { name; preferred_hours; peak_hour; traits; interests;
-                     personality_hint = None; activity_level }
-            else
+        let parsed =
+          List.filter_map (fun edge ->
+            try
+              let node = Yojson.Safe.Util.member "node" edge in
+              let name = Yojson.Safe.Util.(member "name" node |> to_string) in
+              let preferred_hours = Yojson.Safe.Util.(member "preferredHours" node |> to_list |> List.map to_int) in
+              let peak_hour = Yojson.Safe.Util.(member "peakHour" node |> to_int_option) in
+              let traits = Yojson.Safe.Util.(member "traits" node |> to_list |> List.map to_string) in
+              let activity_level =
+                match Yojson.Safe.Util.(member "activityLevel" node) with
+                | `Null -> 0.5
+                | v -> Yojson.Safe.Util.to_float v
+              in
+              (* Client-side filter: only agents with preferredHours *)
+              let interests =
+                try Yojson.Safe.Util.(member "interests" node |> to_list |> List.map to_string)
+                with Yojson.Safe.Util.Type_error _ | Failure _ -> []
+              in
+              if preferred_hours <> [] then
+                Some { name; preferred_hours; peak_hour; traits; interests;
+                       personality_hint = None; activity_level }
+              else
+                None
+            with Yojson.Safe.Util.Type_error (msg, _) ->
+              Eio.traceln "⚠️ Agent parse error: %s" msg;
               None
-          with Yojson.Safe.Util.Type_error (msg, _) ->
-            Eio.traceln "⚠️ Agent parse error: %s" msg;
-            None
-        ) edges)
+          ) edges
+        in
+        if parsed <> [] then parsed
+        else begin
+          Eio.traceln "⚠️ GraphQL agents empty, using builtin core agents fallback";
+          builtin_core_agents ()
+        end)
       with e ->
         Eio.traceln "⚠️ Failed to load agents from GraphQL: %s" (Printexc.to_string e);
         []

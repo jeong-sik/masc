@@ -36,7 +36,7 @@ pub fn bind_action_panel(mut commands: Commands) {
         bind_enter_key();
         bind_dice_roll_button();
         clear_action_status();
-        refresh_action_panel_interaction_state();
+        // Interaction state is refreshed by update systems once resources are ready.
         log::info!("ActionPanel: bound complete");
     }
 
@@ -132,7 +132,7 @@ fn bind_dice_roll_button() {
                     set_action_status(&format!("Dice roll failed: {}", detail), "status-error");
                 }
             }
-            refresh_action_panel_interaction_state();
+            // Interaction state is refreshed by system updates.
         });
     }) as Box<dyn FnMut()>);
 
@@ -164,15 +164,14 @@ fn submit_action_from_input() {
         return;
     }
     
-    let actor_id_opt = current_playable_actor_id();
-    log::info!("ActionPanel: submitting for actor={:?}", actor_id_opt);
+    let actor_id_opt = get_active_actor_from_dom();
+    log::info!("ActionPanel: submitting for active actor={:?}", actor_id_opt);
 
     let Some(actor_id) = actor_id_opt else {
         set_action_status(
-            "파티 actor가 없어 액션을 제출할 수 없습니다. Join Panel에서 Claim하세요.",
+            "현재 턴인 Actor가 없거나 로딩되지 않았습니다.",
             "status-error",
         );
-        refresh_action_panel_interaction_state();
         return;
     };
 
@@ -190,7 +189,7 @@ fn submit_action_from_input() {
                 set_action_status(&format!("Submit failed: {}", detail), "status-error");
             }
         }
-        refresh_action_panel_interaction_state();
+        // Interaction state is refreshed by system updates.
     });
 }
 
@@ -244,8 +243,8 @@ async fn submit_action(actor_id: &str, action_text: &str) -> Result<(), JsValue>
 async fn roll_dice() -> Result<String, JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
-    let Some(actor_id) = current_playable_actor_id() else {
-        return Err(JsValue::from_str("No actor claimed"));
+    let Some(actor_id) = get_active_actor_from_dom() else {
+        return Err(JsValue::from_str("No active actor"));
     };
 
     let url = format!("{}/api/v1/trpg/dice/roll", config::MASC_MCP_URL);
@@ -341,35 +340,44 @@ pub(crate) fn friendly_js_error(val: &JsValue) -> String {
         .unwrap_or_else(|| format!("{:?}", val))
 }
 
-/// Sync action panel visibility: only show in TRPG mode.
-/// Actually, this might overlap with mode-based CSS?
-/// Yes, `mode-trpg` class on body handles general visibility.
-/// But here we can do fine-grained control if needed.
-pub fn sync_action_panel_visibility(
-    _room_state: Res<RoomState>,
-    _progress: Res<TurnProgressState>,
+/// Sync active actor ID to DOM attribute so event closures can read it.
+/// Also enables/disables action controls based on turn state.
+pub fn sync_action_panel_interaction_state(
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
 ) {
-    // Only update if mode matches?
-    // This system runs `in_state(ViewerMode::Trpg)`.
-    
-    // Check if we have an actor to play
+    let _ = &room_state;
+
     #[cfg(target_arch = "wasm32")]
-    refresh_action_panel_interaction_state();
+    {
+        let active_actor = progress.current_actor.trim().to_string();
+        let can_act = !active_actor.is_empty() && active_actor != "dm";
+
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(panel) = doc.get_element_by_id("action-panel") {
+                let _ = panel.set_attribute("data-active-actor", &active_actor);
+            }
+
+            if let Some(input) = doc.get_element_by_id("action-input") {
+                let placeholder = if can_act {
+                    format!("Action for {}...", active_actor)
+                } else {
+                    "Waiting for turn...".to_string()
+                };
+                let _ = input.set_attribute("placeholder", &placeholder);
+            }
+        }
+
+        disable_buttons(!can_act);
+    }
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn refresh_action_panel_interaction_state() {
-    let can_act = current_playable_actor_id().is_some();
-    // Also check if it's our turn?
-    // For now, allow submitting actions anytime (they go to queue).
-    // But maybe disable if turn is strictly blocked?
-    
-    disable_buttons(!can_act);
-    
-    if !can_act {
-        // Optional: show hint?
-        // set_action_status("Claim an actor to play", "status-warn");
-    }
+/// Backward-compatible alias used by older schedule wiring.
+pub fn sync_action_panel_visibility(
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
+) {
+    sync_action_panel_interaction_state(room_state, progress);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -396,9 +404,18 @@ fn disable_buttons(disabled: bool) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn current_playable_actor_id() -> Option<String> {
-    // Use config (localStorage) instead of DOM scraping
-    config::current_actor_id()
+fn get_active_actor_from_dom() -> Option<String> {
+    let doc = web_sys::window().and_then(|w| w.document())?;
+    let panel = doc.get_element_by_id("action-panel");
+    let actor_id = panel
+        .and_then(|el| el.get_attribute("data-active-actor"))
+        .unwrap_or_default();
+
+    if actor_id.trim().is_empty() {
+        None
+    } else {
+        Some(actor_id)
+    }
 }
 
 #[cfg(test)]
@@ -412,3 +429,4 @@ mod tests {
         assert_eq!(extract_roll_display(""), "Roll completed.");
     }
 }
+// Forced update

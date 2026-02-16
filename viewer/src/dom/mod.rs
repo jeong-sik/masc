@@ -37,12 +37,13 @@ impl Plugin for DomBridgePlugin {
                 turn_runtime::update_turn_runtime_dom,
                 connection::update_connection_dom,
                 actor_join::sync_join_panel_interaction_state,
-                action_panel::sync_action_panel_visibility,
+                action_panel::sync_action_panel_interaction_state,
                 turn_controls::sync_turn_controls_visibility,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Action panel lifecycle: bind listeners on enter, unbind on exit
             .add_systems(OnEnter(ViewerMode::Trpg), (
                 action_panel::bind_action_panel,
+                action_panel::sync_action_panel_interaction_state,
                 actor_join::bind_actor_join,
                 turn_controls::bind_turn_controls,
             ))

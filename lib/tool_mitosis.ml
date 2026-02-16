@@ -194,6 +194,17 @@ let get_bool args key default =
        | None -> default)
   | _ -> default
 
+(** Clamp context_ratio to valid range with warning - BALTHASAR feedback *)
+let validate_context_ratio ratio =
+  if ratio < 0.0 then begin
+    Printf.eprintf "[MITOSIS/WARN] context_ratio < 0 (%.2f), clamping to 0.0\n%!" ratio;
+    0.0
+  end else if ratio > 1.0 then begin
+    Printf.eprintf "[MITOSIS/WARN] context_ratio > 1 (%.2f), clamping to 1.0\n%!" ratio;
+    1.0
+  end else
+    ratio
+
 let set_bool_arg args key value =
   match args with
   | `Assoc fields ->
@@ -1032,9 +1043,24 @@ let handle_mitosis_divide ctx args : result =
   end
 
 let handle_mitosis_check _ctx args : result =
-  let context_ratio = get_float args "context_ratio" 0.0 in
+  let raw_ratio = get_float args "context_ratio" 0.0 in
+  let context_ratio = validate_context_ratio raw_ratio in
+  
+  (* P0-2: Warn if context_ratio is default 0.0 *)
+  if raw_ratio = 0.0 then
+    Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
+
+  (* P0-1: Configurable thresholds *)
+  let prepare_threshold = get_float args "prepare_threshold" 0.5 in
+  let handoff_threshold = get_float args "handoff_threshold" 0.8 in
+
   let cell = !(Mcp_server.current_cell) in
-  let config_mitosis = Mitosis.default_config in
+  (* Override config with custom thresholds *)
+  let config_mitosis = { Mitosis.default_config with
+    prepare_threshold;
+    handoff_threshold;
+  } in
+  
   let should_prepare = Mitosis.should_prepare ~config:config_mitosis ~cell ~context_ratio in
   let should_handoff = Mitosis.should_handoff ~config:config_mitosis ~cell ~context_ratio in
   let json = `Assoc [
@@ -1063,14 +1089,22 @@ let handle_mitosis_record ctx args : result =
 
 let handle_mitosis_prepare ctx args : result =
   let full_context = get_string args "full_context" "" in
+  
+  (* P0-3: Configurable DNA compression ratio *)
+  let dna_compression_ratio = get_float args "dna_compression_ratio" 0.1 in
+  let config_mitosis = { Mitosis.default_config with
+    dna_compression_ratio;
+  } in
+
   let cell = !(Mcp_server.current_cell) in
-  let prepared = Mitosis.prepare_for_division ~config:Mitosis.default_config ~cell ~full_context in
+  let prepared = Mitosis.prepare_for_division ~config:config_mitosis ~cell ~full_context in
   Mcp_server.current_cell := prepared;
-  Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared ~config:Mitosis.default_config;
+  Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared ~config:config_mitosis;
   let json = `Assoc [
     ("status", `String "prepared");
     ("phase", `String (Mitosis.phase_to_string prepared.Mitosis.phase));
     ("dna_length", `Int (String.length (Option.value ~default:"" prepared.Mitosis.prepared_dna)));
+    ("compression_ratio", `Float config_mitosis.Mitosis.dna_compression_ratio);
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
@@ -1084,18 +1118,7 @@ let validate_dna dna =
   else
     Ok dna
 
-(** Clamp context_ratio to valid range with warning - BALTHASAR feedback *)
-let validate_context_ratio ratio =
-  if ratio < 0.0 then begin
-    Printf.eprintf "[MITOSIS/WARN] context_ratio < 0 (%.2f), clamping to 0.0\n%!" ratio;
-    0.0
-  end else if ratio > 1.0 then begin
-    Printf.eprintf "[MITOSIS/WARN] context_ratio > 1 (%.2f), clamping to 1.0\n%!" ratio;
-    1.0
-  end else
-    ratio
 
-(** Continuity regression helpers (compaction/handoff before vs after) *)
 let contains_substring_ci ~haystack ~needle =
   let h = String.lowercase_ascii haystack in
   let n = String.lowercase_ascii needle in

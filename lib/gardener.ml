@@ -478,14 +478,14 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
     let end_pos = String.rindex response '}' in
     let json_str = String.sub response start (end_pos - start + 1) in
     let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let decision = json |> member "decision" |> to_string in
-    let reason = json |> member "reason" |> to_string in
+    let module U = Yojson.Safe.Util in
+    let decision = json |> U.member "decision" |> U.to_string in
+    let reason = json |> U.member "reason" |> U.to_string in
 
     match decision with
     | "approve" ->
-        let traits = json |> member "traits" |> to_list |> List.map to_string in
-        let hours = json |> member "hours" |> to_list |> List.map to_int in
+        let traits = json |> U.member "traits" |> U.to_list |> List.map U.to_string in
+        let hours = json |> U.member "hours" |> U.to_list |> List.map U.to_int in
         SpawnApproved {
           topic = gap.topic;
           urgency = if gap.urgency_score > 0.7 then High else Medium;

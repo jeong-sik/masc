@@ -136,11 +136,11 @@ let read_snapshot ~base_dir ~room_id =
         (match Safe_ops.read_json_file_safe path with
         | Error e -> Error e
         | Ok json ->
-            let open Yojson.Safe.Util in
+            let module U = Yojson.Safe.Util in
             try
-              let last_seq = json |> member "last_seq" |> to_int in
-              let ts = json |> member "ts" |> to_string in
-              let state_json = json |> member "state" in
+              let last_seq = json |> U.member "last_seq" |> U.to_int in
+              let ts = json |> U.member "ts" |> U.to_string in
+              let state_json = json |> U.member "state" in
               (match Trpg_engine_types.room_state_of_yojson state_json with
               | Ok state -> Ok (Some { last_seq; ts; state })
               | Error e -> Error (Printf.sprintf "snapshot state parse failed: %s" e))

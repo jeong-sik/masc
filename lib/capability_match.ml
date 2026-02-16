@@ -90,23 +90,23 @@ let task_profile_of_task (task : Types.task) : task_profile =
 
 (** Build an agent profile from GraphQL agent data (JSON) *)
 let agent_profile_of_json (json : Yojson.Safe.t) : agent_profile option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let name = json |> member "name" |> to_string in
+    let name = json |> U.member "name" |> U.to_string in
     let to_string_list j =
       match j with
-      | `List vs -> List.filter_map (fun v -> try Some (to_string v) with _ -> None) vs
+      | `List vs -> List.filter_map (fun v -> try Some (U.to_string v) with _ -> None) vs
       | `String s -> String.split_on_char ',' s |> List.map String.trim
       | _ -> []
     in
     Some {
       name;
-      traits = json |> member "traits" |> to_string_list |> List.map normalize_word;
-      interests = json |> member "interests" |> to_string_list |> List.map normalize_word;
+      traits = json |> U.member "traits" |> to_string_list |> List.map normalize_word;
+      interests = json |> U.member "interests" |> to_string_list |> List.map normalize_word;
       capabilities = [];
-      model = json |> member "model" |> to_string_option;
+      model = json |> U.member "model" |> U.to_string_option;
       activity_level =
-        (try json |> member "activityLevel" |> to_float with _ -> 0.5);
+        (try json |> U.member "activityLevel" |> U.to_float with _ -> 0.5);
     }
   with _ -> None
 

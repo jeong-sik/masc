@@ -96,14 +96,14 @@ IMPORTANT: If context_ratio exceeds 0.8, you MUST handoff. Do not ignore this.
 let parse_claude_json output =
   try
     let json = Yojson.Safe.from_string output in
-    let open Yojson.Safe.Util in
-    let usage = json |> member "usage" in
-    let input_tokens = usage |> member "input_tokens" |> to_int_option in
-    let output_tokens = usage |> member "output_tokens" |> to_int_option in
-    let cache_creation = usage |> member "cache_creation_input_tokens" |> to_int_option in
-    let cache_read = usage |> member "cache_read_input_tokens" |> to_int_option in
-    let cost_usd = json |> member "total_cost_usd" |> to_float_option in
-    let result_text = json |> member "result" |> to_string_option in
+    let module U = Yojson.Safe.Util in
+    let usage = json |> U.member "usage" in
+    let input_tokens = usage |> U.member "input_tokens" |> U.to_int_option in
+    let output_tokens = usage |> U.member "output_tokens" |> U.to_int_option in
+    let cache_creation = usage |> U.member "cache_creation_input_tokens" |> U.to_int_option in
+    let cache_read = usage |> U.member "cache_read_input_tokens" |> U.to_int_option in
+    let cost_usd = json |> U.member "total_cost_usd" |> U.to_float_option in
+    let result_text = json |> U.member "result" |> U.to_string_option in
     (result_text, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (* If JSON parsing fails, return raw output with no token info *)

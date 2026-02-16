@@ -79,15 +79,15 @@ let room_state_to_yojson (s : room_state) : Yojson.Safe.t =
     ]
 
 let room_state_of_yojson (json : Yojson.Safe.t) : (room_state, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let room_id = json |> member "room_id" |> to_string in
-    let scenario_id = json |> member "scenario_id" |> to_string in
-    let phase_s = json |> member "phase" |> to_string in
-    let dm_control_s = json |> member "dm_control" |> to_string in
-    let round = json |> member "round" |> to_int in
-    let turn_order = json |> member "turn_order" |> to_list |> List.map to_string in
-    let current_turn_index = json |> member "current_turn_index" |> to_int_option in
+    let room_id = json |> U.member "room_id" |> U.to_string in
+    let scenario_id = json |> U.member "scenario_id" |> U.to_string in
+    let phase_s = json |> U.member "phase" |> U.to_string in
+    let dm_control_s = json |> U.member "dm_control" |> U.to_string in
+    let round = json |> U.member "round" |> U.to_int in
+    let turn_order = json |> U.member "turn_order" |> U.to_list |> List.map U.to_string in
+    let current_turn_index = json |> U.member "current_turn_index" |> U.to_int_option in
     match phase_of_string phase_s, dm_control_of_string dm_control_s with
     | Ok phase, Ok dm_control ->
         Ok

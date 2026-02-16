@@ -200,11 +200,11 @@ let stop_tracking task_id =
 
 (** MCP tool handler for progress - with input validation *)
 let handle_progress_tool arguments =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   (* Catch Type_error specifically - thrown by member/to_* on missing or wrong type *)
-  let get_string key = try Some (arguments |> member key |> to_string) with Type_error _ -> None in
-  let get_float key = try Some (arguments |> member key |> to_float) with Type_error _ -> None in
-  let get_int key = try Some (arguments |> member key |> to_int) with Type_error _ -> None in
+  let get_string key = try Some (arguments |> U.member key |> U.to_string) with U.Type_error _ -> None in
+  let get_float key = try Some (arguments |> U.member key |> U.to_float) with U.Type_error _ -> None in
+  let get_int key = try Some (arguments |> U.member key |> U.to_int) with U.Type_error _ -> None in
 
   (* Validate and get task_id *)
   let validated_task_id () =

@@ -75,11 +75,11 @@ let generate_client_id () =
 let parse_client_message s =
   try
     let json = Yojson.Safe.from_string s in
-    let open Yojson.Safe.Util in
-    let msg_type = json |> member "type" |> to_string_option in
+    let module U = Yojson.Safe.Util in
+    let msg_type = json |> U.member "type" |> U.to_string_option in
     match msg_type with
     | Some "subscribe" ->
-      let agent_id = json |> member "agent_id" |> to_string in
+      let agent_id = json |> U.member "agent_id" |> U.to_string in
       Subscribe agent_id
     | Some "unsubscribe" -> Unsubscribe
     | _ -> Unknown s

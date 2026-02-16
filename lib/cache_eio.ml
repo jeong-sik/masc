@@ -60,20 +60,20 @@ let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
 
 (** Entry from JSON *)
 let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let key = json |> member "key" |> to_string in
-    let value = json |> member "value" |> to_string in
-    let created_at = json |> member "created_at" |> to_float in
-    let expires_at = match json |> member "expires_at" with
+    let key = json |> U.member "key" |> U.to_string in
+    let value = json |> U.member "value" |> U.to_string in
+    let created_at = json |> U.member "created_at" |> U.to_float in
+    let expires_at = match json |> U.member "expires_at" with
       | `Null -> None
       | `Float f -> Some f
       | _ -> None
     in
-    let tags = json |> member "tags" |> to_list |> List.map to_string in
+    let tags = json |> U.member "tags" |> U.to_list |> List.map U.to_string in
     Some { key; value; created_at; expires_at; tags }
   with
-  | Yojson.Safe.Util.Type_error (msg, _) ->
+  | U.Type_error (msg, _) ->
     Printf.eprintf "[cache] JSON type error in entry_of_json: %s\n%!" msg;
     None
   | e ->

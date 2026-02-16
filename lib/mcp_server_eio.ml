@@ -1172,6 +1172,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_protocol : Tool_protocol_game_view.context =
     { config; agent_name; trpg_keeper_call = Some trpg_keeper_call }
   in
+  let simple_ctx_game : Tool_game.context =
+    { masc_dir = Room.masc_dir config; agent_name }
+  in
 
   (* Chain through all extracted tool modules *)
   match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
@@ -1210,7 +1213,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_protocol_game_view.dispatch simple_ctx_protocol ~name ~args:arguments with
   | Some result -> result
   | None ->
-  match Tool_game.dispatch ~name ~args:arguments with
+  match Tool_game.dispatch simple_ctx_game ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_experiment.dispatch simple_ctx_experiment ~name ~args:arguments with

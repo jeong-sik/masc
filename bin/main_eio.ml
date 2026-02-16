@@ -633,7 +633,12 @@ let trpg_keeper_call_with_runtime
   : Masc_mcp.Tool_trpg.keeper_call_result =
   let keeper_ctx : _ Masc_mcp.Tool_keeper.context = { config; sw; clock } in
   let keeper_args =
-    `Assoc [ ("name", `String keeper_name); ("message", `String message) ]
+    `Assoc
+      [
+        ("name", `String keeper_name);
+        ("message", `String message);
+        ("ollama_timeout_sec", `Float timeout_sec);
+      ]
   in
   try
     Eio.Time.with_timeout_exn clock timeout_sec (fun () ->

@@ -493,17 +493,17 @@ let build_ollama_chat_body (req : completion_request) : string =
   ] in
   Yojson.Safe.to_string (`Assoc body)
 
-let call_ollama_chat (req : completion_request) : (completion_response, string) result =
+let call_ollama_chat ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let url = sprintf "%s/api/chat" req.model.api_url in
   let body = build_ollama_chat_body req in
   let headers = [("Content-Type", "application/json")] in
-  let timeout_sec = ollama_timeout_sec () in
+  let timeout_sec = Option.value timeout_sec ~default:(ollama_timeout_sec ()) in
   match curl_post ~url ~headers ~body ~timeout_sec with
   | Error e -> Error e
   | Ok raw -> parse_ollama_chat_response raw
 
 (** Ollama fallback: /api/generate for models without chat support. *)
-let call_ollama_generate (req : completion_request) : (completion_response, string) result =
+let call_ollama_generate ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let url = sprintf "%s/api/generate" req.model.api_url in
   let prompt = List.fold_left (fun acc m ->
     match m.role with
@@ -519,7 +519,7 @@ let call_ollama_generate (req : completion_request) : (completion_response, stri
     ("stream", `Bool false);
   ]) in
   let headers = [("Content-Type", "application/json")] in
-  let timeout_sec = ollama_timeout_sec () in
+  let timeout_sec = Option.value timeout_sec ~default:(ollama_timeout_sec ()) in
   match curl_post ~url ~headers ~body ~timeout_sec with
   | Error e -> Error e
   | Ok raw -> parse_ollama_generate_response raw
@@ -568,18 +568,19 @@ let call_openai_compatible (req : completion_request) : (completion_response, st
 (* Core: complete                                                   *)
 (* ================================================================ *)
 
-let complete (req : completion_request) : (completion_response, string) result =
+let complete ?ollama_timeout_sec (req : completion_request) : (completion_response, string) result =
   let t0 = Time_compat.now () in
   let result = match req.model.provider with
     | Ollama ->
       (* Try chat API first.
          Fallback to /api/generate only for likely endpoint-support errors,
          because retrying on timeouts doubles latency and can exceed caller deadlines. *)
-      (match call_ollama_chat req with
+      (match call_ollama_chat ?timeout_sec:ollama_timeout_sec req with
        | Ok _ as ok -> ok
        | Error e ->
          if req.tools <> [] then Error e
-         else if ollama_should_fallback_to_generate e then call_ollama_generate req
+         else if ollama_should_fallback_to_generate e then
+           call_ollama_generate ?timeout_sec:ollama_timeout_sec req
          else Error e)
     | Claude -> call_claude req
     | Gemini | Glm_cloud | OpenRouter | Custom _ ->
@@ -593,7 +594,7 @@ let complete (req : completion_request) : (completion_response, string) result =
 (* Cascade: try models in order                                     *)
 (* ================================================================ *)
 
-let cascade (requests : completion_request list) : (completion_response, string) result =
+let cascade ?ollama_timeout_sec (requests : completion_request list) : (completion_response, string) result =
   let rec try_next errors = function
     | [] ->
       let all_errors = String.concat "; " (List.rev errors) in
@@ -601,7 +602,7 @@ let cascade (requests : completion_request list) : (completion_response, string)
     | req :: rest ->
       eprintf "[llm_client] cascade: trying %s (%s)\n%!"
         req.model.model_id (string_of_provider req.model.provider);
-      match complete req with
+      match complete ?ollama_timeout_sec req with
       | Ok resp ->
         eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
           resp.model_used resp.latency_ms;

@@ -91,13 +91,23 @@ type completion_response = {
 
 (** Call LLM with structured request.
     Uses subprocess curl for HTTP — no Eio runtime dependency.
+    Optional [ollama_timeout_sec] overrides Ollama request timeout (seconds)
+    for this call only.
     @return Ok response on success, Error message on failure. *)
-val complete : completion_request -> (completion_response, string) result
+val complete :
+  ?ollama_timeout_sec:int ->
+  completion_request ->
+  (completion_response, string) result
 
 (** Cascade — try models in order until one succeeds.
     Each request targets a different model. First success wins.
+    Optional [ollama_timeout_sec] overrides Ollama request timeout (seconds)
+    for all tries in this cascade.
     @return Ok response from first successful model, Error if all fail. *)
-val cascade : completion_request list -> (completion_response, string) result
+val cascade :
+  ?ollama_timeout_sec:int ->
+  completion_request list ->
+  (completion_response, string) result
 
 (** {1 Helpers} *)
 

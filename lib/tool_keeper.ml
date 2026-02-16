@@ -276,6 +276,10 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Optional: set models when creating keeper inline");
         ]);
+        ("ollama_timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Optional: override Ollama timeout (sec) for this keeper message call");
+        ]);
         ("new_goal", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: replace keeper goal (persisted)");
@@ -5826,6 +5830,12 @@ let handle_keeper_msg ctx args : tool_result =
     let new_drift_enabled_opt = get_bool_opt args "new_drift_enabled" in
     let new_drift_min_turn_gap_opt = Safe_ops.json_int_opt "new_drift_min_turn_gap" args in
     let inline_models = get_string_list args "models" in
+    let ollama_timeout_sec_opt =
+      Safe_ops.json_float_opt "ollama_timeout_sec" args
+      |> Option.map (fun v ->
+             let sec = int_of_float (Float.ceil v) in
+             max 10 (min 300 sec))
+    in
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
     | Ok inline_soul_profile, Ok new_soul_profile ->
@@ -6151,7 +6161,7 @@ let handle_keeper_msg ctx args : tool_result =
             in
 
             (* Single-turn LLM call with cascade *)
-	            let requests =
+            let requests =
 	              List.map (fun (model : Llm_client.model_spec) ->
 	                let msgs =
 	                  (Llm_client.system_msg turn_system_prompt) :: ctx_work.messages
@@ -6166,8 +6176,14 @@ let handle_keeper_msg ctx args : tool_result =
                 } : Llm_client.completion_request)
               ) specs
             in
+            let run_cascade requests =
+              match ollama_timeout_sec_opt with
+              | Some timeout_sec ->
+                  Llm_client.cascade ~ollama_timeout_sec:timeout_sec requests
+              | None -> Llm_client.cascade requests
+            in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
-            match Llm_client.cascade requests with
+            match run_cascade requests with
             | Error e ->
               (false, Printf.sprintf "❌ LLM failed: %s" e)
             | Ok resp0 ->
@@ -6253,7 +6269,7 @@ let handle_keeper_msg ctx args : tool_result =
                       } : Llm_client.completion_request)
                     ) specs
                   in
-                  match Llm_client.cascade followup_requests with
+                  match run_cascade followup_requests with
                   | Error _ ->
                     (* Cascade failed — return what we have *)
                     ( last_resp.Llm_client.content, acc_usage,
@@ -6329,7 +6345,7 @@ let handle_keeper_msg ctx args : tool_result =
                       } : Llm_client.completion_request)
                     ) specs
                   in
-                  match Llm_client.cascade correction_requests with
+                  match run_cascade correction_requests with
                   | Error _ ->
                     ( base_content, base_usage, base_model_used, base_latency_ms,
                       eval0, true, false, false, base_cost_usd, tools_used )
@@ -6393,7 +6409,7 @@ let handle_keeper_msg ctx args : tool_result =
                       } : Llm_client.completion_request)
                     ) specs
                   in
-                  match Llm_client.cascade forced_requests with
+                  match run_cascade forced_requests with
                   | Error _ ->
                       ( content_after_correction, usage_after_correction,
                         model_after_correction, latency_after_correction,

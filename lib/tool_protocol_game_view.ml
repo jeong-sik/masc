@@ -58,6 +58,78 @@ let get_object_opt args key =
 let parse_json_or_string s =
   try Yojson.Safe.from_string s with _ -> `String s
 
+let dedupe_keep_order xs =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+        if List.mem x seen then
+          loop seen acc rest
+        else
+          loop (x :: seen) (x :: acc) rest
+  in
+  loop [] [] xs
+
+let json_string_list xs = `List (List.map (fun s -> `String s) xs)
+
+let default_trpg_room_id = "default"
+
+let supported_client_topics =
+  [ "trpg.events"; "trpg.state"; "experiment.events"; "experiment.state" ]
+
+let split_topics requested =
+  let accepted, rejected =
+    List.partition (fun t -> List.mem t supported_client_topics) requested
+  in
+  (dedupe_keep_order accepted, dedupe_keep_order rejected)
+
+let sse_endpoints_for_topics topics =
+  let items = ref [] in
+  if List.mem "experiment.events" topics then
+    items :=
+      `Assoc
+        [
+          ("topic", `String "experiment.events");
+          ("url", `String "/sse?room=experiment");
+        ]
+      :: !items;
+  !items |> List.rev
+
+let pull_fallback_for_topics topics =
+  let fields = ref [] in
+  if List.mem "trpg.events" topics then
+    fields :=
+      ( "trpg.events",
+        `Assoc
+          [
+            ("tool", `String "trpg.stream.read");
+            ( "cursor",
+              `Assoc
+                [
+                  ("room_id", `String default_trpg_room_id);
+                  ("after_seq", `Int 0);
+                ] );
+          ] )
+      :: !fields;
+  if List.mem "trpg.state" topics then
+    fields :=
+      ( "trpg.state",
+        `Assoc
+          [
+            ("http", `String "/api/v1/trpg/state?room_id=default");
+            ("room_id", `String default_trpg_room_id);
+          ] )
+      :: !fields;
+  if List.mem "experiment.state" topics then
+    fields :=
+      ( "experiment.state",
+        `Assoc
+          [
+            ("tool", `String "experiment.status");
+            ("note", `String "requires experiment_id");
+          ] )
+      :: !fields;
+  `Assoc (List.rev !fields)
+
 let make_envelope ?legacy_alias ~canonical_tool ~status ~code ?message ~payload () =
   `Assoc
     [
@@ -456,10 +528,81 @@ let handle_trpg_canonical (ctx : context) ~canonical_tool ~legacy_name args :
         ~message:(Printf.sprintf "legacy dispatcher unavailable: %s" legacy_name)
         ()
 
-let handle_client_skeleton ~canonical_tool _args : tool_result =
+let handle_client_session_open (ctx : context) ~canonical_tool args :
+    (tool_result, tool_result) result =
+  let* session_id = require_session_id args ~canonical_tool in
+  let trace_id = get_string_opt args "trace_id" in
+  let session =
+    Game_view_state.open_client_session ctx.config ~session_id ~trace_id
+      ~agent_name:ctx.agent_name
+  in
+  let payload =
+    `Assoc
+      [
+        ("session_id", `String session.session_id);
+        ("trace_id", Option.fold ~none:`Null ~some:(fun v -> `String v) session.trace_id);
+        ("status", `String "opened");
+        ("opened_at", `Float session.created_at);
+        ("last_seen", `Float session.last_seen);
+        ("protocol_version", `String protocol_version);
+      ]
+  in
+  Ok (ok_json ~canonical_tool payload)
+
+let handle_client_state_subscribe (ctx : context) ~canonical_tool args :
+    (tool_result, tool_result) result =
+  let* session_id = require_session_id args ~canonical_tool in
+  let requested_topics =
+    get_string_list args "topics"
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+    |> dedupe_keep_order
+  in
+  if requested_topics = [] then
+    Error
+      (err_json ~canonical_tool ~code:"VALIDATION_ERROR"
+         ~message:"topics must include at least one entry" ())
+  else
+    match Game_view_state.get_client_session ctx.config ~session_id with
+    | None ->
+        Error
+          (err_json ~canonical_tool ~code:"PRECONDITION_REQUIRED"
+             ~message:
+               "client.session.open required before client.state.subscribe"
+             ())
+    | Some _ ->
+        let _ =
+          Game_view_state.open_client_session ctx.config ~session_id
+            ~trace_id:None ~agent_name:ctx.agent_name
+        in
+        let accepted_topics, rejected_topics = split_topics requested_topics in
+        let sub =
+          Game_view_state.create_client_subscription ctx.config ~session_id
+            ~topics:requested_topics ~accepted_topics ~rejected_topics
+        in
+        let payload =
+          `Assoc
+            [
+              ("subscription_id", `String sub.subscription_id);
+              ("session_id", `String sub.session_id);
+              ("accepted_topics", json_string_list accepted_topics);
+              ("rejected_topics", json_string_list rejected_topics);
+              ( "transport",
+                `Assoc
+                  [
+                    ("primary", `String "sse");
+                    ("sse_endpoints", `List (sse_endpoints_for_topics accepted_topics));
+                    ("pull_fallback", pull_fallback_for_topics accepted_topics);
+                  ] );
+            ]
+        in
+        Ok (ok_json ~canonical_tool payload)
+
+let handle_client_deferred ~canonical_tool : tool_result =
   err_json ~canonical_tool ~code:"NOT_IMPLEMENTED"
     ~message:
-      "client.* protocol hooks are reserved for engine integration (Bevy/WebGPU/WASM)"
+      "deferred_to_next_cycle: client input/snapshot hooks are not implemented in this cycle"
+    ~details:(`Assoc [ ("deferred_to_next_cycle", `Bool true) ])
     ()
 
 let legacy_alias_to_canonical = function
@@ -620,13 +763,21 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
       Some
         (handle_trpg_canonical ctx ~canonical_tool:name
            ~legacy_name:"masc_trpg_world_event" args)
-  | "client.session.open"
-  | "client.state.subscribe"
+  | "client.session.open" ->
+      Some
+        (match handle_client_session_open ctx ~canonical_tool:name args with
+        | Ok r -> r
+        | Error e -> e)
+  | "client.state.subscribe" ->
+      Some
+        (match handle_client_state_subscribe ctx ~canonical_tool:name args with
+        | Ok r -> r
+        | Error e -> e)
   | "client.input.submit"
   | "client.input.approve"
   | "client.input.reject"
   | "client.snapshot.get" ->
-      Some (handle_client_skeleton ~canonical_tool:name args)
+      Some (handle_client_deferred ~canonical_tool:name)
   | legacy -> (
       match legacy_alias_to_canonical legacy with
       | Some canonical_tool ->
@@ -822,32 +973,32 @@ let schemas : Types.tool_schema list =
            ("severity", string_schema);
          ]);
     schema "client.session.open"
-      "Client protocol stub for engine session bootstrap."
+      "Open (or refresh) a client session for engine/viewer integration."
       (object_schema
          ~required:[ "session_id" ]
          [ ("session_id", string_schema); ("trace_id", string_schema) ]);
     schema "client.state.subscribe"
-      "Client protocol stub for state/event subscription."
+      "Subscribe client session to state/event topics (SSE primary, TRPG pull fallback)."
       (object_schema
          ~required:[ "session_id"; "topics" ]
          [ ("session_id", string_schema); ("topics", array_of string_schema) ]);
     schema "client.input.submit"
-      "Client protocol stub for human input injection."
+      "Deferred: human input injection (next cycle)."
       (object_schema
          ~required:[ "session_id"; "input" ]
          [ ("session_id", string_schema); ("input", string_schema) ]);
     schema "client.input.approve"
-      "Client protocol stub for human approval."
+      "Deferred: human approval hook (next cycle)."
       (object_schema
          ~required:[ "session_id"; "input_id" ]
          [ ("session_id", string_schema); ("input_id", string_schema) ]);
     schema "client.input.reject"
-      "Client protocol stub for human rejection."
+      "Deferred: human rejection hook (next cycle)."
       (object_schema
          ~required:[ "session_id"; "input_id" ]
          [ ("session_id", string_schema); ("input_id", string_schema); ("reason", string_schema) ]);
     schema "client.snapshot.get"
-      "Client protocol stub for current state snapshot."
+      "Deferred: client snapshot hook (next cycle)."
       (object_schema
          ~required:[ "session_id" ]
          [ ("session_id", string_schema) ]);

@@ -18,7 +18,7 @@ pub const MASC_MCP_URL: &str = "http://localhost:8935";
 pub const DEFAULT_ROOM_ID: &str = "default";
 
 /// Poll interval for MASC TRPG stream JSON endpoint.
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 pub const TRPG_POLL_INTERVAL_MS: i32 = 1000;
 
 /// Backend mode for TRPG view.
@@ -37,7 +37,7 @@ pub enum TrpgBackendMode {
 /// source used by server-side tool contracts.
 pub const TRPG_BACKEND_MODE: TrpgBackendMode = TrpgBackendMode::MascApi;
 
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 pub fn trpg_uses_polling() -> bool {
     matches!(TRPG_BACKEND_MODE, TrpgBackendMode::MascApi)
 }
@@ -54,7 +54,7 @@ pub fn trpg_state_url() -> String {
 }
 
 /// URL for incremental TRPG stream reads.
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
     match TRPG_BACKEND_MODE {
         TrpgBackendMode::MascApi => format!(
@@ -68,7 +68,7 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
 /// SSE endpoint for a given viewer mode.
 /// Returns `None` for Lobby (no live data connection).
 /// Called by `masc_client::setup_masc_sse` (wasm32 only).
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
         ViewerMode::Lobby => None,
@@ -80,18 +80,6 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
         ViewerMode::Monitor => Some(format!("{}/sse?room=monitor", MASC_MCP_URL)),
         ViewerMode::Council => Some(format!("{}/sse?room=council", MASC_MCP_URL)),
         ViewerMode::Social => Some(format!("{}/sse?room=social", MASC_MCP_URL)),
-    }
-}
-
-/// HTTP base URL for initial state loading in a given mode.
-#[allow(dead_code)]
-pub fn http_base_url(mode: &ViewerMode) -> &'static str {
-    match mode {
-        ViewerMode::Trpg => match TRPG_BACKEND_MODE {
-            TrpgBackendMode::MascApi => MASC_MCP_URL,
-            TrpgBackendMode::LegacyEngine => TRPG_ENGINE_URL,
-        },
-        _ => MASC_MCP_URL,
     }
 }
 

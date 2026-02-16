@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.68.0] - 2026-02-16
+
+### Added
+- **TRPG Actor Lease Protocol** — Actor spawn/claim/release lifecycle with lease management (#173)
+- **Social Board Interactions** — Vote and comment support for Viewer Lodge Social Board (#172)
+- **GLM Cloud Load Balancer** — Multi-model load balancer pool for GLM Cloud LLM provider (#170)
+- **TRPG Fast Keeper Cascade** — Fast keeper routing with new game flow bootstrap (#169)
+- **TRPG Dashboard Actions** — Guide dashboard with next-action flow for session management (#166)
+- **TRPG Unique Keeper Routing** — Enforce unique keeper routing and session visibility (#165)
+- **Viewer Oil Painting Assets** — Regenerated assets with oil painting aesthetic (#164)
+
+### Changed
+- **Result Types Migration** — Replace `failwith` with `Result` types for safer error handling (#163)
+- **TRPG/Viewer UX** — Fast keeper routing, clean session lifecycle, debug toggle (#171)
+
+### Fixed
+- LLM client now distinguishes curl timeout (exit 28) from empty API response, with connection-refused detection (#174)
+- Viewer narrative stream rendered as text-only to prevent HTML injection (#168)
+- Viewer TRPG DOM panel bindings restored after refactor (#167)
+- TRPG round-run UX hardened with language flow improvements (#162)
+- Viewer trunk build restored by fixing ui module and wasm feature flags
+
 ## [2.67.0] - 2026-02-16
 
 ### Added

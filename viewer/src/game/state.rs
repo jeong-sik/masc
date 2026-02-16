@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::BTreeMap;
 
 /// Turn phases as defined in engine.json.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -73,4 +74,21 @@ pub enum ConnectionStatus {
     #[allow(dead_code)]
     Connecting,
     Connected,
+}
+
+/// Runtime progress derived from TRPG stream events.
+#[derive(Resource, Debug, Default)]
+pub struct TurnProgressState {
+    pub room_status: String,
+    pub turn: u32,
+    pub phase: String,
+    pub dm_keeper: String,
+    pub player_order: Vec<String>,
+    pub actor_order: Vec<String>,
+    pub actor_states: BTreeMap<String, String>,
+    pub current_actor: String,
+    pub next_actor: String,
+    pub last_actor: String,
+    pub last_result: String,
+    pub last_event: String,
 }

@@ -830,6 +830,57 @@ body.mode-lobby #dashboard {
     color: var(--text-primary);
 }
 
+.turn-runtime {
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    background: var(--bg-panel-alt);
+}
+
+.turn-runtime-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
+}
+
+.turn-runtime-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    padding-bottom: 2px;
+    border-bottom: 1px dashed var(--border-main);
+}
+
+.turn-runtime-item .k {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.turn-runtime-item .v {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--text-primary);
+    text-align: right;
+}
+
+.turn-runtime-item .v.status-active {
+    color: var(--status-connected);
+}
+
+.turn-runtime-item .v.status-ended,
+.turn-runtime-item .v.status-wipe {
+    color: var(--status-disconnected);
+}
+
+.turn-runtime-item .v.status-idle {
+    color: var(--text-dim);
+}
+
 #dice-log {
     min-height: 100%;
 }

@@ -291,6 +291,28 @@ let trpg_parse_required_int key json =
   | `Null -> Error (`Bad_request, Printf.sprintf "%s is required" key)
   | _ -> Error (`Bad_request, Printf.sprintf "%s must be int" key)
 
+let trpg_parse_optional_bool key json ~default =
+  match Yojson.Safe.Util.member key json with
+  | `Bool b -> Ok b
+  | `Null -> Ok default
+  | _ -> Error (`Bad_request, Printf.sprintf "%s must be bool" key)
+
+let trpg_parse_optional_string_list key json =
+  match Yojson.Safe.Util.member key json with
+  | `List items ->
+      Ok (List.filter_map (function `String s -> Some s | _ -> None) items)
+  | `Null -> Ok []
+  | _ -> Error (`Bad_request, Printf.sprintf "%s must be array of strings" key)
+
+let trpg_validate_actor_role role =
+  match role with
+  | "dm" | "player" | "npc" -> Ok ()
+  | other ->
+      Error
+        ( `Bad_request,
+          Printf.sprintf "invalid role: %s (must be dm, player, or npc)" other
+        )
+
 let trpg_parse_event_type_filter event_type_filter =
   match event_type_filter with
   | None -> Ok None
@@ -474,6 +496,46 @@ let trpg_read_state_int derived_json field =
   with _ ->
     Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
 
+(* ─── Actor state query helpers ─────────────────────────────── *)
+
+let trpg_normalize_keeper_name s = s |> String.trim |> String.lowercase_ascii
+
+let trpg_state_party_fields state =
+  match Yojson.Safe.Util.member "party" state with
+  | `Assoc fields -> fields
+  | _ -> []
+
+let trpg_actor_exists state actor_id =
+  trpg_state_party_fields state |> List.mem_assoc actor_id
+
+let trpg_actor_alive state actor_id =
+  match trpg_state_party_fields state |> List.assoc_opt actor_id with
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "alive" fields with
+      | Some (`Bool b) -> b
+      | _ -> true)
+  | _ -> true
+
+let trpg_state_actor_control_fields state =
+  match Yojson.Safe.Util.member "actor_control" state with
+  | `Assoc fields ->
+      List.filter_map
+        (fun (k, v) ->
+          match v with
+          | `String s when String.trim s <> "" -> Some (k, String.trim s)
+          | _ -> None)
+        fields
+  | _ -> []
+
+let trpg_owner_for_actor state actor_id =
+  trpg_state_actor_control_fields state |> List.assoc_opt actor_id
+
+let trpg_actor_for_keeper state keeper =
+  let norm = trpg_normalize_keeper_name keeper in
+  trpg_state_actor_control_fields state
+  |> List.find_opt (fun (_aid, kn) -> trpg_normalize_keeper_name kn = norm)
+  |> Option.map fst
+
 let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
   try
     let json = Yojson.Safe.from_string body_str in
@@ -546,6 +608,174 @@ let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
           ("state", trpg_state_from_derived derived);
         ])
   with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+
+(* ─── Actor REST wrappers ───────────────────────────────────── *)
+
+let trpg_actor_spawn_json ~base_dir ~body_str : trpg_api_result =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
+    let* room_id = trpg_parse_required_string "room_id" json in
+    let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
+    let* actor_id = trpg_parse_required_string "actor_id" json in
+    let* name = trpg_parse_required_string "name" json in
+    let* role = trpg_parse_required_string "role" json in
+    let* () = trpg_validate_actor_role role in
+    let* archetype = trpg_parse_optional_string "archetype" json in
+    let* persona = trpg_parse_optional_string "persona" json in
+    let* hp_opt = trpg_parse_optional_int "hp" json in
+    let hp = Option.value ~default:100 hp_opt in
+    let* max_hp_opt = trpg_parse_optional_int "max_hp" json in
+    let max_hp = Option.value ~default:hp max_hp_opt in
+    let* alive = trpg_parse_optional_bool "alive" json ~default:true in
+    let* traits = trpg_parse_optional_string_list "traits" json in
+    let* skills = trpg_parse_optional_string_list "skills" json in
+    let* inventory = trpg_parse_optional_string_list "inventory" json in
+    (* Check actor doesn't already exist *)
+    let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+    let state = trpg_state_from_derived derived in
+    if trpg_actor_exists state actor_id then
+      Error (`Bad_request, Printf.sprintf "actor '%s' already exists" actor_id)
+    else
+      (* Build actor payload *)
+      let payload =
+        `Assoc
+          ([ ("name", `String name); ("role", `String role) ]
+          @ (match archetype with Some a -> [ ("archetype", `String a) ] | None -> [])
+          @ (match persona with Some p -> [ ("persona", `String p) ] | None -> [])
+          @ [ ("hp", `Int hp); ("max_hp", `Int max_hp); ("alive", `Bool alive) ]
+          @ (if traits <> [] then
+               [ ("traits", `List (List.map (fun s -> `String s) traits)) ]
+             else [])
+          @ (if skills <> [] then
+               [ ("skills", `List (List.map (fun s -> `String s) skills)) ]
+             else [])
+          @ (if inventory <> [] then
+               [ ("inventory", `List (List.map (fun s -> `String s) inventory)) ]
+             else []))
+      in
+      let* _event =
+        trpg_append_event ~base_dir ~room_id
+          ~event_type:Masc_mcp.Trpg_engine_event.Actor_spawned ~actor_id ~payload ()
+      in
+      let* derived2 = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("actor_id", `String actor_id);
+            ("state", trpg_state_from_derived derived2);
+          ])
+  with Yojson.Json_error e ->
+    Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+
+let trpg_actor_claim_json ~base_dir ~body_str : trpg_api_result =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
+    let* room_id = trpg_parse_required_string "room_id" json in
+    let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
+    let* actor_id = trpg_parse_required_string "actor_id" json in
+    let* keeper = trpg_parse_required_string "keeper" json in
+    let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+    let state = trpg_state_from_derived derived in
+    if not (trpg_actor_exists state actor_id) then
+      Error (`Bad_request, Printf.sprintf "actor '%s' does not exist" actor_id)
+    else if not (trpg_actor_alive state actor_id) then
+      Error (`Bad_request, Printf.sprintf "actor '%s' is not alive" actor_id)
+    else
+      let norm_keeper = trpg_normalize_keeper_name keeper in
+      (* Check current ownership *)
+      match trpg_owner_for_actor state actor_id with
+      | Some current_keeper
+        when trpg_normalize_keeper_name current_keeper = norm_keeper ->
+          (* Idempotent re-claim by same keeper *)
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("already_claimed", `Bool true);
+                ("actor_id", `String actor_id);
+                ("keeper", `String keeper);
+              ])
+      | Some other_keeper ->
+          Error
+            ( `Bad_request,
+              Printf.sprintf "actor '%s' already claimed by '%s'" actor_id
+                other_keeper )
+      | None -> (
+          (* Check keeper doesn't already control another actor *)
+          match trpg_actor_for_keeper state keeper with
+          | Some other_actor ->
+              Error
+                ( `Bad_request,
+                  Printf.sprintf "keeper '%s' already controls actor '%s'" keeper
+                    other_actor )
+          | None ->
+              let payload = `Assoc [ ("keeper", `String keeper) ] in
+              let* _event =
+                trpg_append_event ~base_dir ~room_id
+                  ~event_type:Masc_mcp.Trpg_engine_event.Actor_claimed
+                  ~actor_id ~payload ()
+              in
+              let* derived2 =
+                trpg_derive_state_json ~base_dir ~room_id
+                  ~rule_module
+              in
+              Ok
+                (`Assoc
+                  [
+                    ("ok", `Bool true);
+                    ("actor_id", `String actor_id);
+                    ("keeper", `String keeper);
+                    ("state", trpg_state_from_derived derived2);
+                  ]))
+  with Yojson.Json_error e ->
+    Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
+
+let trpg_actor_release_json ~base_dir ~body_str : trpg_api_result =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
+    let* room_id = trpg_parse_required_string "room_id" json in
+    let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
+    let* actor_id = trpg_parse_required_string "actor_id" json in
+    let* keeper = trpg_parse_required_string "keeper" json in
+    let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+    let state = trpg_state_from_derived derived in
+    match trpg_owner_for_actor state actor_id with
+    | None ->
+        Error (`Bad_request, Printf.sprintf "actor '%s' is not claimed" actor_id)
+    | Some current_keeper ->
+        let norm_keeper = trpg_normalize_keeper_name keeper in
+        if trpg_normalize_keeper_name current_keeper <> norm_keeper then
+          Error
+            ( `Bad_request,
+              Printf.sprintf "actor '%s' is claimed by '%s', not '%s'" actor_id
+                current_keeper keeper )
+        else
+          let payload = `Assoc [ ("keeper", `String keeper) ] in
+          let* _event =
+            trpg_append_event ~base_dir ~room_id
+              ~event_type:Masc_mcp.Trpg_engine_event.Actor_released
+              ~actor_id ~payload ()
+          in
+          let* derived2 =
+            trpg_derive_state_json ~base_dir ~room_id ~rule_module
+          in
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("actor_id", `String actor_id);
+                ("released_by", `String keeper);
+                ("state", trpg_state_from_derived derived2);
+              ])
+  with Yojson.Json_error e ->
+    Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
 
 let trpg_turn_advance_json ~base_dir ~body_str : trpg_api_result =
   try
@@ -4044,6 +4274,51 @@ let make_routes ~port ~host =
              respond_json_with_cors ~status:`Internal_server_error request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
        ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/actors/spawn" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         Http.Request.read_body_async reqd (fun body_str ->
+           match trpg_actor_spawn_json ~base_dir ~body_str with
+           | Ok json ->
+               respond_json_with_cors ~status:`Created request reqd
+                 (Yojson.Safe.to_string json)
+           | Error (`Bad_request, msg) ->
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+           | Error (`Internal_server_error, msg) ->
+               respond_json_with_cors ~status:`Internal_server_error request reqd
+                 (Yojson.Safe.to_string (trpg_error_json msg)))
+       ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/actors/claim" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         Http.Request.read_body_async reqd (fun body_str ->
+           match trpg_actor_claim_json ~base_dir ~body_str with
+           | Ok json ->
+               respond_json_with_cors ~status:`Created request reqd
+                 (Yojson.Safe.to_string json)
+           | Error (`Bad_request, msg) ->
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+           | Error (`Internal_server_error, msg) ->
+               respond_json_with_cors ~status:`Internal_server_error request reqd
+                 (Yojson.Safe.to_string (trpg_error_json msg)))
+       ) request reqd)
+  |> Http.Router.post "/api/v1/trpg/actors/release" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         Http.Request.read_body_async reqd (fun body_str ->
+           match trpg_actor_release_json ~base_dir ~body_str with
+           | Ok json ->
+               respond_json_with_cors request reqd
+                 (Yojson.Safe.to_string json)
+           | Error (`Bad_request, msg) ->
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (trpg_error_json msg))
+           | Error (`Internal_server_error, msg) ->
+               respond_json_with_cors ~status:`Internal_server_error request reqd
+                 (Yojson.Safe.to_string (trpg_error_json msg)))
+       ) request reqd)
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
        with_read_auth (fun state _req reqd ->
@@ -4844,6 +5119,57 @@ let run_server ~sw ~env ~port ~base_path =
           | Error (`Internal_server_error, msg) ->
               h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
                 ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `POST, "/api/v1/trpg/actors/spawn" ->
+          let state = get_server_state () in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          h2_read_body h2_reqd (fun body_str ->
+            match trpg_actor_spawn_json ~base_dir ~body_str with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                  ~status:`Created ~extra_headers:cors
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Error (`Internal_server_error, msg) ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `POST, "/api/v1/trpg/actors/claim" ->
+          let state = get_server_state () in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          h2_read_body h2_reqd (fun body_str ->
+            match trpg_actor_claim_json ~base_dir ~body_str with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                  ~status:`Created ~extra_headers:cors
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Error (`Internal_server_error, msg) ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `POST, "/api/v1/trpg/actors/release" ->
+          let state = get_server_state () in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          h2_read_body h2_reqd (fun body_str ->
+            match trpg_actor_release_json ~base_dir ~body_str with
+            | Ok json ->
+                h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                  ~extra_headers:cors
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Error (`Internal_server_error, msg) ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Internal_server_error ~extra_headers:cors)
 
       | `GET, "/api/v1/board" ->
           let hearth = query_param httpun_request "hearth" in

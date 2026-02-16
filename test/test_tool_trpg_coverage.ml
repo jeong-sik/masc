@@ -27,6 +27,20 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    ensure_dir (Filename.dirname path);
+    Unix.mkdir path 0o755
+  )
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let dispatch_exn ctx ~name ~args =
   match Tool_trpg.dispatch ctx ~name ~args with
   | Some r -> r
@@ -312,9 +326,70 @@ let test_session_bootstrap_and_intervention_flow () =
     (count_from_json (parse_json_exn stream_applied));
   cleanup_dir base_dir
 
+let test_examples_scenario_visible_as_world_preset () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let scenario_dir = Filename.concat config.base_path "examples/trpg-mvp/scenarios" in
+  ensure_dir scenario_dir;
+  write_file
+    (Filename.concat scenario_dir "grimland-prologue-v1.json")
+    {|{
+  "id": "grimland-prologue-v1",
+  "title": "그림란드 연대기: 여관의 첫 밤",
+  "type": "narrative",
+  "description": "비가 멈추지 않는 밤, 여관에서 시작되는 연대기.",
+  "acts": [
+    { "id": "act-1", "title": "첫 번째 종", "description": "낯선 자들이 하나씩 문을 연다." }
+  ],
+  "runtime": { "max_rounds": 6 }
+}|};
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = None }
+  in
+
+  let ok_preset, preset_body =
+    dispatch_exn ctx ~name:"masc_trpg_preset_list" ~args:(`Assoc [])
+  in
+  Alcotest.(check bool) "preset list ok" true ok_preset;
+  let world_ids =
+    parse_json_exn preset_body
+    |> Yojson.Safe.Util.member "world_presets"
+    |> Yojson.Safe.Util.to_list
+    |> List.map (fun j -> j |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string)
+  in
+  Alcotest.(check bool) "scenario id included in world presets" true
+    (List.mem "grimland-prologue-v1" world_ids);
+
+  let ok_start, start_body =
+    dispatch_exn ctx ~name:"masc_trpg_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String "session-scenario-bridge");
+            ("world_preset_id", `String "grimland-prologue-v1");
+          ])
+  in
+  Alcotest.(check bool) "session start ok with scenario world_preset_id" true ok_start;
+  let start_json = parse_json_exn start_body in
+  Alcotest.(check string)
+    "session uses scenario preset id"
+    "grimland-prologue-v1"
+    (start_json |> Yojson.Safe.Util.member "world_preset"
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir
+
 let () =
   Alcotest.run "Tool_trpg coverage"
     [
+      ( "preset",
+        [
+          Alcotest.test_case
+            "examples scenario is mapped as world preset"
+            `Quick
+            test_examples_scenario_visible_as_world_preset;
+        ] );
       ( "session",
         [
           Alcotest.test_case

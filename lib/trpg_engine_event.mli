@@ -18,6 +18,10 @@ type event_type =
   | Scene_transition
   | Quest_update
   | World_event
+  | Session_started
+  | Party_selected
+  | Intervention_submitted
+  | Intervention_applied
 
 type t = {
   seq : int;

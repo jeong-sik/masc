@@ -185,9 +185,143 @@ let test_round_run_requires_keeper_runtime () =
     (contains_substring msg "keeper_call is not available");
   cleanup_dir base_dir
 
+let test_session_bootstrap_and_intervention_flow () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result
+      =
+    if name = "dm-keeper" then
+      `Ok (`Assoc [ ("reply", `String "The DM advances the grim plot.") ])
+    else if String.starts_with ~prefix:"pk-" name then
+      `Ok (`Assoc [ ("reply", `String "Player executes assigned tactic.") ])
+    else
+      `Error ("unknown keeper: " ^ name)
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+  in
+  let session_id = "session-bootstrap-1" in
+  let ok_preset, preset_body =
+    dispatch_exn ctx ~name:"masc_trpg_preset_list" ~args:(`Assoc [])
+  in
+  Alcotest.(check bool) "preset list ok" true ok_preset;
+  Alcotest.(check bool) "preset list has dm presets" true
+    ((parse_json_exn preset_body |> Yojson.Safe.Util.member "dm_presets" |> Yojson.Safe.Util.to_list |> List.length) >= 1);
+
+  let ok_pool, pool_body =
+    dispatch_exn ctx ~name:"masc_trpg_pool_generate"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("pool_size", `Int 6);
+            ("party_size", `Int 4);
+            ("seed", `Int 7);
+          ])
+  in
+  Alcotest.(check bool) "pool generate ok" true ok_pool;
+  let pool_json = parse_json_exn pool_body in
+  let pool = pool_json |> Yojson.Safe.Util.member "pool" |> Yojson.Safe.Util.to_list in
+  let suggested =
+    pool_json |> Yojson.Safe.Util.member "suggested_party_ids"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "pool size" 6 (List.length pool);
+  Alcotest.(check int) "suggested party size" 4 (List.length suggested);
+
+  let ok_party, party_body =
+    dispatch_exn ctx ~name:"masc_trpg_party_select"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("pool", `List pool);
+            ("selected_player_ids", `List suggested);
+          ])
+  in
+  Alcotest.(check bool) "party select ok" true ok_party;
+  let party_json = parse_json_exn party_body in
+  let party = party_json |> Yojson.Safe.Util.member "party" |> Yojson.Safe.Util.to_list in
+  Alcotest.(check int) "party size" 4 (List.length party);
+
+  let ok_start, start_body =
+    dispatch_exn ctx ~name:"masc_trpg_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("party", `List party);
+          ])
+  in
+  Alcotest.(check bool) "session start ok" true ok_start;
+  let start_json = parse_json_exn start_body in
+  let room_id =
+    start_json |> Yojson.Safe.Util.member "room_id" |> Yojson.Safe.Util.to_string
+  in
+  let round_template =
+    start_json
+    |> Yojson.Safe.Util.member "round_run_template"
+    |> Yojson.Safe.Util.member "player_keepers"
+  in
+
+  let ok_intrv, intrv_body =
+    dispatch_exn ctx ~name:"masc_trpg_intervention_submit"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("session_id", `String session_id);
+            ("intervention_type", `String "nudge");
+            ("payload", `Assoc [ ("target", `String "trust"); ("delta", `Float 0.1) ]);
+          ])
+  in
+  Alcotest.(check bool) "intervention submit ok" true ok_intrv;
+  let intrv_json = parse_json_exn intrv_body in
+  Alcotest.(check string) "intervention status" "pending"
+    (intrv_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+
+  let ok_round, round_body =
+    dispatch_exn ctx ~name:"masc_trpg_round_run"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("dm_keeper", `String "dm-keeper");
+            ("player_keepers", round_template);
+            ("phase", `String "round");
+            ("timeout_sec", `Float 0.5);
+          ])
+  in
+  Alcotest.(check bool) "round run ok" true ok_round;
+  let round_json = parse_json_exn round_body in
+  let summary = round_json |> Yojson.Safe.Util.member "summary" in
+  Alcotest.(check int) "interventions applied count" 1
+    (summary |> Yojson.Safe.Util.member "interventions" |> Yojson.Safe.Util.to_int);
+
+  let _, stream_applied =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("event_type", `String "intervention.applied");
+          ])
+  in
+  Alcotest.(check int) "intervention.applied event count" 1
+    (count_from_json (parse_json_exn stream_applied));
+  cleanup_dir base_dir
+
 let () =
   Alcotest.run "Tool_trpg coverage"
     [
+      ( "session",
+        [
+          Alcotest.test_case
+            "bootstrap + intervention + round"
+            `Quick
+            test_session_bootstrap_and_intervention_flow;
+        ] );
       ( "round_run",
         [
           Alcotest.test_case

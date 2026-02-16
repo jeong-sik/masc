@@ -1,0 +1,16 @@
+[
+  {
+    "id": "grimland-chronicle",
+    "title": "Grimland Chronicle",
+    "description": "A fractured peninsula where guilds and city-states compete for survival.",
+    "intro": "Famine followed by uneasy peace. Supply lines are thin and alliances are brittle.",
+    "initial_flags": ["scarcity.high", "rumor.black-fleet", "trust.public-low"]
+  },
+  {
+    "id": "emberfall-siege",
+    "title": "Emberfall Siege",
+    "description": "Fortress-city under siege with internal factions and limited time.",
+    "intro": "Day 47 of the siege. Food reserves are measured in days, not weeks.",
+    "initial_flags": ["siege.active", "morale.volatile"]
+  }
+]

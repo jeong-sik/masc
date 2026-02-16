@@ -1,0 +1,44 @@
+[
+  {
+    "id": "frontline_shield",
+    "name": "Frontline Shield",
+    "category": "defense",
+    "description": "Absorb incoming threat targeting nearby allies.",
+    "usage_hint": "Use during direct confrontation to prevent party collapse."
+  },
+  {
+    "id": "favor_broker",
+    "name": "Favor Broker",
+    "category": "social",
+    "description": "Trade concessions for delayed obligations.",
+    "usage_hint": "Useful before scarce-resource negotiations."
+  },
+  {
+    "id": "supply_scan",
+    "name": "Supply Scan",
+    "category": "resource",
+    "description": "Estimate resource burn and shortage horizon.",
+    "usage_hint": "Run before committing to long missions."
+  },
+  {
+    "id": "omen_trace",
+    "name": "Omen Trace",
+    "category": "arcane",
+    "description": "Infer likely next event from symbolic anomalies.",
+    "usage_hint": "Best in uncertain branching scenes."
+  },
+  {
+    "id": "mark_prey",
+    "name": "Mark Prey",
+    "category": "combat",
+    "description": "Expose target weakness for coordinated strike.",
+    "usage_hint": "Combine with another actor's attack action."
+  },
+  {
+    "id": "field_mend",
+    "name": "Field Mend",
+    "category": "support",
+    "description": "Emergency stabilization to prevent actor knockout.",
+    "usage_hint": "Use when hp trend is negative for two turns."
+  }
+]

@@ -199,6 +199,40 @@ let test_round_run_requires_keeper_runtime () =
     (contains_substring msg "keeper_call is not available");
   cleanup_dir base_dir
 
+let test_round_run_lang_english_prompt () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let prompts = ref [] in
+  let keeper_call ~name ~message ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    prompts := (name, message) :: !prompts;
+    match name with
+    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "Scene starts.") ])
+    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I move to cover.") ])
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-lang-en");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("lang", `String "en");
+      ]
+  in
+  let ok, _body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success (lang=en)" true ok;
+  let has_en_instruction =
+    List.exists
+      (fun (_name, prompt) -> contains_substring prompt "Respond in English.")
+      !prompts
+  in
+  Alcotest.(check bool) "english prompt instruction injected" true has_en_instruction;
+  cleanup_dir base_dir
+
 let test_session_bootstrap_and_intervention_flow () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -411,5 +445,9 @@ let () =
             "requires keeper runtime"
             `Quick
             test_round_run_requires_keeper_runtime;
+          Alcotest.test_case
+            "supports lang=en prompt"
+            `Quick
+            test_round_run_lang_english_prompt;
         ] );
     ]

@@ -136,6 +136,16 @@ let test_html_contains_trpg_round_run_controls () =
     && contains_substr "function runTrpgRound()" html
     && contains_substr "/api/v1/trpg/rounds/run" html)
 
+let test_html_contains_trpg_keeper_quickpick_and_lang () =
+  let html = Web_dashboard.html () in
+  check bool "trpg keeper quickpick + lang" true
+    (String.length html > 0
+    && contains_substr "id=\"trpg-lang-select\"" html
+    && contains_substr "id=\"trpg-reload-btn\"" html
+    && contains_substr "id=\"trpg-keeper-quick\"" html
+    && contains_substr "function ensureTrpgKeeperCatalog(force = false)" html
+    && contains_substr "function reloadTrpgCatalogs()" html)
+
 let test_html_contains_keeper_goal_horizon_kpis () =
   let html = Web_dashboard.html () in
   check bool "keeper goal horizon kpis" true
@@ -171,6 +181,10 @@ let () =
       test_case "notify uses normalized payload" `Quick test_html_notify_uses_normalized_payload;
       test_case "life state pills" `Quick test_html_life_state_pills_present;
       test_case "trpg round run controls" `Quick test_html_contains_trpg_round_run_controls;
+      test_case
+        "trpg keeper quickpick + lang"
+        `Quick
+        test_html_contains_trpg_keeper_quickpick_and_lang;
       test_case "keeper goal horizon kpis" `Quick test_html_contains_keeper_goal_horizon_kpis;
     ];
   ]

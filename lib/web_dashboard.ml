@@ -1582,7 +1582,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     .trpg-action-row {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
     }
     .trpg-control-help {
@@ -1590,6 +1590,50 @@ let cached_html = lazy ({|<!DOCTYPE html>
       color: #94a3b8;
       line-height: 1.35;
       margin-top: 2px;
+    }
+    .trpg-keeper-quick {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 180px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+    .trpg-keeper-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(15,23,42,0.6);
+      border: 1px solid rgba(148,163,184,0.22);
+      border-radius: 8px;
+      padding: 5px 7px;
+    }
+    .trpg-keeper-name {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.76em;
+      color: #e2e8f0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .trpg-mini-btn {
+      border: 1px solid rgba(148,163,184,0.35);
+      border-radius: 6px;
+      background: rgba(30,41,59,0.72);
+      color: #cbd5e1;
+      font-size: 0.7em;
+      padding: 3px 7px;
+      cursor: pointer;
+    }
+    .trpg-mini-btn:hover {
+      border-color: rgba(34,211,238,0.6);
+      color: #e2e8f0;
+    }
+    .trpg-empty-inline {
+      font-size: 0.75em;
+      color: #94a3b8;
+      padding: 6px 2px;
     }
     .trpg-run-status {
       font-size: 0.75em;
@@ -1901,6 +1945,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <div class="trpg-control-field">
                   <label for="trpg-dm-keeper-input">DM Keeper</label>
                   <input id="trpg-dm-keeper-input" type="text" placeholder="dm-keeper">
+                  <div class="trpg-control-help">직접 입력하거나 아래 Keeper Quick Pick의 DM 버튼으로 지정하세요.</div>
                 </div>
                 <div class="trpg-control-field">
                   <label for="trpg-pool-size-input">Pool Size</label>
@@ -1923,17 +1968,33 @@ let cached_html = lazy ({|<!DOCTYPE html>
                   <label for="trpg-timeout-sec-input">Timeout (sec)</label>
                   <input id="trpg-timeout-sec-input" type="number" min="1" step="1" value="90">
                 </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-lang-select">응답 언어</label>
+                  <select id="trpg-lang-select">
+                    <option value="auto">auto (browser)</option>
+                    <option value="ko">한국어</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
                 <div class="trpg-control-field full">
-                  <label for="trpg-player-keepers-input">Player Keepers (actor=keeper, one per line)</label>
+                  <label for="trpg-player-keepers-input">Player Keepers (한 줄에 1명, actor=keeper 또는 keeper)</label>
                   <textarea id="trpg-player-keepers-input" placeholder="grimja=grimja&#10;luna=luna&#10;songarak=songarak&#10;miso=miso"></textarea>
+                  <div class="trpg-control-help">예: grimja 또는 grimja=grimja. keeper만 쓰면 actor와 keeper를 동일 이름으로 처리합니다.</div>
                 </div>
                 <div class="trpg-control-field full">
                   <label for="trpg-keeper-models-input">Keeper Models (comma-separated)</label>
                   <input id="trpg-keeper-models-input" type="text" value="ollama:glm-4.7-flash" placeholder="ollama:glm-4.7-flash, gemini:gemini-2.5-flash">
                   <div class="trpg-control-help">세션 자동 시작 시 DM/플레이어 Keeper를 생성/갱신할 때 사용합니다.</div>
                 </div>
+                <div class="trpg-control-field full">
+                  <label>Keeper Quick Pick</label>
+                  <div id="trpg-keeper-quick" class="trpg-keeper-quick">
+                    <div class="trpg-empty-inline">Keeper 목록을 불러오는 중...</div>
+                  </div>
+                </div>
               </div>
               <div class="trpg-action-row">
+                <button id="trpg-reload-btn" class="trpg-run-btn secondary" onclick="reloadTrpgCatalogs()">프리셋 새로고침</button>
                 <button id="trpg-bootstrap-btn" class="trpg-run-btn secondary" onclick="bootstrapTrpgSession()">세션 자동 시작</button>
                 <button id="trpg-run-round-btn" class="trpg-run-btn" onclick="runTrpgRound()">라운드 실행</button>
               </div>
@@ -6841,9 +6902,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgRoundRunning = false;
     let trpgBootstrapping = false;
     let trpgPresetsLoaded = false;
+    let trpgKeepersLoaded = false;
     let trpgMcpCallSeq = 1000;
     let trpgMcpSessionId = null;
     let trpgPresetCatalog = { dm_presets: [], world_presets: [] };
+    let trpgKeeperCatalog = [];
 
     function trpgEventType(ev) {
       return (ev && (ev.type || ev.event_type || ev.event)) || '';
@@ -6933,11 +6996,27 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (modelsInput && String(modelsInput.value || '').trim() === '') {
         modelsInput.value = TRPG_DEFAULT_KEEPER_MODELS;
       }
+      const langSelect = document.getElementById('trpg-lang-select');
+      if (langSelect && String(langSelect.value || '').trim() === '') {
+        langSelect.value = browserLang.startsWith('ko') ? 'ko' : 'auto';
+      } else if (langSelect && String(langSelect.value || '').trim() === 'auto' && browserLang.startsWith('ko')) {
+        langSelect.value = 'ko';
+      }
       const dmInput = document.getElementById('trpg-dm-keeper-input');
-      if (dmInput && String(dmInput.value || '').trim() === '') dmInput.value = 'dm-keeper';
+      if (dmInput && String(dmInput.value || '').trim() === '') {
+        const preferredDm =
+          (Array.isArray(trpgKeeperCatalog) ? trpgKeeperCatalog : []).find((name) => trpgIsDmLikeKeeper(name))
+          || 'dm-keeper';
+        dmInput.value = preferredDm;
+      }
       const playerInput = document.getElementById('trpg-player-keepers-input');
       if (playerInput && String(playerInput.value || '').trim() === '') {
-        playerInput.value = TRPG_DEFAULT_PLAYER_KEEPERS.join('\n');
+        if (Array.isArray(trpgKeeperCatalog) && trpgKeeperCatalog.length > 0) {
+          const suggested = trpgSuggestedPlayerKeepers(trpgKeeperCatalog, TRPG_DEFAULT_PARTY_SIZE);
+          playerInput.value = suggested.length > 0 ? suggested.join('\n') : TRPG_DEFAULT_PLAYER_KEEPERS.join('\n');
+        } else {
+          playerInput.value = TRPG_DEFAULT_PLAYER_KEEPERS.join('\n');
+        }
       }
     }
 
@@ -6999,6 +7078,160 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .filter((part) => part !== '');
     }
 
+    function trpgLanguageFromSelect() {
+      const el = document.getElementById('trpg-lang-select');
+      const raw = String((el && el.value) || 'auto').trim().toLowerCase();
+      if (raw === 'ko' || raw === 'en') return raw;
+      return browserLang.startsWith('ko') ? 'ko' : 'en';
+    }
+
+    function trpgNormalizeKeeperNames(raw) {
+      if (!Array.isArray(raw)) return [];
+      const seen = new Set();
+      const out = [];
+      raw.forEach((entry) => {
+        const name = String(entry || '').trim();
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        out.push(name);
+      });
+      return out;
+    }
+
+    function trpgIsDmLikeKeeper(name) {
+      const n = String(name || '').trim().toLowerCase();
+      if (!n) return false;
+      return (
+        n === 'dm'
+        || n.startsWith('dm-')
+        || n.includes('-dm')
+        || n.includes('dm_keeper')
+        || n.includes('dm-keeper')
+        || n.includes('trpg-dm')
+        || n.startsWith('gm')
+      );
+    }
+
+    function trpgSuggestedPlayerKeepers(keepers, limit = TRPG_DEFAULT_PARTY_SIZE) {
+      const xs = Array.isArray(keepers) ? keepers : [];
+      const capped = Math.max(1, Math.min(8, Number(limit) || TRPG_DEFAULT_PARTY_SIZE));
+      return xs.filter((name) => !trpgIsDmLikeKeeper(name)).slice(0, capped);
+    }
+
+    function renderTrpgKeeperQuickList() {
+      const el = document.getElementById('trpg-keeper-quick');
+      if (!el) return;
+      const keepers = Array.isArray(trpgKeeperCatalog) ? trpgKeeperCatalog : [];
+      if (keepers.length === 0) {
+        el.innerHTML = '<div class="trpg-empty-inline">사용 가능한 Keeper를 찾지 못했습니다. 직접 이름을 입력해도 됩니다.</div>';
+        return;
+      }
+      el.innerHTML = keepers.map((name) => {
+        const safe = escapeHtml(name);
+        const token = encodeURIComponent(name);
+        return `<div class="trpg-keeper-chip">
+          <span class="trpg-keeper-name" title="${safe}">${safe}</span>
+          <button type="button" class="trpg-mini-btn" onclick="setTrpgDmKeeperFromQuick('${token}')">DM</button>
+          <button type="button" class="trpg-mini-btn" onclick="addTrpgPlayerKeeperFromQuick('${token}')">+Player</button>
+        </div>`;
+      }).join('');
+    }
+
+    function setTrpgDmKeeperFromQuick(token) {
+      let name = '';
+      try { name = decodeURIComponent(String(token || '')); } catch (_) { name = String(token || ''); }
+      name = name.trim();
+      if (!name) return;
+      const dmInput = document.getElementById('trpg-dm-keeper-input');
+      if (dmInput) dmInput.value = name;
+      showToast(`DM Keeper 선택: ${name}`, 'success');
+    }
+
+    function addTrpgPlayerKeeperFromQuick(token) {
+      let name = '';
+      try { name = decodeURIComponent(String(token || '')); } catch (_) { name = String(token || ''); }
+      name = name.trim();
+      if (!name) return;
+      const input = document.getElementById('trpg-player-keepers-input');
+      if (!input) return;
+      const lines = String(input.value || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      const exists = lines.some((line) => {
+        if (line === name || line === `${name}=${name}`) return true;
+        const eqIdx = line.indexOf('=');
+        if (eqIdx < 0) return false;
+        const actorId = line.slice(0, eqIdx).trim();
+        const keeperName = line.slice(eqIdx + 1).trim();
+        return actorId === name || keeperName === name;
+      });
+      if (!exists) lines.push(name);
+      input.value = lines.join('\n');
+      showToast(`Player Keeper 추가: ${name}`, 'success');
+    }
+
+    function clearTrpgPlayerKeepers() {
+      const input = document.getElementById('trpg-player-keepers-input');
+      if (!input) return;
+      input.value = '';
+      showToast('Player Keeper 입력을 비웠습니다.', 'success');
+    }
+
+    function applyTrpgKeeperAutofill(force = false) {
+      const keepers = Array.isArray(trpgKeeperCatalog) ? trpgKeeperCatalog : [];
+      if (keepers.length === 0) return;
+      const dmInput = document.getElementById('trpg-dm-keeper-input');
+      const playerInput = document.getElementById('trpg-player-keepers-input');
+      const partySizeRaw = Number((document.getElementById('trpg-party-size-input') || {}).value);
+      const partySize = Number.isFinite(partySizeRaw)
+        ? Math.max(1, Math.min(8, Math.floor(partySizeRaw)))
+        : TRPG_DEFAULT_PARTY_SIZE;
+      if (dmInput && (force || String(dmInput.value || '').trim() === '')) {
+        const preferredDm = keepers.find((name) => trpgIsDmLikeKeeper(name)) || keepers[0];
+        if (preferredDm) dmInput.value = preferredDm;
+      }
+      if (playerInput && (force || String(playerInput.value || '').trim() === '')) {
+        const preferred = trpgSuggestedPlayerKeepers(keepers, partySize);
+        if (preferred.length > 0) {
+          playerInput.value = preferred.join('\n');
+        }
+      }
+    }
+
+    async function ensureTrpgKeeperCatalog(force = false) {
+      if (trpgKeepersLoaded && !force) return trpgKeeperCatalog;
+      const data = await mcpToolCall('masc_keeper_list', { limit: 200 });
+      trpgKeeperCatalog = trpgNormalizeKeeperNames(data && data.keepers);
+      trpgKeepersLoaded = true;
+      renderTrpgKeeperQuickList();
+      applyTrpgKeeperAutofill(false);
+      return trpgKeeperCatalog;
+    }
+
+    async function reloadTrpgCatalogs() {
+      if (trpgRoundRunning || trpgBootstrapping) return;
+      setTrpgRoundRunStatus('프리셋/키퍼 목록 새로고침 중...', 'running');
+      try {
+        const [presets, keepers] = await Promise.all([
+          ensureTrpgPresetCatalog(true),
+          ensureTrpgKeeperCatalog(true),
+        ]);
+        const worldCount = Array.isArray(presets.world_presets) ? presets.world_presets.length : 0;
+        const dmCount = Array.isArray(presets.dm_presets) ? presets.dm_presets.length : 0;
+        const keeperCount = Array.isArray(keepers) ? keepers.length : 0;
+        setTrpgRoundRunStatus(
+          `프리셋 로드 완료: world ${worldCount}, dm ${dmCount}, keeper ${keeperCount}`,
+          'ok'
+        );
+        showToast('TRPG 카탈로그 새로고침 완료', 'success');
+      } catch (e) {
+        const msg = String((e && e.message) || e || 'unknown error');
+        setTrpgRoundRunStatus(`카탈로그 새로고침 실패: ${escapeHtml(msg)}`, 'error');
+        showToast('TRPG 카탈로그 새로고침 실패', 'error');
+      }
+    }
+
     function playerKeeperMapToText(mapping) {
       if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return '';
       return Object.entries(mapping)
@@ -7035,6 +7268,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
       for (let i = chunks.length - 1; i >= 0; i -= 1) {
         const chunk = String(chunks[i] || '').trim();
         if (chunk === '') continue;
+        if (chunk.startsWith('{') || chunk.startsWith('[')) {
+          try {
+            const parsedChunk = JSON.parse(chunk);
+            if (parsedChunk && typeof parsedChunk === 'object') return parsedChunk;
+          } catch (_) {
+            // keep scanning older frames
+          }
+        }
         const dataLines = chunk
           .split(/\r?\n/)
           .filter((line) => line.startsWith('data:'))
@@ -7047,6 +7288,15 @@ let cached_html = lazy ({|<!DOCTYPE html>
           if (parsed && typeof parsed === 'object') return parsed;
         } catch (_) {
           // keep scanning older frames
+        }
+      }
+      const trimmed = raw.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          const parsedRaw = JSON.parse(trimmed);
+          if (parsedRaw && typeof parsedRaw === 'object') return parsedRaw;
+        } catch (_) {
+          // fallthrough to detailed parse error
         }
       }
       throw new Error(`${toolName} SSE 응답 파싱 실패: ${trpgShortText(raw, 220)}`);
@@ -7151,10 +7401,32 @@ let cached_html = lazy ({|<!DOCTYPE html>
       updateTrpgButtons();
     }
 
+    function trpgKeeperLanguageInstruction(lang) {
+      if (lang === 'ko') {
+        return '모든 응답은 한국어로 작성하세요. 구조화된 action이 있으면 reply에 함께 담아주세요.';
+      }
+      return 'Respond in English. If you have structured actions, include them in your reply.';
+    }
+
+    function trpgDmGoalText(lang, roomId, worldPresetTitle) {
+      if (lang === 'ko') {
+        return `TRPG room ${roomId}의 DM으로 ${worldPresetTitle} 시나리오를 운영하세요. 장면 연속성과 규칙 일관성을 유지하세요.`;
+      }
+      return `Run TRPG room ${roomId} as DM for ${worldPresetTitle}. Keep consistent scene state and enforce rules.`;
+    }
+
+    function trpgPlayerGoalText(lang, roomId, actorId) {
+      if (lang === 'ko') {
+        return `TRPG room ${roomId}에서 ${actorId} 역할을 플레이하세요. 각 라운드마다 간결하고 일관된 인캐릭터 행동을 제출하세요.`;
+      }
+      return `Play actor ${actorId} in TRPG room ${roomId}. Submit concise in-character actions each round.`;
+    }
+
     async function bootstrapTrpgSession() {
       if (trpgRoundRunning || trpgBootstrapping) return;
       ensureTrpgControlDefaults();
       const roomId = applyTrpgRoomFromInput();
+      const lang = trpgLanguageFromSelect();
       setTrpgBootstrapBusy(true);
       setTrpgRoundRunStatus(`세션 자동 시작 중: room <b>${escapeHtml(roomId)}</b>`, 'running');
       try {
@@ -7247,10 +7519,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
           const worldPresetTitle =
             (((catalog || {}).world_presets || []).find((preset) => String((preset && preset.id) || '') === worldPresetId) || {}).title
             || worldPresetId;
+          const dmInstruction = trpgKeeperLanguageInstruction(lang);
           await mcpToolCall('masc_keeper_up', {
             name: dmKeeper,
-            goal: `Run TRPG room ${roomId} as DM for ${worldPresetTitle}. Keep consistent scene state and enforce rules.`,
+            goal: trpgDmGoalText(lang, roomId, worldPresetTitle),
             models,
+            instructions: dmInstruction,
             proactive_enabled: false,
             presence_keepalive: true,
           });
@@ -7260,12 +7534,19 @@ let cached_html = lazy ({|<!DOCTYPE html>
           for (const [actorId, keeperName] of keeperPairs) {
             await mcpToolCall('masc_keeper_up', {
               name: keeperName,
-              goal: `Play actor ${actorId} in TRPG room ${roomId}. Submit concise in-character actions each round.`,
+              goal: trpgPlayerGoalText(lang, roomId, actorId),
               models,
+              instructions: trpgKeeperLanguageInstruction(lang),
               proactive_enabled: false,
               presence_keepalive: true,
             });
           }
+        }
+
+        try {
+          await ensureTrpgKeeperCatalog(true);
+        } catch (_) {
+          renderTrpgKeeperQuickList();
         }
 
         resetTrpgEventWindow();
@@ -7341,6 +7622,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const roomId = applyTrpgRoomFromInput();
       const dmKeeper = String((document.getElementById('trpg-dm-keeper-input') || {}).value || '').trim();
       const phase = String((document.getElementById('trpg-phase-select') || {}).value || 'round').trim() || 'round';
+      const lang = trpgLanguageFromSelect();
       const timeoutRaw = Number((document.getElementById('trpg-timeout-sec-input') || {}).value);
       const timeoutSec = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 90;
       const playerRaw = String((document.getElementById('trpg-player-keepers-input') || {}).value || '');
@@ -7354,11 +7636,37 @@ let cached_html = lazy ({|<!DOCTYPE html>
         return;
       }
 
+      const participantCount = 1 + Object.keys(parsedPlayers.mapping || {}).length;
+      const estimatedMaxSec = Math.max(1, Math.ceil(timeoutSec * participantCount));
+      let roundDone = false;
+      let pollInFlight = false;
+      const startedAtMs = Date.now();
+
       setTrpgRoundRunBusy(true);
       setTrpgRoundRunStatus(
-        `실행 중: room <b>${escapeHtml(roomId)}</b>, phase <b>${escapeHtml(phase)}</b>, timeout <b>${timeoutSec}s</b>`,
+        `실행 중: room <b>${escapeHtml(roomId)}</b>, phase <b>${escapeHtml(phase)}</b>, 언어 <b>${escapeHtml(lang)}</b><br>` +
+        `참여자 <b>${participantCount}명</b>, 최대 약 <b>${estimatedMaxSec}s</b> (순차 실행 기준)`,
         'running'
       );
+      try { await fetchTrpg(); } catch (_) {}
+      const livePollId = setInterval(async () => {
+        if (roundDone || pollInFlight) return;
+        pollInFlight = true;
+        try {
+          const elapsedSec = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+          setTrpgRoundRunStatus(
+            `실행 중: room <b>${escapeHtml(roomId)}</b>, phase <b>${escapeHtml(phase)}</b>, 언어 <b>${escapeHtml(lang)}</b><br>` +
+            `경과 <b>${elapsedSec}s</b> / 예상 최대 <b>${estimatedMaxSec}s</b>`,
+            'running'
+          );
+          await fetchTrpg();
+        } catch (_) {
+          // ignore polling errors while round run request is in-flight
+        } finally {
+          pollInFlight = false;
+        }
+      }, 2500);
+
       try {
         const headers = Object.assign({ 'Content-Type': 'application/json' }, authHeaders());
         const body = {
@@ -7367,6 +7675,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           player_keepers: parsedPlayers.mapping,
           phase,
           timeout_sec: timeoutSec,
+          lang,
         };
         const res = await fetch('/api/v1/trpg/rounds/run', {
           method: 'POST',
@@ -7388,6 +7697,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           const detail = st.reply || st.error || '';
           return `<div>• ${actor} (${keeper}) <b>${status}</b>${detail ? ` — ${escapeHtml(trpgShortText(detail))}` : ''}</div>`;
         }).join('');
+        roundDone = true;
         setTrpgRoundRunStatus(
           `<div>완료: turn ${escapeHtml(String(data.turn_before || '-'))} → <b>${escapeHtml(String(data.turn_after || '-'))}</b></div>
            <div>요약: success ${escapeHtml(String(summary.successes || 0))}, timeout ${escapeHtml(String(summary.timeouts || 0))}, unavailable ${escapeHtml(String(summary.unavailable || 0))}</div>
@@ -7397,9 +7707,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
         showToast(`TRPG round 완료 (room=${roomId})`, 'success');
         await fetchTrpg();
       } catch (e) {
+        roundDone = true;
         setTrpgRoundRunStatus(`실패: ${escapeHtml(String((e && e.message) || e || 'unknown error'))}`, 'error');
         showToast('TRPG round 실행 실패', 'error');
       } finally {
+        clearInterval(livePollId);
         setTrpgRoundRunBusy(false);
       }
     }
@@ -7412,6 +7724,13 @@ let cached_html = lazy ({|<!DOCTYPE html>
           await ensureTrpgPresetCatalog(false);
         } catch (_) {
           // Keep UI usable even if preset loading fails.
+        }
+      }
+      if (!trpgKeepersLoaded) {
+        try {
+          await ensureTrpgKeeperCatalog(false);
+        } catch (_) {
+          renderTrpgKeeperQuickList();
         }
       }
       const activeRoomId = trpgRoomId;

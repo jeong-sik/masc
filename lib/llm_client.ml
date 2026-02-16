@@ -531,6 +531,11 @@ let call_ollama_generate ?timeout_sec (req : completion_request) : (completion_r
     ("model", `String req.model.model_id);
     ("prompt", `String prompt);
     ("stream", `Bool false);
+    ("think", `Bool false);
+    ("options", `Assoc [
+      ("temperature", `Float req.temperature);
+      ("num_predict", `Int req.max_tokens);
+    ]);
   ]) in
   let headers = [("Content-Type", "application/json")] in
   let timeout_sec = Option.value timeout_sec ~default:(ollama_timeout_sec ()) in

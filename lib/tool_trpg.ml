@@ -221,7 +221,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 30), lang(ko|en), require_claim(boolean).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean).";
       input_schema =
         `Assoc
           [
@@ -2194,7 +2194,7 @@ let handle_round_run ctx args : result =
     let* dm_keeper_raw = get_required_string args "dm_keeper" in
     let dm_keeper = String.trim dm_keeper_raw in
     let* player_keepers = parse_player_keepers args in
-    let* timeout_sec = get_optional_float args "timeout_sec" ~default:30.0 in
+    let* timeout_sec = get_optional_float args "timeout_sec" ~default:90.0 in
     if timeout_sec <= 0.0 then Error "timeout_sec must be > 0"
     else if dm_keeper = "" then Error "dm_keeper cannot be empty"
     else

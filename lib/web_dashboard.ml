@@ -1650,6 +1650,51 @@ let cached_html = lazy ({|<!DOCTYPE html>
     .trpg-run-status.ok { border-color: rgba(74,222,128,0.35); color: #bbf7d0; }
     .trpg-run-status.error { border-color: rgba(239,68,68,0.45); color: #fecaca; }
     .trpg-run-status.running { border-color: rgba(251,191,36,0.4); color: #fde68a; }
+    .trpg-next-action {
+      border: 1px solid rgba(34,211,238,0.35);
+      border-radius: 10px;
+      background: rgba(8,47,73,0.38);
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .trpg-next-action .title {
+      font-size: 0.78em;
+      color: #67e8f9;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 700;
+    }
+    .trpg-next-action .desc {
+      font-size: 0.78em;
+      color: #cbd5e1;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .trpg-next-action .act {
+      border: 1px solid rgba(34,211,238,0.45);
+      border-radius: 8px;
+      background: rgba(8,47,73,0.88);
+      color: #e2e8f0;
+      font-weight: 700;
+      font-size: 0.84em;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+    .trpg-next-action .act:hover {
+      border-color: rgba(34,211,238,0.78);
+      background: rgba(14,116,144,0.45);
+    }
+    .trpg-next-action .act:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .trpg-dev-note {
+      margin-top: 6px;
+      font-size: 0.72em;
+      color: #94a3b8;
+    }
     @media (max-width: 600px) {
       .trpg-control-grid { grid-template-columns: 1fr; }
       .trpg-action-row { grid-template-columns: 1fr; }
@@ -1921,7 +1966,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         <h2>⚔ 그림란드 연대기</h2>
         <div class="trpg-layout">
           <div class="trpg-narrative" id="trpg-narrative">
-            <div class="trpg-empty">아직 서사가 없습니다. 우측에서 세션 자동 시작 후 라운드를 실행하세요.</div>
+            <div class="trpg-empty">아직 서사가 없습니다. 우측에서 1) 세션 시작 후 2) 라운드를 실행하세요.</div>
           </div>
           <div class="trpg-sidebar">
             <div class="trpg-section-title">세션</div>
@@ -1997,16 +2042,22 @@ let cached_html = lazy ({|<!DOCTYPE html>
               </div>
               <div class="trpg-action-row">
                 <button id="trpg-reload-btn" class="trpg-run-btn secondary" onclick="reloadTrpgCatalogs()">프리셋 새로고침</button>
-                <button id="trpg-bootstrap-btn" class="trpg-run-btn secondary" onclick="bootstrapTrpgSession()">세션 자동 시작</button>
-                <button id="trpg-run-round-btn" class="trpg-run-btn" onclick="runTrpgRound()">라운드 실행</button>
+                <button id="trpg-bootstrap-btn" class="trpg-run-btn secondary" onclick="bootstrapTrpgSession()">1) 세션 시작</button>
+                <button id="trpg-run-round-btn" class="trpg-run-btn" onclick="runTrpgRound()">2) 라운드 실행</button>
               </div>
               <div class="trpg-control-help" style="margin-top:6px;">
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
                   <input id="trpg-bootstrap-run-round1" type="checkbox" checked>
-                  <span>세션 자동 시작 후 즉시 1라운드 실행</span>
+                  <span>세션 시작 후 즉시 1라운드 실행</span>
                 </label>
               </div>
-              <div id="trpg-round-run-status" class="trpg-run-status">1) 세션 자동 시작 → 2) 라운드 실행 순서로 진행하세요.</div>
+              <div id="trpg-round-run-status" class="trpg-run-status">1) 세션 시작 → 2) 라운드 실행 순서로 진행하세요.</div>
+              <div id="trpg-next-action" class="trpg-next-action">
+                <div class="title">다음 액션</div>
+                <div id="trpg-next-action-desc" class="desc">세션을 시작하면 다음에 눌러야 할 버튼을 자동으로 안내합니다.</div>
+                <button id="trpg-next-action-btn" class="act" onclick="trpgRunNextAction()">1) 세션 시작</button>
+              </div>
+              <div class="trpg-dev-note">라운드 실행은 DM + 플레이어 Keeper 순차 호출로 진행되며 timeout × 참여자 수만큼 시간이 걸릴 수 있습니다.</div>
             </div>
             <div class="trpg-section-title" style="margin-top:8px;">게임 세션</div>
             <div id="trpg-session-meta" class="trpg-round-list">
@@ -6922,6 +6973,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgStateCache = {};
     let trpgRoundRunning = false;
     let trpgBootstrapping = false;
+    let trpgNextActionKind = 'bootstrap';
+    let trpgCanRunRound = false;
+    let trpgRunBlockedReason = '먼저 1) 세션 시작을 실행하세요.';
     let trpgPresetsLoaded = false;
     let trpgKeepersLoaded = false;
     let trpgMcpCallSeq = 1000;
@@ -6980,6 +7034,70 @@ let cached_html = lazy ({|<!DOCTYPE html>
         else if (type === 'keeper.unavailable') summary.unavailable += 1;
       });
       return summary;
+    }
+
+    function trpgSetNextAction(kind, label, desc, enabled = true) {
+      trpgNextActionKind = String(kind || 'none');
+      trpgCanRunRound = trpgNextActionKind === 'run_round' && !!enabled;
+      trpgRunBlockedReason = trpgCanRunRound ? '' : String(desc || '실행 전 점검이 필요합니다.');
+      const descEl = document.getElementById('trpg-next-action-desc');
+      const btnEl = document.getElementById('trpg-next-action-btn');
+      if (descEl) descEl.textContent = String(desc || '');
+      if (btnEl) {
+        btnEl.textContent = String(label || '새로고침');
+        btnEl.disabled = !enabled;
+      }
+      updateTrpgButtons();
+    }
+
+    function trpgRunNextAction() {
+      if (trpgNextActionKind === 'bootstrap') {
+        bootstrapTrpgSession();
+      } else if (trpgNextActionKind === 'run_round') {
+        runTrpgRound();
+      } else {
+        fetchTrpg();
+      }
+    }
+
+    function trpgUpdateNextAction(state, events) {
+      if (trpgBootstrapping) {
+        trpgSetNextAction('wait', '준비 중...', '세션 시작 준비가 진행 중입니다. 잠시만 기다리세요.', false);
+        return;
+      }
+      if (trpgRoundRunning) {
+        trpgSetNextAction('wait', '라운드 실행 중...', '현재 라운드가 진행 중입니다. 완료 후 상태가 자동 갱신됩니다.', false);
+        return;
+      }
+      const sessions = trpgBuildSessionHistory(events);
+      if (sessions.length === 0) {
+        trpgSetNextAction('bootstrap', '1) 세션 시작', '아직 세션이 없습니다. world/dm preset 확인 후 세션을 시작하세요.', true);
+        return;
+      }
+      const expectedActors = trpgPartyActorsFromStateOrEvents(state, events);
+      if (expectedActors.length === 0) {
+        trpgSetNextAction('wait', '세션 준비 중', '파티 actor_id를 아직 확인하지 못했습니다. 1) 세션 시작을 다시 실행하세요.', false);
+        return;
+      }
+      const parsed = parseTrpgPlayerKeepers(String((document.getElementById('trpg-player-keepers-input') || {}).value || ''));
+      if (!parsed.ok) {
+        trpgSetNextAction('wait', '입력 수정 필요', 'Player keepers 입력 형식 오류를 먼저 해결하세요.', false);
+        return;
+      }
+      const expectedSet = new Set(expectedActors);
+      const inputActors = Object.keys(parsed.mapping || {});
+      const missingActors = expectedActors.filter((actor) => !inputActors.includes(actor));
+      const unknownActors = inputActors.filter((actor) => !expectedSet.has(actor));
+      if (missingActors.length > 0 || unknownActors.length > 0) {
+        trpgSetNextAction(
+          'wait',
+          '할당 수정 필요',
+          '현재 파티 actor_id와 Player keepers actor_id가 일치하지 않습니다. 파티 할당 카드에서 빨간 항목을 먼저 정리하세요.',
+          false
+        );
+        return;
+      }
+      trpgSetNextAction('run_round', '다음 라운드 실행', '준비 완료. 다음 라운드를 실행해 서사를 진행하세요.', true);
     }
 
     function trpgFmtDateTime(ts) {
@@ -7111,6 +7229,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     function ensureTrpgControlDefaults() {
+      const bindTrpgInput = (id, eventName = 'input') => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.trpgBound === '1') return;
+        el.addEventListener(eventName, () => {
+          trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
+        });
+        el.dataset.trpgBound = '1';
+      };
       const roomInput = document.getElementById('trpg-room-input');
       if (roomInput && String(roomInput.value || '').trim() === '') roomInput.value = trpgRoomId;
       const poolInput = document.getElementById('trpg-pool-size-input');
@@ -7143,6 +7269,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
           playerInput.value = TRPG_DEFAULT_PLAYER_KEEPERS.join('\n');
         }
       }
+      bindTrpgInput('trpg-player-keepers-input', 'input');
+      bindTrpgInput('trpg-dm-keeper-input', 'input');
     }
 
     function applyTrpgRoomFromInput() {
@@ -7270,6 +7398,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const dmInput = document.getElementById('trpg-dm-keeper-input');
       if (dmInput) dmInput.value = name;
       showToast(`DM Keeper 선택: ${name}`, 'success');
+      trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
     }
 
     function addTrpgPlayerKeeperFromQuick(token) {
@@ -7294,6 +7423,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (!exists) lines.push(name);
       input.value = lines.join('\n');
       showToast(`Player Keeper 추가: ${name}`, 'success');
+      trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
     }
 
     function clearTrpgPlayerKeepers() {
@@ -7301,6 +7431,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (!input) return;
       input.value = '';
       showToast('Player Keeper 입력을 비웠습니다.', 'success');
+      trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
     }
 
     function applyTrpgKeeperAutofill(force = false) {
@@ -7322,6 +7453,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           playerInput.value = preferred.join('\n');
         }
       }
+      trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
     }
 
     async function ensureTrpgKeeperCatalog(force = false) {
@@ -7506,24 +7638,30 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function updateTrpgButtons() {
       const runBtn = document.getElementById('trpg-run-round-btn');
       if (runBtn) {
-        runBtn.disabled = trpgRoundRunning;
-        runBtn.textContent = trpgRoundRunning ? '실행 중...' : '라운드 실행';
+        runBtn.disabled = trpgRoundRunning || trpgBootstrapping || !trpgCanRunRound;
+        runBtn.textContent = trpgRoundRunning ? '실행 중...' : '2) 라운드 실행';
+        runBtn.title =
+          (!trpgRoundRunning && !trpgBootstrapping && !trpgCanRunRound && trpgRunBlockedReason)
+            ? trpgRunBlockedReason
+            : '';
       }
       const bootstrapBtn = document.getElementById('trpg-bootstrap-btn');
       if (bootstrapBtn) {
         bootstrapBtn.disabled = trpgRoundRunning || trpgBootstrapping;
-        bootstrapBtn.textContent = trpgBootstrapping ? '시작 준비 중...' : '세션 자동 시작';
+        bootstrapBtn.textContent = trpgBootstrapping ? '시작 준비 중...' : '1) 세션 시작';
       }
     }
 
     function setTrpgRoundRunBusy(isBusy) {
       trpgRoundRunning = isBusy;
       updateTrpgButtons();
+      trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
     }
 
     function setTrpgBootstrapBusy(isBusy) {
       trpgBootstrapping = isBusy;
       updateTrpgButtons();
+      trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
     }
 
     function trpgKeeperLanguageInstruction(lang) {
@@ -7554,7 +7692,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const lang = trpgLanguageFromSelect();
       let runRoundAfterBootstrap = false;
       setTrpgBootstrapBusy(true);
-      setTrpgRoundRunStatus(`세션 자동 시작 중: room <b>${escapeHtml(roomId)}</b>`, 'running');
+      setTrpgRoundRunStatus(`세션 시작 중: room <b>${escapeHtml(roomId)}</b>`, 'running');
       try {
         const catalog = await ensureTrpgPresetCatalog(false);
         const worldPresetId =
@@ -7708,7 +7846,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         await fetchTrpg();
       } catch (e) {
         const msg = String((e && e.message) || e || 'unknown error');
-        setTrpgRoundRunStatus(`세션 자동 시작 실패: ${escapeHtml(msg)}`, 'error');
+        setTrpgRoundRunStatus(`세션 시작 실패: ${escapeHtml(msg)}`, 'error');
         showToast('TRPG session bootstrap 실패', 'error');
       } finally {
         setTrpgBootstrapBusy(false);
@@ -7775,6 +7913,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     async function runTrpgRound() {
       if (trpgRoundRunning || trpgBootstrapping) return;
+      if (!trpgCanRunRound) {
+        setTrpgRoundRunStatus(`실행 전 점검: ${escapeHtml(String(trpgRunBlockedReason || '세션/할당 상태를 먼저 확인하세요.'))}`, 'error');
+        return;
+      }
       ensureTrpgControlDefaults();
       const roomId = applyTrpgRoomFromInput();
       const dmKeeper = String((document.getElementById('trpg-dm-keeper-input') || {}).value || '').trim();
@@ -7956,6 +8098,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
         renderTrpgNarrative(trpgEventsCache);
         renderTrpgState(trpgStateCache, trpgEventsCache);
       } catch (_) {}
+      trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
+    }
+
+    function trpgSanitizeNarrative(raw) {
+      let text = String(raw || '').replace(/\r\n/g, '\n');
+      text = text.replace(/^SKILL:.*$/gmi, '');
+      text = text.replace(/^SKILL_REASON:.*$/gmi, '');
+      text = text.replace(/```[\s\S]*?```/g, '');
+      text = text.replace(/\[STATE\][\s\S]*?\[\/STATE\]/gmi, '');
+      text = text.replace(/\n{3,}/g, '\n\n').trim();
+      if (text !== '') return text;
+      return String(raw || '').replace(/\n{3,}/g, '\n\n').trim();
     }
 
     function renderTrpgNarrative(events) {
@@ -7966,7 +8120,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0))
         .slice(-80);
       if (!narrations.length) {
-        el.innerHTML = '<div class="trpg-empty">아직 서사가 없습니다. 세션 자동 시작 후 라운드를 실행하세요.</div>';
+        el.innerHTML = '<div class="trpg-empty">아직 서사가 없습니다. 1) 세션 시작 후 2) 라운드를 실행하세요.</div>';
         return;
       }
       let html = '';
@@ -7980,7 +8134,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const turnLabel = Number.isFinite(turn) ? `turn ${turn}` : 'turn -';
         const keeper = payload.keeper || ev.actor_id || 'dm';
         const meta = `${keeper} · ${turnLabel} · ${trpgFmtEventTime(ev)}`;
-        const rawText = payload.reply || '';
+        const rawText = trpgSanitizeNarrative(payload.reply || '');
         html += '<div class="trpg-post" data-idx="' + idx + '">';
         html += '<div class="trpg-post-meta">' + escapeHtml(meta) + '</div>';
         html += '<div class="trpg-post-body">' + (isNew && !trpgTyping ? '' : formatTrpgContent(rawText)) + '</div>';
@@ -7991,7 +8145,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const postEl = el.querySelector('[data-idx="' + newIdx + '"]');
         if (postEl) {
           const bodyEl = postEl.querySelector('.trpg-post-body');
-          const raw = trpgEventPayload(narrations[newIdx]).reply || '';
+          const raw = trpgSanitizeNarrative(trpgEventPayload(narrations[newIdx]).reply || '');
           trpgTypewriter(bodyEl, raw);
         }
       }
@@ -8043,6 +8197,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const summary = trpgRoundSummary(events, round);
       renderTrpgSessionMeta(state, events, summary, phase);
       renderTrpgPartyAssignment(state, events);
+      trpgUpdateNextAction(state, events);
       renderTrpgStatus(state, summary, phase);
       renderTrpgRoundLog(events, round);
       renderTrpgGameHistory(events);
@@ -8117,7 +8272,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         rows.push(`
           <div class="trpg-round-item mismatch">
             <div class="meta">party</div>
-            <div>파티 actor_id를 아직 확인하지 못했습니다. 먼저 <b>세션 자동 시작</b>을 실행하세요.</div>
+            <div>파티 actor_id를 아직 확인하지 못했습니다. 먼저 <b>1) 세션 시작</b>을 실행하세요.</div>
           </div>
         `);
       } else {

@@ -116,6 +116,11 @@
  (modules test_tool_trpg_coverage)
  (libraries masc_mcp alcotest yojson unix))
 
+(test
+ (name test_protocol_game_view)
+ (modules test_protocol_game_view)
+ (libraries masc_mcp alcotest yojson unix))
+
 ; Dispatch chain evidence test
 (test
  (name test_dispatch_chain_evidence)

@@ -107,6 +107,7 @@
    sctp_eio
    sctp_transport
    safe_ops
+   game_view_state
    sdp
    session
    shutdown_hooks
@@ -159,6 +160,7 @@
    tool_library
    library_bridge
    tool_council
+   tool_protocol_game_view
    tool_experiment
    tool_suspend
    debate

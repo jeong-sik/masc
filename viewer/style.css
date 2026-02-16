@@ -1094,6 +1094,114 @@ body.mode-lobby #dashboard {
     border-color: rgba(255, 255, 255, 0.04);
 }
 
+/* ─── Turn Runtime Grid (live game status) ─── */
+
+#turn-runtime {
+    margin-bottom: 8px;
+}
+
+.turn-runtime-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 4px;
+    padding: 6px;
+    background: var(--bg-deep);
+    border: 1px solid var(--border-main);
+    border-radius: var(--card-radius, 6px);
+}
+
+.turn-runtime-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px;
+    background: var(--bg-panel-alt);
+    border-radius: 4px;
+    border: 1px solid transparent;
+}
+
+.turn-runtime-item .k {
+    font-family: var(--font-ui);
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.turn-runtime-item .v {
+    font-family: var(--font-body);
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.turn-runtime-item .v.status-active {
+    color: var(--accent-primary);
+}
+
+.turn-runtime-item .v.status-ended {
+    color: var(--text-dim);
+    font-style: italic;
+}
+
+.turn-runtime-item .v.status-idle {
+    color: var(--text-secondary, var(--text-dim));
+}
+
+.turn-runtime-item .v.status-wipe {
+    color: #d44;
+    font-weight: 600;
+}
+
+/* ─── Turn Controls (advance turn button) ─── */
+
+#turn-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+#advance-turn-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border-highlight, rgba(196, 162, 101, 0.2));
+    border-radius: var(--card-radius, 6px);
+    color: var(--accent-primary);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    padding: 6px 14px;
+    transition: background 0.2s, color 0.2s;
+    white-space: nowrap;
+}
+
+#advance-turn-btn:hover {
+    background: var(--accent-glow);
+    color: var(--text-bright);
+}
+
+#advance-turn-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+#turn-control-status {
+    font-size: 0.75rem;
+    font-family: var(--font-ui);
+    color: var(--text-dim);
+    transition: color 0.3s;
+}
+
+#turn-control-status.status-ok {
+    color: var(--accent-primary);
+}
+
+#turn-control-status.status-error {
+    color: #d44;
+}
+
 #dice-log {
     min-height: 100%;
 }

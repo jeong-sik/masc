@@ -228,6 +228,24 @@ pub fn apply_initial_state(
         *connection = ConnectionStatus::Connected;
     }
 
+    // Stale room detection: if the room isn't actively running a game,
+    // skip spawning old actors and prompt the user to start a new game.
+    let room_is_active = room_state.status.trim() == "active";
+    if !room_is_active {
+        turn_progress.room_status = room_state.status.clone();
+        turn_progress.turn = room_state.turn;
+        turn_progress.phase = room_state.phase.as_str().to_string();
+        buffer.consumed = true;
+
+        prompt_new_game_for_stale_room(room_state.status.trim());
+        log::info!(
+            "Room '{}' not active (status: '{}') — skipping actor spawn, showing new-game panel",
+            room_state.id,
+            room_state.status,
+        );
+        return;
+    }
+
     turn_progress.room_status = room_state.status.clone();
     turn_progress.turn = room_state.turn;
     turn_progress.phase = room_state.phase.as_str().to_string();
@@ -399,6 +417,46 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
     }
 }
 
+/// When the fetched room is not "active", auto-show the new-game panel
+/// and pre-fill a fresh room ID so the user can start a new session.
+fn prompt_new_game_for_stale_room(_room_status: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+
+        // Show the new-game panel
+        if let Some(panel) = document.get_element_by_id("new-game-panel") {
+            if let Some(html_el) = panel.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = html_el.style().set_property("display", "flex");
+            }
+        }
+
+        // Pre-populate room ID input with a fresh generated ID
+        if let Some(input) = document
+            .get_element_by_id("new-game-room-id")
+            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            if input.value().trim().is_empty() {
+                let ts = js_sys::Date::now() as i64;
+                let rand = (js_sys::Math::random() * 1000.0).floor() as i64;
+                input.set_value(&format!("adventure-{}-{:03}", ts, rand));
+            }
+        }
+
+        // Set a status message appropriate to the room state
+        if let Some(el) = document.get_element_by_id("new-game-status") {
+            let msg = if _room_status == "unavailable" {
+                "엔진에 연결할 수 없습니다. 새 게임을 시작하면 재연결을 시도합니다."
+            } else {
+                "활성 게임이 없습니다. 새 게임을 시작하세요."
+            };
+            el.set_inner_html(msg);
+        }
+    }
+}
+
 fn unavailable_game_state(room_id: &str) -> GameStateResponse {
     GameStateResponse {
         room: Some(RoomResponse {
@@ -457,5 +515,59 @@ mod tests {
         assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(5));
         assert_eq!(parsed.current_area, "C");
         assert!(parsed.characters.is_empty(), "no fallback party should be injected");
+    }
+
+    #[test]
+    fn ended_room_is_not_active() {
+        let root = json!({
+            "room": {
+                "id": "adventure-123",
+                "status": "ended",
+                "turn": 8,
+                "phase": "transition",
+                "current_scenario": "epilogue",
+                "current_node": "end"
+            },
+            "characters": [
+                { "id": "warrior-1", "name": "Kael" }
+            ],
+            "current_area": "D",
+            "area_label": "왕좌의 간"
+        });
+
+        let parsed = normalize_state_response(root).expect("ended room parse should succeed");
+        let status = parsed.room.as_ref().map(|r| r.status.as_str()).unwrap_or("");
+        assert_ne!(status, "active", "ended room should not be treated as active");
+        assert_eq!(status, "ended");
+        assert_eq!(parsed.characters.len(), 1, "characters still parsed even for ended rooms");
+    }
+
+    #[test]
+    fn idle_room_is_not_active() {
+        let root = json!({
+            "room": {
+                "id": "default",
+                "status": "idle",
+                "turn": 0,
+                "phase": "dm_narration"
+            },
+            "characters": [],
+            "current_area": "",
+            "area_label": ""
+        });
+
+        let parsed = normalize_state_response(root).expect("idle room parse should succeed");
+        let status = parsed.room.as_ref().map(|r| r.status.as_str()).unwrap_or("");
+        assert_ne!(status, "active");
+        assert!(parsed.characters.is_empty());
+    }
+
+    #[test]
+    fn unavailable_game_state_has_correct_shape() {
+        let state = unavailable_game_state("test-room");
+        let room = state.room.as_ref().expect("room should be present");
+        assert_eq!(room.id, "test-room");
+        assert_eq!(room.status, "unavailable");
+        assert!(state.characters.is_empty());
     }
 }

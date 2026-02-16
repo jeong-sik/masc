@@ -26,6 +26,44 @@ fn pretty_phase(phase: &str) -> String {
     }
 }
 
+fn normalize_room_status(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        "unknown".to_string()
+    } else {
+        normalized
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn room_status_class(status: &str) -> &'static str {
+    match status {
+        "active" | "running" => "status-active",
+        "paused" => "status-paused",
+        "ended" => "status-ended",
+        "unavailable" => "status-unavailable",
+        "loading" => "status-loading",
+        _ => "status-idle",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn room_status_label(status: &str) -> &'static str {
+    match status {
+        "active" | "running" => "RUNNING",
+        "paused" => "PAUSED",
+        "ended" => "ENDED",
+        "idle" => "IDLE",
+        "loading" => "LOADING",
+        "unavailable" => "UNAVAILABLE",
+        _ => "UNKNOWN",
+    }
+}
+
+fn room_accepts_input(status: &str) -> bool {
+    matches!(status, "active" | "running")
+}
+
 /// Render live TRPG runtime progress:
 /// room/turn/phase, current thinker, next actor, last outcome, and party survival.
 pub fn update_turn_runtime_dom(
@@ -34,13 +72,14 @@ pub fn update_turn_runtime_dom(
     actors: Query<&Actor>,
     mut cache: ResMut<TurnRuntimeCache>,
 ) {
-    let room_status = if !progress.room_status.trim().is_empty() {
+    let room_status_raw = if !progress.room_status.trim().is_empty() {
         progress.room_status.trim().to_string()
     } else if !room_state.status.trim().is_empty() {
         room_state.status.trim().to_string()
     } else {
         "unknown".to_string()
     };
+    let room_status = normalize_room_status(&room_status_raw);
     let turn = if progress.turn > 0 {
         progress.turn
     } else if room_state.turn > 0 {
@@ -95,16 +134,22 @@ pub fn update_turn_runtime_dom(
         format!("{}/{} alive", alive_party, total_party)
     };
 
-    let current_status = if current_actor != "-" {
+    let current_status = if !room_accepts_input(&room_status) {
+        room_status.as_str()
+    } else if current_actor != "-" {
         "thinking"
-    } else if room_status == "ended" {
-        "ended"
     } else {
-        "idle"
+        "waiting"
+    };
+
+    let input_status = if room_accepts_input(&room_status) {
+        "enabled"
+    } else {
+        "disabled"
     };
 
     let snapshot = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
         room_status,
         turn,
         phase,
@@ -112,7 +157,8 @@ pub fn update_turn_runtime_dom(
         next_actor,
         last_result,
         party_status,
-        current_status
+        current_status,
+        input_status
     );
     if cache.last_snapshot == snapshot {
         return;
@@ -128,23 +174,25 @@ pub fn update_turn_runtime_dom(
             return;
         };
 
-        let room_class = match room_status.as_str() {
-            "ended" => "status-ended",
-            "active" => "status-active",
-            _ => "status-idle",
-        };
+        let room_class = room_status_class(&room_status);
         let party_class = if total_party > 0 && alive_party <= 0 {
             "status-wipe"
         } else {
             "status-active"
         };
+        let input_class = if room_accepts_input(&room_status) {
+            "status-active"
+        } else {
+            room_class
+        };
 
         let html = format!(
             r#"
 <div class="turn-runtime-grid">
-  <div class="turn-runtime-item"><span class="k">Room</span><span class="v {room_class}">{room}</span></div>
+  <div class="turn-runtime-item"><span class="k">State</span><span class="v {room_class}">{room}</span></div>
   <div class="turn-runtime-item"><span class="k">Turn</span><span class="v">{turn}</span></div>
   <div class="turn-runtime-item"><span class="k">Phase</span><span class="v">{phase}</span></div>
+  <div class="turn-runtime-item"><span class="k">Input</span><span class="v {input_class}">{input}</span></div>
   <div class="turn-runtime-item"><span class="k">Now</span><span class="v">{current} · {current_status}</span></div>
   <div class="turn-runtime-item"><span class="k">Next</span><span class="v">{next}</span></div>
   <div class="turn-runtime-item"><span class="k">Last</span><span class="v">{last}</span></div>
@@ -152,9 +200,11 @@ pub fn update_turn_runtime_dom(
 </div>
 "#,
             room_class = room_class,
-            room = sanitize_text(&room_status.to_uppercase()),
+            room = sanitize_text(room_status_label(&room_status)),
             turn = turn,
             phase = sanitize_text(&pretty_phase(&phase)),
+            input_class = input_class,
+            input = sanitize_text(input_status),
             current = sanitize_text(&current_actor),
             current_status = sanitize_text(current_status),
             next = sanitize_text(&next_actor),

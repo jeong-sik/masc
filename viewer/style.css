@@ -1250,7 +1250,13 @@ body.mode-lobby #dashboard {
     color: var(--status-connected);
 }
 
+.turn-runtime-item .v.status-paused,
+.turn-runtime-item .v.status-loading {
+    color: var(--status-connecting);
+}
+
 .turn-runtime-item .v.status-ended,
+.turn-runtime-item .v.status-unavailable,
 .turn-runtime-item .v.status-wipe {
     color: var(--status-disconnected);
 }

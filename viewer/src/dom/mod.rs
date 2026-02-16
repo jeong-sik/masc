@@ -36,6 +36,7 @@ impl Plugin for DomBridgePlugin {
                 turn_phase::update_turn_phase_dom,
                 turn_runtime::update_turn_runtime_dom,
                 connection::update_connection_dom,
+                actor_join::sync_join_panel_interaction_state,
                 action_panel::sync_action_panel_visibility,
                 turn_controls::sync_turn_controls_visibility,
             ).run_if(in_state(ViewerMode::Trpg)))

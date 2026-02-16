@@ -158,6 +158,7 @@ module Tool_room = Tool_room
 module Tool_control = Tool_control
 module Tool_verification = Tool_verification
 module Tool_misc = Tool_misc
+module Tool_board = Tool_board
 module Tool_lodge = Tool_lodge
 
 (* Lodge subsystem *)

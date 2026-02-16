@@ -20,6 +20,9 @@ type event_type =
   | World_event
   | Session_started
   | Party_selected
+  | Actor_spawned
+  | Actor_claimed
+  | Actor_released
   | Intervention_submitted
   | Intervention_applied
 

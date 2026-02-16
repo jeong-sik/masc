@@ -160,6 +160,7 @@ impl Plugin for ModePlugin {
             .add_systems(OnExit(ViewerMode::Social), exit_social)
             .add_systems(OnEnter(ViewerMode::Experiment), enter_experiment)
             .add_systems(OnExit(ViewerMode::Experiment), exit_experiment)
+            .add_systems(Update, refresh_trpg_widget_status.run_if(in_state(ViewerMode::Trpg)))
             .add_systems(Update, poll_mode_transition);
     }
 }
@@ -186,6 +187,7 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
 
         // Bind back-to-lobby button
         bind_back_button(&doc, &buffer.pending);
+        bind_debug_controls(&doc);
 
         // Hide loading screen once Bevy is initialized
         if let Some(loading) = doc.get_element_by_id("loading-screen") {
@@ -311,6 +313,77 @@ fn bind_back_button(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMo
         .map(|target| target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
 
     cb.forget();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_debug_state(doc: &web_sys::Document, enabled: bool) {
+    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        let _ = dashboard.set_attribute("data-debug", if enabled { "on" } else { "off" });
+    }
+    if let Some(toggle) = doc.get_element_by_id("debug-log-toggle") {
+        toggle.set_text_content(Some(if enabled { "Debug ON" } else { "Debug OFF" }));
+        let _ = toggle.set_attribute("aria-pressed", if enabled { "true" } else { "false" });
+    }
+    if let Some(status) = doc.get_element_by_id("debug-log-status") {
+        status.set_text_content(Some(if enabled { "DEBUG ON" } else { "DEBUG OFF" }));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_debug_controls(doc: &web_sys::Document) {
+    let Some(toggle) = doc.get_element_by_id("debug-log-toggle") else {
+        return;
+    };
+    if toggle.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = toggle.set_attribute("data-bound", "1");
+    set_debug_state(doc, true);
+
+    let cb = Closure::wrap(Box::new(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let enabled = doc
+            .get_element_by_id("dashboard")
+            .and_then(|el| el.get_attribute("data-debug"))
+            .map(|v| v != "off")
+            .unwrap_or(true);
+        set_debug_state(&doc, !enabled);
+    }) as Box<dyn FnMut()>);
+
+    let _ = toggle
+        .dyn_ref::<web_sys::EventTarget>()
+        .map(|target| target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
+
+    cb.forget();
+}
+
+fn refresh_trpg_widget_status() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let narrative_count = doc
+            .get_element_by_id("narrative-log")
+            .map(|el| el.child_element_count())
+            .unwrap_or(0);
+        let party_count = doc
+            .get_element_by_id("character-panel")
+            .map(|el| el.child_element_count())
+            .unwrap_or(0);
+        let dice_count = doc
+            .get_element_by_id("dice-log")
+            .map(|el| el.child_element_count())
+            .unwrap_or(0);
+        if let Some(status) = doc.get_element_by_id("widget-status") {
+            status.set_text_content(Some(&format!(
+                "Widgets N:{} P:{} D:{}",
+                narrative_count, party_count, dice_count
+            )));
+        }
+    }
 }
 
 // ─── Monitor Mode Enter/Exit ─────────────────

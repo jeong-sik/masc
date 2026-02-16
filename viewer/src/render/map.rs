@@ -58,7 +58,11 @@ pub fn update_map_label(map_state: Res<MapState>) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
-    let Some(label) = document.get_element_by_id("map-label") else {
+    // Backward-compatible fallback for pre-refactor id.
+    let Some(label) = document
+        .get_element_by_id("map-label")
+        .or_else(|| document.get_element_by_id("zone-label"))
+    else {
         return;
     };
 

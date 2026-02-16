@@ -457,6 +457,12 @@ body.mode-lobby #dashboard {
     color: var(--text-dim);
 }
 
+#room-hub-toggle[aria-pressed="true"] {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    box-shadow: inset 0 0 0 1px rgba(201, 165, 90, 0.35);
+}
+
 .inline-button {
     border-color: var(--accent-primary-dim);
     color: var(--accent-primary);
@@ -566,6 +572,8 @@ body.mode-lobby #dashboard {
     display: grid;
     grid-template-columns: repeat(3, minmax(120px, 1fr));
     gap: 8px;
+    max-height: 192px;
+    overflow: hidden;
 }
 
 .room-hub-placeholder {
@@ -579,7 +587,7 @@ body.mode-lobby #dashboard {
     border-radius: var(--panel-radius);
     padding: 6px;
     background: rgba(15, 20, 36, 0.7);
-    min-height: 56px;
+    min-height: 0;
 }
 
 .room-lane[data-lane="running"] {
@@ -602,7 +610,7 @@ body.mode-lobby #dashboard {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    max-height: 132px;
+    max-height: 142px;
     overflow: auto;
 }
 
@@ -1410,12 +1418,13 @@ body.mode-lobby #dashboard {
 #new-game-panel {
     position: absolute;
     inset: 44px 0 0 0;
-    background: rgba(0, 0, 0, 0.52);
+    background: rgba(0, 0, 0, 0.56);
     z-index: 20;
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    padding-top: 28px;
+    padding: 28px 12px 12px 12px;
+    overflow-y: auto;
 }
 
 .new-game-card {

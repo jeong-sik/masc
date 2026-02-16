@@ -1806,3 +1806,95 @@ body.mode-lobby #dashboard {
     background: var(--scrollbar-thumb);
     border-radius: 2px;
 }
+
+/* ═══════════════════════════════════════════
+   TRPG Action Panel
+   ═══════════════════════════════════════════ */
+
+#action-panel {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--bg-panel-alt);
+    border-top: 1px solid var(--border-main, rgba(196, 162, 101, 0.12));
+    border-radius: 0 0 var(--card-radius, 6px) var(--card-radius, 6px);
+}
+
+#action-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+#action-input {
+    flex: 1;
+    background: var(--bg-deep);
+    border: 1px solid var(--border-main, rgba(196, 162, 101, 0.12));
+    border-radius: var(--card-radius, 6px);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    padding: 8px 12px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+#action-input::placeholder {
+    color: var(--text-dim);
+    font-style: italic;
+}
+
+#action-input:focus {
+    border-color: var(--accent-primary-dim);
+}
+
+#action-submit-btn,
+#dice-roll-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border-highlight, rgba(196, 162, 101, 0.2));
+    border-radius: var(--card-radius, 6px);
+    color: var(--accent-primary);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    padding: 8px 16px;
+    transition: background 0.2s, color 0.2s;
+    white-space: nowrap;
+}
+
+#action-submit-btn:hover,
+#dice-roll-btn:hover {
+    background: var(--accent-glow);
+    color: var(--text-bright);
+}
+
+#action-submit-btn:disabled,
+#dice-roll-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+#dice-roll-btn {
+    border-color: var(--accent-tertiary, #4a3f8a);
+    color: var(--accent-tertiary, #4a3f8a);
+}
+
+#dice-roll-btn:hover {
+    background: rgba(74, 63, 138, 0.15);
+}
+
+#action-status {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    font-family: var(--font-ui);
+    color: var(--text-dim);
+    min-height: 1.2em;
+    transition: color 0.3s;
+}
+
+#action-status.status-ok {
+    color: var(--accent-primary);
+}
+
+#action-status.status-error {
+    color: var(--accent-secondary, #8b2500);
+}

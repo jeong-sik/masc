@@ -4,6 +4,7 @@ pub mod character_panel;
 pub mod connection;
 pub mod dice_log;
 pub mod narrative;
+pub mod turn_controls;
 pub mod turn_runtime;
 pub mod turn_phase;
 
@@ -36,15 +37,18 @@ impl Plugin for DomBridgePlugin {
                 turn_runtime::update_turn_runtime_dom,
                 connection::update_connection_dom,
                 action_panel::sync_action_panel_visibility,
+                turn_controls::sync_turn_controls_visibility,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Action panel lifecycle: bind listeners on enter, unbind on exit
             .add_systems(OnEnter(ViewerMode::Trpg), (
                 action_panel::bind_action_panel,
                 actor_join::bind_actor_join,
+                turn_controls::bind_turn_controls,
             ))
             .add_systems(OnExit(ViewerMode::Trpg), (
                 action_panel::unbind_action_panel,
                 actor_join::unbind_actor_join,
+                turn_controls::unbind_turn_controls,
             ));
     }
 }

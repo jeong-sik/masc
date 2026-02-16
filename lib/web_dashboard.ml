@@ -1665,7 +1665,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     .trpg-action-row {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 8px;
     }
     .trpg-action-row.compact {
@@ -2313,7 +2313,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 </div>
               </div>
               <div class="trpg-action-row">
-                <button id="trpg-new-game-btn" class="trpg-run-btn secondary" onclick="startTrpgNewGameFlow()">새 게임</button>
+                <button id="trpg-new-game-btn" class="trpg-run-btn secondary" onclick="startTrpgNewGameFlow()">0) 새 게임 시작</button>
                 <button id="trpg-reload-btn" class="trpg-run-btn secondary" onclick="reloadTrpgCatalogs()">프리셋 새로고침</button>
                 <button id="trpg-bootstrap-btn" class="trpg-run-btn secondary" onclick="bootstrapTrpgSession()">1) 세션 시작</button>
                 <button id="trpg-run-round-btn" class="trpg-run-btn" onclick="runTrpgRound()">2) 라운드 실행</button>
@@ -2330,7 +2330,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                   <span>이전 세션 로그 포함 보기</span>
                 </label>
               </div>
-              <div id="trpg-round-run-status" class="trpg-run-status">1) 세션 시작 → 2) 라운드 실행 순서로 진행하세요.</div>
+              <div id="trpg-round-run-status" class="trpg-run-status">0) 새 게임 시작(선택) → 1) 세션 시작 → 2) 라운드 실행 순서로 진행하세요.</div>
               <div id="trpg-next-action" class="trpg-next-action">
                 <div class="title">다음 액션</div>
                 <div id="trpg-next-action-desc" class="desc">세션을 시작하면 다음에 눌러야 할 버튼을 자동으로 안내합니다.</div>
@@ -2397,6 +2397,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <button id="trpg-actor-update-btn" class="trpg-run-btn secondary" onclick="updateTrpgActor()">액터 수정</button>
                 <button id="trpg-actor-delete-btn" class="trpg-run-btn secondary danger" onclick="deleteTrpgActor()">액터 삭제</button>
               </div>
+              <div id="trpg-actor-run-status" class="trpg-run-status">액터 ID를 입력한 뒤 생성/수정/삭제를 실행하세요.</div>
               <div class="trpg-control-help" style="margin-top:4px;">생성 시 Keeper를 입력하면 lease claim을 자동 시도합니다. 수정은 입력한 필드만 patch하고, 삭제 시 actor lease도 함께 정리됩니다.</div>
               <div class="trpg-dev-note">라운드 실행은 DM + 플레이어 Keeper 순차 호출로 진행되며 timeout × 참여자 수만큼 시간이 걸릴 수 있습니다.</div>
             </div>
@@ -9003,17 +9004,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
       ensureTrpgControlDefaults();
       const form = readTrpgActorForm();
       if (!form.actorId) {
-        setTrpgRoundRunStatus('오류: Actor ID를 입력하세요.', 'error');
+        setTrpgStatusBoth('오류: Actor ID를 입력하세요.', 'error');
         return;
       }
       const maxHp = form.maxHp == null ? 10 : form.maxHp;
       const hpRaw = form.hp == null ? maxHp : form.hp;
       if (!Number.isFinite(maxHp) || maxHp <= 0) {
-        setTrpgRoundRunStatus('오류: Max HP는 1 이상이어야 합니다.', 'error');
+        setTrpgStatusBoth('오류: Max HP는 1 이상이어야 합니다.', 'error');
         return;
       }
       if (!Number.isFinite(hpRaw) || hpRaw < 0) {
-        setTrpgRoundRunStatus('오류: HP는 0 이상이어야 합니다.', 'error');
+        setTrpgStatusBoth('오류: HP는 0 이상이어야 합니다.', 'error');
         return;
       }
       const hp = Math.max(0, Math.min(maxHp, hpRaw));
@@ -9034,7 +9035,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (form.inventory.length > 0) spawnArgs.inventory = form.inventory;
 
       setTrpgActorMutationBusy(true);
-      setTrpgRoundRunStatus(
+      setTrpgStatusBoth(
         `액터 생성 중: <b>${escapeHtml(form.actorId)}</b> (${escapeHtml(role)}) / room <b>${escapeHtml(form.roomId)}</b>`,
         'running'
       );
@@ -9050,7 +9051,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             upsertTrpgPlayerKeeperLine(form.actorId, form.keeperName);
           }
         }
-        setTrpgRoundRunStatus(
+        setTrpgStatusBoth(
           `액터 생성 완료: <b>${escapeHtml(form.actorId)}</b>${form.keeperName ? ` → keeper <b>${escapeHtml(form.keeperName)}</b>` : ''}`,
           'ok'
         );
@@ -9058,7 +9059,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         await fetchTrpg();
       } catch (e) {
         const msg = String((e && e.message) || e || 'unknown error');
-        setTrpgRoundRunStatus(`액터 생성 실패: ${escapeHtml(msg)}`, 'error');
+        setTrpgStatusBoth(`액터 생성 실패: ${escapeHtml(msg)}`, 'error');
         showToast('Actor 생성 실패', 'error');
       } finally {
         setTrpgActorMutationBusy(false);
@@ -9070,7 +9071,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       ensureTrpgControlDefaults();
       const form = readTrpgActorForm();
       if (!form.actorId) {
-        setTrpgRoundRunStatus('오류: 수정할 Actor ID를 입력하세요.', 'error');
+        setTrpgStatusBoth('오류: 수정할 Actor ID를 입력하세요.', 'error');
         return;
       }
       const updateArgs = { room_id: form.roomId, actor_id: form.actorId };
@@ -9081,7 +9082,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (form.persona) { updateArgs.persona = form.persona; hasPatch = true; }
       if (form.hp != null) {
         if (!Number.isFinite(form.hp) || form.hp < 0) {
-          setTrpgRoundRunStatus('오류: HP는 0 이상이어야 합니다.', 'error');
+          setTrpgStatusBoth('오류: HP는 0 이상이어야 합니다.', 'error');
           return;
         }
         updateArgs.hp = form.hp;
@@ -9090,7 +9091,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
       if (form.maxHp != null) {
         if (!Number.isFinite(form.maxHp) || form.maxHp <= 0) {
-          setTrpgRoundRunStatus('오류: Max HP는 1 이상이어야 합니다.', 'error');
+          setTrpgStatusBoth('오류: Max HP는 1 이상이어야 합니다.', 'error');
           return;
         }
         updateArgs.max_hp = form.maxHp;
@@ -9099,19 +9100,22 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (form.traits.length > 0) { updateArgs.traits = form.traits; hasPatch = true; }
       if (form.skills.length > 0) { updateArgs.skills = form.skills; hasPatch = true; }
       if (form.inventory.length > 0) { updateArgs.inventory = form.inventory; hasPatch = true; }
-      if (!hasPatch) {
-        setTrpgRoundRunStatus('오류: 수정할 필드를 최소 1개 이상 입력하세요.', 'error');
+      const hasKeeperClaim = form.keeperName !== '';
+      if (!hasPatch && !hasKeeperClaim) {
+        setTrpgStatusBoth('오류: 수정할 필드를 최소 1개 이상 입력하거나 keeper를 지정하세요.', 'error');
         return;
       }
 
       setTrpgActorMutationBusy(true);
-      setTrpgRoundRunStatus(
+      setTrpgStatusBoth(
         `액터 수정 중: <b>${escapeHtml(form.actorId)}</b> / room <b>${escapeHtml(form.roomId)}</b>`,
         'running'
       );
       try {
-        await mcpToolCall('trpg.actor.update', updateArgs);
-        if (form.keeperName) {
+        if (hasPatch) {
+          await mcpToolCall('trpg.actor.update', updateArgs);
+        }
+        if (hasKeeperClaim) {
           await mcpToolCall('trpg.actor.claim', {
             room_id: form.roomId,
             actor_id: form.actorId,
@@ -9121,12 +9125,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
             upsertTrpgPlayerKeeperLine(form.actorId, form.keeperName);
           }
         }
-        setTrpgRoundRunStatus(`액터 수정 완료: <b>${escapeHtml(form.actorId)}</b>`, 'ok');
+        const updateSummary = hasPatch && hasKeeperClaim
+          ? `액터 수정 완료: <b>${escapeHtml(form.actorId)}</b> (속성 + keeper 반영)`
+          : hasPatch
+            ? `액터 수정 완료: <b>${escapeHtml(form.actorId)}</b>`
+            : `액터 keeper 할당 완료: <b>${escapeHtml(form.actorId)}</b> → <b>${escapeHtml(form.keeperName)}</b>`;
+        setTrpgStatusBoth(updateSummary, 'ok');
         showToast(`Actor 수정 완료: ${form.actorId}`, 'success');
         await fetchTrpg();
       } catch (e) {
         const msg = String((e && e.message) || e || 'unknown error');
-        setTrpgRoundRunStatus(`액터 수정 실패: ${escapeHtml(msg)}`, 'error');
+        setTrpgStatusBoth(`액터 수정 실패: ${escapeHtml(msg)}`, 'error');
         showToast('Actor 수정 실패', 'error');
       } finally {
         setTrpgActorMutationBusy(false);
@@ -9138,7 +9147,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       ensureTrpgControlDefaults();
       const form = readTrpgActorForm();
       if (!form.actorId) {
-        setTrpgRoundRunStatus('오류: 삭제할 Actor ID를 입력하세요.', 'error');
+        setTrpgStatusBoth('오류: 삭제할 Actor ID를 입력하세요.', 'error');
         return;
       }
       const confirmed = window.confirm(`actor ${form.actorId} 를 삭제하시겠습니까?`);
@@ -9147,19 +9156,19 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (form.deleteReason) deleteArgs.reason = form.deleteReason;
 
       setTrpgActorMutationBusy(true);
-      setTrpgRoundRunStatus(
+      setTrpgStatusBoth(
         `액터 삭제 중: <b>${escapeHtml(form.actorId)}</b> / room <b>${escapeHtml(form.roomId)}</b>`,
         'running'
       );
       try {
         await mcpToolCall('trpg.actor.delete', deleteArgs);
         removeTrpgPlayerKeeperLine(form.actorId);
-        setTrpgRoundRunStatus(`액터 삭제 완료: <b>${escapeHtml(form.actorId)}</b>`, 'ok');
+        setTrpgStatusBoth(`액터 삭제 완료: <b>${escapeHtml(form.actorId)}</b>`, 'ok');
         showToast(`Actor 삭제 완료: ${form.actorId}`, 'success');
         await fetchTrpg();
       } catch (e) {
         const msg = String((e && e.message) || e || 'unknown error');
-        setTrpgRoundRunStatus(`액터 삭제 실패: ${escapeHtml(msg)}`, 'error');
+        setTrpgStatusBoth(`액터 삭제 실패: ${escapeHtml(msg)}`, 'error');
         showToast('Actor 삭제 실패', 'error');
       } finally {
         setTrpgActorMutationBusy(false);
@@ -9440,6 +9449,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (!statusEl) return;
       statusEl.className = `trpg-run-status ${cls}`.trim();
       statusEl.innerHTML = html;
+    }
+
+    function setTrpgActorRunStatus(html, cls = '') {
+      const statusEl = document.getElementById('trpg-actor-run-status');
+      if (!statusEl) return;
+      statusEl.className = `trpg-run-status ${cls}`.trim();
+      statusEl.innerHTML = html;
+    }
+
+    function setTrpgStatusBoth(html, cls = '') {
+      setTrpgRoundRunStatus(html, cls);
+      setTrpgActorRunStatus(html, cls);
     }
 
     async function runTrpgRound() {

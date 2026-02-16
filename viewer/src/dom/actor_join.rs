@@ -128,9 +128,9 @@ fn do_join() {
                 set_join_status("", "");
             }
             Err(e) => {
-                let msg = format!("Claim failed: {:?}", e);
-                log::warn!("{}", msg);
-                set_join_status(&msg, "status-error");
+                let detail = crate::dom::action_panel::friendly_js_error(&e);
+                log::warn!("Claim failed: {:?}", e);
+                set_join_status(&format!("Claim failed: {}", detail), "status-error");
             }
         }
         set_join_button_disabled(false);
@@ -165,8 +165,7 @@ fn do_leave() {
                 log::info!("ActorJoin: released {}", actor_id_clone);
             }
             Err(e) => {
-                let msg = format!("Release failed: {:?}", e);
-                log::warn!("{}", msg);
+                log::warn!("Release failed: {:?}", e);
                 // Still swap back — the server may have released anyway
                 clear_claimed_state();
                 swap_to_join_panel();

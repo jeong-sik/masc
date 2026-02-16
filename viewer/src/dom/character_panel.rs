@@ -88,7 +88,7 @@ pub fn update_character_panel_dom(
             .join("");
 
         html.push_str(&format!(
-            r#"<div class="character-card{}" data-class="{}">
+            r#"<div class="character-card{}" data-actor-id="{}" data-class="{}">
   <div class="char-header">
     <span class="char-name">{}</span>
     <span class="char-class"><span class="class-icon">{}</span> {}</span>
@@ -108,6 +108,7 @@ pub fn update_character_panel_dom(
   <div class="char-effects">{}{}</div>
 </div>"#,
             dead_class,
+            actor.id,
             slug,
             actor.name,
             icon,

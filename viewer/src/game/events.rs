@@ -51,9 +51,12 @@ pub struct TurnAdvancePayload {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChoicePayload {
+    #[allow(dead_code)]
     pub character: String,
+    #[allow(dead_code)]
     pub description: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub options: Vec<String>,
 }
 
@@ -72,8 +75,10 @@ pub struct DeathPayload {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CombatPayload {
+    #[allow(dead_code)]
     pub area: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub enemies: Vec<String>,
 }
 
@@ -130,10 +135,10 @@ pub struct AreaMoved(pub AreaMovePayload);
 pub struct TurnAdvanced(pub TurnAdvancePayload);
 
 #[derive(Message, Debug, Clone)]
-pub struct ChoiceAvailable(pub ChoicePayload);
+pub struct ChoiceAvailable(#[allow(dead_code)] pub ChoicePayload);
 
 #[derive(Message, Debug, Clone)]
-pub struct ChoiceResolved(pub ChoicePayload);
+pub struct ChoiceResolved(#[allow(dead_code)] pub ChoicePayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct ItemAcquired(pub ItemPayload);
@@ -142,7 +147,7 @@ pub struct ItemAcquired(pub ItemPayload);
 pub struct CharacterDied(pub DeathPayload);
 
 #[derive(Message, Debug, Clone)]
-pub struct CombatStarted(pub CombatPayload);
+pub struct CombatStarted(#[allow(dead_code)] pub CombatPayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct WeatherChanged(pub WeatherChangePayload);

@@ -1654,6 +1654,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     .trpg-run-btn:hover { border-color: rgba(34,211,238,0.78); background: rgba(14,116,144,0.45); }
     .trpg-run-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .trpg-run-btn.recommend {
+      border-color: rgba(250,204,21,0.75);
+      box-shadow: 0 0 0 1px rgba(250,204,21,0.38), 0 0 16px rgba(250,204,21,0.18);
+      background: rgba(113,63,18,0.28);
+    }
     .trpg-run-btn.secondary {
       border-color: rgba(148,163,184,0.35);
       background: rgba(15,23,42,0.75);
@@ -1909,23 +1914,15 @@ let cached_html = lazy ({|<!DOCTYPE html>
       line-height: 1.45;
       word-break: break-word;
     }
-    .trpg-next-action .act {
-      border: 1px solid rgba(34,211,238,0.45);
+    .trpg-next-action .target {
+      border: 1px solid rgba(148,163,184,0.35);
       border-radius: 8px;
-      background: rgba(8,47,73,0.88);
+      background: rgba(15,23,42,0.6);
       color: #e2e8f0;
-      font-weight: 700;
+      font-weight: 600;
       font-size: 0.84em;
       padding: 8px 10px;
-      cursor: pointer;
-    }
-    .trpg-next-action .act:hover {
-      border-color: rgba(34,211,238,0.78);
-      background: rgba(14,116,144,0.45);
-    }
-    .trpg-next-action .act:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
+      line-height: 1.4;
     }
     .trpg-dev-note {
       margin-top: 6px;
@@ -2330,11 +2327,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
                   <span>이전 세션 로그 포함 보기</span>
                 </label>
               </div>
-              <div id="trpg-round-run-status" class="trpg-run-status">0) 새 게임 시작(선택) → 1) 세션 시작 → 2) 라운드 실행 순서로 진행하세요.</div>
+              <div id="trpg-round-run-status" class="trpg-run-status">세션 상태: 미시작 · 0) 새 게임 시작(선택) → 1) 세션 시작 → 2) 라운드 실행 순서로 진행하세요.</div>
               <div id="trpg-next-action" class="trpg-next-action">
                 <div class="title">다음 액션</div>
-                <div id="trpg-next-action-desc" class="desc">세션을 시작하면 다음에 눌러야 할 버튼을 자동으로 안내합니다.</div>
-                <button id="trpg-next-action-btn" class="act" onclick="trpgRunNextAction()">1) 세션 시작</button>
+                <div id="trpg-next-action-desc" class="desc">세션 상태를 확인하고, 상단 메인 버튼에서 다음 단계를 진행하세요.</div>
+                <div id="trpg-next-action-target" class="target">권장 클릭: 1) 세션 시작 (상단 버튼)</div>
               </div>
               <div class="trpg-section-title" style="margin-top:10px;">액터 관리</div>
               <div class="trpg-control-grid">
@@ -7410,48 +7407,63 @@ let cached_html = lazy ({|<!DOCTYPE html>
       showToast(mode, 'success');
     }
 
+    function trpgActionButtonId(kind) {
+      const key = String(kind || '');
+      if (key === 'bootstrap') return 'trpg-bootstrap-btn';
+      if (key === 'run_round') return 'trpg-run-round-btn';
+      return '';
+    }
+
+    function trpgSetActionRowHighlight(buttonId, enabled = true) {
+      ['trpg-bootstrap-btn', 'trpg-run-round-btn', 'trpg-new-game-btn', 'trpg-reload-btn'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('recommend');
+      });
+      if (!buttonId || !enabled) return;
+      const activeEl = document.getElementById(buttonId);
+      if (activeEl) activeEl.classList.add('recommend');
+    }
+
     function trpgSetNextAction(kind, label, desc, enabled = true) {
       trpgNextActionKind = String(kind || 'none');
       trpgCanRunRound = trpgNextActionKind === 'run_round' && !!enabled;
       trpgRunBlockedReason = trpgCanRunRound ? '' : String(desc || '실행 전 점검이 필요합니다.');
       const descEl = document.getElementById('trpg-next-action-desc');
-      const btnEl = document.getElementById('trpg-next-action-btn');
+      const targetEl = document.getElementById('trpg-next-action-target');
+      const targetBtnId = trpgActionButtonId(trpgNextActionKind);
       if (descEl) descEl.textContent = String(desc || '');
-      if (btnEl) {
-        btnEl.textContent = String(label || '새로고침');
-        btnEl.disabled = !enabled;
+      if (targetEl) {
+        if (targetBtnId && enabled) {
+          targetEl.textContent = `권장 클릭: ${String(label || '메인 버튼')} (상단 버튼)`;
+        } else if (targetBtnId && !enabled) {
+          targetEl.textContent = `권장 클릭: ${String(label || '메인 버튼')} (현재 실행 불가)`;
+        } else {
+          targetEl.textContent = '자동 대기: 상태 변화 감지 중';
+        }
       }
+      trpgSetActionRowHighlight(targetBtnId, !!enabled);
       updateTrpgButtons();
-    }
-
-    function trpgRunNextAction() {
-      if (trpgNextActionKind === 'bootstrap') {
-        bootstrapTrpgSession();
-      } else if (trpgNextActionKind === 'run_round') {
-        runTrpgRound();
-      } else {
-        fetchTrpg();
-      }
     }
 
     function trpgUpdateNextAction(state, events) {
       const viewEvents = trpgCurrentSessionEvents(events);
       if (trpgBootstrapping) {
-        trpgSetNextAction('wait', '준비 중...', '세션 시작 준비가 진행 중입니다. 잠시만 기다리세요.', false);
+        trpgSetNextAction('wait', '1) 세션 시작', '세션 상태: 시작 중 · 세션 구성 완료까지 잠시만 기다리세요.', false);
         return;
       }
       if (trpgRoundRunning) {
-        trpgSetNextAction('wait', '라운드 실행 중...', '현재 라운드가 진행 중입니다. 완료 후 상태가 자동 갱신됩니다.', false);
+        trpgSetNextAction('wait', '2) 라운드 실행', '세션 상태: 진행 중 · 현재 라운드 실행이 끝나면 자동 갱신됩니다.', false);
         return;
       }
       const sessions = trpgBuildSessionHistory(viewEvents);
       if (sessions.length === 0) {
-        trpgSetNextAction('bootstrap', '1) 세션 시작', '아직 세션이 없습니다. world/dm preset 확인 후 세션을 시작하세요.', true);
+        trpgSetNextAction('bootstrap', '1) 세션 시작', '세션 상태: 미시작 · world/dm preset 확인 후 세션을 시작하세요.', true);
         return;
       }
       const expectedActors = trpgPartyActorsFromStateOrEvents(state, viewEvents);
       if (expectedActors.length === 0) {
-        trpgSetNextAction('wait', '세션 준비 중', '파티 actor_id를 아직 확인하지 못했습니다. 1) 세션 시작을 다시 실행하세요.', false);
+        trpgSetNextAction('wait', '1) 세션 시작', '세션 상태: 시작됨(불완전) · 파티 actor_id를 아직 확인하지 못했습니다. 1) 세션 시작을 다시 실행하세요.', false);
         return;
       }
       const resolved = trpgResolvePlayerKeeperMapping(
@@ -7460,7 +7472,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         String((document.getElementById('trpg-player-keepers-input') || {}).value || '')
       );
       if (!resolved.ok) {
-        trpgSetNextAction('wait', '입력 수정 필요', 'Player keepers 입력 형식 오류를 먼저 해결하세요.', false);
+        trpgSetNextAction('wait', '입력 수정 필요', '세션 상태: 확인 필요 · Player keepers 입력 형식 오류를 먼저 해결하세요.', false);
         return;
       }
       const missingActors = resolved.missingActors || [];
@@ -7469,7 +7481,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         trpgSetNextAction(
           'wait',
           '할당 수정 필요',
-          '현재 파티 actor_id와 Player keepers actor_id가 일치하지 않습니다. 파티 할당 카드에서 빨간 항목을 먼저 정리하세요.',
+          '세션 상태: 확인 필요 · 파티 actor_id와 Player keepers actor_id가 일치하지 않습니다. 파티 할당 카드에서 빨간 항목을 먼저 정리하세요.',
           false
         );
         return;
@@ -7482,7 +7494,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           trpgSyncKeeperSelectorsFromInputs();
         }
       }
-      trpgSetNextAction('run_round', '다음 라운드 실행', '준비 완료. 다음 라운드를 실행해 서사를 진행하세요.', true);
+      trpgSetNextAction('run_round', '2) 라운드 실행', '세션 상태: 준비 완료 · 2) 라운드 실행으로 서사를 진행하세요.', true);
     }
 
     function trpgFmtDateTime(ts) {

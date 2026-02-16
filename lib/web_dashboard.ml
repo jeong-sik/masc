@@ -8428,13 +8428,20 @@ let cached_html = lazy ({|<!DOCTYPE html>
           .concat(isPlayer ? [`<span class="trpg-keeper-tag player">PLAYER</span>`] : [])
           .concat(leasedActors.length > 0 ? [`<span class="trpg-keeper-tag lease">LEASE ${escapeHtml(leasedActors.join(','))}</span>`] : [])
           .join('');
+        const leaseConflict = leasedActors.length > 1;
         const disableDm = readOnly || (isPlayer && !isDm);
-        const disablePlayer = readOnly || isDm || isPlayer;
+        const disablePlayer = readOnly || isDm || isPlayer || leaseConflict;
         const dmTitle = disableDm
           ? (readOnly ? '라운드/세션 처리 중에는 변경할 수 없습니다.' : '이미 Player로 사용 중인 keeper는 DM으로 지정할 수 없습니다.')
           : '';
         const playerTitle = disablePlayer
-          ? (readOnly ? '라운드/세션 처리 중에는 변경할 수 없습니다.' : (isDm ? 'DM keeper는 Player로 추가할 수 없습니다.' : '이미 Player로 추가된 keeper입니다.'))
+          ? (readOnly
+              ? '라운드/세션 처리 중에는 변경할 수 없습니다.'
+              : (isDm
+                  ? 'DM keeper는 Player로 추가할 수 없습니다.'
+                  : (isPlayer
+                      ? '이미 Player로 추가된 keeper입니다.'
+                      : '이 keeper는 여러 actor lease를 갖고 있어 자동 추가할 수 없습니다. 할당 편집기에서 actor를 직접 선택하세요.')))
           : '';
         return `<div class="trpg-keeper-chip">
           <span class="trpg-keeper-name" title="${safe}">${safe}</span>
@@ -8488,6 +8495,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .map((line) => line.trim())
         .filter((line) => line !== '');
       const leasedActors = Array.isArray(usage.leaseByKeeper[name]) ? usage.leaseByKeeper[name] : [];
+      if (leasedActors.length > 1) {
+        setTrpgRoundRunStatus(
+          `오류: keeper <b>${escapeHtml(name)}</b>는 lease actor가 여러 개(${escapeHtml(leasedActors.join(', '))})라 자동 추가할 수 없습니다. 파티 할당 편집기에서 actor를 직접 선택하세요.`,
+          'error'
+        );
+        renderTrpgKeeperQuickList();
+        return;
+      }
       const leaseActor = leasedActors.length === 1 ? String(leasedActors[0] || '').trim() : '';
       const lineToAdd = leaseActor ? `${leaseActor}=${name}` : name;
       const exists = lines.some((line) => {

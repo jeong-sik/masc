@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci
+.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve
 
 # Default target
 all: build
@@ -66,3 +66,11 @@ run:
 release:
 	dune build --release
 	@echo "Release binary at _build/default/bin/main.exe"
+
+# Build viewer (Bevy + WASM via trunk) with NO_COLOR normalization.
+viewer-build:
+	scripts/viewer-trunk.sh build
+
+# Serve viewer locally at http://127.0.0.1:8080
+viewer-serve:
+	scripts/viewer-trunk.sh serve

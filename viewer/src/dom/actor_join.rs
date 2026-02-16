@@ -161,7 +161,7 @@ fn do_join() {
         match claim_actor(&actor_id_clone, &keeper_clone).await {
             Ok(()) => {
                 set_claimed_state(&actor_id_clone, &keeper_clone);
-                swap_to_action_panel(&actor_id_clone);
+                swap_to_action_panel(&actor_id_clone); config::set_current_actor_id(&actor_id_clone);
                 set_join_status("", "");
             }
             Err(e) => {
@@ -198,14 +198,14 @@ fn do_leave() {
         match release_actor(&actor_id_clone, &keeper_clone).await {
             Ok(()) => {
                 clear_claimed_state();
-                swap_to_join_panel();
+                swap_to_join_panel(); config::clear_current_actor_id();
                 log::info!("ActorJoin: released {}", actor_id_clone);
             }
             Err(e) => {
                 log::warn!("Release failed: {:?}", e);
                 // Still swap back — the server may have released anyway
                 clear_claimed_state();
-                swap_to_join_panel();
+                swap_to_join_panel(); config::clear_current_actor_id();
             }
         }
         set_leave_button_disabled(false);

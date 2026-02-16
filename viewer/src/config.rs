@@ -199,3 +199,37 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
 pub fn trpg_room_url(path: &str) -> String {
     format!("{}/rooms/{}{}", TRPG_ENGINE_URL, current_room_id(), path)
 }
+
+#[cfg(target_arch = "wasm32")]
+const STORAGE_KEY_ACTOR_ID: &str = "masc_trpg_actor_id";
+
+#[cfg(target_arch = "wasm32")]
+pub fn current_actor_id() -> Option<String> {
+    let window = web_sys::window()?;
+    let storage = window.local_storage().ok()??;
+    storage.get_item(STORAGE_KEY_ACTOR_ID).ok()?
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn set_current_actor_id(actor_id: &str) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok()).flatten() {
+        let _ = storage.set_item(STORAGE_KEY_ACTOR_ID, actor_id);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn clear_current_actor_id() {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok()).flatten() {
+        let _ = storage.remove_item(STORAGE_KEY_ACTOR_ID);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn current_actor_id() -> Option<String> { None }
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn set_current_actor_id(_: &str) {}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn clear_current_actor_id() {}

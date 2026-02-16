@@ -298,6 +298,81 @@ let load_json_list path parse fallback =
 
 let config_path base_dir rel = Filename.concat base_dir rel
 
+let non_empty_string json key =
+  json |> member key |> to_string_option
+  |> Option.map String.trim
+  |> fun v -> Option.bind v (fun s -> if s = "" then None else Some s)
+
+let first_non_empty_string json keys =
+  List.find_map (fun key -> non_empty_string json key) keys
+
+let parse_scenario_world_preset json : world_preset option =
+  let id = non_empty_string json "id" in
+  match id with
+  | None -> None
+  | Some id ->
+      let title = first_non_empty_string json [ "title"; "name"; "id" ] in
+      let description = non_empty_string json "description" in
+      let intro =
+        match json |> member "acts" with
+        | `List (`Assoc _ as first_act :: _) ->
+            first_non_empty_string first_act
+              [ "intro"; "summary"; "description"; "title" ]
+        | _ -> None
+      in
+      let type_flag =
+        non_empty_string json "type"
+        |> Option.map (fun t -> "scenario.type." ^ t)
+      in
+      let weather_flag =
+        match json |> member "weather" with
+        | `Assoc _ as weather ->
+            non_empty_string weather "initial"
+            |> Option.map (fun s -> "scenario.weather." ^ s)
+        | _ -> None
+      in
+      let initial_flags =
+        [ Some "scenario.source.examples-trpg-mvp"; type_flag; weather_flag ]
+        |> List.filter_map (fun x -> x)
+      in
+      let title = Option.value ~default:id title in
+      let description =
+        Option.value
+          ~default:
+            (Printf.sprintf
+               "Imported scenario %s from examples/trpg-mvp."
+               id)
+          description
+      in
+      let intro = Option.value ~default:description intro in
+      Some { id; title; description; intro; initial_flags }
+
+let load_scenario_world_presets ~base_dir : world_preset list =
+  let scenarios_dir = config_path base_dir "examples/trpg-mvp/scenarios" in
+  if Sys.file_exists scenarios_dir && Sys.is_directory scenarios_dir then
+    Sys.readdir scenarios_dir
+    |> Array.to_list
+    |> List.filter (fun name ->
+         Filename.check_suffix (String.lowercase_ascii name) ".json")
+    |> List.sort String.compare
+    |> List.filter_map (fun file_name ->
+         let path = Filename.concat scenarios_dir file_name in
+         try
+           Yojson.Safe.from_file path |> parse_scenario_world_preset
+         with _ -> None)
+  else
+    []
+
+let merge_world_presets ~(base : world_preset list) ~(extras : world_preset list) :
+    world_preset list =
+  let existing = Hashtbl.create 32 in
+  List.iter (fun (p : world_preset) -> Hashtbl.replace existing p.id ()) base;
+  let extras_filtered =
+    extras
+    |> List.filter (fun (p : world_preset) -> not (Hashtbl.mem existing p.id))
+  in
+  base @ extras_filtered
+
 let load_catalog ~base_dir =
   let dm_path = config_path base_dir "config/trpg/presets/dm.json" in
   let world_path = config_path base_dir "config/trpg/presets/world.json" in
@@ -308,6 +383,11 @@ let load_catalog ~base_dir =
   in
   let* world_presets =
     load_json_list world_path parse_world_preset default_catalog.world_presets
+  in
+  let world_presets =
+    merge_world_presets
+      ~base:world_presets
+      ~extras:(load_scenario_world_presets ~base_dir)
   in
   let* character_presets =
     load_json_list character_path parse_character_preset default_catalog.character_presets

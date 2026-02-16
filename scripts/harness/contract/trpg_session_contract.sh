@@ -3,6 +3,7 @@ set -euo pipefail
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 SESSION_ID="${SESSION_ID:-harness-trpg-session-001}"
+ROOM_ID="${ROOM_ID:-}"
 
 call_tool() {
   local id="$1"
@@ -62,7 +63,13 @@ if [ "$(printf "%s" "$party_json" | jq -r 'length')" -ne 4 ]; then
 fi
 
 echo "[4/6] trpg.session.start"
-args_start="$(jq -cn --arg sid "$SESSION_ID" --argjson party "$party_json" '{session_id:$sid,party:$party,phase:"briefing"}')"
+args_start="$(jq -cn --arg sid "$SESSION_ID" --arg room "$ROOM_ID" --argjson party "$party_json" '
+  if $room == "" then
+    {session_id:$sid,party:$party,phase:"briefing"}
+  else
+    {session_id:$sid,room_id:$room,party:$party,phase:"briefing",force:true}
+  end
+')"
 r4="$(call_tool 2004 "trpg.session.start" "$args_start")"
 room_id="$(printf "%s" "$r4" | extract_payload | jq -r '.room_id // empty')"
 if [ -z "$room_id" ]; then

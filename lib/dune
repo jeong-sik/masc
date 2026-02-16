@@ -162,6 +162,7 @@
    library_bridge
    tool_council
    tool_protocol_game_view
+   tool_game
    tool_experiment
    tool_suspend
    debate

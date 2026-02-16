@@ -1210,6 +1210,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_protocol_game_view.dispatch simple_ctx_protocol ~name ~args:arguments with
   | Some result -> result
   | None ->
+  match Tool_game.dispatch ~name ~args:arguments with
+  | Some result -> result
+  | None ->
   match Tool_experiment.dispatch simple_ctx_experiment ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -2555,6 +2558,7 @@ let handle_list_tools_eio state id =
     @ Tool_perpetual.schemas
     @ Tool_keeper.schemas
     @ Tool_protocol_game_view.schemas
+    @ Tool_game.schemas
   in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
     Mode.is_tool_enabled enabled_categories schema.name

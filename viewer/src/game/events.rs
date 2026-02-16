@@ -87,6 +87,31 @@ pub struct MoodChangePayload {
     pub mood: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TurnProgressPayload {
+    pub event_type: String,
+    #[serde(default)]
+    pub turn: u32,
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub actor_id: String,
+    #[serde(default)]
+    pub keeper: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub role: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub reason: String,
+    #[serde(default)]
+    pub room_status: String,
+    #[serde(default)]
+    pub dm_keeper: String,
+    #[serde(default)]
+    pub selected_player_ids: Vec<String>,
+}
+
 // ─── Bevy Events ──────────────────────────
 
 #[derive(Message, Debug, Clone)]
@@ -124,3 +149,6 @@ pub struct WeatherChanged(pub WeatherChangePayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct MoodChanged(pub MoodChangePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct TurnProgressUpdated(pub TurnProgressPayload);

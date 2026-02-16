@@ -45,36 +45,6 @@ impl Plugin for DomBridgePlugin {
 fn reset_trpg_dom_state(
     mut character_cache: ResMut<character_panel::CharacterPanelCache>,
     mut turn_cache: ResMut<turn_phase::TurnPhaseCache>,
-    mut connection_cache: ResMut<connection::ConnectionStatusCache>,
-) {
-    character_cache.last_snapshot.clear();
-    turn_cache.last_turn = 0;
-    turn_cache.last_phase.clear();
-    connection_cache.last_status.clear();
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-        if let Some(el) = document.get_element_by_id("narrative-log") {
-            el.set_inner_html("");
-        }
-        if let Some(el) = document.get_element_by_id("dice-log") {
-            el.set_inner_html("");
-        }
-        if let Some(el) = document.get_element_by_id("character-panel") {
-            el.set_inner_html("");
-        }
-        if let Some(el) = document.get_element_by_id("turn-num") {
-            el.set_text_content(Some("1"));
-        }
-    }
-}
-
-fn reset_trpg_dom_state(
-    mut character_cache: ResMut<character_panel::CharacterPanelCache>,
-    mut turn_cache: ResMut<turn_phase::TurnPhaseCache>,
     mut runtime_cache: ResMut<turn_runtime::TurnRuntimeCache>,
     mut connection_cache: ResMut<connection::ConnectionStatusCache>,
 ) {

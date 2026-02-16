@@ -66,7 +66,7 @@
     </div>
 
     <!-- ═══ Monitor Mode ═══ -->
-    <div id="monitor-panel" class="mode-panel">
+    <div id="monitor-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>System Monitor</h2>
             <button class="back-btn" data-back="lobby">◂ Back</button>
@@ -96,7 +96,7 @@
     </div>
 
     <!-- ═══ Council Mode ═══ -->
-    <div id="council-panel" class="mode-panel">
+    <div id="council-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>MAGI Council</h2>
             <button class="back-btn" data-back="lobby">◂ Back</button>
@@ -113,7 +113,7 @@
     </div>
 
     <!-- ═══ Social Mode ═══ -->
-    <div id="social-panel" class="mode-panel">
+    <div id="social-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>Lodge Social</h2>
             <button class="back-btn" data-back="lobby">◂ Back</button>
@@ -129,7 +129,7 @@
     </div>
 
     <!-- ═══ Experiment Mode ═══ -->
-    <div id="experiment-panel" class="mode-panel">
+    <div id="experiment-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>Experiments</h2>
             <button class="back-btn" data-back="lobby">◂ Back</button>
@@ -146,7 +146,7 @@
     </div>
 
     <!-- ═══ Dashboard (Active Mode View) ═══ -->
-    <div id="dashboard" data-room-id="default" style="display: none;">
+    <div id="dashboard" style="display: none;">
         <!-- Top Bar -->
         <header id="top-bar">
             <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
@@ -158,7 +158,6 @@
                     <option value="terminal">Terminal</option>
                     <option value="parchment">Parchment</option>
                 </select>
-                <button id="new-game-toggle" class="inline-toggle" type="button">새 게임</button>
                 <button id="debug-log-toggle" class="inline-toggle" type="button" aria-pressed="true">Debug ON</button>
                 <span id="debug-log-status" class="widget-pill">DEBUG ON</span>
                 <span id="widget-status" class="widget-pill">Widgets N:0 P:0 D:0</span>
@@ -193,10 +192,28 @@
                             <div class="phase" data-phase="transition">Move</div>
                         </div>
                     </div>
-                    <div id="turn-runtime" class="turn-runtime"></div>
                     <div id="narrative-log"></div>
+                    <!-- Join Panel: claim an actor before playing -->
+                    <div id="join-panel">
+                        <div id="join-input-row">
+                            <input type="text" id="actor-id-input"
+                                   placeholder="Actor ID (e.g. warrior-1)"
+                                   maxlength="100"
+                                   autocomplete="off" />
+                            <input type="text" id="keeper-input"
+                                   placeholder="Your name"
+                                   maxlength="100"
+                                   autocomplete="off" />
+                            <button id="join-btn" title="Claim actor and join game">Join</button>
+                        </div>
+                        <div id="join-status"></div>
+                    </div>
                     <!-- Action Panel: player input for TRPG actions -->
-                    <div id="action-panel">
+                    <div id="action-panel" style="display:none">
+                        <div id="player-info">
+                            Playing as: <span id="player-actor-id"></span>
+                            <button id="leave-btn" title="Release actor">Leave</button>
+                        </div>
                         <div id="action-input-row">
                             <input type="text" id="action-input"
                                    placeholder="Describe your action..."
@@ -206,6 +223,8 @@
                             <button id="dice-roll-btn" title="Roll 1d20">Roll</button>
                         </div>
                         <div id="action-status"></div>
+                        <input type="hidden" id="claimed-actor-id" value="" />
+                        <input type="hidden" id="claimed-keeper" value="" />
                     </div>
                 </div>
             </section>
@@ -225,42 +244,6 @@
             <div id="dice-log" class="scrollable horizontal"></div>
         </footer>
     </div>
-
-    <!-- ═══ TRPG New Game Panel ═══ -->
-    <aside id="new-game-panel" class="new-game-panel" style="display: none;">
-        <div class="new-game-header">
-            <h3>새 게임</h3>
-            <button id="new-game-close" class="inline-toggle" type="button">닫기</button>
-        </div>
-        <div class="new-game-body">
-            <label class="new-game-label" for="new-game-room-id">Room</label>
-            <div class="new-game-room-row">
-                <input id="new-game-room-id" class="new-game-input" type="text" readonly>
-                <button id="new-game-room-regenerate" class="inline-toggle" type="button">재생성</button>
-            </div>
-
-            <label class="new-game-label" for="new-game-dm-select">DM Keeper</label>
-            <select id="new-game-dm-select" class="new-game-select"></select>
-
-            <label class="new-game-label" for="new-game-player-select">AI Players (multi-select)</label>
-            <select id="new-game-player-select" class="new-game-select" multiple size="8"></select>
-
-            <label class="new-game-label" for="new-game-models">Keeper Models</label>
-            <input
-                id="new-game-models"
-                class="new-game-input"
-                type="text"
-                value="glm:glm-4.7,gemini:gemini-2.5-flash"
-                placeholder="glm:glm-4.7,gemini:gemini-2.5-flash"
-            >
-
-            <div id="new-game-status" class="new-game-status">DM과 Player를 선택한 뒤 시작하세요.</div>
-        </div>
-        <div class="new-game-actions">
-            <button id="new-game-refresh" class="inline-toggle" type="button">Keeper 새로고침</button>
-            <button id="new-game-start" class="inline-toggle new-game-start" type="button">시작</button>
-        </div>
-    </aside>
 
 </body>
 </html>

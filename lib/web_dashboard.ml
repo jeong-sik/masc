@@ -7299,11 +7299,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const mapping = {};
       for (const line of lines) {
         const eqIdx = line.indexOf('=');
-        if (eqIdx <= 0 || eqIdx === line.length - 1) {
-          return { ok: false, error: `잘못된 player keeper 형식: ${line}` };
+        let actorId = '';
+        let keeperName = '';
+        if (eqIdx < 0) {
+          actorId = line;
+          keeperName = line;
+        } else {
+          if (eqIdx <= 0 || eqIdx === line.length - 1) {
+            return { ok: false, error: `잘못된 player keeper 형식: ${line}` };
+          }
+          actorId = line.slice(0, eqIdx).trim();
+          keeperName = line.slice(eqIdx + 1).trim();
         }
-        const actorId = line.slice(0, eqIdx).trim();
-        const keeperName = line.slice(eqIdx + 1).trim();
         if (!actorId || !keeperName) {
           return { ok: false, error: `actor/keeper 값이 비어 있습니다: ${line}` };
         }

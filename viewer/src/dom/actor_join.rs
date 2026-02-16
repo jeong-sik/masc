@@ -182,14 +182,14 @@ async fn claim_actor(actor_id: &str, keeper: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = format!("{}/api/v1/trpg/actors/claim", config::MASC_MCP_URL);
-    let room_id = config::DEFAULT_ROOM_ID;
+    let room_id = config::current_room_id();
 
-    let body = format!(
-        r#"{{"room":"{}","actor_id":"{}","keeper":"{}"}}"#,
-        room_id,
-        escape_json(actor_id),
-        escape_json(keeper)
-    );
+    let body = serde_json::json!({
+        "room_id": room_id,
+        "actor_id": actor_id,
+        "keeper": keeper,
+    })
+    .to_string();
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
@@ -221,14 +221,14 @@ async fn release_actor(actor_id: &str, keeper: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = format!("{}/api/v1/trpg/actors/release", config::MASC_MCP_URL);
-    let room_id = config::DEFAULT_ROOM_ID;
+    let room_id = config::current_room_id();
 
-    let body = format!(
-        r#"{{"room":"{}","actor_id":"{}","keeper":"{}"}}"#,
-        room_id,
-        escape_json(actor_id),
-        escape_json(keeper)
-    );
+    let body = serde_json::json!({
+        "room_id": room_id,
+        "actor_id": actor_id,
+        "keeper": keeper,
+    })
+    .to_string();
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
@@ -388,12 +388,4 @@ fn set_display(doc: &web_sys::Document, id: &str, display: &str) {
             let _ = html_el.style().set_property("display", display);
         }
     }
-}
-
-/// Minimal JSON string escaping for embedding in format! templates.
-#[cfg(target_arch = "wasm32")]
-fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
 }

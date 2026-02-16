@@ -363,6 +363,7 @@ body.mode-lobby #dashboard {
     grid-template-rows: 44px 1fr 120px;
     grid-template-columns: 1fr;
     height: 100vh;
+    position: relative;
     gap: 1px;
     background: var(--border-main);
 }
@@ -422,6 +423,7 @@ body.mode-lobby #dashboard {
     padding: 2px 6px;
 }
 
+.inline-button,
 .inline-toggle {
     font-size: 10px;
     padding: 3px 8px;
@@ -435,6 +437,15 @@ body.mode-lobby #dashboard {
 .inline-toggle[aria-pressed="false"] {
     opacity: 0.72;
     color: var(--text-dim);
+}
+
+.inline-button {
+    border-color: var(--accent-primary-dim);
+    color: var(--accent-primary);
+}
+
+.inline-button:hover {
+    background: rgba(255, 140, 50, 0.14);
 }
 
 .widget-pill {
@@ -1094,65 +1105,54 @@ body.mode-lobby #dashboard {
     border-color: rgba(255, 255, 255, 0.04);
 }
 
-/* ─── Turn Runtime Grid (live game status) ─── */
-
 #turn-runtime {
-    margin-bottom: 8px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    background: var(--bg-panel-alt);
+    padding: 8px 10px;
 }
 
 .turn-runtime-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 4px;
-    padding: 6px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border-main);
-    border-radius: var(--card-radius, 6px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
 }
 
 .turn-runtime-item {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 4px 8px;
-    background: var(--bg-panel-alt);
-    border-radius: 4px;
-    border: 1px solid transparent;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    padding-bottom: 3px;
 }
 
 .turn-runtime-item .k {
-    font-family: var(--font-ui);
-    font-size: 9px;
     color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.8px;
 }
 
 .turn-runtime-item .v {
-    font-family: var(--font-body);
-    font-size: 12px;
     color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-family: var(--font-ui);
+    font-size: 11px;
+    text-align: right;
 }
 
 .turn-runtime-item .v.status-active {
-    color: var(--accent-primary);
+    color: var(--status-connected);
 }
 
-.turn-runtime-item .v.status-ended {
-    color: var(--text-dim);
-    font-style: italic;
+.turn-runtime-item .v.status-ended,
+.turn-runtime-item .v.status-wipe {
+    color: var(--status-disconnected);
 }
 
 .turn-runtime-item .v.status-idle {
-    color: var(--text-secondary, var(--text-dim));
-}
-
-.turn-runtime-item .v.status-wipe {
-    color: #d44;
-    font-weight: 600;
+    color: var(--text-dim);
 }
 
 /* ─── Turn Controls (advance turn button) ─── */
@@ -1204,6 +1204,113 @@ body.mode-lobby #dashboard {
 
 #dice-log {
     min-height: 100%;
+}
+
+#new-game-panel {
+    position: absolute;
+    inset: 44px 0 0 0;
+    background: rgba(0, 0, 0, 0.52);
+    z-index: 20;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 28px;
+}
+
+.new-game-card {
+    width: min(520px, calc(100vw - 24px));
+    background: var(--bg-panel);
+    border: 1px solid var(--border-main);
+    border-radius: 10px;
+    box-shadow: 0 14px 46px rgba(0, 0, 0, 0.55);
+    padding: 14px;
+    display: grid;
+    gap: 8px;
+}
+
+.new-game-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.new-game-head h3 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: var(--accent-primary);
+}
+
+.new-game-head button {
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    background: var(--bg-panel-alt);
+    color: var(--text-primary);
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+.new-game-label {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.new-game-row {
+    display: flex;
+    gap: 8px;
+}
+
+#new-game-panel input,
+#new-game-panel select {
+    width: 100%;
+    background: var(--bg-deep);
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    padding: 7px 9px;
+    outline: none;
+}
+
+#new-game-player-select {
+    min-height: 132px;
+}
+
+#new-game-room-regenerate,
+#new-game-refresh,
+#new-game-start {
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    background: var(--bg-panel-alt);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    padding: 7px 10px;
+    cursor: pointer;
+}
+
+#new-game-start {
+    border-color: var(--accent-primary-dim);
+    color: var(--accent-primary);
+}
+
+.new-game-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+#new-game-status {
+    min-height: 1.3em;
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--text-dim);
 }
 
 /* ═══════════════════════════════════════════
@@ -1915,8 +2022,8 @@ body.mode-lobby #dashboard {
 
 #join-panel {
     padding: 8px 10px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-main);
+    background: var(--bg-panel-alt);
 }
 
 #join-input-row {
@@ -1931,9 +2038,9 @@ body.mode-lobby #dashboard {
     padding: 5px 8px;
     font-size: 0.8rem;
     font-family: var(--font-ui);
-    background: var(--bg-primary);
+    background: var(--bg-deep);
     color: var(--text-primary);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-main);
     border-radius: 3px;
     outline: none;
     transition: border-color 0.2s;
@@ -1992,7 +2099,7 @@ body.mode-lobby #dashboard {
     padding: 4px 0 6px;
     font-size: 0.8rem;
     font-family: var(--font-ui);
-    color: var(--text-secondary);
+    color: var(--text-dim);
 }
 
 #player-actor-id {

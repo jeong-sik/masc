@@ -200,21 +200,25 @@ let test_handle_request_tools_list () =
                    |> List.filter_map (function `String s -> Some s | _ -> None)
                  in
                  Alcotest.(check bool)
-                   "contains masc_trpg_dice_roll"
+                   "contains trpg.dice.roll"
                    true
-                   (List.mem "masc_trpg_dice_roll" names);
+                   (List.mem "trpg.dice.roll" names);
                  Alcotest.(check bool)
-                   "contains masc_trpg_turn_advance"
+                   "contains trpg.turn.advance"
                    true
-                   (List.mem "masc_trpg_turn_advance" names);
+                   (List.mem "trpg.turn.advance" names);
                  Alcotest.(check bool)
-                   "contains masc_trpg_stream"
+                   "contains trpg.stream.read"
                    true
-                   (List.mem "masc_trpg_stream" names);
+                   (List.mem "trpg.stream.read" names);
                  Alcotest.(check bool)
-                   "contains masc_trpg_round_run"
+                   "contains trpg.round.run"
                    true
-                   (List.mem "masc_trpg_round_run" names)
+                   (List.mem "trpg.round.run" names);
+                 Alcotest.(check bool)
+                   "legacy masc_trpg_dice_roll hidden from list"
+                   false
+                   (List.mem "masc_trpg_dice_roll" names)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");

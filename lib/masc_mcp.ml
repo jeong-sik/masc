@@ -164,6 +164,9 @@ module Lodge_heartbeat = Lodge_heartbeat
 module Lodge_selection = Lodge_selection
 module Lodge_reaction = Lodge_reaction
 
+module Game_view_state = Game_view_state
+module Tool_protocol_game_view = Tool_protocol_game_view
+
 (* Gardener — Self-Organizing Agent Ecosystem *)
 module Gardener_types = Gardener_types
 module Gardener = Gardener
@@ -186,6 +189,8 @@ module Trpg_engine_event = Trpg_engine_event
 module Trpg_engine_state_machine = Trpg_engine_state_machine
 module Trpg_engine_store = Trpg_engine_store
 module Trpg_engine_store_sqlite = Trpg_engine_store_sqlite
+module Trpg_world_projection = Trpg_world_projection
+module Trpg_visibility = Trpg_visibility
 module Trpg_rule = Trpg_rule
 module Trpg_rule_dnd5e_lite = Trpg_rule_dnd5e_lite
 module Trpg_engine_replay = Trpg_engine_replay

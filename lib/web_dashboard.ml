@@ -1424,6 +1424,82 @@ let cached_html = lazy ({|<!DOCTYPE html>
       align-items: center;
       gap: 6px;
     }
+    .trpg-flow-state {
+      border: 1px solid rgba(148,163,184,0.22);
+      border-radius: 10px;
+      background: rgba(2,6,23,0.45);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .trpg-flow-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .trpg-flow-title {
+      font-size: 0.72em;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+    .trpg-flow-badge {
+      border: 1px solid rgba(148,163,184,0.3);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.7em;
+      color: #cbd5e1;
+      background: rgba(15,23,42,0.72);
+      white-space: nowrap;
+    }
+    .trpg-flow-badge.ok {
+      border-color: rgba(74,222,128,0.45);
+      color: #bbf7d0;
+      background: rgba(20,83,45,0.4);
+    }
+    .trpg-flow-badge.running {
+      border-color: rgba(251,191,36,0.45);
+      color: #fde68a;
+      background: rgba(113,63,18,0.4);
+    }
+    .trpg-flow-badge.warn {
+      border-color: rgba(245,158,11,0.45);
+      color: #fde68a;
+      background: rgba(120,53,15,0.38);
+    }
+    .trpg-flow-badge.error {
+      border-color: rgba(248,113,113,0.48);
+      color: #fecaca;
+      background: rgba(127,29,29,0.42);
+    }
+    .trpg-flow-desc {
+      font-size: 0.75em;
+      line-height: 1.35;
+      color: #cbd5e1;
+    }
+    .trpg-flow-steps {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .trpg-flow-step {
+      border: 1px solid rgba(148,163,184,0.2);
+      border-radius: 8px;
+      background: rgba(15,23,42,0.5);
+      padding: 5px 7px;
+      font-size: 0.72em;
+      color: #94a3b8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .trpg-flow-step.done {
+      border-color: rgba(74,222,128,0.35);
+      color: #bbf7d0;
+      background: rgba(20,83,45,0.35);
+    }
     .trpg-status-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2018,6 +2094,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
           <div class="trpg-sidebar">
             <div class="trpg-section-title">세션</div>
             <div class="trpg-room-label" id="trpg-room-label">room: -</div>
+            <div id="trpg-flow-state" class="trpg-flow-state">
+              <div class="trpg-empty-inline">세션 상태 계산 중...</div>
+            </div>
             <div class="trpg-control-box">
               <div class="trpg-control-grid">
                 <div class="trpg-control-field">
@@ -2200,7 +2279,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
               <div class="trpg-control-help" style="margin-top:4px;">생성 시 Keeper를 입력하면 lease claim을 자동 시도합니다. 수정은 입력한 필드만 patch하고, 삭제 시 actor lease도 함께 정리됩니다.</div>
               <div class="trpg-dev-note">라운드 실행은 DM + 플레이어 Keeper 순차 호출로 진행되며 timeout × 참여자 수만큼 시간이 걸릴 수 있습니다.</div>
             </div>
-            <div class="trpg-section-title" style="margin-top:8px;">게임 세션</div>
+            <div class="trpg-section-title" style="margin-top:8px;">현재 세션</div>
             <div id="trpg-session-meta" class="trpg-round-list">
               <div class="trpg-empty" style="padding:18px 8px;">세션 메타 정보가 없습니다.</div>
             </div>
@@ -2213,7 +2292,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
             <div id="trpg-round-log" class="trpg-round-list">
               <div class="trpg-empty" style="padding:18px 8px;">라운드 이벤트가 없습니다.</div>
             </div>
-            <div class="trpg-section-title" style="margin-top:8px;">게임 히스토리</div>
+            <div class="trpg-section-title" style="margin-top:8px;">이전 세션 히스토리</div>
             <div id="trpg-game-history" class="trpg-round-list">
               <div class="trpg-empty" style="padding:18px 8px;">이 room의 이전 세션 기록이 없습니다.</div>
             </div>
@@ -7291,6 +7370,46 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return d.toLocaleString('ko-KR', { hour12: false });
     }
 
+    function trpgParseTs(ts) {
+      if (!ts) return null;
+      const ms = Date.parse(String(ts));
+      return Number.isFinite(ms) ? ms : null;
+    }
+
+    function trpgFmtDurationMs(ms) {
+      if (!Number.isFinite(ms) || ms <= 0) return '-';
+      const totalSec = Math.floor(ms / 1000);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      if (h > 0) return `${h}h ${m}m ${s}s`;
+      if (m > 0) return `${m}m ${s}s`;
+      return `${s}s`;
+    }
+
+    function trpgSessionModeLabel(history, summary, phase) {
+      if (!Array.isArray(history) || history.length === 0) {
+        return { label: 'LOBBY', cls: '' };
+      }
+      if (trpgBootstrapping) {
+        return { label: 'BOOTSTRAP', cls: 'running' };
+      }
+      if (trpgRoundRunning) {
+        return { label: 'RUNNING', cls: 'running' };
+      }
+      if (String(phase || '') === 'ended') {
+        return { label: 'ENDED', cls: 'warn' };
+      }
+      const round = Number(summary && summary.round);
+      if (Number.isFinite(round) && round > 0) {
+        return { label: 'ACTIVE', cls: 'ok' };
+      }
+      if (trpgCanRunRound) {
+        return { label: 'READY', cls: 'ok' };
+      }
+      return { label: 'SETUP', cls: 'error' };
+    }
+
     function trpgUniqueStrings(xs) {
       const seen = new Set();
       const out = [];
@@ -7460,6 +7579,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
             endSeq: seq,
             startedAt: ev.ts || ev.timestamp || null,
             lastTs: ev.ts || ev.timestamp || null,
+            endedAt: null,
+            ended: false,
             eventCount: 0,
             maxTurn: 0,
             phase: '-',
@@ -7474,6 +7595,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (type === 'phase.changed') {
           const p = String(payload.phase || '').trim();
           if (p) current.phase = p;
+        }
+        if (type === 'session.ended') {
+          current.ended = true;
+          current.endedAt = ev.ts || ev.timestamp || current.lastTs;
         }
       });
       if (current) sessions.push(current);
@@ -7492,12 +7617,23 @@ let cached_html = lazy ({|<!DOCTYPE html>
           endSeq: Number(last.seq) || 0,
           startedAt: first.ts || first.timestamp || null,
           lastTs: last.ts || last.timestamp || null,
+          endedAt: null,
+          ended: false,
           eventCount: sorted.length,
           maxTurn,
           phase: trpgLatestPhase(sorted),
         });
       }
       return sessions
+        .map((session) => {
+          const startedMs = trpgParseTs(session.startedAt);
+          const endMs = trpgParseTs(session.endedAt || session.lastTs);
+          let durationMs = null;
+          if (startedMs !== null && endMs !== null && endMs >= startedMs) {
+            durationMs = endMs - startedMs;
+          }
+          return Object.assign({}, session, { durationMs });
+        })
         .sort((a, b) => b.startSeq - a.startSeq)
         .slice(0, 8);
     }
@@ -9260,11 +9396,44 @@ let cached_html = lazy ({|<!DOCTYPE html>
       tick();
     }
 
+    function renderTrpgFlowState(state, events, summary, phase) {
+      const el = document.getElementById('trpg-flow-state');
+      if (!el) return;
+      const history = trpgBuildSessionHistory(events);
+      const mode = trpgSessionModeLabel(history, summary, phase);
+      const hasSession = history.length > 0;
+      const setupDone = trpgCanRunRound;
+      const sessionDone = hasSession;
+      const roundDone = Number(summary && summary.round) > 0;
+      const ended = String(phase || '') === 'ended';
+      const desc = trpgCanRunRound
+        ? '준비 완료. 다음 라운드를 실행하면 서사가 이어집니다.'
+        : String(trpgRunBlockedReason || '세션 시작과 파티 할당 확인이 필요합니다.');
+      const steps = [
+        { label: '1) 세션 시작', done: sessionDone },
+        { label: '2) 파티 할당 검증', done: setupDone },
+        { label: '3) 라운드 진행', done: roundDone },
+        { label: '4) 세션 종료', done: ended },
+      ];
+      const roomId = String((document.getElementById('trpg-room-input') || {}).value || TRPG_DEFAULT_ROOM_ID).trim() || TRPG_DEFAULT_ROOM_ID;
+      el.innerHTML = `
+        <div class="trpg-flow-head">
+          <div class="trpg-flow-title">진행 상태 · room ${escapeHtml(roomId)}</div>
+          <div class="trpg-flow-badge ${escapeHtml(mode.cls)}">${escapeHtml(mode.label)}</div>
+        </div>
+        <div class="trpg-flow-desc">${escapeHtml(desc)}</div>
+        <div class="trpg-flow-steps">
+          ${steps.map((step) => `<div class="trpg-flow-step ${step.done ? 'done' : ''}">${escapeHtml(step.label)}</div>`).join('')}
+        </div>
+      `;
+    }
+
     function renderTrpgState(state, events) {
       const viewEvents = trpgCurrentSessionEvents(events);
       const phase = trpgLatestPhase(viewEvents);
       const round = trpgLatestRound(state, viewEvents);
       const summary = trpgRoundSummary(viewEvents, round);
+      renderTrpgFlowState(state, viewEvents, summary, phase);
       renderTrpgSessionMeta(state, viewEvents, summary, phase);
       renderTrpgPartyAssignment(state, viewEvents);
       trpgRenderAssignmentEditor(state, viewEvents);
@@ -9281,22 +9450,26 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (!el) return;
       const history = trpgBuildSessionHistory(events);
       if (!history.length) {
+        const mode = trpgSessionModeLabel(history, summary, phase);
         el.innerHTML = `
-          <div class="trpg-round-item">
+          <div class="trpg-round-item ${escapeHtml(mode.cls)}">
             <div class="meta">mode</div>
-            <div><b>LOBBY</b> · 아직 session.started 이벤트가 없습니다.</div>
+            <div><b>${escapeHtml(mode.label)}</b> · 아직 session.started 이벤트가 없습니다.</div>
           </div>
         `;
         return;
       }
       const latest = history[0];
-      const mode = phase === 'ended' ? 'ENDED' : 'RUNNING';
-      const modeClass = mode === 'ENDED' ? 'unavailable' : 'ok';
+      const mode = trpgSessionModeLabel(history, summary, phase);
       const roomText = latest.roomId ? ` · room ${escapeHtml(latest.roomId)}` : '';
+      const durationText = trpgFmtDurationMs(latest.durationMs);
+      const endedText = latest.endedAt
+        ? `종료 ${escapeHtml(trpgFmtDateTime(latest.endedAt))}`
+        : `최근 ${escapeHtml(trpgFmtDateTime(latest.lastTs))}`;
       el.innerHTML = `
-        <div class="trpg-round-item ${modeClass}">
+        <div class="trpg-round-item ${escapeHtml(mode.cls)}">
           <div class="meta">mode</div>
-          <div><b>${mode}</b>${roomText}</div>
+          <div><b>${escapeHtml(mode.label)}</b>${roomText}</div>
         </div>
         <div class="trpg-round-item">
           <div class="meta">session</div>
@@ -9305,6 +9478,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
         <div class="trpg-round-item">
           <div class="meta">runtime</div>
           <div>round ${summary.round} · phase ${escapeHtml(String(phase || '-'))} · events ${latest.eventCount}</div>
+        </div>
+        <div class="trpg-round-item">
+          <div class="meta">time</div>
+          <div>${endedText} · 진행 ${escapeHtml(durationText)}</div>
         </div>
       `;
     }
@@ -9423,11 +9600,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const isLatest = idx === 0;
         const cls = isLatest ? 'ok' : '';
         const roomText = session.roomId ? ` · room ${escapeHtml(session.roomId)}` : '';
+        const statusText = session.ended ? 'ended' : (isLatest ? 'current' : 'past');
+        const tailTime = session.endedAt || session.lastTs;
+        const tailLabel = session.endedAt ? '종료' : '최근';
+        const durationText = trpgFmtDurationMs(session.durationMs);
         return `
           <div class="trpg-round-item ${cls}">
-            <div class="meta">${isLatest ? 'current' : 'past'} · seq ${session.startSeq}~${session.endSeq}</div>
+            <div class="meta">${statusText} · seq ${session.startSeq}~${session.endSeq}</div>
             <div><b>${escapeHtml(session.sessionId)}</b>${roomText}</div>
-            <div class="meta">시작 ${escapeHtml(trpgFmtDateTime(session.startedAt))} · 최근 ${escapeHtml(trpgFmtDateTime(session.lastTs))} · round ${session.maxTurn || 0} · events ${session.eventCount}</div>
+            <div class="meta">시작 ${escapeHtml(trpgFmtDateTime(session.startedAt))} · ${escapeHtml(tailLabel)} ${escapeHtml(trpgFmtDateTime(tailTime))} · 진행 ${escapeHtml(durationText)}</div>
+            <div class="meta">round ${session.maxTurn || 0} · events ${session.eventCount}</div>
           </div>
         `;
       });

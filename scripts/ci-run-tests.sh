@@ -9,6 +9,17 @@ set -euo pipefail
 TEST_CMD="${1:-opam exec -- dune test}"
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
+START_EPOCH="$(date +%s)"
+
+iso_now() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+elapsed_sec() {
+  local now
+  now="$(date +%s)"
+  echo $((now - START_EPOCH))
+}
 
 if [[ -z "${TEST_TIMEOUT_SEC}" || "${TEST_TIMEOUT_SEC}" -le 0 ]]; then
   TEST_TIMEOUT_SEC=1200
@@ -20,7 +31,8 @@ fi
 diag_dump() {
   local reason="${1:-unknown}"
   echo "[ci-diag] reason=${reason}"
-  echo "[ci-diag] timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  echo "[ci-diag] timestamp=$(iso_now)"
+  echo "[ci-diag] elapsed_sec=$(elapsed_sec)"
   echo "[ci-diag] pwd=$(pwd)"
 
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
@@ -31,12 +43,21 @@ diag_dump() {
 
   local tests_root="_build/default/test/_build/_tests"
   if [[ -d "${tests_root}" ]]; then
-    echo "[ci-diag] test output files (latest 20):"
-    find "${tests_root}" -type f -name "*.output" -print | tail -n 20 || true
+    # Sort by file mtime so diagnostic tail follows the most recently updated test.
+    local -a output_files=()
+    local -a latest_outputs=()
+    mapfile -t output_files < <(find "${tests_root}" -type f -name "*.output" -print 2>/dev/null || true)
+    if [[ "${#output_files[@]}" -gt 0 ]]; then
+      mapfile -t latest_outputs < <(ls -1t "${output_files[@]}" 2>/dev/null | head -n 20 || true)
+    fi
+    echo "[ci-diag] test output files (latest 20 by mtime):"
+    printf '%s\n' "${latest_outputs[@]}" || true
 
-    # Print tail of the most recent output file for quick signal.
-    local last_output
-    last_output="$(find "${tests_root}" -type f -name "*.output" -print | tail -n 1 || true)"
+    # Print tail of the most recently updated output file for quick signal.
+    local last_output=""
+    if [[ "${#latest_outputs[@]}" -gt 0 ]]; then
+      last_output="${latest_outputs[0]}"
+    fi
     if [[ -n "${last_output}" && -f "${last_output}" ]]; then
       echo "[ci-diag] tail -n 120 ${last_output}"
       tail -n 120 "${last_output}" || true
@@ -48,9 +69,29 @@ diag_dump() {
 
 heartbeat() {
   while true; do
-    echo "[ci-heartbeat] $(date -u +"%Y-%m-%dT%H:%M:%SZ") dune test still running"
+    echo "[ci-heartbeat] $(iso_now) elapsed_sec=$(elapsed_sec) dune test still running"
     sleep "${HEARTBEAT_SEC}"
   done
+}
+
+run_with_timeout() {
+  local timeout_bin=""
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_bin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_bin="gtimeout"
+  fi
+
+  if [[ -n "${timeout_bin}" ]]; then
+    if "${timeout_bin}" --help 2>&1 | grep -q -- '--foreground'; then
+      "${timeout_bin}" --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}"
+    else
+      "${timeout_bin}" "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}"
+    fi
+  else
+    echo "[ci-run] WARN: timeout command not found (timeout/gtimeout); running without enforced timeout"
+    bash -lc "${TEST_CMD}"
+  fi
 }
 
 hb_pid=""
@@ -64,12 +105,13 @@ trap cleanup EXIT
 
 echo "[ci-run] command: ${TEST_CMD}"
 echo "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC} heartbeat_sec=${HEARTBEAT_SEC}"
+echo "[ci-run] started_at=$(iso_now)"
 
 heartbeat &
 hb_pid="$!"
 
 set +e
-timeout --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}"
+run_with_timeout
 status=$?
 set -e
 
@@ -85,4 +127,4 @@ if [[ "${status}" -ne 0 ]]; then
   exit "${status}"
 fi
 
-echo "[ci-run] tests completed successfully"
+echo "[ci-run] tests completed successfully (elapsed_sec=$(elapsed_sec))"

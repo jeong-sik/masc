@@ -424,7 +424,7 @@ fn bind_debug_controls(doc: &web_sys::Document) {
         return;
     }
     let _ = toggle.set_attribute("data-bound", "1");
-    set_debug_state(doc, true);
+    set_debug_state(doc, false);
 
     let cb = Closure::wrap(Box::new(move || {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -493,6 +493,33 @@ fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(el) = doc.get_element_by_id("turn-num") {
         el.set_text_content(Some("1"));
     }
+    if let Some(el) = doc.get_element_by_id("turn-runtime") {
+        el.set_inner_html("");
+    }
+    if let Some(el) = doc.get_element_by_id("turn-controls") {
+        let _ = el.set_attribute("style", "display:none");
+    }
+    if let Some(el) = doc.get_element_by_id("action-panel") {
+        let _ = el.set_attribute("style", "display:none");
+    }
+    if let Some(el) = doc.get_element_by_id("join-status") {
+        el.set_text_content(Some(""));
+    }
+    if let Some(el) = doc.get_element_by_id("action-status") {
+        el.set_text_content(Some(""));
+    }
+    if let Some(input) = doc
+        .get_element_by_id("claimed-actor-id")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("");
+    }
+    if let Some(input) = doc
+        .get_element_by_id("claimed-keeper")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -512,6 +539,8 @@ fn unique_non_empty(mut values: Vec<String>) -> Vec<String> {
 const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
 #[cfg(target_arch = "wasm32")]
 const KNOWN_ROOMS_STORAGE_KEY: &str = "masc_viewer_known_rooms";
+#[cfg(target_arch = "wasm32")]
+const ROOM_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_room_hub_visible";
 
 #[cfg(target_arch = "wasm32")]
 fn load_recent_rooms() -> Vec<String> {
@@ -764,6 +793,31 @@ fn save_known_rooms(rooms: &[String]) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn load_room_hub_visible() -> bool {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(ROOM_HUB_VISIBLE_STORAGE_KEY).ok().flatten())
+        .map(|value| matches!(value.trim(), "1" | "true" | "on"))
+        .unwrap_or(false)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_room_hub_visible(visible: bool) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(ROOM_HUB_VISIBLE_STORAGE_KEY, if visible { "1" } else { "0" });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_room_hub_visible(doc: &web_sys::Document, visible: bool) {
+    set_element_display(doc, "room-hub", if visible { "grid" } else { "none" });
+    if let Some(toggle) = doc.get_element_by_id("room-hub-toggle") {
+        let _ = toggle.set_attribute("aria-pressed", if visible { "true" } else { "false" });
+        toggle.set_text_content(Some(if visible { "Rooms ON" } else { "Rooms OFF" }));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn remember_known_rooms(extra_rooms: &[String]) {
     let mut rooms = load_known_rooms();
     for raw in extra_rooms {
@@ -913,6 +967,7 @@ fn bind_room_controls(doc: &web_sys::Document) {
     };
     let room_now = crate::config::current_room_id();
     sync_room_controls(doc, &room_now);
+    set_room_hub_visible(doc, load_room_hub_visible());
 
     if select_el.get_attribute("data-bound").as_deref() == Some("1") {
         return;
@@ -1016,6 +1071,28 @@ fn bind_room_controls(doc: &web_sys::Document) {
             target.add_event_listener_with_callback("click", refresh_cb.as_ref().unchecked_ref())
         });
         refresh_cb.forget();
+    }
+
+    if let Some(hub_toggle) = doc.get_element_by_id("room-hub-toggle") {
+        let hub_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let visible = doc
+                .get_element_by_id("room-hub-toggle")
+                .and_then(|el| el.get_attribute("aria-pressed"))
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let next = !visible;
+            set_room_hub_visible(&doc, next);
+            save_room_hub_visible(next);
+        }) as Box<dyn FnMut()>);
+        let _ = hub_toggle
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback("click", hub_cb.as_ref().unchecked_ref())
+            });
+        hub_cb.forget();
     }
 }
 

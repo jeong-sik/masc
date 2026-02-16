@@ -1856,6 +1856,34 @@ let cached_html = lazy ({|<!DOCTYPE html>
       color: #ddd6fe;
       background: rgba(76,29,149,0.35);
     }
+    .trpg-keeper-tag.health-live {
+      border-color: rgba(34,197,94,0.55);
+      color: #bbf7d0;
+      background: rgba(20,83,45,0.4);
+    }
+    .trpg-keeper-tag.health-warm {
+      border-color: rgba(59,130,246,0.55);
+      color: #bfdbfe;
+      background: rgba(30,58,138,0.35);
+    }
+    .trpg-keeper-tag.health-stale {
+      border-color: rgba(245,158,11,0.55);
+      color: #fde68a;
+      background: rgba(120,53,15,0.38);
+    }
+    .trpg-keeper-tag.health-offline {
+      border-color: rgba(248,113,113,0.55);
+      color: #fecaca;
+      background: rgba(127,29,29,0.42);
+    }
+    .trpg-keeper-tag.model {
+      border-color: rgba(148,163,184,0.45);
+      color: #e2e8f0;
+      background: rgba(15,23,42,0.9);
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .trpg-mini-btn {
       border: 1px solid rgba(148,163,184,0.35);
       border-radius: 6px;
@@ -2300,7 +2328,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
                   <div id="trpg-keeper-quick" class="trpg-keeper-quick">
                     <div class="trpg-empty-inline">Keeper 목록을 불러오는 중...</div>
                   </div>
-                  <div class="trpg-control-help">배지 의미: DM(던전마스터), PLAYER(이미 파티 사용중), LEASE(actor 점유).</div>
+                  <div class="trpg-control-help">배지 의미: DM(던전마스터), PLAYER(현재 파티), LEASE(actor 점유), LIVE/WARM/STALE/OFF(최근 활동 상태). DM/Player 버튼은 같은 Keeper를 다시 누르면 해제/제거 토글됩니다.</div>
                 </div>
                 <div class="trpg-control-field full">
                   <label>세션 선택 요약</label>
@@ -7332,6 +7360,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgMcpSessionId = null;
     let trpgPresetCatalog = { dm_presets: [], world_presets: [] };
     let trpgKeeperCatalog = [];
+    let trpgKeeperCatalogDetails = {};
     const TRPG_AUTO_ROUND_DELAY_DEFAULT_SEC = 3;
 
     function trpgEventType(ev) {
@@ -7941,17 +7970,56 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return browserLang.startsWith('ko') ? 'ko' : 'en';
     }
 
-    function trpgNormalizeKeeperNames(raw) {
-      if (!Array.isArray(raw)) return [];
+    function trpgKeeperEntryName(entry) {
+      if (typeof entry === 'string') return String(entry || '').trim();
+      if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        const candidates = [entry.name, entry.agent_name, entry.keeper, entry.id];
+        for (const c of candidates) {
+          const name = String(c || '').trim();
+          if (name !== '') return name;
+        }
+      }
+      return '';
+    }
+
+    function trpgNormalizeKeeperCatalog(raw) {
+      if (!Array.isArray(raw)) return { names: [], details: {} };
       const seen = new Set();
-      const out = [];
+      const names = [];
+      const details = {};
       raw.forEach((entry) => {
-        const name = String(entry || '').trim();
+        const name = trpgKeeperEntryName(entry);
         if (!name || seen.has(name)) return;
         seen.add(name);
-        out.push(name);
+        names.push(name);
+        if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+          details[name] = entry;
+        }
       });
-      return out;
+      return { names, details };
+    }
+
+    function trpgKeeperDetail(name) {
+      if (!name) return null;
+      const detail = trpgKeeperCatalogDetails && trpgKeeperCatalogDetails[name];
+      return (detail && typeof detail === 'object') ? detail : null;
+    }
+
+    function trpgKeeperHealth(detail) {
+      if (!detail || typeof detail !== 'object') {
+        return { label: 'UNK', cls: 'health-stale', reason: '상태 정보 없음' };
+      }
+      const keepaliveRunning = detail.keepalive_running !== false;
+      if (!keepaliveRunning) {
+        return { label: 'OFF', cls: 'health-offline', reason: 'keepalive 비활성' };
+      }
+      const lastTurnAgo = Number(detail.last_turn_ago_s);
+      if (Number.isFinite(lastTurnAgo)) {
+        if (lastTurnAgo <= 120) return { label: 'LIVE', cls: 'health-live', reason: `최근 턴 ${Math.floor(lastTurnAgo)}s 전` };
+        if (lastTurnAgo <= 900) return { label: 'WARM', cls: 'health-warm', reason: `최근 턴 ${Math.floor(lastTurnAgo)}s 전` };
+        return { label: 'STALE', cls: 'health-stale', reason: `최근 턴 ${Math.floor(lastTurnAgo)}s 전` };
+      }
+      return { label: 'WARM', cls: 'health-warm', reason: '최근 턴 정보 없음' };
     }
 
     function trpgIsDmLikeKeeper(name) {
@@ -8455,34 +8523,49 @@ let cached_html = lazy ({|<!DOCTYPE html>
       el.innerHTML = keepers.map((name) => {
         const safe = escapeHtml(name);
         const token = encodeURIComponent(name);
+        const detail = trpgKeeperDetail(name);
+        const health = trpgKeeperHealth(detail);
+        const activeModel = String((detail && detail.active_model) || '').trim();
         const isDm = name === usage.dmKeeper;
         const isPlayer = usage.playerKeeperSet.has(name);
         const leasedActors = Array.isArray(usage.leaseByKeeper[name]) ? usage.leaseByKeeper[name] : [];
+        const isOffline = health.cls === 'health-offline';
         const tags = []
           .concat(isDm ? [`<span class="trpg-keeper-tag dm">DM</span>`] : [])
           .concat(isPlayer ? [`<span class="trpg-keeper-tag player">PLAYER</span>`] : [])
           .concat(leasedActors.length > 0 ? [`<span class="trpg-keeper-tag lease">LEASE ${escapeHtml(leasedActors.join(','))}</span>`] : [])
+          .concat([`<span class="trpg-keeper-tag ${health.cls}" title="${escapeHtml(health.reason)}">${escapeHtml(health.label)}</span>`])
+          .concat(activeModel ? [`<span class="trpg-keeper-tag model" title="${escapeHtml(activeModel)}">${escapeHtml(activeModel)}</span>`] : [])
           .join('');
         const leaseConflict = leasedActors.length > 1;
-        const disableDm = readOnly || (isPlayer && !isDm);
-        const disablePlayer = readOnly || isDm || isPlayer || leaseConflict;
+        const canUnsetDm = isDm && !readOnly;
+        const canSetDm = !isDm && !readOnly && !isPlayer && !isOffline;
+        const disableDm = !(canUnsetDm || canSetDm);
+        const canRemovePlayer = isPlayer && !readOnly;
+        const canAddPlayer = !isPlayer && !readOnly && !isDm && !leaseConflict && !isOffline;
+        const disablePlayer = !(canRemovePlayer || canAddPlayer);
+        const playerBtnLabel = isPlayer ? '−Player' : '+Player';
         const dmTitle = disableDm
-          ? (readOnly ? '라운드/세션 처리 중에는 변경할 수 없습니다.' : '이미 Player로 사용 중인 keeper는 DM으로 지정할 수 없습니다.')
-          : '';
+          ? (readOnly
+              ? '라운드/세션 처리 중에는 변경할 수 없습니다.'
+              : (isOffline
+                  ? 'OFF 상태 keeper는 DM으로 지정할 수 없습니다.'
+                  : '이미 Player로 사용 중인 keeper는 DM으로 지정할 수 없습니다.'))
+          : (isDm ? '클릭하면 DM 지정을 해제합니다.' : '클릭하면 DM으로 지정합니다.');
         const playerTitle = disablePlayer
           ? (readOnly
               ? '라운드/세션 처리 중에는 변경할 수 없습니다.'
               : (isDm
                   ? 'DM keeper는 Player로 추가할 수 없습니다.'
-                  : (isPlayer
-                      ? '이미 Player로 추가된 keeper입니다.'
+                  : (isOffline
+                      ? 'OFF 상태 keeper는 Player로 추가할 수 없습니다.'
                       : '이 keeper는 여러 actor lease를 갖고 있어 자동 추가할 수 없습니다. 할당 편집기에서 actor를 직접 선택하세요.')))
-          : '';
+          : (isPlayer ? '클릭하면 Player 목록에서 제거합니다.' : '클릭하면 Player 목록에 추가합니다.');
         return `<div class="trpg-keeper-chip">
           <span class="trpg-keeper-name" title="${safe}">${safe}</span>
           <span class="trpg-keeper-badges">${tags}</span>
           <button type="button" class="trpg-mini-btn" ${disableDm ? 'disabled' : ''} title="${escapeHtml(dmTitle)}" onclick="setTrpgDmKeeperFromQuick('${token}')">DM</button>
-          <button type="button" class="trpg-mini-btn" ${disablePlayer ? 'disabled' : ''} title="${escapeHtml(playerTitle)}" onclick="addTrpgPlayerKeeperFromQuick('${token}')">+Player</button>
+          <button type="button" class="trpg-mini-btn" ${disablePlayer ? 'disabled' : ''} title="${escapeHtml(playerTitle)}" onclick="addTrpgPlayerKeeperFromQuick('${token}')">${playerBtnLabel}</button>
         </div>`;
       }).join('');
     }
@@ -8494,6 +8577,21 @@ let cached_html = lazy ({|<!DOCTYPE html>
       name = name.trim();
       if (!name) return;
       const usage = trpgKeeperUsageSnapshot(trpgStateCache, trpgCurrentSessionEvents(trpgEventsCache));
+      const detail = trpgKeeperDetail(name);
+      const health = trpgKeeperHealth(detail);
+      if (usage.dmKeeper === name) {
+        const dmInput = document.getElementById('trpg-dm-keeper-input');
+        if (dmInput) dmInput.value = '';
+        trpgSyncKeeperSelectorsFromInputs();
+        showToast(`DM Keeper 해제: ${name}`, 'success');
+        trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
+        return;
+      }
+      if (health.cls === 'health-offline') {
+        setTrpgRoundRunStatus(`오류: keeper <b>${escapeHtml(name)}</b>는 OFF 상태라 DM으로 지정할 수 없습니다.`, 'error');
+        renderTrpgKeeperQuickList();
+        return;
+      }
       if (usage.playerKeeperSet.has(name) && usage.dmKeeper !== name) {
         setTrpgRoundRunStatus(`오류: keeper <b>${escapeHtml(name)}</b>는 이미 Player로 사용 중입니다.`, 'error');
         renderTrpgKeeperQuickList();
@@ -8515,13 +8613,44 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const input = document.getElementById('trpg-player-keepers-input');
       if (!input) return;
       const usage = trpgKeeperUsageSnapshot(trpgStateCache, trpgCurrentSessionEvents(trpgEventsCache));
+      const detail = trpgKeeperDetail(name);
+      const health = trpgKeeperHealth(detail);
       if (usage.dmKeeper === name) {
         setTrpgRoundRunStatus(`오류: DM keeper <b>${escapeHtml(name)}</b>는 Player로 추가할 수 없습니다.`, 'error');
         renderTrpgKeeperQuickList();
         return;
       }
       if (usage.playerKeeperSet.has(name)) {
-        setTrpgRoundRunStatus(`안내: keeper <b>${escapeHtml(name)}</b>는 이미 Player로 추가되어 있습니다.`, 'ok');
+        const parsed = parseTrpgPlayerKeepers(String(input.value || ''));
+        if (parsed.ok) {
+          const nextMap = {};
+          Object.entries(parsed.mapping || {}).forEach(([actorId, keeperName]) => {
+            if (String(keeperName || '').trim() !== name) {
+              nextMap[actorId] = keeperName;
+            }
+          });
+          input.value = playerKeeperMapToText(nextMap);
+        } else {
+          const lines = String(input.value || '')
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line !== '')
+            .filter((line) => {
+              if (line === name || line === `${name}=${name}`) return false;
+              const eqIdx = line.indexOf('=');
+              if (eqIdx < 0) return line !== name;
+              const keeper = line.slice(eqIdx + 1).trim();
+              return keeper !== name;
+            });
+          input.value = lines.join('\n');
+        }
+        trpgSyncKeeperSelectorsFromInputs();
+        showToast(`Player Keeper 제거: ${name}`, 'success');
+        trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
+        return;
+      }
+      if (health.cls === 'health-offline') {
+        setTrpgRoundRunStatus(`오류: keeper <b>${escapeHtml(name)}</b>는 OFF 상태라 Player로 추가할 수 없습니다.`, 'error');
         renderTrpgKeeperQuickList();
         return;
       }
@@ -8589,8 +8718,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     async function ensureTrpgKeeperCatalog(force = false) {
       if (trpgKeepersLoaded && !force) return trpgKeeperCatalog;
-      const data = await mcpToolCall('masc_keeper_list', { limit: 200 });
-      trpgKeeperCatalog = trpgNormalizeKeeperNames(data && data.keepers);
+      let data = null;
+      try {
+        data = await mcpToolCall('masc_keeper_list', { limit: 200, detailed: true });
+      } catch (_) {
+        data = await mcpToolCall('masc_keeper_list', { limit: 200 });
+      }
+      const normalized = trpgNormalizeKeeperCatalog(data && data.keepers);
+      trpgKeeperCatalog = Array.isArray(normalized.names) ? normalized.names : [];
+      trpgKeeperCatalogDetails =
+        normalized && normalized.details && typeof normalized.details === 'object'
+          ? normalized.details
+          : {};
       trpgKeepersLoaded = true;
       renderTrpgKeeperQuickList();
       applyTrpgKeeperAutofill(false);

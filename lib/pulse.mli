@@ -123,3 +123,16 @@ val remove_consumer : t -> string -> bool
 
 (** Default rhythm: 60s base, 30s min, 300s max, quiet 01:00-06:00 KST. *)
 val default_rhythm : rhythm
+
+(** {2 Testing helpers}
+
+    Pure functions exposed for unit testing. Not for production use. *)
+module For_testing : sig
+  val is_quiet_hour_at : hour:int -> quiet_range:(int * int) -> bool
+  (** [is_quiet_hour_at ~hour ~quiet_range] checks if [hour] (0-23) falls
+      within the quiet range. Handles wrap-around (e.g., 22..6). *)
+
+  val effective_interval_at : hour:int -> rhythm -> float
+  (** [effective_interval_at ~hour rhythm] computes the interval in seconds.
+      During quiet hours: base * 3.0, clamped to [min_s, max_s]. *)
+end

@@ -61,7 +61,8 @@ val default_batch_size : int
 (** {1 Type Conversion} *)
 
 val reaction_type_to_string : reaction_type -> string
-val reaction_type_of_string : string -> reaction_type
+val reaction_type_of_string : string -> (reaction_type, string) result
+val reaction_type_of_string_exn : string -> reaction_type
 
 (** {1 Signature Operations} *)
 

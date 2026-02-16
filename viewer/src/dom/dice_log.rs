@@ -48,6 +48,15 @@ fn escape_html(raw: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+fn trim_dice_log(log_el: &web_sys::Element, max_entries: u32) {
+    while log_el.child_element_count() > max_entries {
+        let Some(first) = log_el.first_element_child() else {
+            break;
+        };
+        let _ = log_el.remove_child(&first);
+    }
+}
+
 /// Appends dice roll entries to the #dice-log DOM element.
 pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -90,6 +99,7 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
         ));
 
         let _ = log_el.append_child(&entry);
+        trim_dice_log(&log_el, 120);
 
         // Auto-scroll horizontally to the newest entry
         let scroll_width = log_el.scroll_width();

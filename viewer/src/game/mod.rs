@@ -24,6 +24,7 @@ impl Plugin for GameStatePlugin {
             .init_resource::<MapState>()
             .init_resource::<ConnectionStatus>()
             .init_resource::<OverlayState>()
+            .init_resource::<http::ActiveTrpgRoom>()
             // Events (type registrations — always available)
             .add_message::<DiceRolled>()
             .add_message::<HpChanged>()
@@ -40,6 +41,7 @@ impl Plugin for GameStatePlugin {
             // ── TRPG-gated systems ──
             .add_systems(OnEnter(ViewerMode::Trpg), http::fetch_initial_state)
             .add_systems(Update, (
+                http::refresh_state_on_room_change,
                 http::apply_initial_state,
                 systems::apply_hp_change,
                 systems::apply_area_move,

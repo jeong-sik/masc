@@ -375,6 +375,10 @@ body.mode-lobby #dashboard {
     display: none;
 }
 
+#dashboard[data-debug="off"] .narrative-entry[data-debug-entry="1"] {
+    display: none !important;
+}
+
 /* ─── Top Bar ──────────────────────────── */
 
 #top-bar {
@@ -624,15 +628,15 @@ body.mode-lobby #dashboard {
     box-shadow: 0 0 0 1px var(--border-main) inset;
 }
 
-.narrative-entry.phase-dm_narration {
+.narrative-entry.phase-dm-narration {
     border-left-color: var(--accent-primary-dim);
 }
 
-.narrative-entry.phase-outcome_narration {
+.narrative-entry.phase-outcome-narration {
     border-left-color: var(--accent-secondary);
 }
 
-.narrative-entry.phase-party_discussion {
+.narrative-entry.phase-party-discussion {
     border-left-color: var(--accent-tertiary);
     font-style: italic;
 }
@@ -828,6 +832,98 @@ body.mode-lobby #dashboard {
 
 #dice-log {
     min-height: 100%;
+}
+
+/* TRPG New Game panel */
+.new-game-panel {
+    position: fixed;
+    top: 56px;
+    right: 12px;
+    width: 360px;
+    max-height: calc(100vh - 72px);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-main);
+    box-shadow: var(--panel-shadow);
+    border-radius: var(--panel-radius);
+    padding: 12px;
+    z-index: 180;
+}
+
+.new-game-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.new-game-header h3 {
+    font-family: var(--font-display);
+    font-size: 14px;
+    letter-spacing: 2px;
+    color: var(--accent-primary);
+}
+
+.new-game-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+}
+
+.new-game-label {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.new-game-room-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.new-game-input,
+.new-game-select {
+    width: 100%;
+    background: var(--bg-panel-alt);
+    color: var(--text-primary);
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    padding: 6px 8px;
+    font-family: var(--font-ui);
+    font-size: 11px;
+}
+
+.new-game-select[multiple] {
+    min-height: 132px;
+}
+
+.new-game-status {
+    margin-top: 2px;
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    padding: 8px;
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--bg-panel-alt);
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.new-game-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.new-game-start {
+    border-color: var(--accent-primary-dim);
+    color: var(--text-bright);
 }
 
 /* ═══════════════════════════════════════════

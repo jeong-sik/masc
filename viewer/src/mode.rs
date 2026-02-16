@@ -549,6 +549,200 @@ fn remember_recent_room(room_id: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone)]
+struct RoomSnapshot {
+    id: String,
+    status: String,
+    turn: u32,
+    phase: String,
+    agent_count: i64,
+    task_count: i64,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn room_lane_label(status: &str) -> &'static str {
+    let key = status.trim().to_ascii_lowercase();
+    match key.as_str() {
+        "active" | "running" | "in_progress" => "running",
+        "ended" | "completed" | "done" | "retired" | "closed" => "ended",
+        _ => "lobby",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_room: &str) {
+    let Some(hub) = doc.get_element_by_id("room-hub") else {
+        return;
+    };
+    let mut running = Vec::new();
+    let mut lobby = Vec::new();
+    let mut ended = Vec::new();
+
+    for room in rooms {
+        let lane = room_lane_label(&room.status);
+        let current_attr = if room.id == selected_room {
+            " data-current=\"1\""
+        } else {
+            " data-current=\"0\""
+        };
+        let status_text = if room.status.trim().is_empty() {
+            "unknown".to_string()
+        } else {
+            room.status.clone()
+        };
+        let card = format!(
+            concat!(
+                "<button class=\"room-chip\" data-room-id=\"{id}\" data-room-status=\"{status}\"{current}>",
+                "<span class=\"room-chip-id\">{id}</span>",
+                "<span class=\"room-chip-meta\">turn {turn} · {phase} · a{agents}/t{tasks}</span>",
+                "</button>"
+            ),
+            id = html_escape(&room.id),
+            status = html_escape(&status_text),
+            current = current_attr,
+            turn = room.turn,
+            phase = html_escape(&room.phase),
+            agents = room.agent_count,
+            tasks = room.task_count
+        );
+        match lane {
+            "running" => running.push(card),
+            "ended" => ended.push(card),
+            _ => lobby.push(card),
+        }
+    }
+
+    let lane_html = |title: &str, rows: Vec<String>, lane: &str| -> String {
+        let body = if rows.is_empty() {
+            "<div class=\"room-chip-empty\">(없음)</div>".to_string()
+        } else {
+            rows.join("")
+        };
+        format!(
+            "<div class=\"room-lane\" data-lane=\"{lane}\"><div class=\"room-lane-title\">{title}</div><div class=\"room-chip-list\">{body}</div></div>",
+            lane = lane,
+            title = title,
+            body = body
+        )
+    };
+
+    let html = format!(
+        "{}{}{}",
+        lane_html("진행 중", running, "running"),
+        lane_html("로비", lobby, "lobby"),
+        lane_html("종료", ended, "ended")
+    );
+    hub.set_inner_html(&html);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_room_hub_buttons(doc: &web_sys::Document) {
+    let Ok(nodes) = doc.query_selector_all("#room-hub .room-chip") else {
+        return;
+    };
+    for i in 0..nodes.length() {
+        let Some(node) = nodes.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        if el.get_attribute("data-bound").as_deref() == Some("1") {
+            continue;
+        }
+        let Some(room_id) = el.get_attribute("data-room-id") else {
+            continue;
+        };
+        let _ = el.set_attribute("data-bound", "1");
+        let room_copy = room_id.clone();
+        let cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            apply_room_switch_from_ui(&doc, &room_copy);
+        }) as Box<dyn FnMut()>);
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
+        cb.forget();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_room_hub_selection(doc: &web_sys::Document, selected_room: &str) {
+    let Ok(nodes) = doc.query_selector_all("#room-hub .room-chip") else {
+        return;
+    };
+    for i in 0..nodes.length() {
+        let Some(node) = nodes.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let room = el.get_attribute("data-room-id").unwrap_or_default();
+        let current = if room == selected_room { "1" } else { "0" };
+        let _ = el.set_attribute("data-current", current);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), String> {
+    let url = format!(
+        "{}/api/v1/trpg/state?room_id={}",
+        crate::config::MASC_MCP_URL,
+        room_id
+    );
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(web_sys::RequestMode::Cors);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
+        .map_err(|e| format!("request 생성 실패: {:?}", e))?;
+    request
+        .headers()
+        .set("Accept", "application/json")
+        .map_err(|e| format!("헤더 설정 실패: {:?}", e))?;
+
+    let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("fetch 실패: {:?}", e))?;
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| "response 변환 실패".to_string())?;
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let body_js = JsFuture::from(
+        resp.text()
+            .map_err(|e| format!("response.text() 실패: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("본문 읽기 실패: {:?}", e))?;
+    let body = body_js.as_string().unwrap_or_default();
+    let json: Value = serde_json::from_str(&body).map_err(|e| format!("state JSON 파싱 실패: {}", e))?;
+
+    let room = json.get("room").unwrap_or(&Value::Null);
+    let state = json.get("state").unwrap_or(&Value::Null);
+
+    let status = room
+        .get("status")
+        .and_then(Value::as_str)
+        .or_else(|| state.get("status").and_then(Value::as_str))
+        .unwrap_or("idle")
+        .to_string();
+    let turn = room
+        .get("turn")
+        .and_then(Value::as_u64)
+        .or_else(|| state.get("turn").and_then(Value::as_u64))
+        .unwrap_or(0) as u32;
+    let phase = room
+        .get("phase")
+        .and_then(Value::as_str)
+        .or_else(|| state.get("phase").and_then(Value::as_str))
+        .unwrap_or("-")
+        .to_string();
+    Ok((status, turn, phase))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn load_known_rooms() -> Vec<String> {
     let raw = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
@@ -621,6 +815,7 @@ fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     if let Some(pill) = doc.get_element_by_id("room-status") {
         pill.set_text_content(Some(&format!("room {}", selected)));
     }
+    sync_room_hub_selection(doc, &selected);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -632,27 +827,38 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
     remember_known_rooms(std::slice::from_ref(&room));
     set_current_room_id(doc, &room);
     clear_trpg_dom(doc);
+    sync_room_hub_selection(doc, &room);
     log::info!("Viewer room switched to {}", room);
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<String>, String> {
+async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<RoomSnapshot>, String> {
     let payload = mcp_tool_call("masc_rooms_list", json!({})).await?;
 
-    let mut rooms = payload
+    let mut snapshots = payload
         .get("rooms")
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
                 .filter_map(|row| {
-                    row.get("id")
+                    let id = row
+                        .get("id")
                         .and_then(Value::as_str)
                         .or_else(|| row.as_str())
                         .map(str::trim)
-                        .filter(|id| !id.is_empty())
-                        .map(str::to_string)
+                        .filter(|id| !id.is_empty())?;
+                    let agent_count = row.get("agent_count").and_then(Value::as_i64).unwrap_or(0);
+                    let task_count = row.get("task_count").and_then(Value::as_i64).unwrap_or(0);
+                    Some(RoomSnapshot {
+                        id: id.to_string(),
+                        status: "idle".to_string(),
+                        turn: 0,
+                        phase: "-".to_string(),
+                        agent_count,
+                        task_count,
+                    })
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<RoomSnapshot>>()
         })
         .unwrap_or_default();
 
@@ -661,18 +867,43 @@ async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<String
         .and_then(Value::as_str)
         .map(str::to_string)
     {
-        rooms.push(current);
+        if !snapshots.iter().any(|row| row.id == current) {
+            snapshots.push(RoomSnapshot {
+                id: current,
+                status: "idle".to_string(),
+                turn: 0,
+                phase: "-".to_string(),
+                agent_count: 0,
+                task_count: 0,
+            });
+        }
     }
 
-    let rooms = unique_non_empty(rooms);
-    if rooms.is_empty() {
+    let room_ids = unique_non_empty(snapshots.iter().map(|row| row.id.clone()).collect::<Vec<_>>());
+    if room_ids.is_empty() {
         return Err("서버 room 목록이 비어 있습니다.".to_string());
     }
 
-    remember_known_rooms(&rooms);
+    for row in &mut snapshots {
+        match fetch_room_runtime(&row.id).await {
+            Ok((status, turn, phase)) => {
+                row.status = status;
+                row.turn = turn;
+                row.phase = phase;
+            }
+            Err(e) => {
+                row.status = "unknown".to_string();
+                row.phase = format!("error: {}", e);
+            }
+        }
+    }
+
+    remember_known_rooms(&room_ids);
     let current = crate::config::current_room_id();
     sync_room_controls(doc, &current);
-    Ok(rooms)
+    render_room_hub(doc, &snapshots, &current);
+    bind_room_hub_buttons(doc);
+    Ok(snapshots)
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -623,6 +623,61 @@ let trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter : trpg_api
             ("events", `List (List.map Masc_mcp.Trpg_engine_event.to_yojson events));
           ])
 
+let split_csv_nonempty (raw : string) : string list =
+  let pieces =
+    raw
+    |> String.split_on_char ','
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+  in
+  let seen : (string, bool) Hashtbl.t = Hashtbl.create 8 in
+  let out_rev =
+    List.fold_left
+      (fun acc item ->
+        if Hashtbl.mem seen item then acc
+        else (
+          Hashtbl.replace seen item true;
+          item :: acc))
+      []
+      pieces
+  in
+  List.rev out_rev
+
+let has_nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some value -> String.trim value <> ""
+  | None -> false
+
+let trpg_default_fast_keeper_models () : string list =
+  let glm_available = has_nonempty_env "ZAI_API_KEY" in
+  let gemini_available = has_nonempty_env "GEMINI_API_KEY" in
+  match (glm_available, gemini_available) with
+  | true, true ->
+      [ "glm:glm-4.7"; "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
+  | true, false -> [ "glm:glm-4.7"; "ollama:glm-4.7-flash" ]
+  | false, true -> [ "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
+  | false, false -> [ "ollama:glm-4.7-flash" ]
+
+let trpg_keeper_models_for_round () : string list =
+  let configured_opt =
+    match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
+    | Some raw ->
+        let parsed = split_csv_nonempty raw in
+        if parsed = [] then None else Some parsed
+    | None -> None
+  in
+  let chosen =
+    match configured_opt with
+    | Some models -> models
+    | None -> trpg_default_fast_keeper_models ()
+  in
+  match Tool_keeper.model_specs_of_strings chosen with
+  | Ok _ -> chosen
+  | Error e ->
+      if chosen <> [] then
+        Printf.eprintf "[trpg] invalid keeper model override ignored: %s\n%!" e;
+      []
+
 let trpg_keeper_call_with_runtime
     ~(config : Room.config)
     ~(sw : Eio.Switch.t)
@@ -632,13 +687,25 @@ let trpg_keeper_call_with_runtime
     ~timeout_sec
   : Masc_mcp.Tool_trpg.keeper_call_result =
   let keeper_ctx : _ Masc_mcp.Tool_keeper.context = { config; sw; clock } in
+  let forced_models = trpg_keeper_models_for_round () in
+  let forced_models_field =
+    if forced_models = [] then []
+    else [ ("models", `List (List.map (fun m -> `String m) forced_models)) ]
+  in
+  let inline_goal =
+    Printf.sprintf
+      "TRPG runtime keeper for %s. Stay in character, keep continuity, and answer concisely."
+      keeper_name
+  in
   let keeper_args =
     `Assoc
-      [
-        ("name", `String keeper_name);
-        ("message", `String message);
-        ("ollama_timeout_sec", `Float timeout_sec);
-      ]
+      (forced_models_field
+      @ [
+          ("name", `String keeper_name);
+          ("message", `String message);
+          ("goal", `String inline_goal);
+          ("ollama_timeout_sec", `Float timeout_sec);
+        ])
   in
   try
     Eio.Time.with_timeout_exn clock timeout_sec (fun () ->

@@ -233,6 +233,37 @@ let test_round_run_lang_english_prompt () =
   Alcotest.(check bool) "english prompt instruction injected" true has_en_instruction;
   cleanup_dir base_dir
 
+let test_round_run_rejects_non_unique_keepers () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    `Ok (`Assoc [ ("reply", `String "noop") ])
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-dup-keepers");
+        ("dm_keeper", `String "shared-keeper");
+        ( "player_keepers",
+          `Assoc
+            [
+              ("p1", `String "pk-1");
+              ("p2", `String "shared-keeper");
+            ] );
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run should fail on non-unique keepers" false ok;
+  Alcotest.(check bool)
+    "error mentions unique keeper assignment"
+    true
+    (contains_substring msg "must be unique");
+  cleanup_dir base_dir
+
 let test_session_bootstrap_and_intervention_flow () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -449,5 +480,9 @@ let () =
             "supports lang=en prompt"
             `Quick
             test_round_run_lang_english_prompt;
+          Alcotest.test_case
+            "rejects non-unique keepers"
+            `Quick
+            test_round_run_rejects_non_unique_keepers;
         ] );
     ]

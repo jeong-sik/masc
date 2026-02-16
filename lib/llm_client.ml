@@ -456,7 +456,9 @@ let get_api_key (spec : model_spec) : string =
   | Some env_var -> Sys.getenv_opt env_var |> Option.value ~default:""
   | None -> ""
 
-(** Run curl with body via stdin, return response string. *)
+(** Run curl with body via stdin, return response string.
+    Uses status-aware execution to distinguish timeout (exit 28)
+    from connection failure (exit 7) and other errors. *)
 let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
   let header_args = List.concat_map (fun (k, v) ->
     ["-H"; sprintf "%s: %s" k v]
@@ -464,12 +466,24 @@ let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
   let argv = ["curl"; "-s"; "--max-time"; string_of_int timeout_sec;
               "-X"; "POST"; url] @ header_args @ ["-d"; "@-"] in
   try
-    let raw = Process_eio.run_argv_with_stdin
+    let (status, raw) = Process_eio.run_argv_with_stdin_and_status
       ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
       ~stdin_content:body
       argv in
-    if String.length raw = 0 then Error "Empty response from API"
-    else Ok raw
+    match status with
+    | Unix.WEXITED 0 ->
+      if String.length raw = 0 then Error "Empty response from API"
+      else Ok raw
+    | Unix.WEXITED 28 ->
+      Error (sprintf "Request timed out after %ds (%s)" timeout_sec url)
+    | Unix.WEXITED 7 ->
+      Error (sprintf "Connection refused (%s)" url)
+    | Unix.WEXITED code ->
+      Error (sprintf "curl exit %d (%s)" code url)
+    | Unix.WSIGNALED sig_num ->
+      Error (sprintf "curl killed by signal %d after %ds (%s)" sig_num timeout_sec url)
+    | Unix.WSTOPPED _ ->
+      Error "curl stopped unexpectedly"
   with exn ->
     Error (sprintf "HTTP error: %s" (Printexc.to_string exn))
 

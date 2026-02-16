@@ -52,8 +52,7 @@ let load_meta ~agent_name : float =
         let buf = Bytes.create n in
         really_input ic buf 0 n;
         let json = Yojson.Safe.from_string (Bytes.to_string buf) in
-        let open Yojson.Safe.Util in
-        json |> member "last_reflection" |> to_float)
+                Json_util.get_float json "last_reflection" |> Option.value ~default:0.0)
     with _ -> 0.0
   end
 

@@ -82,9 +82,9 @@ let generate_session_key () =
 
 (** Create identity from MCP request params *)
 let from_mcp_params params =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   let get_opt key =
-    try Some (params |> member key |> to_string)
+    try Some (params |> U.member key |> U.to_string)
     with _ -> None
   in
   let session_key = match get_opt "_session_key" with
@@ -102,7 +102,7 @@ let from_mcp_params params =
   let user_id = get_opt "_user_id" in
   let room_id = get_opt "room" in
   let capabilities = try
-    params |> member "_capabilities" |> to_list |> List.map to_string
+    params |> U.member "_capabilities" |> U.to_list |> List.map U.to_string
   with _ -> []
   in
   let now = Time_compat.now () in

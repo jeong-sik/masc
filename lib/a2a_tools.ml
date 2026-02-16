@@ -165,18 +165,18 @@ let subscription_to_json (sub : subscription) : Yojson.Safe.t =
 (** Subscription from JSON *)
 let subscription_of_json (json : Yojson.Safe.t) : subscription option =
   try
-    let open Yojson.Safe.Util in
-    let id = json |> member "id" |> to_string in
-    let agent_filter = match json |> member "agent_filter" with
+    let module U = Yojson.Safe.Util in
+    let id = json |> U.member "id" |> U.to_string in
+    let agent_filter = match json |> U.member "agent_filter" with
       | `Null -> None
       | `String s -> Some s
       | _ -> None
     in
-    let event_types = json |> member "event_types" |> to_list |> List.filter_map (function
+    let event_types = json |> U.member "event_types" |> U.to_list |> List.filter_map (function
       | `String s -> (match event_type_of_string s with Ok e -> Some e | Error _ -> None)
       | _ -> None)
     in
-    let created_at = json |> member "created_at" |> to_string in
+    let created_at = json |> U.member "created_at" |> U.to_string in
     Some { id; agent_filter; event_types; created_at }
   with Yojson.Safe.Util.Type_error (msg, _) ->
     Printf.eprintf "[WARN] subscription_of_json: %s\n%!" msg;
@@ -203,9 +203,9 @@ let load_subscriptions () =
     match Safe_ops.read_json_file_safe !subscriptions_file with
     | Error msg -> Printf.eprintf "[WARN] load_subscriptions: %s\n%!" msg
     | Ok json ->
-      let open Yojson.Safe.Util in
-      let subs = try json |> member "subscriptions" |> to_list
-                 with Type_error _ -> [] in
+      let module U = Yojson.Safe.Util in
+      let subs = try json |> U.member "subscriptions" |> U.to_list
+                 with U.Type_error _ -> [] in
       List.iter (fun j ->
         match subscription_of_json j with
         | Some sub -> Hashtbl.replace subscriptions sub.id sub

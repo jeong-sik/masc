@@ -369,7 +369,7 @@ module FileSystem = struct
 
   let lock_info_of_json json =
     try
-      let open Yojson.Safe.Util in
+      let module U = Yojson.Safe.Util in
       let j = Yojson.Safe.from_string json in
       let parse_float = function
         | `Float f -> Some f
@@ -383,9 +383,9 @@ module FileSystem = struct
         | _ -> None
       in
       match
-        (parse_string (member "owner" j),
-         parse_float (member "acquired_at" j),
-         parse_float (member "expires_at" j))
+        (parse_string (U.member "owner" j),
+         parse_float (U.member "acquired_at" j),
+         parse_float (U.member "expires_at" j))
       with
       | Some owner, Some acquired_at, Some expires_at ->
           Some { owner; acquired_at; expires_at }

@@ -162,13 +162,13 @@ let handle_read _ctx args =
 
 (* Add document *)
 let handle_add ctx args =
-  let open Yojson.Safe.Util in
-  let title = member "title" args |> to_string_option |> Option.value ~default:"" in
-  let source = member "source" args |> to_string_option |> Option.value ~default:"direct_experience" in
-  let confidence = member "confidence" args |> to_float_option |> Option.value ~default:0.7 in
-  let tags = try member "tags" args |> to_list |> List.filter_map to_string_option
+  let module U = Yojson.Safe.Util in
+  let title = U.member "title" args |> U.to_string_option |> Option.value ~default:"" in
+  let source = U.member "source" args |> U.to_string_option |> Option.value ~default:"direct_experience" in
+  let confidence = U.member "confidence" args |> U.to_float_option |> Option.value ~default:0.7 in
+  let tags = try U.member "tags" args |> U.to_list |> List.filter_map U.to_string_option
     with _ -> [] in
-  let content = member "content" args |> to_string_option |> Option.value ~default:"" in
+  let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
 
   if title = "" then (false, "title is required")
   else if content = "" then (false, "content is required")

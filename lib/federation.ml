@@ -127,21 +127,21 @@ let delegation_request_to_yojson r =
   ]
 
 let delegation_request_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    match json |> member "task" |> task_of_yojson with
+    match json |> U.member "task" |> task_of_yojson with
     | Error e -> Error (Printf.sprintf "task parsing failed: %s" e)
     | Ok task ->
         Ok {
-          id = json |> member "id" |> to_string;
-          from_org = json |> member "from_org" |> to_string;
-          to_org = json |> member "to_org" |> to_string;
+          id = json |> U.member "id" |> U.to_string;
+          from_org = json |> U.member "from_org" |> U.to_string;
+          to_org = json |> U.member "to_org" |> U.to_string;
           task;
-          priority = json |> member "priority" |> to_int;
-          timeout_seconds = json |> member "timeout_seconds" |> to_int_option;
-          created_at = json |> member "created_at" |> to_string;
-          status = json |> member "status" |> to_string;
-          result = json |> member "result" |> to_string_option;
+          priority = json |> U.member "priority" |> U.to_int;
+          timeout_seconds = json |> U.member "timeout_seconds" |> U.to_int_option;
+          created_at = json |> U.member "created_at" |> U.to_string;
+          status = json |> U.member "status" |> U.to_string;
+          result = json |> U.member "result" |> U.to_string_option;
         }
   with e -> Error (Printexc.to_string e)
 

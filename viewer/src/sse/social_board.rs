@@ -30,6 +30,7 @@ use crate::config;
 // ─── Board Data Types ────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct BoardPost {
     pub id: String,
     pub author: String,

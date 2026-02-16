@@ -133,7 +133,7 @@ let test_html_contains_trpg_round_run_controls () =
     && contains_substr "id=\"trpg-run-round-btn\"" html
     && contains_substr "id=\"trpg-dm-keeper-input\"" html
     && contains_substr "id=\"trpg-player-keepers-input\"" html
-    && contains_substr "function runTrpgRound()" html
+    && contains_substr "function runTrpgRound(options = {})" html
     && contains_substr "/api/v1/trpg/rounds/run" html)
 
 let test_html_contains_trpg_keeper_quickpick_and_lang () =
@@ -165,8 +165,9 @@ let test_html_contains_trpg_next_action_guide () =
   check bool "trpg next action guide" true
     (String.length html > 0
     && contains_substr "id=\"trpg-next-action\"" html
-    && contains_substr "id=\"trpg-next-action-btn\"" html
-    && contains_substr "function trpgRunNextAction()" html
+    && contains_substr "id=\"trpg-next-action-desc\"" html
+    && contains_substr "id=\"trpg-next-action-target\"" html
+    && contains_substr "function trpgSetNextAction(kind, label, desc, enabled = true)" html
     && contains_substr "function trpgUpdateNextAction(state, events)" html
     && contains_substr "function trpgSanitizeNarrative(raw)" html)
 

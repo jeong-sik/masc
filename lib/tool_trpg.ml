@@ -133,7 +133,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 30).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 30), lang(ko|en).";
       input_schema =
         `Assoc
           [
@@ -152,6 +152,7 @@ let schemas : Types.tool_schema list =
                   ("phase", `Assoc [ ("type", `String "string") ]);
                   ("rule_module", `Assoc [ ("type", `String "string") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "number") ]);
+                  ("lang", `Assoc [ ("type", `String "string") ]);
                 ] );
             ( "required",
               `List
@@ -603,27 +604,62 @@ let parse_keeper_reply keeper_json =
       if s = "" then Error "keeper response reply is empty" else Ok s
   | _ -> Error "keeper response missing string field: reply"
 
-let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json =
+type prompt_language = [ `Ko | `En ]
+
+let prompt_language_of_string_opt = function
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "ko" | "kr" | "korean" -> `Ko
+      | "en" | "english" -> `En
+      | _ -> `Ko)
+  | None -> `Ko
+
+let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
-  Printf.sprintf
-    "TRPG execution request.\n\
-     room_id=%s\n\
-     phase=%s\n\
-     turn=%d\n\
-     role=%s\n\
-     actor_id=%s\n\
-     \n\
-     visible_state_json:\n\
-     %s\n\
-     \n\
-     Return your response as normal text. \
-     If you can provide structured_action, include it in your reply JSON field."
-    room_id
-    phase
-    turn
-    role_s
-    actor_id
-    (Yojson.Safe.pretty_to_string state_json)
+  let state_text = Yojson.Safe.pretty_to_string state_json in
+  match lang with
+  | `Ko ->
+      Printf.sprintf
+        "TRPG 실행 요청입니다.\n\
+         room_id=%s\n\
+         phase=%s\n\
+         turn=%d\n\
+         role=%s\n\
+         actor_id=%s\n\
+         \n\
+         visible_state_json:\n\
+         %s\n\
+         \n\
+         반드시 한국어로 응답하세요. \
+         일반 텍스트로 답하되 structured_action을 만들 수 있으면 \
+         reply JSON 필드에 함께 포함하세요."
+        room_id
+        phase
+        turn
+        role_s
+        actor_id
+        state_text
+  | `En ->
+      Printf.sprintf
+        "TRPG execution request.\n\
+         room_id=%s\n\
+         phase=%s\n\
+         turn=%d\n\
+         role=%s\n\
+         actor_id=%s\n\
+         \n\
+         visible_state_json:\n\
+         %s\n\
+         \n\
+         Respond in English. \
+         Return your response as normal text. \
+         If you can provide structured_action, include it in your reply JSON field."
+        room_id
+        phase
+        turn
+        role_s
+        actor_id
+        state_text
 
 let room_id_for_session session_id =
   sanitize_room_id (Printf.sprintf "session-%s" session_id)
@@ -1543,8 +1579,10 @@ let handle_round_run ctx args : result =
     else
       let* rule_opt = get_optional_string args "rule_module" in
       let* phase_opt = get_optional_string args "phase" in
+      let* lang_opt = get_optional_string args "lang" in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase = Option.value ~default:"round" phase_opt in
+      let prompt_lang = prompt_language_of_string_opt lang_opt in
       let* () =
         match ctx.keeper_call with
         | Some _ -> Ok ()
@@ -1591,6 +1629,7 @@ let handle_round_run ctx args : result =
             ~role
             ~actor_id
             ~state_json:state_for_prompt
+            ~lang:prompt_lang
         in
         match call_keeper ctx ~name:keeper_name ~message:prompt ~timeout_sec with
         | `Timeout ->

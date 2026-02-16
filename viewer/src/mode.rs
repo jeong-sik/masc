@@ -27,7 +27,9 @@ pub enum ViewerMode {
     Lobby,
 
     /// D&D 5e game session viewer (그림란드 연대기).
-    /// SSE: TRPG Engine `/rooms/:id/stream`
+    /// Data source:
+    /// - default: MASC `/api/v1/trpg/stream` JSON polling
+    /// - optional: legacy TRPG Engine `/rooms/:id/stream` SSE
     Trpg,
 
     /// Experiment visualization — Sankey diagrams, network graphs, A/B metrics.

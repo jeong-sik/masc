@@ -1,3 +1,4 @@
+pub mod action_panel;
 pub mod character_panel;
 pub mod connection;
 pub mod dice_log;
@@ -29,6 +30,10 @@ impl Plugin for DomBridgePlugin {
                 character_panel::update_character_panel_dom,
                 turn_phase::update_turn_phase_dom,
                 connection::update_connection_dom,
-            ).run_if(in_state(ViewerMode::Trpg)));
+                action_panel::sync_action_panel_visibility,
+            ).run_if(in_state(ViewerMode::Trpg)))
+            // Action panel lifecycle: bind listeners on enter, unbind on exit
+            .add_systems(OnEnter(ViewerMode::Trpg), action_panel::bind_action_panel)
+            .add_systems(OnExit(ViewerMode::Trpg), action_panel::unbind_action_panel);
     }
 }

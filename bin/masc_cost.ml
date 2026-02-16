@@ -2,6 +2,7 @@
     Track token usage and costs per agent/task *)
 
 open Printf
+open Json_util
 
 (** Cost entry type *)
 type cost_entry = {
@@ -68,15 +69,14 @@ let log_cost ~agent ~task_id ~model ~input_tokens ~output_tokens ~cost_usd =
 let parse_cost_line line =
   try
     let json = Yojson.Safe.from_string line in
-    let open Yojson.Safe.Util in
     Some {
-      agent = json |> member "agent" |> to_string;
-      task_id = json |> member "task_id" |> to_string_option;
-      model = json |> member "model" |> to_string;
-      input_tokens = json |> member "input_tokens" |> to_int;
-      output_tokens = json |> member "output_tokens" |> to_int;
-      cost_usd = json |> member "cost_usd" |> to_float;
-      timestamp = json |> member "timestamp" |> to_string;
+      agent = get_string json "agent" |> Option.value ~default:"";
+      task_id = get_string json "task_id";
+      model = get_string json "model" |> Option.value ~default:"";
+      input_tokens = get_int json "input_tokens" |> Option.value ~default:0;
+      output_tokens = get_int json "output_tokens" |> Option.value ~default:0;
+      cost_usd = get_float json "cost_usd" |> Option.value ~default:0.0;
+      timestamp = get_string json "timestamp" |> Option.value ~default:"";
     }
   with _ -> None
 

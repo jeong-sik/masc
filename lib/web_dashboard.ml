@@ -6842,6 +6842,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgBootstrapping = false;
     let trpgPresetsLoaded = false;
     let trpgMcpCallSeq = 1000;
+    let trpgMcpSessionId = null;
     let trpgPresetCatalog = { dm_presets: [], world_presets: [] };
 
     function trpgEventType(ev) {
@@ -7023,7 +7024,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     async function mcpToolCall(toolName, args = {}) {
       const requestId = ++trpgMcpCallSeq;
-      const headers = Object.assign({ 'Content-Type': 'application/json' }, authHeaders());
+      const headers = Object.assign({
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+      }, authHeaders());
+      if (trpgMcpSessionId) headers['Mcp-Session-Id'] = trpgMcpSessionId;
       const payload = {
         jsonrpc: '2.0',
         id: requestId,
@@ -7038,6 +7043,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
         headers,
         body: JSON.stringify(payload),
       });
+      const nextSessionId = res.headers.get('mcp-session-id') || res.headers.get('Mcp-Session-Id');
+      if (nextSessionId && String(nextSessionId).trim() !== '') {
+        trpgMcpSessionId = String(nextSessionId).trim();
+      }
       let rpc = {};
       try {
         rpc = await res.json();

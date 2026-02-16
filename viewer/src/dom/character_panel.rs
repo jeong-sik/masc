@@ -18,6 +18,25 @@ fn hp_class(hp: i32, max_hp: i32) -> &'static str {
     }
 }
 
+/// Returns a class icon symbol for visual identity in the party panel.
+fn class_icon(class: &str) -> &'static str {
+    match class.to_lowercase().as_str() {
+        "fighter" | "warrior" | "knight" | "paladin" => "\u{2694}\u{FE0F}",
+        "wizard" | "mage" | "sorcerer" => "\u{1F52E}",
+        "rogue" | "thief" | "assassin" | "ranger" => "\u{1F5E1}\u{FE0F}",
+        "cleric" | "priest" | "healer" => "\u{2728}",
+        "bard" => "\u{1F3B6}",
+        "druid" => "\u{1F33F}",
+        "monk" => "\u{1F94B}",
+        _ => "\u{1F6E1}\u{FE0F}",
+    }
+}
+
+/// Normalizes class name to a CSS-safe identifier for data-class attribute.
+fn class_slug(class: &str) -> String {
+    class.to_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+}
+
 /// Re-renders the #character-panel DOM whenever actor HP changes.
 pub fn update_character_panel_dom(
     actors: Query<&Actor>,
@@ -52,6 +71,8 @@ pub fn update_character_panel_dom(
         };
         let dead_class = if actor.is_dead { " dead" } else { "" };
         let bar_class = hp_class(actor.hp, actor.max_hp);
+        let icon = class_icon(&actor.class);
+        let slug = class_slug(&actor.class);
 
         let buffs_html = actor
             .buffs
@@ -67,25 +88,29 @@ pub fn update_character_panel_dom(
             .join("");
 
         html.push_str(&format!(
-            r#"<div class="character-card{}">
+            r#"<div class="character-card{}" data-class="{}">
   <div class="char-header">
     <span class="char-name">{}</span>
-    <span class="char-class">{}</span>
+    <span class="char-class"><span class="class-icon">{}</span> {}</span>
   </div>
-  <div class="hp-bar-container">
-    <div class="hp-bar-fill {}" style="width: {}%"></div>
+  <div class="hp-row">
+    <div class="hp-bar-container">
+      <div class="hp-bar-fill {}" style="width: {}%"></div>
+    </div>
+    <div class="hp-text">{} / {}</div>
   </div>
-  <div class="hp-text">{} / {}</div>
   <div class="char-stats">
-    <div class="stat"><div class="stat-value">{}</div>ATK</div>
-    <div class="stat"><div class="stat-value">{}</div>DEF</div>
-    <div class="stat"><div class="stat-value">{}</div>INT</div>
-    <div class="stat"><div class="stat-value">{}</div>LCK</div>
+    <div class="stat"><div class="stat-value">{}</div><div class="stat-label">ATK</div></div>
+    <div class="stat"><div class="stat-value">{}</div><div class="stat-label">DEF</div></div>
+    <div class="stat"><div class="stat-value">{}</div><div class="stat-label">INT</div></div>
+    <div class="stat"><div class="stat-value">{}</div><div class="stat-label">LCK</div></div>
   </div>
   <div class="char-effects">{}{}</div>
 </div>"#,
             dead_class,
+            slug,
             actor.name,
+            icon,
             actor.class,
             bar_class,
             hp_pct,

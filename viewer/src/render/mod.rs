@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use crate::game::components::{
     FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken, MoodOverlay, WeatherOverlay,
 };
+use crate::render::ui::UiMarker;
 use crate::mode::ViewerMode;
 use crate::render::transition::{FadeOverlay, SceneTransition};
 
@@ -23,7 +24,7 @@ impl Plugin for MapRenderPlugin {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<SceneTransition>()
-            // Setup: camera, map background, fade overlay — on TRPG mode entry
+            // Setup: camera, map background, fade overlay, UI — on TRPG mode entry
             .add_systems(OnEnter(ViewerMode::Trpg), (
                 map::setup_camera,
                 map::setup_map_background,
@@ -32,7 +33,7 @@ impl Plugin for MapRenderPlugin {
                 transition::setup_fade_overlay,
                 ui::setup_ui,
             ))
-            // Update: character sprites, positions, HP bars, effects, transitions
+            // Update: character sprites, positions, HP bars, effects, transitions, UI
             .add_systems(Update, (
                 characters::spawn_character_sprites,
                 characters::update_character_positions,
@@ -48,6 +49,7 @@ impl Plugin for MapRenderPlugin {
                 transition::trigger_scene_transition,
                 transition::animate_scene_transition,
                 ui::handle_button_interactions,
+                ui::manage_menus,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Cleanup: despawn all TRPG scene entities and reset resources
             .add_systems(OnExit(ViewerMode::Trpg), cleanup_trpg_scene);
@@ -71,7 +73,7 @@ fn cleanup_trpg_scene(
             With<HpBarSprite>,
             With<WeatherOverlay>,
             With<MoodOverlay>,
-            With<ui::UiMarker>,
+            With<UiMarker>,
         )>,
     >,
     mut scene_transition: ResMut<SceneTransition>,

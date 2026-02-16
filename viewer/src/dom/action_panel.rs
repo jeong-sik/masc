@@ -332,7 +332,7 @@ fn set_action_status(text: &str, css_class: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn friendly_js_error(val: &JsValue) -> String {
+pub(crate) fn friendly_js_error(val: &JsValue) -> String {
     val.as_string()
         .or_else(|| {
             val.dyn_ref::<js_sys::Error>()

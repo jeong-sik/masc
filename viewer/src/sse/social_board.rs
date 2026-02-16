@@ -49,12 +49,14 @@ pub struct BoardPost {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct BoardResponse {
     #[serde(default)]
     pub posts: Vec<BoardPost>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct BoardComment {
     pub id: String,
     pub author: String,
@@ -70,6 +72,7 @@ pub struct BoardComment {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct PostDetailResponse {
     pub post: BoardPost,
     #[serde(default)]
@@ -696,6 +699,7 @@ fn append_comment_to_dom(post_id: &str, author: &str, content: &str) {
 // ─── Utilities ───────────────────────────────
 
 /// Minimal HTML escaping for untrusted content.
+#[allow(dead_code)]
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -704,6 +708,7 @@ fn html_escape(s: &str) -> String {
 }
 
 /// Format a Unix timestamp as relative time (e.g., "2h ago", "3d ago").
+#[allow(dead_code)]
 fn format_relative_time(_timestamp: f64) -> String {
     #[cfg(target_arch = "wasm32")]
     {

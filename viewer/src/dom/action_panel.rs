@@ -10,6 +10,9 @@
 use bevy::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
+use serde_json::json;
+
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -32,6 +35,7 @@ pub fn bind_action_panel(mut commands: Commands) {
         bind_enter_key();
         bind_dice_roll_button();
         clear_action_status();
+        refresh_action_panel_interaction_state();
         log::info!("ActionPanel: bound");
     }
 
@@ -112,18 +116,6 @@ fn bind_dice_roll_button() {
     };
 
     let cb = Closure::wrap(Box::new(move || {
-        // Guard: must have a claimed actor
-        let actor_id = {
-            let doc = web_sys::window().and_then(|w| w.document());
-            doc.as_ref()
-                .map(|d| read_claimed_actor_id(d))
-                .unwrap_or_default()
-        };
-        if actor_id.is_empty() {
-            set_action_status("Join a character first.", "status-error");
-            return;
-        }
-
         set_action_status("Rolling dice...", "");
         disable_buttons(true);
 
@@ -131,12 +123,12 @@ fn bind_dice_roll_button() {
             match roll_dice().await {
                 Ok(text) => set_action_status(&text, "status-ok"),
                 Err(e) => {
-                    let msg = format!("Dice roll failed: {:?}", e);
-                    log::warn!("{}", msg);
-                    set_action_status(&msg, "status-error");
+                    let detail = friendly_js_error(&e);
+                    log::warn!("Dice roll failed: {:?}", e);
+                    set_action_status(&format!("Dice roll failed: {}", detail), "status-error");
                 }
             }
-            disable_buttons(false);
+            refresh_action_panel_interaction_state();
         });
     }) as Box<dyn FnMut()>);
 
@@ -155,13 +147,6 @@ fn submit_action_from_input() {
         return;
     };
 
-    // Guard: must have a claimed actor
-    let actor_id = read_claimed_actor_id(&doc);
-    if actor_id.is_empty() {
-        set_action_status("Join a character first.", "status-error");
-        return;
-    }
-
     let Some(el) = doc.get_element_by_id("action-input") else {
         return;
     };
@@ -174,6 +159,14 @@ fn submit_action_from_input() {
     if text.is_empty() {
         return;
     }
+    let Some(actor_id) = current_playable_actor_id() else {
+        set_action_status(
+            "파티 actor가 없어 액션을 제출할 수 없습니다. 새 게임을 시작하세요.",
+            "status-error",
+        );
+        refresh_action_panel_interaction_state();
+        return;
+    };
 
     // Clear input immediately (optimistic UX)
     input.set_value("");
@@ -184,12 +177,12 @@ fn submit_action_from_input() {
         match submit_action(&actor_id, &text).await {
             Ok(()) => set_action_status("Action submitted.", "status-ok"),
             Err(e) => {
-                let msg = format!("Submit failed: {:?}", e);
-                log::warn!("{}", msg);
-                set_action_status(&msg, "status-error");
+                let detail = friendly_js_error(&e);
+                log::warn!("Submit failed: {:?}", e);
+                set_action_status(&format!("Submit failed: {}", detail), "status-error");
             }
         }
-        disable_buttons(false);
+        refresh_action_panel_interaction_state();
     });
 }
 
@@ -200,20 +193,18 @@ async fn submit_action(actor_id: &str, action_text: &str) -> Result<(), JsValue>
     use wasm_bindgen_futures::JsFuture;
 
     let url = format!("{}/api/v1/trpg/events", config::MASC_MCP_URL);
+    let room_id = config::current_room_id();
 
-    // Escape for JSON string embedding
-    let escaped_text = action_text
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n");
-    let escaped_actor = actor_id
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-
-    let body = format!(
-        r#"{{"event_type":"turn.action.proposed","data":{{"character":"{}","action_text":"{}"}}}}"#,
-        escaped_actor, escaped_text
-    );
+    let body = json!({
+        "room_id": room_id,
+        "event_type": "turn.action.proposed",
+        "actor_id": actor_id,
+        "payload": {
+            "actor_id": actor_id,
+            "proposed_action": action_text
+        }
+    })
+    .to_string();
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
@@ -228,7 +219,20 @@ async fn submit_action(actor_id: &str, action_text: &str) -> Result<(), JsValue>
     let resp: web_sys::Response = resp_value.dyn_into()?;
 
     if !resp.ok() {
-        return Err(JsValue::from_str(&format!("HTTP {}", resp.status())));
+        let err_body = JsFuture::from(resp.text()?)
+            .await
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        let err_body = err_body.trim();
+        if err_body.is_empty() {
+            return Err(JsValue::from_str(&format!("HTTP {}", resp.status())));
+        }
+        return Err(JsValue::from_str(&format!(
+            "HTTP {}: {}",
+            resp.status(),
+            err_body
+        )));
     }
 
     log::info!("ActionPanel: action submitted");
@@ -242,12 +246,18 @@ async fn roll_dice() -> Result<String, JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = format!("{}/api/v1/trpg/dice/roll", config::MASC_MCP_URL);
-    let room_id = config::DEFAULT_ROOM_ID;
+    let room_id = config::current_room_id();
+    let actor_id = current_playable_actor_id()
+        .ok_or_else(|| JsValue::from_str("no playable actor in current party"))?;
 
-    let body = format!(
-        r#"{{"room":"{}","dice":"1d20","reason":"Player roll"}}"#,
-        room_id
-    );
+    let body = json!({
+        "room_id": room_id,
+        "actor_id": actor_id,
+        "action": "manual_roll",
+        "stat_value": 10,
+        "dc": 12
+    })
+    .to_string();
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
@@ -262,7 +272,20 @@ async fn roll_dice() -> Result<String, JsValue> {
     let resp: web_sys::Response = resp_value.dyn_into()?;
 
     if !resp.ok() {
-        return Err(JsValue::from_str(&format!("HTTP {}", resp.status())));
+        let err_body = JsFuture::from(resp.text()?)
+            .await
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
+        let err_body = err_body.trim();
+        if err_body.is_empty() {
+            return Err(JsValue::from_str(&format!("HTTP {}", resp.status())));
+        }
+        return Err(JsValue::from_str(&format!(
+            "HTTP {}: {}",
+            resp.status(),
+            err_body
+        )));
     }
 
     // Parse response to extract the roll result for status display
@@ -279,6 +302,7 @@ async fn roll_dice() -> Result<String, JsValue> {
 
 /// Extract a short display string from the dice roll JSON response.
 /// Falls back to the raw response if parsing fails.
+#[allow(dead_code)]
 fn extract_roll_display(json_str: &str) -> String {
     // Try to find "total":N or "result":N in the JSON
     for key in &["total", "result", "value"] {
@@ -295,6 +319,35 @@ fn extract_roll_display(json_str: &str) -> String {
         }
     }
     "Roll completed.".to_string()
+}
+
+// ─── Error Formatting ──────────────────────
+
+/// Extract a short, user-readable message from a JsValue error.
+/// Network failures (server down) produce `TypeError: Failed to fetch` wrapped
+/// in a WASM stack trace — this strips it down to one line.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn friendly_js_error(e: &JsValue) -> String {
+    // JsValue may be a string or a JS Error object.
+    if let Some(s) = e.as_string() {
+        return s;
+    }
+    // Try .message property (JS Error objects)
+    if let Ok(msg) = js_sys::Reflect::get(e, &JsValue::from_str("message")) {
+        if let Some(s) = msg.as_string() {
+            if s.contains("Failed to fetch") {
+                return "서버에 연결할 수 없습니다. MASC 서버가 실행 중인지 확인하세요.".to_string();
+            }
+            // Return just the first line of the message
+            return s.lines().next().unwrap_or(&s).to_string();
+        }
+    }
+    // Last resort: Debug format, but truncated
+    let debug = format!("{:?}", e);
+    if debug.contains("Failed to fetch") {
+        return "서버에 연결할 수 없습니다. MASC 서버가 실행 중인지 확인하세요.".to_string();
+    }
+    debug.chars().take(120).collect()
 }
 
 // ─── DOM Helpers ────────────────────────────
@@ -329,14 +382,6 @@ fn clear_action_input() {
     }
 }
 
-/// Read the claimed actor ID from the hidden input set by actor_join.rs.
-#[cfg(target_arch = "wasm32")]
-fn read_claimed_actor_id(doc: &web_sys::Document) -> String {
-    doc.get_element_by_id("claimed-actor-id")
-        .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
-        .unwrap_or_default()
-}
-
 #[cfg(target_arch = "wasm32")]
 fn disable_buttons(disabled: bool) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -346,6 +391,59 @@ fn disable_buttons(disabled: bool) {
         if let Some(el) = doc.get_element_by_id(id) {
             if let Some(btn) = el.dyn_ref::<web_sys::HtmlButtonElement>() {
                 btn.set_disabled(disabled);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_playable_actor_id() -> Option<String> {
+    let doc = web_sys::window().and_then(|w| w.document())?;
+    let cards = doc.query_selector_all("#character-panel .character-card").ok()?;
+    for i in 0..cards.length() {
+        let Some(node) = cards.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let actor_id = el
+            .get_attribute("data-actor-id")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if actor_id.is_empty() || actor_id == "dm" {
+            continue;
+        }
+        let is_dead = el.class_name().split_whitespace().any(|name| name == "dead");
+        if is_dead {
+            continue;
+        }
+        return Some(actor_id);
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn refresh_action_panel_interaction_state() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let has_actor = current_playable_actor_id().is_some();
+
+    if let Some(el) = doc.get_element_by_id("action-input") {
+        if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+            input.set_disabled(!has_actor);
+            input.set_placeholder(if has_actor {
+                "Describe your action..."
+            } else {
+                "파티 actor 없음 — 새 게임/세션 준비 필요"
+            });
+        }
+    }
+
+    for id in &["action-submit-btn", "dice-roll-btn"] {
+        if let Some(el) = doc.get_element_by_id(id) {
+            if let Some(btn) = el.dyn_ref::<web_sys::HtmlButtonElement>() {
+                btn.set_disabled(!has_actor);
             }
         }
     }
@@ -370,6 +468,9 @@ pub fn sync_action_panel_visibility(mode: Res<State<ViewerMode>>) {
                     .style()
                     .set_property("display", if visible { "block" } else { "none" });
             }
+        }
+        if visible {
+            refresh_action_panel_interaction_state();
         }
     }
 }

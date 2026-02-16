@@ -25,6 +25,7 @@ use wasm_bindgen::JsCast;
 use crate::shaders::post_process::PostProcessSettings;
 
 /// Active visual theme. Stored as a Bevy Resource for change detection.
+#[allow(dead_code)]
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ViewerTheme {
     /// Disco Elysium oil painting — dark, moody, gothic. The original aesthetic.
@@ -41,6 +42,7 @@ pub enum ViewerTheme {
     Parchment,
 }
 
+#[allow(dead_code)]
 impl ViewerTheme {
     /// CSS `data-theme` attribute value applied to `<html>` element.
     /// CSS selectors: `[data-theme="dark-fantasy"] { --bg-deep: #0a0a12; ... }`

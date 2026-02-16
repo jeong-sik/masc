@@ -55,12 +55,14 @@ const LEGACY_SSE_EVENT_TYPES: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct TrpgStreamResponse {
     #[serde(default)]
     events: Vec<TrpgStreamEvent>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct TrpgStreamEvent {
     seq: i64,
     #[serde(rename = "type")]
@@ -72,6 +74,7 @@ struct TrpgStreamEvent {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TrpgMapperState {
     last_turn: u32,
     last_phase: String,
@@ -86,18 +89,21 @@ impl Default for TrpgMapperState {
     }
 }
 
+#[allow(dead_code)]
 fn value_to_i32(v: Option<&Value>, default: i32) -> i32 {
     v.and_then(Value::as_i64)
         .and_then(|n| i32::try_from(n).ok())
         .unwrap_or(default)
 }
 
+#[allow(dead_code)]
 fn value_to_u32(v: Option<&Value>, default: u32) -> u32 {
     v.and_then(Value::as_u64)
         .and_then(|n| u32::try_from(n).ok())
         .unwrap_or(default)
 }
 
+#[allow(dead_code)]
 fn value_to_string_vec(v: Option<&Value>) -> Vec<String> {
     match v.and_then(Value::as_array) {
         Some(xs) => xs
@@ -111,6 +117,7 @@ fn value_to_string_vec(v: Option<&Value>) -> Vec<String> {
     }
 }
 
+#[allow(dead_code)]
 fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
     payload
         .get("actor_id")
@@ -120,6 +127,7 @@ fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
         .to_string()
 }
 
+#[allow(dead_code)]
 fn map_turn_progress_event(
     event_type: &str,
     actor_id: Option<&str>,
@@ -180,6 +188,7 @@ fn map_turn_progress_event(
     Some(("turn_progress".to_string(), mapped.to_string()))
 }
 
+#[allow(dead_code)]
 fn map_trpg_event(
     event_type: &str,
     actor_id: Option<&str>,
@@ -358,6 +367,7 @@ fn map_trpg_event(
     out
 }
 
+#[allow(dead_code)]
 fn decode_stream_events(
     body: &str,
     state: &mut TrpgMapperState,

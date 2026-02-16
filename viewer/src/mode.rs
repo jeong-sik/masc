@@ -55,6 +55,7 @@ pub enum ViewerMode {
     Social,
 }
 
+#[allow(dead_code)]
 impl ViewerMode {
     /// Human-readable display name for UI rendering.
     /// Used by `poll_mode_transition` (wasm32 only).

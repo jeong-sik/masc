@@ -37,6 +37,30 @@ pub enum TrpgBackendMode {
 /// source used by server-side tool contracts.
 pub const TRPG_BACKEND_MODE: TrpgBackendMode = TrpgBackendMode::MascApi;
 
+/// Returns the active TRPG room id.
+///
+/// WASM runtime reads `#dashboard[data-room-id]` so UI can switch rooms
+/// without recompiling. Falls back to `DEFAULT_ROOM_ID`.
+#[cfg(target_arch = "wasm32")]
+pub fn current_room_id() -> String {
+    let room = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|doc| doc.get_element_by_id("dashboard"))
+        .and_then(|el| el.get_attribute("data-room-id"))
+        .unwrap_or_default();
+    let room = room.trim();
+    if room.is_empty() {
+        DEFAULT_ROOM_ID.to_string()
+    } else {
+        room.to_string()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn current_room_id() -> String {
+    DEFAULT_ROOM_ID.to_string()
+}
+
 #[allow(dead_code)]
 pub fn trpg_uses_polling() -> bool {
     matches!(TRPG_BACKEND_MODE, TrpgBackendMode::MascApi)
@@ -44,10 +68,11 @@ pub fn trpg_uses_polling() -> bool {
 
 /// URL for initial TRPG state load.
 pub fn trpg_state_url() -> String {
+    let room_id = current_room_id();
     match TRPG_BACKEND_MODE {
         TrpgBackendMode::MascApi => format!(
             "{}/api/v1/trpg/state?room_id={}",
-            MASC_MCP_URL, DEFAULT_ROOM_ID
+            MASC_MCP_URL, room_id
         ),
         TrpgBackendMode::LegacyEngine => trpg_room_url("/state"),
     }
@@ -56,10 +81,11 @@ pub fn trpg_state_url() -> String {
 /// URL for incremental TRPG stream reads.
 #[allow(dead_code)]
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
+    let room_id = current_room_id();
     match TRPG_BACKEND_MODE {
         TrpgBackendMode::MascApi => format!(
             "{}/api/v1/trpg/stream?room_id={}&after_seq={}",
-            MASC_MCP_URL, DEFAULT_ROOM_ID, after_seq
+            MASC_MCP_URL, room_id, after_seq
         ),
         TrpgBackendMode::LegacyEngine => trpg_room_url("/stream"),
     }
@@ -74,7 +100,8 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
         ViewerMode::Lobby => None,
         ViewerMode::Trpg => Some(format!(
             "{}/rooms/{}/stream",
-            TRPG_ENGINE_URL, DEFAULT_ROOM_ID
+            TRPG_ENGINE_URL,
+            current_room_id()
         )),
         ViewerMode::Experiment => Some(format!("{}/sse?room=experiment", MASC_MCP_URL)),
         ViewerMode::Monitor => Some(format!("{}/sse?room=monitor", MASC_MCP_URL)),
@@ -97,5 +124,5 @@ pub fn http_base_url(mode: &ViewerMode) -> &'static str {
 
 /// TRPG-specific room URL helper (used by game state loader).
 pub fn trpg_room_url(path: &str) -> String {
-    format!("{}/rooms/{}{}", TRPG_ENGINE_URL, DEFAULT_ROOM_ID, path)
+    format!("{}/rooms/{}{}", TRPG_ENGINE_URL, current_room_id(), path)
 }

@@ -171,6 +171,10 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
             return;
         };
 
+        clear_trpg_dom(&doc);
+        let lobby_room = crate::config::room_id_from_url()
+            .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
+        crate::config::set_current_room_id(&lobby_room);
         // Show lobby UI, hide dashboard
         if let Some(body) = doc.body() {
             body.set_class_name("mode-lobby");
@@ -222,6 +226,7 @@ fn enter_trpg() {
         set_element_display(&doc, "dashboard", "grid");
         set_element_display(&doc, "lobby-screen", "none");
         set_element_display(&doc, "new-game-panel", "none");
+        clear_trpg_dom(&doc);
         bind_debug_controls(&doc);
         bind_new_game_controls(&doc);
         let room = crate::config::current_room_id();
@@ -1314,10 +1319,18 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         ];
     }
 
-    let dm_default = keepers
-        .iter()
-        .find(|name| name.starts_with("dm"))
-        .cloned()
+    let previous_dm = doc
+        .get_element_by_id("new-game-dm-select")
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlSelectElement>()
+                .map(|s| s.value())
+        })
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let previous_players = selected_player_keepers(doc);
+    let dm_default = previous_dm
+        .filter(|prev| keepers.iter().any(|name| name == prev))
+        .or_else(|| keepers.iter().find(|name| name.starts_with("dm")).cloned())
         .unwrap_or_else(|| keepers[0].clone());
 
     if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
@@ -1336,14 +1349,17 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
     }
 
     if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
-        let mut selected = 0;
+        let preserve_existing_selection = !previous_players.is_empty();
         let mut html = String::new();
         for name in keepers.iter().filter(|name| **name != dm_default) {
             let safe = html_escape(name);
-            let selected_attr = if selected < 4 { " selected" } else { "" };
-            if selected < 4 {
-                selected += 1;
-            }
+            let selected_attr =
+                if preserve_existing_selection && previous_players.iter().any(|picked| picked == name)
+                {
+                    " selected"
+                } else {
+                    ""
+                };
             html.push_str(&format!(
                 r#"<option value="{value}"{selected}>{value}</option>"#,
                 value = safe,

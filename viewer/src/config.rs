@@ -8,8 +8,6 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::mode::ViewerMode;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsValue;
 
 /// Legacy TRPG Engine server (FastAPI + SQLite event store).
 pub const TRPG_ENGINE_URL: &str = "http://localhost:8940";
@@ -19,8 +17,6 @@ pub const MASC_MCP_URL: &str = "http://localhost:8935";
 
 /// Default TRPG room identifier.
 pub const DEFAULT_ROOM_ID: &str = "default";
-#[cfg(target_arch = "wasm32")]
-pub const ROOM_STORAGE_KEY: &str = "masc_viewer_room_id";
 
 #[cfg(target_arch = "wasm32")]
 pub fn sanitize_room_id(raw: &str) -> Option<String> {
@@ -73,27 +69,23 @@ pub fn current_room_id() -> String {
         return room;
     }
 
-    let from_url = web_sys::window().and_then(|window| {
+    if let Some(room) = room_id_from_url() {
+        return room;
+    }
+
+    DEFAULT_ROOM_ID.to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn room_id_from_url() -> Option<String> {
+    web_sys::window().and_then(|window| {
         let location = window.location();
         let search = location.search().ok().unwrap_or_default();
         room_from_query_like_text(&search).or_else(|| {
             let hash = location.hash().ok().unwrap_or_default();
             room_from_query_like_text(&hash)
         })
-    });
-    if let Some(room) = from_url {
-        return room;
-    }
-
-    let from_storage = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(ROOM_STORAGE_KEY).ok().flatten())
-        .and_then(|raw| sanitize_room_id(&raw));
-    if let Some(room) = from_storage {
-        return room;
-    }
-
-    DEFAULT_ROOM_ID.to_string()
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -122,18 +114,6 @@ pub fn set_current_room_id(room_id: &str) {
             if let Some(dashboard) = doc.get_element_by_id("dashboard") {
                 let _ = dashboard.set_attribute("data-room-id", &room);
             }
-        }
-
-        if let Ok(Some(storage)) = window.local_storage() {
-            let _ = storage.set_item(ROOM_STORAGE_KEY, &room);
-        }
-
-        let location = window.location();
-        let path = location.pathname().ok().unwrap_or_else(|| "/".to_string());
-        let hash = location.hash().ok().unwrap_or_default();
-        let next_url = format!("{}?room={}{}", path, room, hash);
-        if let Ok(history) = window.history() {
-            let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&next_url));
         }
     }
 }

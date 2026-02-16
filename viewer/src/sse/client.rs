@@ -426,36 +426,45 @@ async fn sleep_ms(ms: i32) -> Result<(), JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn bootstrap_after_seq(state: &mut TrpgMapperState) -> i64 {
+    let bootstrap_url = config::trpg_stream_poll_url(0);
+    match fetch_text(&bootstrap_url).await {
+        Ok(body) => match decode_stream_events(&body, state) {
+            Ok((max_seq, _)) => {
+                let seq = max_seq.max(0);
+                if seq > 0 {
+                    log::info!(
+                        "TRPG poll bootstrap: skipping historical events up to seq {}",
+                        seq
+                    );
+                }
+                seq
+            }
+            Err(e) => {
+                log::warn!("Failed to decode TRPG bootstrap payload: {}", e);
+                0
+            }
+        },
+        Err(e) => {
+            log::debug!("TRPG bootstrap request failed: {:?}", e);
+            0
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn start_polling_loop(messages: Arc<Mutex<Vec<(String, String)>>>, active: Arc<AtomicBool>) {
     wasm_bindgen_futures::spawn_local(async move {
         let mut state = TrpgMapperState::default();
         let mut active_room = config::current_room_id();
-        let mut after_seq = 0_i64;
-
-        // Skip historical backlog on viewer enter so old sessions do not flood narrative.
-        let bootstrap_url = config::trpg_stream_poll_url(0);
-        match fetch_text(&bootstrap_url).await {
-            Ok(body) => match decode_stream_events(&body, &mut state) {
-                Ok((max_seq, _)) => {
-                    after_seq = max_seq.max(0);
-                    if after_seq > 0 {
-                        log::info!(
-                            "TRPG poll bootstrap: skipping historical events up to seq {}",
-                            after_seq
-                        );
-                    }
-                }
-                Err(e) => log::warn!("Failed to decode TRPG bootstrap payload: {}", e),
-            },
-            Err(e) => log::debug!("TRPG bootstrap request failed: {:?}", e),
-        }
+        let mut after_seq = bootstrap_after_seq(&mut state).await;
 
         while active.load(Ordering::Relaxed) {
             let room_now = config::current_room_id();
             if room_now != active_room {
                 active_room = room_now.clone();
-                after_seq = 0;
                 state = TrpgMapperState::default();
+                after_seq = bootstrap_after_seq(&mut state).await;
                 log::info!("TRPG poll room switched: {}", room_now);
             }
             let url = config::trpg_stream_poll_url(after_seq);

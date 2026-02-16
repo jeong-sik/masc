@@ -40,13 +40,6 @@ let request_of_reqd reqd =
 
 (** Simple response helpers - H2 streaming API *)
 module Response = struct
-  let cors_headers = [
-    ("access-control-allow-origin", "*");
-    ("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
-    ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-    ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
-  ]
-
   (** Send a complete response body *)
   let send_body reqd response body =
     (* H2 API: respond_with_streaming returns Body.Writer.t directly
@@ -59,7 +52,7 @@ module Response = struct
     let headers = H2.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers) in
+    ]) in
     let response = H2.Response.create ~headers status in
     send_body reqd response body
 
@@ -67,7 +60,7 @@ module Response = struct
     let base_headers = [
       ("content-type", "text/html; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers in
+    ] in
     let response = H2.Response.create
       ~headers:(H2.Headers.of_list (base_headers @ headers))
       status
@@ -78,7 +71,7 @@ module Response = struct
     let headers = H2.Headers.of_list ([
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers) in
+    ]) in
     let response = H2.Response.create ~headers status in
     send_body reqd response body
 
@@ -96,7 +89,7 @@ module Response = struct
     let base_headers = [
       ("content-type", "text/event-stream");
       ("cache-control", "no-cache");
-    ] @ cors_headers in
+    ] in
     let all_headers = H2.Headers.of_list (base_headers @ headers) in
     let response = H2.Response.create ~headers:all_headers `OK in
     (* H2.Reqd.respond_with_streaming returns Body.Writer.t
@@ -107,7 +100,7 @@ module Response = struct
     let base_headers = [
       ("content-type", content_type);
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers in
+    ] in
     let response = H2.Response.create
       ~headers:(H2.Headers.of_list (base_headers @ headers))
       status

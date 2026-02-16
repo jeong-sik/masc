@@ -33,6 +33,7 @@ CI에서는 `scripts/ci-run-tests.sh`를 사용해 테스트를 실행합니다.
 
 - 주기 heartbeat 로그 출력 (`[ci-heartbeat] ...`)
 - 명시적 timeout 적용
+- `timeout`/`gtimeout` 자동 감지 (미설치 시 경고 후 timeout 없이 실행)
 - timeout/실패 시 진단 덤프 출력 (프로세스 스냅샷, 최근 테스트 output tail)
 
 로컬에서 동일 하네스로 재현할 수 있습니다.

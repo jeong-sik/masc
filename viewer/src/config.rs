@@ -6,6 +6,7 @@
 //!
 //! The Lobby mode has no SSE connection — it's a pure UI state.
 
+#[cfg(target_arch = "wasm32")]
 use crate::mode::ViewerMode;
 
 /// Legacy TRPG Engine server (FastAPI + SQLite event store).
@@ -61,7 +62,7 @@ pub fn current_room_id() -> String {
     DEFAULT_ROOM_ID.to_string()
 }
 
-#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub fn trpg_uses_polling() -> bool {
     matches!(TRPG_BACKEND_MODE, TrpgBackendMode::MascApi)
 }

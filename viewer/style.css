@@ -650,11 +650,13 @@ body.mode-lobby #dashboard {
     box-shadow: 0 0 0 1px var(--border-main) inset, 0 0 12px rgba(255, 140, 50, 0.08);
 }
 
-.narrative-entry.phase-dm-narration {
+.narrative-entry.phase-dm-narration,
+.narrative-entry.phase-dm_narration {
     border-left-color: var(--accent-primary-dim);
     background: rgba(255, 140, 50, 0.03);
 }
 
+.narrative-entry.phase-dm-narration .narrative-speaker,
 .narrative-entry.phase-dm_narration .narrative-speaker {
     color: var(--accent-primary);
     text-shadow: 0 0 6px rgba(255, 140, 50, 0.2);

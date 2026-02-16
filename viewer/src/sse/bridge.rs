@@ -17,6 +17,8 @@ pub fn poll_sse_events(
     mut item_events: MessageWriter<ItemAcquired>,
     mut death_events: MessageWriter<CharacterDied>,
     mut combat_events: MessageWriter<CombatStarted>,
+    mut weather_events: MessageWriter<WeatherChanged>,
+    mut mood_events: MessageWriter<MoodChanged>,
     mut connection: ResMut<ConnectionStatus>,
 ) {
     let Some(receiver) = receiver else { return };
@@ -91,6 +93,18 @@ pub fn poll_sse_events(
                 match serde_json::from_str::<CombatPayload>(&data) {
                     Ok(payload) => { combat_events.write(CombatStarted(payload)); }
                     Err(e) => log::warn!("Failed to parse combat_start: {}", e),
+                }
+            }
+            "weather_change" => {
+                match serde_json::from_str::<WeatherChangePayload>(&data) {
+                    Ok(payload) => { weather_events.write(WeatherChanged(payload)); }
+                    Err(e) => log::warn!("Failed to parse weather_change: {}", e),
+                }
+            }
+            "mood_change" => {
+                match serde_json::from_str::<MoodChangePayload>(&data) {
+                    Ok(payload) => { mood_events.write(MoodChanged(payload)); }
+                    Err(e) => log::warn!("Failed to parse mood_change: {}", e),
                 }
             }
             other => {

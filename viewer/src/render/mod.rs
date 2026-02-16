@@ -1,12 +1,13 @@
 pub mod characters;
 pub mod fx;
 pub mod map;
+pub mod overlay;
 pub mod transition;
 
 use bevy::prelude::*;
 
 use crate::game::components::{
-    FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken,
+    FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken, MoodOverlay, WeatherOverlay,
 };
 use crate::mode::ViewerMode;
 use crate::render::transition::{FadeOverlay, SceneTransition};
@@ -25,6 +26,8 @@ impl Plugin for MapRenderPlugin {
             .add_systems(OnEnter(ViewerMode::Trpg), (
                 map::setup_camera,
                 map::setup_map_background,
+                overlay::setup_weather_overlay,
+                overlay::setup_mood_overlay,
                 transition::setup_fade_overlay,
             ))
             // Update: character sprites, positions, HP bars, effects, transitions
@@ -37,6 +40,9 @@ impl Plugin for MapRenderPlugin {
                 map::update_map_texture,
                 fx::spawn_damage_text,
                 fx::animate_floating_text,
+                overlay::update_weather_overlay,
+                overlay::update_mood_overlay,
+                overlay::spawn_prop_notification,
                 transition::trigger_scene_transition,
                 transition::animate_scene_transition,
             ).run_if(in_state(ViewerMode::Trpg)))
@@ -60,6 +66,8 @@ fn cleanup_trpg_scene(
             With<FadeOverlay>,
             With<FloatingText>,
             With<HpBarSprite>,
+            With<WeatherOverlay>,
+            With<MoodOverlay>,
         )>,
     >,
     mut scene_transition: ResMut<SceneTransition>,

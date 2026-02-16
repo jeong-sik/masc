@@ -79,6 +79,16 @@ pub struct CombatPayload {
     pub enemies: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct WeatherChangePayload {
+    pub weather: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MoodChangePayload {
+    pub mood: String,
+}
+
 // ─── Bevy Events ──────────────────────────
 
 #[derive(Message, Debug, Clone)]
@@ -113,3 +123,9 @@ pub struct CharacterDied(pub DeathPayload);
 #[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct CombatStarted(pub CombatPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct WeatherChanged(pub WeatherChangePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct MoodChanged(pub MoodChangePayload);

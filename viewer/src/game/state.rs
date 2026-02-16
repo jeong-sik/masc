@@ -58,6 +58,13 @@ pub struct MapState {
     pub area_label: String,
 }
 
+/// Current weather and mood overlay state.
+#[derive(Resource, Debug, Default)]
+pub struct OverlayState {
+    pub weather: String,
+    pub mood: String,
+}
+
 /// Connection status for the SSE stream.
 #[derive(Resource, Debug, Default)]
 pub enum ConnectionStatus {

@@ -19,7 +19,7 @@ pub struct SettingsMenu;
 pub struct DevMenu;
 
 #[derive(Component)]
-pub struct CloseMenuButton;
+pub struct CloseButton;
 
 /// Tracks UI state toggles.
 #[derive(Resource, Default)]

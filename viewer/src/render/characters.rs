@@ -1,8 +1,20 @@
 use bevy::prelude::*;
+use bevy::input::mouse::MouseButtonInput;
 
 use crate::assets;
 use crate::game::components::*;
 use super::map::area_to_position;
+
+/// Marker component for entities that can be dragged by the player.
+#[derive(Component)]
+pub struct Draggable;
+
+/// Tracks the current drag state.
+#[derive(Resource, Default)]
+pub struct DragState {
+    pub dragged_entity: Option<Entity>,
+    pub drag_offset: Vec2,
+}
 
 /// Character color assignments — each party member gets a distinct color.
 /// Used as fallback tint when portrait texture is not yet loaded.
@@ -56,6 +68,7 @@ pub fn spawn_character_sprites(
             sprite,
             Transform::from_xyz(pos.x, pos.y, 1.0),
             MapToken,
+            Draggable,
         ));
 
         // HP bar as child entity (positioned below the sprite)
@@ -117,13 +130,114 @@ pub fn update_hp_bars(
     }
 }
 
-/// Desaturates dead character sprites.
-pub fn apply_death_visuals(
-    mut actors: Query<(&Actor, &mut Sprite), (With<MapToken>, Changed<Actor>)>,
+/// Handles drag start - captures entity and offset.
+pub fn handle_drag_start(
+    mut drag_state: ResMut<DragState>,
+    windows: Query<&Window>,
+    mut query: Query<(Entity, &Transform), (With<Draggable>, Without<ChildOf>)>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
 ) {
-    for (actor, mut sprite) in &mut actors {
-        if actor.is_dead {
-            sprite.color = Color::srgb(0.3, 0.3, 0.3);
+    // Only start drag on left mouse button press
+    if !mouse_button_input.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    // Check if cursor is over any draggable entity
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+
+    // Convert cursor position to world space
+    // TODO: Proper camera projection - for now use simple mapping
+    // This is a simplified approach; proper implementation needs camera query
+
+    for (entity, transform) in &mut query {
+        let entity_pos = Vec2::new(transform.translation.x, transform.translation.y);
+        let size = 32.0; // Approximate token size
+
+        // Simple hit test
+        let diff = cursor_pos - entity_pos;
+        if diff.x.abs() < size && diff.y.abs() < size {
+            drag_state.dragged_entity = Some(entity);
+            drag_state.drag_offset = entity_pos - cursor_pos;
+            log::info!("Drag started: entity {:?}", entity);
+            break;
         }
     }
+}
+
+/// Handles drag movement - updates entity position.
+pub fn handle_drag(
+    mut drag_state: ResMut<DragState>,
+    windows: Query<&Window>,
+    mut query: Query<&mut Transform, With<Draggable>>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+) {
+    let Some(entity) = drag_state.dragged_entity else {
+        return;
+    };
+
+    // Cancel drag if mouse released
+    if !mouse_button_input.pressed(MouseButton::Left) {
+        drag_state.dragged_entity = None;
+        return;
+    }
+
+    let Ok(mut transform) = query.get_mut(entity) else {
+        drag_state.dragged_entity = None;
+        return;
+    };
+
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+
+    // Update position with offset
+    let new_pos = cursor_pos + drag_state.drag_offset;
+    transform.translation.x = new_pos.x;
+    transform.translation.y = new_pos.y;
+}
+
+/// Handles drag end - updates Actor area based on final position.
+pub fn handle_drag_end(
+    mut drag_state: ResMut<DragState>,
+    mut actors: Query<&mut Actor>,
+    mouse_button_input: Res<ButtonInput<MouseButton>>,
+    map_query: Query<&Transform, (With<MapToken>, With<Draggable>)>,
+) {
+    // Check if mouse was just released
+    if !mouse_button_input.just_released(MouseButton::Left) {
+        return;
+    }
+
+    let Some(entity) = drag_state.dragged_entity else {
+        return;
+    };
+
+    // Get final position
+    let Ok(transform) = map_query.get(entity) else {
+        drag_state.dragged_entity = None;
+        return;
+    };
+
+    let final_pos = Vec2::new(transform.translation.x, transform.translation.y);
+
+    // Convert position to area (simple grid-based approach)
+    // TODO: Implement proper reverse mapping from position to area
+    let grid_x = (final_pos.x / 64.0).floor() as i32;
+    let grid_y = (final_pos.y / 64.0).floor() as i32;
+
+    // Update actor's area
+    if let Ok(mut actor) = actors.get_mut(entity) {
+        actor.area = format!("{}_{}", grid_x, grid_y);
+        log::info!("Drag ended: entity {:?} moved to area {}", entity, actor.area);
+    }
+
+    drag_state.dragged_entity = None;
 }

@@ -192,6 +192,7 @@ pub fn refresh_state_on_room_change(
 pub fn apply_initial_state(
     mut commands: Commands,
     mut buffer: ResMut<InitialStateBuffer>,
+    actors: Query<Entity, With<Actor>>,
     mut room_state: ResMut<RoomState>,
     mut map_state: ResMut<MapState>,
     mut turn_progress: ResMut<TurnProgressState>,
@@ -223,6 +224,10 @@ pub fn apply_initial_state(
         .map(|ch| ch.id.clone())
         .collect();
 
+    for entity in &actors {
+        commands.entity(entity).despawn();
+    }
+
     // Apply room state
     if let Some(room) = &state.room {
         room_state.id = room.id.clone();
@@ -245,6 +250,14 @@ pub fn apply_initial_state(
         turn_progress.room_status = room_state.status.clone();
         turn_progress.turn = room_state.turn;
         turn_progress.phase = room_state.phase.as_str().to_string();
+        turn_progress.player_order.clear();
+        turn_progress.actor_order.clear();
+        turn_progress.actor_states.clear();
+        turn_progress.current_actor.clear();
+        turn_progress.next_actor.clear();
+        turn_progress.last_actor.clear();
+        turn_progress.last_result.clear();
+        *map_state = MapState::default();
         buffer.consumed = true;
 
         prompt_new_game_for_inactive_room(room_state.status.trim());

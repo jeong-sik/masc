@@ -7914,9 +7914,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     function trpgDmGoalText(lang, roomId, worldPresetTitle) {
       if (lang === 'ko') {
-        return `TRPG room ${roomId}의 DM으로 ${worldPresetTitle} 시나리오를 운영하세요. 장면 연속성과 규칙 일관성을 유지하세요.`;
+        return `TRPG room ${roomId}의 세계관 주민인 DM Keeper로 ${worldPresetTitle} 시나리오를 진행하세요. 메타 설명을 피하고 인월드 관점으로 장면 연속성과 규칙 일관성을 유지하세요.`;
       }
-      return `Run TRPG room ${roomId} as DM for ${worldPresetTitle}. Keep consistent scene state and enforce rules.`;
+      return `Act as an in-world DM Keeper for TRPG room ${roomId} in ${worldPresetTitle}. Avoid out-of-world meta narration, keep scene continuity, and enforce rules consistently.`;
     }
 
     function trpgPlayerGoalText(lang, roomId, actorId) {

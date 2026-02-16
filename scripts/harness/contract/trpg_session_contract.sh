@@ -67,7 +67,7 @@ args_start="$(jq -cn --arg sid "$SESSION_ID" --arg room "$ROOM_ID" --argjson par
   if $room == "" then
     {session_id:$sid,party:$party,phase:"briefing"}
   else
-    {session_id:$sid,room_id:$room,party:$party,phase:"briefing"}
+    {session_id:$sid,room_id:$room,party:$party,phase:"briefing",force:true}
   end
 ')"
 r4="$(call_tool 2004 "trpg.session.start" "$args_start")"

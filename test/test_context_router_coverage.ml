@@ -134,7 +134,7 @@ let test_depth_to_sources_light () =
 
 let test_depth_to_sources_full () =
   let sources = depth_to_sources Full in
-  assert (List.length sources = 4)
+  assert (List.length sources = 3)
 
 (* ---------- Recall Config Generation ---------- *)
 

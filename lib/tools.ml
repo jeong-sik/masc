@@ -2498,12 +2498,12 @@ Part of the Agent Being Protocol - agents should know their place in the lifecyc
 
   {
     name = "masc_recall_search";
-    description = {|Semantic memory search using Qdrant vector database.
+    description = {|Semantic memory search using local memory sources.
 
-Searches the agent's episodic memories using semantic similarity.
+Searches the agent's episodic memories using relevance scoring.
 Part of the Agent Being Protocol - agents can recall relevant past experiences.
 
-Returns matched memories with relevance scores, sorted by similarity.|};
+Returns matched memories with relevance scores, sorted by relevance.|};
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

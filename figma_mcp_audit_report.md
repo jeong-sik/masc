@@ -9,7 +9,7 @@
 Three different modules manage Neo4j connections, causing potential connection leaks and state inconsistency.
 - **`lib/clients/neo4j_client.py`**: Functional client with "Second Brain" specific caching.
 - **`lib/core/database/neo4j_client.py`**: Singleton `GraphDatabase` driver wrapper (thread-safe).
-- **`lib/database/connection_pool.py`**: Pool manager that *also* handles Neo4j (plus Qdrant/OpenAI).
+- **`lib/database/connection_pool.py`**: Pool manager that *also* handles Neo4j (plus pgvector/OpenAI).
 
 **Improvement:** Consolidate to `lib/core/database/neo4j_client.py` as the single low-level driver. `lib/clients` should consume this driver, not create new connections. `connection_pool.py` should likely be deprecated or refactored to use the Core driver.
 
@@ -36,7 +36,7 @@ Three different modules manage Neo4j connections, causing potential connection l
 The following directories exist but contain no code:
 - `tools/slack-cli/`
 - `tools/slack-term/`
-- `lib/ocaml/qdrant_client/` (appears empty in file listing)
+- `lib/ocaml/` 내 레거시 벡터 클라이언트 디렉터리 (file listing 기준 empty)
 
 **Improvement:** Remove these directories if they are abandoned placeholders, or add a `README.md` explaining their roadmap status.
 

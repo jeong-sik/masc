@@ -192,7 +192,7 @@ let depth_to_sources (depth : retrieval_depth) : Auto_recall.recall_source list 
   | Skip -> []
   | Light -> [Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache]
   | Full -> [Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache;
-             Auto_recall.Qdrant_semantic; Auto_recall.File_context]
+             Auto_recall.File_context]
 
 (** Create an Auto_recall config from a routing decision.
     Adjusts token budget based on depth. *)

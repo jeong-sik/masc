@@ -11,6 +11,7 @@ use crate::game::components::{
     FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken, MoodOverlay, WeatherOverlay,
 };
 use crate::render::ui::UiMarker;
+use crate::render::ui::ResizeState;
 use crate::render::characters::DragState;
 use crate::mode::ViewerMode;
 use crate::render::transition::{FadeOverlay, SceneTransition};
@@ -26,6 +27,7 @@ impl Plugin for MapRenderPlugin {
         app
             .init_resource::<SceneTransition>()
             .init_resource::<DragState>()
+            .init_resource::<ResizeState>()
             // Setup: camera, map background, fade overlay, UI — on TRPG mode entry
             .add_systems(OnEnter(ViewerMode::Trpg), (
                 map::setup_camera,
@@ -56,6 +58,13 @@ impl Plugin for MapRenderPlugin {
                 ui::handle_button_interactions,
                 ui::manage_menus,
                 ui::handle_menu_item_clicks,
+            ).run_if(in_state(ViewerMode::Trpg)))
+            .add_systems(Update, (
+                ui::spawn_resize_handles,
+                ui::handle_resize_start,
+                ui::handle_resize,
+                ui::handle_resize_end,
+                ui::update_resize_cursors,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Cleanup: despawn all TRPG scene entities and reset resources
             .add_systems(OnExit(ViewerMode::Trpg), cleanup_trpg_scene);

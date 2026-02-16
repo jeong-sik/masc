@@ -50,6 +50,7 @@ impl Plugin for MapRenderPlugin {
                 transition::animate_scene_transition,
                 ui::handle_button_interactions,
                 ui::manage_menus,
+                ui::handle_menu_item_clicks,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Cleanup: despawn all TRPG scene entities and reset resources
             .add_systems(OnExit(ViewerMode::Trpg), cleanup_trpg_scene);

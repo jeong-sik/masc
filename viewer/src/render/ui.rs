@@ -18,6 +18,25 @@ pub struct SettingsMenu;
 #[derive(Component)]
 pub struct DevMenu;
 
+/// Actions that can be triggered from menu items.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    // Settings menu
+    SoundToggle,
+    MusicToggle,
+    AutoSaveToggle,
+    Fullscreen,
+    // Dev menu
+    ShowFps,
+    DebugOverlay,
+    ReloadAssets,
+    DumpState,
+}
+
+/// Marker component for menu items with their associated action.
+#[derive(Component)]
+pub struct MenuItem(pub MenuAction);
+
 /// Tracks UI state toggles.
 #[derive(Resource, Default)]
 pub struct UiState {
@@ -205,6 +224,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
 
             // Menu items (inline to avoid type annotation issues)
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::SoundToggle),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -228,6 +249,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::MusicToggle),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -251,6 +274,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::AutoSaveToggle),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -274,6 +299,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::Fullscreen),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -335,6 +362,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
 
             // Dev options
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::ShowFps),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -358,6 +387,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::DebugOverlay),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -381,6 +412,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::ReloadAssets),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -404,6 +437,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::DumpState),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -426,4 +461,56 @@ fn spawn_dev_menu(commands: &mut Commands) {
                 ));
             });
         });
+}
+
+/// Handles menu item click interactions.
+///
+/// Logs the action for now. Future expansion: connect to actual systems
+/// (audio toggles, FPS counter, state dump, etc.).
+pub fn handle_menu_item_clicks(
+    interactions: Query<
+        (&Interaction, &MenuItem),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    for (interaction, menu_item) in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        match menu_item.0 {
+            MenuAction::SoundToggle => {
+                log::info!("Menu action: Sound toggled");
+                // TODO: Connect to audio system
+            }
+            MenuAction::MusicToggle => {
+                log::info!("Menu action: Music toggled");
+                // TODO: Connect to audio system
+            }
+            MenuAction::AutoSaveToggle => {
+                log::info!("Menu action: Auto-save toggled");
+                // TODO: Connect to save system
+            }
+            MenuAction::Fullscreen => {
+                log::info!("Menu action: Toggle fullscreen");
+                // TODO: Switch to fullscreen mode
+            }
+            MenuAction::ShowFps => {
+                log::info!("Menu action: Toggle FPS display");
+                // TODO: Enable/disable FPS counter
+            }
+            MenuAction::DebugOverlay => {
+                log::info!("Menu action: Toggle debug overlay");
+                // TODO: Show/hide debug info
+            }
+            MenuAction::ReloadAssets => {
+                log::info!("Menu action: Reload assets");
+                // TODO: Trigger asset hot-reload
+            }
+            MenuAction::DumpState => {
+                log::info!("Menu action: Dump game state");
+                // TODO: Serialize and log current state
+            }
+        }
+    }
 }

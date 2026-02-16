@@ -562,16 +562,16 @@ let load_governance (config : Room.config) : governance_config =
   let path = governance_path config in
   if Room_utils.path_exists config path then
     let json = Room_utils.read_json config path in
-    let open Yojson.Safe.Util in
-    let level = json |> member "level" |> to_string_option |> Option.value ~default:"development" in
+    let module U = Yojson.Safe.Util in
+    let level = Json_util.get_string json "level" |> Option.value ~default:"development" in
     let defaults = governance_defaults level in
     let audit_enabled =
-      match json |> member "audit_enabled" with
+      match json |> U.member "audit_enabled" with
       | `Bool b -> b
       | _ -> defaults.audit_enabled
     in
     let anomaly_detection =
-      match json |> member "anomaly_detection" with
+      match json |> U.member "anomaly_detection" with
       | `Bool b -> b
       | _ -> defaults.anomaly_detection
     in
@@ -631,14 +631,14 @@ let read_audit_events (config : Room.config) ~since : audit_event list =
     List.filter_map (fun line ->
       try
         let json = Yojson.Safe.from_string line in
-        let open Yojson.Safe.Util in
-        let timestamp = json |> member "timestamp" |> to_float in
+        let module U = Yojson.Safe.Util in
+        let timestamp = match Json_util.get_float json "timestamp" with Some v -> v | None -> raise Not_found in
         if timestamp < since then None
         else
-          let agent = json |> member "agent" |> to_string in
-          let event_type = json |> member "event_type" |> to_string in
-          let success = json |> member "success" |> to_bool in
-          let detail = json |> member "detail" |> to_string_option in
+          let agent = match Json_util.get_string json "agent" with Some v -> v | None -> raise Not_found in
+          let event_type = match Json_util.get_string json "event_type" with Some v -> v | None -> raise Not_found in
+          let success = match Json_util.get_bool json "success" with Some v -> v | None -> raise Not_found in
+          let detail = Json_util.get_string json "detail" in
           Some { timestamp; agent; event_type; success; detail }
       with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
     ) lines
@@ -666,12 +666,12 @@ let mcp_session_to_json (s : mcp_session_record) : Yojson.Safe.t =
   ]
 
 let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let agent_name = json |> member "agent_name" |> to_string_option in
-    let created_at = json |> member "created_at" |> to_float in
-    let last_seen = json |> member "last_seen" |> to_float in
+    let id = match Json_util.get_string json "id" with Some v -> v | None -> raise Not_found in
+    let agent_name = Json_util.get_string json "agent_name" in
+    let created_at = match Json_util.get_float json "created_at" with Some v -> v | None -> raise Not_found in
+    let last_seen = match Json_util.get_float json "last_seen" with Some v -> v | None -> raise Not_found in
     Some { id; agent_name; created_at; last_seen }
   with Yojson.Safe.Util.Type_error _ -> None
 
@@ -767,7 +767,7 @@ let cosine_similarity a b =
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
 
   let config = state.Mcp_server.room_config in
   let registry = state.Mcp_server.session_registry in
@@ -810,37 +810,37 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   (* Helper to get values from JSON arguments - delegates to Safe_ops *)
-  let get_string key default =
+  let arg_get_string key default =
     Safe_ops.json_string ~default key arguments
   in
-  let get_int key default =
+  let arg_get_int key default =
     Safe_ops.json_int ~default key arguments
   in
-  let get_float key default =
+  let arg_get_float key default =
     Safe_ops.json_float ~default key arguments
   in
-  let get_bool key default =
+  let arg_get_bool key default =
     Safe_ops.json_bool ~default key arguments
   in
-  let get_string_list key =
+  let arg_get_string_list key =
     Safe_ops.json_string_list key arguments
   in
-  let get_string_opt key =
+  let arg_get_string_opt key =
     match Safe_ops.json_string_opt key arguments with
     | Some "" -> None
     | other -> other
   in
-  let _get_int_opt key =
+  let _arg_get_int_opt key =
     Safe_ops.json_int_opt key arguments
   in
-  let get_float_opt key =
+  let arg_get_float_opt key =
     Safe_ops.json_float_opt key arguments
   in
 
   (* Resolve agent_name via Agent Identity system (primary) with legacy fallback.
      Agent_registry_eio.get_or_create_identity already resolved identity above.
      Use identity.agent_name as the canonical source. *)
-  let raw_agent_name = get_string "agent_name" "" in
+  let raw_agent_name = arg_get_string "agent_name" "" in
   let agent_name =
     (* Priority: explicit arg > identity > legacy file-based *)
     if raw_agent_name <> "" && raw_agent_name <> "unknown" then
@@ -867,7 +867,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   let token =
-    match get_string_opt "token" with
+    match arg_get_string_opt "token" with
     | Some t -> Some t
     | None -> auth_token
   in
@@ -1288,7 +1288,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   match name with
   | "masc_lock" ->
-      let file = get_string "file" "" in
+      let file = arg_get_string "file" "" in
       if file = "" then
         (false, "❌ file is required")
       else begin
@@ -1327,7 +1327,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       end
 
   | "masc_unlock" ->
-      let file = get_string "file" "" in
+      let file = arg_get_string "file" "" in
       if file = "" then
         (false, "❌ file is required")
       else begin
@@ -1361,7 +1361,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       end
 
   | "masc_set_room" ->
-      let path = get_string "path" "" in
+      let path = arg_get_string "path" "" in
       let expanded =
         if String.length path > 0 && path.[0] = '~' then
           Filename.concat (Sys.getenv "HOME") (String.sub path 1 (String.length path - 1))
@@ -1380,7 +1380,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
 
   | "masc_join" ->
-      let caps = get_string_list "capabilities" in
+      let caps = arg_get_string_list "capabilities" in
       let result = Room.join config ~agent_name ~capabilities:caps () in
       (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
       let nickname =
@@ -1456,13 +1456,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
 
   | "masc_bounded_run" ->
-      let agents = match arguments |> member "agents" with
+      let module U = Yojson.Safe.Util in
+      let agents = match arguments |> U.member "agents" with
         | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
         | _ -> []
       in
-      let prompt = get_string "prompt" "" in
-      let constraints_json = arguments |> member "constraints" in
-      let goal_json = arguments |> member "goal" in
+      let prompt = arg_get_string "prompt" "" in
+      let constraints_json = arguments |> U.member "constraints" in
+      let goal_json = arguments |> U.member "goal" in
       let constraints = Bounded.constraints_of_json constraints_json in
       let goal = Bounded.goal_of_json goal_json in
       (match state.Mcp_server.proc_mgr with
@@ -1479,7 +1480,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
 
   | "masc_broadcast" ->
-      let message = get_string "message" "" in
+      let message = arg_get_string "message" "" in
       (* Check rate limit - Eio native *)
       let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
       if not allowed then
@@ -1522,22 +1523,22 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       end
 
   | "masc_messages" ->
-      let since_seq = get_int "since_seq" 0 in
-      let limit = get_int "limit" 10 in
+      let since_seq = arg_get_int "since_seq" 0 in
+      let limit = arg_get_int "limit" 10 in
       (true, Room.get_messages config ~since_seq ~limit)
 
 
 
   | "masc_listen" ->
-      let timeout = float_of_int (get_int "timeout" 300) in
+      let timeout = float_of_int (arg_get_int "timeout" 300) in
       Log.Mcp.info "%s is now listening (timeout: %.0fs)..." agent_name timeout;
       (* Eio native - uses Session registry with Eio.Time.sleep *)
       let msg_opt = wait_for_message_eio ~clock registry ~agent_name ~timeout in
       (match msg_opt with
        | Some msg ->
-           let from = Yojson.Safe.Util.(msg |> member "from" |> to_string) in
-           let content = Yojson.Safe.Util.(msg |> member "content" |> to_string) in
-           let timestamp = Yojson.Safe.Util.(msg |> member "timestamp" |> to_string) in
+           let from = match Json_util.get_string msg "from" with Some v -> v | None -> raise Not_found in
+           let content = match Json_util.get_string msg "content" with Some v -> v | None -> raise Not_found in
+           let timestamp = match Json_util.get_string msg "timestamp" with Some v -> v | None -> raise Not_found in
            (true, Printf.sprintf {|
 🔔 **MESSAGE RECEIVED!**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1576,9 +1577,9 @@ Time: %s
 
 
   | "masc_verify_handoff" ->
-      let original = get_string "original" "" in
-      let received = get_string "received" "" in
-      let threshold = get_float "threshold" (Level2_config.Drift_guard.default_threshold ()) in
+      let original = arg_get_string "original" "" in
+      let received = arg_get_string "received" "" in
+      let threshold = arg_get_float "threshold" (Level2_config.Drift_guard.default_threshold ()) in
       let tokens_a = tokenize original in
       let tokens_b = tokenize received in
       let jacc = jaccard_similarity tokens_a tokens_b in
@@ -1625,14 +1626,14 @@ Time: %s
 
 
   | "masc_mcp_session" ->
-      let action = get_string "action" "" in
+      let action = arg_get_string "action" "" in
       let now = Time_compat.now () in
       let sessions = load_mcp_sessions config in
       let save sessions = save_mcp_sessions config sessions in
       let response =
         match action with
         | "create" ->
-            let agent_name = get_string_opt "agent_name" in
+            let agent_name = arg_get_string_opt "agent_name" in
             let id = Mcp_session.generate () in
             let record = { id; agent_name; created_at = now; last_seen = now } in
             save (record :: sessions);
@@ -1641,7 +1642,7 @@ Time: %s
               ("session", mcp_session_to_json record);
             ])
         | "get" ->
-            let session_id = get_string "session_id" "" in
+            let session_id = arg_get_string "session_id" "" in
             (match List.find_opt (fun s -> s.id = session_id) sessions with
              | None -> Error (Printf.sprintf "MCP session '%s' not found" session_id)
              | Some s ->
@@ -1668,7 +1669,7 @@ Time: %s
               ("remaining", `Int (List.length remaining));
             ])
         | "remove" ->
-            let session_id = get_string "session_id" "" in
+            let session_id = arg_get_string "session_id" "" in
             let remaining = List.filter (fun s -> s.id <> session_id) sessions in
             if List.length remaining = List.length sessions then
               Error (Printf.sprintf "MCP session '%s' not found" session_id)
@@ -1705,23 +1706,23 @@ Time: %s
 
 
   | "masc_interrupt" ->
-      let task_id = get_string "task_id" "" in
-      let step = get_int "step" 1 in
-      let action = get_string "action" "" in
-      let message = get_string "message" "" in
+      let task_id = arg_get_string "task_id" "" in
+      let step = arg_get_int "step" 1 in
+      let action = arg_get_string "action" "" in
+      let message = arg_get_string "message" "" in
       Notify.notify_interrupt ~agent:agent_name ~action;
       safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config;
                  "--task-id"; task_id; "--step"; string_of_int step;
                  "--action"; action; "--agent"; agent_name; "--interrupt"; message]
 
   | "masc_approve" ->
-      let task_id = get_string "task_id" "" in
+      let task_id = arg_get_string "task_id" "" in
       safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config;
                  "--task-id"; task_id; "--approve"]
 
   | "masc_reject" ->
-      let task_id = get_string "task_id" "" in
-      let reason = get_string "reason" "" in
+      let task_id = arg_get_string "task_id" "" in
+      let reason = arg_get_string "reason" "" in
       let args = if reason = "" then
         ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config; "--task-id"; task_id; "--reject"]
       else
@@ -1733,9 +1734,9 @@ Time: %s
       safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config; "--pending"]
 
   | "masc_branch" ->
-      let task_id = get_string "task_id" "" in
-      let source_step = get_int "source_step" 0 in
-      let branch_name = get_string "branch_name" "" in
+      let task_id = arg_get_string "task_id" "" in
+      let source_step = arg_get_int "source_step" 0 in
+      let branch_name = arg_get_string "branch_name" "" in
       if task_id = "" || source_step = 0 || branch_name = "" then
         (false, "❌ task_id, source_step, and branch_name are required")
       else
@@ -1755,10 +1756,10 @@ Time: %s
 
 
   | "masc_governance_set" ->
-      let level = get_string "level" "production" in
+      let level = arg_get_string "level" "production" in
       let defaults = governance_defaults level in
-      let audit_enabled = get_bool "audit_enabled" defaults.audit_enabled in
-      let anomaly_detection = get_bool "anomaly_detection" defaults.anomaly_detection in
+      let audit_enabled = arg_get_bool "audit_enabled" defaults.audit_enabled in
+      let anomaly_detection = arg_get_bool "anomaly_detection" defaults.anomaly_detection in
       let g = {
         level = String.lowercase_ascii level;
         audit_enabled;
@@ -1782,10 +1783,11 @@ Time: %s
 
 
   | "masc_spawn" ->
-      let spawn_agent_name = get_string "agent_name" "" in
-      let prompt = get_string "prompt" "" in
-      let timeout_seconds = get_int "timeout_seconds" 300 in
-      let working_dir = match arguments |> member "working_dir" with
+      let spawn_agent_name = arg_get_string "agent_name" "" in
+      let prompt = arg_get_string "prompt" "" in
+      let timeout_seconds = arg_get_int "timeout_seconds" 300 in
+      let module U = Yojson.Safe.Util in
+      let working_dir = match arguments |> U.member "working_dir" with
         | `String s when s <> "" -> Some s
         | _ -> None
       in
@@ -1807,11 +1809,11 @@ Time: %s
 
 
   | "masc_memento_mori" ->
-      let context_ratio = get_float "context_ratio" 0.0 in
-      let full_context = get_string "full_context" "" in
-      let summary = get_string "summary" "" in
-      let current_task = get_string "current_task" "" in
-      let target_agent = get_string "target_agent" "claude" in
+      let context_ratio = arg_get_float "context_ratio" 0.0 in
+      let full_context = arg_get_string "full_context" "" in
+      let summary = arg_get_string "summary" "" in
+      let current_task = arg_get_string "current_task" "" in
+      let target_agent = arg_get_string "target_agent" "claude" in
       let cell = !(Mcp_server.current_cell) in
       let mitosis_config = Mitosis.default_config in
 
@@ -1925,8 +1927,8 @@ Time: %s
   (* ============================================ *)
 
   | "masc_episode_flush" ->
-      let limit = get_int "limit" 10 in
-      let dry_run = get_bool "dry_run" false in
+      let limit = arg_get_int "limit" 10 in
+      let dry_run = arg_get_bool "dry_run" false in
       let base_path = config.Room_utils.base_path in
       let pending_dir = Filename.concat base_path ".masc/pending_episodes" in
 
@@ -1991,23 +1993,23 @@ Time: %s
             in
             (* Parse and validate *)
             let json = Yojson.Safe.from_string content in
-            let open Yojson.Safe.Util in
-            let ep_id = json |> member "ep_id" |> to_string in
+            let module U = Yojson.Safe.Util in
+            let ep_id = match Json_util.get_string json "ep_id" with Some v -> v | None -> raise Not_found in
 
             (* Build Episode record from JSON *)
             let episode : Jiphyeon.Archive.episode = {
               ep_id;
-              session_id = json |> member "session_id" |> to_string;
-              agent_name = json |> member "agent_name" |> to_string;
-              generation = json |> member "generation" |> to_int;
-              parent_episode = json |> member "parent_episode" |> to_string_option;
-              event_type = json |> member "event_type" |> to_string;
-              summary = json |> member "summary" |> to_string;
-              dna = json |> member "dna" |> to_string_option;
-              outcome = json |> member "outcome" |> to_string |> parse_outcome;
-              learnings = json |> member "learnings" |> parse_string_list;
-              context = json |> member "context" |> parse_context;
-              timestamp = json |> member "timestamp" |> to_string;
+              session_id = json |> U.member "session_id" |> U.to_string;
+              agent_name = json |> U.member "agent_name" |> U.to_string;
+              generation = json |> U.member "generation" |> U.to_int;
+              parent_episode = Json_util.get_string json "parent_episode";
+              event_type = json |> U.member "event_type" |> U.to_string;
+              summary = json |> U.member "summary" |> U.to_string;
+              dna = Json_util.get_string json "dna";
+              outcome = json |> U.member "outcome" |> U.to_string |> parse_outcome;
+              learnings = json |> U.member "learnings" |> parse_string_list;
+              context = json |> U.member "context" |> parse_context;
+              timestamp = json |> U.member "timestamp" |> U.to_string;
             } in
 
             (* Save to PostgreSQL + Neo4j using Jiphyeon.Archive *)
@@ -2048,14 +2050,14 @@ Time: %s
       end
 
   | "masc_episode_list" ->
-      let agent_filter = get_string_opt "agent_name" in
+      let agent_filter = arg_get_string_opt "agent_name" in
       let gen_filter = match arguments with
         | `Assoc fields -> (match List.assoc_opt "generation" fields with
             | Some (`Int n) -> Some n
             | _ -> None)
         | _ -> None
       in
-      let limit = get_int "limit" 20 in
+      let limit = arg_get_int "limit" 20 in
       let base_path = config.Room_utils.base_path in
 
       (* Collect from processed_episodes (already flushed) *)
@@ -2080,8 +2082,9 @@ Time: %s
                       Buffer.contents buf)
                 in
                 let json = Yojson.Safe.from_string content in
-                let ep_agent = Yojson.Safe.Util.(json |> member "agent_name" |> to_string) in
-                let ep_gen = Yojson.Safe.Util.(json |> member "generation" |> to_int) in
+                let ep_agent = let module U = Yojson.Safe.Util in
+                U.(json |> member "agent_name" |> to_string) in
+                let ep_gen = U.(json |> member "generation" |> to_int) in
                 (* Apply filters *)
                 let agent_ok = match agent_filter with None -> true | Some a -> ep_agent = a in
                 let gen_ok = match gen_filter with None -> true | Some g -> ep_gen = g in
@@ -2180,9 +2183,9 @@ Time: %s
 
   | "masc_recall_search" ->
       (* Agent Being Protocol: Semantic memory recall from local sources *)
-      let open Yojson.Safe.Util in
-      let query = arguments |> member "query" |> to_string in
-      let limit = arguments |> member "limit" |> to_int_option |> Option.value ~default:5 in
+      let module U = Yojson.Safe.Util in
+      let query = match Json_util.get_string arguments "query" with Some v -> v | None -> raise Not_found in
+      let limit = arguments |> U.member "limit" |> U.to_int_option |> Option.value ~default:5 in
 
       (match state.Mcp_server.env with
        | None ->
@@ -2281,11 +2284,11 @@ Time: %s
   (* ============================================ *)
 
   | "masc_convo_start" ->
-      let topic = get_string "topic" "" in
-      let initiator = get_string "initiator" agent_name in
-      let initial_content = get_string "initial_content" "" in
-      let max_turns = get_int "max_turns" 50 in
-      let source_post_id = get_string_opt "post_id" in
+      let topic = arg_get_string "topic" "" in
+      let initiator = arg_get_string "initiator" agent_name in
+      let initial_content = arg_get_string "initial_content" "" in
+      let max_turns = arg_get_int "max_turns" 50 in
+      let source_post_id = arg_get_string_opt "post_id" in
       if topic = "" then (false, "❌ topic required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2311,12 +2314,12 @@ Time: %s
       end
 
   | "masc_convo_reply" ->
-      let thread_id = get_string "thread_id" "" in
-      let speaker = get_string "speaker" agent_name in
-      let content = get_string "content" "" in
-      let confidence = get_float_opt "confidence" in
-      let reply_to = get_string_opt "reply_to" in
-      let mentions = get_string_list "mentions" in
+      let thread_id = arg_get_string "thread_id" "" in
+      let speaker = arg_get_string "speaker" agent_name in
+      let content = arg_get_string "content" "" in
+      let confidence = arg_get_float_opt "confidence" in
+      let reply_to = arg_get_string_opt "reply_to" in
+      let mentions = arg_get_string_list "mentions" in
       if thread_id = "" || content = "" then
         (false, "❌ thread_id and content required")
       else begin
@@ -2346,9 +2349,9 @@ Time: %s
       end
 
   | "masc_convo_conclude" ->
-      let thread_id = get_string "thread_id" "" in
-      let concluder = get_string "concluder" agent_name in
-      let conclusion = get_string "conclusion" "" in
+      let thread_id = arg_get_string "thread_id" "" in
+      let concluder = arg_get_string "concluder" agent_name in
+      let conclusion = arg_get_string "conclusion" "" in
       if thread_id = "" || conclusion = "" then
         (false, "❌ thread_id and conclusion required")
       else begin
@@ -2366,7 +2369,7 @@ Time: %s
       end
 
   | "masc_convo_get" ->
-      let thread_id = get_string "thread_id" "" in
+      let thread_id = arg_get_string "thread_id" "" in
       if thread_id = "" then (false, "❌ thread_id required")
       else begin
         let convo_config : Council.Conversation.config = {
@@ -2429,9 +2432,9 @@ let tool_timeout_sec_opt ~(tool_name : string) : float option =
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
 let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params =
-  let open Yojson.Safe.Util in
-  let name = params |> member "name" |> to_string in
-  let arguments = params |> member "arguments" in
+  let module U = Yojson.Safe.Util in
+  let name = params |> U.member "name" |> U.to_string in
+  let arguments = params |> U.member "arguments" in
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in

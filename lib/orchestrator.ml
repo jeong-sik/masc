@@ -151,80 +151,98 @@ let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   result
   end
 
-(** Main orchestrator loop with cancellation support *)
-let rec run_loop ~sw ~proc_mgr ~clock ?domain_mgr ~cancel_flag config room_config () =
-  if Atomic.get cancel_flag then (
-    (* Cancelled - exit gracefully *)
-    Eio.traceln "🎮 Orchestrator: Cancellation requested, exiting loop\n%!"
-  ) else if not config.enabled then (
-    (* Disabled - just sleep and check again later in case config changes *)
-    Eio.Time.sleep clock 60.0;
-    run_loop ~sw ~proc_mgr ~clock ?domain_mgr ~cancel_flag config room_config ()
-  ) else (
-    let needs_orchestration = should_orchestrate room_config in
+(* ── Pulse helpers ─────────────────────────────────────────── *)
 
-    if needs_orchestration && not (Atomic.get cancel_flag) then
-      Eio.Fiber.fork ~sw (fun () ->
-        try
-          ignore (spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config)
-        with exn ->
-          Printf.eprintf "[Orchestrator] spawn failed: %s\n%!" (Printexc.to_string exn)
-      );
+(** Fixed-interval rhythm with no quiet hours.
+    Orchestrator runs at constant interval regardless of time of day. *)
+let fixed_rhythm base_s =
+  { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = (0, 0) }
 
-    (* Wait for next check interval, checking cancel_flag periodically *)
-    if not (Atomic.get cancel_flag) then begin
-      Eio.Time.sleep clock config.check_interval_s;
-      run_loop ~sw ~proc_mgr ~clock ?domain_mgr ~cancel_flag config room_config ()
-    end
-  )
+(** Pulse instances for orchestrator and zombie cleanup.
+    Stored in refs for shutdown access. *)
+let orchestrator_pulse : Pulse.t option ref = ref None
+let zombie_pulse : Pulse.t option ref = ref None
 
-(** Start the orchestrator background loop
-    Returns a cancel function to gracefully stop the orchestrator *)
+(** Build the orchestrator check consumer.
+    Checks if orchestration is needed and spawns coordinator if so. *)
+let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config ()
+    : (module Pulse.Consumer) =
+  (module struct
+    let name = "orchestrator-check"
+    let should_act _beat = config.enabled
+    let on_beat _beat =
+      try
+        if should_orchestrate room_config then
+          Eio.Fiber.fork ~sw (fun () ->
+            try
+              ignore (spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config)
+            with exn ->
+              Printf.eprintf "[Orchestrator] spawn failed: %s\n%!" (Printexc.to_string exn));
+        Ok ()
+      with exn ->
+        let msg = Printf.sprintf "orchestrator check error: %s" (Printexc.to_string exn) in
+        Eio.traceln "[Orchestrator] %s (recovering...)" msg;
+        Error msg
+  end)
+
+(** Build the zero-zombie cleanup consumer.
+    Runs Room.cleanup_zombies and logs if zombies were found. *)
+let make_zero_zombie_consumer ~room_config
+    : (module Pulse.Consumer) =
+  (module struct
+    let name = "zero-zombie-cleanup"
+    let should_act _beat = true
+    let on_beat _beat =
+      try
+        let status = Room.cleanup_zombies room_config in
+        let status_trimmed = String.trim status in
+        if String.length status_trimmed > 0 then begin
+          (* Zombie emoji is U+1F9DF (4 bytes in UTF-8: F0 9F A7 9F) *)
+          let has_zombie_indicator =
+            try
+              String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "\xf0\x9f\xa7\x9f" ||
+              String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
+            with _ -> false
+          in
+          if has_zombie_indicator then
+            Printf.eprintf "[ZeroZombie] %s\n%!" status_trimmed
+        end;
+        Ok ()
+      with exn ->
+        if Resilience.ZeroZombie.is_benign_error exn then
+          Ok ()
+        else begin
+          let msg = Printf.sprintf "zombie cleanup error: %s" (Printexc.to_string exn) in
+          Printf.eprintf "[ZeroZombie] %s\n%!" msg;
+          Error msg
+        end
+  end)
+
+(** Start the orchestrator background services using Pulse.
+    Returns a cancel function to gracefully stop both Pulse engines. *)
 let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   let config = load_config () in
-  let cancel_flag = Atomic.make false in
-  let zombie_cancel_flag = Atomic.make false in
 
-  (* Start Zero-Zombie background cleanup loop *)
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.traceln "🧟 Zero-Zombie Protocol: Automatic cleanup enabled (interval: 60s)\n%!";
-    Resilience.ZeroZombie.run_loop ~interval:60.0 ~clock
-      ~cleanup_fn:(fun () ->
-        if Atomic.get zombie_cancel_flag then ["(cancelled)"]
-        else begin
-          let status = Room.cleanup_zombies room_config in
-          (* Check if zombies were actually cleaned (message starts with 🧟)
-             "🧟 Cleaned up N zombie agent(s)..." vs "✅ No zombie agents found" *)
-          let status_trimmed = String.trim status in
-          if String.length status_trimmed > 0 then begin
-            (* Safe check: look for zombie emoji or "Cleaned" keyword *)
-            let has_zombie_indicator =
-              try
-                String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "🧟" ||
-                String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
-              with _ -> false
-            in
-            if has_zombie_indicator then begin
-              Printf.eprintf "[ZeroZombie] %s\n%!" status_trimmed;
-              ["(zombies-cleaned)"]
-            end else
-              []
-          end else []
-        end
-      ) ());
+  (* Zero-Zombie cleanup: always enabled, 60s interval *)
+  Eio.traceln "🧟 Zero-Zombie Protocol: Automatic cleanup enabled (interval: 60s)\n%!";
+  let zombie_consumer = make_zero_zombie_consumer ~room_config in
+  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm 60.0) ~lifecycle:Perpetual ~consumers:[zombie_consumer] in
+  zombie_pulse := Some zp;
+  Eio.Fiber.fork ~sw (fun () -> Pulse.run ~sw zp);
 
-  if config.enabled then (
+  (* Orchestrator check: respects enabled flag via should_act *)
+  if config.enabled then
     Eio.traceln "🎮 Orchestrator loop enabled (interval: %.0fs, agent: %s)\n%!"
-      config.check_interval_s config.orchestrator_agent;
-    Eio.Fiber.fork ~sw (fun () ->
-      try run_loop ~sw ~proc_mgr ~clock ?domain_mgr ~cancel_flag config room_config ()
-      with exn ->
-        Printf.eprintf "[Orchestrator] loop crashed: %s\n%!" (Printexc.to_string exn))
-  ) else (
-    Eio.traceln "💤 Orchestrator loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)\n%!"
-  );
+      config.check_interval_s config.orchestrator_agent
+  else
+    Eio.traceln "💤 Orchestrator loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)\n%!";
 
-  (* Return cancel function *)
+  let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config () in
+  let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Perpetual ~consumers:[orch_consumer] in
+  orchestrator_pulse := Some op;
+  Eio.Fiber.fork ~sw (fun () -> Pulse.run ~sw op);
+
+  (* Return cancel function — shuts down both Pulse engines *)
   fun () ->
-    Atomic.set cancel_flag true;
-    Atomic.set zombie_cancel_flag true
+    (match !orchestrator_pulse with Some p -> Pulse.shutdown p | None -> ());
+    (match !zombie_pulse with Some p -> Pulse.shutdown p | None -> ())

@@ -367,6 +367,14 @@ body.mode-lobby #dashboard {
     background: var(--border-main);
 }
 
+#dashboard[data-debug="off"] {
+    grid-template-rows: 44px 1fr;
+}
+
+#dashboard[data-debug="off"] #bottom-zone {
+    display: none;
+}
+
 /* ─── Top Bar ──────────────────────────── */
 
 #top-bar {
@@ -412,6 +420,32 @@ body.mode-lobby #dashboard {
 .inline-select {
     font-size: 10px;
     padding: 2px 6px;
+}
+
+.inline-toggle {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: var(--panel-radius);
+    border: 1px solid var(--border-main);
+    background: var(--bg-panel-alt);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.inline-toggle[aria-pressed="false"] {
+    opacity: 0.72;
+    color: var(--text-dim);
+}
+
+.widget-pill {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-dim);
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    padding: 3px 8px;
+    background: var(--bg-panel-alt);
+    white-space: nowrap;
 }
 
 /* ─── Connection Status ────────────────── */
@@ -570,10 +604,24 @@ body.mode-lobby #dashboard {
     margin-bottom: 14px;
     padding: 8px 12px;
     border-left: 2px solid var(--border-main);
+    border-radius: var(--panel-radius);
     font-size: 14px;
     line-height: 1.7;
     color: var(--text-primary);
     animation: fade-in 0.4s ease;
+    cursor: pointer;
+    transition: background 0.18s ease, border-left-color 0.18s ease;
+}
+
+.narrative-entry:hover {
+    background: var(--bg-panel-alt);
+    border-left-color: var(--accent-primary-dim);
+}
+
+.narrative-entry.selected {
+    background: var(--bg-panel-alt);
+    border-left-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--border-main) inset;
 }
 
 .narrative-entry.phase-dm_narration {
@@ -591,6 +639,24 @@ body.mode-lobby #dashboard {
 
 #narrative-log {
     margin-top: 12px;
+}
+
+.narrative-meta {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.narrative-speaker {
+    color: var(--accent-primary);
+    font-weight: 700;
+}
+
+.narrative-text {
+    white-space: pre-wrap;
 }
 
 /* Character cards */

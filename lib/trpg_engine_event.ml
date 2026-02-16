@@ -15,6 +15,9 @@ type event_type =
   | Flag_set
   | Node_advanced
   | Narration_posted
+  | Scene_transition
+  | Quest_update
+  | World_event
 
 type t = {
   seq : int;
@@ -42,6 +45,9 @@ let string_of_event_type = function
   | Flag_set -> "flag.set"
   | Node_advanced -> "node.advanced"
   | Narration_posted -> "narration.posted"
+  | Scene_transition -> "scene.transition"
+  | Quest_update -> "quest.update"
+  | World_event -> "world.event"
 
 let event_type_of_string = function
   | "room.created" -> Ok Room_created
@@ -60,6 +66,9 @@ let event_type_of_string = function
   | "flag.set" -> Ok Flag_set
   | "node.advanced" -> Ok Node_advanced
   | "narration.posted" -> Ok Narration_posted
+  | "scene.transition" -> Ok Scene_transition
+  | "quest.update" -> Ok Quest_update
+  | "world.event" -> Ok World_event
   | s -> Error (Printf.sprintf "unknown event_type: %s" s)
 
 let make ~seq ~room_id ~ts ~event_type ?actor_id ~payload () =

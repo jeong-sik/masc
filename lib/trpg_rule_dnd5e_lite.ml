@@ -244,7 +244,10 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Turn_action_proposed
   | Trpg_engine_event.Turn_timeout
   | Trpg_engine_event.Keeper_unavailable
-  | Trpg_engine_event.Metric_updated ->
+  | Trpg_engine_event.Metric_updated
+  | Trpg_engine_event.Scene_transition
+  | Trpg_engine_event.Quest_update
+  | Trpg_engine_event.World_event ->
       state
 
 let derive_state ~state = state

@@ -1105,11 +1105,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_worktree : Tool_worktree.context = { config; agent_name } in
   let simple_ctx_vote : Tool_vote.context = { config; agent_name } in
   let simple_ctx_social : Tool_social.context = { config; agent_name } in
-  let simple_ctx_council : Tool_council.context = { 
-    base_path = config.base_path; 
+  let simple_ctx_council : Tool_council.context = {
+    base_path = config.base_path;
     agent_name;
     room_config = Some config;
   } in
+  let simple_ctx_experiment : Tool_experiment.context = { config; agent_name } in
   let simple_ctx_a2a : Tool_a2a.context = { config; agent_name } in
   let handover_ctx : Tool_handover.context = {
     config; agent_name;
@@ -1201,6 +1202,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_council.dispatch simple_ctx_council ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_experiment.dispatch simple_ctx_experiment ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_a2a.dispatch simple_ctx_a2a ~name ~args:arguments with
@@ -2545,6 +2549,7 @@ let handle_list_tools_eio state id =
     @ Tool_perpetual.schemas
     @ Tool_keeper.schemas
     @ Tool_trpg.schemas
+    @ Tool_experiment.schemas
   in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
     Mode.is_tool_enabled enabled_categories schema.name

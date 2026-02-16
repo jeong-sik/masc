@@ -1,17 +1,17 @@
 (** Auto-Recall Memory - Agent Being Protocol Memory System
 
     Automatic memory injection for MASC agents.
-    Fetches relevant context from cache, broadcasts, and vector search.
+    Fetches relevant context from cache, broadcasts, and file context.
 
     {2 Example Usage}
 
     {[
       let config = Auto_recall.make_config
         ~max_tokens:1000
-        ~sources:[Recent_broadcasts; Masc_cache; Qdrant_semantic]
+        ~sources:[Recent_broadcasts; Masc_cache; File_context]
         () in
 
-      (* With Eio for Qdrant semantic search *)
+      (* With Eio runtime context *)
       let result = Auto_recall.fetch_context_eio ~sw ~env room_config ~config ~query:"error handling" () in
       let injection = Auto_recall.format_for_injection result in
       (* Use injection as system prompt prefix *)
@@ -24,7 +24,6 @@
 type recall_source =
   | Masc_cache        (** Shared context store *)
   | Recent_broadcasts (** Last N broadcasts in room *)
-  | Qdrant_semantic   (** Vector similarity search - Agent Being Protocol *)
   | File_context      (** Recently touched files (TODO) *)
 
 (** Configuration for auto-recall *)
@@ -88,15 +87,15 @@ val fetch_context :
   unit ->
   recall_result
 
-(** Fetch context with Eio support for Qdrant semantic search.
-    Includes vector similarity search from Qdrant when configured.
+(** Fetch context with Eio runtime context.
+    Uses the same retrieval sources as {!fetch_context}.
 
     @param sw Eio switch
     @param env Eio environment with network access
     @param room_config MASC room configuration
     @param config Recall configuration
     @param query Query string for semantic search
-    @return Recall result including Qdrant matches
+    @return Recall result from configured sources
 *)
 val fetch_context_eio :
   sw:Eio.Switch.t ->

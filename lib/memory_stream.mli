@@ -4,7 +4,7 @@
     score = α·recency + β·importance + γ·relevance
 
     Phase 1: JSONL persistence, keyword-based relevance.
-    Phase 2+: Qdrant embedding-based relevance.
+    Phase 2+: external semantic store integration (pgvector-based).
 
     @since 4.0.0 *)
 

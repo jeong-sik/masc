@@ -4,7 +4,7 @@
     score = α·recency + β·importance + γ·relevance
 
     Phase 1: JSONL file persistence, keyword overlap for relevance.
-    Phase 2+: Qdrant vector similarity for relevance.
+    Phase 2+: external semantic store integration (pgvector-based).
 
     Storage: .masc/memory/{agent_name}/stream.jsonl
     Rotation: archive after 1000 entries.

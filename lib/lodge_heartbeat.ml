@@ -1532,7 +1532,7 @@ let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~cur
   in
 
   let memory_str = match memories with
-    | Some m -> Printf.sprintf "\n\n[관련 기억 (Qdrant)]\n%s" m
+    | Some m -> Printf.sprintf "\n\n[관련 기억]\n%s" m
     | None -> ""
   in
 
@@ -1557,7 +1557,7 @@ let load_agent_identity ~agent_name =
 let generate_agent_content ~agent_name ~context:_ ~action_type =
   (* Load full profile from Neo4j via GraphQL *)
   let profile = load_agent_profile ~agent_name in
-  (* Load short-term memories from Qdrant *)
+  (* Load short-term memories from local memory stream *)
   let memories = load_agent_memories ~agent_name ~limit:3 in
   (* Load thread history - accumulated agent activity *)
   let thread_history = get_recent_turns ~agent_name ~limit:5 in

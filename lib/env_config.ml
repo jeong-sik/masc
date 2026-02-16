@@ -183,14 +183,6 @@ module Guardian = struct
     get_bool ~default:true "MASC_GUARDIAN_LODGE_RESPECT_QUIET_HOURS"
 end
 
-(** {1 Qdrant Configuration} *)
-
-module Qdrant = struct
-  (** Timeout for Qdrant API calls (seconds) *)
-  let timeout_seconds =
-    get_float ~default:30.0 "MASC_QDRANT_TIMEOUT_SEC"
-end
-
 (** {1 LLM Configuration} *)
 
 module Llm = struct
@@ -399,7 +391,6 @@ let print_summary () =
     Session.max_age_seconds Session.rate_limit_window_seconds;
   Printf.eprintf "[env_config] Tempo: min=%.0fs max=%.0fs default=%.0fs\n%!"
     Tempo.min_interval_seconds Tempo.max_interval_seconds Tempo.default_interval_seconds;
-  Printf.eprintf "[env_config] Qdrant: timeout=%.0fs\n%!" Qdrant.timeout_seconds;
   Printf.eprintf "[env_config] Llm: timeout=%.0fs\n%!" Llm.timeout_seconds;
   Printf.eprintf "[env_config] RateLimit: cleanup_interval=%.0fs entry_max_age=%.0fs\n%!"
     RateLimit.cleanup_interval_seconds RateLimit.entry_max_age_seconds;

@@ -303,7 +303,7 @@ let extract_topics (content : string) : string list =
   let keywords = [
     "ocaml"; "eio"; "graphql"; "neo4j"; "rust"; "typescript"; "react";
     "agent"; "mcp"; "llm"; "ai"; "ml"; "api"; "webrtc"; "grpc";
-    "postgresql"; "sqlite"; "redis"; "qdrant"; "vector";
+    "postgresql"; "sqlite"; "redis"; "vector";
     "test"; "debug"; "deploy"; "ci"; "docker"; "kubernetes";
     "architecture"; "design"; "pattern"; "refactor";
     "performance"; "memory"; "concurrency"; "async";

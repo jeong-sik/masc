@@ -2164,7 +2164,7 @@ Time: %s
       (true, Yojson.Safe.pretty_to_string response)
 
   | "masc_recall_search" ->
-      (* Agent Being Protocol: Semantic memory search using Qdrant *)
+      (* Agent Being Protocol: Semantic memory recall from local sources *)
       let open Yojson.Safe.Util in
       let query = arguments |> member "query" |> to_string in
       let limit = arguments |> member "limit" |> to_int_option |> Option.value ~default:5 in
@@ -2174,12 +2174,12 @@ Time: %s
            (true, Yojson.Safe.pretty_to_string (`Assoc [
              ("success", `Bool false);
              ("error", `String "Database environment not available");
-             ("suggestion", `String "Ensure QDRANT_URL is configured");
+             ("suggestion", `String "Ensure runtime environment is initialized");
            ]))
        | Some env ->
            let recall_config = Auto_recall.make_config
              ~enabled:true
-             ~sources:[Auto_recall.Qdrant_semantic; Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache]
+             ~sources:[Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache; Auto_recall.File_context]
              ~max_tokens:4000
              ~max_broadcasts:limit
              ()
@@ -2193,7 +2193,6 @@ Time: %s
                  ("source", `String (match item.source with
                    | Auto_recall.Masc_cache -> "cache"
                    | Auto_recall.Recent_broadcasts -> "broadcast"
-                   | Auto_recall.Qdrant_semantic -> "memory"
                    | Auto_recall.File_context -> "file"));
                  ("content", `String item.content);
                  ("relevance", `Float item.relevance);

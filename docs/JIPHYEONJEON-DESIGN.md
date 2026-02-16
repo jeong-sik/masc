@@ -104,7 +104,7 @@ Neo4j (관계)
     ├── (Agent)-[:ARGUED {position}]->(Topic)
     └── (Topic)-[:RESULTED_IN]->(Decision)
 
-Qdrant (검색)
+pgvector (검색)
     │
     └── 토론 내용 벡터 임베딩
 ```
@@ -229,7 +229,7 @@ lib/
    └─> "만장일치 가결, 구현 진행"
 
 7. 실록 기록 (Archive)
-   └─> Neo4j + PostgreSQL + Qdrant 저장
+   └─> Neo4j + PostgreSQL + pgvector 저장
 ```
 
 ## 구현 우선순위

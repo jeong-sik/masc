@@ -329,12 +329,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Shutdown Hooks**: New `shutdown_hooks.ml` module for centralized graceful shutdown
 - **Cleanup Loops**: Auto-cleanup for rate limit buckets and MCP sessions
-- **Env Config**: `MASC_QDRANT_TIMEOUT_SEC`, `MASC_LLM_TIMEOUT_SEC`, `MASC_RATE_LIMIT_*`
+- **Env Config**: `MASC_LLM_TIMEOUT_SEC`, `MASC_RATE_LIMIT_*`
 
 ### Fixed
 - **SSE Zombie Prevention**: Snapshot-based broadcast + failed client auto-removal
 - **Atomic Race Condition**: `Atomic.fetch_and_add` in sse.ml (event/client counters)
-- **Timeout Guards**: Qdrant and LLM calls now have configurable timeouts
+- **Timeout Guards**: External memory/LLM calls now have configurable timeouts
 - **Subscriptions**: O(1) Queue-based notifications (was O(n) List append)
 - **Orchestrator**: Cancellation flag support for graceful loop termination
 

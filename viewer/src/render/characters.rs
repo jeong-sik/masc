@@ -5,12 +5,24 @@ use crate::game::components::*;
 use super::map::area_to_position;
 
 /// Character color assignments — each party member gets a distinct color.
+/// Used as fallback tint when portrait texture is not yet loaded.
 fn character_color(id: &str) -> Color {
     match id {
+        // Grimland originals
         "grimja" => Color::srgb(0.8, 0.3, 0.2),    // warrior red
         "luna" => Color::srgb(0.3, 0.4, 0.8),       // mage blue
         "songarak" => Color::srgb(0.3, 0.7, 0.3),   // rogue green
         "miso" => Color::srgb(0.8, 0.7, 0.3),       // cleric gold
+        // Identity Erosion
+        "iron" => Color::srgb(0.9, 0.9, 0.85),      // ivory white (uncanny saint)
+        "moth" => Color::srgb(0.4, 0.3, 0.5),       // murky purple (J-horror)
+        "bell" => Color::srgb(1.0, 0.85, 0.3),      // bright gold (cult leader glow)
+        "dust" => Color::srgb(0.4, 0.4, 0.35),      // muted brown-grey (shrinking)
+        // Conformity Pressure
+        "aldric" => Color::srgb(0.6, 0.2, 0.15),    // dark crimson (authority)
+        "brenna" => Color::srgb(0.7, 0.55, 0.4),    // warm tan (agreeable)
+        "cedric" => Color::srgb(0.5, 0.6, 0.7),     // pale blue (uncertain)
+        "dara" => Color::srgb(0.5, 0.45, 0.55),     // sage purple (observer)
         _ => Color::srgb(0.6, 0.6, 0.6),
     }
 }

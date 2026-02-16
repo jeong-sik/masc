@@ -8,7 +8,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::config;
 use crate::game::components::{Actor, Stats};
-use crate::game::state::{MapState, RoomState, TurnPhase, TurnProgressState};
+use crate::game::state::{ConnectionStatus, MapState, RoomState, TurnPhase, TurnProgressState};
 
 // ─── Expected API Response Types ─────────────
 
@@ -117,9 +117,9 @@ fn queue_initial_state_fetch(commands: &mut Commands) {
                 log::info!("Initial game state loaded from engine");
             }
             Err(e) => {
-                log::warn!("Engine not available, using mock data: {:?}", e);
+                log::warn!("Engine not available, using unavailable state: {:?}", e);
                 if let Ok(mut buf) = shared.lock() {
-                    *buf = Some(mock_game_state());
+                    *buf = Some(unavailable_game_state(&config::current_room_id()));
                 }
             }
         }
@@ -137,8 +137,10 @@ fn queue_initial_state_fetch(commands: &mut Commands) {
 pub fn fetch_initial_state(
     mut commands: Commands,
     mut active_room: ResMut<ActiveTrpgRoom>,
+    mut connection: ResMut<ConnectionStatus>,
 ) {
     active_room.room_id = config::current_room_id();
+    *connection = ConnectionStatus::Connecting;
     queue_initial_state_fetch(&mut commands);
 }
 
@@ -150,6 +152,7 @@ pub fn refresh_state_on_room_change(
     mut room_state: ResMut<RoomState>,
     mut map_state: ResMut<MapState>,
     mut turn_progress: ResMut<TurnProgressState>,
+    mut connection: ResMut<ConnectionStatus>,
 ) {
     let current_room = config::current_room_id();
     if active_room.room_id == current_room {
@@ -167,6 +170,7 @@ pub fn refresh_state_on_room_change(
     *map_state = MapState::default();
     *turn_progress = TurnProgressState::default();
     turn_progress.room_status = "loading".to_string();
+    *connection = ConnectionStatus::Connecting;
 
     queue_initial_state_fetch(&mut commands);
     log::info!("TRPG room changed — reloading state for room {}", current_room);
@@ -180,6 +184,7 @@ pub fn apply_initial_state(
     mut room_state: ResMut<RoomState>,
     mut map_state: ResMut<MapState>,
     mut turn_progress: ResMut<TurnProgressState>,
+    mut connection: ResMut<ConnectionStatus>,
 ) {
     if buffer.consumed {
         return;
@@ -195,6 +200,11 @@ pub fn apply_initial_state(
     let Some(state) = state else {
         return;
     };
+    let state_unavailable = state
+        .room
+        .as_ref()
+        .map(|room| room.status.trim() == "unavailable")
+        .unwrap_or(false);
 
     let actor_ids: Vec<String> = state
         .characters
@@ -203,13 +213,19 @@ pub fn apply_initial_state(
         .collect();
 
     // Apply room state
-    if let Some(room) = state.room {
-        room_state.id = room.id;
-        room_state.status = room.status;
+    if let Some(room) = &state.room {
+        room_state.id = room.id.clone();
+        room_state.status = room.status.clone();
         room_state.turn = room.turn;
         room_state.phase = TurnPhase::from_str(&room.phase);
-        room_state.current_scenario = room.current_scenario;
-        room_state.current_node = room.current_node;
+        room_state.current_scenario = room.current_scenario.clone();
+        room_state.current_node = room.current_node.clone();
+    }
+
+    if state_unavailable {
+        *connection = ConnectionStatus::Disconnected;
+    } else {
+        *connection = ConnectionStatus::Connected;
     }
 
     turn_progress.room_status = room_state.status.clone();
@@ -332,7 +348,7 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         .unwrap_or(config::DEFAULT_ROOM_ID)
         .to_string();
 
-    let turn = state.get("turn").and_then(Value::as_u64).unwrap_or(1) as u32;
+    let turn = state.get("turn").and_then(Value::as_u64).unwrap_or(0) as u32;
     let phase = state
         .get("phase")
         .and_then(Value::as_str)
@@ -342,23 +358,19 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
     let current_area = state
         .get("current_area")
         .and_then(Value::as_str)
-        .unwrap_or("A")
+        .unwrap_or("")
         .to_string();
     let area_label = state
         .get("area_label")
         .and_then(Value::as_str)
-        .unwrap_or("미상 지역")
+        .unwrap_or("")
         .to_string();
 
-    let mut characters = state
+    let characters = state
         .get("characters")
         .cloned()
         .and_then(|v| serde_json::from_value::<Vec<CharacterData>>(v).ok())
         .unwrap_or_default();
-
-    if characters.is_empty() {
-        characters = mock_game_state().characters;
-    }
 
     GameStateResponse {
         room: Some(RoomResponse {
@@ -366,7 +378,7 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
             status: state
                 .get("status")
                 .and_then(Value::as_str)
-                .unwrap_or("active")
+                .unwrap_or("idle")
                 .to_string(),
             turn,
             phase,
@@ -387,96 +399,19 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
     }
 }
 
-// ─── Mock Data ───────────────────────────────
-
-/// Fallback data when the engine is not running.
-/// Matches the 4-character party from scenarios.json.
-fn mock_game_state() -> GameStateResponse {
+fn unavailable_game_state(room_id: &str) -> GameStateResponse {
     GameStateResponse {
         room: Some(RoomResponse {
-            id: "default".to_string(),
-            status: "active".to_string(),
-            turn: 1,
+            id: room_id.to_string(),
+            status: "unavailable".to_string(),
+            turn: 0,
             phase: "dm_narration".to_string(),
-            current_scenario: "prologue".to_string(),
-            current_node: "tavern_entrance".to_string(),
+            current_scenario: "".to_string(),
+            current_node: "".to_string(),
         }),
-        characters: vec![
-            CharacterData {
-                id: "grimja".to_string(),
-                name: "그림자".to_string(),
-                class: "fighter".to_string(),
-                hp: 28,
-                max_hp: 28,
-                stats: Some(StatsData {
-                    atk: 16,
-                    def: 14,
-                    int: 8,
-                    luck: 10,
-                }),
-                area: "A".to_string(),
-                is_dead: false,
-                inventory: vec![],
-                buffs: vec![],
-                debuffs: vec![],
-            },
-            CharacterData {
-                id: "luna".to_string(),
-                name: "루나".to_string(),
-                class: "wizard".to_string(),
-                hp: 18,
-                max_hp: 18,
-                stats: Some(StatsData {
-                    atk: 8,
-                    def: 10,
-                    int: 18,
-                    luck: 12,
-                }),
-                area: "B".to_string(),
-                is_dead: false,
-                inventory: vec![],
-                buffs: vec![],
-                debuffs: vec![],
-            },
-            CharacterData {
-                id: "songarak".to_string(),
-                name: "손가락".to_string(),
-                class: "rogue".to_string(),
-                hp: 22,
-                max_hp: 22,
-                stats: Some(StatsData {
-                    atk: 12,
-                    def: 12,
-                    int: 14,
-                    luck: 16,
-                }),
-                area: "C".to_string(),
-                is_dead: false,
-                inventory: vec![],
-                buffs: vec![],
-                debuffs: vec![],
-            },
-            CharacterData {
-                id: "miso".to_string(),
-                name: "미소".to_string(),
-                class: "cleric".to_string(),
-                hp: 24,
-                max_hp: 24,
-                stats: Some(StatsData {
-                    atk: 10,
-                    def: 12,
-                    int: 16,
-                    luck: 14,
-                }),
-                area: "D".to_string(),
-                is_dead: false,
-                inventory: vec![],
-                buffs: vec![],
-                debuffs: vec![],
-            },
-        ],
-        current_area: "A".to_string(),
-        area_label: "폐허의 입구".to_string(),
+        characters: Vec::new(),
+        current_area: "".to_string(),
+        area_label: "".to_string(),
     }
 }
 
@@ -507,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_masc_shape_uses_defaults_and_fallback_party() {
+    fn normalize_masc_shape_uses_defaults_without_fallback_party() {
         let root = json!({
             "ok": true,
             "room_id": "default",
@@ -521,6 +456,6 @@ mod tests {
         let parsed = normalize_state_response(root).expect("masc parse should succeed");
         assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(5));
         assert_eq!(parsed.current_area, "C");
-        assert!(!parsed.characters.is_empty(), "fallback party should exist");
+        assert!(parsed.characters.is_empty(), "no fallback party should be injected");
     }
 }

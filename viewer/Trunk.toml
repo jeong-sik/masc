@@ -1,6 +1,6 @@
 [build]
 target = "index.html"
-release = false
+release = true
 filehash = true
 
 [watch]

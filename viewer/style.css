@@ -995,3 +995,117 @@ body.mode-lobby #dashboard {
     max-width: 900px;
     margin: 0 auto;
 }
+
+/* ═══════════════════════════════════════════
+   ENHANCED PANEL SECTIONS (Phase 2)
+   ═══════════════════════════════════════════ */
+
+/* ─── Panel Header (shared across modes) ─── */
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.panel-header h2 {
+    font-family: var(--font-display);
+    font-size: 18px;
+    color: var(--accent-primary);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+}
+
+/* ─── Status Badges ──────────────────────── */
+
+.council-status,
+.experiment-status {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--bg-card);
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    padding: 4px 10px;
+    letter-spacing: 1px;
+}
+
+/* ─── Feed Containers (scrollable) ───────── */
+
+.council-feed,
+.social-feed,
+.experiment-feed {
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 8px 0;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.council-feed::-webkit-scrollbar,
+.social-feed::-webkit-scrollbar,
+.experiment-feed::-webkit-scrollbar {
+    width: 4px;
+}
+
+.council-feed::-webkit-scrollbar-track,
+.social-feed::-webkit-scrollbar-track,
+.experiment-feed::-webkit-scrollbar-track {
+    background: var(--bg-deep);
+}
+
+.council-feed::-webkit-scrollbar-thumb,
+.social-feed::-webkit-scrollbar-thumb,
+.experiment-feed::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 2px;
+}
+
+.council-feed::-webkit-scrollbar-thumb:hover,
+.social-feed::-webkit-scrollbar-thumb:hover,
+.experiment-feed::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* ─── Empty State Placeholders ───────────── */
+
+.council-empty,
+.social-empty,
+.experiment-empty {
+    color: var(--text-dim);
+    font-style: italic;
+    font-size: 13px;
+    padding: 24px 0;
+    text-align: center;
+}
+
+/* ─── Monitor Event Feed ─────────────────── */
+
+.monitor-event-feed {
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.monitor-event-feed::-webkit-scrollbar {
+    width: 4px;
+}
+
+.monitor-event-feed::-webkit-scrollbar-track {
+    background: var(--bg-deep);
+}
+
+.monitor-event-feed::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 2px;
+}

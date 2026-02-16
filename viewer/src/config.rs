@@ -19,6 +19,8 @@ pub const DEFAULT_ROOM_ID: &str = "default";
 
 /// SSE endpoint for a given viewer mode.
 /// Returns `None` for Lobby (no live data connection).
+/// Called by `masc_client::setup_masc_sse` (wasm32 only).
+#[allow(dead_code)]
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
         ViewerMode::Lobby => None,

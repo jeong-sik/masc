@@ -161,6 +161,7 @@
                     <button id="room-refresh-btn" class="inline-toggle" type="button">목록 새로고침</button>
                     <span id="room-status" class="widget-pill">room default</span>
                 </div>
+                <button id="new-game-toggle" class="inline-toggle" type="button">새 게임</button>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>
@@ -176,6 +177,47 @@
                 </div>
             </div>
         </header>
+
+        <section id="new-game-panel" class="new-game-panel" style="display: none;">
+            <div class="new-game-panel-head">
+                <strong>새 게임 시작</strong>
+                <button id="new-game-close" class="inline-toggle" type="button">닫기</button>
+            </div>
+            <div class="new-game-grid">
+                <label class="new-game-field">
+                    <span>Room ID</span>
+                    <div class="new-game-inline">
+                        <input id="new-game-room-id" type="text" maxlength="64" placeholder="adventure-..." />
+                        <button id="new-game-room-regenerate" class="inline-toggle" type="button">재생성</button>
+                    </div>
+                </label>
+
+                <label class="new-game-field">
+                    <span>DM Keeper</span>
+                    <select id="new-game-dm-select">
+                        <option value="">로딩 중...</option>
+                    </select>
+                </label>
+
+                <label class="new-game-field">
+                    <span>Player Keepers (다중 선택)</span>
+                    <select id="new-game-player-select" multiple size="6">
+                        <option value="">로딩 중...</option>
+                    </select>
+                </label>
+
+                <label class="new-game-field">
+                    <span>Keeper Models (comma-separated)</span>
+                    <input id="new-game-models" type="text" value="ollama:glm-4.7-flash" />
+                </label>
+            </div>
+
+            <div class="new-game-actions">
+                <button id="new-game-refresh" class="inline-toggle" type="button">Keeper 새로고침</button>
+                <button id="new-game-start" class="inline-toggle primary" type="button">세션 시작</button>
+            </div>
+            <div id="new-game-status" class="new-game-status">버튼을 눌러 준비하세요.</div>
+        </section>
 
         <!-- Main Content Grid -->
         <main id="content">

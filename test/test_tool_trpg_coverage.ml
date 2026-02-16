@@ -445,6 +445,195 @@ let test_examples_scenario_visible_as_world_preset () =
     |> Yojson.Safe.Util.to_string);
   cleanup_dir base_dir
 
+let test_actor_spawn_claim_release_flow () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = None }
+  in
+  let room_id = "room-actor-lease-flow" in
+
+  let ok_spawn1, _spawn1 =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-raven");
+            ("role", `String "npc");
+            ("name", `String "Raven");
+            ("skills", `List [ `String "scout" ]);
+          ])
+  in
+  Alcotest.(check bool) "spawn actor1 ok" true ok_spawn1;
+
+  let ok_claim1, _claim1 =
+    dispatch_exn ctx ~name:"masc_trpg_actor_claim"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-raven");
+            ("keeper_name", `String "keeper-raven");
+          ])
+  in
+  Alcotest.(check bool) "claim actor1 ok" true ok_claim1;
+
+  let ok_claim_same, claim_same_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_claim"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-raven");
+            ("keeper_name", `String "keeper-raven");
+          ])
+  in
+  Alcotest.(check bool) "idempotent same-keeper claim ok" true ok_claim_same;
+  Alcotest.(check string)
+    "same claim returns already_claimed"
+    "already_claimed"
+    (parse_json_exn claim_same_body |> Yojson.Safe.Util.member "status"
+   |> Yojson.Safe.Util.to_string);
+
+  let ok_spawn2, _spawn2 =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-owl");
+            ("role", `String "npc");
+          ])
+  in
+  Alcotest.(check bool) "spawn actor2 ok" true ok_spawn2;
+
+  let ok_claim2_conflict, claim2_conflict_msg =
+    dispatch_exn ctx ~name:"masc_trpg_actor_claim"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-owl");
+            ("keeper_name", `String "keeper-raven");
+          ])
+  in
+  Alcotest.(check bool) "keeper cannot control two actors" false ok_claim2_conflict;
+  Alcotest.(check bool)
+    "error mentions keeper already controls actor"
+    true
+    (contains_substring claim2_conflict_msg "keeper already controls actor");
+
+  let ok_release_wrong, release_wrong_msg =
+    dispatch_exn ctx ~name:"masc_trpg_actor_release"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-raven");
+            ("keeper_name", `String "keeper-wrong");
+          ])
+  in
+  Alcotest.(check bool) "release by non-owner fails" false ok_release_wrong;
+  Alcotest.(check bool)
+    "release error mentions another keeper"
+    true
+    (contains_substring release_wrong_msg "another keeper");
+
+  let ok_release, _release_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_release"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-raven");
+            ("keeper_name", `String "keeper-raven");
+          ])
+  in
+  Alcotest.(check bool) "release by owner ok" true ok_release;
+
+  let ok_claim2, _claim2 =
+    dispatch_exn ctx ~name:"masc_trpg_actor_claim"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-owl");
+            ("keeper_name", `String "keeper-raven");
+          ])
+  in
+  Alcotest.(check bool) "claim actor2 after release ok" true ok_claim2;
+
+  let _, stream_claimed =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("event_type", `String "actor.claimed");
+          ])
+  in
+  Alcotest.(check int)
+    "actor.claimed count"
+    2
+    (count_from_json (parse_json_exn stream_claimed));
+
+  let _, stream_released =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("event_type", `String "actor.released");
+          ])
+  in
+  Alcotest.(check int)
+    "actor.released count"
+    1
+    (count_from_json (parse_json_exn stream_released));
+  cleanup_dir base_dir
+
+let test_actor_claim_rejects_dead_actor () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = None }
+  in
+  let room_id = "room-actor-dead-claim" in
+  let ok_spawn, _spawn =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-fallen");
+            ("role", `String "npc");
+            ("hp", `Int 0);
+            ("max_hp", `Int 10);
+            ("alive", `Bool false);
+          ])
+  in
+  Alcotest.(check bool) "spawn dead actor ok" true ok_spawn;
+
+  let ok_claim, claim_msg =
+    dispatch_exn ctx ~name:"masc_trpg_actor_claim"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "npc-fallen");
+            ("keeper_name", `String "keeper-fallen");
+          ])
+  in
+  Alcotest.(check bool) "claim dead actor fails" false ok_claim;
+  Alcotest.(check bool)
+    "error mentions not alive"
+    true
+    (contains_substring claim_msg "not alive");
+  cleanup_dir base_dir
+
 let () =
   Alcotest.run "Tool_trpg coverage"
     [
@@ -484,5 +673,16 @@ let () =
             "rejects non-unique keepers"
             `Quick
             test_round_run_rejects_non_unique_keepers;
+        ] );
+      ( "actor_control",
+        [
+          Alcotest.test_case
+            "spawn + claim + release flow"
+            `Quick
+            test_actor_spawn_claim_release_flow;
+          Alcotest.test_case
+            "reject dead actor claim"
+            `Quick
+            test_actor_claim_rejects_dead_actor;
         ] );
     ]

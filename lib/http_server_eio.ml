@@ -87,18 +87,11 @@ end
 
 (** Simple response helpers *)
 module Response = struct
-  let cors_headers = [
-    ("access-control-allow-origin", "*");
-    ("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
-    ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-    ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
-  ]
-
   let text ?(status = `OK) body reqd =
     let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers) in
+    ]) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
@@ -106,7 +99,7 @@ module Response = struct
     let base_headers = [
       ("content-type", "text/html; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers in
+    ] in
     let response = Httpun.Response.create
       ~headers:(Httpun.Headers.of_list (base_headers @ headers))
       status
@@ -117,7 +110,7 @@ module Response = struct
     let base_headers = [
       ("content-type", content_type);
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers in
+    ] in
     let response = Httpun.Response.create
       ~headers:(Httpun.Headers.of_list (base_headers @ headers))
       status
@@ -149,7 +142,7 @@ module Response = struct
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length final_body));
       ("vary", "Accept-Encoding");
-    ] @ cors_headers in
+    ] in
     let headers = match encoding with
       | Some enc -> ("content-encoding", enc) :: base_headers
       | None -> base_headers
@@ -163,7 +156,7 @@ module Response = struct
     let headers = Httpun.Headers.of_list ([
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers) in
+    ]) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
@@ -199,7 +192,7 @@ module Response = struct
           ("etag", etag_value);
           ("cache-control", "no-cache");
           ("vary", "Accept-Encoding");
-        ] @ cors_headers in
+        ] in
         let headers = match encoding with
           | Some enc -> ("content-encoding", enc) :: base_headers
           | None -> base_headers
@@ -245,10 +238,6 @@ module Request = struct
     let headers = Httpun.Headers.of_list [
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
       ("connection", "close");
     ] in
     let response = Httpun.Response.create ~headers status in
@@ -424,7 +413,6 @@ let metrics_handler _request reqd =
   let headers = Httpun.Headers.of_list [
     ("content-type", "text/plain; version=0.0.4; charset=utf-8");
     ("content-length", string_of_int (String.length body));
-    ("access-control-allow-origin", "*");
   ] in
   let response = Httpun.Response.create ~headers `OK in
   Httpun.Reqd.respond_with_string reqd response body

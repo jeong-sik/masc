@@ -184,6 +184,7 @@ module Perpetual_loop = Perpetual_loop
 module Tool_perpetual = Tool_perpetual
 module Tool_keeper = Tool_keeper
 module Tool_trpg = Tool_trpg
+module Trpg_preset_store = Trpg_preset_store
 module Trpg_engine_types = Trpg_engine_types
 module Trpg_engine_event = Trpg_engine_event
 module Trpg_engine_state_machine = Trpg_engine_state_machine

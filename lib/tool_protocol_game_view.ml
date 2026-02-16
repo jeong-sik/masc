@@ -950,6 +950,11 @@ let legacy_alias_to_canonical = function
   | "masc_trpg_turn_advance" -> Some "trpg.turn.advance"
   | "masc_trpg_stream" -> Some "trpg.stream.read"
   | "masc_trpg_round_run" -> Some "trpg.round.run"
+  | "masc_trpg_preset_list" -> Some "trpg.preset.list"
+  | "masc_trpg_pool_generate" -> Some "trpg.pool.generate"
+  | "masc_trpg_party_select" -> Some "trpg.party.select"
+  | "masc_trpg_session_start" -> Some "trpg.session.start"
+  | "masc_trpg_intervention_submit" -> Some "trpg.intervention.submit"
   | "masc_trpg_scene_transition" -> Some "trpg.scene.transition"
   | "masc_trpg_quest_update" -> Some "trpg.quest.update"
   | "masc_trpg_world_event" -> Some "trpg.world.event"
@@ -1075,6 +1080,26 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
         (match handle_trpg_world_query ctx ~canonical_tool:name args with
         | Ok r -> r
         | Error e -> e)
+  | "trpg.preset.list" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_preset_list" args)
+  | "trpg.pool.generate" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_pool_generate" args)
+  | "trpg.party.select" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_party_select" args)
+  | "trpg.session.start" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_session_start" args)
+  | "trpg.intervention.submit" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_intervention_submit" args)
   | "trpg.dice.roll" ->
       Some (handle_trpg_canonical ctx ~canonical_tool:name ~legacy_name:"masc_trpg_dice_roll" args)
   | "trpg.turn.advance" ->
@@ -1269,6 +1294,64 @@ let schemas : Types.tool_schema list =
            ("room_id", string_schema);
            ("after_seq", int_schema);
            ("event_limit", int_schema);
+         ]);
+    schema "trpg.preset.list"
+      "Canonical alias of masc_trpg_preset_list."
+      (object_schema
+         [
+           ("include_characters", bool_schema);
+           ("include_skills", bool_schema);
+         ]);
+    schema "trpg.pool.generate"
+      "Canonical alias of masc_trpg_pool_generate."
+      (object_schema
+         ~required:[ "session_id" ]
+         [
+           ("session_id", string_schema);
+           ("world_preset_id", string_schema);
+           ("dm_preset_id", string_schema);
+           ("pool_size", int_schema);
+           ("party_size", int_schema);
+           ("seed", int_schema);
+         ]);
+    schema "trpg.party.select"
+      "Canonical alias of masc_trpg_party_select."
+      (object_schema
+         ~required:[ "session_id"; "pool"; "selected_player_ids" ]
+         [
+           ("session_id", string_schema);
+           ("room_id", string_schema);
+           ("pool", array_of (object_schema []));
+           ("selected_player_ids", array_of string_schema);
+         ]);
+    schema "trpg.session.start"
+      "Canonical alias of masc_trpg_session_start."
+      (object_schema
+         ~required:[ "session_id" ]
+         [
+           ("session_id", string_schema);
+           ("room_id", string_schema);
+           ("dm_preset_id", string_schema);
+           ("world_preset_id", string_schema);
+           ("dm_keeper", string_schema);
+           ("party", array_of (object_schema []));
+           ("phase", string_schema);
+           ("rule_module", string_schema);
+           ("force", bool_schema);
+         ]);
+    schema "trpg.intervention.submit"
+      "Canonical alias of masc_trpg_intervention_submit."
+      (object_schema
+         ~required:[ "room_id"; "intervention_type" ]
+         [
+           ("room_id", string_schema);
+           ("session_id", string_schema);
+           ("intervention_type", string_schema);
+           ("scope", string_schema);
+           ("target_actor", string_schema);
+           ("expected_turn", int_schema);
+           ("reason", string_schema);
+           ("payload", object_schema []);
          ]);
     schema "trpg.dice.roll"
       "Canonical alias of masc_trpg_dice_roll."

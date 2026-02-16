@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve
+.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-trpg-session-contract harness-trpg-grimland-smoke
 
 # Default target
 all: build
@@ -74,3 +74,15 @@ viewer-build:
 # Serve viewer locally at http://127.0.0.1:8080
 viewer-serve:
 	scripts/viewer-trunk.sh serve
+
+# GAME-VIEW contract harness (decision/experiment/trpg gate checks)
+harness-game-view-contract:
+	scripts/harness_game_view_precondition.sh
+
+# TRPG session bootstrap contract harness (preset/pool/party/session/intervention)
+harness-trpg-session-contract:
+	scripts/harness_trpg_session_contract.sh
+
+# TRPG Grimland smoke workload (manual/nightly; set RUN_ROUND=1 for keeper rounds)
+harness-trpg-grimland-smoke:
+	scripts/run_trpg_grimland_smoke.sh

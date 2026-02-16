@@ -16,6 +16,7 @@ use web_sys::{EventSource, MessageEvent};
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+use crate::game::state::ConnectionStatus;
 
 /// Wrapper around `EventSource` that is `Send + Sync`.
 /// Safe because WASM is single-threaded — there are no real threads to race with.
@@ -427,8 +428,26 @@ async fn sleep_ms(ms: i32) -> Result<(), JsValue> {
 #[cfg(target_arch = "wasm32")]
 fn start_polling_loop(messages: Arc<Mutex<Vec<(String, String)>>>, active: Arc<AtomicBool>) {
     wasm_bindgen_futures::spawn_local(async move {
-        let mut after_seq = 0_i64;
         let mut state = TrpgMapperState::default();
+        let mut after_seq = 0_i64;
+
+        // Skip historical backlog on viewer enter so old sessions do not flood narrative.
+        let bootstrap_url = config::trpg_stream_poll_url(0);
+        match fetch_text(&bootstrap_url).await {
+            Ok(body) => match decode_stream_events(&body, &mut state) {
+                Ok((max_seq, _)) => {
+                    after_seq = max_seq.max(0);
+                    if after_seq > 0 {
+                        log::info!(
+                            "TRPG poll bootstrap: skipping historical events up to seq {}",
+                            after_seq
+                        );
+                    }
+                }
+                Err(e) => log::warn!("Failed to decode TRPG bootstrap payload: {}", e),
+            },
+            Err(e) => log::debug!("TRPG bootstrap request failed: {:?}", e),
+        }
 
         while active.load(Ordering::Relaxed) {
             let url = config::trpg_stream_poll_url(after_seq);
@@ -462,7 +481,8 @@ fn start_polling_loop(messages: Arc<Mutex<Vec<(String, String)>>>, active: Arc<A
 
 /// Startup system that creates TRPG stream input (polling or legacy EventSource).
 #[cfg(target_arch = "wasm32")]
-pub fn setup_sse(mut commands: Commands) {
+pub fn setup_sse(mut commands: Commands, mut connection: ResMut<ConnectionStatus>) {
+    *connection = ConnectionStatus::Connecting;
     let messages = Arc::new(Mutex::new(Vec::new()));
     let active = Arc::new(AtomicBool::new(true));
     let es_handle: Arc<Mutex<Option<SendEventSource>>> = Arc::new(Mutex::new(None));
@@ -539,10 +559,14 @@ pub fn setup_sse(mut commands: Commands) {
 
 /// Native no-op for setup_sse.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn setup_sse(mut _commands: Commands) {}
+pub fn setup_sse(mut _commands: Commands, mut _connection: ResMut<ConnectionStatus>) {}
 
 /// OnExit(Trpg) system: stops polling, closes EventSource, and removes resource.
-pub fn teardown_sse(mut commands: Commands, receiver: Option<Res<SseReceiver>>) {
+pub fn teardown_sse(
+    mut commands: Commands,
+    receiver: Option<Res<SseReceiver>>,
+    connection: Option<ResMut<ConnectionStatus>>,
+) {
     if let Some(recv) = receiver {
         recv.polling_active.store(false, Ordering::Relaxed);
         #[cfg(target_arch = "wasm32")]
@@ -554,6 +578,9 @@ pub fn teardown_sse(mut commands: Commands, receiver: Option<Res<SseReceiver>>) 
                 }
             }
         }
+    }
+    if let Some(mut status) = connection {
+        *status = ConnectionStatus::Disconnected;
     }
     commands.remove_resource::<SseReceiver>();
     log::info!("SseReceiver resource removed");

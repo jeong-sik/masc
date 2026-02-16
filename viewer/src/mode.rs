@@ -465,6 +465,32 @@ fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(el) = doc.get_element_by_id("turn-num") {
         el.set_text_content(Some("1"));
     }
+    if let Some(el) = doc.get_element_by_id("turn-runtime") {
+        el.set_inner_html("");
+    }
+    for hidden_id in &["claimed-actor-id", "claimed-keeper"] {
+        if let Some(input) = doc
+            .get_element_by_id(hidden_id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            input.set_value("");
+        }
+    }
+    if let Some(el) = doc.get_element_by_id("player-actor-id") {
+        el.set_text_content(Some(""));
+    }
+    if let Some(join_panel) = doc
+        .get_element_by_id("join-panel")
+        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().cloned())
+    {
+        let _ = join_panel.style().set_property("display", "block");
+    }
+    if let Some(action_panel) = doc
+        .get_element_by_id("action-panel")
+        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().cloned())
+    {
+        let _ = action_panel.style().set_property("display", "none");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -487,6 +513,14 @@ fn parse_keeper_models(raw: &str) -> Vec<String> {
             .map(|part| part.trim().to_string())
             .collect::<Vec<_>>(),
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn default_keeper_models() -> Vec<String> {
+    vec![
+        "glm:glm-4.7".to_string(),
+        "gemini:gemini-2.5-flash".to_string(),
+    ]
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -689,13 +723,7 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         .unwrap_or_default();
     keepers = unique_non_empty(keepers);
     if keepers.is_empty() {
-        keepers = vec![
-            "dm-keeper".to_string(),
-            "grimja".to_string(),
-            "luna".to_string(),
-            "songarak".to_string(),
-            "miso".to_string(),
-        ];
+        return Err("사용 가능한 keeper가 없습니다. 먼저 keeper를 실행하세요.".to_string());
     }
 
     let dm_default = keepers
@@ -780,7 +808,10 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .get_element_by_id("new-game-models")
         .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
         .unwrap_or_default();
-    let models = parse_keeper_models(&model_text);
+    let mut models = parse_keeper_models(&model_text);
+    if models.is_empty() {
+        models = default_keeper_models();
+    }
 
     let preset_catalog = mcp_tool_call(
         "trpg.preset.list",
@@ -1198,12 +1229,20 @@ fn set_element_display(doc: &web_sys::Document, id: &str, display: &str) {
 #[cfg(target_arch = "wasm32")]
 fn set_panel_active(doc: &web_sys::Document, id: &str, active: bool) {
     if let Some(el) = doc.get_element_by_id(id) {
-        let class_list = el.class_list();
+        let class_name = el.get_attribute("class").unwrap_or_default();
+        let mut parts = class_name
+            .split_whitespace()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        let has_active = parts.iter().any(|v| v == "active");
         if active {
-            let _ = class_list.add_1("active");
-        } else {
-            let _ = class_list.remove_1("active");
+            if !has_active {
+                parts.push("active".to_string());
+            }
+        } else if has_active {
+            parts.retain(|v| v != "active");
         }
+        let _ = el.set_attribute("class", &parts.join(" "));
     }
 }
 

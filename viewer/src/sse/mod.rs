@@ -2,6 +2,7 @@ pub mod bridge;
 pub mod client;
 pub mod masc_bridge;
 pub mod masc_client;
+pub mod social_board;
 
 use bevy::prelude::*;
 
@@ -12,6 +13,9 @@ use crate::mode::ViewerMode;
 ///
 /// Also manages MASC MCP SSE connections for Monitor, Council,
 /// Social, and Experiment modes — rendering events as text in DOM panels.
+///
+/// Social mode additionally runs a Board HTTP poller (no board SSE events
+/// exist on the server, so it uses 30s polling via social_board module).
 ///
 /// TRPG systems are gated on `ViewerMode::Trpg`. MASC systems are gated
 /// on their respective modes. Each mode has its own OnEnter/OnExit lifecycle.
@@ -45,5 +49,23 @@ impl Plugin for SsePlugin {
                 )
                 .add_systems(OnExit(mode), masc_client::teardown_masc_sse);
         }
+
+        // ── Social Board HTTP poller (supplements SSE with Board posts) ──
+        app.add_systems(
+            OnEnter(ViewerMode::Social),
+            social_board::fetch_board_on_enter,
+        )
+        .add_systems(
+            Update,
+            (
+                social_board::render_board_posts,
+                social_board::board_refresh_tick,
+            )
+                .run_if(in_state(ViewerMode::Social)),
+        )
+        .add_systems(
+            OnExit(ViewerMode::Social),
+            social_board::cleanup_board,
+        );
     }
 }

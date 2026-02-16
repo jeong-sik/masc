@@ -6842,6 +6842,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgBootstrapping = false;
     let trpgPresetsLoaded = false;
     let trpgMcpCallSeq = 1000;
+    let trpgMcpSessionId = null;
     let trpgPresetCatalog = { dm_presets: [], world_presets: [] };
 
     function trpgEventType(ev) {
@@ -7021,9 +7022,36 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
     }
 
+    function parseMcpRpcFromSse(toolName, rawBody) {
+      const raw = String(rawBody || '');
+      const chunks = raw.split(/\r?\n\r?\n/);
+      for (let i = chunks.length - 1; i >= 0; i -= 1) {
+        const chunk = String(chunks[i] || '').trim();
+        if (chunk === '') continue;
+        const dataLines = chunk
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart());
+        if (dataLines.length === 0) continue;
+        const dataText = dataLines.join('\n').trim();
+        if (dataText === '') continue;
+        try {
+          const parsed = JSON.parse(dataText);
+          if (parsed && typeof parsed === 'object') return parsed;
+        } catch (_) {
+          // keep scanning older chunks
+        }
+      }
+      throw new Error(`${toolName} SSE 응답 파싱 실패: ${trpgShortText(raw, 220)}`);
+    }
+
     async function mcpToolCall(toolName, args = {}) {
       const requestId = ++trpgMcpCallSeq;
-      const headers = Object.assign({ 'Content-Type': 'application/json' }, authHeaders());
+      const headers = Object.assign({
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+      }, authHeaders());
+      if (trpgMcpSessionId) headers['Mcp-Session-Id'] = trpgMcpSessionId;
       const payload = {
         jsonrpc: '2.0',
         id: requestId,
@@ -7038,11 +7066,27 @@ let cached_html = lazy ({|<!DOCTYPE html>
         headers,
         body: JSON.stringify(payload),
       });
+      const nextSessionId = res.headers.get('mcp-session-id') || res.headers.get('Mcp-Session-Id');
+      if (nextSessionId && String(nextSessionId).trim() !== '') {
+        trpgMcpSessionId = String(nextSessionId).trim();
+      }
+      const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+      const rawBody = await res.text();
       let rpc = {};
-      try {
-        rpc = await res.json();
-      } catch (_) {
-        throw new Error(`${toolName} 응답 파싱 실패 (HTTP ${res.status})`);
+      if (rawBody.trim() !== '') {
+        if (contentType.includes('text/event-stream')) {
+          rpc = parseMcpRpcFromSse(toolName, rawBody);
+        } else {
+          try {
+            rpc = JSON.parse(rawBody);
+          } catch (_) {
+            try {
+              rpc = parseMcpRpcFromSse(toolName, rawBody);
+            } catch (_) {
+              throw new Error(`${toolName} 응답 파싱 실패 (HTTP ${res.status})`);
+            }
+          }
+        }
       }
       if (!res.ok) {
         const msg = (rpc && rpc.error && rpc.error.message) ? rpc.error.message : `HTTP ${res.status}`;

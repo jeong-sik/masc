@@ -8758,14 +8758,26 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return null;
     }
 
+    function trpgUnwrapRpcObject(value, maxDepth = 4) {
+      let current = value;
+      for (let i = 0; i < maxDepth; i += 1) {
+        if (current && typeof current === 'object') return current;
+        if (typeof current !== 'string') break;
+        const parsed = trpgTryParseJson(current);
+        if (parsed === null || parsed === current) break;
+        current = parsed;
+      }
+      return (current && typeof current === 'object') ? current : null;
+    }
+
     function parseMcpRpcFromSse(toolName, rawBody) {
       const raw = String(rawBody || '');
       const chunks = raw.split(/\r?\n\r?\n/);
       for (let i = chunks.length - 1; i >= 0; i -= 1) {
         const chunk = String(chunks[i] || '').trim();
         if (chunk === '') continue;
-        const parsedChunk = trpgTryParseJson(chunk);
-        if (parsedChunk && typeof parsedChunk === 'object') {
+        const parsedChunk = trpgUnwrapRpcObject(trpgTryParseJson(chunk));
+        if (parsedChunk) {
           return parsedChunk;
         }
         const dataLines = chunk
@@ -8775,14 +8787,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (dataLines.length === 0) continue;
         const dataText = dataLines.join('\n').trim();
         if (dataText === '' || dataText === '[DONE]') continue;
-        const parsedData = trpgTryParseJson(dataText);
-        if (parsedData && typeof parsedData === 'object') {
+        const parsedData = trpgUnwrapRpcObject(trpgTryParseJson(dataText));
+        if (parsedData) {
           return parsedData;
         }
       }
       const trimmed = raw.trim();
-      const parsedRaw = trpgTryParseJson(trimmed);
-      if (parsedRaw && typeof parsedRaw === 'object') {
+      const parsedRaw = trpgUnwrapRpcObject(trpgTryParseJson(trimmed));
+      if (parsedRaw) {
         return parsedRaw;
       }
       throw new Error(`${toolName} SSE 응답 파싱 실패: ${trpgShortText(raw, 220)}`);
@@ -8839,14 +8851,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (contentType.includes('text/event-stream')) {
           rpc = parseMcpRpcFromSse(toolName, rawBody);
         } else {
-          const parsedDirect = trpgTryParseJson(rawBody);
+          const parsedDirect = trpgUnwrapRpcObject(trpgTryParseJson(rawBody));
           if (parsedDirect !== null) {
             rpc = normalizeRpcEnvelope(requestId, parsedDirect);
           } else {
             try {
               rpc = parseMcpRpcFromSse(toolName, rawBody);
-            } catch (_) {
-              throw new Error(`${toolName} 응답 파싱 실패 (HTTP ${res.status})`);
+            } catch (innerErr) {
+              const innerMsg = String((innerErr && innerErr.message) || innerErr || 'parse error');
+              throw new Error(
+                `${toolName} 응답 파싱 실패 (HTTP ${res.status}): ${innerMsg} / raw=${trpgShortText(rawBody, 220)}`
+              );
             }
           }
         }
@@ -8870,10 +8885,24 @@ let cached_html = lazy ({|<!DOCTYPE html>
 
     async function ensureTrpgPresetCatalog(force = false) {
       if (trpgPresetsLoaded && !force) return trpgPresetCatalog;
-      const catalog = await mcpToolCall('trpg.preset.list', {
-        include_characters: false,
-        include_skills: false,
-      });
+      let catalog = null;
+      try {
+        catalog = await mcpToolCall('trpg.preset.list', {
+          include_characters: false,
+          include_skills: false,
+        });
+      } catch (primaryErr) {
+        try {
+          catalog = await mcpToolCall('masc_trpg_preset_list', {
+            include_characters: false,
+            include_skills: false,
+          });
+        } catch (legacyErr) {
+          const primaryMsg = String((primaryErr && primaryErr.message) || primaryErr || 'unknown error');
+          const legacyMsg = String((legacyErr && legacyErr.message) || legacyErr || 'unknown error');
+          throw new Error(`preset 조회 실패: canonical(${primaryMsg}) / legacy(${legacyMsg})`);
+        }
+      }
       trpgPresetCatalog = {
         dm_presets: Array.isArray(catalog.dm_presets) ? catalog.dm_presets : [],
         world_presets: Array.isArray(catalog.world_presets) ? catalog.world_presets : [],
@@ -9344,36 +9373,6 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (phaseSelect) phaseSelect.value = phase;
         trpgSyncKeeperSelectorsFromInputs();
 
-        const modelsRaw = String((document.getElementById('trpg-keeper-models-input') || {}).value || '');
-        const models = parseKeeperModels(modelsRaw);
-        if (models.length > 0) {
-          const worldPresetTitle =
-            (((catalog || {}).world_presets || []).find((preset) => String((preset && preset.id) || '') === worldPresetId) || {}).title
-            || worldPresetId;
-          const dmInstruction = trpgKeeperLanguageInstruction(lang);
-          await mcpToolCall('masc_keeper_up', {
-            name: dmKeeper,
-            goal: trpgDmGoalText(lang, roomId, worldPresetTitle),
-            models,
-            instructions: dmInstruction,
-            proactive_enabled: false,
-            presence_keepalive: true,
-          });
-          const keeperPairs = Object.entries(playerMap)
-            .map(([actorId, keeperName]) => [String(actorId || '').trim(), String(keeperName || '').trim()])
-            .filter(([actorId, keeperName]) => actorId !== '' && keeperName !== '');
-          for (const [actorId, keeperName] of keeperPairs) {
-            await mcpToolCall('masc_keeper_up', {
-              name: keeperName,
-              goal: trpgPlayerGoalText(lang, roomId, actorId),
-              models,
-              instructions: trpgKeeperLanguageInstruction(lang),
-              proactive_enabled: false,
-              presence_keepalive: true,
-            });
-          }
-        }
-
         try {
           await ensureTrpgKeeperCatalog(true);
         } catch (_) {
@@ -9387,15 +9386,75 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const worldPresetLabel =
           (((catalog || {}).world_presets || []).find((preset) => String((preset && preset.id) || '') === worldPresetId) || {}).title
           || worldPresetId;
-        setTrpgRoundRunStatus(
+        await fetchTrpg();
+
+        const modelsRaw = String((document.getElementById('trpg-keeper-models-input') || {}).value || '');
+        const models = parseKeeperModels(modelsRaw);
+        const keeperProvisionWarnings = [];
+        if (models.length > 0) {
+          const worldPresetTitle =
+            (((catalog || {}).world_presets || []).find((preset) => String((preset && preset.id) || '') === worldPresetId) || {}).title
+            || worldPresetId;
+          const dmInstruction = trpgKeeperLanguageInstruction(lang);
+          try {
+            await mcpToolCall('masc_keeper_up', {
+              name: dmKeeper,
+              goal: trpgDmGoalText(lang, roomId, worldPresetTitle),
+              models,
+              instructions: dmInstruction,
+              proactive_enabled: false,
+              presence_keepalive: true,
+            });
+          } catch (e) {
+            const msg = String((e && e.message) || e || 'unknown error');
+            keeperProvisionWarnings.push(`DM ${dmKeeper}: ${msg}`);
+          }
+          const keeperPairs = Object.entries(playerMap)
+            .map(([actorId, keeperName]) => [String(actorId || '').trim(), String(keeperName || '').trim()])
+            .filter(([actorId, keeperName]) => actorId !== '' && keeperName !== '');
+          for (const [actorId, keeperName] of keeperPairs) {
+            try {
+              await mcpToolCall('masc_keeper_up', {
+                name: keeperName,
+                goal: trpgPlayerGoalText(lang, roomId, actorId),
+                models,
+                instructions: trpgKeeperLanguageInstruction(lang),
+                proactive_enabled: false,
+                presence_keepalive: true,
+              });
+            } catch (e) {
+              const msg = String((e && e.message) || e || 'unknown error');
+              keeperProvisionWarnings.push(`${actorId}/${keeperName}: ${msg}`);
+            }
+          }
+        }
+        try {
+          await ensureTrpgKeeperCatalog(true);
+        } catch (_) {
+          renderTrpgKeeperQuickList();
+        }
+
+        const baseStatusHtml =
           `세션 시작 완료: <b>${escapeHtml(worldPresetLabel)}</b> / room <b>${escapeHtml(roomId)}</b><br>` +
-          `DM <b>${escapeHtml(dmKeeper)}</b> + 플레이어 <b>${escapeHtml(String(Object.keys(playerMap).length || party.length))}</b>명 준비됨`,
-          'ok'
-        );
+          `DM <b>${escapeHtml(dmKeeper)}</b> + 플레이어 <b>${escapeHtml(String(Object.keys(playerMap).length || party.length))}</b>명 준비됨`;
+        if (keeperProvisionWarnings.length > 0) {
+          const warningText = keeperProvisionWarnings
+            .slice(0, 3)
+            .map((msg) => escapeHtml(trpgShortText(msg, 160)))
+            .join('<br>');
+          const moreCount = Math.max(0, keeperProvisionWarnings.length - 3);
+          const moreText = moreCount > 0 ? `<br>… 외 ${moreCount}건` : '';
+          setTrpgRoundRunStatus(
+            `${baseStatusHtml}<br><span style="color:#fbbf24;">Keeper 준비 경고</span><br>${warningText}${moreText}`,
+            'warn'
+          );
+          showToast('세션은 시작됨 (Keeper 일부 준비 실패)', 'warning');
+        } else {
+          setTrpgRoundRunStatus(baseStatusHtml, 'ok');
+          showToast(`TRPG session ready (${roomId})`, 'success');
+        }
         const autoRoundEl = document.getElementById('trpg-bootstrap-run-round1');
         runRoundAfterBootstrap = !!(autoRoundEl && autoRoundEl.checked);
-        showToast(`TRPG session ready (${roomId})`, 'success');
-        await fetchTrpg();
       } catch (e) {
         const msg = String((e && e.message) || e || 'unknown error');
         setTrpgRoundRunStatus(`세션 시작 실패: ${escapeHtml(msg)}`, 'error');

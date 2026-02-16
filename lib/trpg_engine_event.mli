@@ -21,6 +21,8 @@ type event_type =
   | Session_started
   | Party_selected
   | Actor_spawned
+  | Actor_updated
+  | Actor_deleted
   | Actor_claimed
   | Actor_released
   | Intervention_submitted

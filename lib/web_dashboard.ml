@@ -2083,6 +2083,68 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <div id="trpg-next-action-desc" class="desc">세션을 시작하면 다음에 눌러야 할 버튼을 자동으로 안내합니다.</div>
                 <button id="trpg-next-action-btn" class="act" onclick="trpgRunNextAction()">1) 세션 시작</button>
               </div>
+              <div class="trpg-section-title" style="margin-top:10px;">액터 관리</div>
+              <div class="trpg-control-grid">
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-id-input">Actor ID</label>
+                  <input id="trpg-actor-id-input" type="text" placeholder="p99">
+                </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-role-select">Role</label>
+                  <select id="trpg-actor-role-select">
+                    <option value="" selected>(기본/유지)</option>
+                    <option value="player">player</option>
+                    <option value="npc">npc</option>
+                    <option value="dm">dm</option>
+                  </select>
+                </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-name-input">Name</label>
+                  <input id="trpg-actor-name-input" type="text" placeholder="새 캐릭터">
+                </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-archetype-input">Archetype</label>
+                  <input id="trpg-actor-archetype-input" type="text" placeholder="scout / tank / support">
+                </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-persona-input">Persona</label>
+                  <input id="trpg-actor-persona-input" type="text" placeholder="냉정한 정찰자">
+                </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-keeper-input">Keeper (선택)</label>
+                  <input id="trpg-actor-keeper-input" type="text" placeholder="pk-p99">
+                </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-hp-input">HP</label>
+                  <input id="trpg-actor-hp-input" type="number" min="0" step="1" placeholder="10">
+                </div>
+                <div class="trpg-control-field">
+                  <label for="trpg-actor-maxhp-input">Max HP</label>
+                  <input id="trpg-actor-maxhp-input" type="number" min="1" step="1" placeholder="10">
+                </div>
+                <div class="trpg-control-field full">
+                  <label for="trpg-actor-traits-input">Traits (comma-separated)</label>
+                  <input id="trpg-actor-traits-input" type="text" placeholder="brave,loyal">
+                </div>
+                <div class="trpg-control-field full">
+                  <label for="trpg-actor-skills-input">Skills (comma-separated)</label>
+                  <input id="trpg-actor-skills-input" type="text" placeholder="guard,heal,shadow-step">
+                </div>
+                <div class="trpg-control-field full">
+                  <label for="trpg-actor-inventory-input">Inventory (comma-separated)</label>
+                  <input id="trpg-actor-inventory-input" type="text" placeholder="dagger,potion,torch">
+                </div>
+                <div class="trpg-control-field full">
+                  <label for="trpg-actor-delete-reason-input">Delete Reason (선택)</label>
+                  <input id="trpg-actor-delete-reason-input" type="text" placeholder="retired / dead / replaced">
+                </div>
+              </div>
+              <div class="trpg-action-row">
+                <button id="trpg-actor-spawn-btn" class="trpg-run-btn secondary" onclick="spawnTrpgActor()">액터 생성</button>
+                <button id="trpg-actor-update-btn" class="trpg-run-btn secondary" onclick="updateTrpgActor()">액터 수정</button>
+                <button id="trpg-actor-delete-btn" class="trpg-run-btn secondary danger" onclick="deleteTrpgActor()">액터 삭제</button>
+              </div>
+              <div class="trpg-control-help" style="margin-top:4px;">생성 시 Keeper를 입력하면 lease claim을 자동 시도합니다. 수정은 입력한 필드만 patch하고, 삭제 시 actor lease도 함께 정리됩니다.</div>
               <div class="trpg-dev-note">라운드 실행은 DM + 플레이어 Keeper 순차 호출로 진행되며 timeout × 참여자 수만큼 시간이 걸릴 수 있습니다.</div>
             </div>
             <div class="trpg-section-title" style="margin-top:8px;">게임 세션</div>
@@ -6999,6 +7061,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgStateCache = {};
     let trpgRoundRunning = false;
     let trpgBootstrapping = false;
+    let trpgActorMutating = false;
     let trpgNextActionKind = 'bootstrap';
     let trpgCanRunRound = false;
     let trpgRunBlockedReason = '먼저 1) 세션 시작을 실행하세요.';
@@ -7394,6 +7457,13 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .filter((part) => part !== '');
     }
 
+    function parseCommaTextList(raw) {
+      return String(raw || '')
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part !== '');
+    }
+
     function trpgLanguageFromSelect() {
       const el = document.getElementById('trpg-lang-select');
       const raw = String((el && el.value) || 'auto').trim().toLowerCase();
@@ -7651,7 +7721,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     async function startTrpgNewGameFlow() {
-      if (trpgRoundRunning || trpgBootstrapping) return;
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
       ensureTrpgControlDefaults();
       const roomInput = document.getElementById('trpg-room-input');
       const newRoomId = trpgGenerateRoomId();
@@ -7704,7 +7774,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     async function reloadTrpgCatalogs() {
-      if (trpgRoundRunning || trpgBootstrapping) return;
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
       setTrpgRoundRunStatus('프리셋/키퍼 목록 새로고침 중...', 'running');
       try {
         const [presets, keepers] = await Promise.all([
@@ -7875,21 +7945,40 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function updateTrpgButtons() {
       const runBtn = document.getElementById('trpg-run-round-btn');
       if (runBtn) {
-        runBtn.disabled = trpgRoundRunning || trpgBootstrapping || !trpgCanRunRound;
+        runBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating || !trpgCanRunRound;
         runBtn.textContent = trpgRoundRunning ? '실행 중...' : '2) 라운드 실행';
         runBtn.title =
-          (!trpgRoundRunning && !trpgBootstrapping && !trpgCanRunRound && trpgRunBlockedReason)
+          (!trpgRoundRunning && !trpgBootstrapping && !trpgActorMutating && !trpgCanRunRound && trpgRunBlockedReason)
             ? trpgRunBlockedReason
             : '';
       }
       const bootstrapBtn = document.getElementById('trpg-bootstrap-btn');
       if (bootstrapBtn) {
-        bootstrapBtn.disabled = trpgRoundRunning || trpgBootstrapping;
+        bootstrapBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
         bootstrapBtn.textContent = trpgBootstrapping ? '시작 준비 중...' : '1) 세션 시작';
       }
       const newGameBtn = document.getElementById('trpg-new-game-btn');
       if (newGameBtn) {
-        newGameBtn.disabled = trpgRoundRunning || trpgBootstrapping;
+        newGameBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
+      }
+      const reloadBtn = document.getElementById('trpg-reload-btn');
+      if (reloadBtn) {
+        reloadBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
+      }
+      const actorSpawnBtn = document.getElementById('trpg-actor-spawn-btn');
+      if (actorSpawnBtn) {
+        actorSpawnBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
+        actorSpawnBtn.textContent = trpgActorMutating ? '처리 중...' : '액터 생성';
+      }
+      const actorUpdateBtn = document.getElementById('trpg-actor-update-btn');
+      if (actorUpdateBtn) {
+        actorUpdateBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
+        actorUpdateBtn.textContent = trpgActorMutating ? '처리 중...' : '액터 수정';
+      }
+      const actorDeleteBtn = document.getElementById('trpg-actor-delete-btn');
+      if (actorDeleteBtn) {
+        actorDeleteBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
+        actorDeleteBtn.textContent = trpgActorMutating ? '처리 중...' : '액터 삭제';
       }
     }
 
@@ -7903,6 +7992,249 @@ let cached_html = lazy ({|<!DOCTYPE html>
       trpgBootstrapping = isBusy;
       updateTrpgButtons();
       trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
+    }
+
+    function setTrpgActorMutationBusy(isBusy) {
+      trpgActorMutating = !!isBusy;
+      updateTrpgButtons();
+    }
+
+    function trpgActorTextInput(id) {
+      return String((document.getElementById(id) || {}).value || '').trim();
+    }
+
+    function trpgActorNumberInput(id) {
+      const raw = String((document.getElementById(id) || {}).value || '').trim();
+      if (raw === '') return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return NaN;
+      return Math.floor(n);
+    }
+
+    function readTrpgActorForm() {
+      return {
+        roomId: applyTrpgRoomFromInput(),
+        actorId: trpgActorTextInput('trpg-actor-id-input'),
+        role: trpgActorTextInput('trpg-actor-role-select'),
+        name: trpgActorTextInput('trpg-actor-name-input'),
+        archetype: trpgActorTextInput('trpg-actor-archetype-input'),
+        persona: trpgActorTextInput('trpg-actor-persona-input'),
+        keeperName: trpgActorTextInput('trpg-actor-keeper-input'),
+        hp: trpgActorNumberInput('trpg-actor-hp-input'),
+        maxHp: trpgActorNumberInput('trpg-actor-maxhp-input'),
+        traits: parseCommaTextList((document.getElementById('trpg-actor-traits-input') || {}).value || ''),
+        skills: parseCommaTextList((document.getElementById('trpg-actor-skills-input') || {}).value || ''),
+        inventory: parseCommaTextList((document.getElementById('trpg-actor-inventory-input') || {}).value || ''),
+        deleteReason: trpgActorTextInput('trpg-actor-delete-reason-input'),
+      };
+    }
+
+    function upsertTrpgPlayerKeeperLine(actorId, keeperName) {
+      const input = document.getElementById('trpg-player-keepers-input');
+      if (!input) return;
+      const actor = String(actorId || '').trim();
+      const keeper = String(keeperName || '').trim();
+      if (!actor || !keeper) return;
+      const rows = String(input.value || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      const nextRows = [];
+      for (const row of rows) {
+        const eqIdx = row.indexOf('=');
+        const left = eqIdx < 0 ? row : row.slice(0, eqIdx).trim();
+        if (left === actor) continue;
+        nextRows.push(row);
+      }
+      nextRows.push(`${actor}=${keeper}`);
+      input.value = nextRows.join('\n');
+      trpgSyncKeeperSelectorsFromInputs();
+    }
+
+    function removeTrpgPlayerKeeperLine(actorId) {
+      const input = document.getElementById('trpg-player-keepers-input');
+      if (!input) return;
+      const actor = String(actorId || '').trim();
+      if (!actor) return;
+      const rows = String(input.value || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      const nextRows = rows.filter((row) => {
+        const eqIdx = row.indexOf('=');
+        const left = eqIdx < 0 ? row : row.slice(0, eqIdx).trim();
+        return left !== actor;
+      });
+      input.value = nextRows.join('\n');
+      trpgSyncKeeperSelectorsFromInputs();
+    }
+
+    async function spawnTrpgActor() {
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
+      ensureTrpgControlDefaults();
+      const form = readTrpgActorForm();
+      if (!form.actorId) {
+        setTrpgRoundRunStatus('오류: Actor ID를 입력하세요.', 'error');
+        return;
+      }
+      const maxHp = form.maxHp == null ? 10 : form.maxHp;
+      const hpRaw = form.hp == null ? maxHp : form.hp;
+      if (!Number.isFinite(maxHp) || maxHp <= 0) {
+        setTrpgRoundRunStatus('오류: Max HP는 1 이상이어야 합니다.', 'error');
+        return;
+      }
+      if (!Number.isFinite(hpRaw) || hpRaw < 0) {
+        setTrpgRoundRunStatus('오류: HP는 0 이상이어야 합니다.', 'error');
+        return;
+      }
+      const hp = Math.max(0, Math.min(maxHp, hpRaw));
+      const role = form.role || 'player';
+      const spawnArgs = {
+        room_id: form.roomId,
+        actor_id: form.actorId,
+        role,
+        hp,
+        max_hp: maxHp,
+        alive: hp > 0,
+      };
+      if (form.name) spawnArgs.name = form.name;
+      if (form.archetype) spawnArgs.archetype = form.archetype;
+      if (form.persona) spawnArgs.persona = form.persona;
+      if (form.traits.length > 0) spawnArgs.traits = form.traits;
+      if (form.skills.length > 0) spawnArgs.skills = form.skills;
+      if (form.inventory.length > 0) spawnArgs.inventory = form.inventory;
+
+      setTrpgActorMutationBusy(true);
+      setTrpgRoundRunStatus(
+        `액터 생성 중: <b>${escapeHtml(form.actorId)}</b> (${escapeHtml(role)}) / room <b>${escapeHtml(form.roomId)}</b>`,
+        'running'
+      );
+      try {
+        await mcpToolCall('trpg.actor.spawn', spawnArgs);
+        if (form.keeperName) {
+          await mcpToolCall('trpg.actor.claim', {
+            room_id: form.roomId,
+            actor_id: form.actorId,
+            keeper_name: form.keeperName,
+          });
+          if (role === 'player') {
+            upsertTrpgPlayerKeeperLine(form.actorId, form.keeperName);
+          }
+        }
+        setTrpgRoundRunStatus(
+          `액터 생성 완료: <b>${escapeHtml(form.actorId)}</b>${form.keeperName ? ` → keeper <b>${escapeHtml(form.keeperName)}</b>` : ''}`,
+          'ok'
+        );
+        showToast(`Actor 생성 완료: ${form.actorId}`, 'success');
+        await fetchTrpg();
+      } catch (e) {
+        const msg = String((e && e.message) || e || 'unknown error');
+        setTrpgRoundRunStatus(`액터 생성 실패: ${escapeHtml(msg)}`, 'error');
+        showToast('Actor 생성 실패', 'error');
+      } finally {
+        setTrpgActorMutationBusy(false);
+      }
+    }
+
+    async function updateTrpgActor() {
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
+      ensureTrpgControlDefaults();
+      const form = readTrpgActorForm();
+      if (!form.actorId) {
+        setTrpgRoundRunStatus('오류: 수정할 Actor ID를 입력하세요.', 'error');
+        return;
+      }
+      const updateArgs = { room_id: form.roomId, actor_id: form.actorId };
+      let hasPatch = false;
+      if (form.role) { updateArgs.role = form.role; hasPatch = true; }
+      if (form.name) { updateArgs.name = form.name; hasPatch = true; }
+      if (form.archetype) { updateArgs.archetype = form.archetype; hasPatch = true; }
+      if (form.persona) { updateArgs.persona = form.persona; hasPatch = true; }
+      if (form.hp != null) {
+        if (!Number.isFinite(form.hp) || form.hp < 0) {
+          setTrpgRoundRunStatus('오류: HP는 0 이상이어야 합니다.', 'error');
+          return;
+        }
+        updateArgs.hp = form.hp;
+        updateArgs.alive = form.hp > 0;
+        hasPatch = true;
+      }
+      if (form.maxHp != null) {
+        if (!Number.isFinite(form.maxHp) || form.maxHp <= 0) {
+          setTrpgRoundRunStatus('오류: Max HP는 1 이상이어야 합니다.', 'error');
+          return;
+        }
+        updateArgs.max_hp = form.maxHp;
+        hasPatch = true;
+      }
+      if (form.traits.length > 0) { updateArgs.traits = form.traits; hasPatch = true; }
+      if (form.skills.length > 0) { updateArgs.skills = form.skills; hasPatch = true; }
+      if (form.inventory.length > 0) { updateArgs.inventory = form.inventory; hasPatch = true; }
+      if (!hasPatch) {
+        setTrpgRoundRunStatus('오류: 수정할 필드를 최소 1개 이상 입력하세요.', 'error');
+        return;
+      }
+
+      setTrpgActorMutationBusy(true);
+      setTrpgRoundRunStatus(
+        `액터 수정 중: <b>${escapeHtml(form.actorId)}</b> / room <b>${escapeHtml(form.roomId)}</b>`,
+        'running'
+      );
+      try {
+        await mcpToolCall('trpg.actor.update', updateArgs);
+        if (form.keeperName) {
+          await mcpToolCall('trpg.actor.claim', {
+            room_id: form.roomId,
+            actor_id: form.actorId,
+            keeper_name: form.keeperName,
+          });
+          if (form.role === 'player') {
+            upsertTrpgPlayerKeeperLine(form.actorId, form.keeperName);
+          }
+        }
+        setTrpgRoundRunStatus(`액터 수정 완료: <b>${escapeHtml(form.actorId)}</b>`, 'ok');
+        showToast(`Actor 수정 완료: ${form.actorId}`, 'success');
+        await fetchTrpg();
+      } catch (e) {
+        const msg = String((e && e.message) || e || 'unknown error');
+        setTrpgRoundRunStatus(`액터 수정 실패: ${escapeHtml(msg)}`, 'error');
+        showToast('Actor 수정 실패', 'error');
+      } finally {
+        setTrpgActorMutationBusy(false);
+      }
+    }
+
+    async function deleteTrpgActor() {
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
+      ensureTrpgControlDefaults();
+      const form = readTrpgActorForm();
+      if (!form.actorId) {
+        setTrpgRoundRunStatus('오류: 삭제할 Actor ID를 입력하세요.', 'error');
+        return;
+      }
+      const confirmed = window.confirm(`actor ${form.actorId} 를 삭제하시겠습니까?`);
+      if (!confirmed) return;
+      const deleteArgs = { room_id: form.roomId, actor_id: form.actorId };
+      if (form.deleteReason) deleteArgs.reason = form.deleteReason;
+
+      setTrpgActorMutationBusy(true);
+      setTrpgRoundRunStatus(
+        `액터 삭제 중: <b>${escapeHtml(form.actorId)}</b> / room <b>${escapeHtml(form.roomId)}</b>`,
+        'running'
+      );
+      try {
+        await mcpToolCall('trpg.actor.delete', deleteArgs);
+        removeTrpgPlayerKeeperLine(form.actorId);
+        setTrpgRoundRunStatus(`액터 삭제 완료: <b>${escapeHtml(form.actorId)}</b>`, 'ok');
+        showToast(`Actor 삭제 완료: ${form.actorId}`, 'success');
+        await fetchTrpg();
+      } catch (e) {
+        const msg = String((e && e.message) || e || 'unknown error');
+        setTrpgRoundRunStatus(`액터 삭제 실패: ${escapeHtml(msg)}`, 'error');
+        showToast('Actor 삭제 실패', 'error');
+      } finally {
+        setTrpgActorMutationBusy(false);
+      }
     }
 
     function trpgKeeperLanguageInstruction(lang) {
@@ -7927,7 +8259,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     async function bootstrapTrpgSession() {
-      if (trpgRoundRunning || trpgBootstrapping) return;
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
       ensureTrpgControlDefaults();
       trpgApplyKeeperSelectionToInputs();
       const roomId = applyTrpgRoomFromInput();
@@ -8182,7 +8514,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     async function runTrpgRound() {
-      if (trpgRoundRunning || trpgBootstrapping) return;
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
       if (!trpgCanRunRound) {
         setTrpgRoundRunStatus(`실행 전 점검: ${escapeHtml(String(trpgRunBlockedReason || '세션/할당 상태를 먼저 확인하세요.'))}`, 'error');
         return;

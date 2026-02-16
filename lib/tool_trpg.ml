@@ -10,6 +10,8 @@
     - masc_trpg_party_select
     - masc_trpg_session_start
     - masc_trpg_actor_spawn
+    - masc_trpg_actor_update
+    - masc_trpg_actor_delete
     - masc_trpg_actor_claim
     - masc_trpg_actor_release
     - masc_trpg_intervention_submit
@@ -458,7 +460,7 @@ let schemas : Types.tool_schema list =
       description =
         "Spawn an actor entity in room state. \
          Required: room_id, actor_id. \
-         Optional: role(dm|player|npc), name, archetype, persona, hp, max_hp, alive, traits, skills.";
+         Optional: role(dm|player|npc), name, archetype, persona, hp, max_hp, alive, traits, skills, inventory.";
       input_schema =
         `Assoc
           [
@@ -477,6 +479,55 @@ let schemas : Types.tool_schema list =
                   ("alive", `Assoc [ ("type", `String "boolean") ]);
                   ("traits", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("skills", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("inventory", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                ] );
+            ("required", `List [ `String "room_id"; `String "actor_id" ]);
+          ];
+    };
+    {
+      name = "masc_trpg_actor_update";
+      description =
+        "Update an existing actor entity in room state. \
+         Required: room_id, actor_id. \
+         Optional: role(dm|player|npc), name, archetype, persona, hp, max_hp, alive, traits, skills, inventory.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("role", `Assoc [ ("type", `String "string") ]);
+                  ("name", `Assoc [ ("type", `String "string") ]);
+                  ("archetype", `Assoc [ ("type", `String "string") ]);
+                  ("persona", `Assoc [ ("type", `String "string") ]);
+                  ("hp", `Assoc [ ("type", `String "integer") ]);
+                  ("max_hp", `Assoc [ ("type", `String "integer") ]);
+                  ("alive", `Assoc [ ("type", `String "boolean") ]);
+                  ("traits", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("skills", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("inventory", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                ] );
+            ("required", `List [ `String "room_id"; `String "actor_id" ]);
+          ];
+    };
+    {
+      name = "masc_trpg_actor_delete";
+      description =
+        "Delete an actor entity from room state and release its lease. \
+         Required: room_id, actor_id. Optional: reason.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("reason", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "room_id"; `String "actor_id" ]);
           ];
@@ -636,6 +687,15 @@ let get_optional_string_list args key =
   match args |> member key with
   | `Null -> Ok []
   | `List _ as list_json -> get_string_list_from_json list_json
+  | _ -> Error (Printf.sprintf "%s must be string array" key)
+
+let get_optional_string_list_option args key =
+  match args |> member key with
+  | `Null -> Ok None
+  | `List _ as list_json ->
+      let ( let* ) = Result.bind in
+      let* xs = get_string_list_from_json list_json in
+      Ok (Some xs)
   | _ -> Error (Printf.sprintf "%s must be string array" key)
 
 let dedupe_keep_order xs =
@@ -1734,6 +1794,7 @@ let actor_payload_from_spawn_args args ~actor_id =
   let* alive = get_optional_bool args "alive" ~default:true in
   let* traits = get_optional_string_list args "traits" in
   let* skills = get_optional_string_list args "skills" in
+  let* inventory = get_optional_string_list args "inventory" in
   let max_hp = Option.value ~default:10 max_hp_opt in
   if max_hp <= 0 then Error "max_hp must be > 0"
   else
@@ -1753,10 +1814,81 @@ let actor_payload_from_spawn_args args ~actor_id =
             ("alive", `Bool alive);
             ("traits", json_of_strings traits);
             ("skills", json_of_strings skills);
-            ("inventory", `List []);
+            ("inventory", json_of_strings inventory);
           ]
       in
       Ok actor_json
+
+let actor_patch_from_update_args args =
+  let ( let* ) = Result.bind in
+  let* role_opt = get_optional_string args "role" in
+  let* () =
+    match role_opt with
+    | Some role -> validate_actor_role role
+    | None -> Ok ()
+  in
+  let* name_opt = get_optional_string args "name" in
+  let* archetype_opt = get_optional_string args "archetype" in
+  let* persona_opt = get_optional_string args "persona" in
+  let* hp_opt = get_optional_int args "hp" in
+  let* max_hp_opt = get_optional_int args "max_hp" in
+  let* traits_opt = get_optional_string_list_option args "traits" in
+  let* skills_opt = get_optional_string_list_option args "skills" in
+  let* inventory_opt = get_optional_string_list_option args "inventory" in
+  let alive_opt =
+    match args |> member "alive" with
+    | `Bool b -> Ok (Some b)
+    | `Null -> Ok None
+    | _ -> Error "alive must be boolean"
+  in
+  let* alive_opt = alive_opt in
+  let alive_opt =
+    match alive_opt, hp_opt with
+    | Some v, _ -> Some v
+    | None, Some hp -> Some (hp > 0)
+    | None, None -> None
+  in
+  let* () =
+    match max_hp_opt with
+    | Some v when v <= 0 -> Error "max_hp must be > 0"
+    | _ -> Ok ()
+  in
+  let* () =
+    match hp_opt with
+    | Some v when v < 0 -> Error "hp must be >= 0"
+    | _ -> Ok ()
+  in
+  let fields = ref [] in
+  let add_opt_string key = function
+    | Some value -> fields := (key, `String value) :: !fields
+    | None -> ()
+  in
+  let add_opt_int key = function
+    | Some value -> fields := (key, `Int value) :: !fields
+    | None -> ()
+  in
+  let add_opt_bool key = function
+    | Some value -> fields := (key, `Bool value) :: !fields
+    | None -> ()
+  in
+  let add_opt_strings key = function
+    | Some values -> fields := (key, json_of_strings values) :: !fields
+    | None -> ()
+  in
+  add_opt_string "role" role_opt;
+  add_opt_string "name" name_opt;
+  add_opt_string "archetype" archetype_opt;
+  add_opt_string "persona" persona_opt;
+  add_opt_int "hp" hp_opt;
+  add_opt_int "max_hp" max_hp_opt;
+  add_opt_bool "alive" alive_opt;
+  add_opt_strings "traits" traits_opt;
+  add_opt_strings "skills" skills_opt;
+  add_opt_strings "inventory" inventory_opt;
+  if !fields = [] then
+    Error
+      "at least one update field is required: role,name,archetype,persona,hp,max_hp,alive,traits,skills,inventory"
+  else Ok (`Assoc (List.rev !fields))
 
 let handle_actor_spawn ctx args : result =
   let ( let* ) = Result.bind in
@@ -1793,6 +1925,89 @@ let handle_actor_spawn ctx args : result =
             ("ok", `Bool true);
             ("room_id", `String room_id);
             ("actor_id", `String actor_id);
+            ("event", Trpg_engine_event.to_yojson event);
+            ("state", state_of_derived next_derived);
+          ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_actor_update ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* actor_id = get_required_string args "actor_id" in
+    let* rule_opt = get_optional_string args "rule_module" in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+    let* () = validate_rule_module rule_module in
+    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let state = state_of_derived derived in
+    if not (actor_exists_in_state state actor_id) then
+      Error (Printf.sprintf "unknown actor_id: %s" actor_id)
+    else
+      let* actor_patch = actor_patch_from_update_args args in
+      let payload =
+        `Assoc
+          [
+            ("actor_id", `String actor_id);
+            ("actor_patch", actor_patch);
+            ("updated_by", `String ctx.agent_name);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Actor_updated
+          ~actor_id ~payload ()
+      in
+      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("event", Trpg_engine_event.to_yojson event);
+            ("state", state_of_derived next_derived);
+          ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_actor_delete ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* actor_id = get_required_string args "actor_id" in
+    let* reason_opt = get_optional_string args "reason" in
+    let* rule_opt = get_optional_string args "rule_module" in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+    let* () = validate_rule_module rule_module in
+    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let state = state_of_derived derived in
+    if not (actor_exists_in_state state actor_id) then
+      Error (Printf.sprintf "unknown actor_id: %s" actor_id)
+    else
+      let payload =
+        `Assoc
+          [
+            ("actor_id", `String actor_id);
+            ("reason", Option.fold ~none:`Null ~some:(fun v -> `String v) reason_opt);
+            ("deleted_by", `String ctx.agent_name);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Actor_deleted
+          ~actor_id ~payload ()
+      in
+      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("status", `String "deleted");
             ("event", Trpg_engine_event.to_yojson event);
             ("state", state_of_derived next_derived);
           ])
@@ -2320,6 +2535,8 @@ let dispatch ctx ~name ~args : result option =
   | "masc_trpg_party_select" -> Some (handle_party_select ctx args)
   | "masc_trpg_session_start" -> Some (handle_session_start ctx args)
   | "masc_trpg_actor_spawn" -> Some (handle_actor_spawn ctx args)
+  | "masc_trpg_actor_update" -> Some (handle_actor_update ctx args)
+  | "masc_trpg_actor_delete" -> Some (handle_actor_delete ctx args)
   | "masc_trpg_actor_claim" -> Some (handle_actor_claim ctx args)
   | "masc_trpg_actor_release" -> Some (handle_actor_release ctx args)
   | "masc_trpg_intervention_submit" -> Some (handle_intervention_submit ctx args)

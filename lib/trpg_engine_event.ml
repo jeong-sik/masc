@@ -21,6 +21,8 @@ type event_type =
   | Session_started
   | Party_selected
   | Actor_spawned
+  | Actor_updated
+  | Actor_deleted
   | Actor_claimed
   | Actor_released
   | Intervention_submitted
@@ -58,6 +60,8 @@ let string_of_event_type = function
   | Session_started -> "session.started"
   | Party_selected -> "party.selected"
   | Actor_spawned -> "actor.spawned"
+  | Actor_updated -> "actor.updated"
+  | Actor_deleted -> "actor.deleted"
   | Actor_claimed -> "actor.claimed"
   | Actor_released -> "actor.released"
   | Intervention_submitted -> "intervention.submitted"
@@ -86,6 +90,8 @@ let event_type_of_string = function
   | "session.started" -> Ok Session_started
   | "party.selected" -> Ok Party_selected
   | "actor.spawned" -> Ok Actor_spawned
+  | "actor.updated" -> Ok Actor_updated
+  | "actor.deleted" -> Ok Actor_deleted
   | "actor.claimed" -> Ok Actor_claimed
   | "actor.released" -> Ok Actor_released
   | "intervention.submitted" -> Ok Intervention_submitted

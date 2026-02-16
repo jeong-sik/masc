@@ -1,0 +1,5 @@
+
+(library
+ (name game_engine)
+ (public_name masc_mcp.game)
+ (modules judgment))

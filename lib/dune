@@ -159,6 +159,7 @@
    tool_library
    library_bridge
    tool_council
+   tool_experiment
    tool_suspend
    debate
    social

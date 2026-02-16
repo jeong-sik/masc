@@ -128,6 +128,128 @@ let schemas : Types.tool_schema list =
                 [ `String "room_id"; `String "dm_keeper"; `String "player_keepers" ] );
           ];
     };
+    {
+      name = "masc_trpg_scene_transition";
+      description =
+        "Record a scene transition event. Tracks quest progression and narrative flow. \
+         Required: room_id, from_scene, to_scene. \
+         Optional: trigger, narrative_hook.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("from_scene", `Assoc [ ("type", `String "string") ]);
+                  ("to_scene", `Assoc [ ("type", `String "string") ]);
+                  ("trigger", `Assoc [ ("type", `String "string") ]);
+                  ("narrative_hook", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ( "required",
+              `List [ `String "room_id"; `String "from_scene"; `String "to_scene" ] );
+          ];
+    };
+    {
+      name = "masc_trpg_quest_update";
+      description =
+        "Record a quest state change. Tracks quest progression (active/completed/failed) \
+         and objective completion. \
+         Required: room_id, quest_id, title, status. \
+         Optional: objectives (array of {desc, done}).";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("quest_id", `Assoc [ ("type", `String "string") ]);
+                  ("title", `Assoc [ ("type", `String "string") ]);
+                  ( "status",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "enum",
+                          `List
+                            [
+                              `String "active"; `String "completed"; `String "failed";
+                            ] );
+                      ] );
+                  ( "objectives",
+                    `Assoc
+                      [
+                        ("type", `String "array");
+                        ( "items",
+                          `Assoc
+                            [
+                              ("type", `String "object");
+                              ( "properties",
+                                `Assoc
+                                  [
+                                    ("desc", `Assoc [ ("type", `String "string") ]);
+                                    ("done", `Assoc [ ("type", `String "boolean") ]);
+                                  ] );
+                            ] );
+                      ] );
+                ] );
+            ( "required",
+              `List
+                [
+                  `String "room_id";
+                  `String "quest_id";
+                  `String "title";
+                  `String "status";
+                ] );
+          ];
+    };
+    {
+      name = "masc_trpg_world_event";
+      description =
+        "Record a global world state change (weather, political shift, catastrophe, etc.). \
+         Required: room_id, event_type, description. \
+         Optional: affected_areas (string array), severity (minor/major/catastrophic).";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ( "event_type",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "description",
+                          `String
+                            "Type of world event (e.g. weather, political, disaster)" );
+                      ] );
+                  ("description", `Assoc [ ("type", `String "string") ]);
+                  ( "affected_areas",
+                    `Assoc
+                      [
+                        ("type", `String "array");
+                        ("items", `Assoc [ ("type", `String "string") ]);
+                      ] );
+                  ( "severity",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "enum",
+                          `List
+                            [
+                              `String "minor"; `String "major"; `String "catastrophic";
+                            ] );
+                      ] );
+                ] );
+            ( "required",
+              `List
+                [ `String "room_id"; `String "event_type"; `String "description" ] );
+          ];
+    };
   ]
 
 let ok_json json = (true, Yojson.Safe.to_string json)
@@ -809,10 +931,127 @@ let handle_round_run ctx args : result =
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
+let handle_scene_transition ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* from_scene = get_required_string args "from_scene" in
+    let* to_scene = get_required_string args "to_scene" in
+    let* trigger = get_optional_string args "trigger" in
+    let* narrative_hook = get_optional_string args "narrative_hook" in
+    let payload =
+      `Assoc
+        [
+          ("from_scene", `String from_scene);
+          ("to_scene", `String to_scene);
+          ( "trigger",
+            match trigger with Some t -> `String t | None -> `Null );
+          ( "narrative_hook",
+            match narrative_hook with Some h -> `String h | None -> `Null );
+        ]
+    in
+    let* event =
+      append_event ~base_dir ~room_id
+        ~event_type:Trpg_engine_event.Scene_transition ~payload ()
+    in
+    Ok
+      (`Assoc
+        [
+          ("ok", `Bool true);
+          ("event", Trpg_engine_event.to_yojson event);
+        ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_quest_update ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* quest_id = get_required_string args "quest_id" in
+    let* title = get_required_string args "title" in
+    let* status = get_required_string args "status" in
+    let* () =
+      match status with
+      | "active" | "completed" | "failed" -> Ok ()
+      | _ -> Error "status must be one of: active, completed, failed"
+    in
+    let objectives =
+      match args |> member "objectives" with
+      | `List xs -> `List xs
+      | _ -> `List []
+    in
+    let payload =
+      `Assoc
+        [
+          ("quest_id", `String quest_id);
+          ("title", `String title);
+          ("status", `String status);
+          ("objectives", objectives);
+        ]
+    in
+    let* event =
+      append_event ~base_dir ~room_id
+        ~event_type:Trpg_engine_event.Quest_update ~payload ()
+    in
+    Ok
+      (`Assoc
+        [
+          ("ok", `Bool true);
+          ("event", Trpg_engine_event.to_yojson event);
+        ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_world_event ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* evt_type = get_required_string args "event_type" in
+    let* description = get_required_string args "description" in
+    let* severity_opt = get_optional_string args "severity" in
+    let severity = Option.value ~default:"minor" severity_opt in
+    let* () =
+      match severity with
+      | "minor" | "major" | "catastrophic" -> Ok ()
+      | _ -> Error "severity must be one of: minor, major, catastrophic"
+    in
+    let affected_areas =
+      match args |> member "affected_areas" with
+      | `List xs -> `List xs
+      | _ -> `List []
+    in
+    let payload =
+      `Assoc
+        [
+          ("event_type", `String evt_type);
+          ("description", `String description);
+          ("affected_areas", affected_areas);
+          ("severity", `String severity);
+        ]
+    in
+    let* event =
+      append_event ~base_dir ~room_id
+        ~event_type:Trpg_engine_event.World_event ~payload ()
+    in
+    Ok
+      (`Assoc
+        [
+          ("ok", `Bool true);
+          ("event", Trpg_engine_event.to_yojson event);
+        ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_trpg_dice_roll" -> Some (handle_dice_roll ctx args)
   | "masc_trpg_turn_advance" -> Some (handle_turn_advance ctx args)
   | "masc_trpg_stream" -> Some (handle_stream ctx args)
   | "masc_trpg_round_run" -> Some (handle_round_run ctx args)
+  | "masc_trpg_scene_transition" -> Some (handle_scene_transition ctx args)
+  | "masc_trpg_quest_update" -> Some (handle_quest_update ctx args)
+  | "masc_trpg_world_event" -> Some (handle_world_event ctx args)
   | _ -> None

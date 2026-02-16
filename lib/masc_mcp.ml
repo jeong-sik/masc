@@ -55,6 +55,7 @@ module Web_dashboard = Web_dashboard
 module Credits_dashboard = Credits_dashboard
 module Lodge_dashboard = Lodge_dashboard
 module Progress = Progress
+module Pulse = Pulse
 module Cancellation = Cancellation
 module Subscriptions = Subscriptions
 

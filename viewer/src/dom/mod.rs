@@ -22,6 +22,7 @@ impl Plugin for DomBridgePlugin {
             .init_resource::<character_panel::CharacterPanelCache>()
             .init_resource::<turn_phase::TurnPhaseCache>()
             .init_resource::<connection::ConnectionStatusCache>()
+            .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
             // TRPG-specific DOM update systems
             .add_systems(Update, (
                 narrative::update_narrative_dom,
@@ -30,5 +31,35 @@ impl Plugin for DomBridgePlugin {
                 turn_phase::update_turn_phase_dom,
                 connection::update_connection_dom,
             ).run_if(in_state(ViewerMode::Trpg)));
+    }
+}
+
+fn reset_trpg_dom_state(
+    mut character_cache: ResMut<character_panel::CharacterPanelCache>,
+    mut turn_cache: ResMut<turn_phase::TurnPhaseCache>,
+    mut connection_cache: ResMut<connection::ConnectionStatusCache>,
+) {
+    character_cache.last_snapshot.clear();
+    turn_cache.last_turn = 0;
+    turn_cache.last_phase.clear();
+    connection_cache.last_status.clear();
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        if let Some(el) = document.get_element_by_id("narrative-log") {
+            el.set_inner_html("");
+        }
+        if let Some(el) = document.get_element_by_id("dice-log") {
+            el.set_inner_html("");
+        }
+        if let Some(el) = document.get_element_by_id("character-panel") {
+            el.set_inner_html("");
+        }
+        if let Some(el) = document.get_element_by_id("turn-num") {
+            el.set_text_content(Some("1"));
+        }
     }
 }

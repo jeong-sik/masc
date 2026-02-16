@@ -97,10 +97,13 @@ pub struct InitialStateBuffer {
     consumed: bool,
 }
 
-// ─── Systems ─────────────────────────────────
+/// Tracks the currently active TRPG room for runtime room switching.
+#[derive(Resource, Default)]
+pub struct ActiveTrpgRoom {
+    pub room_id: String,
+}
 
-/// Startup system: fires async HTTP fetch for initial game state.
-pub fn fetch_initial_state(mut commands: Commands) {
+fn queue_initial_state_fetch(commands: &mut Commands) {
     let buffer: Arc<Mutex<Option<GameStateResponse>>> = Arc::new(Mutex::new(None));
     let shared = buffer.clone();
 
@@ -126,6 +129,44 @@ pub fn fetch_initial_state(mut commands: Commands) {
         data: buffer,
         consumed: false,
     });
+}
+
+// ─── Systems ─────────────────────────────────
+
+/// Startup system: fires async HTTP fetch for initial game state.
+pub fn fetch_initial_state(
+    mut commands: Commands,
+    mut active_room: ResMut<ActiveTrpgRoom>,
+) {
+    active_room.room_id = config::current_room_id();
+    queue_initial_state_fetch(&mut commands);
+}
+
+/// Detects TRPG room changes at runtime and reloads state for the new room.
+pub fn refresh_state_on_room_change(
+    mut commands: Commands,
+    mut active_room: ResMut<ActiveTrpgRoom>,
+    actors: Query<Entity, With<Actor>>,
+    mut room_state: ResMut<RoomState>,
+    mut map_state: ResMut<MapState>,
+) {
+    let current_room = config::current_room_id();
+    if active_room.room_id == current_room {
+        return;
+    }
+
+    active_room.room_id = current_room.clone();
+
+    for entity in &actors {
+        commands.entity(entity).despawn();
+    }
+
+    *room_state = RoomState::default();
+    room_state.id = current_room.clone();
+    *map_state = MapState::default();
+
+    queue_initial_state_fetch(&mut commands);
+    log::info!("TRPG room changed — reloading state for room {}", current_room);
 }
 
 /// Update system: polls the buffer each frame. Once data arrives,

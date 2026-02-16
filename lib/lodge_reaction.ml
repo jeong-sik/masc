@@ -100,11 +100,17 @@ let reaction_type_to_string = function
   | Skip -> "skip"
 
 let reaction_type_of_string = function
-  | "upvote" -> Upvote
-  | "pass" -> Pass
-  | "comment_intent" -> CommentIntent
-  | "skip" -> Skip
-  | s -> failwith (sprintf "Unknown reaction type: %s" s)
+  | "upvote" -> Ok Upvote
+  | "pass" -> Ok Pass
+  | "comment_intent" -> Ok CommentIntent
+  | "skip" -> Ok Skip
+  | s -> Error (sprintf "Unknown reaction type: %s" s)
+
+(** Unsafe version that raises on invalid input — for backward compatibility *)
+let reaction_type_of_string_exn s =
+  match reaction_type_of_string s with
+  | Ok r -> r
+  | Error msg -> failwith msg
 
 let reaction_record_to_json (r : reaction_record) : Yojson.Safe.t =
   `Assoc [
@@ -118,18 +124,20 @@ let reaction_record_to_json (r : reaction_record) : Yojson.Safe.t =
     ("timestamp", `Float r.timestamp);
   ]
 
-let reaction_record_of_json (json : Yojson.Safe.t) : reaction_record =
+let reaction_record_of_json (json : Yojson.Safe.t) : (reaction_record, string) result =
   let open Yojson.Safe.Util in
-  {
-    agent_name = json |> member "agent_name" |> to_string;
-    post_id = json |> member "post_id" |> to_string;
-    post_author = json |> member "post_author" |> to_string;
-    post_topics = json |> member "post_topics" |> to_list |> List.map to_string;
-    reaction = json |> member "reaction" |> to_string |> reaction_type_of_string;
-    confidence = json |> member "confidence" |> to_float;
-    reason = json |> member "reason" |> to_string_option;
-    timestamp = json |> member "timestamp" |> to_float;
-  }
+  match json |> member "reaction" |> to_string |> reaction_type_of_string with
+  | Error msg -> Error msg
+  | Ok reaction -> Ok {
+      agent_name = json |> member "agent_name" |> to_string;
+      post_id = json |> member "post_id" |> to_string;
+      post_author = json |> member "post_author" |> to_string;
+      post_topics = json |> member "post_topics" |> to_list |> List.map to_string;
+      reaction;
+      confidence = json |> member "confidence" |> to_float;
+      reason = json |> member "reason" |> to_string_option;
+      timestamp = json |> member "timestamp" |> to_float;
+    }
 
 let agent_signature_to_json (s : agent_signature) : Yojson.Safe.t =
   `Assoc [
@@ -143,20 +151,25 @@ let agent_signature_to_json (s : agent_signature) : Yojson.Safe.t =
     ("last_updated", `Float s.last_updated);
   ]
 
-let agent_signature_of_json (json : Yojson.Safe.t) : agent_signature =
+let agent_signature_of_json (json : Yojson.Safe.t) : (agent_signature, string) result =
   let open Yojson.Safe.Util in
-  {
-    agent_name = json |> member "agent_name" |> to_string;
-    reaction_patterns = json |> member "reaction_patterns" |> to_assoc
-      |> List.map (fun (k, v) -> (k, to_float v));
-    upvote_ratio = json |> member "upvote_ratio" |> to_float;
-    comment_tendency = json |> member "comment_tendency" |> to_float;
-    recent_reactions = json |> member "recent_reactions" |> to_list
-      |> List.map reaction_record_of_json;
-    generated_self_summary = json |> member "generated_self_summary" |> to_string_option;
-    total_reactions = json |> member "total_reactions" |> to_int;
-    last_updated = json |> member "last_updated" |> to_float;
-  }
+  let recent_jsons = json |> member "recent_reactions" |> to_list in
+  match List.filter_map (fun j ->
+    match reaction_record_of_json j with
+    | Ok r -> Some r
+    | Error _ -> None
+  ) recent_jsons with
+  | recent_reactions -> Ok {
+      agent_name = json |> member "agent_name" |> to_string;
+      reaction_patterns = json |> member "reaction_patterns" |> to_assoc
+        |> List.map (fun (k, v) -> (k, to_float v));
+      upvote_ratio = json |> member "upvote_ratio" |> to_float;
+      comment_tendency = json |> member "comment_tendency" |> to_float;
+      recent_reactions;
+      generated_self_summary = json |> member "generated_self_summary" |> to_string_option;
+      total_reactions = json |> member "total_reactions" |> to_int;
+      last_updated = json |> member "last_updated" |> to_float;
+    }
 
 (** {1 Storage Operations} *)
 
@@ -172,10 +185,9 @@ let load_reactions ~agent_name : reaction_record list =
   let path = reaction_history_path () in
   Fs_compat.load_jsonl path
   |> List.filter_map (fun json ->
-      try
-        let record = reaction_record_of_json json in
-        if record.agent_name = agent_name then Some record else None
-      with _ -> None)
+      match reaction_record_of_json json with
+      | Ok record when record.agent_name = agent_name -> Some record
+      | _ -> None)
 
 (** Load recent reactions for an agent *)
 let load_recent_reactions ~agent_name ~limit : reaction_record list =
@@ -270,7 +282,11 @@ let load_all_signatures () : agent_signature list =
     try
       let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
-      Yojson.Safe.Util.to_list json |> List.map agent_signature_of_json
+      Yojson.Safe.Util.to_list json
+      |> List.filter_map (fun j ->
+          match agent_signature_of_json j with
+          | Ok sig_ -> Some sig_
+          | Error _ -> None)
     with _ -> []
   end
 
@@ -432,19 +448,23 @@ let parse_batch_reactions (response : string) : batch_reaction list =
           let parts = String.split_on_char '|' line |> List.map String.trim in
           match parts with
           | [post_id; reaction_str; conf_str] ->
-            Some {
-              post_id;
-              reaction = reaction_type_of_string (String.lowercase_ascii reaction_str);
-              confidence = Float.of_string conf_str;
-              reason = None;
-            }
+            (match reaction_type_of_string (String.lowercase_ascii reaction_str) with
+             | Ok reaction -> Some {
+                 post_id;
+                 reaction;
+                 confidence = Float.of_string conf_str;
+                 reason = None;
+               }
+             | Error _ -> None)
           | [post_id; reaction_str; conf_str; reason] ->
-            Some {
-              post_id;
-              reaction = reaction_type_of_string (String.lowercase_ascii reaction_str);
-              confidence = Float.of_string conf_str;
-              reason = if reason = "" then None else Some reason;
-            }
+            (match reaction_type_of_string (String.lowercase_ascii reaction_str) with
+             | Ok reaction -> Some {
+                 post_id;
+                 reaction;
+                 confidence = Float.of_string conf_str;
+                 reason = if reason = "" then None else Some reason;
+               }
+             | Error _ -> None)
           | _ -> None
         with _ -> None
     )

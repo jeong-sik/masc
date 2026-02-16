@@ -40,6 +40,23 @@ type client_subscription = {
   created_at: float;
 }
 
+type client_input_status =
+  | Pending
+  | Approved
+  | Rejected
+
+type client_input = {
+  input_id: string;
+  session_id: string;
+  input: string;
+  status: client_input_status;
+  submitted_by: string;
+  submitted_at: float;
+  handled_by: string option;
+  handled_at: float option;
+  reject_reason: string option;
+}
+
 let decisions_path config =
   Filename.concat (Room.masc_dir config) "game_view_decisions.json"
 
@@ -48,6 +65,9 @@ let client_sessions_path config =
 
 let client_subscriptions_path config =
   Filename.concat (Room.masc_dir config) "game_view_subscriptions.json"
+
+let client_inputs_path config =
+  Filename.concat (Room.masc_dir config) "game_view_inputs.json"
 
 let decision_to_json (d : decision) =
   `Assoc [
@@ -98,6 +118,31 @@ let client_subscription_to_json (s : client_subscription) =
     ("created_at", `Float s.created_at);
   ]
 
+let client_input_status_to_string = function
+  | Pending -> "pending"
+  | Approved -> "approved"
+  | Rejected -> "rejected"
+
+let client_input_status_of_string = function
+  | "pending" -> Some Pending
+  | "approved" -> Some Approved
+  | "rejected" -> Some Rejected
+  | _ -> None
+
+let client_input_to_json (i : client_input) =
+  `Assoc [
+    ("input_id", `String i.input_id);
+    ("session_id", `String i.session_id);
+    ("input", `String i.input);
+    ("status", `String (client_input_status_to_string i.status));
+    ("submitted_by", `String i.submitted_by);
+    ("submitted_at", `Float i.submitted_at);
+    ("handled_by", Option.fold ~none:`Null ~some:(fun v -> `String v) i.handled_by);
+    ("handled_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) i.handled_at);
+    ( "reject_reason",
+      Option.fold ~none:`Null ~some:(fun v -> `String v) i.reject_reason );
+  ]
+
 let client_subscription_of_json json =
   let subscription_id = Safe_ops.json_string "subscription_id" json in
   let session_id = Safe_ops.json_string "session_id" json in
@@ -112,6 +157,32 @@ let client_subscription_of_json json =
       rejected_topics = Safe_ops.json_string_list "rejected_topics" json;
       created_at = Safe_ops.json_float ~default:(Time_compat.now ()) "created_at" json;
     }
+
+let client_input_of_json json =
+  let input_id = Safe_ops.json_string "input_id" json in
+  let session_id = Safe_ops.json_string "session_id" json in
+  let input = Safe_ops.json_string "input" json in
+  let status_opt =
+    Safe_ops.json_string ~default:"pending" "status" json
+    |> client_input_status_of_string
+  in
+  if input_id = "" || session_id = "" || input = "" then
+    None
+  else
+    match status_opt with
+    | None -> None
+    | Some status ->
+        Some {
+          input_id;
+          session_id;
+          input;
+          status;
+          submitted_by = Safe_ops.json_string ~default:"unknown" "submitted_by" json;
+          submitted_at = Safe_ops.json_float ~default:(Time_compat.now ()) "submitted_at" json;
+          handled_by = Safe_ops.json_string_opt "handled_by" json;
+          handled_at = Safe_ops.json_float_opt "handled_at" json;
+          reject_reason = Safe_ops.json_string_opt "reject_reason" json;
+        }
 
 let decision_of_json json : decision option =
   let decision_id = Safe_ops.json_string "decision_id" json in
@@ -183,6 +254,20 @@ let save_client_subscriptions (config : Room.config)
   Room_utils.write_json config path
     (`Assoc [("subscriptions", `List (List.map client_subscription_to_json subs))])
 
+let load_client_inputs (config : Room.config) : client_input list =
+  let path = client_inputs_path config in
+  match Room_utils.read_json_opt config path with
+  | None -> []
+  | Some json ->
+      (match json |> member "inputs" with
+       | `List items -> List.filter_map client_input_of_json items
+       | _ -> [])
+
+let save_client_inputs (config : Room.config) (inputs : client_input list) =
+  let path = client_inputs_path config in
+  Room_utils.write_json config path
+    (`Assoc [("inputs", `List (List.map client_input_to_json inputs))])
+
 let rec replace_client_session
     (acc : client_session list)
     (target : client_session)
@@ -247,6 +332,75 @@ let create_client_subscription
   let all = load_client_subscriptions config in
   save_client_subscriptions config (sub :: all);
   sub
+
+let get_client_subscriptions (config : Room.config) ~session_id : client_subscription list =
+  load_client_subscriptions config
+  |> List.filter (fun (s : client_subscription) -> s.session_id = session_id)
+
+let get_client_input (config : Room.config) ~session_id ~input_id : client_input option =
+  load_client_inputs config
+  |> List.find_opt
+       (fun (i : client_input) ->
+         i.session_id = session_id && i.input_id = input_id)
+
+let get_client_inputs (config : Room.config) ~session_id : client_input list =
+  load_client_inputs config
+  |> List.filter (fun (i : client_input) -> i.session_id = session_id)
+
+let create_client_input (config : Room.config) ~session_id ~input ~submitted_by
+    : client_input =
+  let now = Time_compat.now () in
+  let input_id = Printf.sprintf "gvinput-%Ld" (Int64.of_float (now *. 1_000_000.0)) in
+  let item = {
+    input_id;
+    session_id;
+    input;
+    status = Pending;
+    submitted_by = if String.trim submitted_by = "" then "unknown" else submitted_by;
+    submitted_at = now;
+    handled_by = None;
+    handled_at = None;
+    reject_reason = None;
+  } in
+  let all = load_client_inputs config in
+  save_client_inputs config (item :: all);
+  item
+
+let transition_client_input (config : Room.config) ~session_id ~input_id
+    ~status ~handled_by ~reject_reason
+    : (client_input, string) result =
+  let all : client_input list = load_client_inputs config in
+  let now = Time_compat.now () in
+  let rec loop acc = function
+    | [] ->
+        Error
+          (Printf.sprintf
+             "input not found: %s (session: %s)"
+             input_id
+             session_id)
+    | (i : client_input) :: rest ->
+        if i.session_id = session_id && i.input_id = input_id then
+          if i.status <> Pending then
+            Error
+              (Printf.sprintf
+                 "input already handled: %s (status=%s)"
+                 input_id
+                 (client_input_status_to_string i.status))
+          else
+            let updated = {
+              i with
+              status;
+              handled_by = Some handled_by;
+              handled_at = Some now;
+              reject_reason;
+            } in
+            let merged = List.rev_append acc (updated :: rest) in
+            save_client_inputs config merged;
+            Ok updated
+        else
+          loop (i :: acc) rest
+  in
+  loop [] all
 
 let create_decision (config : Room.config)
     ~session_id ~issue ~options ~criteria ~weights

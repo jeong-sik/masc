@@ -310,7 +310,7 @@ let test_client_subscribe_partial_and_transport () =
         |> member "tool"
         |> to_string ))
 
-let test_client_input_deferred () =
+let test_client_input_requires_open () =
   let base_dir = temp_dir () in
   let _, ctx = mk_ctx base_dir in
   Fun.protect
@@ -324,14 +324,116 @@ let test_client_input_deferred () =
           ]
       in
       let ok, body = dispatch_exn ctx ~name:"client.input.submit" ~args in
-      check bool "client.input.submit should be deferred" false ok;
+      check bool "client.input.submit should fail before open" false ok;
       let json = parse_json body in
       check string "error code"
-        "NOT_IMPLEMENTED"
-        (json |> member "payload" |> member "code" |> to_string);
-      check bool "deferred flag"
-        true
-        (json |> member "payload" |> member "details" |> member "deferred_to_next_cycle" |> to_bool))
+        "PRECONDITION_REQUIRED"
+        (json |> member "payload" |> member "code" |> to_string))
+
+let test_client_input_submit_and_approve () =
+  let base_dir = temp_dir () in
+  let _, ctx = mk_ctx base_dir in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let _ =
+        dispatch_exn ctx ~name:"client.session.open"
+          ~args:(`Assoc [ ("session_id", `String "client-in-2") ])
+      in
+      let submit_args =
+        `Assoc
+          [
+            ("session_id", `String "client-in-2");
+            ("input", `String "human chooses route C");
+          ]
+      in
+      let ok_submit, submit_body =
+        dispatch_exn ctx ~name:"client.input.submit" ~args:submit_args
+      in
+      check bool "submit ok" true ok_submit;
+      let submit_json = parse_json submit_body in
+      let input_id =
+        submit_json |> member "payload" |> member "input_id" |> to_string
+      in
+      check string "submit status"
+        "pending"
+        (submit_json |> member "payload" |> member "status" |> to_string);
+      let approve_args =
+        `Assoc
+          [
+            ("session_id", `String "client-in-2");
+            ("input_id", `String input_id);
+          ]
+      in
+      let ok_approve, approve_body =
+        dispatch_exn ctx ~name:"client.input.approve" ~args:approve_args
+      in
+      check bool "approve ok" true ok_approve;
+      let approve_json = parse_json approve_body in
+      check string "approve status"
+        "approved"
+        (approve_json |> member "payload" |> member "status" |> to_string);
+      let ok_reapprove, reapprove_body =
+        dispatch_exn ctx ~name:"client.input.approve" ~args:approve_args
+      in
+      check bool "re-approve should fail" false ok_reapprove;
+      check string "re-approve code"
+        "CONFLICT"
+        (reapprove_body |> parse_json |> member "payload" |> member "code" |> to_string))
+
+let test_client_snapshot_get () =
+  let base_dir = temp_dir () in
+  let _, ctx = mk_ctx base_dir in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      finalize_for_session ctx ~session_id:"client-snap-1";
+      let _ =
+        dispatch_exn ctx ~name:"client.session.open"
+          ~args:(`Assoc [ ("session_id", `String "client-snap-1") ])
+      in
+      let _ =
+        dispatch_exn ctx ~name:"client.input.submit"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String "client-snap-1");
+                ("input", `String "wait for sunset");
+              ])
+      in
+      let _ =
+        dispatch_exn ctx ~name:"trpg.action.submit"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String "client-snap-1");
+                ("action", `String "scout gate");
+              ])
+      in
+      let ok, body =
+        dispatch_exn ctx ~name:"client.snapshot.get"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String "client-snap-1");
+                ("max_events", `Int 5);
+              ])
+      in
+      check bool "snapshot ok" true ok;
+      let json = parse_json body in
+      check bool "latest decision exists" true
+        (match json |> member "payload" |> member "latest_decision" with
+         | `Null -> false
+         | _ -> true);
+      check bool "input pending count >= 1" true
+        ((json
+         |> member "payload"
+         |> member "input_queue"
+         |> member "pending_count"
+         |> to_int)
+        >= 1);
+      check bool "trpg events included" true
+        ((json |> member "payload" |> member "trpg" |> member "event_count" |> to_int) >= 2))
 
 let () =
   Alcotest.run "Protocol GAME-VIEW"
@@ -354,7 +456,11 @@ let () =
             test_client_subscribe_requires_open;
           test_case "client.state.subscribe partial + transport" `Quick
             test_client_subscribe_partial_and_transport;
-          test_case "client.input.submit deferred" `Quick
-            test_client_input_deferred;
+          test_case "client.input.submit requires open" `Quick
+            test_client_input_requires_open;
+          test_case "client.input submit+approve" `Quick
+            test_client_input_submit_and_approve;
+          test_case "client.snapshot.get" `Quick
+            test_client_snapshot_get;
         ] );
     ]

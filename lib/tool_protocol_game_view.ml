@@ -42,6 +42,13 @@ let get_float_opt args key =
   | `Int n -> Some (Float.of_int n)
   | _ -> None
 
+let get_int args key default =
+  match args |> member key with
+  | `Int n -> n
+  | `Intlit s -> (
+      try int_of_string s with _ -> default)
+  | _ -> default
+
 let get_string_list args key =
   match args |> member key with
   | `List xs ->
@@ -129,6 +136,16 @@ let pull_fallback_for_topics topics =
           ] )
       :: !fields;
   `Assoc (List.rev !fields)
+
+let rec take n xs =
+  if n <= 0 then []
+  else
+    match xs with
+    | [] -> []
+    | x :: rest -> x :: take (n - 1) rest
+
+let take_last n xs =
+  xs |> List.rev |> take n |> List.rev
 
 let make_envelope ?legacy_alias ~canonical_tool ~status ~code ?message ~payload () =
   `Assoc
@@ -238,6 +255,33 @@ let decision_payload (d : Game_view_state.decision) =
       ("risk_ack", Option.fold ~none:`Null ~some:(fun v -> `String v) d.risk_ack);
     ]
 
+let client_input_payload (i : Game_view_state.client_input) =
+  let status = Game_view_state.client_input_status_to_string i.status in
+  `Assoc
+    [
+      ("input_id", `String i.input_id);
+      ("session_id", `String i.session_id);
+      ("input", `String i.input);
+      ("status", `String status);
+      ("submitted_by", `String i.submitted_by);
+      ("submitted_at", `Float i.submitted_at);
+      ("handled_by", Option.fold ~none:`Null ~some:(fun v -> `String v) i.handled_by);
+      ("handled_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) i.handled_at);
+      ("reject_reason", Option.fold ~none:`Null ~some:(fun v -> `String v) i.reject_reason);
+    ]
+
+let experiment_summary_payload (e : Tool_experiment.experiment) =
+  `Assoc
+    [
+      ("experiment_id", `String e.id);
+      ("status", `String (Tool_experiment.status_to_string e.status));
+      ("created_at", `Float e.created_at);
+      ("metrics", `List (List.map (fun m -> `String m) e.metrics));
+      ("window_seconds", `Float e.window_seconds);
+      ("assignments", `Int (List.length e.assignments));
+      ("observations", `Int (List.length e.observations));
+    ]
+
 let latest_decision_for_session config ~session_id =
   let score (d : Game_view_state.decision) =
     match d.finalized_at with Some ts -> ts | None -> d.created_at
@@ -257,6 +301,14 @@ let require_session_id args ~canonical_tool =
       (err_json ~canonical_tool ~code:"VALIDATION_ERROR"
          ~message:"session_id is required" ())
   else Ok session_id
+
+let require_input_id args ~canonical_tool =
+  let input_id = get_string args "input_id" "" in
+  if input_id = "" then
+    Error
+      (err_json ~canonical_tool ~code:"VALIDATION_ERROR"
+         ~message:"input_id is required" ())
+  else Ok input_id
 
 let require_finalized_decision (ctx : context) ~canonical_tool args =
   let* session_id = require_session_id args ~canonical_tool in
@@ -598,12 +650,179 @@ let handle_client_state_subscribe (ctx : context) ~canonical_tool args :
         in
         Ok (ok_json ~canonical_tool payload)
 
-let handle_client_deferred ~canonical_tool : tool_result =
-  err_json ~canonical_tool ~code:"NOT_IMPLEMENTED"
-    ~message:
-      "deferred_to_next_cycle: client input/snapshot hooks are not implemented in this cycle"
-    ~details:(`Assoc [ ("deferred_to_next_cycle", `Bool true) ])
-    ()
+let handle_client_input_submit (ctx : context) ~canonical_tool args :
+    (tool_result, tool_result) result =
+  let* session_id = require_session_id args ~canonical_tool in
+  let input = get_string args "input" "" |> String.trim in
+  if input = "" then
+    Error
+      (err_json ~canonical_tool ~code:"VALIDATION_ERROR"
+         ~message:"input is required" ())
+  else
+    match Game_view_state.get_client_session ctx.config ~session_id with
+    | None ->
+        Error
+          (err_json ~canonical_tool ~code:"PRECONDITION_REQUIRED"
+             ~message:"client.session.open required before client.input.submit"
+             ())
+    | Some _ ->
+        let _ =
+          Game_view_state.open_client_session ctx.config ~session_id
+            ~trace_id:None ~agent_name:ctx.agent_name
+        in
+        let item =
+          Game_view_state.create_client_input ctx.config ~session_id ~input
+            ~submitted_by:ctx.agent_name
+        in
+        Ok (ok_json ~canonical_tool (client_input_payload item))
+
+let handle_client_input_transition (ctx : context) ~canonical_tool ~status
+    ~default_reason args : (tool_result, tool_result) result =
+  let* session_id = require_session_id args ~canonical_tool in
+  let* input_id = require_input_id args ~canonical_tool in
+  let reject_reason =
+    match status with
+    | Game_view_state.Rejected ->
+        Some
+          (get_string_opt args "reason"
+           |> Option.value ~default:default_reason
+           |> String.trim)
+    | _ -> None
+  in
+  match Game_view_state.get_client_session ctx.config ~session_id with
+  | None ->
+      Error
+        (err_json ~canonical_tool ~code:"PRECONDITION_REQUIRED"
+           ~message:
+             (Printf.sprintf
+                "client.session.open required before %s"
+                canonical_tool)
+           ())
+  | Some _ -> (
+      let _ =
+        Game_view_state.open_client_session ctx.config ~session_id
+          ~trace_id:None ~agent_name:ctx.agent_name
+      in
+      match
+        Game_view_state.transition_client_input ctx.config ~session_id ~input_id
+          ~status ~handled_by:ctx.agent_name ~reject_reason
+      with
+      | Ok item -> Ok (ok_json ~canonical_tool (client_input_payload item))
+      | Error msg ->
+          let code =
+            if String.starts_with ~prefix:"input not found" msg then "NOT_FOUND"
+            else if String.starts_with ~prefix:"input already handled" msg then
+              "CONFLICT"
+            else "VALIDATION_ERROR"
+          in
+          Error (err_json ~canonical_tool ~code ~message:msg ()))
+
+let handle_client_snapshot_get (ctx : context) ~canonical_tool args :
+    (tool_result, tool_result) result =
+  let* session_id = require_session_id args ~canonical_tool in
+  let requested_room_id =
+    get_string_opt args "room_id"
+    |> Option.value
+         ~default:(sanitize_room_id (Printf.sprintf "session-%s" session_id))
+  in
+  let max_events = get_int args "max_events" 20 |> min 100 |> max 1 in
+  match Game_view_state.get_client_session ctx.config ~session_id with
+  | None ->
+      Error
+        (err_json ~canonical_tool ~code:"PRECONDITION_REQUIRED"
+           ~message:"client.session.open required before client.snapshot.get" ())
+  | Some _ ->
+      let session =
+        Game_view_state.open_client_session ctx.config ~session_id ~trace_id:None
+          ~agent_name:ctx.agent_name
+      in
+      let subscriptions =
+        Game_view_state.get_client_subscriptions ctx.config ~session_id
+      in
+      let inputs =
+        Game_view_state.get_client_inputs ctx.config ~session_id
+      in
+      let pending_inputs =
+        List.filter
+          (fun (i : Game_view_state.client_input) ->
+            i.status = Game_view_state.Pending)
+          inputs
+      in
+      let latest_decision =
+        latest_decision_for_session ctx.config ~session_id
+      in
+      let finalized_decision =
+        Game_view_state.latest_finalized_decision ctx.config ~session_id
+      in
+      let trpg_events =
+        match
+          Trpg_engine_store.read_events ~base_dir:ctx.config.base_path
+            ~room_id:requested_room_id
+        with
+        | Ok events -> events
+        | Error _ -> []
+      in
+      let recent_events = take_last max_events trpg_events in
+      let last_seq =
+        match List.rev recent_events with
+        | (ev : Trpg_engine_event.t) :: _ -> ev.seq
+        | [] -> 0
+      in
+      let all_experiments = Tool_experiment.list_experiments ctx.config in
+      let running_experiments =
+        List.filter
+          (fun (e : Tool_experiment.experiment) ->
+            e.status = Tool_experiment.Running)
+          all_experiments
+      in
+      let payload =
+        `Assoc
+          [
+            ("snapshot_version", `String "masc.game-view.snapshot/0.1");
+            ("session", Game_view_state.client_session_to_json session);
+            ( "latest_decision",
+              Option.fold ~none:`Null ~some:decision_payload latest_decision );
+            ( "finalized_decision",
+              Option.fold ~none:`Null ~some:decision_payload finalized_decision );
+            ( "subscriptions",
+              `List
+                (List.map
+                   Game_view_state.client_subscription_to_json
+                   subscriptions) );
+            ( "input_queue",
+              `Assoc
+                [
+                  ("pending_count", `Int (List.length pending_inputs));
+                  ("recent", `List (List.map client_input_payload (take_last 20 inputs)));
+                ] );
+            ( "trpg",
+              `Assoc
+                [
+                  ("room_id", `String requested_room_id);
+                  ("event_count", `Int (List.length trpg_events));
+                  ("last_seq", `Int last_seq);
+                  ( "recent_events",
+                    `List
+                      (List.map
+                         (fun (ev : Trpg_engine_event.t) ->
+                           Trpg_engine_event.to_yojson ev)
+                         recent_events) );
+                ] );
+            ( "experiments",
+              `Assoc
+                [
+                  ("running_count", `Int (List.length running_experiments));
+                  ( "recent",
+                    `List
+                      (List.map
+                         experiment_summary_payload
+                         (take 5 all_experiments)) );
+                ] );
+            ("server_time", `Float (Time_compat.now ()));
+            ("protocol_version", `String protocol_version);
+          ]
+      in
+      Ok (ok_json ~canonical_tool payload)
 
 let legacy_alias_to_canonical = function
   | "experiment_start" -> Some "experiment.start"
@@ -773,11 +992,36 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
         (match handle_client_state_subscribe ctx ~canonical_tool:name args with
         | Ok r -> r
         | Error e -> e)
-  | "client.input.submit"
-  | "client.input.approve"
-  | "client.input.reject"
+  | "client.input.submit" ->
+      Some
+        (match handle_client_input_submit ctx ~canonical_tool:name args with
+        | Ok r -> r
+        | Error e -> e)
+  | "client.input.approve" ->
+      Some
+        (match
+           handle_client_input_transition ctx ~canonical_tool:name
+             ~status:Game_view_state.Approved
+             ~default_reason:""
+             args
+         with
+        | Ok r -> r
+        | Error e -> e)
+  | "client.input.reject" ->
+      Some
+        (match
+           handle_client_input_transition ctx ~canonical_tool:name
+             ~status:Game_view_state.Rejected
+             ~default_reason:"rejected"
+             args
+         with
+        | Ok r -> r
+        | Error e -> e)
   | "client.snapshot.get" ->
-      Some (handle_client_deferred ~canonical_tool:name)
+      Some
+        (match handle_client_snapshot_get ctx ~canonical_tool:name args with
+        | Ok r -> r
+        | Error e -> e)
   | legacy -> (
       match legacy_alias_to_canonical legacy with
       | Some canonical_tool ->
@@ -983,23 +1227,27 @@ let schemas : Types.tool_schema list =
          ~required:[ "session_id"; "topics" ]
          [ ("session_id", string_schema); ("topics", array_of string_schema) ]);
     schema "client.input.submit"
-      "Deferred: human input injection (next cycle)."
+      "Submit human input into session queue (pending approval state)."
       (object_schema
          ~required:[ "session_id"; "input" ]
          [ ("session_id", string_schema); ("input", string_schema) ]);
     schema "client.input.approve"
-      "Deferred: human approval hook (next cycle)."
+      "Approve a queued human input."
       (object_schema
          ~required:[ "session_id"; "input_id" ]
          [ ("session_id", string_schema); ("input_id", string_schema) ]);
     schema "client.input.reject"
-      "Deferred: human rejection hook (next cycle)."
+      "Reject a queued human input."
       (object_schema
          ~required:[ "session_id"; "input_id" ]
          [ ("session_id", string_schema); ("input_id", string_schema); ("reason", string_schema) ]);
     schema "client.snapshot.get"
-      "Deferred: client snapshot hook (next cycle)."
+      "Get a replay-friendly state snapshot for engine/viewer sync."
       (object_schema
          ~required:[ "session_id" ]
-         [ ("session_id", string_schema) ]);
+         [
+           ("session_id", string_schema);
+           ("room_id", string_schema);
+           ("max_events", int_schema);
+         ]);
   ]

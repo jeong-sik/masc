@@ -17,6 +17,7 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+use crate::game::state::{RoomState, TurnProgressState};
 use crate::mode::ViewerMode;
 
 // ─── Marker Resource ────────────────────────
@@ -350,6 +351,42 @@ pub(crate) fn friendly_js_error(e: &JsValue) -> String {
     debug.chars().take(120).collect()
 }
 
+#[cfg(target_arch = "wasm32")]
+fn normalize_room_status(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        "unknown".to_string()
+    } else {
+        normalized
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn effective_room_status(room_state: &RoomState, progress: &TurnProgressState) -> String {
+    if !progress.room_status.trim().is_empty() {
+        normalize_room_status(&progress.room_status)
+    } else {
+        normalize_room_status(&room_state.status)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn room_accepts_actions(status: &str) -> bool {
+    matches!(status, "active" | "running")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn blocked_action_placeholder(status: &str) -> &'static str {
+    match status {
+        "paused" => "게임 일시정지 상태입니다. 재개 후 액션을 제출하세요.",
+        "ended" => "게임이 종료되었습니다. 새 게임을 시작하세요.",
+        "idle" => "진행 중 게임이 없습니다. 새 게임을 시작하세요.",
+        "loading" => "방 상태를 불러오는 중입니다.",
+        "unavailable" => "엔진 연결 불가 상태입니다.",
+        _ => "현재 방 상태에서는 액션을 제출할 수 없습니다.",
+    }
+}
+
 // ─── DOM Helpers ────────────────────────────
 
 #[cfg(target_arch = "wasm32")]
@@ -453,24 +490,57 @@ fn refresh_action_panel_interaction_state() {
 
 /// Hides the action panel when not in TRPG mode.
 /// The panel HTML always exists in index.html but should only be visible in TRPG.
-pub fn sync_action_panel_visibility(mode: Res<State<ViewerMode>>) {
+pub fn sync_action_panel_visibility(
+    mode: Res<State<ViewerMode>>,
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
+) {
     let _ = mode; // read to register as system parameter
+    let _ = (&room_state, &progress);
 
     #[cfg(target_arch = "wasm32")]
     {
-        let visible = matches!(mode.get(), ViewerMode::Trpg);
+        let trpg_visible = matches!(mode.get(), ViewerMode::Trpg);
+        let status = effective_room_status(&room_state, &progress);
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
+        let claimed_actor = doc
+            .get_element_by_id("claimed-actor-id")
+            .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
+            .unwrap_or_default();
+        let has_claim = !claimed_actor.trim().is_empty();
+        let panel_visible = trpg_visible && has_claim;
+
         if let Some(el) = doc.get_element_by_id("action-panel") {
             if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
                 let _ = html_el
                     .style()
-                    .set_property("display", if visible { "block" } else { "none" });
+                    .set_property("display", if panel_visible { "block" } else { "none" });
             }
         }
-        if visible {
+        if panel_visible {
             refresh_action_panel_interaction_state();
+
+            let has_actor = current_playable_actor_id().is_some();
+            let can_act = has_actor && room_accepts_actions(&status);
+
+            if let Some(el) = doc.get_element_by_id("action-input") {
+                if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+                    input.set_disabled(!can_act);
+                    if !room_accepts_actions(&status) {
+                        input.set_placeholder(blocked_action_placeholder(&status));
+                    }
+                }
+            }
+
+            for id in &["action-submit-btn", "dice-roll-btn"] {
+                if let Some(el) = doc.get_element_by_id(id) {
+                    if let Some(btn) = el.dyn_ref::<web_sys::HtmlButtonElement>() {
+                        btn.set_disabled(!can_act);
+                    }
+                }
+            }
         }
     }
 }

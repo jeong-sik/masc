@@ -103,6 +103,17 @@ pub struct ActiveTrpgRoom {
     pub room_id: String,
 }
 
+fn normalize_room_status(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+fn room_requires_new_game(raw_status: &str) -> bool {
+    matches!(
+        normalize_room_status(raw_status).as_str(),
+        "" | "idle" | "ended" | "unavailable"
+    )
+}
+
 fn queue_initial_state_fetch(commands: &mut Commands) {
     let buffer: Arc<Mutex<Option<GameStateResponse>>> = Arc::new(Mutex::new(None));
     let shared = buffer.clone();
@@ -228,18 +239,17 @@ pub fn apply_initial_state(
         *connection = ConnectionStatus::Connected;
     }
 
-    // Stale room detection: if the room isn't actively running a game,
-    // skip spawning old actors and prompt the user to start a new game.
-    let room_is_active = room_state.status.trim() == "active";
-    if !room_is_active {
+    // Rooms in terminal/empty states should open the new-game flow instead of
+    // replaying stale entities. Paused/running rooms are resumable and keep state.
+    if room_requires_new_game(&room_state.status) {
         turn_progress.room_status = room_state.status.clone();
         turn_progress.turn = room_state.turn;
         turn_progress.phase = room_state.phase.as_str().to_string();
         buffer.consumed = true;
 
-        prompt_new_game_for_stale_room(room_state.status.trim());
+        prompt_new_game_for_inactive_room(room_state.status.trim());
         log::info!(
-            "Room '{}' not active (status: '{}') — skipping actor spawn, showing new-game panel",
+            "Room '{}' is not resumable (status: '{}') — skipping actor spawn, showing new-game panel",
             room_state.id,
             room_state.status,
         );
@@ -417,9 +427,11 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
     }
 }
 
-/// When the fetched room is not "active", auto-show the new-game panel
+/// When the fetched room is not resumable, auto-show the new-game panel
 /// and pre-fill a fresh room ID so the user can start a new session.
-fn prompt_new_game_for_stale_room(_room_status: &str) {
+fn prompt_new_game_for_inactive_room(room_status: &str) {
+    let _ = room_status;
+
     #[cfg(target_arch = "wasm32")]
     {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -447,10 +459,10 @@ fn prompt_new_game_for_stale_room(_room_status: &str) {
 
         // Set a status message appropriate to the room state
         if let Some(el) = document.get_element_by_id("new-game-status") {
-            let msg = if _room_status == "unavailable" {
-                "엔진에 연결할 수 없습니다. 새 게임을 시작하면 재연결을 시도합니다."
-            } else {
-                "활성 게임이 없습니다. 새 게임을 시작하세요."
+            let msg = match normalize_room_status(room_status).as_str() {
+                "ended" => "이 게임은 종료되었습니다. 새 게임을 시작하세요.",
+                "unavailable" => "엔진에 연결할 수 없습니다. 새 게임을 시작하면 재연결을 시도합니다.",
+                _ => "진행 중인 게임이 없습니다. 새 게임을 시작하세요.",
             };
             el.set_inner_html(msg);
         }
@@ -569,5 +581,20 @@ mod tests {
         assert_eq!(room.id, "test-room");
         assert_eq!(room.status, "unavailable");
         assert!(state.characters.is_empty());
+    }
+
+    #[test]
+    fn paused_room_is_resumable() {
+        assert!(!room_requires_new_game("paused"));
+    }
+
+    #[test]
+    fn ended_room_requires_new_game() {
+        assert!(room_requires_new_game("ended"));
+    }
+
+    #[test]
+    fn normalize_room_status_is_case_insensitive() {
+        assert_eq!(normalize_room_status("  AcTiVe "), "active");
     }
 }

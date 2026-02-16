@@ -955,6 +955,8 @@ let legacy_alias_to_canonical = function
   | "masc_trpg_party_select" -> Some "trpg.party.select"
   | "masc_trpg_session_start" -> Some "trpg.session.start"
   | "masc_trpg_actor_spawn" -> Some "trpg.actor.spawn"
+  | "masc_trpg_actor_update" -> Some "trpg.actor.update"
+  | "masc_trpg_actor_delete" -> Some "trpg.actor.delete"
   | "masc_trpg_actor_claim" -> Some "trpg.actor.claim"
   | "masc_trpg_actor_release" -> Some "trpg.actor.release"
   | "masc_trpg_intervention_submit" -> Some "trpg.intervention.submit"
@@ -1103,6 +1105,14 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
       Some
         (handle_trpg_canonical ctx ~canonical_tool:name
            ~legacy_name:"masc_trpg_actor_spawn" args)
+  | "trpg.actor.update" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_actor_update" args)
+  | "trpg.actor.delete" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_actor_delete" args)
   | "trpg.actor.claim" ->
       Some
         (handle_trpg_canonical ctx ~canonical_tool:name
@@ -1370,6 +1380,36 @@ let schemas : Types.tool_schema list =
            ("alive", bool_schema);
            ("traits", array_of string_schema);
            ("skills", array_of string_schema);
+           ("inventory", array_of string_schema);
+         ]);
+    schema "trpg.actor.update"
+      "Canonical alias of masc_trpg_actor_update."
+      (object_schema
+         ~required:[ "room_id"; "actor_id" ]
+         [
+           ("room_id", string_schema);
+           ("actor_id", string_schema);
+           ("role", string_schema);
+           ("name", string_schema);
+           ("archetype", string_schema);
+           ("persona", string_schema);
+           ("hp", int_schema);
+           ("max_hp", int_schema);
+           ("alive", bool_schema);
+           ("traits", array_of string_schema);
+           ("skills", array_of string_schema);
+           ("inventory", array_of string_schema);
+           ("rule_module", string_schema);
+         ]);
+    schema "trpg.actor.delete"
+      "Canonical alias of masc_trpg_actor_delete."
+      (object_schema
+         ~required:[ "room_id"; "actor_id" ]
+         [
+           ("room_id", string_schema);
+           ("actor_id", string_schema);
+           ("reason", string_schema);
+           ("rule_module", string_schema);
          ]);
     schema "trpg.actor.claim"
       "Canonical alias of masc_trpg_actor_claim."

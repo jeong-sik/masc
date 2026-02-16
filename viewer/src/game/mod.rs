@@ -24,6 +24,8 @@ impl Plugin for GameStatePlugin {
             .init_resource::<MapState>()
             .init_resource::<ConnectionStatus>()
             .init_resource::<OverlayState>()
+            .init_resource::<TurnProgressState>()
+            .init_resource::<http::ActiveTrpgRoom>()
             // Events (type registrations — always available)
             .add_message::<DiceRolled>()
             .add_message::<HpChanged>()
@@ -37,13 +39,19 @@ impl Plugin for GameStatePlugin {
             .add_message::<CombatStarted>()
             .add_message::<WeatherChanged>()
             .add_message::<MoodChanged>()
+            .add_message::<TurnProgressUpdated>()
             // ── TRPG-gated systems ──
-            .add_systems(OnEnter(ViewerMode::Trpg), http::fetch_initial_state)
+            .add_systems(
+                OnEnter(ViewerMode::Trpg),
+                (systems::reset_turn_progress, http::fetch_initial_state),
+            )
             .add_systems(Update, (
+                http::refresh_state_on_room_change,
                 http::apply_initial_state,
                 systems::apply_hp_change,
                 systems::apply_area_move,
                 systems::apply_turn_advance,
+                systems::apply_turn_progress,
                 systems::apply_item_acquired,
                 systems::apply_character_death,
                 systems::apply_weather_change,

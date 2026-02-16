@@ -34,6 +34,7 @@ module Safe_ops = Masc_mcp.Safe_ops
 module Context_manager = Masc_mcp.Context_manager
 module Llm_client = Masc_mcp.Llm_client
 module Tool_perpetual = Masc_mcp.Tool_perpetual
+module Tool_board = Masc_mcp.Tool_board
 
 (** MCP Protocol Versions *)
 (* ============================================ *)
@@ -4397,6 +4398,47 @@ let make_routes ~port ~host =
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json (Yojson.Safe.to_string json) reqd)
 
+
+  (* Board write APIs — used by Bevy Viewer *)
+  |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let (ok, msg) = Tool_board.handle_tool "masc_board_vote" args in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_with_cors ~status request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool ok); ("message", `String msg)
+               ]))
+           with exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("message", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let (ok, msg) = Tool_board.handle_tool "masc_board_comment" args in
+             let status = if ok then `Created else `Bad_request in
+             respond_json_with_cors ~status request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool ok); ("message", `String msg)
+               ]))
+           with exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("message", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          let karma_list = Board_dispatch.get_all_karma () in

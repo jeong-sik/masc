@@ -12,7 +12,7 @@
  (modules masc_cost)
  (public_name masc-cost)
  (package masc_mcp)
- (libraries unix yojson))
+ (libraries masc_mcp unix yojson))
 
 ;; TUI Dashboard - Terminal interface for multi-agent coordination
 (executable

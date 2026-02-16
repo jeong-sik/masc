@@ -1,6 +1,7 @@
 //! UI widgets and interaction systems for TRPG viewer.
 
 use bevy::prelude::*;
+use bevy::ecs::relationship::Relationship;
 
 /// Marker component for UI entities spawned by the TRPG viewer.
 #[derive(Component)]
@@ -17,6 +18,25 @@ pub struct SettingsMenu;
 
 #[derive(Component)]
 pub struct DevMenu;
+
+/// Actions that can be triggered from menu items.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    // Settings menu
+    SoundToggle,
+    MusicToggle,
+    AutoSaveToggle,
+    Fullscreen,
+    // Dev menu
+    ShowFps,
+    DebugOverlay,
+    ReloadAssets,
+    DumpState,
+}
+
+/// Marker component for menu items with their associated action.
+#[derive(Component)]
+pub struct MenuItem(pub MenuAction);
 
 /// Tracks UI state toggles.
 #[derive(Resource, Default)]
@@ -184,6 +204,7 @@ fn spawn_settings_menu(commands: &mut Commands) {
             BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
             UiMarker,
             SettingsMenu,
+            Resizable::default(),
         ))
         .with_children(|parent| {
             // Title
@@ -205,6 +226,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
 
             // Menu items (inline to avoid type annotation issues)
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::SoundToggle),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -228,6 +251,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::MusicToggle),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -251,6 +276,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::AutoSaveToggle),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -274,6 +301,8 @@ fn spawn_settings_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::Fullscreen),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -314,6 +343,7 @@ fn spawn_dev_menu(commands: &mut Commands) {
             BackgroundColor(Color::srgb(0.2, 0.15, 0.15)),
             UiMarker,
             DevMenu,
+            Resizable::default(),
         ))
         .with_children(|parent| {
             // Title
@@ -335,6 +365,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
 
             // Dev options
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::ShowFps),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -358,6 +390,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::DebugOverlay),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -381,6 +415,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::ReloadAssets),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -404,6 +440,8 @@ fn spawn_dev_menu(commands: &mut Commands) {
             });
 
             parent.spawn((
+                Button,
+                MenuItem(MenuAction::DumpState),
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(25.0),
@@ -426,4 +464,298 @@ fn spawn_dev_menu(commands: &mut Commands) {
                 ));
             });
         });
+}
+
+/// Handles menu item click interactions.
+///
+/// Logs the action for now. Future expansion: connect to actual systems
+/// (audio toggles, FPS counter, state dump, etc.).
+pub fn handle_menu_item_clicks(
+    interactions: Query<
+        (&Interaction, &MenuItem),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    for (interaction, menu_item) in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        match menu_item.0 {
+            MenuAction::SoundToggle => {
+                log::info!("Menu action: Sound toggled");
+                // TODO: Connect to audio system
+            }
+            MenuAction::MusicToggle => {
+                log::info!("Menu action: Music toggled");
+                // TODO: Connect to audio system
+            }
+            MenuAction::AutoSaveToggle => {
+                log::info!("Menu action: Auto-save toggled");
+                // TODO: Connect to save system
+            }
+            MenuAction::Fullscreen => {
+                log::info!("Menu action: Toggle fullscreen");
+                // TODO: Switch to fullscreen mode
+            }
+            MenuAction::ShowFps => {
+                log::info!("Menu action: Toggle FPS display");
+                // TODO: Enable/disable FPS counter
+            }
+            MenuAction::DebugOverlay => {
+                log::info!("Menu action: Toggle debug overlay");
+                // TODO: Show/hide debug info
+            }
+            MenuAction::ReloadAssets => {
+                log::info!("Menu action: Reload assets");
+                // TODO: Trigger asset hot-reload
+            }
+            MenuAction::DumpState => {
+                log::info!("Menu action: Dump game state");
+                // TODO: Serialize and log current state
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Widget Resize Handles (Phase 3)
+// ============================================================================
+
+/// Which edge or corner of a widget.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResizeEdge {
+    North,
+    South,
+    East,
+    West,
+    NorthWest,
+    NorthEast,
+    SouthWest,
+    SouthEast,
+}
+
+/// Marker component for resize handle entities.
+#[derive(Component)]
+pub struct ResizeHandle {
+    pub edge: ResizeEdge,
+}
+
+/// Marks a widget as resizable with size constraints.
+#[derive(Component)]
+pub struct Resizable {
+    pub min_width: f32,
+    pub min_height: f32,
+    pub max_width: Option<f32>,
+    pub max_height: Option<f32>,
+}
+
+impl Default for Resizable {
+    fn default() -> Self {
+        Self {
+            min_width: 100.0,
+            min_height: 50.0,
+            max_width: None,
+            max_height: None,
+        }
+    }
+}
+
+/// Tracks active resize operation.
+#[derive(Resource, Default)]
+pub struct ResizeState {
+    pub resizing_entity: Option<Entity>,
+    pub resize_edge: Option<ResizeEdge>,
+    pub start_cursor: Vec2,
+    pub start_size: Vec2,
+}
+
+const HANDLE_SIZE: f32 = 8.0;
+const HANDLE_HOVER_COLOR: Color = Color::srgb(0.4, 0.6, 1.0);
+const HANDLE_COLOR: Color = Color::srgb(0.3, 0.3, 0.4);
+
+/// Spawns resize handles on resizable widgets.
+pub fn spawn_resize_handles(
+    mut commands: Commands,
+    resizable_widgets: Query<(Entity, &Node, &Resizable), (Added<Resizable>, With<UiMarker>)>,
+) {
+    for (entity, _node, _resizable) in &resizable_widgets {
+        // Use default size since calculated_size isn't available in Bevy 0.18
+        let size = Vec2::new(200.0, 200.0);
+        if size.x <= 0.0 || size.y <= 0.0 {
+            continue;
+        }
+
+        // Spawn 8 handles (corners + edges)
+        let edges = [
+            (ResizeEdge::NorthWest, Val::Px(0.0), Val::Px(0.0)),
+            (ResizeEdge::North, Val::Px(size.x / 2.0 - HANDLE_SIZE / 2.0), Val::Px(0.0)),
+            (ResizeEdge::NorthEast, Val::Px(size.x - HANDLE_SIZE), Val::Px(0.0)),
+            (ResizeEdge::West, Val::Px(0.0), Val::Px(size.y / 2.0 - HANDLE_SIZE / 2.0)),
+            (ResizeEdge::East, Val::Px(size.x - HANDLE_SIZE), Val::Px(size.y / 2.0 - HANDLE_SIZE / 2.0)),
+            (ResizeEdge::SouthWest, Val::Px(0.0), Val::Px(size.y - HANDLE_SIZE)),
+            (ResizeEdge::South, Val::Px(size.x / 2.0 - HANDLE_SIZE / 2.0), Val::Px(size.y - HANDLE_SIZE)),
+            (ResizeEdge::SouthEast, Val::Px(size.x - HANDLE_SIZE), Val::Px(size.y - HANDLE_SIZE)),
+        ];
+
+        for (edge, left, top) in edges {
+            let handle = commands.spawn((
+                Button,
+                ResizeHandle { edge },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left,
+                    top,
+                    width: Val::Px(HANDLE_SIZE),
+                    height: Val::Px(HANDLE_SIZE),
+                    ..default()
+                },
+                BackgroundColor(HANDLE_COLOR),
+                UiMarker,
+            )).id();
+            commands.entity(entity).add_child(handle);
+        }
+    }
+}
+
+/// Handles resize start - captures initial state.
+pub fn handle_resize_start(
+    mut resize_state: ResMut<ResizeState>,
+    windows: Query<&Window>,
+    resize_handles: Query<(Entity, &ResizeHandle, &ChildOf, &Interaction), (With<Button>, Changed<Interaction>)>,
+    nodes: Query<&Node>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+
+    for (_handle_entity, handle, parent, interaction) in &resize_handles {
+        if *interaction == Interaction::Pressed {
+            // Access the parent entity from ChildOf component
+            let parent_entity = parent.get();
+            let Ok(_node) = nodes.get(parent_entity) else {
+                continue;
+            };
+
+            // Use the Node's size directly (width/height as Val)
+            // For resize, we'll use a default starting size since calculated_size isn't available
+            let size = Vec2::new(200.0, 200.0); // Default starting size
+
+            resize_state.resizing_entity = Some(parent_entity);
+            resize_state.resize_edge = Some(handle.edge);
+            resize_state.start_cursor = cursor_pos;
+            resize_state.start_size = size;
+            log::info!("Resize started: edge={:?}", handle.edge);
+            break;
+        }
+    }
+}
+
+/// Handles resize movement - updates widget size.
+pub fn handle_resize(
+    mut resize_state: ResMut<ResizeState>,
+    windows: Query<&Window>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut nodes: Query<(&Resizable, &mut Node)>,
+) {
+    let Some(entity) = resize_state.resizing_entity else {
+        return;
+    };
+
+    // Cancel if mouse released
+    if !mouse_buttons.pressed(MouseButton::Left) {
+        return;
+    }
+
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+
+    let Ok((resizable, mut node)) = nodes.get_mut(entity) else {
+        resize_state.resizing_entity = None;
+        return;
+    };
+
+    let delta = cursor_pos - resize_state.start_cursor;
+    let mut new_size = resize_state.start_size;
+
+    match resize_state.resize_edge {
+        Some(ResizeEdge::North) => {
+            new_size.y -= delta.y;
+            new_size.y = new_size.y.max(resizable.min_height);
+        }
+        Some(ResizeEdge::South) => {
+            new_size.y += delta.y;
+            new_size.y = new_size.y.max(resizable.min_height);
+        }
+        Some(ResizeEdge::East) => {
+            new_size.x += delta.x;
+            new_size.x = new_size.x.max(resizable.min_width);
+        }
+        Some(ResizeEdge::West) => {
+            new_size.x -= delta.x;
+            new_size.x = new_size.x.max(resizable.min_width);
+        }
+        Some(ResizeEdge::NorthEast) => {
+            new_size.y -= delta.y;
+            new_size.x += delta.x;
+            new_size = new_size.max(Vec2::new(resizable.min_width, resizable.min_height));
+        }
+        Some(ResizeEdge::NorthWest) => {
+            new_size.y -= delta.y;
+            new_size.x -= delta.x;
+            new_size = new_size.max(Vec2::new(resizable.min_width, resizable.min_height));
+        }
+        Some(ResizeEdge::SouthEast) => {
+            new_size.y += delta.y;
+            new_size.x += delta.x;
+            new_size = new_size.max(Vec2::new(resizable.min_width, resizable.min_height));
+        }
+        Some(ResizeEdge::SouthWest) => {
+            new_size.y += delta.y;
+            new_size.x -= delta.x;
+            new_size = new_size.max(Vec2::new(resizable.min_width, resizable.min_height));
+        }
+        None => {}
+    }
+
+    // Apply max constraints
+    if let Some(max_w) = resizable.max_width {
+        new_size.x = new_size.x.min(max_w);
+    }
+    if let Some(max_h) = resizable.max_height {
+        new_size.y = new_size.y.min(max_h);
+    }
+
+    node.width = Val::Px(new_size.x);
+    node.height = Val::Px(new_size.y);
+}
+
+/// Handles resize end - cleans up state.
+pub fn handle_resize_end(
+    mut resize_state: ResMut<ResizeState>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+) {
+    if mouse_buttons.just_released(MouseButton::Left) {
+        if resize_state.resizing_entity.is_some() {
+            log::info!("Resize ended");
+            resize_state.resizing_entity = None;
+            resize_state.resize_edge = None;
+        }
+    }
+}
+
+/// Updates handle cursor to indicate resize direction.
+pub fn update_resize_cursors(
+    _windows: Query<&Window>,
+    _resize_handles: Query<(&ResizeHandle, &Interaction), With<ResizeHandle>>,
+) {
+    // Cursor update not directly available in Bevy 0.18 Window API
+    // The OS will handle cursor changes automatically
 }

@@ -49,7 +49,6 @@ pub struct TurnAdvancePayload {
     pub phase: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChoicePayload {
     pub character: String,
@@ -71,7 +70,6 @@ pub struct DeathPayload {
     pub cause: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct CombatPayload {
     pub area: String,
@@ -87,6 +85,31 @@ pub struct WeatherChangePayload {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MoodChangePayload {
     pub mood: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TurnProgressPayload {
+    pub event_type: String,
+    #[serde(default)]
+    pub turn: u32,
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub actor_id: String,
+    #[serde(default)]
+    pub keeper: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub role: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub reason: String,
+    #[serde(default)]
+    pub room_status: String,
+    #[serde(default)]
+    pub dm_keeper: String,
+    #[serde(default)]
+    pub selected_player_ids: Vec<String>,
 }
 
 // ─── Bevy Events ──────────────────────────
@@ -106,11 +129,9 @@ pub struct AreaMoved(pub AreaMovePayload);
 #[derive(Message, Debug, Clone)]
 pub struct TurnAdvanced(pub TurnAdvancePayload);
 
-#[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct ChoiceAvailable(pub ChoicePayload);
 
-#[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct ChoiceResolved(pub ChoicePayload);
 
@@ -120,7 +141,6 @@ pub struct ItemAcquired(pub ItemPayload);
 #[derive(Message, Debug, Clone)]
 pub struct CharacterDied(pub DeathPayload);
 
-#[allow(dead_code)]
 #[derive(Message, Debug, Clone)]
 pub struct CombatStarted(pub CombatPayload);
 
@@ -129,3 +149,6 @@ pub struct WeatherChanged(pub WeatherChangePayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct MoodChanged(pub MoodChangePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct TurnProgressUpdated(pub TurnProgressPayload);

@@ -15,6 +15,9 @@ type event_type =
   | Flag_set
   | Node_advanced
   | Narration_posted
+  | Scene_transition
+  | Quest_update
+  | World_event
 
 type t = {
   seq : int;

@@ -34,6 +34,30 @@ type context = {
 
 type result = bool * string
 
+(** {1 SSE Event Broadcasting}
+
+    Emits decision-model events to connected viewers via the SSE push pipeline.
+    Wire format follows JSON-RPC 2.0 notification (no id field):
+    {jsonrpc: "2.0", method: "masc/event", params: {type, agent, data, timestamp}}
+
+    Event types follow the Cross-Session Protocol defined in the viewer plan:
+    - decision_issue, decision_option, decision_argument
+    - decision_vote, decision_consensus, decision_phase *)
+
+let broadcast_decision_event ~event_type ~agent ?(data=`Null) () =
+  let params = `Assoc [
+    ("type", `String event_type);
+    ("agent", `String agent);
+    ("data", data);
+    ("timestamp", `Float (Unix.gettimeofday ()));
+  ] in
+  let notification = `Assoc [
+    ("jsonrpc", `String "2.0");
+    ("method", `String "masc/event");
+    ("params", params);
+  ] in
+  Sse.broadcast notification
+
 (** {1 Debate Handlers} *)
 
 let handle_debate_start ctx args =
@@ -45,6 +69,19 @@ let handle_debate_start ctx args =
     let notify_fn = fun ~agent:_ ~message:_ -> () in
     match DebateApi.start ~config ~topic ~notify_fn with
     | Ok debate ->
+      (* SSE: decision_issue + decision_phase(proposal) *)
+      broadcast_decision_event ~event_type:"decision_issue" ~agent:ctx.agent_name
+        ~data:(`Assoc [
+          ("id", `String debate.Debate.id);
+          ("title", `String topic);
+          ("description", `String topic);
+          ("urgency", `String "medium");
+        ]) ();
+      broadcast_decision_event ~event_type:"decision_phase" ~agent:ctx.agent_name
+        ~data:(`Assoc [
+          ("issue_id", `String debate.Debate.id);
+          ("phase", `String "proposal");
+        ]) ();
       let json = `Assoc [
         ("id", `String debate.Debate.id);
         ("topic", `String debate.topic);
@@ -92,6 +129,19 @@ let handle_debate_argue ctx args =
         | Some i -> Printf.sprintf " (reply to #%d)" i
         | None -> ""
       in
+      (* SSE: decision_argument *)
+      broadcast_decision_event ~event_type:"decision_argument" ~agent:ctx.agent_name
+        ~data:(`Assoc [
+          ("issue_id", `String debate_id);
+          ("option_id", `String (Printf.sprintf "arg-%d" (count - 1)));
+          ("agent", `String ctx.agent_name);
+          ("position", `String (match position with
+            | Debate.Support -> "for"
+            | Debate.Oppose -> "against"
+            | Debate.Neutral -> "neutral"));
+          ("reasoning", `String content);
+          ("confidence", `Float 0.8);
+        ]) ();
       (true, Printf.sprintf "Argument #%d added%s. Total: %d" (count - 1) reply_info count)
     | Error e -> (false, Printf.sprintf "Error: %s" e)
 
@@ -103,6 +153,12 @@ let handle_debate_close ctx args =
     let config = Council.make_config ~base_path:ctx.base_path in
     match DebateApi.close ~config ~debate_id with
     | Ok debate ->
+      (* SSE: decision_phase(resolved) *)
+      broadcast_decision_event ~event_type:"decision_phase" ~agent:ctx.agent_name
+        ~data:(`Assoc [
+          ("issue_id", `String debate.Debate.id);
+          ("phase", `String "resolved");
+        ]) ();
       let json = `Assoc [
         ("id", `String debate.Debate.id);
         ("topic", `String debate.topic);
@@ -147,6 +203,12 @@ let handle_consensus_start ctx args =
   else
     match ConsensusApi.start_vote ~topic ~initiator:ctx.agent_name ~quorum ~threshold () with
     | Ok session ->
+      (* SSE: decision_phase(voting) *)
+      broadcast_decision_event ~event_type:"decision_phase" ~agent:ctx.agent_name
+        ~data:(`Assoc [
+          ("issue_id", `String session.Consensus.id);
+          ("phase", `String "voting");
+        ]) ();
       let json = `Assoc [
         ("id", `String session.Consensus.id);
         ("topic", `String session.topic);
@@ -183,7 +245,15 @@ let handle_consensus_vote ctx args =
     in
     match ConsensusApi.cast ~session_id ~agent:ctx.agent_name ~decision ~reason () with
     | Ok session ->
-      (true, Printf.sprintf "Vote cast. Total votes: %d/%d" 
+      (* SSE: decision_vote *)
+      broadcast_decision_event ~event_type:"decision_vote" ~agent:ctx.agent_name
+        ~data:(`Assoc [
+          ("issue_id", `String session_id);
+          ("agent", `String ctx.agent_name);
+          ("option_id", `String decision_str);
+          ("weight", `Float 1.0);
+        ]) ();
+      (true, Printf.sprintf "Vote cast. Total votes: %d/%d"
         (List.length session.Consensus.votes) session.quorum)
     | Error e ->
       let msg = match e with
@@ -207,6 +277,15 @@ let handle_consensus_close _ctx args =
         | Ok r -> Consensus.show_voting_result r
         | Error _ -> "unknown"
       in
+      (* SSE: decision_consensus *)
+      broadcast_decision_event ~event_type:"decision_consensus" ~agent:"system"
+        ~data:(`Assoc [
+          ("issue_id", `String session.Consensus.id);
+          ("chosen_option_id", `String result);
+          ("method", `String "weighted");
+          ("margin", `Float session.threshold);
+          ("dissenting", `List []);
+        ]) ();
       let json = `Assoc [
         ("id", `String session.Consensus.id);
         ("topic", `String session.topic);

@@ -3072,6 +3072,25 @@ let current_sw : Eio.Switch.t option ref = ref None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
 let current_net : _ Eio.Net.t option ref = ref None
 
+
+(** Helper functions to get initialized state or fail *)
+let get_server_state () = match !server_state with
+  | Some s -> s
+  | None -> failwith "Server state not initialized"
+
+let get_switch () = match !current_sw with
+  | Some s -> s
+  | None -> failwith "Eio switch not initialized"
+
+let get_clock () = match !current_clock with
+  | Some c -> c
+  | None -> failwith "Eio clock not initialized"
+
+let get_net () = match !current_net with
+  | Some n -> n
+  | None -> failwith "Eio net not initialized"
+
+
 let http_status_of_graphql = function
   | `OK -> `OK
   | `Bad_request -> `Bad_request
@@ -3091,9 +3110,7 @@ let handle_get_graphql _request reqd =
 let handle_post_graphql request reqd =
   let origin = get_origin request in
   Http.Request.read_body_async reqd (fun body_str ->
-    let state = match !server_state with
-      | Some s -> s
-      | None -> failwith "Server state not initialized"
+    let state = get_server_state ()
     in
     let response = Graphql_api.handle_request ~config:state.room_config body_str in
     let status = http_status_of_graphql response.status in
@@ -3123,17 +3140,11 @@ let handle_post_mcp request reqd =
 
   Http.Request.read_body_async reqd (fun body_str ->
     try
-      let state = match !server_state with
-        | Some s -> s
-        | None -> failwith "Server state not initialized"
+      let state = get_server_state ()
       in
-      let sw = match !current_sw with
-        | Some s -> s
-        | None -> failwith "Eio switch not initialized"
+      let sw = get_switch ()
       in
-      let clock = match !current_clock with
-        | Some c -> c
-        | None -> failwith "Eio clock not initialized"
+      let clock = get_clock ()
       in
       let response_json =
         Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id ?auth_token state body_str
@@ -3491,17 +3502,11 @@ let handle_post_messages request reqd =
       let protocol_version = get_protocol_version_for_session ~session_id request in
       let auth_token = auth_token_from_request request in
       Http.Request.read_body_async reqd (fun body_str ->
-        let state = match !server_state with
-          | Some s -> s
-          | None -> failwith "Server state not initialized"
+        let state = get_server_state ()
         in
-        let sw = match !current_sw with
-          | Some s -> s
-          | None -> failwith "Eio switch not initialized"
+        let sw = get_switch ()
         in
-        let clock = match !current_clock with
-          | Some c -> c
-          | None -> failwith "Eio clock not initialized"
+        let clock = get_clock ()
         in
         let response_json =
           Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id ?auth_token state body_str
@@ -4528,9 +4533,7 @@ let run_server ~sw ~env ~port ~base_path =
               h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
           | Ok _cred_opt ->
           h2_read_body h2_reqd (fun body_str ->
-            let state = match !server_state with
-              | Some s -> s
-              | None -> failwith "Server state not initialized"
+            let state = get_server_state ()
             in
             let response_json =
               Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id ?auth_token state body_str
@@ -4615,9 +4618,7 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `POST, "/graphql" ->
           h2_read_body h2_reqd (fun body_str ->
-            let state = match !server_state with
-              | Some s -> s
-              | None -> failwith "Server state not initialized"
+            let state = get_server_state ()
             in
             let response = Graphql_api.handle_request ~config:state.room_config body_str in
             let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
@@ -4628,13 +4629,13 @@ let run_server ~sw ~env ~port ~base_path =
          REST API
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/api/v1/dashboard" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let config = state.Mcp_server.room_config in
           let json = dashboard_batch_json config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/status" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let config = state.Mcp_server.room_config in
           let room_state = Masc_mcp.Room.read_state config in
           let tempo = Masc_mcp.Tempo.get_tempo config in
@@ -4650,7 +4651,7 @@ let run_server ~sw ~env ~port ~base_path =
           h2_respond_json h2_reqd (Masc_mcp.Credits_dashboard.json_api ()) ~extra_headers:cors
 
       | `GET, "/api/v1/trpg/events" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
           let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
           let after_seq = int_query_param httpun_request "after_seq" ~default:0 in
@@ -4666,7 +4667,7 @@ let run_server ~sw ~env ~port ~base_path =
                 ~status:`Internal_server_error ~extra_headers:cors)
 
       | `POST, "/api/v1/trpg/events" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
           h2_read_body h2_reqd (fun body_str ->
             match trpg_append_event_json ~base_dir ~body_str with
@@ -4682,7 +4683,7 @@ let run_server ~sw ~env ~port ~base_path =
           )
 
       | `GET, "/api/v1/trpg/state" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
           let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
           let rule_module =
@@ -4699,7 +4700,7 @@ let run_server ~sw ~env ~port ~base_path =
                 ~status:`Internal_server_error ~extra_headers:cors)
 
       | `POST, "/api/v1/trpg/dice/roll" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
           h2_read_body h2_reqd (fun body_str ->
             match trpg_dice_roll_json ~base_dir ~body_str with
@@ -4715,7 +4716,7 @@ let run_server ~sw ~env ~port ~base_path =
           )
 
       | `POST, "/api/v1/trpg/turns/advance" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
           h2_read_body h2_reqd (fun body_str ->
             match trpg_turn_advance_json ~base_dir ~body_str with
@@ -4731,7 +4732,7 @@ let run_server ~sw ~env ~port ~base_path =
           )
 
       | `POST, "/api/v1/trpg/rounds/run" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           h2_read_body h2_reqd (fun body_str ->
             let agent_name =
               Option.value
@@ -4762,7 +4763,7 @@ let run_server ~sw ~env ~port ~base_path =
           )
 
       | `GET, "/api/v1/trpg/stream" ->
-          let state = match !server_state with Some s -> s | None -> failwith "Not initialized" in
+          let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
           let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
           let after_seq = int_query_param httpun_request "after_seq" ~default:0 in

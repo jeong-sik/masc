@@ -1505,6 +1505,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
     .trpg-round-item.timeout { border-left-color: rgba(239,68,68,0.9); }
     .trpg-round-item.unavailable { border-left-color: rgba(251,191,36,0.9); }
+    .trpg-round-item.mismatch { border-left-color: rgba(245,158,11,0.9); }
+    .trpg-round-item.ok { border-left-color: rgba(74,222,128,0.9); }
     .trpg-round-item .meta { color: #64748b; font-size: 0.95em; }
     .trpg-empty { text-align: center; color: #64748b; padding: 60px 20px; font-style: italic; }
     .trpg-control-box {
@@ -1998,12 +2000,30 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <button id="trpg-bootstrap-btn" class="trpg-run-btn secondary" onclick="bootstrapTrpgSession()">세션 자동 시작</button>
                 <button id="trpg-run-round-btn" class="trpg-run-btn" onclick="runTrpgRound()">라운드 실행</button>
               </div>
+              <div class="trpg-control-help" style="margin-top:6px;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input id="trpg-bootstrap-run-round1" type="checkbox" checked>
+                  <span>세션 자동 시작 후 즉시 1라운드 실행</span>
+                </label>
+              </div>
               <div id="trpg-round-run-status" class="trpg-run-status">1) 세션 자동 시작 → 2) 라운드 실행 순서로 진행하세요.</div>
+            </div>
+            <div class="trpg-section-title" style="margin-top:8px;">게임 세션</div>
+            <div id="trpg-session-meta" class="trpg-round-list">
+              <div class="trpg-empty" style="padding:18px 8px;">세션 메타 정보가 없습니다.</div>
+            </div>
+            <div class="trpg-section-title" style="margin-top:8px;">파티 할당</div>
+            <div id="trpg-party-assignment" class="trpg-round-list">
+              <div class="trpg-empty" style="padding:18px 8px;">세션 시작 후 actor↔keeper 할당이 표시됩니다.</div>
             </div>
             <div class="trpg-status-grid" id="trpg-status-grid"></div>
             <div class="trpg-section-title" style="margin-top:8px;">최근 라운드</div>
             <div id="trpg-round-log" class="trpg-round-list">
               <div class="trpg-empty" style="padding:18px 8px;">라운드 이벤트가 없습니다.</div>
+            </div>
+            <div class="trpg-section-title" style="margin-top:8px;">게임 히스토리</div>
+            <div id="trpg-game-history" class="trpg-round-list">
+              <div class="trpg-empty" style="padding:18px 8px;">이 room의 이전 세션 기록이 없습니다.</div>
             </div>
             <div class="trpg-section-title">파티 상태</div>
             <div id="trpg-party"></div>
@@ -6899,6 +6919,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgTyping = false;
     let trpgLastSeq = 0;
     let trpgEventsCache = [];
+    let trpgStateCache = {};
     let trpgRoundRunning = false;
     let trpgBootstrapping = false;
     let trpgPresetsLoaded = false;
@@ -6961,6 +6982,109 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return summary;
     }
 
+    function trpgFmtDateTime(ts) {
+      if (!ts) return '-';
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return String(ts);
+      return d.toLocaleString('ko-KR', { hour12: false });
+    }
+
+    function trpgUniqueStrings(xs) {
+      const seen = new Set();
+      const out = [];
+      (Array.isArray(xs) ? xs : []).forEach((x) => {
+        const v = String(x || '').trim();
+        if (!v || seen.has(v)) return;
+        seen.add(v);
+        out.push(v);
+      });
+      return out;
+    }
+
+    function trpgPartyActorsFromStateOrEvents(state, events) {
+      const partyObj =
+        state && state.party && typeof state.party === 'object' && !Array.isArray(state.party)
+          ? state.party
+          : null;
+      if (partyObj) {
+        const actors = trpgUniqueStrings(Object.keys(partyObj));
+        if (actors.length > 0) return actors;
+      }
+      for (let i = (events || []).length - 1; i >= 0; i -= 1) {
+        const ev = events[i];
+        if (trpgEventType(ev) !== 'party.selected') continue;
+        const payload = trpgEventPayload(ev);
+        const party = Array.isArray(payload.party) ? payload.party : [];
+        const actors = trpgUniqueStrings(
+          party.map((row) => (row && typeof row === 'object' && !Array.isArray(row) ? row.actor_id : ''))
+        );
+        if (actors.length > 0) return actors;
+      }
+      return [];
+    }
+
+    function trpgBuildSessionHistory(events) {
+      const sorted = (Array.isArray(events) ? events.slice() : [])
+        .sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+      const sessions = [];
+      let current = null;
+      sorted.forEach((ev) => {
+        const type = trpgEventType(ev);
+        const payload = trpgEventPayload(ev);
+        if (type === 'session.started') {
+          if (current) sessions.push(current);
+          const seq = Number(ev.seq) || 0;
+          const sessionId =
+            String(payload.session_id || '').trim() || `session@${seq}`;
+          current = {
+            sessionId,
+            roomId: String(payload.room_id || '').trim(),
+            startSeq: seq,
+            endSeq: seq,
+            startedAt: ev.ts || ev.timestamp || null,
+            lastTs: ev.ts || ev.timestamp || null,
+            eventCount: 0,
+            maxTurn: 0,
+            phase: '-',
+          };
+        }
+        if (!current) return;
+        current.eventCount += 1;
+        current.endSeq = Number(ev.seq) || current.endSeq;
+        current.lastTs = ev.ts || ev.timestamp || current.lastTs;
+        const t = Number(payload.turn);
+        if (Number.isFinite(t) && t > current.maxTurn) current.maxTurn = t;
+        if (type === 'phase.changed') {
+          const p = String(payload.phase || '').trim();
+          if (p) current.phase = p;
+        }
+      });
+      if (current) sessions.push(current);
+      if (sessions.length === 0 && sorted.length > 0) {
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        let maxTurn = 0;
+        sorted.forEach((ev) => {
+          const t = Number(trpgEventPayload(ev).turn);
+          if (Number.isFinite(t) && t > maxTurn) maxTurn = t;
+        });
+        sessions.push({
+          sessionId: '(legacy)',
+          roomId: '',
+          startSeq: Number(first.seq) || 0,
+          endSeq: Number(last.seq) || 0,
+          startedAt: first.ts || first.timestamp || null,
+          lastTs: last.ts || last.timestamp || null,
+          eventCount: sorted.length,
+          maxTurn,
+          phase: trpgLatestPhase(sorted),
+        });
+      }
+      return sessions
+        .sort((a, b) => b.startSeq - a.startSeq)
+        .slice(0, 8);
+    }
+
     function trpgFmtEventTime(ev) {
       const ts = ev && (ev.ts || ev.timestamp);
       if (!ts) return '-';
@@ -6982,6 +7106,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function resetTrpgEventWindow() {
       trpgLastSeq = 0;
       trpgEventsCache = [];
+      trpgStateCache = {};
       trpgKnownIds.clear();
     }
 
@@ -7427,6 +7552,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       ensureTrpgControlDefaults();
       const roomId = applyTrpgRoomFromInput();
       const lang = trpgLanguageFromSelect();
+      let runRoundAfterBootstrap = false;
       setTrpgBootstrapBusy(true);
       setTrpgRoundRunStatus(`세션 자동 시작 중: room <b>${escapeHtml(roomId)}</b>`, 'running');
       try {
@@ -7499,10 +7625,25 @@ let cached_html = lazy ({|<!DOCTYPE html>
             ? startResult.round_run_template
             : {};
         const dmKeeper = String(template.dm_keeper || startResult.dm_keeper || 'dm-keeper').trim() || 'dm-keeper';
-        const playerMap =
+        const playerMapRaw =
           (template.player_keepers && typeof template.player_keepers === 'object' && !Array.isArray(template.player_keepers))
             ? template.player_keepers
             : {};
+        const usedKeepers = new Set([dmKeeper]);
+        const playerMap = {};
+        Object.entries(playerMapRaw).forEach(([actorIdRaw, keeperRaw]) => {
+          const actorId = String(actorIdRaw || '').trim();
+          if (!actorId) return;
+          let keeper = String(keeperRaw || '').trim();
+          if (!keeper || usedKeepers.has(keeper)) {
+            keeper = `pk-${actorId}`;
+          }
+          while (usedKeepers.has(keeper)) {
+            keeper = `${keeper}-1`;
+          }
+          usedKeepers.add(keeper);
+          playerMap[actorId] = keeper;
+        });
         const playerLines = playerKeeperMapToText(playerMap);
         const phase = String(template.phase || 'round').trim() || 'round';
 
@@ -7561,6 +7702,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
           `DM <b>${escapeHtml(dmKeeper)}</b> + 플레이어 <b>${escapeHtml(String(Object.keys(playerMap).length || party.length))}</b>명 준비됨`,
           'ok'
         );
+        const autoRoundEl = document.getElementById('trpg-bootstrap-run-round1');
+        runRoundAfterBootstrap = !!(autoRoundEl && autoRoundEl.checked);
         showToast(`TRPG session ready (${roomId})`, 'success');
         await fetchTrpg();
       } catch (e) {
@@ -7569,6 +7712,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
         showToast('TRPG session bootstrap 실패', 'error');
       } finally {
         setTrpgBootstrapBusy(false);
+        if (runRoundAfterBootstrap) {
+          setTimeout(() => { runTrpgRound(); }, 100);
+        }
       }
     }
 
@@ -7578,6 +7724,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .map((line) => line.trim())
         .filter((line) => line !== '');
       const mapping = {};
+      const keeperOwners = {};
       for (const line of lines) {
         const eqIdx = line.indexOf('=');
         let actorId = '';
@@ -7595,6 +7742,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (!actorId || !keeperName) {
           return { ok: false, error: `actor/keeper 값이 비어 있습니다: ${line}` };
         }
+        if (Object.prototype.hasOwnProperty.call(mapping, actorId)) {
+          return { ok: false, error: `중복 actor_id 입니다: ${actorId}` };
+        }
+        if (Object.prototype.hasOwnProperty.call(keeperOwners, keeperName)) {
+          return {
+            ok: false,
+            error: `중복 keeper 입니다: ${keeperName} (actor ${keeperOwners[keeperName]} / ${actorId})`,
+          };
+        }
+        keeperOwners[keeperName] = actorId;
         mapping[actorId] = keeperName;
       }
       if (Object.keys(mapping).length === 0) {
@@ -7617,7 +7774,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     async function runTrpgRound() {
-      if (trpgRoundRunning) return;
+      if (trpgRoundRunning || trpgBootstrapping) return;
       ensureTrpgControlDefaults();
       const roomId = applyTrpgRoomFromInput();
       const dmKeeper = String((document.getElementById('trpg-dm-keeper-input') || {}).value || '').trim();
@@ -7634,6 +7791,35 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (!parsedPlayers.ok) {
         setTrpgRoundRunStatus('오류: ' + escapeHtml(parsedPlayers.error || 'invalid player_keepers'), 'error');
         return;
+      }
+      const playerKeeperNames = Object.values(parsedPlayers.mapping || {})
+        .map((name) => String(name || '').trim())
+        .filter((name) => name !== '');
+      if (playerKeeperNames.includes(dmKeeper)) {
+        setTrpgRoundRunStatus(
+          `오류: DM keeper <b>${escapeHtml(dmKeeper)}</b>가 player keeper와 중복됩니다. keeper는 모두 유일해야 합니다.`,
+          'error'
+        );
+        return;
+      }
+      const expectedActors = trpgPartyActorsFromStateOrEvents(trpgStateCache, trpgEventsCache);
+      if (expectedActors.length > 0) {
+        const expectedSet = new Set(expectedActors);
+        const inputActors = Object.keys(parsedPlayers.mapping || {});
+        const inputSet = new Set(inputActors);
+        const unknownActors = inputActors.filter((actor) => !expectedSet.has(actor));
+        const missingActors = expectedActors.filter((actor) => !inputSet.has(actor));
+        if (unknownActors.length > 0 || missingActors.length > 0) {
+          const unknownText = unknownActors.length > 0 ? `입력만 존재: ${unknownActors.join(', ')}` : '-';
+          const missingText = missingActors.length > 0 ? `누락: ${missingActors.join(', ')}` : '-';
+          setTrpgRoundRunStatus(
+            `오류: player keepers actor_id가 현재 파티와 일치하지 않습니다.<br>` +
+            `현재 파티 actor: <b>${escapeHtml(expectedActors.join(', '))}</b><br>` +
+            `${escapeHtml(unknownText)} / ${escapeHtml(missingText)}`,
+            'error'
+          );
+          return;
+        }
       }
 
       const participantCount = 1 + Object.keys(parsedPlayers.mapping || {}).length;
@@ -7763,8 +7949,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
           );
         }
 
+        trpgStateCache =
+          stateData && stateData.state && typeof stateData.state === 'object' && !Array.isArray(stateData.state)
+            ? stateData.state
+            : {};
         renderTrpgNarrative(trpgEventsCache);
-        renderTrpgState(stateData.state || {}, trpgEventsCache);
+        renderTrpgState(trpgStateCache, trpgEventsCache);
       } catch (_) {}
     }
 
@@ -7851,10 +8041,154 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const phase = trpgLatestPhase(events);
       const round = trpgLatestRound(state, events);
       const summary = trpgRoundSummary(events, round);
+      renderTrpgSessionMeta(state, events, summary, phase);
+      renderTrpgPartyAssignment(state, events);
       renderTrpgStatus(state, summary, phase);
       renderTrpgRoundLog(events, round);
+      renderTrpgGameHistory(events);
       renderTrpgParty(state);
       renderTrpgMap(state, summary);
+    }
+
+    function renderTrpgSessionMeta(_state, events, summary, phase) {
+      const el = document.getElementById('trpg-session-meta');
+      if (!el) return;
+      const history = trpgBuildSessionHistory(events);
+      if (!history.length) {
+        el.innerHTML = `
+          <div class="trpg-round-item">
+            <div class="meta">mode</div>
+            <div><b>LOBBY</b> · 아직 session.started 이벤트가 없습니다.</div>
+          </div>
+        `;
+        return;
+      }
+      const latest = history[0];
+      const mode = phase === 'ended' ? 'ENDED' : 'RUNNING';
+      const modeClass = mode === 'ENDED' ? 'unavailable' : 'ok';
+      const roomText = latest.roomId ? ` · room ${escapeHtml(latest.roomId)}` : '';
+      el.innerHTML = `
+        <div class="trpg-round-item ${modeClass}">
+          <div class="meta">mode</div>
+          <div><b>${mode}</b>${roomText}</div>
+        </div>
+        <div class="trpg-round-item">
+          <div class="meta">session</div>
+          <div>${escapeHtml(latest.sessionId)} · 시작 ${escapeHtml(trpgFmtDateTime(latest.startedAt))}</div>
+        </div>
+        <div class="trpg-round-item">
+          <div class="meta">runtime</div>
+          <div>round ${summary.round} · phase ${escapeHtml(String(phase || '-'))} · events ${latest.eventCount}</div>
+        </div>
+      `;
+    }
+
+    function renderTrpgPartyAssignment(state, events) {
+      const el = document.getElementById('trpg-party-assignment');
+      if (!el) return;
+      const expectedActors = trpgPartyActorsFromStateOrEvents(state, events);
+      const inputRaw = String((document.getElementById('trpg-player-keepers-input') || {}).value || '');
+      const parsed = parseTrpgPlayerKeepers(inputRaw);
+      const mapping = parsed.ok ? parsed.mapping : {};
+      const assignedActors = Object.keys(mapping);
+      const actorSet = new Set(expectedActors);
+      const keeperUse = {};
+      Object.entries(mapping).forEach(([actor, keeper]) => {
+        const key = String(keeper || '').trim();
+        if (!key) return;
+        if (!keeperUse[key]) keeperUse[key] = [];
+        keeperUse[key].push(actor);
+      });
+      const duplicateKeepers = Object.entries(keeperUse).filter(([, actors]) => actors.length > 1);
+
+      const unknownActors = assignedActors.filter((actor) => !actorSet.has(actor));
+      const missingActors = expectedActors.filter((actor) => !Object.prototype.hasOwnProperty.call(mapping, actor));
+
+      const rows = [];
+      if (!parsed.ok) {
+        rows.push(`
+          <div class="trpg-round-item mismatch">
+            <div class="meta">입력 오류</div>
+            <div>${escapeHtml(String(parsed.error || 'invalid player keeper mapping'))}</div>
+          </div>
+        `);
+      }
+      if (!expectedActors.length) {
+        rows.push(`
+          <div class="trpg-round-item mismatch">
+            <div class="meta">party</div>
+            <div>파티 actor_id를 아직 확인하지 못했습니다. 먼저 <b>세션 자동 시작</b>을 실행하세요.</div>
+          </div>
+        `);
+      } else {
+        rows.push(`
+          <div class="trpg-round-item">
+            <div class="meta">expected party actors</div>
+            <div>${escapeHtml(expectedActors.join(', '))}</div>
+          </div>
+        `);
+      }
+      expectedActors.forEach((actor) => {
+        const keeper = String(mapping[actor] || '').trim();
+        if (!keeper) {
+          rows.push(`
+            <div class="trpg-round-item mismatch">
+              <div class="meta">${escapeHtml(actor)}</div>
+              <div>keeper 미할당 (player keepers 입력 필요)</div>
+            </div>
+          `);
+          return;
+        }
+        rows.push(`
+          <div class="trpg-round-item ok">
+            <div class="meta">${escapeHtml(actor)}</div>
+            <div>${escapeHtml(keeper)}</div>
+          </div>
+        `);
+      });
+
+      unknownActors.forEach((actor) => {
+        rows.push(`
+          <div class="trpg-round-item mismatch">
+            <div class="meta">${escapeHtml(actor)}</div>
+            <div>파티에 없는 actor_id 입니다. (현재 입력만 존재)</div>
+          </div>
+        `);
+      });
+      duplicateKeepers.forEach(([keeper, actors]) => {
+        rows.push(`
+          <div class="trpg-round-item mismatch">
+            <div class="meta">중복 keeper</div>
+            <div>${escapeHtml(keeper)} ← ${escapeHtml(actors.join(', '))}</div>
+          </div>
+        `);
+      });
+      if (!rows.length) {
+        rows.push('<div class="trpg-empty" style="padding:18px 8px;">할당 정보가 없습니다.</div>');
+      }
+      el.innerHTML = rows.join('');
+    }
+
+    function renderTrpgGameHistory(events) {
+      const el = document.getElementById('trpg-game-history');
+      if (!el) return;
+      const history = trpgBuildSessionHistory(events);
+      if (!history.length) {
+        el.innerHTML = '<div class="trpg-empty" style="padding:18px 8px;">이 room의 이전 세션 기록이 없습니다.</div>';
+        return;
+      }
+      el.innerHTML = history.map((session, idx) => {
+        const isLatest = idx === 0;
+        const cls = isLatest ? 'ok' : '';
+        const roomText = session.roomId ? ` · room ${escapeHtml(session.roomId)}` : '';
+        return `
+          <div class="trpg-round-item ${cls}">
+            <div class="meta">${isLatest ? 'current' : 'past'} · seq ${session.startSeq}~${session.endSeq}</div>
+            <div><b>${escapeHtml(session.sessionId)}</b>${roomText}</div>
+            <div class="meta">시작 ${escapeHtml(trpgFmtDateTime(session.startedAt))} · 최근 ${escapeHtml(trpgFmtDateTime(session.lastTs))} · round ${session.maxTurn || 0} · events ${session.eventCount}</div>
+          </div>
+        `;
+      }).join('');
     }
 
     function renderTrpgStatus(state, summary, phase) {

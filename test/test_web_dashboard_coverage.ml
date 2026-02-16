@@ -142,9 +142,23 @@ let test_html_contains_trpg_keeper_quickpick_and_lang () =
     (String.length html > 0
     && contains_substr "id=\"trpg-lang-select\"" html
     && contains_substr "id=\"trpg-reload-btn\"" html
+    && contains_substr "id=\"trpg-bootstrap-run-round1\"" html
     && contains_substr "id=\"trpg-keeper-quick\"" html
     && contains_substr "function ensureTrpgKeeperCatalog(force = false)" html
     && contains_substr "function reloadTrpgCatalogs()" html)
+
+let test_html_contains_trpg_session_history_and_assignment () =
+  let html = Web_dashboard.html () in
+  check bool "trpg session/history/assignment panels" true
+    (String.length html > 0
+    && contains_substr "id=\"trpg-session-meta\"" html
+    && contains_substr "id=\"trpg-party-assignment\"" html
+    && contains_substr "id=\"trpg-game-history\"" html
+    && contains_substr "function trpgBuildSessionHistory(events)" html
+    && contains_substr "function trpgPartyActorsFromStateOrEvents(state, events)" html
+    && contains_substr "function renderTrpgSessionMeta(_state, events, summary, phase)" html
+    && contains_substr "function renderTrpgPartyAssignment(state, events)" html
+    && contains_substr "function renderTrpgGameHistory(events)" html)
 
 let test_html_contains_keeper_goal_horizon_kpis () =
   let html = Web_dashboard.html () in
@@ -185,6 +199,10 @@ let () =
         "trpg keeper quickpick + lang"
         `Quick
         test_html_contains_trpg_keeper_quickpick_and_lang;
+      test_case
+        "trpg session/history/assignment panels"
+        `Quick
+        test_html_contains_trpg_session_history_and_assignment;
       test_case "keeper goal horizon kpis" `Quick test_html_contains_keeper_goal_horizon_kpis;
     ];
   ]

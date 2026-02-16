@@ -30,6 +30,89 @@ type trpg_role = [ `Dm | `Player ]
 
 let role_to_string = function `Dm -> "dm" | `Player -> "player"
 
+let normalize_keeper_name (s : string) : string =
+  s |> String.trim |> String.lowercase_ascii
+
+let validate_unique_keeper_assignments ~dm_keeper
+    ~(player_keepers : (string * string) list) : (unit, string) Stdlib.result =
+  let dm_keeper = String.trim dm_keeper in
+  if dm_keeper = "" then Error "dm_keeper cannot be empty"
+  else
+    let seen : (string, string) Hashtbl.t = Hashtbl.create 16 in
+    Hashtbl.replace seen (normalize_keeper_name dm_keeper) "dm";
+    let rec loop = function
+      | [] -> Ok ()
+      | (actor_id, keeper_name) :: tl ->
+          let actor_id = String.trim actor_id in
+          let keeper_name = String.trim keeper_name in
+          if actor_id = "" then Error "player actor_id cannot be empty"
+          else if keeper_name = "" then
+            Error (Printf.sprintf "keeper for actor %s cannot be empty" actor_id)
+          else
+            let key = normalize_keeper_name keeper_name in
+            (match Hashtbl.find_opt seen key with
+            | Some previous_owner ->
+                Error
+                  (Printf.sprintf
+                     "keeper assignments must be unique: keeper '%s' is reused by %s and %s"
+                     keeper_name previous_owner actor_id)
+            | None ->
+                Hashtbl.replace seen key actor_id;
+                loop tl)
+    in
+    loop player_keepers
+
+let keeper_busy_mutex = Mutex.create ()
+let keeper_busy_counts : (string, int) Hashtbl.t = Hashtbl.create 128
+
+let with_keeper_reservation ~(keepers : string list)
+    (f : unit -> ('a, string) Stdlib.result) : ('a, string) Stdlib.result =
+  let keeper_keys =
+    keepers |> List.map normalize_keeper_name
+    |> List.filter (fun k -> k <> "")
+    |> List.sort_uniq String.compare
+  in
+  let reserve () =
+    Mutex.lock keeper_busy_mutex;
+    Fun.protect
+      ~finally:(fun () -> Mutex.unlock keeper_busy_mutex)
+      (fun () ->
+        let busy =
+          List.filter
+            (fun key ->
+              let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
+              cnt > 0)
+            keeper_keys
+        in
+        if busy <> [] then
+          Error
+            (Printf.sprintf
+               "keeper busy: %s (each spawned keeper can handle only one round at a time)"
+               (String.concat ", " busy))
+        else (
+          List.iter
+            (fun key ->
+              let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
+              Hashtbl.replace keeper_busy_counts key (cnt + 1))
+            keeper_keys;
+          Ok ()))
+  in
+  let release () =
+    Mutex.lock keeper_busy_mutex;
+    Fun.protect
+      ~finally:(fun () -> Mutex.unlock keeper_busy_mutex)
+      (fun () ->
+        List.iter
+          (fun key ->
+            let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
+            if cnt <= 1 then Hashtbl.remove keeper_busy_counts key
+            else Hashtbl.replace keeper_busy_counts key (cnt - 1))
+          keeper_keys)
+  in
+  match reserve () with
+  | Error _ as e -> e
+  | Ok () -> Fun.protect ~finally:release f
+
 type pool_member = {
   actor_id : string;
   name : string;
@@ -1572,10 +1655,12 @@ let handle_round_run ctx args : result =
   let base_dir = ctx.config.base_path in
   let result_json =
     let* room_id = get_required_string args "room_id" in
-    let* dm_keeper = get_required_string args "dm_keeper" in
+    let* dm_keeper_raw = get_required_string args "dm_keeper" in
+    let dm_keeper = String.trim dm_keeper_raw in
     let* player_keepers = parse_player_keepers args in
     let* timeout_sec = get_optional_float args "timeout_sec" ~default:30.0 in
     if timeout_sec <= 0.0 then Error "timeout_sec must be > 0"
+    else if dm_keeper = "" then Error "dm_keeper cannot be empty"
     else
       let* rule_opt = get_optional_string args "rule_module" in
       let* phase_opt = get_optional_string args "phase" in
@@ -1594,6 +1679,10 @@ let handle_round_run ctx args : result =
         | Ok _ -> Ok ()
         | Error e -> Error e
       in
+      let* () = validate_unique_keeper_assignments ~dm_keeper ~player_keepers in
+      with_keeper_reservation
+        ~keepers:(dm_keeper :: List.map snd player_keepers)
+        (fun () ->
       let* derived = derive_state ~base_dir ~room_id ~rule_module in
       let state = state_of_derived derived in
       let* turn_before = read_state_turn derived in
@@ -1782,7 +1871,7 @@ let handle_round_run ctx args : result =
                 ] );
             ("events", `List events_json);
             ("state", state_of_derived next_derived);
-          ])
+          ]))
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 

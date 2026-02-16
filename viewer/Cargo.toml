@@ -9,6 +9,9 @@ bevy = { version = "0.18", default-features = false, features = [
     "2d",
     "webgpu",
     "jpeg",
+    "bevy_ui",
+    "bevy_text",
+    "bevy_picking",
 ] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

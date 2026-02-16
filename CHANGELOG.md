@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.67.0] - 2026-02-16
+
+### Added
+- **Pulse Tick Engine** — Generic heartbeat abstraction for timer-based subsystems
+  - `pulse.ml`: Core engine using `Eio.Stream` for nudge signaling, `Eio.Promise` for graceful shutdown
+  - `Pulse.Consumer` module type: First-class modules with `name`, `should_act`, `on_beat` callbacks
+  - Rhythm types: Fixed interval, quiet hours support, interval clamping (min/max bounds)
+  - Lifecycle: `Perpetual` (auto-restart on error) or `Oneshot`
+  - 20+ tests covering quiet hours, nudge coalescing, consumer error isolation
+
+### Changed
+- **Orchestrator → Pulse migration**: Replaced ad-hoc timer loop with dual Pulse engines (orchestrator 300s, zombie cleanup 60s)
+- **Lodge → Pulse migration**: Main tick loop now uses Pulse with configurable rhythm
+- **Guardian → Pulse migration**: All 3 timer loops (spawn, retire, health check) consolidated to Pulse
+
+### Fixed
+- TRPG round run unblocked by handling MCP SSE responses with proper timeout propagation
+
+## [2.66.0] - 2026-02-14
+
+### Added
+- **TRPG Dashboard MCP**: Bootstrap endpoint for TRPG session management with CORS header deduplication
+- **Viewer Lodge Social Board**: HTTP polling-based social feed with posts, votes, comments
+- **Viewer Weather/Mood Overlay**: Atmospheric effects system with prop notifications
+- **TRPG Scenario System**: 4 scenario templates, world presets, session bootstrap with presets + interventions
+
+### Fixed
+- CORS headers for TRPG API responses
+- Viewer NO_COLOR normalization for trunk runner
+
 ## [2.65.0] - 2026-02-13
 
 ### Added

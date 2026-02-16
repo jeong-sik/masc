@@ -3,6 +3,7 @@ pub mod character_panel;
 pub mod connection;
 pub mod dice_log;
 pub mod narrative;
+pub mod turn_runtime;
 pub mod turn_phase;
 
 use bevy::prelude::*;
@@ -22,6 +23,7 @@ impl Plugin for DomBridgePlugin {
             // DOM caches for change detection (inert when unused)
             .init_resource::<character_panel::CharacterPanelCache>()
             .init_resource::<turn_phase::TurnPhaseCache>()
+            .init_resource::<turn_runtime::TurnRuntimeCache>()
             .init_resource::<connection::ConnectionStatusCache>()
             .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
             // TRPG-specific DOM update systems
@@ -30,6 +32,7 @@ impl Plugin for DomBridgePlugin {
                 dice_log::update_dice_log_dom,
                 character_panel::update_character_panel_dom,
                 turn_phase::update_turn_phase_dom,
+                turn_runtime::update_turn_runtime_dom,
                 connection::update_connection_dom,
                 action_panel::sync_action_panel_visibility,
             ).run_if(in_state(ViewerMode::Trpg)))
@@ -72,11 +75,13 @@ fn reset_trpg_dom_state(
 fn reset_trpg_dom_state(
     mut character_cache: ResMut<character_panel::CharacterPanelCache>,
     mut turn_cache: ResMut<turn_phase::TurnPhaseCache>,
+    mut runtime_cache: ResMut<turn_runtime::TurnRuntimeCache>,
     mut connection_cache: ResMut<connection::ConnectionStatusCache>,
 ) {
     character_cache.last_snapshot.clear();
     turn_cache.last_turn = 0;
     turn_cache.last_phase.clear();
+    runtime_cache.last_snapshot.clear();
     connection_cache.last_status.clear();
 
     #[cfg(target_arch = "wasm32")]
@@ -95,6 +100,9 @@ fn reset_trpg_dom_state(
         }
         if let Some(el) = document.get_element_by_id("turn-num") {
             el.set_text_content(Some("1"));
+        }
+        if let Some(el) = document.get_element_by_id("turn-runtime") {
+            el.set_inner_html("");
         }
     }
 }

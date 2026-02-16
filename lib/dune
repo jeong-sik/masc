@@ -107,6 +107,7 @@
    sctp_eio
    sctp_transport
    safe_ops
+   game_view_state
    sdp
    session
    shutdown_hooks
@@ -159,6 +160,7 @@
    tool_library
    library_bridge
    tool_council
+   tool_protocol_game_view
    tool_experiment
    tool_suspend
    debate
@@ -194,6 +196,8 @@
    trpg_engine_state_machine
    trpg_engine_store
    trpg_engine_store_sqlite
+   trpg_world_projection
+   trpg_visibility
    trpg_rule
    trpg_rule_dnd5e_lite
    trpg_engine_replay)

@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use serde::Deserialize;
+use serde_json::Value;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -170,12 +171,20 @@ pub fn apply_initial_state(
 
     // Spawn actor entities
     for ch in state.characters {
-        let stats = ch.stats.map(|s| Stats {
-            atk: s.atk,
-            def: s.def,
-            int: s.int,
-            luck: s.luck,
-        }).unwrap_or(Stats { atk: 10, def: 10, int: 10, luck: 10 });
+        let stats = ch
+            .stats
+            .map(|s| Stats {
+                atk: s.atk,
+                def: s.def,
+                int: s.int,
+                luck: s.luck,
+            })
+            .unwrap_or(Stats {
+                atk: 10,
+                def: 10,
+                int: 10,
+                luck: 10,
+            });
 
         commands.spawn(Actor {
             id: ch.id,
@@ -199,7 +208,7 @@ pub fn apply_initial_state(
 // ─── Async Fetch ─────────────────────────────
 
 async fn fetch_game_state() -> Result<GameStateResponse, JsValue> {
-    let url = config::trpg_room_url("/state");
+    let url = config::trpg_state_url();
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
@@ -217,10 +226,86 @@ async fn fetch_game_state() -> Result<GameStateResponse, JsValue> {
     }
 
     let json = JsFuture::from(resp.json()?).await?;
-    let state: GameStateResponse = serde_wasm_bindgen::from_value(json)
-        .map_err(|e| JsValue::from_str(&format!("parse error: {}", e)))?;
+    let root: Value = serde_wasm_bindgen::from_value(json)
+        .map_err(|e| JsValue::from_str(&format!("json conversion error: {}", e)))?;
 
-    Ok(state)
+    normalize_state_response(root).map_err(|e| JsValue::from_str(&format!("parse error: {}", e)))
+}
+
+fn normalize_state_response(root: Value) -> Result<GameStateResponse, String> {
+    if root.get("room").is_some() {
+        return serde_json::from_value(root).map_err(|e| e.to_string());
+    }
+
+    if root.get("state").is_some() {
+        return Ok(parse_masc_state_response(&root));
+    }
+
+    Err("unsupported state payload shape".to_string())
+}
+
+fn parse_masc_state_response(root: &Value) -> GameStateResponse {
+    let state = root.get("state").unwrap_or(&Value::Null);
+
+    let room_id = root
+        .get("room_id")
+        .and_then(Value::as_str)
+        .unwrap_or(config::DEFAULT_ROOM_ID)
+        .to_string();
+
+    let turn = state.get("turn").and_then(Value::as_u64).unwrap_or(1) as u32;
+    let phase = state
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("dm_narration")
+        .to_string();
+
+    let current_area = state
+        .get("current_area")
+        .and_then(Value::as_str)
+        .unwrap_or("A")
+        .to_string();
+    let area_label = state
+        .get("area_label")
+        .and_then(Value::as_str)
+        .unwrap_or("미상 지역")
+        .to_string();
+
+    let mut characters = state
+        .get("characters")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<Vec<CharacterData>>(v).ok())
+        .unwrap_or_default();
+
+    if characters.is_empty() {
+        characters = mock_game_state().characters;
+    }
+
+    GameStateResponse {
+        room: Some(RoomResponse {
+            id: room_id,
+            status: state
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("active")
+                .to_string(),
+            turn,
+            phase,
+            current_scenario: state
+                .get("current_scenario")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            current_node: state
+                .get("current_node")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        }),
+        characters,
+        current_area,
+        area_label,
+    }
 }
 
 // ─── Mock Data ───────────────────────────────
@@ -244,7 +329,12 @@ fn mock_game_state() -> GameStateResponse {
                 class: "fighter".to_string(),
                 hp: 28,
                 max_hp: 28,
-                stats: Some(StatsData { atk: 16, def: 14, int: 8, luck: 10 }),
+                stats: Some(StatsData {
+                    atk: 16,
+                    def: 14,
+                    int: 8,
+                    luck: 10,
+                }),
                 area: "A".to_string(),
                 is_dead: false,
                 inventory: vec![],
@@ -257,7 +347,12 @@ fn mock_game_state() -> GameStateResponse {
                 class: "wizard".to_string(),
                 hp: 18,
                 max_hp: 18,
-                stats: Some(StatsData { atk: 8, def: 10, int: 18, luck: 12 }),
+                stats: Some(StatsData {
+                    atk: 8,
+                    def: 10,
+                    int: 18,
+                    luck: 12,
+                }),
                 area: "B".to_string(),
                 is_dead: false,
                 inventory: vec![],
@@ -270,7 +365,12 @@ fn mock_game_state() -> GameStateResponse {
                 class: "rogue".to_string(),
                 hp: 22,
                 max_hp: 22,
-                stats: Some(StatsData { atk: 12, def: 12, int: 14, luck: 16 }),
+                stats: Some(StatsData {
+                    atk: 12,
+                    def: 12,
+                    int: 14,
+                    luck: 16,
+                }),
                 area: "C".to_string(),
                 is_dead: false,
                 inventory: vec![],
@@ -283,7 +383,12 @@ fn mock_game_state() -> GameStateResponse {
                 class: "cleric".to_string(),
                 hp: 24,
                 max_hp: 24,
-                stats: Some(StatsData { atk: 10, def: 12, int: 16, luck: 14 }),
+                stats: Some(StatsData {
+                    atk: 10,
+                    def: 12,
+                    int: 16,
+                    luck: 14,
+                }),
                 area: "D".to_string(),
                 is_dead: false,
                 inventory: vec![],
@@ -293,5 +398,50 @@ fn mock_game_state() -> GameStateResponse {
         ],
         current_area: "A".to_string(),
         area_label: "폐허의 입구".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn normalize_legacy_shape() {
+        let root = json!({
+            "room": {
+                "id": "default",
+                "status": "active",
+                "turn": 2,
+                "phase": "player_action",
+                "current_scenario": "prologue",
+                "current_node": "gate"
+            },
+            "characters": [],
+            "current_area": "A",
+            "area_label": "폐허의 입구"
+        });
+
+        let parsed = normalize_state_response(root).expect("legacy parse should succeed");
+        assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(2));
+        assert_eq!(parsed.current_area, "A");
+    }
+
+    #[test]
+    fn normalize_masc_shape_uses_defaults_and_fallback_party() {
+        let root = json!({
+            "ok": true,
+            "room_id": "default",
+            "state": {
+                "turn": 5,
+                "phase": "dm_narration",
+                "current_area": "C"
+            }
+        });
+
+        let parsed = normalize_state_response(root).expect("masc parse should succeed");
+        assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(5));
+        assert_eq!(parsed.current_area, "C");
+        assert!(!parsed.characters.is_empty(), "fallback party should exist");
     }
 }

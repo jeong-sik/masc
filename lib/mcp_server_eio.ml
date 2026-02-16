@@ -1169,6 +1169,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_trpg : Tool_trpg.context =
     { config; agent_name; keeper_call = Some trpg_keeper_call }
   in
+  let simple_ctx_protocol : Tool_protocol_game_view.context =
+    { config; agent_name; trpg_keeper_call = Some trpg_keeper_call }
+  in
 
   (* Chain through all extracted tool modules *)
   match Tool_swarm.dispatch swarm_ctx ~name ~args:arguments with
@@ -1202,6 +1205,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_council.dispatch simple_ctx_council ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_protocol_game_view.dispatch simple_ctx_protocol ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_experiment.dispatch simple_ctx_experiment ~name ~args:arguments with
@@ -2548,8 +2554,7 @@ let handle_list_tools_eio state id =
     @ Tool_lodge.tools
     @ Tool_perpetual.schemas
     @ Tool_keeper.schemas
-    @ Tool_trpg.schemas
-    @ Tool_experiment.schemas
+    @ Tool_protocol_game_view.schemas
   in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
     Mode.is_tool_enabled enabled_categories schema.name

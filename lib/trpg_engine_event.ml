@@ -18,6 +18,10 @@ type event_type =
   | Scene_transition
   | Quest_update
   | World_event
+  | Session_started
+  | Party_selected
+  | Intervention_submitted
+  | Intervention_applied
 
 type t = {
   seq : int;
@@ -48,6 +52,10 @@ let string_of_event_type = function
   | Scene_transition -> "scene.transition"
   | Quest_update -> "quest.update"
   | World_event -> "world.event"
+  | Session_started -> "session.started"
+  | Party_selected -> "party.selected"
+  | Intervention_submitted -> "intervention.submitted"
+  | Intervention_applied -> "intervention.applied"
 
 let event_type_of_string = function
   | "room.created" -> Ok Room_created
@@ -69,6 +77,10 @@ let event_type_of_string = function
   | "scene.transition" -> Ok Scene_transition
   | "quest.update" -> Ok Quest_update
   | "world.event" -> Ok World_event
+  | "session.started" -> Ok Session_started
+  | "party.selected" -> Ok Party_selected
+  | "intervention.submitted" -> Ok Intervention_submitted
+  | "intervention.applied" -> Ok Intervention_applied
   | s -> Error (Printf.sprintf "unknown event_type: %s" s)
 
 let make ~seq ~room_id ~ts ~event_type ?actor_id ~payload () =

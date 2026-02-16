@@ -351,6 +351,94 @@ let test_trpg_world_query_merge_and_visibility () =
          |> List.length )
         <= 1))
 
+let test_trpg_session_protocol_bootstrap () =
+  let base_dir = temp_dir () in
+  let _, ctx = mk_ctx base_dir in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let ok_preset, body_preset =
+        dispatch_exn ctx ~name:"trpg.preset.list" ~args:(`Assoc [])
+      in
+      check bool "preset.list ok" true ok_preset;
+      check bool "has dm presets" true
+        ((body_preset |> parse_json |> member "payload" |> member "dm_presets" |> to_list |> List.length) >= 1);
+
+      let session_id = "proto-boot-1" in
+      let ok_pool, body_pool =
+        dispatch_exn ctx ~name:"trpg.pool.generate"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ("pool_size", `Int 6);
+                ("party_size", `Int 4);
+                ("seed", `Int 13);
+              ])
+      in
+      check bool "pool.generate ok" true ok_pool;
+      let payload_pool = body_pool |> parse_json |> member "payload" in
+      let pool = payload_pool |> member "pool" |> to_list in
+      let suggested_ids = payload_pool |> member "suggested_party_ids" |> to_list in
+      check int "pool size" 6 (List.length pool);
+      check int "suggested size" 4 (List.length suggested_ids);
+
+      let ok_party, body_party =
+        dispatch_exn ctx ~name:"trpg.party.select"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ("pool", `List pool);
+                ("selected_player_ids", `List suggested_ids);
+              ])
+      in
+      check bool "party.select ok" true ok_party;
+      let selected_party =
+        body_party |> parse_json |> member "payload" |> member "party" |> to_list
+      in
+      check int "selected party size" 4 (List.length selected_party);
+
+      let ok_start, body_start =
+        dispatch_exn ctx ~name:"trpg.session.start"
+          ~args:
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ("party", `List selected_party);
+                ("phase", `String "briefing");
+              ])
+      in
+      check bool "session.start ok" true ok_start;
+      let payload_start = body_start |> parse_json |> member "payload" in
+      let room_id = payload_start |> member "room_id" |> to_string in
+      check bool "room_id derived from session" true (String.length room_id > 0);
+      let events = payload_start |> member "events" |> to_list in
+      let has_session_started =
+        List.exists
+          (fun ev ->
+            try ev |> member "type" |> to_string = "session.started" with _ -> false)
+          events
+      in
+      check bool "session.started emitted" true has_session_started;
+
+      let ok_intrv, body_intrv =
+        dispatch_exn ctx ~name:"trpg.intervention.submit"
+          ~args:
+            (`Assoc
+              [
+                ("room_id", `String room_id);
+                ("session_id", `String session_id);
+                ("intervention_type", `String "nudge");
+                ("reason", `String "human small tweak");
+                ("payload", `Assoc [ ("delta", `Float 0.1) ]);
+              ])
+      in
+      check bool "intervention.submit ok" true ok_intrv;
+      check string "intervention status"
+        "pending"
+        (body_intrv |> parse_json |> member "payload" |> member "status" |> to_string))
+
 let test_client_session_open_success () =
   let base_dir = temp_dir () in
   let config, ctx = mk_ctx base_dir in
@@ -641,6 +729,8 @@ let () =
             test_trpg_world_query_default_room_and_skills;
           test_case "trpg.world.query merge + visibility" `Quick
             test_trpg_world_query_merge_and_visibility;
+          test_case "trpg session bootstrap protocol flow" `Quick
+            test_trpg_session_protocol_bootstrap;
           test_case "client.session.open success" `Quick
             test_client_session_open_success;
           test_case "client.session.open idempotent refresh" `Quick

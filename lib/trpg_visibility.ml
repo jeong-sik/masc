@@ -7,6 +7,10 @@ let public_event_types =
     Trpg_engine_event.Quest_update;
     Trpg_engine_event.World_event;
     Trpg_engine_event.Dice_rolled;
+    Trpg_engine_event.Session_started;
+    Trpg_engine_event.Party_selected;
+    Trpg_engine_event.Intervention_submitted;
+    Trpg_engine_event.Intervention_applied;
   ]
 
 let is_public_event (ev : Trpg_engine_event.t) =

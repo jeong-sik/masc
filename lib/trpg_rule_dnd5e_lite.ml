@@ -247,7 +247,11 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Metric_updated
   | Trpg_engine_event.Scene_transition
   | Trpg_engine_event.Quest_update
-  | Trpg_engine_event.World_event ->
+  | Trpg_engine_event.World_event
+  | Trpg_engine_event.Session_started
+  | Trpg_engine_event.Party_selected
+  | Trpg_engine_event.Intervention_submitted
+  | Trpg_engine_event.Intervention_applied ->
       state
 
 let derive_state ~state = state

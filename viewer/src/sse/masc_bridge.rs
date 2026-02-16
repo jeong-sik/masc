@@ -167,6 +167,182 @@ pub fn poll_masc_events(
 
                 log::info!("MASC endpoint info received");
             }
+
+            // ─── Council (MAGI Deliberation) ─────────────
+            "decision_issue" => {
+                let title = extract_field(&data, "title").unwrap_or("untitled");
+                let urgency = extract_field(&data, "urgency").unwrap_or("normal");
+                let summary = format!("[ISSUE] {} (urgency: {})", title, urgency);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "decision_issue".to_string(),
+                    summary: summary.clone(),
+                });
+                update_council_deliberation(&summary);
+                log::info!("MASC council: {}", summary);
+            }
+            "decision_option" => {
+                let label = extract_field(&data, "label").unwrap_or("?");
+                let proposed_by = extract_field(&data, "proposed_by").unwrap_or("unknown");
+                let summary = format!("[OPTION] {} by {}", label, proposed_by);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "decision_option".to_string(),
+                    summary: summary.clone(),
+                });
+                update_council_deliberation(&summary);
+                log::info!("MASC council: {}", summary);
+            }
+            "decision_argument" => {
+                let agent = extract_field(&data, "agent").unwrap_or("unknown");
+                let position = extract_field(&data, "position").unwrap_or("neutral");
+                let reasoning = extract_field(&data, "reasoning").unwrap_or("...");
+                let summary = format!("[{}] {}: {}", position.to_uppercase(), agent, reasoning);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "decision_argument".to_string(),
+                    summary: summary.clone(),
+                });
+                update_council_deliberation(&summary);
+                log::info!("MASC council: {}", summary);
+            }
+            "decision_vote" => {
+                let agent = extract_field(&data, "agent").unwrap_or("unknown");
+                let option_id = extract_field(&data, "option_id").unwrap_or("?");
+                let weight = extract_field(&data, "weight").unwrap_or("1");
+                let summary = format!("[VOTE] {} -> {} (weight: {})", agent, option_id, weight);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "decision_vote".to_string(),
+                    summary: summary.clone(),
+                });
+                update_council_deliberation(&summary);
+                log::info!("MASC council: {}", summary);
+            }
+            "decision_consensus" => {
+                let chosen = extract_field(&data, "chosen_option_id").unwrap_or("?");
+                let method = extract_field(&data, "method").unwrap_or("unknown");
+                let margin = extract_field(&data, "margin").unwrap_or("?");
+                let summary = format!("[CONSENSUS] {} via {} (margin: {})", chosen, method, margin);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "decision_consensus".to_string(),
+                    summary: summary.clone(),
+                });
+                update_council_deliberation(&summary);
+                log::info!("MASC council: {}", summary);
+            }
+            "decision_phase" => {
+                let phase = extract_field(&data, "phase").unwrap_or("unknown");
+                let summary = format!("[PHASE] {}", phase);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "decision_phase".to_string(),
+                    summary: summary.clone(),
+                });
+                update_council_deliberation(&summary);
+                log::info!("MASC council: {}", summary);
+            }
+
+            // ─── Experiment (A/B Testing) ────────────────
+            "experiment_created" => {
+                let hypothesis = extract_field(&data, "hypothesis").unwrap_or("(no hypothesis)");
+                let summary = format!("[NEW] {}", hypothesis);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "experiment_created".to_string(),
+                    summary: summary.clone(),
+                });
+                update_experiment_dashboard(&summary);
+                log::info!("MASC experiment: {}", summary);
+            }
+            "experiment_assignment" => {
+                let subject_id = extract_field(&data, "subject_id").unwrap_or("?");
+                let group = extract_field(&data, "group").unwrap_or("?");
+                let summary = format!("[ASSIGN] {} -> {}", subject_id, group);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "experiment_assignment".to_string(),
+                    summary: summary.clone(),
+                });
+                update_experiment_dashboard(&summary);
+                log::info!("MASC experiment: {}", summary);
+            }
+            "experiment_observation" => {
+                let metric_name = extract_field(&data, "metric_name").unwrap_or("?");
+                let value = extract_field(&data, "value").unwrap_or("?");
+                let summary = format!("[OBS] {}: {}", metric_name, value);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "experiment_observation".to_string(),
+                    summary: summary.clone(),
+                });
+                update_experiment_dashboard(&summary);
+                log::info!("MASC experiment: {}", summary);
+            }
+            "experiment_checkpoint" => {
+                let elapsed_pct = extract_field(&data, "elapsed_pct").unwrap_or("?");
+                let p_value = extract_field(&data, "p_value").unwrap_or("?");
+                let summary = format!("[CHECK] {}% complete, p={}", elapsed_pct, p_value);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "experiment_checkpoint".to_string(),
+                    summary: summary.clone(),
+                });
+                update_experiment_dashboard(&summary);
+                log::info!("MASC experiment: {}", summary);
+            }
+            "experiment_concluded" => {
+                let result = extract_field(&data, "result").unwrap_or("?");
+                let effect_size = extract_field(&data, "effect_size").unwrap_or("?");
+                let summary = format!("[DONE] {}, effect={}", result, effect_size);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "experiment_concluded".to_string(),
+                    summary: summary.clone(),
+                });
+                update_experiment_dashboard(&summary);
+                log::info!("MASC experiment: {}", summary);
+            }
+
+            // ─── TRPG Extensions ─────────────────────────
+            "scene_transition" => {
+                let from_scene = extract_field(&data, "from_scene").unwrap_or("?");
+                let to_scene = extract_field(&data, "to_scene").unwrap_or("?");
+                let summary = format!("[SCENE] {} -> {}", from_scene, to_scene);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "scene_transition".to_string(),
+                    summary: summary.clone(),
+                });
+                update_monitor_events(&summary);
+                log::info!("MASC trpg: {}", summary);
+            }
+            "quest_update" => {
+                let title = extract_field(&data, "title").unwrap_or("?");
+                let status = extract_field(&data, "status").unwrap_or("?");
+                let summary = format!("[QUEST] {}: {}", title, status);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "quest_update".to_string(),
+                    summary: summary.clone(),
+                });
+                update_monitor_events(&summary);
+                log::info!("MASC trpg: {}", summary);
+            }
+            "world_event" => {
+                let description = extract_field(&data, "description").unwrap_or("?");
+                let severity = extract_field(&data, "severity").unwrap_or("info");
+                let summary = format!("[WORLD] {} ({})", description, severity);
+                event_log.entries.push(MascLogEntry {
+                    timestamp: now,
+                    event_type: "world_event".to_string(),
+                    summary: summary.clone(),
+                });
+                update_monitor_events(&summary);
+                log::info!("MASC trpg: {}", summary);
+            }
+
             other => {
                 log::debug!("Unhandled MASC SSE event type: {}", other);
             }
@@ -185,28 +361,25 @@ fn update_monitor_agents(_count: u32, _summary: &str) {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
-        // Monitor panel > first monitor-card > placeholder-text
-        if let Ok(Some(el)) = doc.query_selector(
-            "#monitor-panel .monitor-card:nth-child(1) .placeholder-text",
-        ) {
+        if let Ok(Some(el)) = doc.query_selector("#monitor-agent-list") {
             let text = format!("{} agent(s) online\n{}", _count, _summary);
             el.set_text_content(Some(&text));
         }
     }
 }
 
-/// Update the Monitor panel "Room Activity" card.
+/// Update the Monitor panel "Room Activity" event feed.
 fn update_monitor_events(_summary: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
-        // Monitor panel > second monitor-card > placeholder-text
-        if let Ok(Some(el)) = doc.query_selector(
-            "#monitor-panel .monitor-card:nth-child(2) .placeholder-text",
-        ) {
-            el.set_text_content(Some(_summary));
+        if let Ok(Some(el)) = doc.query_selector("#monitor-events") {
+            let current = el.text_content().unwrap_or_default();
+            let updated = format!("{}\n{}", _summary, current);
+            let lines: Vec<&str> = updated.lines().take(50).collect();
+            el.set_text_content(Some(&lines.join("\n")));
         }
     }
 }
@@ -218,10 +391,7 @@ fn update_monitor_tasks(_count: u32, _summary: &str) {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
-        // Monitor panel > third monitor-card > placeholder-text
-        if let Ok(Some(el)) = doc.query_selector(
-            "#monitor-panel .monitor-card:nth-child(3) .placeholder-text",
-        ) {
+        if let Ok(Some(el)) = doc.query_selector("#monitor-task-list") {
             let text = format!("{} active task(s)\n{}", _count, _summary);
             el.set_text_content(Some(&text));
         }
@@ -235,10 +405,43 @@ fn update_social_feed(_summary: &str) {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
-        if let Ok(Some(el)) =
-            doc.query_selector("#social-panel .social-feed .placeholder-text")
-        {
-            el.set_text_content(Some(_summary));
+        if let Ok(Some(el)) = doc.query_selector("#social-feed") {
+            let current = el.text_content().unwrap_or_default();
+            let updated = format!("{}\n{}", _summary, current);
+            let lines: Vec<&str> = updated.lines().take(50).collect();
+            el.set_text_content(Some(&lines.join("\n")));
+        }
+    }
+}
+
+/// Update the Council panel deliberation feed.
+fn update_council_deliberation(_summary: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        if let Ok(Some(el)) = doc.query_selector("#council-deliberation") {
+            let current = el.text_content().unwrap_or_default();
+            let updated = format!("{}\n{}", _summary, current);
+            let lines: Vec<&str> = updated.lines().take(50).collect();
+            el.set_text_content(Some(&lines.join("\n")));
+        }
+    }
+}
+
+/// Update the Experiment panel dashboard feed.
+fn update_experiment_dashboard(_summary: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        if let Ok(Some(el)) = doc.query_selector("#experiment-dashboard") {
+            let current = el.text_content().unwrap_or_default();
+            let updated = format!("{}\n{}", _summary, current);
+            let lines: Vec<&str> = updated.lines().take(50).collect();
+            el.set_text_content(Some(&lines.join("\n")));
         }
     }
 }

@@ -49,6 +49,8 @@ pub enum ViewerMode {
 
 impl ViewerMode {
     /// Human-readable display name for UI rendering.
+    /// Used by `poll_mode_transition` (wasm32 only).
+    #[allow(dead_code)]
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Lobby => "MASC Viewer",
@@ -86,6 +88,8 @@ impl ViewerMode {
     }
 
     /// CSS class name applied to the HTML body for mode-specific DOM styling.
+    /// Used by `poll_mode_transition` (wasm32 only).
+    #[allow(dead_code)]
     pub fn css_class(&self) -> &'static str {
         match self {
             Self::Lobby => "mode-lobby",
@@ -98,6 +102,8 @@ impl ViewerMode {
     }
 
     /// Parse from the HTML `data-mode` attribute value.
+    /// Used by `bind_mode_cards` (wasm32 only).
+    #[allow(dead_code)]
     pub fn from_data_attr(s: &str) -> Option<ViewerMode> {
         match s {
             "trpg" => Some(Self::Trpg),

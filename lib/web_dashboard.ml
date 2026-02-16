@@ -8713,12 +8713,48 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
     }
 
+    /** Strip outermost JSON block containing a marker key (brace-matched). */
+    function trpgStripJsonBlock(text, marker) {
+      var idx = text.indexOf(marker);
+      if (idx < 0) return text;
+      // Walk back to opening brace
+      var start = idx;
+      var braces = 0;
+      for (var i = idx; i >= 0; i--) {
+        if (text[i] === '}') braces++;
+        if (text[i] === '{') {
+          if (braces === 0) { start = i; break; }
+          braces--;
+        }
+      }
+      // Walk forward from start to matching close
+      var depth = 0;
+      var end = text.length;
+      for (var i2 = start; i2 < text.length; i2++) {
+        if (text[i2] === '{') depth++;
+        if (text[i2] === '}') {
+          depth--;
+          if (depth === 0) { end = i2 + 1; break; }
+        }
+      }
+      return text.substring(0, start) + text.substring(end);
+    }
+
     function trpgSanitizeNarrative(raw) {
       let text = trpgNormalizeDisplayText(raw).replace(/\r\n/g, '\n');
+      // Strip SKILL metadata
       text = text.replace(/^SKILL:.*$/gmi, '');
       text = text.replace(/^SKILL_REASON:.*$/gmi, '');
+      // Strip code fences: closed first, then unclosed trailing
       text = text.replace(/```[\s\S]*?```/g, '');
+      text = text.replace(/```[\s\S]*$/g, '');
+      // Strip [STATE] blocks: closed first, then unclosed trailing
       text = text.replace(/\[STATE\][\s\S]*?\[\/STATE\]/gmi, '');
+      text = text.replace(/\[STATE\][\s\S]*$/gmi, '');
+      // Strip structured_action / action_type JSON blocks (brace-matched)
+      text = trpgStripJsonBlock(text, '"structured_action"');
+      text = trpgStripJsonBlock(text, '"action_type"');
+      // Clean up whitespace
       text = text.replace(/\n{3,}/g, '\n\n').trim();
       if (text !== '') return text;
       return trpgNormalizeDisplayText(raw).replace(/\n{3,}/g, '\n\n').trim();

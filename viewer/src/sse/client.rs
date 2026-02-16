@@ -7,6 +7,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{EventSource, MessageEvent};
 
+#[cfg(target_arch = "wasm32")]
 use crate::config;
 
 /// Wrapper around `EventSource` that is `Send + Sync`.
@@ -33,6 +34,8 @@ pub struct SseReceiver {
 
 /// List of SSE event types the viewer subscribes to.
 /// These must match the event names emitted by the TRPG Engine.
+/// Used by `setup_sse` (wasm32 only).
+#[allow(dead_code)]
 const SSE_EVENT_TYPES: &[&str] = &[
     "dice_roll",
     "hp_change",
@@ -110,8 +113,16 @@ pub fn setup_sse(mut commands: Commands) {
     }
 
     {
+        // Log the first connection error at warn level, then suppress to debug
+        // to avoid flooding the browser console when no backend is running.
+        let error_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let callback = Closure::<dyn FnMut()>::new(move || {
-            log::warn!("SSE connection error — will auto-reconnect");
+            let count = error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if count == 0 {
+                log::warn!("SSE connection error — will auto-reconnect (subsequent errors suppressed to debug)");
+            } else {
+                log::debug!("SSE reconnect attempt #{}", count + 1);
+            }
         });
         es.set_onerror(Some(callback.as_ref().unchecked_ref()));
         callback.forget();

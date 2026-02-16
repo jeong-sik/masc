@@ -7,6 +7,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{EventSource, MessageEvent};
 
+#[cfg(target_arch = "wasm32")]
 use crate::config;
 use crate::mode::ViewerMode;
 
@@ -34,13 +35,32 @@ pub struct MascSseReceiver {
 
 /// MASC MCP SSE event types.
 /// These must match the event names emitted by the MASC MCP server.
+#[cfg(target_arch = "wasm32")]
 const MASC_SSE_EVENT_TYPES: &[&str] = &[
+    // Core events
     "broadcast",
     "heartbeat",
     "agent_joined",
     "agent_left",
     "task_update",
     "endpoint",
+    // Council (MAGI deliberation)
+    "decision_issue",
+    "decision_option",
+    "decision_argument",
+    "decision_vote",
+    "decision_consensus",
+    "decision_phase",
+    // Experiment (A/B testing)
+    "experiment_created",
+    "experiment_assignment",
+    "experiment_observation",
+    "experiment_checkpoint",
+    "experiment_concluded",
+    // TRPG extensions
+    "scene_transition",
+    "quest_update",
+    "world_event",
 ];
 
 /// OnEnter system for MASC modes (Monitor, Council, Social, Experiment).

@@ -75,15 +75,21 @@
             <div class="monitor-grid">
                 <div class="monitor-card">
                     <h3>Agent Status</h3>
-                    <p class="placeholder-text">Connecting to MASC...</p>
+                    <div id="monitor-agent-list">
+                        <p class="placeholder-text">Connecting to MASC...</p>
+                    </div>
                 </div>
                 <div class="monitor-card">
                     <h3>Room Activity</h3>
-                    <p class="placeholder-text">Waiting for events...</p>
+                    <div id="monitor-events" class="monitor-event-feed">
+                        <p class="placeholder-text">Waiting for events...</p>
+                    </div>
                 </div>
                 <div class="monitor-card">
                     <h3>Task Queue</h3>
-                    <p class="placeholder-text">No active tasks</p>
+                    <div id="monitor-task-list">
+                        <p class="placeholder-text">No active tasks</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -96,8 +102,12 @@
             <button class="back-btn" data-back="lobby">◂ Back</button>
         </div>
         <div class="mode-panel-content">
-            <div class="council-deliberation">
-                <p class="placeholder-text">No active deliberation. Awaiting decision issues...</p>
+            <div class="panel-header">
+                <h2>Council — MAGI Deliberation</h2>
+                <div class="council-status">Waiting for issues...</div>
+            </div>
+            <div class="council-feed" id="council-deliberation">
+                <div class="council-empty">No deliberations in progress. Issues will appear when submitted.</div>
             </div>
         </div>
     </div>
@@ -109,8 +119,11 @@
             <button class="back-btn" data-back="lobby">◂ Back</button>
         </div>
         <div class="mode-panel-content">
-            <div class="social-feed">
-                <p class="placeholder-text">Loading social feed...</p>
+            <div class="panel-header">
+                <h2>Social — Lodge Board</h2>
+            </div>
+            <div class="social-feed" id="social-feed">
+                <div class="social-empty">Connecting to Lodge...</div>
             </div>
         </div>
     </div>
@@ -122,8 +135,12 @@
             <button class="back-btn" data-back="lobby">◂ Back</button>
         </div>
         <div class="mode-panel-content">
-            <div class="experiment-dashboard">
-                <p class="placeholder-text">No active experiments. Awaiting hypothesis...</p>
+            <div class="panel-header">
+                <h2>Experiments — A/B Testing</h2>
+                <div class="experiment-status">No active experiments</div>
+            </div>
+            <div class="experiment-feed" id="experiment-dashboard">
+                <div class="experiment-empty">No experiments running. Start one via MASC tools.</div>
             </div>
         </div>
     </div>

@@ -66,7 +66,10 @@ fn cleanup_trpg_scene(
 ) {
     let count = trpg_entities.iter().count();
     for entity in &trpg_entities {
-        commands.entity(entity).despawn();
+        // Use try_despawn to avoid panics when parent despawn already
+        // recursively removed child entities (e.g., HpBarSprite children
+        // of MapToken entities).
+        commands.entity(entity).try_despawn();
     }
 
     // Reset the scene transition resource so re-entering Trpg starts clean

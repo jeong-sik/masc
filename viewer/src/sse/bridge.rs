@@ -19,6 +19,7 @@ pub fn poll_sse_events(
     mut combat_events: MessageWriter<CombatStarted>,
     mut weather_events: MessageWriter<WeatherChanged>,
     mut mood_events: MessageWriter<MoodChanged>,
+    mut progress_events: MessageWriter<TurnProgressUpdated>,
     mut connection: ResMut<ConnectionStatus>,
 ) {
     let Some(receiver) = receiver else { return };
@@ -105,6 +106,12 @@ pub fn poll_sse_events(
                 match serde_json::from_str::<MoodChangePayload>(&data) {
                     Ok(payload) => { mood_events.write(MoodChanged(payload)); }
                     Err(e) => log::warn!("Failed to parse mood_change: {}", e),
+                }
+            }
+            "turn_progress" => {
+                match serde_json::from_str::<TurnProgressPayload>(&data) {
+                    Ok(payload) => { progress_events.write(TurnProgressUpdated(payload)); }
+                    Err(e) => log::warn!("Failed to parse turn_progress: {}", e),
                 }
             }
             other => {

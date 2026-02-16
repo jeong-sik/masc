@@ -8,7 +8,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::config;
 use crate::game::components::{Actor, Stats};
-use crate::game::state::{MapState, RoomState, TurnPhase};
+use crate::game::state::{MapState, RoomState, TurnPhase, TurnProgressState};
 
 // ─── Expected API Response Types ─────────────
 
@@ -149,6 +149,7 @@ pub fn refresh_state_on_room_change(
     actors: Query<Entity, With<Actor>>,
     mut room_state: ResMut<RoomState>,
     mut map_state: ResMut<MapState>,
+    mut turn_progress: ResMut<TurnProgressState>,
 ) {
     let current_room = config::current_room_id();
     if active_room.room_id == current_room {
@@ -164,6 +165,8 @@ pub fn refresh_state_on_room_change(
     *room_state = RoomState::default();
     room_state.id = current_room.clone();
     *map_state = MapState::default();
+    *turn_progress = TurnProgressState::default();
+    turn_progress.room_status = "loading".to_string();
 
     queue_initial_state_fetch(&mut commands);
     log::info!("TRPG room changed — reloading state for room {}", current_room);
@@ -176,6 +179,7 @@ pub fn apply_initial_state(
     mut buffer: ResMut<InitialStateBuffer>,
     mut room_state: ResMut<RoomState>,
     mut map_state: ResMut<MapState>,
+    mut turn_progress: ResMut<TurnProgressState>,
 ) {
     if buffer.consumed {
         return;
@@ -192,6 +196,12 @@ pub fn apply_initial_state(
         return;
     };
 
+    let actor_ids: Vec<String> = state
+        .characters
+        .iter()
+        .map(|ch| ch.id.clone())
+        .collect();
+
     // Apply room state
     if let Some(room) = state.room {
         room_state.id = room.id;
@@ -201,6 +211,34 @@ pub fn apply_initial_state(
         room_state.current_scenario = room.current_scenario;
         room_state.current_node = room.current_node;
     }
+
+    turn_progress.room_status = room_state.status.clone();
+    turn_progress.turn = room_state.turn;
+    turn_progress.phase = room_state.phase.as_str().to_string();
+    turn_progress.player_order = actor_ids
+        .iter()
+        .filter(|id| id.as_str() != "dm")
+        .cloned()
+        .collect();
+    let player_order = turn_progress.player_order.clone();
+    turn_progress.actor_order.clear();
+    turn_progress.actor_order.push("dm".to_string());
+    for actor_id in &player_order {
+        if actor_id != "dm" && !turn_progress.actor_order.iter().any(|id| id == actor_id) {
+            turn_progress.actor_order.push(actor_id.clone());
+        }
+    }
+    turn_progress.actor_states.clear();
+    let actor_order = turn_progress.actor_order.clone();
+    for actor_id in &actor_order {
+        turn_progress
+            .actor_states
+            .insert(actor_id.clone(), "pending".to_string());
+    }
+    turn_progress.current_actor.clear();
+    turn_progress.next_actor.clear();
+    turn_progress.last_actor.clear();
+    turn_progress.last_result.clear();
 
     // Apply map state
     if !state.current_area.is_empty() {

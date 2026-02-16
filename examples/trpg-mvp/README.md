@@ -4,9 +4,20 @@ This directory contains machine-readable scenario templates and API contract exa
 
 ## Files
 
-- `scenarios/negotiation-v1.json`
-- `scenarios/rumor-propagation-v1.json`
-- `scenarios/trust-public-goods-v1.json`
+### Social Experiments (Game Theory)
+- `scenarios/negotiation-v1.json` — Triple-faction ceasefire negotiation
+- `scenarios/rumor-propagation-v1.json` — Cathedral rumor diffusion
+- `scenarios/trust-public-goods-v1.json` — Sanctioned commons game
+
+### Narrative / Character
+- `scenarios/grimland-prologue-v1.json` — Fantasy RPG baseline (uses existing viewer assets)
+- `scenarios/identity-erosion-v1.json` — Extreme archetype dinner party, trait drift measurement
+- `scenarios/conformity-pressure-v1.json` — Asch conformity paradigm with AI agents
+
+### Mystery
+- `scenarios/the-room-v1.json` — Locked room exploration
+
+### Contracts
 - `openapi.yaml` (runtime-aligned API + MCP parity contract)
 
 ## Scenario Schema (MVP)

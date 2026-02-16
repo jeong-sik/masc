@@ -19,12 +19,16 @@ pub struct SceneTransition {
 #[derive(Component)]
 pub struct FadeOverlay;
 
-/// Spawns the fade overlay (initially invisible).
-pub fn setup_fade_overlay(mut commands: Commands) {
+/// Spawns the fade overlay (initially invisible), sized to cover the window.
+pub fn setup_fade_overlay(mut commands: Commands, windows: Query<&Window>) {
+    let size = windows.single().map_or(
+        Vec2::new(2000.0, 2000.0),
+        |win: &Window| Vec2::new(win.width() * 1.5, win.height() * 1.5),
+    );
     commands.spawn((
         Sprite {
             color: Color::srgba(0.0, 0.0, 0.0, 0.0),
-            custom_size: Some(Vec2::new(2000.0, 2000.0)),
+            custom_size: Some(size),
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, 50.0), // Above everything

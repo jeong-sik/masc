@@ -1,215 +1,139 @@
-//! Connection configuration for each viewer mode.
-//!
-//! Each `ViewerMode` connects to a different backend endpoint:
-//! - TRPG: MASC TRPG HTTP API (default) or legacy TRPG Engine SSE
-//! - Monitor/Experiment/Council/Social: MASC MCP server (OCaml, SSE)
-//!
-//! The Lobby mode has no SSE connection — it's a pure UI state.
-
-#[cfg(target_arch = "wasm32")]
 use crate::mode::ViewerMode;
 
-/// Legacy TRPG Engine server (FastAPI + SQLite event store).
-pub const TRPG_ENGINE_URL: &str = "http://localhost:8940";
+// ─── Configuration ──────────────────────────
 
-/// MASC MCP server (OCaml + Eio, SSE + JSON-RPC).
-pub const MASC_MCP_URL: &str = "http://localhost:8935";
+#[cfg(debug_assertions)]
+pub const MASC_MCP_URL: &str = "http://localhost:8935"; // Updated to match active server port
 
-/// Default TRPG room identifier.
+#[cfg(not(debug_assertions))]
+pub const MASC_MCP_URL: &str = ""; // Relative path in production
+
 pub const DEFAULT_ROOM_ID: &str = "default";
 
-#[cfg(target_arch = "wasm32")]
+/// Legacy TRPG Engine URL (for direct mode)
+#[cfg(debug_assertions)]
+pub const TRPG_ENGINE_URL: &str = "http://localhost:8000";
+
+#[cfg(not(debug_assertions))]
+pub const TRPG_ENGINE_URL: &str = "";
+
+// ─── Backend Mode ───────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrpgBackendMode {
+    MascApi,    // Uses /api/v1/trpg endpoints (default)
+    LegacyEngine // Uses direct engine endpoints (if needed)
+}
+
+pub const DEFAULT_TRPG_BACKEND: TrpgBackendMode = TrpgBackendMode::MascApi;
+
+// ─── Room ID Management ─────────────────────
+
+/// Get current room ID from DOM attribute (set by dashboard/lobby) or URL param.
+pub fn current_room_id() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // 1. Try URL param ?room=...
+        if let Some(win) = web_sys::window() {
+            if let Ok(search) = win.location().search() {
+                if let Some(room) = parse_query_param(&search, "room") {
+                    return sanitize_room_id(&room).unwrap_or_else(|| DEFAULT_ROOM_ID.to_string());
+                }
+            }
+        }
+
+        // 2. Try dashboard attribute
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id("dashboard") {
+                if let Some(room) = el.get_attribute("data-room-id") {
+                    if !room.is_empty() {
+                        return room;
+                    }
+                }
+            }
+        }
+    }
+    
+    DEFAULT_ROOM_ID.to_string()
+}
+
+/// Set current room ID (persisted via URL or just runtime state).
+/// In this viewer, we primarily use the dashboard data attribute.
+pub fn set_current_room_id(room_id: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id("dashboard") {
+                let _ = el.set_attribute("data-room-id", room_id);
+            }
+        }
+        
+        // Also update URL without reload?
+        if let Some(win) = web_sys::window() {
+            if let Ok(history) = win.history() {
+                let url = format!("?room={}", room_id);
+                let _ = history.push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url));
+            }
+        }
+    }
+}
+
 pub fn sanitize_room_id(raw: &str) -> Option<String> {
-    let room = raw.trim();
-    if room.is_empty() {
+    let s = raw.trim();
+    if s.is_empty() || s.len() > 64 {
         return None;
     }
-    if room
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
-    {
-        Some(room.to_string())
+    if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        Some(s.to_string())
     } else {
         None
     }
 }
 
-/// Poll interval for MASC TRPG stream JSON endpoint.
 #[cfg(target_arch = "wasm32")]
-pub const TRPG_POLL_INTERVAL_MS: i32 = 1000;
-
-/// Backend mode for TRPG view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrpgBackendMode {
-    /// MASC `/api/v1/trpg/*` JSON API (default, protocol-unified path).
-    MascApi,
-    /// Legacy `/rooms/{id}/*` engine endpoints.
-    #[allow(dead_code)]
-    LegacyEngine,
-}
-
-/// Current TRPG backend mode.
-///
-/// Keep this default on MASC API so the viewer consumes the same protocol/event
-/// source used by server-side tool contracts.
-pub const TRPG_BACKEND_MODE: TrpgBackendMode = TrpgBackendMode::MascApi;
-
-/// Returns the active TRPG room id.
-///
-/// WASM runtime reads `#dashboard[data-room-id]` so UI can switch rooms
-/// without recompiling. Falls back to `DEFAULT_ROOM_ID`.
-#[cfg(target_arch = "wasm32")]
-pub fn current_room_id() -> String {
-    let from_dashboard = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|doc| doc.get_element_by_id("dashboard"))
-        .and_then(|el| el.get_attribute("data-room-id"))
-        .and_then(|raw| sanitize_room_id(&raw));
-    if let Some(room) = from_dashboard {
-        return room;
-    }
-
-    if let Some(room) = room_id_from_url() {
-        return room;
-    }
-
-    DEFAULT_ROOM_ID.to_string()
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn room_id_from_url() -> Option<String> {
-    web_sys::window().and_then(|window| {
-        let location = window.location();
-        let search = location.search().ok().unwrap_or_default();
-        room_from_query_like_text(&search).or_else(|| {
-            let hash = location.hash().ok().unwrap_or_default();
-            room_from_query_like_text(&hash)
-        })
-    })
-}
-
-#[cfg(target_arch = "wasm32")]
-fn room_from_query_like_text(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed
-        .split(['?', '#', '&'])
-        .filter_map(|token| token.split_once('='))
-        .find_map(|(k, v)| {
-            if k.trim() == "room" {
-                sanitize_room_id(v)
-            } else {
-                None
-            }
-        })
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn set_current_room_id(room_id: &str) {
-    let room = sanitize_room_id(room_id).unwrap_or_else(|| DEFAULT_ROOM_ID.to_string());
-    if let Some(window) = web_sys::window() {
-        if let Some(doc) = window.document() {
-            if let Some(dashboard) = doc.get_element_by_id("dashboard") {
-                let _ = dashboard.set_attribute("data-room-id", &room);
+fn parse_query_param(search: &str, key: &str) -> Option<String> {
+    let search = search.trim_start_matches('?');
+    for pair in search.split('&') {
+        let mut parts = pair.splitn(2, '=');
+        if let Some(k) = parts.next() {
+            if k == key {
+                return parts.next().map(|v| v.to_string());
             }
         }
     }
+    None
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn current_room_id() -> String {
-    DEFAULT_ROOM_ID.to_string()
-}
+// ─── Endpoints ──────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-pub fn set_current_room_id(_room_id: &str) {}
-
-#[allow(dead_code)]
 pub fn trpg_uses_polling() -> bool {
-    matches!(TRPG_BACKEND_MODE, TrpgBackendMode::MascApi)
+    // MASC API supports SSE, so polling is fallback or for legacy engine.
+    // If using MASC API, we use SSE.
+    // If using Legacy Engine, we might need polling if SSE not exposed?
+    // Actually MASC API exposes /stream/sse.
+    false
 }
 
-/// URL for initial TRPG state load.
 pub fn trpg_state_url() -> String {
-    let room_id = current_room_id();
-    match TRPG_BACKEND_MODE {
-        TrpgBackendMode::MascApi => {
-            format!("{}/api/v1/trpg/state?room_id={}", MASC_MCP_URL, room_id)
-        }
-        TrpgBackendMode::LegacyEngine => trpg_room_url("/state"),
-    }
+    format!("{}/api/v1/trpg/state/{}", MASC_MCP_URL, current_room_id())
 }
 
-/// URL for incremental TRPG stream reads.
-#[cfg(target_arch = "wasm32")]
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
-    let room_id = current_room_id();
-    match TRPG_BACKEND_MODE {
-        TrpgBackendMode::MascApi => format!(
-            "{}/api/v1/trpg/stream?room_id={}&after_seq={}",
-            MASC_MCP_URL, room_id, after_seq
-        ),
-        TrpgBackendMode::LegacyEngine => trpg_room_url("/stream"),
-    }
+    format!("{}/api/v1/trpg/stream/poll/{}?after={}", MASC_MCP_URL, current_room_id(), after_seq)
 }
 
-/// SSE endpoint for a given viewer mode.
-/// Returns `None` for Lobby (no live data connection).
-/// Called by `masc_client::setup_masc_sse` (wasm32 only).
-#[cfg(target_arch = "wasm32")]
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
+        ViewerMode::Trpg => Some(format!("{}/api/v1/trpg/stream/sse/{}", MASC_MCP_URL, current_room_id())),
+        ViewerMode::Monitor => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
+        ViewerMode::Experiment => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
+        ViewerMode::Council => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
+        ViewerMode::Social => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
         ViewerMode::Lobby => None,
-        ViewerMode::Trpg => Some(format!(
-            "{}/rooms/{}/stream",
-            TRPG_ENGINE_URL,
-            current_room_id()
-        )),
-        ViewerMode::Experiment => Some(format!("{}/sse?room=experiment", MASC_MCP_URL)),
-        ViewerMode::Monitor => Some(format!("{}/sse?room=monitor", MASC_MCP_URL)),
-        ViewerMode::Council => Some(format!("{}/sse?room=council", MASC_MCP_URL)),
-        ViewerMode::Social => Some(format!("{}/sse?room=social", MASC_MCP_URL)),
     }
 }
 
-/// TRPG-specific room URL helper (used by game state loader).
+/// Helper to get full room URL for external links (if needed)
 pub fn trpg_room_url(path: &str) -> String {
-    format!("{}/rooms/{}{}", TRPG_ENGINE_URL, current_room_id(), path)
+    format!("{}/rooms/{}/{}", MASC_MCP_URL, current_room_id(), path.trim_start_matches('/'))
 }
-
-#[cfg(target_arch = "wasm32")]
-const STORAGE_KEY_ACTOR_ID: &str = "masc_trpg_actor_id";
-
-#[cfg(target_arch = "wasm32")]
-pub fn current_actor_id() -> Option<String> {
-    let window = web_sys::window()?;
-    let storage = window.local_storage().ok()??;
-    storage.get_item(STORAGE_KEY_ACTOR_ID).ok()?
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn set_current_actor_id(actor_id: &str) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok()).flatten() {
-        let _ = storage.set_item(STORAGE_KEY_ACTOR_ID, actor_id);
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn clear_current_actor_id() {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok()).flatten() {
-        let _ = storage.remove_item(STORAGE_KEY_ACTOR_ID);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-pub fn current_actor_id() -> Option<String> { None }
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-pub fn set_current_actor_id(_: &str) {}
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-pub fn clear_current_actor_id() {}

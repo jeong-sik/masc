@@ -94,12 +94,12 @@ impl ViewerTheme {
     pub fn shader_settings(&self) -> PostProcessSettings {
         match self {
             Self::DarkFantasy => PostProcessSettings {
-                kuwahara_radius: 4.0,
-                edge_strength: 0.3,
+                kuwahara_radius: 5.0,
+                edge_strength: 0.4,
                 saturation: 0.85,
                 warmth: 0.15,
                 vignette_strength: 0.4,
-                grain_strength: 0.03,
+                grain_strength: 0.06,
                 time: 0.0,
                 intensity: 1.0,
             },

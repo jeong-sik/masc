@@ -61,7 +61,7 @@ pub fn current_room_id() -> String {
     DEFAULT_ROOM_ID.to_string()
 }
 
-#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub fn trpg_uses_polling() -> bool {
     matches!(TRPG_BACKEND_MODE, TrpgBackendMode::MascApi)
 }

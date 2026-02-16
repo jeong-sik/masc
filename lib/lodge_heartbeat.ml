@@ -2732,6 +2732,88 @@ let tick ~config ~pending_triggers =
     activity_report;
   }
 
+(* ── Pulse helpers ─────────────────────────────────────────── *)
+
+(** Fixed-interval rhythm with no quiet hours.
+    Lodge manages quiet hours via Env_config, not Pulse rhythm. *)
+let fixed_rhythm base_s =
+  { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = (0, 0) }
+
+(** Pulse instance for the main Lodge tick loop. *)
+let lodge_tick_pulse : Pulse.t option ref = ref None
+
+(** Build the main Lodge tick consumer.
+    This consumer captures the full Lodge heartbeat cycle:
+    scan triggers → tick → update state → log → post report → start agent heartbeats → GC *)
+let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
+    ~tick_interval : (module Pulse.Consumer) =
+  (module struct
+    let name = "lodge-tick"
+    let should_act _beat = true
+    let on_beat (beat : Pulse.beat) =
+      try
+        (* Scan for content-driven triggers since last tick *)
+        let agents = get_agents () in
+        let pending_triggers = scan_board_triggers ~since:!last_tick_time ~agents in
+        last_tick_time := Time_compat.now ();
+
+        (* Run the tick — plan-based selection + LLM decisions + reflection *)
+        let result = tick ~config ~pending_triggers in
+
+        (* Record observable state *)
+        _lodge_last_tick := Time_compat.now ();
+        _lodge_total_ticks := !_lodge_total_ticks + 1;
+        _lodge_total_checkins := !_lodge_total_checkins + List.length result.checkins;
+        _lodge_last_result := Some result;
+
+        (* Log result *)
+        let n_acted = List.length (List.filter (fun (_, _, r) ->
+          match r with Acted _ -> true | _ -> false) result.checkins) in
+        Printf.printf "🫀 [%02d:00 KST] agents=%d selected=%d acted=%d (%.0fs tick)\n%!"
+          result.current_hour result.agents_checked
+          (List.length result.checkins) n_acted tick_interval;
+
+        (* Post activity report to Board if there were actions *)
+        post_activity_report ~result;
+
+        (* Start self-heartbeat for agents who acted (continue engagement) *)
+        let acted_agents = List.filter_map (fun (name, _, r) ->
+          match r with
+          | Acted { action = ActionDelegated _; _ } -> None
+          | Acted _ -> Some name
+          | _ -> None
+        ) result.checkins in
+        List.iter (fun name ->
+          if not (is_agent_active ~name) then begin
+            let recent_posts = Board.list_posts (Board.global ()) ~limit:10 () in
+            let on_tick ~name ~state:_ =
+              let trigger_reason = "self-heartbeat continuation" in
+              let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+              execute_agent_action ~agent_name:name ~action;
+              record_agent_activity ~name
+            in
+            start_agent_heartbeat ~sw ~clock ~name ~on_tick
+          end
+        ) acted_agents;
+
+        ignore room_config;
+
+        (* Cleanup inactive Lodge agents *)
+        cleanup_inactive_lodge_agents ();
+
+        (* Memory GC: run every 10 ticks to prune stale + consolidate similar *)
+        if beat.seq > 0 && beat.seq mod 10 = 0 then begin
+          let gc_result = Lodge_memory_gc.run_gc () in
+          if gc_result.total_pruned > 0 || gc_result.total_merged > 0 then
+            Printf.printf "🧹 %s\n%!" (Lodge_memory_gc.format_result gc_result)
+        end;
+        Ok ()
+      with exn ->
+        let msg = Printf.sprintf "tick error: %s" (Printexc.to_string exn) in
+        Eio.traceln "💀 Lodge %s (recovering...)" msg;
+        Error msg
+  end)
+
 (** Start heartbeat daemon fiber — Generative Agent Architecture *)
 let start ~sw ~clock room_config =
   Printf.printf "+Lodge Heartbeat v2 (Generative Agent): initializing...\n%!";
@@ -2765,75 +2847,17 @@ let start ~sw ~clock room_config =
     (* Track last tick time for content alert scanning *)
     let last_tick_time = ref (Time_compat.now ()) in
 
-    Eio.Fiber.fork ~sw (fun () ->
-      (* Initial delay *)
-      Eio.Time.sleep clock 5.0;
-
-      while true do
-        try
-          (* Scan for content-driven triggers since last tick *)
-          let agents = get_agents () in
-          let pending_triggers = scan_board_triggers ~since:!last_tick_time ~agents in
-          last_tick_time := Time_compat.now ();
-
-          (* Run the tick — plan-based selection + LLM decisions + reflection *)
-          let result = tick ~config ~pending_triggers in
-
-          (* Record observable state *)
-          _lodge_last_tick := Time_compat.now ();
-          _lodge_total_ticks := !_lodge_total_ticks + 1;
-          _lodge_total_checkins := !_lodge_total_checkins + List.length result.checkins;
-          _lodge_last_result := Some result;
-
-          (* Log result *)
-          let n_acted = List.length (List.filter (fun (_, _, r) ->
-            match r with Acted _ -> true | _ -> false) result.checkins) in
-          Printf.printf "🫀 [%02d:00 KST] agents=%d selected=%d acted=%d (%.0fs tick)\n%!"
-            result.current_hour result.agents_checked
-            (List.length result.checkins) n_acted tick_interval;
-
-          (* Post activity report to Board if there were actions *)
-          post_activity_report ~result;
-
-          (* Start self-heartbeat for agents who acted (continue engagement) *)
-          let acted_agents = List.filter_map (fun (name, _, r) ->
-            match r with
-            | Acted { action = ActionDelegated _; _ } -> None (* Skip: Worker handles via heartbeat_task event *)
-            | Acted _ -> Some name
-            | _ -> None
-          ) result.checkins in
-          List.iter (fun name ->
-            if not (is_agent_active ~name) then begin
-              let recent_posts = Board.list_posts (Board.global ()) ~limit:10 () in
-              let on_tick ~name ~state:_ =
-                let trigger_reason = "self-heartbeat continuation" in
-                let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
-                execute_agent_action ~agent_name:name ~action;
-                record_agent_activity ~name
-              in
-              start_agent_heartbeat ~sw ~clock ~name ~on_tick
-            end
-          ) acted_agents;
-
-          ignore room_config;
-
-          (* Cleanup inactive Lodge agents *)
-          cleanup_inactive_lodge_agents ();
-
-          (* Memory GC: run every 10 ticks to prune stale + consolidate similar *)
-          if !_lodge_total_ticks mod 10 = 0 && !_lodge_total_ticks > 0 then begin
-            let gc_result = Lodge_memory_gc.run_gc () in
-            if gc_result.total_pruned > 0 || gc_result.total_merged > 0 then
-              Printf.printf "🧹 %s\n%!" (Lodge_memory_gc.format_result gc_result)
-          end;
-
-          (* Sleep for the configured tick interval (default: 4h) *)
-          Eio.Time.sleep clock tick_interval
-        with e ->
-          Eio.traceln "💀 Heartbeat tick error: %s (recovering...)" (Printexc.to_string e);
-          Eio.Time.sleep clock 30.0  (* Longer recovery for 4h ticks *)
-      done
-    )
+    (* Build Pulse consumer and engine *)
+    let consumer = make_lodge_tick_consumer
+      ~config ~last_tick_time ~sw ~clock ~room_config ~tick_interval in
+    let p = Pulse.create
+      ~clock
+      ~rhythm:(fixed_rhythm tick_interval)
+      ~lifecycle:Perpetual
+      ~consumers:[consumer]
+    in
+    lodge_tick_pulse := Some p;
+    Pulse.run ~sw p
   end
 
 (** {1 Manual Trigger (for MCP tool)} *)

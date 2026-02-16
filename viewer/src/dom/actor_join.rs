@@ -207,7 +207,10 @@ async fn claim_actor(actor_id: &str, keeper: &str) -> Result<(), JsValue> {
         let status = resp.status();
         let text = JsFuture::from(resp.text()?).await?;
         let text_str = text.as_string().unwrap_or_default();
-        return Err(JsValue::from_str(&format!("HTTP {} — {}", status, text_str)));
+        return Err(JsValue::from_str(&format!(
+            "HTTP {} — {}",
+            status, text_str
+        )));
     }
 
     log::info!("ActorJoin: claimed {} as {}", actor_id, keeper);

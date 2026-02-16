@@ -16,6 +16,7 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+use crate::game::state::{RoomState, TurnProgressState};
 
 // ─── Marker Resource ────────────────────────
 
@@ -49,9 +50,30 @@ pub fn unbind_turn_controls(mut commands: Commands) {
 // ─── Visibility Sync ────────────────────────
 
 /// Show turn controls only when a keeper is claimed (Keeper/GM privilege).
-pub fn sync_turn_controls_visibility() {
+pub fn sync_turn_controls_visibility(
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
+) {
+    let _ = (&room_state, &progress);
+
     #[cfg(target_arch = "wasm32")]
     {
+        fn normalize_room_status(raw: &str) -> String {
+            let normalized = raw.trim().to_ascii_lowercase();
+            if normalized.is_empty() {
+                "unknown".to_string()
+            } else {
+                normalized
+            }
+        }
+
+        let status = if !progress.room_status.trim().is_empty() {
+            normalize_room_status(&progress.room_status)
+        } else {
+            normalize_room_status(&room_state.status)
+        };
+        let room_allows_control = matches!(status.as_str(), "active" | "running");
+
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
@@ -63,7 +85,11 @@ pub fn sync_turn_controls_visibility() {
             .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()));
         let has_keeper = keeper.map_or(false, |v| !v.trim().is_empty());
 
-        let style = if has_keeper { "" } else { "display:none" };
+        let style = if has_keeper && room_allows_control {
+            ""
+        } else {
+            "display:none"
+        };
         let _ = panel.set_attribute("style", style);
     }
 }

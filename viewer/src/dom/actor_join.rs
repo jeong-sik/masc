@@ -14,6 +14,7 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+use crate::game::state::{RoomState, TurnProgressState};
 
 // ─── Marker Resource ────────────────────────
 
@@ -46,6 +47,42 @@ pub fn unbind_actor_join(mut commands: Commands) {
     }
 
     commands.remove_resource::<ActorJoinBound>();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_room_status(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        "unknown".to_string()
+    } else {
+        normalized
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn effective_room_status(room_state: &RoomState, progress: &TurnProgressState) -> String {
+    if !progress.room_status.trim().is_empty() {
+        normalize_room_status(&progress.room_status)
+    } else {
+        normalize_room_status(&room_state.status)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn room_accepts_join(status: &str) -> bool {
+    matches!(status, "active" | "running")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn room_blocked_join_message(status: &str) -> &'static str {
+    match status {
+        "paused" => "ROOM: 게임이 일시정지 상태입니다. 재개 후 참여할 수 있습니다.",
+        "ended" => "ROOM: 게임이 종료되었습니다. 새 게임을 시작하세요.",
+        "idle" => "ROOM: 진행 중 게임이 없습니다. 새 게임을 시작하세요.",
+        "loading" => "ROOM: 방 상태를 불러오는 중입니다.",
+        "unavailable" => "ROOM: 엔진 연결 상태를 확인할 수 없습니다.",
+        _ => "ROOM: 현재 상태에서는 참여할 수 없습니다.",
+    }
 }
 
 // ─── Event: Join Button ─────────────────────
@@ -311,6 +348,53 @@ fn restore_join_panel_state() {
         set_display(&doc, "action-panel", "block");
         if let Some(el) = doc.get_element_by_id("player-actor-id") {
             el.set_text_content(Some(&actor_id));
+        }
+    }
+}
+
+/// Disable join controls when the room is not in an interactive state.
+/// This prevents confusing claim errors for ended/idle/unavailable rooms.
+pub fn sync_join_panel_interaction_state(
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
+) {
+    let _ = (&room_state, &progress);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let claimed_actor = read_hidden_value(&doc, "claimed-actor-id");
+        if !claimed_actor.trim().is_empty() {
+            return;
+        }
+
+        let status = effective_room_status(&room_state, &progress);
+        let join_enabled = room_accepts_join(&status);
+
+        if let Some(el) = doc.get_element_by_id("join-btn") {
+            if let Some(btn) = el.dyn_ref::<web_sys::HtmlButtonElement>() {
+                btn.set_disabled(!join_enabled);
+            }
+        }
+        for input_id in &["actor-id-input", "keeper-input"] {
+            if let Some(el) = doc.get_element_by_id(input_id) {
+                if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+                    input.set_disabled(!join_enabled);
+                }
+            }
+        }
+
+        if join_enabled {
+            if let Some(status_el) = doc.get_element_by_id("join-status") {
+                let current = status_el.text_content().unwrap_or_default();
+                if current.starts_with("ROOM: ") {
+                    set_join_status("", "");
+                }
+            }
+        } else {
+            set_join_status(room_blocked_join_message(&status), "status-error");
         }
     }
 }

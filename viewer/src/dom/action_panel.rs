@@ -112,6 +112,18 @@ fn bind_dice_roll_button() {
     };
 
     let cb = Closure::wrap(Box::new(move || {
+        // Guard: must have a claimed actor
+        let actor_id = {
+            let doc = web_sys::window().and_then(|w| w.document());
+            doc.as_ref()
+                .map(|d| read_claimed_actor_id(d))
+                .unwrap_or_default()
+        };
+        if actor_id.is_empty() {
+            set_action_status("Join a character first.", "status-error");
+            return;
+        }
+
         set_action_status("Rolling dice...", "");
         disable_buttons(true);
 
@@ -142,6 +154,14 @@ fn submit_action_from_input() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
+
+    // Guard: must have a claimed actor
+    let actor_id = read_claimed_actor_id(&doc);
+    if actor_id.is_empty() {
+        set_action_status("Join a character first.", "status-error");
+        return;
+    }
+
     let Some(el) = doc.get_element_by_id("action-input") else {
         return;
     };
@@ -161,7 +181,7 @@ fn submit_action_from_input() {
     disable_buttons(true);
 
     wasm_bindgen_futures::spawn_local(async move {
-        match submit_action(&text).await {
+        match submit_action(&actor_id, &text).await {
             Ok(()) => set_action_status("Action submitted.", "status-ok"),
             Err(e) => {
                 let msg = format!("Submit failed: {:?}", e);
@@ -176,20 +196,23 @@ fn submit_action_from_input() {
 // ─── HTTP: Submit Action ────────────────────
 
 #[cfg(target_arch = "wasm32")]
-async fn submit_action(action_text: &str) -> Result<(), JsValue> {
+async fn submit_action(actor_id: &str, action_text: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = format!("{}/api/v1/trpg/events", config::MASC_MCP_URL);
 
     // Escape for JSON string embedding
-    let escaped = action_text
+    let escaped_text = action_text
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n");
+    let escaped_actor = actor_id
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
 
     let body = format!(
-        r#"{{"event_type":"turn.action.proposed","data":{{"character":"player","action_text":"{}"}}}}"#,
-        escaped
+        r#"{{"event_type":"turn.action.proposed","data":{{"character":"{}","action_text":"{}"}}}}"#,
+        escaped_actor, escaped_text
     );
 
     let opts = web_sys::RequestInit::new();
@@ -304,6 +327,14 @@ fn clear_action_input() {
             input.set_value("");
         }
     }
+}
+
+/// Read the claimed actor ID from the hidden input set by actor_join.rs.
+#[cfg(target_arch = "wasm32")]
+fn read_claimed_actor_id(doc: &web_sys::Document) -> String {
+    doc.get_element_by_id("claimed-actor-id")
+        .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
+        .unwrap_or_default()
 }
 
 #[cfg(target_arch = "wasm32")]

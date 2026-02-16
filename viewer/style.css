@@ -1802,3 +1802,113 @@ body.mode-lobby #dashboard {
 #action-status.status-error {
     color: var(--accent-secondary, #8b2500);
 }
+
+/* ─── Join Panel ───────────────────────────── */
+
+#join-panel {
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+#join-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+#actor-id-input,
+#keeper-input {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 0.8rem;
+    font-family: var(--font-ui);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+#actor-id-input:focus,
+#keeper-input:focus {
+    border-color: var(--accent-primary);
+}
+
+#join-btn {
+    padding: 5px 14px;
+    font-size: 0.8rem;
+    font-family: var(--font-ui);
+    font-weight: 600;
+    background: transparent;
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+#join-btn:hover {
+    background: rgba(200, 170, 110, 0.15);
+}
+
+#join-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#join-status {
+    margin-top: 4px;
+    font-size: 0.75rem;
+    font-family: var(--font-ui);
+    color: var(--text-dim);
+    min-height: 1em;
+}
+
+#join-status.status-ok {
+    color: var(--accent-primary);
+}
+
+#join-status.status-error {
+    color: var(--accent-secondary, #8b2500);
+}
+
+/* ─── Player Info Bar ──────────────────────── */
+
+#player-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0 6px;
+    font-size: 0.8rem;
+    font-family: var(--font-ui);
+    color: var(--text-secondary);
+}
+
+#player-actor-id {
+    font-weight: 600;
+    color: var(--accent-primary);
+}
+
+#leave-btn {
+    padding: 2px 10px;
+    font-size: 0.7rem;
+    font-family: var(--font-ui);
+    background: transparent;
+    color: var(--accent-secondary, #8b2500);
+    border: 1px solid var(--accent-secondary, #8b2500);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#leave-btn:hover {
+    background: rgba(139, 37, 0, 0.15);
+}
+
+#leave-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

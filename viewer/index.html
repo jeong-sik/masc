@@ -193,8 +193,27 @@
                         </div>
                     </div>
                     <div id="narrative-log"></div>
+                    <!-- Join Panel: claim an actor before playing -->
+                    <div id="join-panel">
+                        <div id="join-input-row">
+                            <input type="text" id="actor-id-input"
+                                   placeholder="Actor ID (e.g. warrior-1)"
+                                   maxlength="100"
+                                   autocomplete="off" />
+                            <input type="text" id="keeper-input"
+                                   placeholder="Your name"
+                                   maxlength="100"
+                                   autocomplete="off" />
+                            <button id="join-btn" title="Claim actor and join game">Join</button>
+                        </div>
+                        <div id="join-status"></div>
+                    </div>
                     <!-- Action Panel: player input for TRPG actions -->
-                    <div id="action-panel">
+                    <div id="action-panel" style="display:none">
+                        <div id="player-info">
+                            Playing as: <span id="player-actor-id"></span>
+                            <button id="leave-btn" title="Release actor">Leave</button>
+                        </div>
                         <div id="action-input-row">
                             <input type="text" id="action-input"
                                    placeholder="Describe your action..."
@@ -204,6 +223,8 @@
                             <button id="dice-roll-btn" title="Roll 1d20">Roll</button>
                         </div>
                         <div id="action-status"></div>
+                        <input type="hidden" id="claimed-actor-id" value="" />
+                        <input type="hidden" id="claimed-keeper" value="" />
                     </div>
                 </div>
             </section>

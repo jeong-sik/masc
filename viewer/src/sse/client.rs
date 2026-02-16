@@ -128,10 +128,70 @@ fn map_trpg_event(
             Some(("hp_change".to_string(), mapped.to_string()))
         }
         "narration.posted" => {
+            let text = payload
+                .get("text")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("reply").and_then(Value::as_str))
+                .unwrap_or("");
             let mapped = json!({
-                "text": payload.get("text").and_then(Value::as_str).unwrap_or(""),
+                "text": text,
                 "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
-                "speaker": payload.get("speaker").and_then(Value::as_str)
+                "speaker": payload
+                    .get("speaker")
+                    .and_then(Value::as_str)
+                    .or_else(|| payload.get("keeper").and_then(Value::as_str))
+                    .or(actor_id)
+            });
+            Some(("narrative".to_string(), mapped.to_string()))
+        }
+        "turn.action.proposed" => {
+            let proposed = payload
+                .get("proposed_action")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("reply").and_then(Value::as_str))
+                .unwrap_or("action proposed");
+            let mapped = json!({
+                "text": proposed,
+                "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
+                "speaker": payload
+                    .get("actor_id")
+                    .and_then(Value::as_str)
+                    .or(actor_id)
+            });
+            Some(("narrative".to_string(), mapped.to_string()))
+        }
+        "turn.timeout" => {
+            let actor = payload
+                .get("actor_id")
+                .and_then(Value::as_str)
+                .or(actor_id)
+                .unwrap_or("unknown");
+            let timeout = payload.get("timeout_sec").and_then(Value::as_f64);
+            let text = match timeout {
+                Some(sec) => format!("[timeout] {} ({}s)", actor, sec.round()),
+                None => format!("[timeout] {}", actor),
+            };
+            let mapped = json!({
+                "text": text,
+                "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
+                "speaker": payload.get("keeper").and_then(Value::as_str)
+            });
+            Some(("narrative".to_string(), mapped.to_string()))
+        }
+        "keeper.unavailable" => {
+            let actor = payload
+                .get("actor_id")
+                .and_then(Value::as_str)
+                .or(actor_id)
+                .unwrap_or("unknown");
+            let reason = payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let mapped = json!({
+                "text": format!("[unavailable] {}: {}", actor, reason),
+                "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
+                "speaker": payload.get("keeper").and_then(Value::as_str)
             });
             Some(("narrative".to_string(), mapped.to_string()))
         }
@@ -445,5 +505,50 @@ mod tests {
         let payload: Value = serde_json::from_str(&mapped[0].1).expect("narrative payload json");
         assert_eq!(payload["text"], "문이 열린다");
         assert_eq!(payload["speaker"], "dm");
+    }
+
+    #[test]
+    fn decode_stream_maps_narration_reply_field() {
+        let body = r#"{
+            "events": [
+                {"seq": 1, "type": "narration.posted", "actor_id": "dm", "payload": {"phase": "round", "keeper": "dm-keeper", "reply": "안개가 짙어집니다."}}
+            ]
+        }"#;
+        let mut state = TrpgMapperState::default();
+        let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].0, "narrative");
+
+        let payload: Value = serde_json::from_str(&mapped[0].1).expect("narrative payload json");
+        assert_eq!(payload["text"], "안개가 짙어집니다.");
+        assert_eq!(payload["speaker"], "dm-keeper");
+    }
+
+    #[test]
+    fn decode_stream_maps_timeout_and_unavailable_to_narrative() {
+        let body = r#"{
+            "events": [
+                {"seq": 1, "type": "turn.timeout", "payload": {"actor_id": "p01", "keeper": "pk-p01", "timeout_sec": 90, "phase": "round"}},
+                {"seq": 2, "type": "keeper.unavailable", "payload": {"actor_id": "p02", "keeper": "pk-p02", "reason": "LLM failed", "phase": "round"}}
+            ]
+        }"#;
+        let mut state = TrpgMapperState::default();
+        let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0].0, "narrative");
+        assert_eq!(mapped[1].0, "narrative");
+
+        let timeout_payload: Value =
+            serde_json::from_str(&mapped[0].1).expect("timeout narrative payload json");
+        assert!(
+            timeout_payload["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("[timeout] p01")
+        );
+
+        let unavailable_payload: Value =
+            serde_json::from_str(&mapped[1].1).expect("unavailable narrative payload json");
+        assert_eq!(unavailable_payload["text"], "[unavailable] p02: LLM failed");
     }
 }

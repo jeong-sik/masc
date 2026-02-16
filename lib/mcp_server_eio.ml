@@ -1148,7 +1148,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let trpg_keeper_call ~name:keeper_name ~message ~timeout_sec :
       Tool_trpg.keeper_call_result =
     let keeper_args =
-      `Assoc [ ("name", `String keeper_name); ("message", `String message) ]
+      `Assoc
+        [
+          ("name", `String keeper_name);
+          ("message", `String message);
+          ("ollama_timeout_sec", `Float timeout_sec);
+        ]
     in
     try
       Eio.Time.with_timeout_exn clock timeout_sec (fun () ->

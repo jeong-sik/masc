@@ -182,7 +182,7 @@ async fn claim_actor(actor_id: &str, keeper: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = format!("{}/api/v1/trpg/actors/claim", config::MASC_MCP_URL);
-    let room_id = config::DEFAULT_ROOM_ID;
+    let room_id = config::current_room_id();
 
     let body = format!(
         r#"{{"room":"{}","actor_id":"{}","keeper":"{}"}}"#,
@@ -207,7 +207,10 @@ async fn claim_actor(actor_id: &str, keeper: &str) -> Result<(), JsValue> {
         let status = resp.status();
         let text = JsFuture::from(resp.text()?).await?;
         let text_str = text.as_string().unwrap_or_default();
-        return Err(JsValue::from_str(&format!("HTTP {} — {}", status, text_str)));
+        return Err(JsValue::from_str(&format!(
+            "HTTP {} — {}",
+            status, text_str
+        )));
     }
 
     log::info!("ActorJoin: claimed {} as {}", actor_id, keeper);
@@ -221,7 +224,7 @@ async fn release_actor(actor_id: &str, keeper: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let url = format!("{}/api/v1/trpg/actors/release", config::MASC_MCP_URL);
-    let room_id = config::DEFAULT_ROOM_ID;
+    let room_id = config::current_room_id();
 
     let body = format!(
         r#"{{"room":"{}","actor_id":"{}","keeper":"{}"}}"#,

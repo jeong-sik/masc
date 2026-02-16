@@ -429,8 +429,16 @@ fn start_polling_loop(messages: Arc<Mutex<Vec<(String, String)>>>, active: Arc<A
     wasm_bindgen_futures::spawn_local(async move {
         let mut after_seq = 0_i64;
         let mut state = TrpgMapperState::default();
+        let mut active_room = config::current_room_id();
 
         while active.load(Ordering::Relaxed) {
+            let room_now = config::current_room_id();
+            if room_now != active_room {
+                active_room = room_now.clone();
+                after_seq = 0;
+                state = TrpgMapperState::default();
+                log::info!("TRPG poll room switched: {}", room_now);
+            }
             let url = config::trpg_stream_poll_url(after_seq);
             match fetch_text(&url).await {
                 Ok(body) => match decode_stream_events(&body, &mut state) {
@@ -598,8 +606,7 @@ mod tests {
         assert_eq!(turn_payload["turn"], 3);
         assert_eq!(turn_payload["phase"], "player_action");
 
-        let dice_payload: Value =
-            serde_json::from_str(&dice_event.1).expect("dice payload json");
+        let dice_payload: Value = serde_json::from_str(&dice_event.1).expect("dice payload json");
         assert_eq!(dice_payload["character"], "grimja");
         assert_eq!(dice_payload["d20"], 17);
     }
@@ -676,15 +683,13 @@ mod tests {
 
         let timeout_payload: Value =
             serde_json::from_str(&narrative_events[0].1).expect("timeout narrative payload json");
-        assert!(
-            timeout_payload["text"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("[timeout] p01")
-        );
+        assert!(timeout_payload["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("[timeout] p01"));
 
-        let unavailable_payload: Value =
-            serde_json::from_str(&narrative_events[1].1).expect("unavailable narrative payload json");
+        let unavailable_payload: Value = serde_json::from_str(&narrative_events[1].1)
+            .expect("unavailable narrative payload json");
         assert_eq!(unavailable_payload["text"], "[unavailable] p02: LLM failed");
     }
 }

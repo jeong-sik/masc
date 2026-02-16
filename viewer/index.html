@@ -152,6 +152,15 @@
             <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
             <span id="mode-title">—</span>
             <div class="top-bar-right">
+                <div class="room-switch-inline">
+                    <select id="room-selector-inline" class="inline-select" title="TRPG room 목록">
+                        <option value="default" selected>default</option>
+                    </select>
+                    <input id="room-input-inline" class="inline-input" type="text" value="default" placeholder="room-id" maxlength="64" />
+                    <button id="room-apply-btn" class="inline-toggle" type="button">Room 적용</button>
+                    <button id="room-refresh-btn" class="inline-toggle" type="button">목록 새로고침</button>
+                    <span id="room-status" class="widget-pill">room default</span>
+                </div>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>

@@ -414,12 +414,29 @@ body.mode-lobby #dashboard {
 .top-bar-right {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
+}
+
+.room-switch-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .inline-select {
     font-size: 10px;
     padding: 2px 6px;
+}
+
+.inline-input {
+    font-size: 10px;
+    min-width: 92px;
+    padding: 3px 6px;
+    border-radius: var(--panel-radius);
+    border: 1px solid var(--border-main);
+    background: var(--bg-panel-alt);
+    color: var(--text-primary);
 }
 
 .inline-toggle {

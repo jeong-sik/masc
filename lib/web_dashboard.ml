@@ -8655,10 +8655,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function parseTrpgToolText(name, text) {
       const raw = String(text || '').trim();
       if (raw === '') return {};
-      let parsed = {};
-      try {
-        parsed = JSON.parse(raw);
-      } catch (_) {
+      const parsed = trpgTryParseJson(raw);
+      if (parsed === null) {
         throw new Error(`${name} 응답이 JSON이 아닙니다: ${trpgShortText(raw, 180)}`);
       }
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -8669,19 +8667,93 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return parsed;
     }
 
+    function trpgExtractJsonCandidates(text) {
+      const src = String(text || '');
+      const out = [];
+      const stack = [];
+      let start = -1;
+      let inString = false;
+      let escaped = false;
+      for (let i = 0; i < src.length; i += 1) {
+        const ch = src[i];
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (ch === '\\') {
+            escaped = true;
+          } else if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+        if (ch === '{' || ch === '[') {
+          if (stack.length === 0) start = i;
+          stack.push(ch);
+          continue;
+        }
+        if (ch === '}' || ch === ']') {
+          if (stack.length === 0) continue;
+          const open = stack[stack.length - 1];
+          const match = (open === '{' && ch === '}') || (open === '[' && ch === ']');
+          if (!match) {
+            stack.length = 0;
+            start = -1;
+            continue;
+          }
+          stack.pop();
+          if (stack.length === 0 && start >= 0) {
+            const candidate = src.slice(start, i + 1).trim();
+            if (candidate !== '') out.push(candidate);
+            start = -1;
+          }
+        }
+      }
+      return out;
+    }
+
+    function trpgTryParseJson(rawText) {
+      const raw = String(rawText || '').trim();
+      if (raw === '') return null;
+      try {
+        return JSON.parse(raw);
+      } catch (_) {
+        // fallthrough
+      }
+      const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fenceMatch && fenceMatch[1]) {
+        const fenced = String(fenceMatch[1] || '').trim();
+        if (fenced !== '') {
+          try {
+            return JSON.parse(fenced);
+          } catch (_) {
+            // fallthrough
+          }
+        }
+      }
+      const candidates = trpgExtractJsonCandidates(raw).sort((a, b) => b.length - a.length);
+      for (const candidate of candidates) {
+        try {
+          return JSON.parse(candidate);
+        } catch (_) {
+          // keep trying
+        }
+      }
+      return null;
+    }
+
     function parseMcpRpcFromSse(toolName, rawBody) {
       const raw = String(rawBody || '');
       const chunks = raw.split(/\r?\n\r?\n/);
       for (let i = chunks.length - 1; i >= 0; i -= 1) {
         const chunk = String(chunks[i] || '').trim();
         if (chunk === '') continue;
-        if (chunk.startsWith('{') || chunk.startsWith('[')) {
-          try {
-            const parsedChunk = JSON.parse(chunk);
-            if (parsedChunk && typeof parsedChunk === 'object') return parsedChunk;
-          } catch (_) {
-            // keep scanning older frames
-          }
+        const parsedChunk = trpgTryParseJson(chunk);
+        if (parsedChunk && typeof parsedChunk === 'object') {
+          return parsedChunk;
         }
         const dataLines = chunk
           .split(/\r?\n/)
@@ -8690,23 +8762,36 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (dataLines.length === 0) continue;
         const dataText = dataLines.join('\n').trim();
         if (dataText === '' || dataText === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(dataText);
-          if (parsed && typeof parsed === 'object') return parsed;
-        } catch (_) {
-          // keep scanning older frames
+        const parsedData = trpgTryParseJson(dataText);
+        if (parsedData && typeof parsedData === 'object') {
+          return parsedData;
         }
       }
       const trimmed = raw.trim();
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-          const parsedRaw = JSON.parse(trimmed);
-          if (parsedRaw && typeof parsedRaw === 'object') return parsedRaw;
-        } catch (_) {
-          // fallthrough to detailed parse error
-        }
+      const parsedRaw = trpgTryParseJson(trimmed);
+      if (parsedRaw && typeof parsedRaw === 'object') {
+        return parsedRaw;
       }
       throw new Error(`${toolName} SSE 응답 파싱 실패: ${trpgShortText(raw, 220)}`);
+    }
+
+    function normalizeRpcEnvelope(requestId, parsed) {
+      if (parsed && typeof parsed === 'object') {
+        if (Object.prototype.hasOwnProperty.call(parsed, 'jsonrpc')
+            || Object.prototype.hasOwnProperty.call(parsed, 'result')
+            || Object.prototype.hasOwnProperty.call(parsed, 'error')) {
+          return parsed;
+        }
+      }
+      const fallbackText = typeof parsed === 'string' ? parsed : JSON.stringify(parsed || {});
+      return {
+        jsonrpc: '2.0',
+        id: requestId,
+        result: {
+          content: [{ type: 'text', text: String(fallbackText || '') }],
+          isError: false,
+        },
+      };
     }
 
     async function mcpToolCall(toolName, args = {}) {
@@ -8741,9 +8826,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (contentType.includes('text/event-stream')) {
           rpc = parseMcpRpcFromSse(toolName, rawBody);
         } else {
-          try {
-            rpc = JSON.parse(rawBody);
-          } catch (_) {
+          const parsedDirect = trpgTryParseJson(rawBody);
+          if (parsedDirect !== null) {
+            rpc = normalizeRpcEnvelope(requestId, parsedDirect);
+          } else {
             try {
               rpc = parseMcpRpcFromSse(toolName, rawBody);
             } catch (_) {

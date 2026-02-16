@@ -2314,6 +2314,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <button id="trpg-reload-btn" class="trpg-run-btn secondary" onclick="reloadTrpgCatalogs()">프리셋 새로고침</button>
                 <button id="trpg-bootstrap-btn" class="trpg-run-btn secondary" onclick="bootstrapTrpgSession()">1) 세션 시작</button>
                 <button id="trpg-run-round-btn" class="trpg-run-btn" onclick="runTrpgRound()">2) 라운드 실행</button>
+                <button id="trpg-auto-round-btn" class="trpg-run-btn secondary" onclick="toggleTrpgAutoRound()">3) 자동 진행 ON</button>
+              </div>
+              <div class="trpg-control-help" style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+                <label for="trpg-auto-round-delay-sec-input">자동 진행 간격(sec)</label>
+                <input id="trpg-auto-round-delay-sec-input" type="number" min="1" step="1" value="3" style="width:90px;">
+                <span>ON 상태에서 라운드 완료 후 자동으로 다음 라운드를 실행합니다.</span>
               </div>
               <div class="trpg-control-help" style="margin-top:6px;">
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
@@ -7313,6 +7319,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgRoundRunning = false;
     let trpgBootstrapping = false;
     let trpgActorMutating = false;
+    let trpgAutoRoundEnabled = false;
+    let trpgAutoRoundTimer = null;
     let trpgNextActionKind = 'bootstrap';
     let trpgCanRunRound = false;
     let trpgRunBlockedReason = '먼저 1) 세션 시작을 실행하세요.';
@@ -7324,6 +7332,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgMcpSessionId = null;
     let trpgPresetCatalog = { dm_presets: [], world_presets: [] };
     let trpgKeeperCatalog = [];
+    const TRPG_AUTO_ROUND_DELAY_DEFAULT_SEC = 3;
 
     function trpgEventType(ev) {
       return (ev && (ev.type || ev.event_type || ev.event)) || '';
@@ -7415,7 +7424,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     }
 
     function trpgSetActionRowHighlight(buttonId, enabled = true) {
-      ['trpg-bootstrap-btn', 'trpg-run-round-btn', 'trpg-new-game-btn', 'trpg-reload-btn'].forEach((id) => {
+      ['trpg-bootstrap-btn', 'trpg-run-round-btn', 'trpg-auto-round-btn', 'trpg-new-game-btn', 'trpg-reload-btn'].forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;
         el.classList.remove('recommend');
@@ -7817,6 +7826,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (modelsInput && String(modelsInput.value || '').trim() === '') {
         modelsInput.value = TRPG_DEFAULT_KEEPER_MODELS;
       }
+      const autoDelayInput = document.getElementById('trpg-auto-round-delay-sec-input');
+      if (autoDelayInput && String(autoDelayInput.value || '').trim() === '') {
+        autoDelayInput.value = String(TRPG_AUTO_ROUND_DELAY_DEFAULT_SEC);
+      }
+      if (autoDelayInput && autoDelayInput.dataset.trpgBound !== '1') {
+        autoDelayInput.addEventListener('change', () => {
+          if (trpgAutoRoundEnabled) {
+            scheduleTrpgAutoRoundNext('delay-change');
+          }
+        });
+        autoDelayInput.dataset.trpgBound = '1';
+      }
       const langSelect = document.getElementById('trpg-lang-select');
       if (langSelect && String(langSelect.value || '').trim() === '') {
         langSelect.value = browserLang.startsWith('ko') ? 'ko' : 'auto';
@@ -7845,6 +7866,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       bindTrpgInput('trpg-dm-keeper-input', 'input');
       bindTrpgInput('trpg-party-size-input', 'input');
       trpgPopulateKeeperSelectors(false);
+      syncTrpgAutoRoundUi();
     }
 
     function applyTrpgRoomFromInput() {
@@ -8936,6 +8958,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (reloadBtn) {
         reloadBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
       }
+      const autoBtn = document.getElementById('trpg-auto-round-btn');
+      if (autoBtn) {
+        autoBtn.disabled = trpgBootstrapping || trpgActorMutating;
+        autoBtn.textContent = trpgAutoRoundEnabled ? '3) 자동 진행 OFF' : '3) 자동 진행 ON';
+        autoBtn.title = trpgAutoRoundEnabled ? '자동 라운드 실행 중입니다. 클릭하면 중지합니다.' : '라운드 자동 진행을 시작합니다.';
+      }
       const actorSpawnBtn = document.getElementById('trpg-actor-spawn-btn');
       if (actorSpawnBtn) {
         actorSpawnBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
@@ -8951,6 +8979,87 @@ let cached_html = lazy ({|<!DOCTYPE html>
         actorDeleteBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
         actorDeleteBtn.textContent = trpgActorMutating ? '처리 중...' : '액터 삭제';
       }
+      syncTrpgAutoRoundUi();
+    }
+
+    function trpgAutoRoundDelaySec() {
+      const el = document.getElementById('trpg-auto-round-delay-sec-input');
+      const n = Number((el && el.value) || TRPG_AUTO_ROUND_DELAY_DEFAULT_SEC);
+      if (!Number.isFinite(n) || n < 1) return TRPG_AUTO_ROUND_DELAY_DEFAULT_SEC;
+      return Math.min(600, Math.floor(n));
+    }
+
+    function clearTrpgAutoRoundTimer() {
+      if (trpgAutoRoundTimer) {
+        clearTimeout(trpgAutoRoundTimer);
+        trpgAutoRoundTimer = null;
+      }
+    }
+
+    function syncTrpgAutoRoundUi() {
+      const btn = document.getElementById('trpg-auto-round-btn');
+      if (btn) {
+        btn.classList.toggle('recommend', trpgAutoRoundEnabled && !trpgRoundRunning);
+      }
+      const delayEl = document.getElementById('trpg-auto-round-delay-sec-input');
+      if (delayEl) {
+        delayEl.disabled = trpgBootstrapping || trpgActorMutating;
+      }
+    }
+
+    function setTrpgAutoRoundEnabled(enabled, reason = '') {
+      const next = !!enabled;
+      if (next === trpgAutoRoundEnabled) return;
+      trpgAutoRoundEnabled = next;
+      if (!next) {
+        clearTrpgAutoRoundTimer();
+      }
+      updateTrpgButtons();
+      if (next) {
+        const delay = trpgAutoRoundDelaySec();
+        setTrpgRoundRunStatus(
+          `자동 진행 시작: ${delay}s 간격으로 라운드를 실행합니다. (room <b>${escapeHtml(trpgRoomId)}</b>)`,
+          'running'
+        );
+        showToast('자동 진행 ON', 'success');
+        scheduleTrpgAutoRoundNext('enabled');
+      } else {
+        if (reason) {
+          setTrpgRoundRunStatus(escapeHtml(reason), 'warn');
+        }
+        showToast('자동 진행 OFF', 'info');
+      }
+    }
+
+    function toggleTrpgAutoRound() {
+      if (trpgAutoRoundEnabled) {
+        setTrpgAutoRoundEnabled(false, '자동 진행을 중지했습니다.');
+        return;
+      }
+      if (!trpgCanRunRound) {
+        setTrpgRoundRunStatus(`자동 진행 시작 불가: ${escapeHtml(String(trpgRunBlockedReason || '세션 시작 후 다시 시도하세요.'))}`, 'error');
+        return;
+      }
+      setTrpgAutoRoundEnabled(true);
+    }
+
+    function scheduleTrpgAutoRoundNext(source = '') {
+      if (!trpgAutoRoundEnabled) return;
+      clearTrpgAutoRoundTimer();
+      const delaySec = trpgAutoRoundDelaySec();
+      trpgAutoRoundTimer = setTimeout(async () => {
+        trpgAutoRoundTimer = null;
+        if (!trpgAutoRoundEnabled) return;
+        if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) {
+          scheduleTrpgAutoRoundNext('busy-retry');
+          return;
+        }
+        if (!trpgCanRunRound) {
+          setTrpgAutoRoundEnabled(false, `자동 진행 중지: ${String(trpgRunBlockedReason || '라운드를 실행할 수 없는 상태입니다.')}`);
+          return;
+        }
+        await runTrpgRound({ source: `auto:${source}` });
+      }, delaySec * 1000);
     }
 
     function setTrpgRoundRunBusy(isBusy) {
@@ -9534,10 +9643,15 @@ let cached_html = lazy ({|<!DOCTYPE html>
       setTrpgActorRunStatus(html, cls);
     }
 
-    async function runTrpgRound() {
+    async function runTrpgRound(options = {}) {
+      const runSource = String((options && options.source) || 'manual');
+      const isAutoRun = runSource.startsWith('auto:') || runSource === 'auto';
       if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
       if (!trpgCanRunRound) {
         setTrpgRoundRunStatus(`실행 전 점검: ${escapeHtml(String(trpgRunBlockedReason || '세션/할당 상태를 먼저 확인하세요.'))}`, 'error');
+        if (isAutoRun && trpgAutoRoundEnabled) {
+          setTrpgAutoRoundEnabled(false, `자동 진행 중지: ${String(trpgRunBlockedReason || '실행 조건을 확인하세요.')}`);
+        }
         return;
       }
       ensureTrpgControlDefaults();
@@ -9667,12 +9781,20 @@ let cached_html = lazy ({|<!DOCTYPE html>
            ${statusRows || '<div>상태 로그 없음</div>'}`,
           'ok'
         );
-        showToast(`TRPG round 완료 (room=${roomId})`, 'success');
+        if (!isAutoRun) {
+          showToast(`TRPG round 완료 (room=${roomId})`, 'success');
+        }
         await fetchTrpg();
+        if (trpgAutoRoundEnabled) {
+          scheduleTrpgAutoRoundNext('round-complete');
+        }
       } catch (e) {
         roundDone = true;
         setTrpgRoundRunStatus(`실패: ${escapeHtml(String((e && e.message) || e || 'unknown error'))}`, 'error');
         showToast('TRPG round 실행 실패', 'error');
+        if (trpgAutoRoundEnabled) {
+          setTrpgAutoRoundEnabled(false, '자동 진행 중지: 라운드 실행 실패');
+        }
       } finally {
         clearInterval(livePollId);
         setTrpgRoundRunBusy(false);
@@ -9734,6 +9856,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
         renderTrpgState(trpgStateCache, trpgEventsCache);
       } catch (_) {}
       trpgUpdateNextAction(trpgStateCache, trpgEventsCache);
+      if (trpgAutoRoundEnabled && !trpgRoundRunning && !trpgBootstrapping && !trpgActorMutating && !trpgCanRunRound) {
+        setTrpgAutoRoundEnabled(false, `자동 진행 중지: ${String(trpgRunBlockedReason || '세션 상태를 확인하세요.')}`);
+      }
     }
 
     function trpgNormalizeDisplayText(raw) {

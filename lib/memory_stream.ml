@@ -76,9 +76,9 @@ let memory_type_to_json = function
   | Plan s -> `Assoc [("type", `String "plan"); ("detail", `String s)]
 
 let memory_type_of_json json =
-  let open Yojson.Safe.Util in
-  let typ = json |> member "type" |> to_string in
-  let detail = json |> member "detail" |> to_string in
+  let module U = Yojson.Safe.Util in
+  let typ = json |> U.member "type" |> U.to_string in
+  let detail = json |> U.member "detail" |> U.to_string in
   match typ with
   | "observation" -> Observation detail
   | "action" -> Action detail
@@ -98,14 +98,14 @@ let entry_to_json (e : memory_entry) : Yojson.Safe.t =
 
 let entry_of_json (json : Yojson.Safe.t) : memory_entry option =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     Some {
-      id = json |> member "id" |> to_string;
-      agent_name = json |> member "agent_name" |> to_string;
-      content = json |> member "content" |> to_string;
-      timestamp = json |> member "timestamp" |> to_float;
-      importance = json |> member "importance" |> to_int;
-      entry_type = json |> member "entry_type" |> memory_type_of_json;
+      id = json |> U.member "id" |> U.to_string;
+      agent_name = json |> U.member "agent_name" |> U.to_string;
+      content = json |> U.member "content" |> U.to_string;
+      timestamp = json |> U.member "timestamp" |> U.to_float;
+      importance = json |> U.member "importance" |> U.to_int;
+      entry_type = json |> U.member "entry_type" |> memory_type_of_json;
     }
   with _ -> None
 

@@ -93,10 +93,10 @@ let assignment_to_yojson (a : assignment) : Yojson.Safe.t =
   ]
 
 let assignment_of_yojson (json : Yojson.Safe.t) : assignment =
-  let open Yojson.Safe.Util in
-  let subject_id = json |> member "subject_id" |> to_string in
-  let group = json |> member "group" |> to_string |> group_of_string in
-  let timestamp = json |> member "timestamp" |> to_float in
+  let module U = Yojson.Safe.Util in
+  let subject_id = json |> U.member "subject_id" |> U.to_string in
+  let group = json |> U.member "group" |> U.to_string |> group_of_string in
+  let timestamp = json |> U.member "timestamp" |> U.to_float in
   { subject_id; group; timestamp }
 
 let observation_to_yojson (o : observation) : Yojson.Safe.t =
@@ -108,11 +108,11 @@ let observation_to_yojson (o : observation) : Yojson.Safe.t =
   ]
 
 let observation_of_yojson (json : Yojson.Safe.t) : observation =
-  let open Yojson.Safe.Util in
-  let subject_id = json |> member "subject_id" |> to_string in
-  let metric_name = json |> member "metric_name" |> to_string in
-  let value = json |> member "value" |> to_float in
-  let timestamp = json |> member "timestamp" |> to_float in
+  let module U = Yojson.Safe.Util in
+  let subject_id = json |> U.member "subject_id" |> U.to_string in
+  let metric_name = json |> U.member "metric_name" |> U.to_string in
+  let value = json |> U.member "value" |> U.to_float in
+  let timestamp = json |> U.member "timestamp" |> U.to_float in
   { subject_id; metric_name; value; timestamp }
 
 let experiment_to_yojson (e : experiment) : Yojson.Safe.t =
@@ -130,21 +130,21 @@ let experiment_to_yojson (e : experiment) : Yojson.Safe.t =
   ]
 
 let experiment_of_yojson (json : Yojson.Safe.t) : experiment =
-  let open Yojson.Safe.Util in
-  let id = json |> member "id" |> to_string in
-  let hypothesis = json |> member "hypothesis" |> to_string in
-  let treatment_desc = json |> member "treatment_description" |> to_string in
-  let control_desc = json |> member "control_description" |> to_string in
-  let metrics = json |> member "metrics" |> to_list |> List.map to_string in
-  let window_seconds = json |> member "window_seconds" |> to_float in
-  let status = json |> member "status" |> to_string |> status_of_string in
+  let module U = Yojson.Safe.Util in
+  let id = json |> U.member "id" |> U.to_string in
+  let hypothesis = json |> U.member "hypothesis" |> U.to_string in
+  let treatment_desc = json |> U.member "treatment_description" |> U.to_string in
+  let control_desc = json |> U.member "control_description" |> U.to_string in
+  let metrics = json |> U.member "metrics" |> U.to_list |> List.map U.to_string in
+  let window_seconds = json |> U.member "window_seconds" |> U.to_float in
+  let status = json |> U.member "status" |> U.to_string |> status_of_string in
   let assignments =
-    json |> member "assignments" |> to_list |> List.map assignment_of_yojson
+    json |> U.member "assignments" |> U.to_list |> List.map assignment_of_yojson
   in
   let observations =
-    json |> member "observations" |> to_list |> List.map observation_of_yojson
+    json |> U.member "observations" |> U.to_list |> List.map observation_of_yojson
   in
-  let created_at = json |> member "created_at" |> to_float in
+  let created_at = json |> U.member "created_at" |> U.to_float in
   { id; hypothesis; treatment_desc; control_desc; metrics;
     window_seconds; status; assignments; observations; created_at }
 

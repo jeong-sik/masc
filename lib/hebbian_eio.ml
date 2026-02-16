@@ -120,16 +120,16 @@ let synapse_to_json (s : synapse) : Yojson.Safe.t =
 
 (** Synapse from JSON *)
 let synapse_of_json json : synapse option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
     Some {
-      from_agent = json |> member "from_agent" |> to_string;
-      to_agent = json |> member "to_agent" |> to_string;
-      weight = json |> member "weight" |> to_float;
-      success_count = json |> member "success_count" |> to_int;
-      failure_count = json |> member "failure_count" |> to_int;
-      last_updated = json |> member "last_updated" |> to_float;
-      created_at = json |> member "created_at" |> to_float;
+      from_agent = json |> U.member "from_agent" |> U.to_string;
+      to_agent = json |> U.member "to_agent" |> U.to_string;
+      weight = json |> U.member "weight" |> U.to_float;
+      success_count = json |> U.member "success_count" |> U.to_int;
+      failure_count = json |> U.member "failure_count" |> U.to_int;
+      last_updated = json |> U.member "last_updated" |> U.to_float;
+      created_at = json |> U.member "created_at" |> U.to_float;
     }
   with exn ->
     Printf.eprintf "[hebbian_eio] Failed to parse synapse: %s\n" (Printexc.to_string exn);
@@ -144,11 +144,11 @@ let graph_to_json (g : synapse_graph) : Yojson.Safe.t =
 
 (** Graph from JSON *)
 let graph_of_json json : synapse_graph =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let synapses = json |> member "synapses" |> to_list
+    let synapses = json |> U.member "synapses" |> U.to_list
       |> List.filter_map synapse_of_json in
-    let last_consolidation = json |> member "last_consolidation" |> to_float in
+    let last_consolidation = json |> U.member "last_consolidation" |> U.to_float in
     { synapses; last_consolidation }
   with exn ->
     Printf.eprintf "[hebbian_eio] Failed to parse graph: %s\n" (Printexc.to_string exn);

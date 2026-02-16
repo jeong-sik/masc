@@ -64,15 +64,15 @@ let session_to_json session =
   ]
 
 let session_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    session_id = json |> member "session_id" |> to_string;
-    agent_id = json |> member "agent_id" |> to_string;
-    voice = json |> member "voice" |> to_string;
-    started_at = json |> member "started_at" |> to_float;
-    last_activity = json |> member "last_activity" |> to_float;
-    turn_count = json |> member "turn_count" |> to_int;
-    status = json |> member "status" |> to_string |> status_of_string;
+    session_id = json |> U.member "session_id" |> U.to_string;
+    agent_id = json |> U.member "agent_id" |> U.to_string;
+    voice = json |> U.member "voice" |> U.to_string;
+    started_at = json |> U.member "started_at" |> U.to_float;
+    last_activity = json |> U.member "last_activity" |> U.to_float;
+    turn_count = json |> U.member "turn_count" |> U.to_int;
+    status = json |> U.member "status" |> U.to_string |> status_of_string;
   }
 
 (** {1 Creation} *)

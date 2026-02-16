@@ -59,19 +59,19 @@ let record_to_yojson r =
   ]
 
 let record_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let type_str = json |> member "type" |> to_string in
+    let id = json |> U.member "id" |> U.to_string in
+    let type_str = json |> U.member "type" |> U.to_string in
     let type_ = match record_type_of_string type_str with
       | Ok t -> t
       | Error _ -> Debate  (* default *)
     in
-    let content = json |> member "content" |> to_string in
-    let agents = json |> member "agents" |> to_list |> List.map to_string in
-    let timestamp = json |> member "timestamp" |> to_string in
-    let metadata = json |> member "metadata" |> to_assoc
-      |> List.map (fun (k, v) -> (k, to_string v)) in
+    let content = json |> U.member "content" |> U.to_string in
+    let agents = json |> U.member "agents" |> U.to_list |> List.map U.to_string in
+    let timestamp = json |> U.member "timestamp" |> U.to_string in
+    let metadata = json |> U.member "metadata" |> U.to_assoc
+      |> List.map (fun (k, v) -> (k, U.to_string v)) in
     Ok { id; type_; content; agents; timestamp; metadata }
   with e ->
     Error (Printf.sprintf "JSON parse error: %s" (Printexc.to_string e))

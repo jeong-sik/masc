@@ -217,21 +217,21 @@ let room_state_to_json state =
   ]
 
 let room_state_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
     Ok {
-      protocol_version = json |> member "protocol_version" |> to_string;
-      started_at = json |> member "started_at" |> to_float;
-      last_updated = json |> member "last_updated" |> to_float;
-      active_agents = json |> member "active_agents" |> to_list |> List.map to_string;
-      message_seq = json |> member "message_seq" |> to_int;
+      protocol_version = json |> U.member "protocol_version" |> U.to_string;
+      started_at = json |> U.member "started_at" |> U.to_float;
+      last_updated = json |> U.member "last_updated" |> U.to_float;
+      active_agents = json |> U.member "active_agents" |> U.to_list |> List.map U.to_string;
+      message_seq = json |> U.member "message_seq" |> U.to_int;
       (* Backward compat: default to 0 if event_seq missing from old state files *)
       event_seq = Safe_ops.json_int ~default:0 "event_seq" json;
-      mode = json |> member "mode" |> to_string;
-      paused = json |> member "paused" |> to_bool;
-      paused_by = json |> member "paused_by" |> to_string_option;
-      paused_at = json |> member "paused_at" |> to_float_option;
-      pause_reason = json |> member "pause_reason" |> to_string_option;
+      mode = json |> U.member "mode" |> U.to_string;
+      paused = json |> U.member "paused" |> U.to_bool;
+      paused_by = json |> U.member "paused_by" |> U.to_string_option;
+      paused_at = json |> U.member "paused_at" |> U.to_float_option;
+      pause_reason = json |> U.member "pause_reason" |> U.to_string_option;
     }
   with e ->
     Error (Printexc.to_string e)
@@ -305,13 +305,13 @@ let agent_state_to_json agent =
   ]
 
 let agent_state_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
     Ok {
-      name = json |> member "name" |> to_string;
-      last_seen = json |> member "last_seen" |> to_float;
-      capabilities = json |> member "capabilities" |> to_list |> List.map to_string;
-      status = json |> member "status" |> to_string;
+      name = json |> U.member "name" |> U.to_string;
+      last_seen = json |> U.member "last_seen" |> U.to_float;
+      capabilities = json |> U.member "capabilities" |> U.to_list |> List.map U.to_string;
+      status = json |> U.member "status" |> U.to_string;
     }
   with e ->
     Error (Printexc.to_string e)
@@ -417,7 +417,7 @@ let lock_info_to_json lock =
   ]
 
 let lock_info_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
     let parse_float = function
       | `Float f -> Some f
@@ -431,10 +431,10 @@ let lock_info_of_json json =
       | _ -> None
     in
     match
-      (parse_string (member "resource" json),
-       parse_string (member "owner" json),
-       parse_float (member "acquired_at" json),
-       parse_float (member "expires_at" json))
+      (parse_string (U.member "resource" json),
+       parse_string (U.member "owner" json),
+       parse_float (U.member "acquired_at" json),
+       parse_float (U.member "expires_at" json))
     with
     | Some resource, Some owner, Some acquired_at, Some expires_at ->
         Ok { resource; owner; acquired_at; expires_at }
@@ -504,14 +504,14 @@ let message_to_json msg =
   ]
 
 let message_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
     Ok {
-      seq = json |> member "seq" |> to_int;
-      from_agent = json |> member "from" |> to_string;
-      content = json |> member "content" |> to_string;
-      mention = json |> member "mention" |> to_string_option;
-      timestamp = json |> member "timestamp" |> to_float;
+      seq = json |> U.member "seq" |> U.to_int;
+      from_agent = json |> U.member "from" |> U.to_string;
+      content = json |> U.member "content" |> U.to_string;
+      mention = json |> U.member "mention" |> U.to_string_option;
+      timestamp = json |> U.member "timestamp" |> U.to_float;
     }
   with e ->
     Error (Printexc.to_string e)
@@ -607,12 +607,12 @@ let task_status_to_json = function
   | Failed (agent, reason) -> `Assoc [("type", `String "failed"); ("agent", `String agent); ("reason", `String reason)]
 
 let task_status_of_json json =
-  let open Yojson.Safe.Util in
-  match json |> member "type" |> to_string with
+  let module U = Yojson.Safe.Util in
+  match json |> U.member "type" |> U.to_string with
   | "pending" -> Ok Pending
-  | "in_progress" -> Ok (InProgress (json |> member "agent" |> to_string))
-  | "completed" -> Ok (Completed (json |> member "agent" |> to_string))
-  | "failed" -> Ok (Failed (json |> member "agent" |> to_string, json |> member "reason" |> to_string))
+  | "in_progress" -> Ok (InProgress (json |> U.member "agent" |> U.to_string))
+  | "completed" -> Ok (Completed (json |> U.member "agent" |> U.to_string))
+  | "failed" -> Ok (Failed (json |> U.member "agent" |> U.to_string, json |> U.member "reason" |> U.to_string))
   | s -> Error ("Unknown task status: " ^ s)
 
 let task_to_json task =
@@ -626,18 +626,18 @@ let task_to_json task =
   ]
 
 let task_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    match task_status_of_json (json |> member "status") with
+    match task_status_of_json (json |> U.member "status") with
     | Error e -> Error e
     | Ok status ->
         Ok {
-          id = json |> member "id" |> to_string;
-          description = json |> member "description" |> to_string;
+          id = json |> U.member "id" |> U.to_string;
+          description = json |> U.member "description" |> U.to_string;
           status;
-          created_at = json |> member "created_at" |> to_float;
-          updated_at = json |> member "updated_at" |> to_float;
-          priority = json |> member "priority" |> to_int;
+          created_at = json |> U.member "created_at" |> U.to_float;
+          updated_at = json |> U.member "updated_at" |> U.to_float;
+          priority = json |> U.member "priority" |> U.to_int;
         }
   with e ->
     Error (Printexc.to_string e)

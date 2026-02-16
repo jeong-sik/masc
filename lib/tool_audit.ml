@@ -70,16 +70,16 @@ let read_audit_events (config : Room.config) ~since : audit_event list =
     List.filter_map (fun line ->
       try
         let json = Yojson.Safe.from_string line in
-        let open Yojson.Safe.Util in
-        let timestamp = json |> member "timestamp" |> to_float in
+        let module U = Yojson.Safe.Util in
+        let timestamp = json |> U.member "timestamp" |> U.to_float in
         if timestamp < since then None
         else
-          let agent = json |> member "agent" |> to_string in
-          let event_type = json |> member "event_type" |> to_string in
-          let success = json |> member "success" |> to_bool in
-          let detail = json |> member "detail" |> to_string_option in
+          let agent = json |> U.member "agent" |> U.to_string in
+          let event_type = json |> U.member "event_type" |> U.to_string in
+          let success = json |> U.member "success" |> U.to_bool in
+          let detail = json |> U.member "detail" |> U.to_string_option in
           Some { timestamp; agent; event_type; success; detail }
-      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+      with Yojson.Json_error _ | U.Type_error _ -> None
     ) lines
 
 (* Handle masc_audit_query *)

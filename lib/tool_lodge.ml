@@ -629,18 +629,18 @@ let agent_config_to_yojson (a : agent_config) : Yojson.Safe.t =
 (** Parse agent_config from JSON *)
 let agent_config_of_yojson (json : Yojson.Safe.t) : agent_config option =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     Some {
-      name = json |> member "name" |> to_string;
-      primary_value = json |> member "primary_value" |> to_string_option;
-      value_weights = json |> member "value_weights" |> to_string_option;
-      prompt_template = json |> member "prompt_template" |> to_string_option;
-      generation = json |> member "generation" |> to_int_option |> Option.value ~default:0;
-      status = json |> member "status" |> to_string_option |> Option.value ~default:"active";
-      emoji = json |> member "emoji" |> to_string_option |> Option.value ~default:"🤖";
-      korean_name = json |> member "korean_name" |> to_string_option |> Option.value ~default:"";
-      model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7-flash:latest";
-      interests = json |> member "interests" |> to_list |> List.filter_map to_string_option;
+      name = json |> U.member "name" |> U.to_string;
+      primary_value = json |> U.member "primary_value" |> U.to_string_option;
+      value_weights = json |> U.member "value_weights" |> U.to_string_option;
+      prompt_template = json |> U.member "prompt_template" |> U.to_string_option;
+      generation = json |> U.member "generation" |> U.to_int_option |> Option.value ~default:0;
+      status = json |> U.member "status" |> U.to_string_option |> Option.value ~default:"active";
+      emoji = json |> U.member "emoji" |> U.to_string_option |> Option.value ~default:"🤖";
+      korean_name = json |> U.member "korean_name" |> U.to_string_option |> Option.value ~default:"";
+      model = json |> U.member "model" |> U.to_string_option |> Option.value ~default:"glm-4.7-flash:latest";
+      interests = json |> U.member "interests" |> U.to_list |> List.filter_map U.to_string_option;
     }
   with _ -> None
 
@@ -678,15 +678,15 @@ let load_agents_from_file_cache () : bool =
       let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
         (fun () -> really_input_string ic (in_channel_length ic)) in
       let json = Yojson.Safe.from_string content in
-      let open Yojson.Safe.Util in
-      let updated_at = json |> member "updated_at" |> to_float in
+      let module U = Yojson.Safe.Util in
+      let updated_at = json |> U.member "updated_at" |> U.to_float in
       let age_hours = (Unix.gettimeofday () -. updated_at) /. 3600.0 in
       let ttl = agent_cache_ttl_hours () in
       if age_hours > ttl then begin
         Printf.eprintf "[Lodge] Cache expired (%.1f hours old, TTL=%.0f)\n%!" age_hours ttl;
         false
       end else begin
-        let agents_json = json |> member "agents" |> to_list in
+        let agents_json = json |> U.member "agents" |> U.to_list in
         let loaded = List.filter_map agent_config_of_yojson agents_json in
         Mutex.lock agent_cache_mu;
         List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded;
@@ -1485,9 +1485,9 @@ let lodge_orchestrate ~net (_args : Yojson.Safe.t) =
 
 (** Auto-chain: run orchestrator with probability continuation *)
 let lodge_auto_chain ~net (args : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
-  let chain_prob = try to_float (member "chain_probability" args) with Yojson.Safe.Util.Type_error _ -> 0.5 in
-  let max_chain = try to_int (member "max_chain" args) with Yojson.Safe.Util.Type_error _ -> 3 in
+  let module U = Yojson.Safe.Util in
+  let chain_prob = try U.to_float (U.member "chain_probability" args) with U.Type_error _ -> 0.5 in
+  let max_chain = try U.to_int (U.member "max_chain" args) with U.Type_error _ -> 3 in
 
   let buf = Buffer.create 512 in
   let add msg = Buffer.add_string buf (msg ^ "\n") in

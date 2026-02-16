@@ -765,20 +765,20 @@ let visibility_of_string = function
 
 let post_of_yojson (json : Yojson.Safe.t) : post option =
   try
-    let open Yojson.Safe.Util in
-    let id_str = json |> member "id" |> to_string in
-    let author_str = json |> member "author" |> to_string in
-    let content = json |> member "content" |> to_string in
-    let vis_str = json |> member "visibility" |> to_string in
-    let created_at = json |> member "created_at" |> to_float in
+    let module U = Yojson.Safe.Util in
+    let id_str = json |> U.member "id" |> U.to_string in
+    let author_str = json |> U.member "author" |> U.to_string in
+    let content = json |> U.member "content" |> U.to_string in
+    let vis_str = json |> U.member "visibility" |> U.to_string in
+    let created_at = json |> U.member "created_at" |> U.to_float in
     (* Backward compat: default updated_at to created_at if missing *)
-    let updated_at = json |> member "updated_at" |> to_float_option |> Option.value ~default:created_at in
-    let expires_at = json |> member "expires_at" |> to_float in
-    let votes_up = json |> member "votes_up" |> to_int in
-    let votes_down = json |> member "votes_down" |> to_int in
-    let reply_count = json |> member "reply_count" |> to_int_option |> Option.value ~default:0 in
-    let hearth = json |> member "hearth" |> to_string_option in
-    let thread_id = json |> member "thread_id" |> to_string_option in
+    let updated_at = json |> U.member "updated_at" |> U.to_float_option |> Option.value ~default:created_at in
+    let expires_at = json |> U.member "expires_at" |> U.to_float in
+    let votes_up = json |> U.member "votes_up" |> U.to_int in
+    let votes_down = json |> U.member "votes_down" |> U.to_int in
+    let reply_count = json |> U.member "reply_count" |> U.to_int_option |> Option.value ~default:0 in
+    let hearth = json |> U.member "hearth" |> U.to_string_option in
+    let thread_id = json |> U.member "thread_id" |> U.to_string_option in
     match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
     | Ok id, Ok author, Some visibility ->
         Some { id; author; content; visibility; created_at; updated_at; expires_at; votes_up; votes_down; reply_count; hearth; thread_id }
@@ -787,16 +787,16 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
 
 let comment_of_yojson (json : Yojson.Safe.t) : comment option =
   try
-    let open Yojson.Safe.Util in
-    let id_str = json |> member "id" |> to_string in
-    let post_id_str = json |> member "post_id" |> to_string in
-    let parent_id_opt = json |> member "parent_id" |> to_string_option in
-    let author_str = json |> member "author" |> to_string in
-    let content = json |> member "content" |> to_string in
-    let created_at = json |> member "created_at" |> to_float in
-    let expires_at = json |> member "expires_at" |> to_float in
-    let votes_up = json |> member "votes_up" |> to_int in
-    let votes_down = json |> member "votes_down" |> to_int in
+    let module U = Yojson.Safe.Util in
+    let id_str = json |> U.member "id" |> U.to_string in
+    let post_id_str = json |> U.member "post_id" |> U.to_string in
+    let parent_id_opt = json |> U.member "parent_id" |> U.to_string_option in
+    let author_str = json |> U.member "author" |> U.to_string in
+    let content = json |> U.member "content" |> U.to_string in
+    let created_at = json |> U.member "created_at" |> U.to_float in
+    let expires_at = json |> U.member "expires_at" |> U.to_float in
+    let votes_up = json |> U.member "votes_up" |> U.to_int in
+    let votes_down = json |> U.member "votes_down" |> U.to_int in
     match Comment_id.of_string id_str, Post_id.of_string post_id_str, Agent_id.of_string author_str with
     | Ok id, Ok post_id, Ok author ->
         let parent_id = match parent_id_opt with
@@ -890,10 +890,10 @@ let load_persisted_votes store =
           while true do
             let line = input_line ic in
             if String.length line > 0 then begin
-              let open Yojson.Safe.Util in
+              let module U = Yojson.Safe.Util in
               let json = Yojson.Safe.from_string line in
-              let target = json |> member "target" |> to_string in
-              let dir_str = json |> member "direction" |> to_string in
+              let target = json |> U.member "target" |> U.to_string in
+              let dir_str = json |> U.member "direction" |> U.to_string in
               let direction = if dir_str = "down" then Down else Up in
               Hashtbl.replace store.vote_log target direction;
               incr loaded

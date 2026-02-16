@@ -111,14 +111,14 @@ let extend ?(agent_type=Visitor) ?(profile=None) ?(lineage=None) (base : Agent_i
 
 (** Create extended identity from MCP request params *)
 let from_mcp_params params =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   let get_opt key =
-    try Some (params |> member key |> to_string)
-    with Yojson.Safe.Util.Type_error _ | Not_found -> None
+    try Some (params |> U.member key |> U.to_string)
+    with U.Type_error _ | Not_found -> None
   in
   let get_list key =
-    try params |> member key |> to_list |> List.map to_string
-    with Yojson.Safe.Util.Type_error _ | Not_found -> []
+    try params |> U.member key |> U.to_list |> List.map U.to_string
+    with U.Type_error _ | Not_found -> []
   in
   let base = Agent_identity.from_mcp_params params in
   let hash = hash_of_session_key base.session_key in

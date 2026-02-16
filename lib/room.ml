@@ -94,20 +94,20 @@ let task_id_to_int id =
 let read_archive_task_ids config =
   if not (Sys.file_exists (archive_path config)) then []
   else
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     let json = read_json config (archive_path config) in
     let tasks =
       match json with
       | `List tasks -> tasks
       | `Assoc _ -> begin
-          match json |> member "tasks" with
+          match json |> U.member "tasks" with
           | `List tasks -> tasks
           | _ -> []
         end
       | _ -> []
     in
     List.filter_map (fun task ->
-      match task |> member "id" |> to_string_option with
+      match task |> U.member "id" |> U.to_string_option with
       | Some id -> task_id_to_int id
       | None -> None
     ) tasks
@@ -116,14 +116,14 @@ let read_archive_task_ids config =
 let append_archive_tasks config (tasks : task list) =
   if tasks = [] then ()
   else begin
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     let path = archive_path config in
     let existing = read_json config path in
     let existing_tasks =
       match existing with
       | `List items -> items
       | `Assoc _ -> begin
-          match existing |> member "tasks" with
+          match existing |> U.member "tasks" with
           | `List items -> items
           | _ -> []
         end
@@ -133,7 +133,7 @@ let append_archive_tasks config (tasks : task list) =
     (* Deduplicate by task id, preserving first occurrence *)
     let seen = Hashtbl.create 64 in
     let dedup = List.filter (fun json ->
-      match json |> member "id" |> to_string_option with
+      match json |> U.member "id" |> U.to_string_option with
       | Some id ->
           if Hashtbl.mem seen id then false
           else (Hashtbl.add seen id (); true)
@@ -2067,17 +2067,17 @@ let vote_cast config ~agent_name ~vote_id ~choice =
   else begin
     with_file_lock config vote_path (fun () ->
       let json = read_json config vote_path in
-      let open Yojson.Safe.Util in
+      let module U = Yojson.Safe.Util in
 
-      let status = json |> member "status" |> to_string in
+      let status = json |> U.member "status" |> U.to_string in
       if status <> "pending" then
         Printf.sprintf "⚠ Vote %s already resolved (%s)" vote_id status
       else begin
-        let options = json |> member "options" |> to_list |> List.map to_string in
+        let options = json |> U.member "options" |> U.to_list |> List.map U.to_string in
         if not (List.mem choice options) then
           Printf.sprintf "❌ Invalid choice: %s. Options: %s" choice (String.concat ", " options)
         else begin
-          let votes = json |> member "votes" in
+          let votes = json |> U.member "votes" in
           let current_votes = match votes with
             | `Assoc kvs -> kvs
             | _ -> []
@@ -2087,7 +2087,7 @@ let vote_cast config ~agent_name ~vote_id ~choice =
           let new_votes = (agent_name, `String choice) ::
             (List.filter (fun (k, _) -> k <> agent_name) current_votes) in
 
-          let required = json |> member "required_votes" |> to_int in
+          let required = json |> U.member "required_votes" |> U.to_int in
           let vote_count = List.length new_votes in
 
           (* Check if vote is resolved *)

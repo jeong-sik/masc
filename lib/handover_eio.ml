@@ -106,13 +106,13 @@ let handover_to_json (h : handover_record) : Yojson.Safe.t =
 
 (** JSON to handover *)
 let handover_of_json (json : Yojson.Safe.t) : handover_record option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let str key = json |> member key |> to_string in
-    let str_opt key = json |> member key |> to_string_option in
-    let str_list key = json |> member key |> to_list |> List.map to_string in
-    let int_val key = json |> member key |> to_int in
-    let float_val key = json |> member key |> to_float in
+    let str key = json |> U.member key |> U.to_string in
+    let str_opt key = json |> U.member key |> U.to_string_option in
+    let str_list key = json |> U.member key |> U.to_list |> List.map U.to_string in
+    let int_val key = json |> U.member key |> U.to_int in
+    let float_val key = json |> U.member key |> U.to_float in
     Some {
       id = str "id";
       from_agent = str "from_agent";

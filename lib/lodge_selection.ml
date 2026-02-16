@@ -183,19 +183,19 @@ let stats_to_json (s : agent_stats) : Yojson.Safe.t =
   ]
 
 let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let name = json |> member "name" |> to_string in
-    let alpha = json |> member "alpha" |> to_float in
-    let beta = json |> member "beta" |> to_float in
-    let selections = json |> member "selections" |> to_int in
-    let last_selected_at = json |> member "last_selected_at" |> to_float in
-    let total_votes_up = json |> member "total_votes_up" |> to_int in
-    let total_votes_down = json |> member "total_votes_down" |> to_int in
-    let posts_created = json |> member "posts_created" |> to_int_option |> Option.value ~default:0 in
-    let comments_created = json |> member "comments_created" |> to_int_option |> Option.value ~default:0 in
-    let skips = json |> member "skips" |> to_int_option |> Option.value ~default:0 in
-    let updated_at = json |> member "updated_at" |> to_float in
+    let name = json |> U.member "name" |> U.to_string in
+    let alpha = json |> U.member "alpha" |> U.to_float in
+    let beta = json |> U.member "beta" |> U.to_float in
+    let selections = json |> U.member "selections" |> U.to_int in
+    let last_selected_at = json |> U.member "last_selected_at" |> U.to_float in
+    let total_votes_up = json |> U.member "total_votes_up" |> U.to_int in
+    let total_votes_down = json |> U.member "total_votes_down" |> U.to_int in
+    let posts_created = json |> U.member "posts_created" |> U.to_int_option |> Option.value ~default:0 in
+    let comments_created = json |> U.member "comments_created" |> U.to_int_option |> Option.value ~default:0 in
+    let skips = json |> U.member "skips" |> U.to_int_option |> Option.value ~default:0 in
+    let updated_at = json |> U.member "updated_at" |> U.to_float in
     Some {
       name;
       alpha = Float.max 0.1 alpha;

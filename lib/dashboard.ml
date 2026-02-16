@@ -158,19 +158,19 @@ let tempo_section (config : Room_utils.config) : section =
 (** Parse worktree list JSON to extract worktrees.
     Tolerant of malformed entries - skips invalid items rather than failing. *)
 let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
-  let open Yojson.Safe.Util in
-  match json |> member "worktrees" with
+  let module U = Yojson.Safe.Util in
+  match json |> U.member "worktrees" with
   | `List items ->
       List.filter_map (fun item ->
         try
-          let worktree = item |> member "worktree" |> to_string in
-          let branch = item |> member "branch" |> to_string in
+          let worktree = item |> U.member "worktree" |> U.to_string in
+          let branch = item |> U.member "branch" |> U.to_string in
           (* Skip main worktree (usually the repo root) *)
           if String.length branch > 0 && not (String.equal branch "HEAD") then
             Some (branch, worktree)
           else None
         with
-        | Type_error _ -> None  (* JSON field missing or wrong type *)
+        | U.Type_error _ -> None  (* JSON field missing or wrong type *)
         | _ -> None  (* Other unexpected errors *)
       ) items
   | `Null -> []  (* No worktrees key - git worktree not used *)

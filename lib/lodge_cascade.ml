@@ -71,16 +71,16 @@ let load_json_file path =
 (* ---------- Config Parsing ---------- *)
 
 let parse_slot (json : Yojson.Safe.t) : cascade_slot =
-  let open Yojson.Safe.Util in
-  let tool_name = json |> member "tool" |> to_string in
-  let model = json |> member "model" |> to_string in
-  let key_env = json |> member "key_env" |> to_string_option in
+  let module U = Yojson.Safe.Util in
+  let tool_name = json |> U.member "tool" |> U.to_string in
+  let model = json |> U.member "model" |> U.to_string in
+  let key_env = json |> U.member "key_env" |> U.to_string_option in
   { tool_name; model; key_env }
 
 (** Parse cost_tiers from config: tool_name -> int cost tier *)
 let parse_cost_tiers (json : Yojson.Safe.t) : (string * int) list =
-  let open Yojson.Safe.Util in
-  match json |> member "cost_tiers" with
+  let module U = Yojson.Safe.Util in
+  match json |> U.member "cost_tiers" with
   | `Assoc pairs ->
     List.filter_map (fun (k, v) ->
       match v with `Int n -> Some (k, n) | _ -> None
@@ -89,10 +89,10 @@ let parse_cost_tiers (json : Yojson.Safe.t) : (string * int) list =
 
 (** Parse per-cascade strategy from config *)
 let parse_strategy (json : Yojson.Safe.t) ~cascade_name : strategy =
-  let open Yojson.Safe.Util in
-  match json |> member "strategy" with
+  let module U = Yojson.Safe.Util in
+  match json |> U.member "strategy" with
   | `Assoc _ as strat ->
-    (match strat |> member cascade_name |> to_string_option with
+    (match strat |> U.member cascade_name |> U.to_string_option with
      | Some s -> strategy_of_string s
      | None -> Sequential)
   | `String s -> strategy_of_string s
@@ -117,8 +117,8 @@ let apply_strategy ~(strategy : strategy) ~(cost_tiers : (string * int) list)
 let load_cascade ~config_path ~cascade_name : cascade_slot list =
   try
     let json = load_json_file config_path in
-    let open Yojson.Safe.Util in
-    let arr = json |> member cascade_name |> to_list in
+    let module U = Yojson.Safe.Util in
+    let arr = json |> U.member cascade_name |> U.to_list in
     List.map parse_slot arr
   with
   | Sys_error msg ->
@@ -132,8 +132,8 @@ let load_cascade ~config_path ~cascade_name : cascade_slot list =
 let load_cascade_with_strategy ~config_path ~cascade_name : cascade_slot list =
   try
     let json = load_json_file config_path in
-    let open Yojson.Safe.Util in
-    let arr = json |> member cascade_name |> to_list in
+    let module U = Yojson.Safe.Util in
+    let arr = json |> U.member cascade_name |> U.to_list in
     let slots = List.map parse_slot arr in
     let strategy = parse_strategy json ~cascade_name in
     let cost_tiers = parse_cost_tiers json in

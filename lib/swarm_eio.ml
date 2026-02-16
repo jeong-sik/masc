@@ -116,18 +116,18 @@ let agent_to_json (a : swarm_agent) : Yojson.Safe.t =
 
 let agent_of_json json : (swarm_agent, string) result =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     Ok {
-      id = json |> member "id" |> to_string;
-      name = json |> member "name" |> to_string;
-      fitness = json |> member "fitness" |> to_float |> Level4_config.Fitness.of_float_clamped;
-      generation = json |> member "generation" |> to_int;
-      mutations = json |> member "mutations" |> to_list |> List.map to_string;
-      joined_at = json |> member "joined_at" |> to_float;
-      last_active = json |> member "last_active" |> to_float;
+      id = json |> U.member "id" |> U.to_string;
+      name = json |> U.member "name" |> U.to_string;
+      fitness = json |> U.member "fitness" |> U.to_float |> Level4_config.Fitness.of_float_clamped;
+      generation = json |> U.member "generation" |> U.to_int;
+      mutations = json |> U.member "mutations" |> U.to_list |> List.map U.to_string;
+      joined_at = json |> U.member "joined_at" |> U.to_float;
+      last_active = json |> U.member "last_active" |> U.to_float;
     }
   with
-  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("agent_of_json: " ^ msg)
+  | U.Type_error (msg, _) -> Error ("agent_of_json: " ^ msg)
   | Yojson.Json_error msg -> Error ("agent_of_json: " ^ msg)
 
 let pheromone_to_json (p : pheromone) : Yojson.Safe.t =
@@ -141,17 +141,17 @@ let pheromone_to_json (p : pheromone) : Yojson.Safe.t =
 
 let pheromone_of_json json : (pheromone, string) result =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     let nc = Level4_config.Normalized.of_float_clamped in
     Ok {
-      path_id = json |> member "path_id" |> to_string;
-      strength = json |> member "strength" |> to_float |> nc;
-      deposited_by = json |> member "deposited_by" |> to_string;
-      deposited_at = json |> member "deposited_at" |> to_float;
-      evaporation_rate = json |> member "evaporation_rate" |> to_float |> nc;
+      path_id = json |> U.member "path_id" |> U.to_string;
+      strength = json |> U.member "strength" |> U.to_float |> nc;
+      deposited_by = json |> U.member "deposited_by" |> U.to_string;
+      deposited_at = json |> U.member "deposited_at" |> U.to_float;
+      evaporation_rate = json |> U.member "evaporation_rate" |> U.to_float |> nc;
     }
   with
-  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("pheromone_of_json: " ^ msg)
+  | U.Type_error (msg, _) -> Error ("pheromone_of_json: " ^ msg)
   | Yojson.Json_error msg -> Error ("pheromone_of_json: " ^ msg)
 
 let proposal_to_json (p : quorum_proposal) : Yojson.Safe.t =
@@ -169,20 +169,20 @@ let proposal_to_json (p : quorum_proposal) : Yojson.Safe.t =
 
 let proposal_of_json json : (quorum_proposal, string) result =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     Ok {
-      proposal_id = json |> member "proposal_id" |> to_string;
-      description = json |> member "description" |> to_string;
-      proposed_by = json |> member "proposed_by" |> to_string;
-      proposed_at = json |> member "proposed_at" |> to_float;
-      votes_for = json |> member "votes_for" |> to_list |> List.map to_string;
-      votes_against = json |> member "votes_against" |> to_list |> List.map to_string;
-      threshold = json |> member "threshold" |> to_float |> Level4_config.Threshold.of_float_clamped;
-      deadline = json |> member "deadline" |> to_float_option;
-      status = json |> member "status" |> to_string |> status_of_string;
+      proposal_id = json |> U.member "proposal_id" |> U.to_string;
+      description = json |> U.member "description" |> U.to_string;
+      proposed_by = json |> U.member "proposed_by" |> U.to_string;
+      proposed_at = json |> U.member "proposed_at" |> U.to_float;
+      votes_for = json |> U.member "votes_for" |> U.to_list |> List.map U.to_string;
+      votes_against = json |> U.member "votes_against" |> U.to_list |> List.map U.to_string;
+      threshold = json |> U.member "threshold" |> U.to_float |> Level4_config.Threshold.of_float_clamped;
+      deadline = json |> U.member "deadline" |> U.to_float_option;
+      status = json |> U.member "status" |> U.to_string |> status_of_string;
     }
   with
-  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("proposal_of_json: " ^ msg)
+  | U.Type_error (msg, _) -> Error ("proposal_of_json: " ^ msg)
   | Yojson.Json_error msg -> Error ("proposal_of_json: " ^ msg)
 
 let config_to_json (c : swarm_config) : Yojson.Safe.t =
@@ -199,20 +199,20 @@ let config_to_json (c : swarm_config) : Yojson.Safe.t =
 
 let config_of_json json : (swarm_config, string) result =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     let n f = Level4_config.Normalized.of_float_clamped f in
     Ok {
-      id = json |> member "id" |> to_string;
-      name = json |> member "name" |> to_string;
-      selection_pressure = json |> member "selection_pressure" |> to_float |> n;
-      mutation_rate = json |> member "mutation_rate" |> to_float |> n;
-      evaporation_rate = json |> member "evaporation_rate" |> to_float |> n;
-      quorum_threshold = json |> member "quorum_threshold" |> to_float |> n;
-      max_agents = json |> member "max_agents" |> to_int;
-      behavior = json |> member "behavior" |> to_string |> behavior_of_string;
+      id = json |> U.member "id" |> U.to_string;
+      name = json |> U.member "name" |> U.to_string;
+      selection_pressure = json |> U.member "selection_pressure" |> U.to_float |> n;
+      mutation_rate = json |> U.member "mutation_rate" |> U.to_float |> n;
+      evaporation_rate = json |> U.member "evaporation_rate" |> U.to_float |> n;
+      quorum_threshold = json |> U.member "quorum_threshold" |> U.to_float |> n;
+      max_agents = json |> U.member "max_agents" |> U.to_int;
+      behavior = json |> U.member "behavior" |> U.to_string |> behavior_of_string;
     }
   with
-  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("config_of_json: " ^ msg)
+  | U.Type_error (msg, _) -> Error ("config_of_json: " ^ msg)
   | Yojson.Json_error msg -> Error ("config_of_json: " ^ msg)
 
 let swarm_to_json (s : swarm) : Yojson.Safe.t =
@@ -239,22 +239,22 @@ let result_map_list f xs =
 
 let swarm_of_json json : (swarm, string) result =
   try
-    let open Yojson.Safe.Util in
-    Result.bind (json |> member "config" |> config_of_json) (fun swarm_cfg ->
-    Result.bind (json |> member "agents" |> to_list |> result_map_list agent_of_json) (fun agents ->
-    Result.bind (json |> member "pheromones" |> to_list |> result_map_list pheromone_of_json) (fun pheromones ->
-    Result.bind (json |> member "proposals" |> to_list |> result_map_list proposal_of_json) (fun proposals ->
+    let module U = Yojson.Safe.Util in
+    Result.bind (json |> U.member "config" |> config_of_json) (fun swarm_cfg ->
+    Result.bind (json |> U.member "agents" |> U.to_list |> result_map_list agent_of_json) (fun agents ->
+    Result.bind (json |> U.member "pheromones" |> U.to_list |> result_map_list pheromone_of_json) (fun pheromones ->
+    Result.bind (json |> U.member "proposals" |> U.to_list |> result_map_list proposal_of_json) (fun proposals ->
     Ok {
       swarm_cfg;
       agents;
       pheromones;
       proposals;
-      generation = json |> member "generation" |> to_int;
-      created_at = json |> member "created_at" |> to_float;
-      last_evolution = json |> member "last_evolution" |> to_float;
+      generation = json |> U.member "generation" |> U.to_int;
+      created_at = json |> U.member "created_at" |> U.to_float;
+      last_evolution = json |> U.member "last_evolution" |> U.to_float;
     }))))
   with
-  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("swarm_of_json: " ^ msg)
+  | U.Type_error (msg, _) -> Error ("swarm_of_json: " ^ msg)
   | Yojson.Json_error msg -> Error ("swarm_of_json: " ^ msg)
 
 (** {1 Persistence (Eio Native)} *)

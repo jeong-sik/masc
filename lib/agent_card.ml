@@ -89,17 +89,17 @@ let capabilities_to_json (c : agent_capabilities) : Yojson.Safe.t =
   ]
 
 let capabilities_of_json (json : Yojson.Safe.t) : agent_capabilities =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   match json with
   | `Assoc _ ->
     {
-      streaming = (try json |> member "streaming" |> to_bool with _ -> false);
-      push_notifications = (try json |> member "pushNotifications" |> to_bool with _ -> false);
-      extended_agent_card = (try json |> member "extendedAgentCard" |> to_bool with _ -> false);
+      streaming = (try json |> U.member "streaming" |> U.to_bool with _ -> false);
+      push_notifications = (try json |> U.member "pushNotifications" |> U.to_bool with _ -> false);
+      extended_agent_card = (try json |> U.member "extendedAgentCard" |> U.to_bool with _ -> false);
     }
   | `List strs ->
     (* Backward compat: parse old string list format *)
-    let has s = List.exists (fun v -> try to_string v = s with _ -> false) strs in
+    let has s = List.exists (fun v -> try U.to_string v = s with _ -> false) strs in
     {
       streaming = has "streaming";
       push_notifications = has "push-notifications";
@@ -117,14 +117,14 @@ let signature_to_json (s : agent_card_signature) : Yojson.Safe.t =
   ]))
 
 let signature_of_json (json : Yojson.Safe.t) : agent_card_signature option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let protected_header = json |> member "protected" |> to_string in
-    let signature = json |> member "signature" |> to_string in
+    let protected_header = json |> U.member "protected" |> U.to_string in
+    let signature = json |> U.member "signature" |> U.to_string in
     let header =
-      match json |> member "header" with
+      match json |> U.member "header" with
       | `Assoc pairs -> List.filter_map (fun (k, v) ->
-          try Some (k, to_string v) with _ -> None) pairs
+          try Some (k, U.to_string v) with _ -> None) pairs
       | _ -> []
     in
     Some { protected_header; signature; header }
@@ -166,14 +166,14 @@ let to_json (card : agent_card) : Yojson.Safe.t =
 
 (** Parse agent_card from JSON (accepts both v0.3 and legacy formats) *)
 let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let name = json |> member "name" |> to_string in
-    let version = json |> member "version" |> to_string in
-    let description = json |> member "description" |> to_string_option in
+    let name = json |> U.member "name" |> U.to_string in
+    let version = json |> U.member "version" |> U.to_string in
+    let description = json |> U.member "description" |> U.to_string_option in
 
     let provider =
-      match json |> member "provider" with
+      match json |> U.member "provider" with
       | `Null -> None
       | p ->
         match provider_of_yojson p with
@@ -182,15 +182,15 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
     in
 
     let protocol_versions =
-      match json |> member "protocolVersions" with
-      | `List vs -> List.filter_map (fun v -> try Some (to_string v) with _ -> None) vs
+      match json |> U.member "protocolVersions" with
+      | `List vs -> List.filter_map (fun v -> try Some (U.to_string v) with _ -> None) vs
       | _ -> ["0.3"]
     in
 
-    let capabilities = capabilities_of_json (json |> member "capabilities") in
+    let capabilities = capabilities_of_json (json |> U.member "capabilities") in
 
     let skills =
-      (match json |> member "skills" with
+      (match json |> U.member "skills" with
       | `List vs -> vs | _ -> [])
       |> List.filter_map (fun s ->
         match skill_of_yojson s with
@@ -201,9 +201,9 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
     (* Accept both "supportedInterfaces" (v0.3) and "bindings" (legacy) *)
     let supported_interfaces =
       let ifaces_json =
-        match json |> member "supportedInterfaces" with
+        match json |> U.member "supportedInterfaces" with
         | `List _ as v -> v
-        | _ -> json |> member "bindings"
+        | _ -> json |> U.member "bindings"
       in
       (match ifaces_json with
       | `List vs -> vs | _ -> [])
@@ -214,7 +214,7 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
     in
 
     let security_schemes =
-      match json |> member "securitySchemes" with
+      match json |> U.member "securitySchemes" with
       | `Assoc pairs ->
         List.filter_map (fun (k, v) ->
           match security_scheme_of_yojson v with
@@ -224,37 +224,37 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
     in
 
     let default_input_modes =
-      (match json |> member "defaultInputModes" with
+      (match json |> U.member "defaultInputModes" with
       | `List vs -> vs | _ -> [])
-      |> List.filter_map (fun v -> try Some (to_string v) with _ -> None)
+      |> List.filter_map (fun v -> try Some (U.to_string v) with _ -> None)
     in
 
     let default_output_modes =
-      (match json |> member "defaultOutputModes" with
+      (match json |> U.member "defaultOutputModes" with
       | `List vs -> vs | _ -> [])
-      |> List.filter_map (fun v -> try Some (to_string v) with _ -> None)
+      |> List.filter_map (fun v -> try Some (U.to_string v) with _ -> None)
     in
 
     let extensions =
-      match json |> member "extensions" with
+      match json |> U.member "extensions" with
       | `Assoc pairs -> pairs
       | _ -> []
     in
 
     (* Accept both "signatures" (v0.3 array) and "signature" (legacy string) *)
     let signatures =
-      match json |> member "signatures" with
+      match json |> U.member "signatures" with
       | `List vs -> List.filter_map signature_of_json vs
       | _ ->
-        match json |> member "signature" |> to_string_option with
+        match json |> U.member "signature" |> U.to_string_option with
         | Some s -> [{ protected_header = ""; signature = s; header = [] }]
         | None -> []
     in
 
-    let icon_url = json |> member "iconUrl" |> to_string_option in
-    let documentation_url = json |> member "documentationUrl" |> to_string_option in
-    let created_at = json |> member "createdAt" |> to_string in
-    let updated_at = json |> member "updatedAt" |> to_string in
+    let icon_url = json |> U.member "iconUrl" |> U.to_string_option in
+    let documentation_url = json |> U.member "documentationUrl" |> U.to_string_option in
+    let created_at = json |> U.member "createdAt" |> U.to_string in
+    let updated_at = json |> U.member "updatedAt" |> U.to_string in
 
     Ok {
       name;

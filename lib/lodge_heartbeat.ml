@@ -1036,19 +1036,19 @@ let load_lodge_agents_full () =
         let agents = List.filter_map (fun edge ->
           try
             let node = Yojson.Safe.Util.member "node" edge in
-            let open Yojson.Safe.Util in
-            let name = member "name" node |> to_string in
-            let emoji = (match member "emoji" node with `String s -> s | _ -> "🤖") in
-            let korean_name = (match member "koreanName" node with `String s -> Some s | _ -> None) in
-            let traits = (try member "traits" node |> to_list |> List.map to_string with _ -> []) in
-            let interests = (try member "interests" node |> to_list |> List.map to_string with _ -> []) in
-            let activity_level = (match member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
-            let preferred_hours = (try member "preferredHours" node |> to_list |> List.map to_int with _ -> []) in
-            let peak_hour = (match member "peakHour" node with `Int i -> Some i | _ -> None) in
-            let model = (match member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
-            let status = (match member "status" node with `String s -> s | _ -> "active") in
-            let primary_value = (match member "primaryValue" node with `String s -> Some s | _ -> None) in
-            let personality_hint = (match member "personalityHint" node with `String s -> Some s | _ -> None) in
+            let module U = Yojson.Safe.Util in
+            let name = U.member "name" node |> U.to_string in
+            let emoji = (match U.member "emoji" node with `String s -> s | _ -> "🤖") in
+            let korean_name = (match U.member "koreanName" node with `String s -> Some s | _ -> None) in
+            let traits = (try U.member "traits" node |> U.to_list |> List.map U.to_string with _ -> []) in
+            let interests = (try U.member "interests" node |> U.to_list |> List.map U.to_string with _ -> []) in
+            let activity_level = (match U.member "activityLevel" node with `Float f -> f | `Int i -> float_of_int i | _ -> 0.5) in
+            let preferred_hours = (try U.member "preferredHours" node |> U.to_list |> List.map U.to_int with _ -> []) in
+            let peak_hour = (match U.member "peakHour" node with `Int i -> Some i | _ -> None) in
+            let model = (match U.member "model" node with `String s -> s | _ -> "glm-4.7-flash:latest") in
+            let status = (match U.member "status" node with `String s -> s | _ -> "active") in
+            let primary_value = (match U.member "primaryValue" node with `String s -> Some s | _ -> None) in
+            let personality_hint = (match U.member "personalityHint" node with `String s -> Some s | _ -> None) in
             Some (`Assoc [
               ("name", `String name);
               ("emoji", `String emoji);
@@ -1453,29 +1453,29 @@ let load_agent_profile ~agent_name : agent_profile =
       in
       try
         let json = Yojson.Safe.from_string json_str in
-        let open Yojson.Safe.Util in
-        let agent = json |> member "data" |> member "agent" in
+        let module U = Yojson.Safe.Util in
+        let agent = json |> U.member "data" |> U.member "agent" in
         if agent = `Null then fallback
         else
-          let get_string_opt key = match agent |> member key with
+          let get_string_opt key = match agent |> U.member key with
             | `Null -> None | `String s -> Some s | _ -> None in
-          let get_int_opt key = match agent |> member key with
+          let get_int_opt key = match agent |> U.member key with
             | `Null -> None | `Int i -> Some i | _ -> None in
           {
-            name = agent |> member "name" |> to_string_option |> Option.value ~default:agent_name;
+            name = agent |> U.member "name" |> U.to_string_option |> Option.value ~default:agent_name;
             role = get_string_opt "role";
             description = get_string_opt "description";
-            traits = (try agent |> member "traits" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> []);
-            interests = (try agent |> member "interests" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> []);
-            preferred_hours = (try agent |> member "preferredHours" |> to_list |> List.map to_int with Yojson.Safe.Util.Type_error _ -> []);
+            traits = (try agent |> U.member "traits" |> U.to_list |> List.map U.to_string with U.Type_error _ -> []);
+            interests = (try agent |> U.member "interests" |> U.to_list |> List.map U.to_string with U.Type_error _ -> []);
+            preferred_hours = (try agent |> U.member "preferredHours" |> U.to_list |> List.map U.to_int with U.Type_error _ -> []);
             peak_hour = get_int_opt "peakHour";
-            activity_level = (try agent |> member "activityLevel" |> to_float with Yojson.Safe.Util.Type_error _ -> 0.5);
-            karma = (try agent |> member "karma" |> to_int with Yojson.Safe.Util.Type_error _ -> 0);
+            activity_level = (try agent |> U.member "activityLevel" |> U.to_float with U.Type_error _ -> 0.5);
+            karma = (try agent |> U.member "karma" |> U.to_int with U.Type_error _ -> 0);
             agent_prompt = get_string_opt "agentPrompt";
             personality_hint = get_string_opt "personalityHint";
           }
       with
-      | Yojson.Safe.Util.Type_error (msg, _) ->
+      | U.Type_error (msg, _) ->
         Eio.traceln "⚠️ Failed to load profile for %s: %s" agent_name msg;
         fallback
       | Yojson.Json_error msg ->
@@ -1519,28 +1519,28 @@ let load_lodge_config () =
   try
     let json_str = In_channel.with_open_text config_path In_channel.input_all in
     let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let lodge = json |> member "lodge" in
+    let module U = Yojson.Safe.Util in
+    let lodge = json |> U.member "lodge" in
     if lodge = `Null then default_lodge_config
     else
       let parse_tools () =
-        let tools_obj = lodge |> member "tools" in
+        let tools_obj = lodge |> U.member "tools" in
         if tools_obj = `Null then []
         else
-          tools_obj |> to_assoc |> List.map (fun (_key, tool) ->
+          tools_obj |> U.to_assoc |> List.map (fun (_key, tool) ->
             {
-              name = tool |> member "name" |> to_string_option |> Option.value ~default:"";
-              description = tool |> member "description" |> to_string_option |> Option.value ~default:"";
-              example = tool |> member "example" |> to_string_option |> Option.value ~default:"";
+              name = tool |> U.member "name" |> U.to_string_option |> Option.value ~default:"";
+              description = tool |> U.member "description" |> U.to_string_option |> Option.value ~default:"";
+              example = tool |> U.member "example" |> U.to_string_option |> Option.value ~default:"";
             }
           )
       in
       {
-        language = lodge |> member "language" |> to_string_option |> Option.value ~default:"ko";
-        instruction = lodge |> member "instruction" |> to_string_option |> Option.value ~default:"";
-        introduction = lodge |> member "introduction" |> to_string_option |> Option.value ~default:default_lodge_config.introduction;
-        actions = (try lodge |> member "actions" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> default_lodge_config.actions);
-        rules = (try lodge |> member "rules" |> to_list |> List.map to_string with Yojson.Safe.Util.Type_error _ -> default_lodge_config.rules);
+        language = lodge |> U.member "language" |> U.to_string_option |> Option.value ~default:"ko";
+        instruction = lodge |> U.member "instruction" |> U.to_string_option |> Option.value ~default:"";
+        introduction = lodge |> U.member "introduction" |> U.to_string_option |> Option.value ~default:default_lodge_config.introduction;
+        actions = (try lodge |> U.member "actions" |> U.to_list |> List.map U.to_string with U.Type_error _ -> default_lodge_config.actions);
+        rules = (try lodge |> U.member "rules" |> U.to_list |> List.map U.to_string with U.Type_error _ -> default_lodge_config.rules);
         tools = parse_tools ();
       }
   with

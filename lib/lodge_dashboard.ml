@@ -17,11 +17,11 @@ let etag () =
 let get_emoji_map () =
   match Lodge_heartbeat.load_lodge_agents_full () with
   | Ok json ->
-    let open Yojson.Safe.Util in
-    let agents = member "agents" json |> to_list in
+    let module U = Yojson.Safe.Util in
+    let agents = U.member "agents" json |> U.to_list in
     List.fold_left (fun acc agent ->
-      let name = member "name" agent |> to_string in
-      let emoji = match member "emoji" agent with `String s -> s | _ -> "🤖" in
+      let name = U.member "name" agent |> U.to_string in
+      let emoji = match U.member "emoji" agent with `String s -> s | _ -> "🤖" in
       (name, emoji) :: acc
     ) [] agents
   | Error _ -> []

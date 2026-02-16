@@ -83,17 +83,17 @@ IMPORTANT: If context_ratio exceeds 0.8, you MUST handoff. Do not ignore this.
 let parse_claude_json output =
   try
     let json = Yojson.Safe.from_string output in
-    let open Yojson.Safe.Util in
-    let usage = json |> member "usage" in
-    let input_tokens = usage |> member "input_tokens" |> to_int_option in
-    let output_tokens = usage |> member "output_tokens" |> to_int_option in
-    let cache_creation = usage |> member "cache_creation_input_tokens" |> to_int_option in
-    let cache_read = usage |> member "cache_read_input_tokens" |> to_int_option in
-    let cost_usd = json |> member "total_cost_usd" |> to_float_option in
-    let result_text = json |> member "result" |> to_string_option in
+    let module U = Yojson.Safe.Util in
+    let usage = json |> U.member "usage" in
+    let input_tokens = usage |> U.member "input_tokens" |> U.to_int_option in
+    let output_tokens = usage |> U.member "output_tokens" |> U.to_int_option in
+    let cache_creation = usage |> U.member "cache_creation_input_tokens" |> U.to_int_option in
+    let cache_read = usage |> U.member "cache_read_input_tokens" |> U.to_int_option in
+    let cost_usd = json |> U.member "total_cost_usd" |> U.to_float_option in
+    let result_text = json |> U.member "result" |> U.to_string_option in
     (result_text, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
   with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+  | Yojson.Json_error _ | U.Type_error _ ->
     (Some output, None, None, None, None, None)
 
 (** Parse Gemini output for token tracking
@@ -101,11 +101,11 @@ let parse_claude_json output =
 let parse_gemini_output output =
   try
     let json = Yojson.Safe.from_string output in
-    let open Yojson.Safe.Util in
-    let usage = json |> member "usageMetadata" in
-    let input_tokens = usage |> member "promptTokenCount" |> to_int_option in
-    let output_tokens = usage |> member "candidatesTokenCount" |> to_int_option in
-    let cached_tokens = usage |> member "cachedContentTokenCount" |> to_int_option in
+    let module U = Yojson.Safe.Util in
+    let usage = json |> U.member "usageMetadata" in
+    let input_tokens = usage |> U.member "promptTokenCount" |> U.to_int_option in
+    let output_tokens = usage |> U.member "candidatesTokenCount" |> U.to_int_option in
+    let cached_tokens = usage |> U.member "cachedContentTokenCount" |> U.to_int_option in
     (* Gemini 2.5: cached tokens are 90% cheaper *)
     let cost = match input_tokens, output_tokens, cached_tokens with
       | Some inp, Some out, Some cached ->
@@ -119,7 +119,7 @@ let parse_gemini_output output =
       | _ -> None
     in
     (input_tokens, output_tokens, cached_tokens, cost)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+  with Yojson.Json_error _ | U.Type_error _ ->
     (None, None, None, None)
 
 (** Parse Ollama output for token tracking
@@ -127,12 +127,12 @@ let parse_gemini_output output =
 let parse_ollama_output output =
   try
     let json = Yojson.Safe.from_string output in
-    let open Yojson.Safe.Util in
-    let input_tokens = json |> member "prompt_eval_count" |> to_int_option in
-    let output_tokens = json |> member "eval_count" |> to_int_option in
+    let module U = Yojson.Safe.Util in
+    let input_tokens = json |> U.member "prompt_eval_count" |> U.to_int_option in
+    let output_tokens = json |> U.member "eval_count" |> U.to_int_option in
     (* Local ollama has no cost *)
     (input_tokens, output_tokens, Some 0.0)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+  with Yojson.Json_error _ | U.Type_error _ ->
     (None, None, None)
 
 (** Parse Codex JSONL output for token tracking
@@ -151,11 +151,11 @@ let parse_codex_output output =
     match turn_completed with
     | Some line ->
         let json = Yojson.Safe.from_string line in
-        let open Yojson.Safe.Util in
-        let usage = json |> member "usage" in
-        let input_tokens = usage |> member "input_tokens" |> to_int_option in
-        let output_tokens = usage |> member "output_tokens" |> to_int_option in
-        let cached = usage |> member "cached_input_tokens" |> to_int_option in
+        let module U = Yojson.Safe.Util in
+        let usage = json |> U.member "usage" in
+        let input_tokens = usage |> U.member "input_tokens" |> U.to_int_option in
+        let output_tokens = usage |> U.member "output_tokens" |> U.to_int_option in
+        let cached = usage |> U.member "cached_input_tokens" |> U.to_int_option in
         (* OpenAI pricing estimate: $15/1M input, $60/1M output *)
         let cost = match input_tokens, output_tokens with
           | Some inp, Some out ->
@@ -164,7 +164,7 @@ let parse_codex_output output =
         in
         (input_tokens, output_tokens, cached, cost)
     | None -> (None, None, None, None)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+  with Yojson.Json_error _ | U.Type_error _ ->
     (None, None, None, None)
 
 (** Parse GLM (Z.ai) output for token tracking - OpenAI-compatible format
@@ -172,14 +172,14 @@ let parse_codex_output output =
 let parse_glm_output output =
   try
     let json = Yojson.Safe.from_string output in
-    let open Yojson.Safe.Util in
-    let usage = json |> member "usage" in
-    let input_tokens = usage |> member "prompt_tokens" |> to_int_option in
-    let output_tokens = usage |> member "completion_tokens" |> to_int_option in
+    let module U = Yojson.Safe.Util in
+    let usage = json |> U.member "usage" in
+    let input_tokens = usage |> U.member "prompt_tokens" |> U.to_int_option in
+    let output_tokens = usage |> U.member "completion_tokens" |> U.to_int_option in
     (* GLM-4.7: Z.ai Coding Plan pricing is subscription-based, estimate $0 per token *)
     let cost = Some 0.0 in
     (input_tokens, output_tokens, cost)
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+  with Yojson.Json_error _ | U.Type_error _ ->
     (None, None, None)
 
 let default_configs = [
@@ -366,14 +366,14 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
             let (response_text, inp, out, cost) =
               try
                 let json = Yojson.Safe.from_string raw_output in
-                let open Yojson.Safe.Util in
-                let result = json |> member "result" in
-                let content = result |> member "content" in
+                let module U = Yojson.Safe.Util in
+                let result = json |> U.member "result" in
+                let content = result |> U.member "content" in
                 let text = match content with
                   | `List items ->
                       let texts = List.filter_map (fun item ->
-                        match item |> member "type" |> to_string_option with
-                        | Some "text" -> item |> member "text" |> to_string_option
+                        match item |> U.member "type" |> U.to_string_option with
+                        | Some "text" -> item |> U.member "text" |> U.to_string_option
                         | _ -> None
                       ) items in
                       String.concat "\n" texts
@@ -381,7 +381,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
                 in
                 let (inp, out, cost) = parse_glm_output raw_output in
                 (text, inp, out, cost)
-              with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+              with Yojson.Json_error _ | U.Type_error _ ->
                 (raw_output, None, None, None)
             in
             (response_text, inp, out, None, None, cost)

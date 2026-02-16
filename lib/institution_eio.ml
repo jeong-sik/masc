@@ -145,16 +145,16 @@ let rec episode_to_json (e : episode) : Yojson.Safe.t =
   ]
 
 and episode_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    id = json |> member "id" |> to_string;
-    timestamp = json |> member "timestamp" |> json_to_float;
-    participants = json |> member "participants" |> to_list |> List.map to_string;
-    event_type = json |> member "event_type" |> to_string;
-    summary = json |> member "summary" |> to_string;
-    outcome = json |> member "outcome" |> to_string |> outcome_of_string;
-    learnings = json |> member "learnings" |> to_list |> List.map to_string;
-    context = json |> member "context" |> to_assoc |> List.map (fun (k, v) -> (k, to_string v));
+    id = json |> U.member "id" |> U.to_string;
+    timestamp = json |> U.member "timestamp" |> json_to_float;
+    participants = json |> U.member "participants" |> U.to_list |> List.map U.to_string;
+    event_type = json |> U.member "event_type" |> U.to_string;
+    summary = json |> U.member "summary" |> U.to_string;
+    outcome = json |> U.member "outcome" |> U.to_string |> outcome_of_string;
+    learnings = json |> U.member "learnings" |> U.to_list |> List.map U.to_string;
+    context = json |> U.member "context" |> U.to_assoc |> List.map (fun (k, v) -> (k, U.to_string v));
   }
 
 and knowledge_to_json (k : knowledge) : Yojson.Safe.t =
@@ -170,16 +170,16 @@ and knowledge_to_json (k : knowledge) : Yojson.Safe.t =
   ]
 
 and knowledge_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    id = json |> member "id" |> to_string;
-    topic = json |> member "topic" |> to_string;
-    content = json |> member "content" |> to_string;
-    confidence = json |> member "confidence" |> json_to_float;
-    source = json |> member "source" |> to_string;
-    created_at = json |> member "created_at" |> json_to_float;
-    last_verified = json |> member "last_verified" |> json_to_float;
-    references = json |> member "references" |> to_list |> List.map to_string;
+    id = json |> U.member "id" |> U.to_string;
+    topic = json |> U.member "topic" |> U.to_string;
+    content = json |> U.member "content" |> U.to_string;
+    confidence = json |> U.member "confidence" |> json_to_float;
+    source = json |> U.member "source" |> U.to_string;
+    created_at = json |> U.member "created_at" |> json_to_float;
+    last_verified = json |> U.member "last_verified" |> json_to_float;
+    references = json |> U.member "references" |> U.to_list |> List.map U.to_string;
   }
 
 and pattern_to_json (p : pattern) : Yojson.Safe.t =
@@ -196,17 +196,17 @@ and pattern_to_json (p : pattern) : Yojson.Safe.t =
   ]
 
 and pattern_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    id = json |> member "id" |> to_string;
-    name = json |> member "name" |> to_string;
-    description = json |> member "description" |> to_string;
-    trigger = json |> member "trigger" |> to_string;
-    steps = json |> member "steps" |> to_list |> List.map to_string;
-    success_rate = json |> member "success_rate" |> json_to_float;
-    usage_count = json |> member "usage_count" |> to_int;
-    last_used = json |> member "last_used" |> json_to_float;
-    evolved_from = json |> member "evolved_from" |> to_string_option;
+    id = json |> U.member "id" |> U.to_string;
+    name = json |> U.member "name" |> U.to_string;
+    description = json |> U.member "description" |> U.to_string;
+    trigger = json |> U.member "trigger" |> U.to_string;
+    steps = json |> U.member "steps" |> U.to_list |> List.map U.to_string;
+    success_rate = json |> U.member "success_rate" |> json_to_float;
+    usage_count = json |> U.member "usage_count" |> U.to_int;
+    last_used = json |> U.member "last_used" |> json_to_float;
+    evolved_from = json |> U.member "evolved_from" |> U.to_string_option;
   }
 
 and cultural_value_to_json (c : cultural_value) : Yojson.Safe.t =
@@ -221,15 +221,15 @@ and cultural_value_to_json (c : cultural_value) : Yojson.Safe.t =
   ]
 
 and cultural_value_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    id = json |> member "id" |> to_string;
-    name = json |> member "name" |> to_string;
-    description = json |> member "description" |> to_string;
-    weight = json |> member "weight" |> json_to_float;
-    examples = json |> member "examples" |> to_list |> List.map to_string;
-    anti_patterns = json |> member "anti_patterns" |> to_list |> List.map to_string;
-    adopted_at = json |> member "adopted_at" |> json_to_float;
+    id = json |> U.member "id" |> U.to_string;
+    name = json |> U.member "name" |> U.to_string;
+    description = json |> U.member "description" |> U.to_string;
+    weight = json |> U.member "weight" |> json_to_float;
+    examples = json |> U.member "examples" |> U.to_list |> List.map U.to_string;
+    anti_patterns = json |> U.member "anti_patterns" |> U.to_list |> List.map U.to_string;
+    adopted_at = json |> U.member "adopted_at" |> json_to_float;
   }
 
 and succession_to_json (s : succession_policy) : Yojson.Safe.t =
@@ -242,13 +242,13 @@ and succession_to_json (s : succession_policy) : Yojson.Safe.t =
   ]
 
 and succession_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    onboarding_steps = json |> member "onboarding_steps" |> to_list |> List.map to_string;
-    required_knowledge = json |> member "required_knowledge" |> to_list |> List.map to_string;
-    mentor_assignment = json |> member "mentor_assignment" |> to_string |> mentor_of_string;
-    probation_period = json |> member "probation_period" |> json_to_float;
-    graduation_criteria = json |> member "graduation_criteria" |> to_list |> List.map to_string;
+    onboarding_steps = json |> U.member "onboarding_steps" |> U.to_list |> List.map U.to_string;
+    required_knowledge = json |> U.member "required_knowledge" |> U.to_list |> List.map U.to_string;
+    mentor_assignment = json |> U.member "mentor_assignment" |> U.to_string |> mentor_of_string;
+    probation_period = json |> U.member "probation_period" |> json_to_float;
+    graduation_criteria = json |> U.member "graduation_criteria" |> U.to_list |> List.map U.to_string;
   }
 
 and identity_to_json (i : identity) : Yojson.Safe.t =
@@ -261,13 +261,13 @@ and identity_to_json (i : identity) : Yojson.Safe.t =
   ]
 
 and identity_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    id = json |> member "id" |> to_string;
-    name = json |> member "name" |> to_string;
-    mission = json |> member "mission" |> to_string;
-    founded_at = json |> member "founded_at" |> json_to_float;
-    generation = json |> member "generation" |> to_int;
+    id = json |> U.member "id" |> U.to_string;
+    name = json |> U.member "name" |> U.to_string;
+    mission = json |> U.member "mission" |> U.to_string;
+    founded_at = json |> U.member "founded_at" |> json_to_float;
+    generation = json |> U.member "generation" |> U.to_int;
   }
 
 and memory_to_json (m : long_term_memory) : Yojson.Safe.t =
@@ -278,11 +278,11 @@ and memory_to_json (m : long_term_memory) : Yojson.Safe.t =
   ]
 
 and memory_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    episodic = json |> member "episodic" |> to_list |> List.map episode_of_json;
-    semantic = json |> member "semantic" |> to_list |> List.map knowledge_of_json;
-    procedural = json |> member "procedural" |> to_list |> List.map pattern_of_json;
+    episodic = json |> U.member "episodic" |> U.to_list |> List.map episode_of_json;
+    semantic = json |> U.member "semantic" |> U.to_list |> List.map knowledge_of_json;
+    procedural = json |> U.member "procedural" |> U.to_list |> List.map pattern_of_json;
   }
 
 and institution_to_json (inst : institution) : Yojson.Safe.t =
@@ -296,14 +296,14 @@ and institution_to_json (inst : institution) : Yojson.Safe.t =
   ]
 
 and institution_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    identity = json |> member "identity" |> identity_of_json;
-    memory = json |> member "memory" |> memory_of_json;
-    culture = json |> member "culture" |> to_list |> List.map cultural_value_of_json;
-    succession = json |> member "succession" |> succession_of_json;
-    current_agents = json |> member "current_agents" |> to_list |> List.map to_string;
-    alumni = json |> member "alumni" |> to_list |> List.map to_string;
+    identity = json |> U.member "identity" |> identity_of_json;
+    memory = json |> U.member "memory" |> memory_of_json;
+    culture = json |> U.member "culture" |> U.to_list |> List.map cultural_value_of_json;
+    succession = json |> U.member "succession" |> succession_of_json;
+    current_agents = json |> U.member "current_agents" |> U.to_list |> List.map U.to_string;
+    alumni = json |> U.member "alumni" |> U.to_list |> List.map U.to_string;
   }
 
 (** {1 Persistence (Eio Native)} *)

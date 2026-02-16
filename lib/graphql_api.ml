@@ -668,19 +668,19 @@ let handle_request ~config body_str =
   | Error msg ->
       { status = `Bad_request; body = graphql_error msg }
   | Ok payload ->
-      let open Yojson.Safe.Util in
+      let module U = Yojson.Safe.Util in
       let query =
-        match payload |> member "query" with
+        match payload |> U.member "query" with
         | `String q -> Some q
         | _ -> None
       in
       let variables_json =
-        match payload |> member "variables" with
+        match payload |> U.member "variables" with
         | `Null -> None
         | other -> Some other
       in
       let operation_name =
-        match payload |> member "operationName" with
+        match payload |> U.member "operationName" with
         | `String s -> Some s
         | _ -> None
       in

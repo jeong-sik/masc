@@ -347,11 +347,11 @@ let status_string registry =
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
     List.iter (fun status ->
-      let open Yojson.Safe.Util in
-      let name = status |> member "name" |> to_string in
-      let icon = status |> member "status" |> to_string in
-      let idle = status |> member "idle_seconds" |> to_int in
-      let listening = status |> member "listening" |> to_bool in
+      let module U = Yojson.Safe.Util in
+      let name = status |> U.member "name" |> U.to_string in
+      let icon = status |> U.member "status" |> U.to_string in
+      let idle = status |> U.member "idle_seconds" |> U.to_int in
+      let listening = status |> U.member "listening" |> U.to_bool in
       let idle_info = if idle > 30 then Printf.sprintf "(idle %ds)" idle else "" in
       let listen_info = if listening then "리스닝중" else "" in
       Buffer.add_string buf (Printf.sprintf "  %s %s %s %s\n" icon name listen_info idle_info)

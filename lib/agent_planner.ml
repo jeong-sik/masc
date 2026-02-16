@@ -70,11 +70,11 @@ let block_to_json (b : block) : Yojson.Safe.t =
   ]
 
 let block_of_json (json : Yojson.Safe.t) : block =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    hour = json |> member "hour" |> to_int;
-    activity = json |> member "activity" |> to_string;
-    priority = json |> member "priority" |> to_float;
+    hour = json |> U.member "hour" |> U.to_int;
+    activity = json |> U.member "activity" |> U.to_string;
+    priority = json |> U.member "priority" |> U.to_float;
   }
 
 let plan_to_json (p : daily_plan) : Yojson.Safe.t =
@@ -88,13 +88,13 @@ let plan_to_json (p : daily_plan) : Yojson.Safe.t =
 
 let plan_of_json (json : Yojson.Safe.t) : daily_plan option =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     Some {
-      agent_name = json |> member "agent_name" |> to_string;
-      date = json |> member "date" |> to_string;
-      goals = json |> member "goals" |> to_list |> List.map to_string;
-      hourly_blocks = json |> member "hourly_blocks" |> to_list |> List.map block_of_json;
-      created_at = json |> member "created_at" |> to_float;
+      agent_name = json |> U.member "agent_name" |> U.to_string;
+      date = json |> U.member "date" |> U.to_string;
+      goals = json |> U.member "goals" |> U.to_list |> List.map U.to_string;
+      hourly_blocks = json |> U.member "hourly_blocks" |> U.to_list |> List.map block_of_json;
+      created_at = json |> U.member "created_at" |> U.to_float;
     }
   with _ -> None
 
@@ -208,13 +208,13 @@ let parse_plan_response ~agent_name ~response : daily_plan option =
       else s
     in
     let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let goals = json |> member "goals" |> to_list |> List.map to_string in
-    let blocks = json |> member "blocks" |> to_list |> List.map (fun b ->
+    let module U = Yojson.Safe.Util in
+    let goals = json |> U.member "goals" |> U.to_list |> List.map U.to_string in
+    let blocks = json |> U.member "blocks" |> U.to_list |> List.map (fun b ->
       {
-        hour = b |> member "hour" |> to_int;
-        activity = b |> member "activity" |> to_string;
-        priority = b |> member "priority" |> to_float;
+        hour = b |> U.member "hour" |> U.to_int;
+        activity = b |> U.member "activity" |> U.to_string;
+        priority = b |> U.member "priority" |> U.to_float;
       }
     ) in
     let date = today_kst () in

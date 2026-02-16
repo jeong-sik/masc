@@ -320,41 +320,41 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
       | `List (first :: _) -> first
       | other -> other
     in
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     (* Check for error *)
-    (match json |> member "error" with
+    (match json |> U.member "error" with
      | `Null -> ()
      | err ->
-       let msg = err |> member "message" |> to_string_option
+       let msg = err |> U.member "message" |> U.to_string_option
                  |> Option.value ~default:"Unknown API error" in
        raise (Failure msg));
-    let choice = json |> member "choices" |> index 0 in
-    let msg = choice |> member "message" in
-    let content = msg |> member "content" |> to_string_option
+    let choice = json |> U.member "choices" |> U.index 0 in
+    let msg = choice |> U.member "message" in
+    let content = msg |> U.member "content" |> U.to_string_option
                   |> Option.value ~default:"" in
     (* Parse tool calls if present *)
-    let tool_calls = match msg |> member "tool_calls" with
+    let tool_calls = match msg |> U.member "tool_calls" with
       | `List calls ->
         List.filter_map (fun tc ->
           try
-            let fn = tc |> member "function" in
+            let fn = tc |> U.member "function" in
             Some {
-              call_id = tc |> member "id" |> to_string;
-              call_name = fn |> member "name" |> to_string;
-              call_arguments = fn |> member "arguments" |> to_string;
+              call_id = tc |> U.member "id" |> U.to_string;
+              call_name = fn |> U.member "name" |> U.to_string;
+              call_arguments = fn |> U.member "arguments" |> U.to_string;
             }
           with _ -> None
         ) calls
       | _ -> []
     in
     (* Parse usage *)
-    let usage_json = json |> member "usage" in
+    let usage_json = json |> U.member "usage" in
     let usage = {
-      input_tokens = (try usage_json |> member "prompt_tokens" |> to_int with _ -> 0);
-      output_tokens = (try usage_json |> member "completion_tokens" |> to_int with _ -> 0);
-      total_tokens = (try usage_json |> member "total_tokens" |> to_int with _ -> 0);
+      input_tokens = (try usage_json |> U.member "prompt_tokens" |> U.to_int with _ -> 0);
+      output_tokens = (try usage_json |> U.member "completion_tokens" |> U.to_int with _ -> 0);
+      total_tokens = (try usage_json |> U.member "total_tokens" |> U.to_int with _ -> 0);
     } in
-    let model_used = json |> member "model" |> to_string_option
+    let model_used = json |> U.member "model" |> U.to_string_option
                      |> Option.value ~default:"unknown" in
     Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
   with
@@ -364,41 +364,41 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
 let parse_claude_response (json_str : string) : (completion_response, string) result =
   try
     let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     (* Check for error *)
-    (match json |> member "type" |> to_string_option with
+    (match json |> U.member "type" |> U.to_string_option with
      | Some "error" ->
-       let msg = json |> member "error" |> member "message" |> to_string in
+       let msg = json |> U.member "error" |> U.member "message" |> U.to_string in
        raise (Failure msg)
      | _ -> ());
     (* Extract content blocks *)
-    let content_blocks = json |> member "content" |> to_list in
+    let content_blocks = json |> U.member "content" |> U.to_list in
     let content = List.fold_left (fun acc block ->
-      match block |> member "type" |> to_string with
-      | "text" -> acc ^ (block |> member "text" |> to_string)
+      match block |> U.member "type" |> U.to_string with
+      | "text" -> acc ^ (block |> U.member "text" |> U.to_string)
       | _ -> acc
     ) "" content_blocks in
     (* Extract tool use blocks *)
     let tool_calls = List.filter_map (fun block ->
-      match block |> member "type" |> to_string with
+      match block |> U.member "type" |> U.to_string with
       | "tool_use" ->
         Some {
-          call_id = block |> member "id" |> to_string;
-          call_name = block |> member "name" |> to_string;
-          call_arguments = block |> member "input" |> Yojson.Safe.to_string;
+          call_id = block |> U.member "id" |> U.to_string;
+          call_name = block |> U.member "name" |> U.to_string;
+          call_arguments = block |> U.member "input" |> Yojson.Safe.to_string;
         }
       | _ -> None
     ) content_blocks in
     (* Parse usage *)
-    let usage_json = json |> member "usage" in
-    let input_tokens = try usage_json |> member "input_tokens" |> to_int with _ -> 0 in
-    let output_tokens = try usage_json |> member "output_tokens" |> to_int with _ -> 0 in
+    let usage_json = json |> U.member "usage" in
+    let input_tokens = try usage_json |> U.member "input_tokens" |> U.to_int with _ -> 0 in
+    let output_tokens = try usage_json |> U.member "output_tokens" |> U.to_int with _ -> 0 in
     let usage = {
       input_tokens;
       output_tokens;
       total_tokens = input_tokens + output_tokens;
     } in
-    let model_used = json |> member "model" |> to_string_option
+    let model_used = json |> U.member "model" |> U.to_string_option
                      |> Option.value ~default:"unknown" in
     Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
   with
@@ -408,11 +408,11 @@ let parse_claude_response (json_str : string) : (completion_response, string) re
 let parse_ollama_generate_response (json_str : string) : (completion_response, string) result =
   try
     let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let content = json |> member "response" |> to_string in
-    let eval_count = try json |> member "eval_count" |> to_int with _ -> 0 in
-    let prompt_eval_count = try json |> member "prompt_eval_count" |> to_int with _ -> 0 in
-    let model_used = json |> member "model" |> to_string_option
+    let module U = Yojson.Safe.Util in
+    let content = json |> U.member "response" |> U.to_string in
+    let eval_count = try json |> U.member "eval_count" |> U.to_int with _ -> 0 in
+    let prompt_eval_count = try json |> U.member "prompt_eval_count" |> U.to_int with _ -> 0 in
+    let model_used = json |> U.member "model" |> U.to_string_option
                      |> Option.value ~default:"unknown" in
     let usage = {
       input_tokens = prompt_eval_count;
@@ -429,13 +429,13 @@ let parse_ollama_generate_response (json_str : string) : (completion_response, s
 let parse_ollama_chat_response (json_str : string) : (completion_response, string) result =
   try
     let json = Yojson.Safe.from_string json_str in
-    let open Yojson.Safe.Util in
-    let msg = json |> member "message" in
-    let content = msg |> member "content" |> to_string_option
+    let module U = Yojson.Safe.Util in
+    let msg = json |> U.member "message" in
+    let content = msg |> U.member "content" |> U.to_string_option
                   |> Option.value ~default:"" in
-    let eval_count = try json |> member "eval_count" |> to_int with _ -> 0 in
-    let prompt_eval_count = try json |> member "prompt_eval_count" |> to_int with _ -> 0 in
-    let model_used = json |> member "model" |> to_string_option
+    let eval_count = try json |> U.member "eval_count" |> U.to_int with _ -> 0 in
+    let prompt_eval_count = try json |> U.member "prompt_eval_count" |> U.to_int with _ -> 0 in
+    let model_used = json |> U.member "model" |> U.to_string_option
                      |> Option.value ~default:"unknown" in
     let usage = {
       input_tokens = prompt_eval_count;

@@ -251,28 +251,28 @@ let task_status_to_yojson = function
       ]
 
 let task_status_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let status = json |> member "status" |> to_string in
+    let status = json |> U.member "status" |> U.to_string in
     match status with
     | "todo" -> Ok Todo
     | "claimed" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let claimed_at = json |> member "claimed_at" |> to_string in
+        let assignee = json |> U.member "assignee" |> U.to_string in
+        let claimed_at = json |> U.member "claimed_at" |> U.to_string in
         Ok (Claimed { assignee; claimed_at })
     | "in_progress" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let started_at = json |> member "started_at" |> to_string in
+        let assignee = json |> U.member "assignee" |> U.to_string in
+        let started_at = json |> U.member "started_at" |> U.to_string in
         Ok (InProgress { assignee; started_at })
     | "done" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let completed_at = json |> member "completed_at" |> to_string in
-        let notes = json |> member "notes" |> to_string_option in
+        let assignee = json |> U.member "assignee" |> U.to_string in
+        let completed_at = json |> U.member "completed_at" |> U.to_string in
+        let notes = json |> U.member "notes" |> U.to_string_option in
         Ok (Done { assignee; completed_at; notes })
     | "cancelled" ->
-        let cancelled_by = json |> member "cancelled_by" |> to_string in
-        let cancelled_at = json |> member "cancelled_at" |> to_string in
-        let reason = json |> member "reason" |> to_string_option in
+        let cancelled_by = json |> U.member "cancelled_by" |> U.to_string in
+        let cancelled_at = json |> U.member "cancelled_at" |> U.to_string in
+        let reason = json |> U.member "reason" |> U.to_string_option in
         Ok (Cancelled { cancelled_by; cancelled_at; reason })
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)
@@ -294,12 +294,12 @@ let worktree_info_to_yojson wt =
   ]
 
 let worktree_info_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let branch = json |> member "branch" |> to_string in
-    let path = json |> member "path" |> to_string in
-    let git_root = json |> member "git_root" |> to_string in
-    let repo_name = json |> member "repo_name" |> to_string in
+    let branch = json |> U.member "branch" |> U.to_string in
+    let path = json |> U.member "path" |> U.to_string in
+    let git_root = json |> U.member "git_root" |> U.to_string in
+    let repo_name = json |> U.member "repo_name" |> U.to_string in
     Ok { branch; path; git_root; repo_name }
   with e -> Error (Printexc.to_string e)
 
@@ -337,16 +337,16 @@ let task_to_yojson t =
   | _ -> `Assoc with_worktree
 
 let task_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let title = json |> member "title" |> to_string in
-    let description = json |> member "description" |> to_string_option |> Option.value ~default:"" in
-    let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
-    let files = json |> member "files" |> to_list |> List.map to_string in
-    let created_at = json |> member "created_at" |> to_string in
+    let id = json |> U.member "id" |> U.to_string in
+    let title = json |> U.member "title" |> U.to_string in
+    let description = json |> U.member "description" |> U.to_string_option |> Option.value ~default:"" in
+    let priority = json |> U.member "priority" |> U.to_int_option |> Option.value ~default:3 in
+    let files = json |> U.member "files" |> U.to_list |> List.map U.to_string in
+    let created_at = json |> U.member "created_at" |> U.to_string in
     (* Parse optional worktree field *)
-    let worktree = match json |> member "worktree" with
+    let worktree = match json |> U.member "worktree" with
       | `Null -> None
       | wt_json ->
           match worktree_info_of_yojson wt_json with
@@ -442,13 +442,13 @@ let tempo_config_to_yojson c =
   ]
 
 let tempo_config_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let mode_str = json |> member "mode" |> to_string in
-    let delay_ms = json |> member "delay_ms" |> to_int_option |> Option.value ~default:0 in
-    let reason = json |> member "reason" |> to_string_option in
-    let set_by = json |> member "set_by" |> to_string_option in
-    let set_at = json |> member "set_at" |> to_string_option in
+    let mode_str = json |> U.member "mode" |> U.to_string in
+    let delay_ms = json |> U.member "delay_ms" |> U.to_int_option |> Option.value ~default:0 in
+    let reason = json |> U.member "reason" |> U.to_string_option in
+    let set_by = json |> U.member "set_by" |> U.to_string_option in
+    let set_at = json |> U.member "set_at" |> U.to_string_option in
     match tempo_mode_of_string mode_str with
     | Ok mode -> Ok { mode; delay_ms; reason; set_by; set_at }
     | Error e -> Error e
@@ -469,14 +469,14 @@ let backlog_to_yojson b =
   ]
 
 let backlog_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let tasks_json = json |> member "tasks" |> to_list in
+    let tasks_json = json |> U.member "tasks" |> U.to_list in
     let tasks = List.filter_map (fun j ->
       match task_of_yojson j with Ok t -> Some t | Error _ -> None
     ) tasks_json in
-    let last_updated = json |> member "last_updated" |> to_string in
-    let version = json |> member "version" |> to_int in
+    let last_updated = json |> U.member "last_updated" |> U.to_string in
+    let version = json |> U.member "version" |> U.to_int in
     Ok { tasks; last_updated; version }
   with e -> Error (Printexc.to_string e)
 
@@ -557,16 +557,16 @@ let a2a_task_to_yojson t =
   ]
 
 let a2a_task_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let a2a_id = json |> member "id" |> to_string in
-    let from_agent = json |> member "from" |> to_string in
-    let to_agent = json |> member "to" |> to_string in
-    let a2a_message = json |> member "message" |> to_string in
-    let status_str = json |> member "status" |> to_string in
-    let a2a_result = json |> member "result" |> to_string_option in
-    let created_at = json |> member "createdAt" |> to_string in
-    let updated_at = json |> member "updatedAt" |> to_string in
+    let a2a_id = json |> U.member "id" |> U.to_string in
+    let from_agent = json |> U.member "from" |> U.to_string in
+    let to_agent = json |> U.member "to" |> U.to_string in
+    let a2a_message = json |> U.member "message" |> U.to_string in
+    let status_str = json |> U.member "status" |> U.to_string in
+    let a2a_result = json |> U.member "result" |> U.to_string_option in
+    let created_at = json |> U.member "createdAt" |> U.to_string in
+    let updated_at = json |> U.member "updatedAt" |> U.to_string in
     match a2a_task_status_of_string status_str with
     | Ok a2a_status -> Ok { a2a_id; from_agent; to_agent; a2a_message; a2a_status; a2a_result; created_at; updated_at }
     | Error e -> Error e
@@ -592,13 +592,13 @@ let portal_to_yojson p =
   ]
 
 let portal_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let portal_from = json |> member "from" |> to_string in
-    let portal_target = json |> member "target" |> to_string in
-    let portal_opened_at = json |> member "openedAt" |> to_string in
-    let status_str = json |> member "status" |> to_string in
-    let task_count = json |> member "taskCount" |> to_int in
+    let portal_from = json |> U.member "from" |> U.to_string in
+    let portal_target = json |> U.member "target" |> U.to_string in
+    let portal_opened_at = json |> U.member "openedAt" |> U.to_string in
+    let status_str = json |> U.member "status" |> U.to_string in
+    let task_count = json |> U.member "taskCount" |> U.to_int in
     match portal_state_of_string status_str with
     | Ok portal_status -> Ok { portal_from; portal_target; portal_opened_at; portal_status; task_count }
     | Error e -> Error e
@@ -673,20 +673,20 @@ let rate_limit_config_to_yojson c =
   ]
 
 let rate_limit_config_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let per_minute = json |> member "per_minute" |> to_int_option |> Option.value ~default:10 in
-    let burst_allowed = json |> member "burst_allowed" |> to_int_option |> Option.value ~default:5 in
+    let per_minute = json |> U.member "per_minute" |> U.to_int_option |> Option.value ~default:10 in
+    let burst_allowed = json |> U.member "burst_allowed" |> U.to_int_option |> Option.value ~default:5 in
     let priority_agents =
-      match json |> member "priority_agents" with
+      match json |> U.member "priority_agents" with
       | `Null -> default_rate_limit.priority_agents
-      | `List items -> List.map to_string items
-      | _ -> raise (Type_error ("priority_agents must be a list", json))
+      | `List items -> List.map U.to_string items
+      | _ -> raise (U.Type_error ("priority_agents must be a list", json))
     in
-    let reader_multiplier = json |> member "reader_multiplier" |> to_float_option |> Option.value ~default:0.5 in
-    let worker_multiplier = json |> member "worker_multiplier" |> to_float_option |> Option.value ~default:1.0 in
-    let admin_multiplier = json |> member "admin_multiplier" |> to_float_option |> Option.value ~default:2.0 in
-    let broadcast_per_minute = json |> member "broadcast_per_minute" |> to_int_option |> Option.value ~default:15 in
+    let reader_multiplier = json |> U.member "reader_multiplier" |> U.to_float_option |> Option.value ~default:0.5 in
+    let worker_multiplier = json |> U.member "worker_multiplier" |> U.to_float_option |> Option.value ~default:1.0 in
+    let admin_multiplier = json |> U.member "admin_multiplier" |> U.to_float_option |> Option.value ~default:2.0 in
+    let broadcast_per_minute = json |> U.member "broadcast_per_minute" |> U.to_int_option |> Option.value ~default:15 in
     let task_ops_per_minute = json |> member "task_ops_per_minute" |> to_int_option |> Option.value ~default:30 in
     Ok { per_minute; burst_allowed; priority_agents; reader_multiplier; worker_multiplier; admin_multiplier;
          broadcast_per_minute; task_ops_per_minute }
@@ -858,13 +858,13 @@ let agent_credential_to_yojson c =
   | None -> `Assoc base
 
 let agent_credential_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let agent_name = json |> member "agent_name" |> to_string in
-    let token = json |> member "token" |> to_string in
-    let role_str = json |> member "role" |> to_string in
-    let created_at = json |> member "created_at" |> to_string in
-    let expires_at = json |> member "expires_at" |> to_string_option in
+    let agent_name = json |> U.member "agent_name" |> U.to_string in
+    let token = json |> U.member "token" |> U.to_string in
+    let role_str = json |> U.member "role" |> U.to_string in
+    let created_at = json |> U.member "created_at" |> U.to_string in
+    let expires_at = json |> U.member "expires_at" |> U.to_string_option in
     match agent_role_of_string role_str with
     | Ok role -> Ok { agent_name; token; role; created_at; expires_at }
     | Error e -> Error e
@@ -897,13 +897,13 @@ let auth_config_to_yojson c =
   ]
 
 let auth_config_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let enabled = json |> member "enabled" |> to_bool in
-    let room_secret_hash = json |> member "room_secret_hash" |> to_string_option in
-    let require_token = json |> member "require_token" |> to_bool_option |> Option.value ~default:false in
-    let default_role_str = json |> member "default_role" |> to_string_option |> Option.value ~default:"worker" in
-    let token_expiry_hours = json |> member "token_expiry_hours" |> to_int_option |> Option.value ~default:24 in
+    let enabled = json |> U.member "enabled" |> U.to_bool in
+    let room_secret_hash = json |> U.member "room_secret_hash" |> U.to_string_option in
+    let require_token = json |> U.member "require_token" |> U.to_bool_option |> Option.value ~default:false in
+    let default_role_str = json |> U.member "default_role" |> U.to_string_option |> Option.value ~default:"worker" in
+    let token_expiry_hours = json |> U.member "token_expiry_hours" |> U.to_int_option |> Option.value ~default:24 in
     match agent_role_of_string default_role_str with
     | Ok default_role -> Ok { enabled; room_secret_hash; require_token; default_role; token_expiry_hours }
     | Error e -> Error e

@@ -407,21 +407,21 @@ let metrics_to_json m : Yojson.Safe.t =
   ]
 
 let metrics_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    total_turns = json |> member "total_turns" |> to_int;
-    total_tokens_used = json |> member "total_tokens_used" |> to_int;
-    total_cost_usd = json |> member "total_cost_usd" |> to_number;
-    tasks_completed = json |> member "tasks_completed" |> to_int;
-    errors_encountered = json |> member "errors_encountered" |> to_int;
-    elapsed_seconds = json |> member "elapsed_seconds" |> to_number;
+    total_turns = json |> U.member "total_turns" |> U.to_int;
+    total_tokens_used = json |> U.member "total_tokens_used" |> U.to_int;
+    total_cost_usd = json |> U.member "total_cost_usd" |> U.to_number;
+    tasks_completed = json |> U.member "tasks_completed" |> U.to_int;
+    errors_encountered = json |> U.member "errors_encountered" |> U.to_int;
+    elapsed_seconds = json |> U.member "elapsed_seconds" |> U.to_number;
   }
 
 let str_list_to_json lst = `List (List.map (fun s -> `String s) lst)
 
 let str_list_of_json json =
-  let open Yojson.Safe.Util in
-  json |> to_list |> List.map to_string
+  let module U = Yojson.Safe.Util in
+  json |> U.to_list |> List.map U.to_string
 
 let dna_to_json dna : Yojson.Safe.t =
   `Assoc [
@@ -439,18 +439,18 @@ let dna_to_json dna : Yojson.Safe.t =
 
 let dna_of_json json =
   try
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     Ok {
-      generation = json |> member "generation" |> to_int;
-      trace_id = json |> member "trace_id" |> to_string;
-      goal = json |> member "goal" |> to_string;
-      progress_summary = json |> member "progress_summary" |> to_string;
-      compressed_context = json |> member "compressed_context" |> to_string;
-      pending_actions = json |> member "pending_actions" |> str_list_of_json;
-      key_decisions = json |> member "key_decisions" |> str_list_of_json;
-      memory_refs = json |> member "memory_refs" |> str_list_of_json;
-      warnings = json |> member "warnings" |> str_list_of_json;
-      metrics = json |> member "metrics" |> metrics_of_json;
+      generation = json |> U.member "generation" |> U.to_int;
+      trace_id = json |> U.member "trace_id" |> U.to_string;
+      goal = json |> U.member "goal" |> U.to_string;
+      progress_summary = json |> U.member "progress_summary" |> U.to_string;
+      compressed_context = json |> U.member "compressed_context" |> U.to_string;
+      pending_actions = json |> U.member "pending_actions" |> str_list_of_json;
+      key_decisions = json |> U.member "key_decisions" |> str_list_of_json;
+      memory_refs = json |> U.member "memory_refs" |> str_list_of_json;
+      warnings = json |> U.member "warnings" |> str_list_of_json;
+      metrics = json |> U.member "metrics" |> metrics_of_json;
     }
   with exn ->
     Error (sprintf "DNA parse error: %s" (Printexc.to_string exn))

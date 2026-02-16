@@ -69,18 +69,18 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
   ]
 
 let post_of_yojson (json : Yojson.Safe.t) : (post, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let author = json |> member "author" |> to_string in
-    let content = json |> member "content" |> to_string in
-    let submolt = match json |> member "submolt" with
+    let id = json |> U.member "id" |> U.to_string in
+    let author = json |> U.member "author" |> U.to_string in
+    let content = json |> U.member "content" |> U.to_string in
+    let submolt = match json |> U.member "submolt" with
       | `Null -> None
       | `String s -> Some s
       | _ -> None
     in
-    let created_at = json |> member "created_at" |> to_float in
-    let votes = json |> member "votes" |> to_int in
+    let created_at = json |> U.member "created_at" |> U.to_float in
+    let votes = json |> U.member "votes" |> U.to_int in
     Ok { id; author; content; submolt; created_at; votes }
   with e ->
     Error (Printf.sprintf "Failed to parse post: %s" (Printexc.to_string e))
@@ -97,19 +97,19 @@ let comment_to_yojson (c : comment) : Yojson.Safe.t =
   ]
 
 let comment_of_yojson (json : Yojson.Safe.t) : (comment, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let post_id = json |> member "post_id" |> to_string in
-    let parent_id = match json |> member "parent_id" with
+    let id = json |> U.member "id" |> U.to_string in
+    let post_id = json |> U.member "post_id" |> U.to_string in
+    let parent_id = match json |> U.member "parent_id" with
       | `Null -> None
       | `String s -> Some s
       | _ -> None
     in
-    let author = json |> member "author" |> to_string in
-    let content = json |> member "content" |> to_string in
-    let created_at = json |> member "created_at" |> to_float in
-    let votes = json |> member "votes" |> to_int in
+    let author = json |> U.member "author" |> U.to_string in
+    let content = json |> U.member "content" |> U.to_string in
+    let created_at = json |> U.member "created_at" |> U.to_float in
+    let votes = json |> U.member "votes" |> U.to_int in
     Ok { id; post_id; parent_id; author; content; created_at; votes }
   with e ->
     Error (Printf.sprintf "Failed to parse comment: %s" (Printexc.to_string e))
@@ -122,13 +122,13 @@ let vote_record_to_yojson (v : vote_record) : Yojson.Safe.t =
   ]
 
 let vote_record_of_yojson (json : Yojson.Safe.t) : (vote_record, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let voter = json |> member "voter" |> to_string in
-    let dir_str = json |> member "direction" |> to_string in
+    let voter = json |> U.member "voter" |> U.to_string in
+    let dir_str = json |> U.member "direction" |> U.to_string in
     match direction_of_string dir_str with
     | Ok direction ->
-        let voted_at = json |> member "voted_at" |> to_float in
+        let voted_at = json |> U.member "voted_at" |> U.to_float in
         Ok { voter; direction; voted_at }
     | Error e -> Error e
   with e ->

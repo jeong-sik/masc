@@ -326,12 +326,12 @@ let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
   `Assoc with_id
 
 let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    role = json |> member "role" |> to_string |> role_of_string;
-    content = json |> member "content" |> to_string;
-    name = json |> member "name" |> to_string_option;
-    tool_call_id = json |> member "tool_call_id" |> to_string_option;
+    role = json |> U.member "role" |> U.to_string |> role_of_string;
+    content = json |> U.member "content" |> U.to_string;
+    name = json |> U.member "name" |> U.to_string_option;
+    tool_call_id = json |> U.member "tool_call_id" |> U.to_string_option;
   }
 
 let serialize_context (ctx : working_context) : string =
@@ -345,10 +345,10 @@ let serialize_context (ctx : working_context) : string =
 
 let deserialize_context (s : string) ~max_tokens : working_context =
   let json = Yojson.Safe.from_string s in
-  let open Yojson.Safe.Util in
-  let system_prompt = json |> member "system_prompt" |> to_string in
-  let messages = json |> member "messages" |> to_list |> List.map message_of_json in
-  let token_count = json |> member "token_count" |> to_int in
+  let module U = Yojson.Safe.Util in
+  let system_prompt = json |> U.member "system_prompt" |> U.to_string in
+  let messages = json |> U.member "messages" |> U.to_list |> List.map message_of_json in
+  let token_count = json |> U.member "token_count" |> U.to_int in
   { system_prompt; messages; token_count; max_tokens; importance_scores = [] }
 
 let create_checkpoint ctx ~generation =
@@ -435,12 +435,12 @@ let load_latest_checkpoint session =
         let buf = Bytes.create n in
         really_input ic buf 0 n;
         let json = Yojson.Safe.from_string (Bytes.to_string buf) in
-        let open Yojson.Safe.Util in
+        let module U = Yojson.Safe.Util in
         Some {
-          checkpoint_id = json |> member "checkpoint_id" |> to_string;
-          timestamp = json |> member "timestamp" |> to_number;
-          generation = json |> member "generation" |> to_int;
-          message_count = json |> member "message_count" |> to_int;
-          token_count = json |> member "token_count" |> to_int;
-          serialized = json |> member "serialized" |> to_string;
+          checkpoint_id = json |> U.member "checkpoint_id" |> U.to_string;
+          timestamp = json |> U.member "timestamp" |> U.to_number;
+          generation = json |> U.member "generation" |> U.to_int;
+          message_count = json |> U.member "message_count" |> U.to_int;
+          token_count = json |> U.member "token_count" |> U.to_int;
+          serialized = json |> U.member "serialized" |> U.to_string;
         })

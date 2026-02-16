@@ -387,12 +387,12 @@ let get_bool args key default =
   Safe_ops.json_bool ~default key args
 
 let get_bool_opt args key =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    match args |> member key with
+    match args |> U.member key with
     | `Null -> None
-    | j -> Some (to_bool j)
-  with Type_error _ -> None
+    | j -> Some (U.to_bool j)
+  with U.Type_error _ -> None
 
 let get_int args key default =
   Safe_ops.json_int ~default key args
@@ -3749,7 +3749,7 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
   ]
 
 let summarize_metrics_lines (lines : string list) ~(default_generation : int) : metrics_summary =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   List.fold_left (fun acc line ->
     try
       let j = Yojson.Safe.from_string line in
@@ -3765,7 +3765,7 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) : 
       let before_tokens = Safe_ops.json_int ~default:0 "compaction_before_tokens" j in
       let after_tokens = Safe_ops.json_int ~default:0 "compaction_after_tokens" j in
       let saved_tokens = max 0 (before_tokens - after_tokens) in
-      let handoff = j |> member "handoff" in
+      let handoff = j |> U.member "handoff" in
       let handoff_performed = Safe_ops.json_bool ~default:false "performed" handoff in
       let to_model = Safe_ops.json_string_opt "to_model" handoff in
       let prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff in
@@ -5483,7 +5483,7 @@ let handle_keeper_status ctx args : tool_result =
            if not include_metrics_overview then
              None
            else
-             let open Yojson.Safe.Util in
+             let module U = Yojson.Safe.Util in
              let rec find_latest = function
                | [] -> None
                | line :: tl ->
@@ -5492,7 +5492,7 @@ let handle_keeper_status ctx args : tool_result =
                     match Safe_ops.json_string_opt "skill_primary" j with
                     | Some primary when String.trim primary <> "" ->
                       let secondary =
-                        match j |> member "skill_secondary" with
+                        match j |> U.member "skill_secondary" with
                         | `List xs ->
                           xs
                           |> List.filter_map (fun v ->
@@ -5548,18 +5548,18 @@ let handle_keeper_status ctx args : tool_result =
                  ~max_bytes:tail_bytes
                  ~max_lines:tail_messages
              in
-             let open Yojson.Safe.Util in
+             let module U = Yojson.Safe.Util in
              let (items_rev, raw_count, fragment_count, filtered_count) =
                List.fold_left
                  (fun (acc, raw_count, fragment_count, filtered_count) line ->
                    try
                      let j = Yojson.Safe.from_string line in
                      let role =
-                       j |> member "role" |> to_string_option
+                       j |> U.member "role" |> U.to_string_option
                        |> Option.value ~default:"unknown"
                      in
                      let content =
-                       j |> member "content" |> to_string_option
+                       j |> U.member "content" |> U.to_string_option
                        |> Option.value ~default:""
                      in
                      let ts_unix =
@@ -7188,13 +7188,13 @@ let handle_keeper_list ctx args : tool_result =
 	                ]
 	            in
 	            let skill_route_json =
-	              let open Yojson.Safe.Util in
+	              let module U = Yojson.Safe.Util in
 	              match last_skill_metrics with
 	              | None -> `Null
 	              | Some metrics ->
 	                  let primary = Safe_ops.json_string_opt "skill_primary" metrics in
 	                  let secondary =
-	                    match metrics |> member "skill_secondary" with
+	                    match metrics |> U.member "skill_secondary" with
 	                    | `List xs ->
 	                        xs
 	                        |> List.filter_map (fun v ->

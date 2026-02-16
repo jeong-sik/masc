@@ -369,7 +369,7 @@ module FileSystem = struct
 
   let lock_info_of_json json =
     try
-      let open Yojson.Safe.Util in
+      let module U = Yojson.Safe.Util in
       let j = Yojson.Safe.from_string json in
       let parse_float = function
         | `Float f -> Some f

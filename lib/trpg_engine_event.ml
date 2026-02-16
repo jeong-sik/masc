@@ -113,14 +113,14 @@ let to_yojson (e : t) : Yojson.Safe.t =
     ]
 
 let of_yojson (json : Yojson.Safe.t) : (t, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let seq = json |> member "seq" |> to_int in
-    let room_id = json |> member "room_id" |> to_string in
-    let ts = json |> member "ts" |> to_string in
-    let event_type_s = json |> member "type" |> to_string in
-    let actor_id = json |> member "actor_id" |> to_string_option in
-    let payload = json |> member "payload" in
+    let seq = json |> U.member "seq" |> U.to_int in
+    let room_id = json |> U.member "room_id" |> U.to_string in
+    let ts = json |> U.member "ts" |> U.to_string in
+    let event_type_s = json |> U.member "type" |> U.to_string in
+    let actor_id = json |> U.member "actor_id" |> U.to_string_option in
+    let payload = json |> U.member "payload" in
     match event_type_of_string event_type_s with
     | Ok event_type ->
         Ok

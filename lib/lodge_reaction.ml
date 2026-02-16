@@ -125,18 +125,18 @@ let reaction_record_to_json (r : reaction_record) : Yojson.Safe.t =
   ]
 
 let reaction_record_of_json (json : Yojson.Safe.t) : (reaction_record, string) result =
-  let open Yojson.Safe.Util in
-  match json |> member "reaction" |> to_string |> reaction_type_of_string with
+  let module U = Yojson.Safe.Util in
+  match json |> U.member "reaction" |> U.to_string |> reaction_type_of_string with
   | Error msg -> Error msg
   | Ok reaction -> Ok {
-      agent_name = json |> member "agent_name" |> to_string;
-      post_id = json |> member "post_id" |> to_string;
-      post_author = json |> member "post_author" |> to_string;
-      post_topics = json |> member "post_topics" |> to_list |> List.map to_string;
+      agent_name = json |> U.member "agent_name" |> U.to_string;
+      post_id = json |> U.member "post_id" |> U.to_string;
+      post_author = json |> U.member "post_author" |> U.to_string;
+      post_topics = json |> U.member "post_topics" |> U.to_list |> List.map U.to_string;
       reaction;
-      confidence = json |> member "confidence" |> to_float;
-      reason = json |> member "reason" |> to_string_option;
-      timestamp = json |> member "timestamp" |> to_float;
+      confidence = json |> U.member "confidence" |> U.to_float;
+      reason = json |> U.member "reason" |> U.to_string_option;
+      timestamp = json |> U.member "timestamp" |> U.to_float;
     }
 
 let agent_signature_to_json (s : agent_signature) : Yojson.Safe.t =
@@ -152,23 +152,23 @@ let agent_signature_to_json (s : agent_signature) : Yojson.Safe.t =
   ]
 
 let agent_signature_of_json (json : Yojson.Safe.t) : (agent_signature, string) result =
-  let open Yojson.Safe.Util in
-  let recent_jsons = json |> member "recent_reactions" |> to_list in
+  let module U = Yojson.Safe.Util in
+  let recent_jsons = json |> U.member "recent_reactions" |> U.to_list in
   match List.filter_map (fun j ->
     match reaction_record_of_json j with
     | Ok r -> Some r
     | Error _ -> None
   ) recent_jsons with
   | recent_reactions -> Ok {
-      agent_name = json |> member "agent_name" |> to_string;
-      reaction_patterns = json |> member "reaction_patterns" |> to_assoc
-        |> List.map (fun (k, v) -> (k, to_float v));
-      upvote_ratio = json |> member "upvote_ratio" |> to_float;
-      comment_tendency = json |> member "comment_tendency" |> to_float;
+      agent_name = json |> U.member "agent_name" |> U.to_string;
+      reaction_patterns = json |> U.member "reaction_patterns" |> U.to_assoc
+        |> List.map (fun (k, v) -> (k, U.to_float v));
+      upvote_ratio = json |> U.member "upvote_ratio" |> U.to_float;
+      comment_tendency = json |> U.member "comment_tendency" |> U.to_float;
       recent_reactions;
-      generated_self_summary = json |> member "generated_self_summary" |> to_string_option;
-      total_reactions = json |> member "total_reactions" |> to_int;
-      last_updated = json |> member "last_updated" |> to_float;
+      generated_self_summary = json |> U.member "generated_self_summary" |> U.to_string_option;
+      total_reactions = json |> U.member "total_reactions" |> U.to_int;
+      last_updated = json |> U.member "last_updated" |> U.to_float;
     }
 
 (** {1 Storage Operations} *)
@@ -685,14 +685,14 @@ let calibration_to_json (c : confidence_calibration) : Yojson.Safe.t =
   ]
 
 let calibration_of_json (json : Yojson.Safe.t) : confidence_calibration =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   {
-    agent_name = json |> member "agent_name" |> to_string;
-    post_id = json |> member "post_id" |> to_string;
-    predicted_confidence = json |> member "predicted_confidence" |> to_float;
-    actual_outcome = json |> member "actual_outcome" |> to_float;
-    error = json |> member "error" |> to_float;
-    timestamp = json |> member "timestamp" |> to_float;
+    agent_name = json |> U.member "agent_name" |> U.to_string;
+    post_id = json |> U.member "post_id" |> U.to_string;
+    predicted_confidence = json |> U.member "predicted_confidence" |> U.to_float;
+    actual_outcome = json |> U.member "actual_outcome" |> U.to_float;
+    error = json |> U.member "error" |> U.to_float;
+    timestamp = json |> U.member "timestamp" |> U.to_float;
   }
 
 (** Record a calibration data point *)

@@ -125,9 +125,9 @@ let safe_parse_lock_json file_path =
         None
       end else
         let json = Yojson.Safe.from_string content in
-        let open Yojson.Safe.Util in
+        let module U = Yojson.Safe.Util in
         let parse_float_field field =
-          match json |> member field with
+          match json |> U.member field with
           | `Float f -> Some f
           | `Int i -> Some (float_of_int i)
           | `Intlit s -> float_of_string_opt s
@@ -135,7 +135,7 @@ let safe_parse_lock_json file_path =
           | _ -> None
         in
         let parse_string_field field =
-          match json |> member field with
+          match json |> U.member field with
           | `String s -> Some s
           | _ -> None
         in
@@ -637,8 +637,8 @@ module FileSystemBackend : BACKEND = struct
               try
                 let content = In_channel.with_open_text file_path In_channel.input_all in
                 let json = Yojson.Safe.from_string content in
-                let open Yojson.Safe.Util in
-                let own = json |> member "owner" |> to_string in
+                let module U = Yojson.Safe.Util in
+                let own = json |> U.member "owner" |> U.to_string in
                 if own = owner then begin
                   let now = Time_compat.now () in
                   let expires_at = now +. float_of_int safe_ttl in

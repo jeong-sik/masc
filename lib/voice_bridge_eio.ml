@@ -53,25 +53,25 @@ let load_config () =
   if Sys.file_exists config_path then
     try
       let json = Yojson.Safe.from_file config_path in
-      let open Yojson.Safe.Util in
+      let module U = Yojson.Safe.Util in
       let get_float key default =
-        try json |> member "server" |> member key |> to_float
-        with Type_error _ -> try json |> member "retry" |> member key |> to_float
-        with Type_error _ -> default
+        try json |> U.member "server" |> U.member key |> U.to_float
+        with U.Type_error _ -> try json |> U.member "retry" |> U.member key |> U.to_float
+        with U.Type_error _ -> default
       in
       let get_int key default =
-        try json |> member "server" |> member key |> to_int
-        with Type_error _ -> try json |> member "retry" |> member key |> to_int
-        with Type_error _ -> default
+        try json |> U.member "server" |> U.member key |> U.to_int
+        with U.Type_error _ -> try json |> U.member "retry" |> U.member key |> U.to_int
+        with U.Type_error _ -> default
       in
       let voices =
-        try json |> member "agent_voices" |> to_assoc
-            |> List.map (fun (agent, voice) -> (agent, to_string voice))
-        with Type_error _ -> default_config.agent_voices
+        try json |> U.member "agent_voices" |> U.to_assoc
+            |> List.map (fun (agent, voice) -> (agent, U.to_string voice))
+        with U.Type_error _ -> default_config.agent_voices
       in
       {
-        host = (try json |> member "server" |> member "host" |> to_string
-                with Type_error _ -> default_config.host);
+        host = (try json |> U.member "server" |> U.member "host" |> U.to_string
+                with U.Type_error _ -> default_config.host);
         port = get_int "port" default_config.port;
         timeout_seconds = get_float "timeout_seconds" default_config.timeout_seconds;
         max_retries = get_int "max_retries" default_config.max_retries;
@@ -262,19 +262,19 @@ let call_voice_mcp ~sw ~clock ~net ~tool_name ~arguments =
 
 (** Extract result from MCP response *)
 let extract_mcp_result json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let result = json |> member "result" in
+    let result = json |> U.member "result" in
     if result = `Null then
-      let error = json |> member "error" |> member "message" |> to_string_option in
+      let error = json |> U.member "error" |> U.member "message" |> U.to_string_option in
       Error (Option.value error ~default:"Unknown error")
     else
       (* Get content from result *)
-      let content = result |> member "content" |> to_list in
+      let content = result |> U.member "content" |> U.to_list in
       match content with
       | [] -> Ok (`Assoc [])
       | first :: _ ->
-        let text = first |> member "text" |> to_string_option in
+        let text = first |> U.member "text" |> U.to_string_option in
         (match text with
         | Some t ->
           (try Ok (Yojson.Safe.from_string t)
@@ -364,8 +364,8 @@ let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
     | Ok json ->
       (match extract_mcp_result json with
       | Ok data ->
-        let open Yojson.Safe.Util in
-        let session_id = data |> member "session_id" |> to_string_option |> Option.value ~default:"unknown" in
+        let module U = Yojson.Safe.Util in
+        let session_id = data |> U.member "session_id" |> U.to_string_option |> Option.value ~default:"unknown" in
         Ok (`Assoc [
           ("session_id", `String session_id);
           ("agent_id", `String agent_id);
@@ -407,9 +407,9 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?(priority=1) () =
     | Ok json ->
       (match extract_mcp_result json with
       | Ok data ->
-        let open Yojson.Safe.Util in
-        let status = data |> member "status" |> to_string_option |> Option.value ~default:"queued" in
-        let queue_pos = data |> member "queue_position" |> to_int_option |> Option.value ~default:0 in
+        let module U = Yojson.Safe.Util in
+        let status = data |> U.member "status" |> U.to_string_option |> Option.value ~default:"queued" in
+        let queue_pos = data |> U.member "queue_position" |> U.to_int_option |> Option.value ~default:0 in
         Ok (`Assoc [
           ("status", `String status);
           ("agent_id", `String agent_id);
@@ -467,8 +467,8 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
     | Ok json ->
       (match extract_mcp_result json with
       | Ok data ->
-        let open Yojson.Safe.Util in
-        let conference_id = data |> member "conference_id" |> to_string_option |> Option.value ~default:"unknown" in
+        let module U = Yojson.Safe.Util in
+        let conference_id = data |> U.member "conference_id" |> U.to_string_option |> Option.value ~default:"unknown" in
         Ok (`Assoc [
           ("conference_id", `String conference_id);
           ("state", `String "active");

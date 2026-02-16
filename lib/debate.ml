@@ -68,15 +68,15 @@ let argument_to_yojson (a : argument) : Yojson.Safe.t =
   ]
 
 let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let agent = json |> member "agent" |> to_string in
-    let pos_str = json |> member "position" |> to_string in
+    let agent = json |> U.member "agent" |> U.to_string in
+    let pos_str = json |> U.member "position" |> U.to_string in
     match position_of_string pos_str with
     | Error e -> Error e
     | Ok position ->
-        let content = json |> member "content" |> to_string in
-        let evidence = json |> member "evidence" |> to_list |> List.map to_string in
+        let content = json |> U.member "content" |> U.to_string in
+        let evidence = json |> U.member "evidence" |> U.to_list |> List.map U.to_string in
         Ok { agent; position; content; evidence }
   with e ->
     Error (Printf.sprintf "Failed to parse argument: %s" (Printexc.to_string e))
@@ -91,15 +91,15 @@ let debate_to_yojson (d : debate) : Yojson.Safe.t =
   ]
 
 let debate_of_yojson (json : Yojson.Safe.t) : (debate, string) result =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let topic = json |> member "topic" |> to_string in
-    let status_str = json |> member "status" |> to_string in
+    let id = json |> U.member "id" |> U.to_string in
+    let topic = json |> U.member "topic" |> U.to_string in
+    let status_str = json |> U.member "status" |> U.to_string in
     match status_of_string status_str with
     | Error e -> Error e
     | Ok status ->
-        let args_json = json |> member "arguments" |> to_list in
+        let args_json = json |> U.member "arguments" |> U.to_list in
         let args_results = List.map argument_of_yojson args_json in
         let rec collect_args acc = function
           | [] -> Ok (List.rev acc)
@@ -109,7 +109,7 @@ let debate_of_yojson (json : Yojson.Safe.t) : (debate, string) result =
         (match collect_args [] args_results with
          | Error e -> Error e
          | Ok arguments ->
-             let created_at = json |> member "created_at" |> to_float in
+             let created_at = json |> U.member "created_at" |> U.to_float in
              Ok { id; topic; status; arguments; created_at })
   with e ->
     Error (Printf.sprintf "Failed to parse debate: %s" (Printexc.to_string e))

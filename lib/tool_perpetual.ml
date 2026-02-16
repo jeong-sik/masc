@@ -126,14 +126,14 @@ let active_agents : (string, Perpetual_loop.loop_state * Perpetual_loop.loop_con
 let latest_trace_id : string option ref = ref None
 
 let handle_start ctx args =
-  let open Yojson.Safe.Util in
-  let goal = args |> member "goal" |> to_string in
-  let model_strs = args |> member "models" |> to_list |> List.map to_string in
-  let verify = args |> member "verify" |> to_bool_option
+  let module U = Yojson.Safe.Util in
+  let goal = args |> U.member "goal" |> U.to_string in
+  let model_strs = args |> U.member "models" |> U.to_list |> List.map U.to_string in
+  let verify = args |> U.member "verify" |> U.to_bool_option
                |> Option.value ~default:true in
-  let heartbeat = args |> member "heartbeat_sec" |> to_number_option
+  let heartbeat = args |> U.member "heartbeat_sec" |> U.to_number_option
                   |> Option.value ~default:30.0 in
-  let max_idle = args |> member "max_idle" |> to_int_option
+  let max_idle = args |> U.member "max_idle" |> U.to_int_option
                  |> Option.value ~default:5 in
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
@@ -176,8 +176,8 @@ let handle_start ctx args =
   end
 
 let handle_status args =
-  let open Yojson.Safe.Util in
-  let trace = match args |> member "trace_id" |> to_string_option with
+  let module U = Yojson.Safe.Util in
+  let trace = match args |> U.member "trace_id" |> U.to_string_option with
     | Some id -> Some id
     | None -> !latest_trace_id
   in
@@ -211,12 +211,12 @@ let handle_status args =
        | other -> other)
 
 let handle_stop args =
-  let open Yojson.Safe.Util in
-  let trace = match args |> member "trace_id" |> to_string_option with
+  let module U = Yojson.Safe.Util in
+  let trace = match args |> U.member "trace_id" |> U.to_string_option with
     | Some id -> Some id
     | None -> !latest_trace_id
   in
-  let reason = args |> member "reason" |> to_string_option
+  let reason = args |> U.member "reason" |> U.to_string_option
                |> Option.value ~default:"manual stop" in
   match trace with
   | None -> `Assoc [("error", `String "No perpetual agent running")]
@@ -234,12 +234,12 @@ let handle_stop args =
       ]
 
 let handle_inject args =
-  let open Yojson.Safe.Util in
-  let trace = match args |> member "trace_id" |> to_string_option with
+  let module U = Yojson.Safe.Util in
+  let trace = match args |> U.member "trace_id" |> U.to_string_option with
     | Some id -> Some id
     | None -> !latest_trace_id
   in
-  let message = args |> member "message" |> to_string in
+  let message = args |> U.member "message" |> U.to_string in
   match trace with
   | None -> `Assoc [("error", `String "No perpetual agent running")]
   | Some id ->

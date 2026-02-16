@@ -85,15 +85,15 @@ module JsonRpc = struct
 
   (** Parse JSON-RPC request *)
   let parse_request (json : Yojson.Safe.t) : (request, string) result =
-    let open Yojson.Safe.Util in
+    let module U = Yojson.Safe.Util in
     try
-      let jsonrpc = json |> member "jsonrpc" |> to_string in
+      let jsonrpc = json |> U.member "jsonrpc" |> U.to_string in
       if jsonrpc <> version then
         Error (Printf.sprintf "Invalid JSON-RPC version: %s" jsonrpc)
       else
-        let id = json |> member "id" |> to_string_option in
-        let method_name = json |> member "method" |> to_string in
-        let params = json |> member "params" in
+        let id = json |> U.member "id" |> U.to_string_option in
+        let method_name = json |> U.member "method" |> U.to_string in
+        let params = json |> U.member "params" in
         Ok { id; method_name; params; headers = [] }
     with e -> Error (Printexc.to_string e)
 

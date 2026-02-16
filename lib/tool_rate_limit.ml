@@ -16,18 +16,18 @@ let handle_rate_limit_status ctx _args =
   let buf = Buffer.create 512 in
   Buffer.add_string buf "📊 **Rate Limit Status**\n";
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   Buffer.add_string buf (Printf.sprintf "Agent: %s (Role: %s)\n"
-    (status |> member "agent" |> to_string)
-    (status |> member "role" |> to_string));
+    (status |> U.member "agent" |> U.to_string)
+    (status |> U.member "role" |> U.to_string));
   Buffer.add_string buf (Printf.sprintf "Burst remaining: %d\n\n"
-    (status |> member "burst_remaining" |> to_int));
+    (status |> U.member "burst_remaining" |> U.to_int));
   Buffer.add_string buf "Categories:\n";
-  status |> member "categories" |> to_list |> List.iter (fun cat ->
-    let cat_name = cat |> member "category" |> to_string in
-    let current = cat |> member "current" |> to_int in
-    let cat_limit = cat |> member "limit" |> to_int in
-    let remaining = cat |> member "remaining" |> to_int in
+  status |> U.member "categories" |> U.to_list |> List.iter (fun cat ->
+    let cat_name = cat |> U.member "category" |> U.to_string in
+    let current = cat |> U.member "current" |> U.to_int in
+    let cat_limit = cat |> U.member "limit" |> U.to_int in
+    let remaining = cat |> U.member "remaining" |> U.to_int in
     Buffer.add_string buf (Printf.sprintf "  • %s: %d/%d (remaining: %d)\n"
       cat_name current cat_limit remaining)
   );

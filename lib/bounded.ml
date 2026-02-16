@@ -443,8 +443,8 @@ let result_to_json result =
 
 (** Parse retry config from JSON *)
 let retry_config_of_json json =
-  let open Yojson.Safe.Util in
-  let retry = json |> member "retry" in
+  let module U = Yojson.Safe.Util in
+  let retry = json |> U.member "retry" in
   if retry = `Null then
     default_retry_config
   else
@@ -461,11 +461,11 @@ let retry_config_of_json json =
 
 (** Parse constraints from JSON *)
 let constraints_of_json json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   let get_int_opt key = Safe_ops.json_int_opt key json in
   let get_float_opt key =
-    try Some (json |> member key |> to_float)
-    with Yojson.Safe.Util.Type_error _ -> None
+    try Some (json |> U.member key |> U.to_float)
+    with U.Type_error _ -> None
   in
   {
     max_turns = get_int_opt "max_turns";
@@ -481,22 +481,22 @@ let constraints_of_json json =
 
 (** Parse goal from JSON *)
 let goal_of_json json =
-  let open Yojson.Safe.Util in
-  let path = json |> member "path" |> to_string in
-  let cond = json |> member "condition" in
+  let module U = Yojson.Safe.Util in
+  let path = json |> U.member "path" |> U.to_string in
+  let cond = json |> U.member "condition" in
   let condition =
-    if member "eq" cond <> `Null then
-      Eq (member "eq" cond)
-    else if member "neq" cond <> `Null then
-      Neq (member "neq" cond)
-    else if member "lt" cond <> `Null then
-      Lt (member "lt" cond |> to_float)
-    else if member "lte" cond <> `Null then
-      Lte (member "lte" cond |> to_float)
-    else if member "gt" cond <> `Null then
-      Gt (member "gt" cond |> to_float)
-    else if member "gte" cond <> `Null then
-      Gte (member "gte" cond |> to_float)
+    if U.member "eq" cond <> `Null then
+      Eq (U.member "eq" cond)
+    else if U.member "neq" cond <> `Null then
+      Neq (U.member "neq" cond)
+    else if U.member "lt" cond <> `Null then
+      Lt (U.member "lt" cond |> U.to_float)
+    else if U.member "lte" cond <> `Null then
+      Lte (U.member "lte" cond |> U.to_float)
+    else if U.member "gt" cond <> `Null then
+      Gt (U.member "gt" cond |> U.to_float)
+    else if U.member "gte" cond <> `Null then
+      Gte (U.member "gte" cond |> U.to_float)
     else if member "between" cond <> `Null then
       let arr = member "between" cond |> to_list in
       Between (List.nth arr 0 |> to_float, List.nth arr 1 |> to_float)

@@ -37,16 +37,16 @@ let run_record_to_json (r : run_record) : Yojson.Safe.t =
   ]
 
 let run_record_of_json (json : Yojson.Safe.t) : run_record option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let task_id = json |> member "task_id" |> to_string in
-    let agent_name = json |> member "agent_name" |> to_string_option in
-    let plan = json |> member "plan" |> to_string_option |> Option.value ~default:"" in
-    let deliverable = json |> member "deliverable" |> to_string_option |> Option.value ~default:"" in
-    let created_at = json |> member "created_at" |> to_string in
-    let updated_at = json |> member "updated_at" |> to_string in
+    let task_id = json |> U.member "task_id" |> U.to_string in
+    let agent_name = json |> U.member "agent_name" |> U.to_string_option in
+    let plan = json |> U.member "plan" |> U.to_string_option |> Option.value ~default:"" in
+    let deliverable = json |> U.member "deliverable" |> U.to_string_option |> Option.value ~default:"" in
+    let created_at = json |> U.member "created_at" |> U.to_string in
+    let updated_at = json |> U.member "updated_at" |> U.to_string in
     Some { task_id; agent_name; plan; deliverable; created_at; updated_at }
-  with Yojson.Safe.Util.Type_error (msg, _) ->
+  with U.Type_error (msg, _) ->
     Printf.eprintf "[WARN] run_of_json type error: %s\n%!" msg;
     None
 
@@ -57,12 +57,12 @@ let log_entry_to_json (e : log_entry) : Yojson.Safe.t =
   ]
 
 let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let timestamp = json |> member "timestamp" |> to_string in
-    let note = json |> member "note" |> to_string in
+    let timestamp = json |> U.member "timestamp" |> U.to_string in
+    let note = json |> U.member "note" |> U.to_string in
     Some { timestamp; note }
-  with Yojson.Safe.Util.Type_error (msg, _) ->
+  with U.Type_error (msg, _) ->
     Printf.eprintf "[WARN] log_entry_of_json type error: %s\n%!" msg;
     None
 

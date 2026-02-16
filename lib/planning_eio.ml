@@ -43,13 +43,13 @@ let error_entry_to_yojson e =
   ]
 
 let error_entry_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let timestamp = json |> member "timestamp" |> to_string in
-    let error_type = json |> member "error_type" |> to_string in
-    let message = json |> member "message" |> to_string in
-    let context = json |> member "context" |> to_string_option in
-    let resolved = json |> member "resolved" |> to_bool in
+    let timestamp = json |> U.member "timestamp" |> U.to_string in
+    let error_type = json |> U.member "error_type" |> U.to_string in
+    let message = json |> U.member "message" |> U.to_string in
+    let context = json |> U.member "context" |> U.to_string_option in
+    let resolved = json |> U.member "resolved" |> U.to_bool in
     Ok { timestamp; error_type; message; context; resolved }
   with e -> Error (Printexc.to_string e)
 
@@ -65,23 +65,23 @@ let planning_context_to_yojson ctx =
   ]
 
 let planning_context_of_yojson json =
-  let open Yojson.Safe.Util in
+  let module U = Yojson.Safe.Util in
   try
-    let task_id = json |> member "task_id" |> to_string in
-    let task_plan = json |> member "task_plan" |> to_string in
-    let notes = json |> member "notes" |> to_list |> List.map to_string in
-    let errors_json = json |> member "errors" in
+    let task_id = json |> U.member "task_id" |> U.to_string in
+    let task_plan = json |> U.member "task_plan" |> U.to_string in
+    let notes = json |> U.member "notes" |> U.to_list |> List.map U.to_string in
+    let errors_json = json |> U.member "errors" in
     let errors =
       if errors_json = `Null then []
       else
-        errors_json |> to_list |> List.filter_map (fun j ->
+        errors_json |> U.to_list |> List.filter_map (fun j ->
           match error_entry_of_yojson j with
           | Ok e -> Some e
           | Error _ -> None)
     in
-    let deliverable = json |> member "deliverable" |> to_string in
-    let created_at = json |> member "created_at" |> to_string in
-    let updated_at = json |> member "updated_at" |> to_string in
+    let deliverable = json |> U.member "deliverable" |> U.to_string in
+    let created_at = json |> U.member "created_at" |> U.to_string in
+    let updated_at = json |> U.member "updated_at" |> U.to_string in
     Ok { task_id; task_plan; notes; errors; deliverable; created_at; updated_at }
   with e -> Error (Printexc.to_string e)
 

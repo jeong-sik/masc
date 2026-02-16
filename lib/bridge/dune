@@ -1,0 +1,5 @@
+
+(library
+ (name event_bridge)
+ (public_name masc_mcp.bridge)
+ (modules event_bus))

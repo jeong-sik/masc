@@ -10,6 +10,8 @@ let public_event_types =
     Trpg_engine_event.Session_started;
     Trpg_engine_event.Party_selected;
     Trpg_engine_event.Actor_spawned;
+    Trpg_engine_event.Actor_updated;
+    Trpg_engine_event.Actor_deleted;
     Trpg_engine_event.Actor_claimed;
     Trpg_engine_event.Actor_released;
     Trpg_engine_event.Intervention_submitted;

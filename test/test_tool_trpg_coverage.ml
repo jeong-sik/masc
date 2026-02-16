@@ -594,6 +594,124 @@ let test_actor_spawn_claim_release_flow () =
     (count_from_json (parse_json_exn stream_released));
   cleanup_dir base_dir
 
+let test_actor_update_delete_flow () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = None }
+  in
+  let room_id = "room-actor-update-delete" in
+  let actor_id = "npc-fox" in
+
+  let ok_spawn, _spawn =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("role", `String "npc");
+            ("name", `String "Fox");
+            ("hp", `Int 10);
+            ("max_hp", `Int 10);
+            ("traits", `List [ `String "sneaky" ]);
+          ])
+  in
+  Alcotest.(check bool) "spawn actor ok" true ok_spawn;
+
+  let ok_claim, _claim =
+    dispatch_exn ctx ~name:"masc_trpg_actor_claim"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("keeper_name", `String "keeper-fox");
+          ])
+  in
+  Alcotest.(check bool) "claim actor ok" true ok_claim;
+
+  let ok_update, update_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_update"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("name", `String "Fox Prime");
+            ("hp", `Int 0);
+            ("max_hp", `Int 12);
+            ("alive", `Bool false);
+            ("traits", `List [ `String "swift"; `String "cunning" ]);
+            ("skills", `List [ `String "dash" ]);
+            ("inventory", `List [ `String "potion" ]);
+          ])
+  in
+  Alcotest.(check bool) "update actor ok" true ok_update;
+  let update_json = parse_json_exn update_body in
+  let state = Yojson.Safe.Util.member "state" update_json in
+  let actor = state |> Yojson.Safe.Util.member "party" |> Yojson.Safe.Util.member actor_id in
+  Alcotest.(check string) "updated name" "Fox Prime"
+    (actor |> Yojson.Safe.Util.member "name" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check int) "updated hp" 0
+    (actor |> Yojson.Safe.Util.member "hp" |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int) "updated max_hp" 12
+    (actor |> Yojson.Safe.Util.member "max_hp" |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool) "updated alive false" false
+    (actor |> Yojson.Safe.Util.member "alive" |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check int) "inventory size" 1
+    (actor |> Yojson.Safe.Util.member "inventory" |> Yojson.Safe.Util.to_list |> List.length);
+  Alcotest.(check bool) "actor lease released when dead" true
+    ((state |> Yojson.Safe.Util.member "actor_control" |> Yojson.Safe.Util.member actor_id) = `Null);
+
+  let ok_delete, delete_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_delete"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("reason", `String "retired");
+          ])
+  in
+  Alcotest.(check bool) "delete actor ok" true ok_delete;
+  let delete_state =
+    parse_json_exn delete_body |> Yojson.Safe.Util.member "state"
+  in
+  Alcotest.(check bool) "actor removed from party" true
+    ((delete_state |> Yojson.Safe.Util.member "party" |> Yojson.Safe.Util.member actor_id)
+    = `Null);
+
+  let _, stream_updated =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("event_type", `String "actor.updated");
+          ])
+  in
+  Alcotest.(check int)
+    "actor.updated count"
+    1
+    (count_from_json (parse_json_exn stream_updated));
+
+  let _, stream_deleted =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("event_type", `String "actor.deleted");
+          ])
+  in
+  Alcotest.(check int)
+    "actor.deleted count"
+    1
+    (count_from_json (parse_json_exn stream_deleted));
+  cleanup_dir base_dir
+
 let test_actor_claim_rejects_dead_actor () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -680,6 +798,10 @@ let () =
             "spawn + claim + release flow"
             `Quick
             test_actor_spawn_claim_release_flow;
+          Alcotest.test_case
+            "update + delete flow"
+            `Quick
+            test_actor_update_delete_flow;
           Alcotest.test_case
             "reject dead actor claim"
             `Quick

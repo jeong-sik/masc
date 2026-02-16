@@ -160,6 +160,16 @@ let test_html_contains_trpg_session_history_and_assignment () =
     && contains_substr "function renderTrpgPartyAssignment(state, events)" html
     && contains_substr "function renderTrpgGameHistory(events)" html)
 
+let test_html_contains_trpg_next_action_guide () =
+  let html = Web_dashboard.html () in
+  check bool "trpg next action guide" true
+    (String.length html > 0
+    && contains_substr "id=\"trpg-next-action\"" html
+    && contains_substr "id=\"trpg-next-action-btn\"" html
+    && contains_substr "function trpgRunNextAction()" html
+    && contains_substr "function trpgUpdateNextAction(state, events)" html
+    && contains_substr "function trpgSanitizeNarrative(raw)" html)
+
 let test_html_contains_keeper_goal_horizon_kpis () =
   let html = Web_dashboard.html () in
   check bool "keeper goal horizon kpis" true
@@ -203,6 +213,10 @@ let () =
         "trpg session/history/assignment panels"
         `Quick
         test_html_contains_trpg_session_history_and_assignment;
+      test_case
+        "trpg next action guide"
+        `Quick
+        test_html_contains_trpg_next_action_guide;
       test_case "keeper goal horizon kpis" `Quick test_html_contains_keeper_goal_horizon_kpis;
     ];
   ]

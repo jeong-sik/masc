@@ -3,6 +3,7 @@ pub mod fx;
 pub mod map;
 pub mod overlay;
 pub mod transition;
+pub mod ui;
 
 use bevy::prelude::*;
 
@@ -29,6 +30,7 @@ impl Plugin for MapRenderPlugin {
                 overlay::setup_weather_overlay,
                 overlay::setup_mood_overlay,
                 transition::setup_fade_overlay,
+                ui::setup_ui,
             ))
             // Update: character sprites, positions, HP bars, effects, transitions
             .add_systems(Update, (
@@ -45,6 +47,7 @@ impl Plugin for MapRenderPlugin {
                 overlay::spawn_prop_notification,
                 transition::trigger_scene_transition,
                 transition::animate_scene_transition,
+                ui::handle_button_interactions,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Cleanup: despawn all TRPG scene entities and reset resources
             .add_systems(OnExit(ViewerMode::Trpg), cleanup_trpg_scene);
@@ -68,6 +71,7 @@ fn cleanup_trpg_scene(
             With<HpBarSprite>,
             With<WeatherOverlay>,
             With<MoodOverlay>,
+            With<ui::UiMarker>,
         )>,
     >,
     mut scene_transition: ResMut<SceneTransition>,

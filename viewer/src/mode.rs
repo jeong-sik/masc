@@ -801,6 +801,33 @@ fn set_round_run_fields(
     }
 }
 
+/// Populate the `#new-game-assignment` DOM element with a human-readable
+/// summary of the game assignment (DM keeper + player-to-keeper mappings).
+#[cfg(target_arch = "wasm32")]
+fn set_new_game_assignment(
+    doc: &web_sys::Document,
+    dm_keeper: &str,
+    player_map: &std::collections::HashMap<String, String>,
+    actor_ids: &[String],
+) {
+    let Some(el) = doc.get_element_by_id("new-game-assignment") else {
+        return;
+    };
+    let player_pairs: Vec<(String, String)> = actor_ids
+        .iter()
+        .filter_map(|actor_id| {
+            player_map
+                .get(actor_id)
+                .map(|keeper| (actor_id.clone(), keeper.clone()))
+        })
+        .collect();
+    el.set_text_content(Some(&format_round_plan_for_display(
+        dm_keeper,
+        &player_pairs,
+    )));
+    let _ = el.set_attribute("style", "display:block");
+}
+
 #[cfg(target_arch = "wasm32")]
 const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
 #[cfg(target_arch = "wasm32")]

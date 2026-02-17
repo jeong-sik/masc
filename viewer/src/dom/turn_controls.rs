@@ -74,7 +74,7 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
         } else {
             normalize_room_status(&room_state.status)
         };
-        let room_allows_control = matches!(status.as_str(), "active" | "running" | "idle");
+        let room_allows_control = is_room_active_for_controls(&status);
 
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
@@ -82,6 +82,7 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
         let Some(panel) = doc.get_element_by_id("turn-controls") else {
             return;
         };
+
 
         let claimed_keeper = doc
             .get_element_by_id("claimed-keeper")
@@ -112,6 +113,27 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
         };
         let _ = panel.set_attribute("style", style);
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_room_active_for_controls(status: &str) -> bool {
+    matches!(
+        status,
+        "active"
+            | "running"
+            | "in_progress"
+            | "round"
+            | "combat"
+            | "briefing"
+            | "dm_narration"
+            | "party_discussion"
+            | "action_declaration"
+            | "dice_resolution"
+            | "outcome_narration"
+            | "state_update"
+            | "transition"
+            | "paused"
+    )
 }
 
 // ─── Event: Advance Button ──────────────────

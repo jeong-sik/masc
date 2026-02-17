@@ -1942,7 +1942,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
 fn set_new_game_assignment(
     doc: &web_sys::Document,
     dm_keeper: &str,
-    player_map: &serde_json::Map<String, Value>,
+    player_map: &std::collections::HashMap<String, String>,
     actor_ids: &[String],
 ) {
     let Some(el) = doc.get_element_by_id("new-game-assignment") else {
@@ -1953,7 +1953,7 @@ fn set_new_game_assignment(
     for actor_id in actor_ids {
         let keeper = player_map
             .get(actor_id)
-            .and_then(Value::as_str)
+            .map(String::as_str)
             .unwrap_or("미정");
         html.push_str(&format!(
             "<li>{} → {}</li>",

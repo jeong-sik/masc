@@ -3,6 +3,7 @@ pub mod actor_join;
 pub mod character_panel;
 pub mod choice_panel;
 pub mod connection;
+pub mod escape;
 pub mod gameplay_events;
 pub mod dice_log;
 pub mod endgame;

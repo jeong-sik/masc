@@ -2,22 +2,7 @@ use bevy::prelude::*;
 
 use crate::game::events::{AreaMoved, CharacterDied, ItemAcquired};
 
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
-fn trim_log(log_el: &web_sys::Element, max_entries: u32) {
-    while log_el.child_element_count() > max_entries {
-        let Some(first) = log_el.first_element_child() else {
-            break;
-        };
-        let _ = log_el.remove_child(&first);
-    }
-}
+use super::escape::{html_escape, scroll_to_bottom, trim_log};
 
 /// Renders AreaMoved, ItemAcquired, and CharacterDied events into the
 /// `#narrative-log` DOM element as styled narrative blocks.
@@ -72,5 +57,6 @@ pub fn update_gameplay_events_dom(
         let _ = log_el.append_child(&entry);
     }
 
+    scroll_to_bottom(&log_el);
     trim_log(&log_el, 200);
 }

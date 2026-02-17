@@ -6,13 +6,7 @@ use wasm_bindgen::JsCast;
 use crate::game::state::{ChoiceState, CombatState, OverlayState};
 
 #[cfg(target_arch = "wasm32")]
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
+use super::escape::html_escape;
 
 /// Cache to avoid redundant DOM writes.
 #[derive(Resource, Debug, Default)]

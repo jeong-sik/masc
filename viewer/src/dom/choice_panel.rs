@@ -2,6 +2,9 @@ use bevy::prelude::*;
 
 use crate::game::events::{ChoiceAvailable, ChoiceResolved, CombatStarted};
 
+#[cfg(target_arch = "wasm32")]
+use super::escape::{html_escape, scroll_to_bottom, trim_log};
+
 /// Renders choice and combat events into the `#narrative-log` DOM element.
 /// Uses the same append-child pattern as `narrative.rs` and `dice_log.rs`.
 pub fn update_choice_dom(
@@ -37,6 +40,8 @@ pub fn update_choice_dom(
                 opts
             ));
             let _ = log.append_child(&div);
+            scroll_to_bottom(&log);
+            trim_log(&log, 200);
         }
 
         for ChoiceResolved(p) in resolutions.read() {
@@ -45,6 +50,8 @@ pub fn update_choice_dom(
             let text = format!("{} chose: {}", &p.character, &p.description);
             div.set_text_content(Some(&text));
             let _ = log.append_child(&div);
+            scroll_to_bottom(&log);
+            trim_log(&log, 200);
         }
 
         for CombatStarted(p) in combats.read() {
@@ -61,6 +68,8 @@ pub fn update_choice_dom(
                 html_escape(&enemies)
             ));
             let _ = log.append_child(&div);
+            scroll_to_bottom(&log);
+            trim_log(&log, 200);
         }
     }
 
@@ -68,9 +77,3 @@ pub fn update_choice_dom(
     let _ = (&mut choices, &mut resolutions, &mut combats);
 }
 
-#[cfg(target_arch = "wasm32")]
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}

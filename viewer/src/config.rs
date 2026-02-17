@@ -152,3 +152,26 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
 pub fn trpg_room_url(path: &str) -> String {
     format!("{}/rooms/{}/{}", MASC_MCP_URL, current_room_id(), path.trim_start_matches('/'))
 }
+
+// ─── Actor ID Management ─────────────────────
+
+/// Get current actor ID from dashboard attribute (selected player in lobby).
+/// This serves as a fallback when TurnProgressState doesn't have an active actor.
+pub fn current_actor_id() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            // 1. Try dashboard attribute (set by lobby/character selection)
+            if let Some(el) = doc.get_element_by_id("dashboard") {
+                if let Some(actor) = el.get_attribute("data-current-actor") {
+                    let actor = actor.trim().to_string();
+                    if !actor.is_empty() {
+                        return Some(actor);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}

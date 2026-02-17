@@ -65,11 +65,11 @@
 | T1 | context_ratio = -1.0 (negative) | P0 | DONE (test_negative_context_ratio) |
 | T2 | context_ratio = 2.0 (>1.0) | P0 | DONE (test_over_one_context_ratio) |
 | T3 | spawn failure → fallback path | P0 | DONE (test_mitosis_check_zero_ratio_warning) |
-| T4 | DNA extraction with empty context | P1 | OPEN |
-| T5 | Concurrent handoff attempts | P1 | OPEN |
-| T6 | Generation overflow (>10) | P1 | OPEN |
-| T7 | Full lifecycle: prepare → handoff | P1 | OPEN |
-| T8 | Metrics recording accuracy | P1 | OPEN |
+| T4 | DNA extraction with empty context | P1 | DONE (5 tests, PR #229) |
+| T5 | Concurrent handoff attempts | P1 | DONE (4 tests, PR #229) |
+| T6 | Generation overflow (>10) | P1 | DONE (6 tests, PR #229) |
+| T7 | Full lifecycle: prepare → handoff | P1 | DONE (6 tests, PR #229) |
+| T8 | Metrics recording accuracy | P1 | DONE (8 tests, PR #229) |
 
 ---
 
@@ -111,5 +111,5 @@
 - **P0 Completed**: 4/5 (P0-4 addressed via cascade fallback)
 - **P1 Completed**: 7/7
 - **P2 Completed**: 0/5
-- **Test Gaps Closed**: 3/8 (T1, T2, T3)
-- **Items Remaining**: P2-1..P2-5, T4..T8
+- **Test Gaps Closed**: 8/8 (T1-T8 all closed)
+- **Items Remaining**: P2-1..P2-5

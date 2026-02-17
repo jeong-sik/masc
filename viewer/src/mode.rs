@@ -172,8 +172,7 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
         };
 
         clear_trpg_dom(&doc);
-        let lobby_room = crate::config::room_id_from_url()
-            .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
+        let lobby_room = crate::config::current_room_id();
         crate::config::set_current_room_id(&lobby_room);
         // Show lobby UI, hide dashboard
         if let Some(body) = doc.body() {

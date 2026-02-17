@@ -32,6 +32,7 @@ pub struct NarrativePayload {
     pub text: String,
     pub phase: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub turn: u32,
     #[serde(default)]
     pub speaker: Option<String>,
@@ -159,6 +160,7 @@ pub struct TurnProgressUpdated(pub TurnProgressPayload);
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PartySelectedPayload {
+    #[allow(dead_code)]
     pub room_id: String,
     #[serde(default)]
     pub selected_player_ids: Vec<String>,
@@ -180,6 +182,7 @@ pub struct RoomLifecyclePayload {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionStartedPayload {
+    #[allow(dead_code)]
     pub room_id: String,
     #[serde(default)]
     pub session_id: String,
@@ -239,12 +242,14 @@ pub struct ActorLifecyclePayload {
 pub struct RoomEndedPayload {
     pub room_id: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TurnActionResolvedPayload {
     #[serde(default)]
+    #[allow(dead_code)]
     pub turn: u32,
     pub actor_id: String,
     pub action: String,

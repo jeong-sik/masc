@@ -585,7 +585,7 @@ fn parse_dice_log(root: &Value) -> Option<Vec<DiceRollPayload>> {
 fn parse_dice_log_entry(
     entry: &Value,
     fallback_turn: u32,
-    fallback_phase: &str,
+    _fallback_phase: &str,
 ) -> Option<DiceRollPayload> {
     if !entry.is_object() {
         return None;

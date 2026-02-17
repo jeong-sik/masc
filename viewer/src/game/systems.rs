@@ -440,3 +440,95 @@ pub fn apply_scene_transitioned(
         room_state.current_scenario = payload.to_scene.clone();
     }
 }
+
+// --- Session / Turn lifecycle systems ---
+
+pub fn apply_party_selected(
+    mut events: MessageReader<PartySelected>,
+) {
+    for PartySelected(_p) in events.read() {
+        // Log-only: no ECS state mutation needed
+    }
+}
+
+pub fn apply_room_created(
+    mut events: MessageReader<RoomCreated>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for RoomCreated(p) in events.read() {
+        room_state.id = p.room_id.clone();
+        room_state.status = "created".to_string();
+    }
+}
+
+pub fn apply_room_started(
+    mut events: MessageReader<RoomStarted>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for RoomStarted(p) in events.read() {
+        if !p.status.is_empty() {
+            room_state.status = p.status.clone();
+        } else {
+            room_state.status = "started".to_string();
+        }
+    }
+}
+
+pub fn apply_session_started(
+    mut events: MessageReader<SessionStarted>,
+) {
+    for SessionStarted(_p) in events.read() {
+        // Log-only: session ID is informational
+    }
+}
+
+pub fn apply_phase_changed(
+    mut events: MessageReader<PhaseChanged>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for PhaseChanged(p) in events.read() {
+        room_state.phase = TurnPhase::from_str(&p.phase);
+    }
+}
+
+pub fn apply_turn_started(
+    mut events: MessageReader<TurnStarted>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for TurnStarted(p) in events.read() {
+        room_state.turn = p.turn;
+        room_state.phase = TurnPhase::from_str(&p.phase);
+    }
+}
+
+pub fn apply_turn_action_resolved(
+    mut events: MessageReader<TurnActionResolved>,
+) {
+    for TurnActionResolved(_p) in events.read() {
+        // Log-only: action result is rendered by DOM system
+    }
+}
+
+pub fn apply_intervention_submitted(
+    mut events: MessageReader<InterventionSubmitted>,
+) {
+    for InterventionSubmitted(_p) in events.read() {
+        // Log-only: rendered by DOM system
+    }
+}
+
+pub fn apply_intervention_applied(
+    mut events: MessageReader<InterventionApplied>,
+) {
+    for InterventionApplied(_p) in events.read() {
+        // Log-only: rendered by DOM system
+    }
+}
+
+pub fn apply_keeper_unavailable(
+    mut events: MessageReader<KeeperUnavailable>,
+) {
+    for KeeperUnavailable(_p) in events.read() {
+        // Log-only: warning rendered by DOM system
+    }
+}

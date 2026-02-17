@@ -24,6 +24,8 @@ web-sys = { version = "0.3", features = [
     "HtmlButtonElement",
     "HtmlElement",
     "HtmlInputElement",
+    "HtmlOptionsCollection",
+    "HtmlOptionElement",
     "HtmlSelectElement",
     "CssStyleDeclaration",
     "KeyboardEvent",

@@ -2561,3 +2561,112 @@ body.mode-lobby #dashboard {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* ─── Endgame Overlay ────────────────────── */
+
+.endgame-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.88);
+    animation: endgame-fade-in 0.6s ease;
+}
+
+@keyframes endgame-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.endgame-content {
+    text-align: center;
+    padding: 2.5em;
+    max-width: 600px;
+}
+
+.endgame-title {
+    font-family: var(--font-display, 'Cinzel', serif);
+    font-size: 2.8em;
+    margin: 0 0 0.3em;
+    letter-spacing: 0.05em;
+}
+
+.endgame-overlay.victory .endgame-title {
+    color: var(--accent-primary, #c4a265);
+    text-shadow: 0 0 20px rgba(196, 162, 101, 0.4);
+}
+
+.endgame-overlay.defeat .endgame-title {
+    color: var(--accent-secondary, #8b2500);
+    text-shadow: 0 0 20px rgba(139, 37, 0, 0.4);
+}
+
+.endgame-message {
+    font-family: var(--font-body, 'EB Garamond', serif);
+    font-size: 1.2em;
+    color: var(--text-dim, #6a5d4d);
+    line-height: 1.6;
+    margin: 0 auto 1.8em;
+}
+
+.endgame-btn {
+    padding: 0.6em 2.4em;
+    border: 1px solid var(--accent-primary, #c4a265);
+    background: transparent;
+    color: var(--text-primary, #d4c4a8);
+    cursor: pointer;
+    font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
+    font-size: 0.95em;
+    border-radius: var(--panel-radius, 2px);
+    transition: background 0.2s, color 0.2s;
+}
+
+.endgame-btn:hover {
+    background: var(--accent-primary, #c4a265);
+    color: var(--bg-deep, #0a0a12);
+}
+
+/* ── Choice blocks in narrative log ── */
+.choice-block {
+    border-left: 3px solid var(--accent-primary, #c4a265);
+    padding-left: 0.8em;
+    margin: 0.5em 0;
+}
+.choice-character {
+    font-weight: bold;
+    color: var(--accent-primary, #c4a265);
+}
+.choice-desc {
+    color: var(--text-dim, #999);
+}
+.choice-list {
+    margin: 0.3em 0 0 1em;
+    padding: 0;
+    list-style: none;
+}
+.choice-option {
+    padding: 0.2em 0.5em;
+    margin: 0.1em 0;
+    border: 1px solid var(--border-main, #2a1f1a);
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+.choice-resolved {
+    opacity: 0.7;
+    font-style: italic;
+}
+
+/* ── Combat alert in narrative log ── */
+.combat-block {
+    border-left: 3px solid var(--accent-secondary, #8b2500);
+    padding-left: 0.8em;
+    margin: 0.5em 0;
+}
+.combat-alert {
+    color: #e74c3c;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}

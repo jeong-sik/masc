@@ -22,10 +22,7 @@ const PHASES: &[&str] = &[
 ];
 
 /// Updates the turn phase bar in the DOM.
-pub fn update_turn_phase_dom(
-    room_state: Res<RoomState>,
-    mut cache: ResMut<TurnPhaseCache>,
-) {
+pub fn update_turn_phase_dom(room_state: Res<RoomState>, mut cache: ResMut<TurnPhaseCache>) {
     let current_phase = room_state.phase.as_str().to_string();
 
     // Skip if nothing changed
@@ -57,9 +54,7 @@ pub fn update_turn_phase_dom(
             continue;
         };
 
-        let phase_name = element
-            .get_attribute("data-phase")
-            .unwrap_or_default();
+        let phase_name = element.get_attribute("data-phase").unwrap_or_default();
         let phase_idx = PHASES.iter().position(|&p| p == phase_name);
 
         let class = match (current_idx, phase_idx) {

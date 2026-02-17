@@ -39,6 +39,7 @@ web-sys = { version = "0.3", features = [
     "RequestMode",
     "Response",
     "Headers",
+    "HtmlAudioElement",
 ] }
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }

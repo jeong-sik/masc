@@ -9,6 +9,9 @@ pub const MASC_MCP_URL: &str = "";
 
 pub const DEFAULT_ROOM_ID: &str = "default";
 
+/// Polling interval for TRPG stream fallback (milliseconds).
+pub const TRPG_POLL_INTERVAL_MS: u64 = 2000;
+
 /// Legacy TRPG Engine URL (for direct mode)
 #[cfg(debug_assertions)]
 pub const TRPG_ENGINE_URL: &str = "http://localhost:8000";

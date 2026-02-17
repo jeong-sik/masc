@@ -113,3 +113,7 @@
 - **P2 Completed**: 0/5
 - **Test Gaps Closed**: 8/8 (T1-T8 all closed)
 - **Items Remaining**: P2-1..P2-5
+
+## Process Improvements
+- [x] [Process] Enforce Worktree Workflow: Prevent `git checkout -b` in root directory via git hooks or wrapper scripts. (Triggered by manual intervention incident)
+

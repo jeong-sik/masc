@@ -25,6 +25,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
 use crate::game::lifecycle::TrpgLifecycleState;
+#[cfg(target_arch = "wasm32")]
+use crate::dom::escape::html_escape;
 
 /// Top-level viewer mode. Determines which plugins/systems are active
 /// and which SSE endpoint the viewer connects to.
@@ -427,6 +429,7 @@ fn bind_debug_controls(doc: &web_sys::Document) {
         return;
     };
     if toggle.get_attribute("data-bound").as_deref() == Some("1") {
+        bind_dedup_status_toggle(doc);
         return;
     }
     let _ = toggle.set_attribute("data-bound", "1");
@@ -449,15 +452,91 @@ fn bind_debug_controls(doc: &web_sys::Document) {
     });
 
     cb.forget();
+    bind_dedup_status_toggle(doc);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+fn dedup_sample_list(doc: &web_sys::Document, attr: &str) -> String {
+    let Some(dashboard) = doc.get_element_by_id("dashboard") else {
+        return "<li>(없음)</li>".to_string();
+    };
+    let raw = dashboard.get_attribute(attr).unwrap_or_default();
+    let rows = raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(html_escape)
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return "<li>(없음)</li>".to_string();
+    }
+    rows.iter()
+        .rev()
+        .take(5)
+        .map(|line| format!("<li>{}</li>", line))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_dedup_popover(doc: &web_sys::Document) {
+    let Some(popover) = doc.get_element_by_id("dedup-popover") else {
+        return;
+    };
+    let stream = dedup_sample_list(doc, "data-dedup-samples-stream");
+    let narrative = dedup_sample_list(doc, "data-dedup-samples-narrative");
+    let history = dedup_sample_list(doc, "data-dedup-samples-history");
+    let html = format!(
+        concat!(
+            "<h4>Dedup 최근 스킵 샘플</h4>",
+            "<div class=\"dedup-block\"><div class=\"dedup-label\">Stream</div><ul>{}</ul></div>",
+            "<div class=\"dedup-block\"><div class=\"dedup-label\">Narrative</div><ul>{}</ul></div>",
+            "<div class=\"dedup-block\"><div class=\"dedup-label\">History</div><ul>{}</ul></div>"
+        ),
+        stream, narrative, history
+    );
+    popover.set_inner_html(&html);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_dedup_status_toggle(doc: &web_sys::Document) {
+    let Some(btn) = doc.get_element_by_id("dedup-status") else {
+        return;
+    };
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
+
+    let cb = Closure::wrap(Box::new(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let expanded = doc
+            .get_element_by_id("dedup-status")
+            .and_then(|el| el.get_attribute("aria-expanded"))
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        let next = !expanded;
+        if let Some(button) = doc.get_element_by_id("dedup-status") {
+            let _ = button.set_attribute("aria-expanded", if next { "true" } else { "false" });
+        }
+        if let Some(popover) = doc.get_element_by_id("dedup-popover") {
+            if next {
+                render_dedup_popover(&doc);
+                if let Some(el) = popover.dyn_ref::<web_sys::HtmlElement>() {
+                    let _ = el.style().set_property("display", "block");
+                }
+            } else if let Some(el) = popover.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = el.style().set_property("display", "none");
+            }
+        }
+    }) as Box<dyn FnMut()>);
+
+    let _ = btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+    });
+    cb.forget();
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -566,6 +645,24 @@ fn clear_trpg_dom(doc: &web_sys::Document) {
         summary.set_text_content(Some(""));
         let _ = summary.set_attribute("style", "display:none");
     }
+    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        let _ = dashboard.set_attribute("data-history-focus", "latest");
+        let _ = dashboard.set_attribute("data-dedup-stream", "0");
+        let _ = dashboard.set_attribute("data-dedup-narrative", "0");
+        let _ = dashboard.set_attribute("data-dedup-history", "0");
+        let _ = dashboard.set_attribute("data-dedup-samples-stream", "");
+        let _ = dashboard.set_attribute("data-dedup-samples-narrative", "");
+        let _ = dashboard.set_attribute("data-dedup-samples-history", "");
+    }
+    if let Some(btn) = doc.get_element_by_id("dedup-status") {
+        let _ = btn.set_attribute("aria-expanded", "false");
+    }
+    if let Some(popover) = doc.get_element_by_id("dedup-popover") {
+        if let Some(el) = popover.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = el.style().set_property("display", "none");
+        }
+        popover.set_inner_html("");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -581,6 +678,7 @@ fn unique_non_empty(mut values: Vec<String>) -> Vec<String> {
     out
 }
 
+#[allow(dead_code)] // Called from wasm32-only session start block + tests.
 fn assign_keepers_to_actor_ids(
     actor_ids: &[String],
     dm_keeper: &str,
@@ -3059,6 +3157,13 @@ fn bind_actor_admin_controls(doc: &web_sys::Document) {
 fn refresh_trpg_widget_status() {
     #[cfg(target_arch = "wasm32")]
     {
+        fn parse_counter_attr(doc: &web_sys::Document, key: &str) -> u64 {
+            doc.get_element_by_id("dashboard")
+                .and_then(|el| el.get_attribute(key))
+                .and_then(|raw| raw.parse::<u64>().ok())
+                .unwrap_or(0)
+        }
+
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
@@ -3070,15 +3175,32 @@ fn refresh_trpg_widget_status() {
             .get_element_by_id("character-panel")
             .map(|el| el.child_element_count())
             .unwrap_or(0);
-        let dice_count = doc
-            .get_element_by_id("dice-log")
+        let history_count = doc
+            .get_element_by_id("session-history")
             .map(|el| el.child_element_count())
             .unwrap_or(0);
         if let Some(status) = doc.get_element_by_id("widget-status") {
             status.set_text_content(Some(&format!(
-                "Widgets N:{} P:{} D:{}",
-                narrative_count, party_count, dice_count
+                "Widgets N:{} P:{} H:{}",
+                narrative_count, party_count, history_count
             )));
+        }
+        let dedup_stream = parse_counter_attr(&doc, "data-dedup-stream");
+        let dedup_narrative = parse_counter_attr(&doc, "data-dedup-narrative");
+        let dedup_history = parse_counter_attr(&doc, "data-dedup-history");
+        if let Some(status) = doc.get_element_by_id("dedup-status") {
+            status.set_text_content(Some(&format!(
+                "Dedup S:{} N:{} H:{}",
+                dedup_stream, dedup_narrative, dedup_history
+            )));
+        }
+        let popover_visible = doc
+            .get_element_by_id("dedup-status")
+            .and_then(|el| el.get_attribute("aria-expanded"))
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        if popover_visible {
+            render_dedup_popover(&doc);
         }
     }
 }

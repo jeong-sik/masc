@@ -27,6 +27,9 @@ use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
 use crate::config;
 
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::dom::escape::html_escape;
+
 // ─── Board Data Types ────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
@@ -734,15 +737,6 @@ fn append_comment_to_dom(post_id: &str, author: &str, content: &str) {
 }
 
 // ─── Utilities ───────────────────────────────
-
-/// Minimal HTML escaping for untrusted content.
-#[allow(dead_code)]
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
 
 /// Format a Unix timestamp as relative time (e.g., "2h ago", "3d ago").
 #[allow(dead_code)]

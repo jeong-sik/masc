@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::game::events::DiceRolled;
 
-use super::escape::trim_log;
+use super::escape::{html_escape, sanitize_text, trim_log};
 
 /// Maps dice result tiers to CSS class suffixes.
 fn tier_class(result: &str) -> &'static str {
@@ -30,26 +30,6 @@ fn tier_label(result: &str) -> &'static str {
     }
 }
 
-fn sanitize_text(raw: &str) -> String {
-    raw.chars()
-        .filter(|ch| {
-            let code = *ch as u32;
-            *ch != '\u{feff}'
-                && *ch != '\u{fffd}'
-                && !(code <= 0x08 || code == 0x0b || code == 0x0c || (0x0e..=0x1f).contains(&code))
-        })
-        .collect()
-}
-
-fn escape_html(raw: &str) -> String {
-    sanitize_text(raw)
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 /// Appends dice roll entries to the #dice-log DOM element.
 pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -65,12 +45,12 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
         };
         let tier = tier_class(&payload.result);
         entry.set_class_name(&format!("dice-entry {}", tier));
-        let character = escape_html(&payload.character);
-        let action = escape_html(&payload.action);
+        let character = html_escape(&sanitize_text(&payload.character));
+        let action = html_escape(&sanitize_text(&payload.action));
         let note_html = payload
             .note
             .as_deref()
-            .map(|n| format!("<div class=\"dice-note\">{}</div>", escape_html(n)))
+            .map(|n| format!("<div class=\"dice-note\">{}</div>", html_escape(&sanitize_text(n))))
             .unwrap_or_default();
 
         entry.set_inner_html(&format!(

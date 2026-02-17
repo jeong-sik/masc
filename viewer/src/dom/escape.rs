@@ -1,3 +1,17 @@
+/// Strip BOM, replacement char, and C0 control codes (except \t, \n, \r)
+/// so that untrusted text is safe for DOM insertion.
+pub fn sanitize_text(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| {
+            !matches!(c, '\u{feff}' | '\u{fffd}')
+                && !('\x00'..='\x08').contains(c)
+                && *c != '\x0b'
+                && *c != '\x0c'
+                && !('\x0e'..='\x1f').contains(c)
+        })
+        .collect()
+}
+
 /// HTML-escape a string for safe insertion into innerHTML.
 /// Covers the 5 characters that can break HTML context.
 pub fn html_escape(s: &str) -> String {

@@ -3,6 +3,8 @@
 //! Captures narrative, dice, and turn-progress events into per-turn history
 //! and renders them as a compact expandable timeline in the bottom panel.
 
+#![allow(dead_code)] // Many helpers used only in wasm32 cfg blocks.
+
 use bevy::prelude::*;
 
 use crate::game::events::{DiceRolled, NarrativeReceived, TurnAdvanced, TurnProgressUpdated};
@@ -33,24 +35,7 @@ pub struct SessionHistoryCache {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn sanitize_text(raw: &str) -> String {
-    raw.chars()
-        .filter(|ch| {
-            let code = *ch as u32;
-            !ch.is_control() && code != 0x00ad && code != 0x200b && code != 0xfeff
-        })
-        .collect()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn escape_html(raw: &str) -> String {
-    sanitize_text(raw)
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
+use super::escape::{html_escape, sanitize_text};
 
 fn sanitize_key(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
@@ -89,21 +74,40 @@ fn ensure_turn_entry(turns: &mut Vec<TurnHistory>, turn: u32, phase: &str) -> us
     turns.iter().position(|row| row.turn == turn).unwrap_or(0)
 }
 
-fn append_event(turns: &mut Vec<TurnHistory>, turn: u32, phase: &str, kind: &str, actor: &str, title: &str, detail: &str) {
+fn append_event(
+    turns: &mut Vec<TurnHistory>,
+    turn: u32,
+    phase: &str,
+    kind: &str,
+    actor: &str,
+    title: &str,
+    detail: &str,
+) -> bool {
     let idx = ensure_turn_entry(turns, turn, phase);
     let Some(row) = turns.get_mut(idx) else {
-        return;
+        return false;
     };
-    row.events.push(HistoryEvent {
+    let candidate = HistoryEvent {
         kind: kind.to_string(),
         actor: actor.to_string(),
         title: title.to_string(),
         detail: detail.to_string(),
-    });
+    };
+    if row
+        .events
+        .iter()
+        .rev()
+        .take(48)
+        .any(|existing| existing == &candidate)
+    {
+        return false;
+    }
+    row.events.push(candidate);
     if row.events.len() > MAX_EVENTS_PER_TURN {
         let overflow = row.events.len() - MAX_EVENTS_PER_TURN;
         row.events.drain(0..overflow);
     }
+    true
 }
 
 fn label_progress_event(payload: &crate::game::events::TurnProgressPayload) -> (&'static str, String, String) {
@@ -177,9 +181,9 @@ fn render_session_history_html(turns: &[TurnHistory]) -> String {
             row.events
                 .iter()
                 .map(|ev| {
-                    let actor = escape_html(&ev.actor);
-                    let title = escape_html(&ev.title);
-                    let detail = escape_html(&ev.detail);
+                    let actor = html_escape(&sanitize_text(&ev.actor));
+                    let title = html_escape(&sanitize_text(&ev.title));
+                    let detail = html_escape(&sanitize_text(&ev.detail));
                     let class = history_kind_class(&sanitize_key(&ev.kind));
                     if actor.is_empty() {
                         if detail.is_empty() {
@@ -212,15 +216,46 @@ fn render_session_history_html(turns: &[TurnHistory]) -> String {
     html
 }
 
+#[cfg(target_arch = "wasm32")]
+fn bump_dedup_history(document: &web_sys::Document, sample: &str) {
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    let next = dashboard
+        .get_attribute("data-dedup-history")
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(0)
+        .saturating_add(1);
+    let _ = dashboard.set_attribute("data-dedup-history", &next.to_string());
+
+    let mut lines = dashboard
+        .get_attribute("data-dedup-samples-history")
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let trimmed = sample.trim();
+    if !trimmed.is_empty() {
+        lines.push(trimmed.chars().take(160).collect());
+    }
+    if lines.len() > 24 {
+        let drain = lines.len() - 24;
+        lines.drain(0..drain);
+    }
+    let _ = dashboard.set_attribute("data-dedup-samples-history", &lines.join("\n"));
+}
+
 /// Render a compact per-turn timeline from TRPG stream events.
 pub fn update_session_history_dom(
-    room_state: Res<RoomState>,
-    progress: Res<TurnProgressState>,
+    _room_state: Res<RoomState>,
+    _progress: Res<TurnProgressState>,
     mut narratives: MessageReader<NarrativeReceived>,
     mut dice_events: MessageReader<DiceRolled>,
     mut turn_events: MessageReader<TurnAdvanced>,
     mut progress_events: MessageReader<TurnProgressUpdated>,
-    mut cache: ResMut<SessionHistoryCache>,
+    _cache: ResMut<SessionHistoryCache>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -265,7 +300,7 @@ pub fn update_session_history_dom(
             if !event.phase.is_empty() {
                 current_phase = event.phase.clone();
             }
-            append_event(
+            let appended = append_event(
                 &mut cache.turns,
                 current_turn,
                 &current_phase,
@@ -274,11 +309,17 @@ pub fn update_session_history_dom(
                 "턴 진행",
                 &format!("Turn {} ({})", current_turn, if current_phase.is_empty() { "-" } else { &current_phase }),
             );
+            if !appended {
+                bump_dedup_history(
+                    &document,
+                    &format!("t{} | turn | {}", current_turn, current_phase),
+                );
+            }
             changed = true;
         }
 
         for NarrativeReceived(event) in narratives.read() {
-            append_event(
+            let appended = append_event(
                 &mut cache.turns,
                 current_turn,
                 &current_phase,
@@ -287,6 +328,16 @@ pub fn update_session_history_dom(
                 "내러티브",
                 &event.text,
             );
+            if !appended {
+                bump_dedup_history(
+                    &document,
+                    &format!(
+                        "t{} | narrative | {}",
+                        current_turn,
+                        event.text.trim()
+                    ),
+                );
+            }
             changed = true;
         }
 
@@ -295,7 +346,7 @@ pub fn update_session_history_dom(
             if turn > 0 {
                 current_turn = turn;
             }
-            append_event(
+            let appended = append_event(
                 &mut cache.turns,
                 current_turn,
                 &current_phase,
@@ -312,6 +363,17 @@ pub fn update_session_history_dom(
                     payload.dc
                 ),
             );
+            if !appended {
+                bump_dedup_history(
+                    &document,
+                    &format!(
+                        "t{} | dice | {}:{}",
+                        current_turn,
+                        payload.character,
+                        payload.action
+                    ),
+                );
+            }
             changed = true;
         }
 
@@ -323,7 +385,7 @@ pub fn update_session_history_dom(
                 current_phase = event.phase.clone();
             }
             let (kind, actor, summary) = label_progress_event(&event);
-            append_event(
+            let appended = append_event(
                 &mut cache.turns,
                 current_turn,
                 &current_phase,
@@ -332,6 +394,16 @@ pub fn update_session_history_dom(
                 if summary.is_empty() { "turn progress" } else { &summary },
                 &event.event_type,
             );
+            if !appended {
+                bump_dedup_history(
+                    &document,
+                    &format!(
+                        "t{} | progress | {}",
+                        current_turn,
+                        event.event_type
+                    ),
+                );
+            }
             changed = true;
         }
 

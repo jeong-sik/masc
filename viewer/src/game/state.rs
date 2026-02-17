@@ -75,8 +75,10 @@ pub enum ConnectionStatus {
     Connecting,
     Connected,
     /// Reconnecting after a lost connection. (current_attempt, max_attempts)
+    #[allow(dead_code)]
     Reconnecting(u32, u32),
     /// All retry attempts exhausted.
+    #[allow(dead_code)]
     Failed,
 }
 

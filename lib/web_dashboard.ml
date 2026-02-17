@@ -9167,6 +9167,17 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (parsedRaw) {
         return parsedRaw;
       }
+      const dataCandidates = raw
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .filter((line) => line !== '' && line !== '[DONE]');
+      for (let i = dataCandidates.length - 1; i >= 0; i -= 1) {
+        const parsedDataLine = trpgUnwrapRpcObject(trpgTryParseJson(dataCandidates[i]));
+        if (parsedDataLine) {
+          return parsedDataLine;
+        }
+      }
       throw new Error(`${toolName} SSE 응답 파싱 실패: ${trpgShortText(raw, 220)}`);
     }
 
@@ -9243,7 +9254,25 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (rpc && rpc.error) {
         throw new Error(String(rpc.error.message || `${toolName} RPC 오류`));
       }
+      if (rpc && typeof rpc === 'object' && !Array.isArray(rpc)
+          && !Object.prototype.hasOwnProperty.call(rpc, 'result')
+          && !Object.prototype.hasOwnProperty.call(rpc, 'error')
+          && (Object.prototype.hasOwnProperty.call(rpc, 'payload')
+            || Object.prototype.hasOwnProperty.call(rpc, 'status'))) {
+        return (rpc.payload !== undefined && rpc.payload !== null) ? rpc.payload : rpc;
+      }
       const result = (rpc && rpc.result && typeof rpc.result === 'object') ? rpc.result : {};
+      if (result && typeof result === 'object' && !Array.isArray(result)
+          && result.structuredContent && typeof result.structuredContent === 'object') {
+        const structured = result.structuredContent;
+        return (structured.payload !== undefined && structured.payload !== null)
+          ? structured.payload
+          : structured;
+      }
+      if (result && typeof result === 'object' && !Array.isArray(result)
+          && result.payload !== undefined && result.payload !== null) {
+        return result.payload;
+      }
       const content = Array.isArray(result.content) ? result.content : [];
       const textChunk = content.find((row) => row && row.type === 'text' && typeof row.text === 'string');
       const text = textChunk ? textChunk.text : '';

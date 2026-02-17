@@ -366,6 +366,12 @@
  (modules test_pulse)
  (libraries masc_mcp eio eio_main unix))
 
+; Mitosis Metrics + P2-2 Experiment Flag tests
+(test
+ (name test_mitosis_metrics)
+ (modules test_mitosis_metrics)
+ (libraries masc_mcp alcotest str yojson))
+
 ; Perpetual Agent Runtime tests (infinite context system)
 (test
  (name test_perpetual)

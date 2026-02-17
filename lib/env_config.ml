@@ -108,6 +108,12 @@ module Mitosis = struct
       Prevents rapid repeated handoffs when context_ratio fluctuates near threshold. *)
   let handoff_cooldown_seconds =
     get_float ~default:60.0 "MASC_MITOSIS_HANDOFF_COOLDOWN_SEC"
+
+  (** Enable experimental mitosis path (A/B testing integration).
+      When true, run_sync_handoff logs the experimental path and can
+      participate in experiment flag checks. *)
+  let experiment_enabled =
+    get_bool ~default:false "MASC_MITOSIS_EXPERIMENT_ENABLED"
 end
 
 (** {1 Spawn Configuration} *)

@@ -2231,6 +2231,40 @@ let handle_round_run ctx args : result =
       let state = state_of_derived derived in
       let* turn_before = read_state_turn derived in
       let next_turn = max 1 (turn_before + 1) in
+      let* () =
+        if player_keepers = [] then
+          Error "player_keepers must include at least one player actor assignment"
+        else Ok ()
+      in
+      let* () =
+        let invalid_actor =
+          List.find_opt
+            (fun (actor_id, _) ->
+              actor_id = "dm" || not (actor_exists_in_state state actor_id))
+            player_keepers
+        in
+        match invalid_actor with
+        | Some (actor_id, _) ->
+            Error
+              (Printf.sprintf
+                 "invalid player assignment: actor_id=%s is not a playable party actor"
+                 actor_id)
+        | None -> Ok ()
+      in
+      let* () =
+        let dead_actor =
+          List.find_opt
+            (fun (actor_id, _) -> not (actor_alive_in_state state actor_id))
+            player_keepers
+        in
+        match dead_actor with
+        | Some (actor_id, _) ->
+            Error
+              (Printf.sprintf
+                 "invalid player assignment: actor_id=%s is not alive"
+                 actor_id)
+        | None -> Ok ()
+      in
 
       let* phase_event =
         append_event
@@ -2250,6 +2284,8 @@ let handle_round_run ctx args : result =
       let appended_events = ref (phase_event :: intervention_events) in
       let statuses = ref [] in
       let success_count = ref 0 in
+      let player_success_count = ref 0 in
+      let dm_success = ref false in
       let unavailable_count = ref 0 in
       let timeout_count = ref 0 in
 
@@ -2372,6 +2408,9 @@ let handle_round_run ctx args : result =
                     ~reply
                 in
                 success_count := !success_count + 1;
+                (match role with
+                | `Dm -> dm_success := true
+                | `Player -> player_success_count := !player_success_count + 1);
                 appended_events := !appended_events @ [ reply_event ];
                 statuses :=
                   `Assoc
@@ -2386,7 +2425,6 @@ let handle_round_run ctx args : result =
                 Ok () )
       in
 
-      let* () = process_one ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper in
       let* () =
         List.fold_left
           (fun acc (actor_id, keeper_name) ->
@@ -2395,15 +2433,40 @@ let handle_round_run ctx args : result =
           (Ok ())
           player_keepers
       in
-      let* turn_event =
-        append_event
-          ~base_dir
-          ~room_id
-          ~event_type:Trpg_engine_event.Turn_started
-          ~payload:(`Assoc [ ("turn", `Int next_turn) ])
-          ()
+      let* () =
+        if !player_success_count > 0 then
+          process_one ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
+        else (
+          statuses :=
+            `Assoc
+              [
+                ("actor_id", `String "dm");
+                ("role", `String "dm");
+                ("keeper", `String dm_keeper);
+                ("status", `String "skipped");
+                ( "reason",
+                  `String
+                    "no successful player response; dm execution skipped" );
+              ]
+            :: !statuses;
+          Ok () )
       in
-      appended_events := !appended_events @ [ turn_event ];
+      let advanced = !player_success_count > 0 && !dm_success in
+      let turn_after = if advanced then next_turn else turn_before in
+      let* () =
+        if advanced then
+          let* turn_event =
+            append_event
+              ~base_dir
+              ~room_id
+              ~event_type:Trpg_engine_event.Turn_started
+              ~payload:(`Assoc [ ("turn", `Int next_turn) ])
+              ()
+          in
+          appended_events := !appended_events @ [ turn_event ];
+          Ok ()
+        else Ok ()
+      in
       let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
       let statuses = List.rev !statuses in
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
@@ -2414,7 +2477,7 @@ let handle_round_run ctx args : result =
             ("room_id", `String room_id);
             ("phase", `String phase);
             ("turn_before", `Int turn_before);
-            ("turn_after", `Int next_turn);
+            ("turn_after", `Int turn_after);
             ("timeout_sec", `Float timeout_sec);
             ("statuses", `List statuses);
             ("interventions_applied", `List interventions_applied);
@@ -2423,6 +2486,9 @@ let handle_round_run ctx args : result =
                 [
                   ("participants", `Int (1 + List.length player_keepers));
                   ("successes", `Int !success_count);
+                  ("player_successes", `Int !player_success_count);
+                  ("dm_success", `Bool !dm_success);
+                  ("advanced", `Bool advanced);
                   ("timeouts", `Int !timeout_count);
                   ("unavailable", `Int !unavailable_count);
                   ("interventions", `Int (List.length interventions_applied));

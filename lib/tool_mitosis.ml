@@ -1063,14 +1063,17 @@ let handle_mitosis_check _ctx args : result =
   
   let should_prepare = Mitosis.should_prepare ~config:config_mitosis ~cell ~context_ratio in
   let should_handoff = Mitosis.should_handoff ~config:config_mitosis ~cell ~context_ratio in
-  let json = `Assoc [
+  let warning = if raw_ratio = 0.0 then
+    [("warning", `String "context_ratio is 0.0 - did you forget to provide it?")]
+  else [] in
+  let json = `Assoc ([
     ("should_prepare", `Bool should_prepare);
     ("should_handoff", `Bool should_handoff);
     ("context_ratio", `Float context_ratio);
     ("threshold_prepare", `Float config_mitosis.Mitosis.prepare_threshold);
     ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
     ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
-  ] in
+  ] @ warning) in
   (true, Yojson.Safe.pretty_to_string json)
 
 let handle_mitosis_record ctx args : result =
@@ -1306,14 +1309,17 @@ let run_sync_handoff ctx args : result =
         | Mitosis.Idle ->
             "Context ratio below prepare threshold. Continue working."
       in
-      let json = `Assoc [
+      let warning = if raw_ratio = 0.0 then
+        [("warning", `String "context_ratio is 0.0 - did you forget to provide it?")]
+      else [] in
+      let json = `Assoc ([
         ("action", `String "none");
         ("context_ratio", `Float context_ratio);
         ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
         ("message", `String no_action_message);
         ("threshold_prepare", `Float config_mitosis.Mitosis.prepare_threshold);
         ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
-      ] in
+      ] @ warning) in
       (true, Yojson.Safe.pretty_to_string json)
       
   | Mitosis.Prepared prepared_cell ->

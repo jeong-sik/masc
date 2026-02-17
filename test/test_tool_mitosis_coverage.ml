@@ -353,6 +353,32 @@ let test_metrics_compare_no_data () =
   | Some (true, _) -> check bool "compare with no data" true true
   | None -> fail "expected Some for metrics_compare"
 
+(* P0-2: Verify warning field surfaces in JSON when context_ratio = 0.0 *)
+let test_mitosis_check_zero_ratio_warning () =
+  let ctx = make_ctx () in
+  let args = `Assoc [] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_check" ~args with
+  | Some (true, result) ->
+      let json = Yojson.Safe.from_string result in
+      let has_warning =
+        try ignore (Yojson.Safe.Util.member "warning" json |> Yojson.Safe.Util.to_string); true
+        with _ -> false
+      in
+      check bool "0.0 ratio should have warning field" true has_warning
+  | Some (false, _) -> fail "mitosis_check should succeed"
+  | None -> fail "expected Some for mitosis_check"
+
+let test_mitosis_check_nonzero_ratio_no_warning () =
+  let ctx = make_ctx () in
+  let args = `Assoc [("context_ratio", `Float 0.3)] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_check" ~args with
+  | Some (true, result) ->
+      let json = Yojson.Safe.from_string result in
+      let warning = Yojson.Safe.Util.member "warning" json in
+      check bool "non-zero ratio should have no warning" true (warning = `Null)
+  | Some (false, _) -> fail "mitosis_check should succeed"
+  | None -> fail "expected Some for mitosis_check"
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -390,6 +416,8 @@ let () =
     "context_ratio_validation", [
       test_case "T1: negative ratio" `Quick test_negative_context_ratio;
       test_case "T2: over-one ratio" `Quick test_over_one_context_ratio;
+      test_case "T3: zero ratio warning" `Quick test_mitosis_check_zero_ratio_warning;
+      test_case "T3b: nonzero ratio no warning" `Quick test_mitosis_check_nonzero_ratio_no_warning;
     ];
     "metrics", [
       test_case "record task" `Quick test_metrics_record;

@@ -1823,13 +1823,16 @@ Time: %s
 
       if not should_prepare_now && not should_handoff_now then begin
         (* <50%: Continue working, no action needed *)
-        let response = `Assoc [
+        let warning = if context_ratio = 0.0 then
+          [("warning", `String "context_ratio is 0.0 - did you forget to provide it?")]
+        else [] in
+        let response = `Assoc ([
           ("status", `String "continue");
           ("context_ratio", `Float context_ratio);
           ("threshold_prepare", `Float mitosis_config.prepare_threshold);
           ("threshold_handoff", `Float mitosis_config.handoff_threshold);
           ("message", `String (Printf.sprintf "💚 Context healthy (%.0f%%). Continue working." (context_ratio *. 100.0)));
-        ] in
+        ] @ warning) in
         (true, Yojson.Safe.pretty_to_string response)
       end
       else if should_prepare_now && not should_handoff_now then begin

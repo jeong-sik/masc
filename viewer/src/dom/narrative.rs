@@ -4,6 +4,8 @@ use wasm_bindgen::JsCast;
 
 use crate::game::events::NarrativeReceived;
 
+use super::escape::{scroll_to_bottom, trim_log};
+
 fn normalize_phase_suffix(phase: &str) -> String {
     let mut out = String::with_capacity(phase.len());
     for ch in phase.chars() {
@@ -55,15 +57,6 @@ fn apply_debug_visibility(el: &web_sys::Element, debug_enabled: bool, is_debug_e
     };
     if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
         let _ = html_el.style().set_property("display", display);
-    }
-}
-
-fn trim_narrative_log(log_el: &web_sys::Element, max_entries: u32) {
-    while log_el.child_element_count() > max_entries {
-        let Some(first) = log_el.first_element_child() else {
-            break;
-        };
-        let _ = log_el.remove_child(&first);
     }
 }
 
@@ -158,12 +151,8 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
 
         let _ = log_el.append_child(&entry);
         apply_debug_visibility(&entry, debug_enabled, is_debug_entry);
-        trim_narrative_log(&log_el, 180);
-
-        // Auto-scroll to the newest entry
-        if let Ok(html_el) = entry.dyn_into::<web_sys::HtmlElement>() {
-            html_el.scroll_into_view();
-        }
+        scroll_to_bottom(&log_el);
+        trim_log(&log_el, 200);
     }
 }
 

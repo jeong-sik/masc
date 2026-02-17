@@ -1,6 +1,7 @@
 pub mod components;
 pub mod events;
 pub mod http;
+pub mod lifecycle;
 pub mod round_runner;
 pub mod state;
 pub mod systems;

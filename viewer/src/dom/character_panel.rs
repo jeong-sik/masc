@@ -60,7 +60,9 @@ fn class_icon(class: &str) -> &'static str {
 
 /// Normalizes class name to a CSS-safe identifier for data-class attribute.
 fn class_slug(class: &str) -> String {
-    class.to_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+    class
+        .to_lowercase()
+        .replace(|c: char| !c.is_ascii_alphanumeric(), "-")
 }
 
 /// Icon for a condition name.
@@ -134,10 +136,7 @@ fn read_collapse_state() -> std::collections::HashSet<String> {
 }
 
 /// Re-renders the #character-panel DOM whenever actor state changes.
-pub fn update_character_panel_dom(
-    actors: Query<&Actor>,
-    mut cache: ResMut<CharacterPanelCache>,
-) {
+pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<CharacterPanelCache>) {
     // Build current snapshot for cheap equality check
     let compat_snapshot: Vec<(String, i32, bool)> = actors
         .iter()

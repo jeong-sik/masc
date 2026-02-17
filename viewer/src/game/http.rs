@@ -260,11 +260,7 @@ pub fn apply_initial_state(
         .map(|room| room.status.trim() == "unavailable")
         .unwrap_or(false);
 
-    let actor_ids: Vec<String> = state
-        .characters
-        .iter()
-        .map(|ch| ch.id.clone())
-        .collect();
+    let actor_ids: Vec<String> = state.characters.iter().map(|ch| ch.id.clone()).collect();
 
     for entity in &actors {
         commands.entity(entity).despawn();
@@ -571,6 +567,41 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            let mp = info
+                .get("mp")
+                .and_then(Value::as_i64)
+                .unwrap_or(i64::from(hp.max(1))) as i32;
+            let max_mp = info
+                .get("max_mp")
+                .and_then(Value::as_i64)
+                .unwrap_or(i64::from(mp.max(1))) as i32;
+            let skills = info
+                .get("skills")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|row| serde_json::from_value::<SkillData>(row.clone()).ok())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let conditions = info
+                .get("conditions")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|row| serde_json::from_value::<ConditionData>(row.clone()).ok())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let equipment = info
+                .get("equipment")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|row| serde_json::from_value::<EquipmentData>(row.clone()).ok())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let debuffs = info
                 .get("debuffs")
                 .and_then(Value::as_array)
@@ -707,7 +738,9 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
         if let Some(el) = document.get_element_by_id("new-game-status") {
             let msg = match normalize_room_status(room_status).as_str() {
                 "ended" => "이 게임은 종료되었습니다. 새 게임을 시작하세요.",
-                "unavailable" => "엔진에 연결할 수 없습니다. 새 게임을 시작하면 재연결을 시도합니다.",
+                "unavailable" => {
+                    "엔진에 연결할 수 없습니다. 새 게임을 시작하면 재연결을 시도합니다."
+                }
                 _ => "진행 중인 게임이 없습니다. 새 게임을 시작하세요.",
             };
             el.set_inner_html(msg);
@@ -772,7 +805,10 @@ mod tests {
         let parsed = normalize_state_response(root).expect("masc parse should succeed");
         assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(5));
         assert_eq!(parsed.current_area, "C");
-        assert!(parsed.characters.is_empty(), "no fallback party should be injected");
+        assert!(
+            parsed.characters.is_empty(),
+            "no fallback party should be injected"
+        );
     }
 
     #[test]
@@ -823,10 +859,21 @@ mod tests {
         });
 
         let parsed = normalize_state_response(root).expect("ended room parse should succeed");
-        let status = parsed.room.as_ref().map(|r| r.status.as_str()).unwrap_or("");
-        assert_ne!(status, "active", "ended room should not be treated as active");
+        let status = parsed
+            .room
+            .as_ref()
+            .map(|r| r.status.as_str())
+            .unwrap_or("");
+        assert_ne!(
+            status, "active",
+            "ended room should not be treated as active"
+        );
         assert_eq!(status, "ended");
-        assert_eq!(parsed.characters.len(), 1, "characters still parsed even for ended rooms");
+        assert_eq!(
+            parsed.characters.len(),
+            1,
+            "characters still parsed even for ended rooms"
+        );
     }
 
     #[test]
@@ -844,7 +891,11 @@ mod tests {
         });
 
         let parsed = normalize_state_response(root).expect("idle room parse should succeed");
-        let status = parsed.room.as_ref().map(|r| r.status.as_str()).unwrap_or("");
+        let status = parsed
+            .room
+            .as_ref()
+            .map(|r| r.status.as_str())
+            .unwrap_or("");
         assert_ne!(status, "active");
         assert!(parsed.characters.is_empty());
     }

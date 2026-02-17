@@ -107,7 +107,7 @@ pub fn sync_join_panel_interaction_state(
 
         let status = effective_room_status(&room_state.status, &progress.room_status);
         let can_join = room_accepts_join(&status);
-        
+
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
@@ -143,9 +143,11 @@ fn bind_join_button() {
         };
 
         // 1. Get input values
-        let actor_id_input = doc.get_element_by_id("actor-id-input")
+        let actor_id_input = doc
+            .get_element_by_id("actor-id-input")
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok());
-        let keeper_input = doc.get_element_by_id("keeper-input")
+        let keeper_input = doc
+            .get_element_by_id("keeper-input")
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok());
 
         let actor_id = actor_id_input.map(|i| i.value()).unwrap_or_default();
@@ -174,7 +176,7 @@ fn bind_join_button() {
                     let detail = friendly_js_error(&e);
                     log::warn!("Claim failed: {:?}", detail);
                     set_join_status(&format!("Join failed: {}", detail), "status-error");
-                    
+
                     // Re-enable button on error
                     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
                         if let Some(btn) = doc.get_element_by_id("join-btn") {
@@ -223,7 +225,7 @@ fn bind_leave_button() {
         if let Some(btn) = doc.get_element_by_id("leave-btn") {
             let _ = btn.set_attribute("disabled", "true");
         }
-        
+
         // Spawn async release request
         let actor_id = claimed_id.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -238,7 +240,7 @@ fn bind_leave_button() {
                     // Force leave on UI anyway? Or show error?
                     // Usually better to let them try again.
                     set_join_status(&format!("Leave failed: {}", detail), "status-error");
-                    
+
                     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
                         if let Some(btn) = doc.get_element_by_id("leave-btn") {
                             let _ = btn.remove_attribute("disabled");
@@ -300,7 +302,11 @@ async fn claim_actor(actor_id: &str, keeper_name: &str) -> Result<(), JsValue> {
                 return Err(JsValue::from_str(detail));
             }
         }
-        return Err(JsValue::from_str(&format!("HTTP {} - {}", resp.status(), err_text)));
+        return Err(JsValue::from_str(&format!(
+            "HTTP {} - {}",
+            resp.status(),
+            err_text
+        )));
     }
 
     Ok(())
@@ -314,7 +320,7 @@ async fn release_actor(actor_id: &str) -> Result<(), JsValue> {
 
     let url = format!("{}/api/v1/trpg/actors/release", config::MASC_MCP_URL);
     let room_id = config::current_room_id();
-    
+
     // Retrieve keeper name from hidden state if possible, or send empty (server might require it?)
     // The current API spec for release requires `keeper_name`.
     let keeper = get_claimed_keeper_from_dom().unwrap_or("Anonymous Viewer".to_string());
@@ -347,7 +353,11 @@ async fn release_actor(actor_id: &str) -> Result<(), JsValue> {
                 return Err(JsValue::from_str(detail));
             }
         }
-        return Err(JsValue::from_str(&format!("HTTP {} - {}", resp.status(), err_text)));
+        return Err(JsValue::from_str(&format!(
+            "HTTP {} - {}",
+            resp.status(),
+            err_text
+        )));
     }
 
     Ok(())
@@ -385,7 +395,7 @@ fn swap_to_action_panel(actor_id: &str) {
     if let Some(el) = doc.get_element_by_id("player-actor-id") {
         el.set_inner_html(actor_id);
     }
-    
+
     // Store state in hidden inputs (for persistence across re-renders if needed)
     set_claimed_state(actor_id);
 }
@@ -410,10 +420,10 @@ fn swap_to_join_panel() {
     if let Some(el) = doc.get_element_by_id("player-actor-id") {
         el.set_inner_html("");
     }
-    
+
     // Clear state
     clear_claimed_state();
-    
+
     // Reset buttons
     if let Some(btn) = doc.get_element_by_id("join-btn") {
         let _ = btn.remove_attribute("disabled");
@@ -425,14 +435,16 @@ fn swap_to_join_panel() {
 
 #[cfg(target_arch = "wasm32")]
 fn set_claimed_state(actor_id: &str) {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+
     if let Some(el) = doc.get_element_by_id("claimed-actor-id") {
         if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
             input.set_value(actor_id);
         }
     }
-    
+
     // Also save keeper name?
     if let Some(k_input) = doc.get_element_by_id("keeper-input") {
         if let Some(input) = k_input.dyn_ref::<web_sys::HtmlInputElement>() {
@@ -448,8 +460,10 @@ fn set_claimed_state(actor_id: &str) {
 
 #[cfg(target_arch = "wasm32")]
 fn clear_claimed_state() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+
     if let Some(el) = doc.get_element_by_id("claimed-actor-id") {
         if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
             input.set_value("");
@@ -468,7 +482,11 @@ fn get_claimed_actor_id_from_dom() -> Option<String> {
     let el = doc.get_element_by_id("claimed-actor-id")?;
     let input = el.dyn_ref::<web_sys::HtmlInputElement>()?;
     let val = input.value();
-    if val.is_empty() { None } else { Some(val) }
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -477,7 +495,11 @@ fn get_claimed_keeper_from_dom() -> Option<String> {
     let el = doc.get_element_by_id("claimed-keeper")?;
     let input = el.dyn_ref::<web_sys::HtmlInputElement>()?;
     let val = input.value();
-    if val.is_empty() { None } else { Some(val) }
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -487,7 +509,7 @@ fn restore_join_panel_state() {
         swap_to_join_panel();
         return;
     };
-    
+
     // Have claimed actor, show action panel
     swap_to_action_panel(&actor_id);
 }

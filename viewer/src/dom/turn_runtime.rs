@@ -138,15 +138,15 @@ pub fn update_turn_runtime_dom(
         "-".to_string()
     };
 
-    let (alive_party, total_party) = actors
-        .iter()
-        .filter(|actor| actor.id != "dm")
-        .fold((0_i32, 0_i32), |(alive, total), actor| {
+    let (alive_party, total_party) = actors.iter().filter(|actor| actor.id != "dm").fold(
+        (0_i32, 0_i32),
+        |(alive, total), actor| {
             (
                 alive + if !actor.is_dead && actor.hp > 0 { 1 } else { 0 },
                 total + 1,
             )
-        });
+        },
+    );
     let party_status = if total_party <= 0 {
         "-".to_string()
     } else if alive_party <= 0 {

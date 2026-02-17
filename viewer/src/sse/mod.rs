@@ -52,10 +52,7 @@ impl Plugin for SsePlugin {
         ];
         for mode in masc_modes {
             app.add_systems(OnEnter(mode), masc_client::setup_masc_sse)
-                .add_systems(
-                    Update,
-                    masc_bridge::poll_masc_events.run_if(in_state(mode)),
-                )
+                .add_systems(Update, masc_bridge::poll_masc_events.run_if(in_state(mode)))
                 .add_systems(OnExit(mode), masc_client::teardown_masc_sse);
         }
 
@@ -72,10 +69,7 @@ impl Plugin for SsePlugin {
             )
                 .run_if(in_state(ViewerMode::Social)),
         )
-        .add_systems(
-            OnExit(ViewerMode::Social),
-            social_board::cleanup_board,
-        );
+        .add_systems(OnExit(ViewerMode::Social), social_board::cleanup_board);
 
         // ── Sync async connection status into ECS (runs every frame) ──
         app.add_systems(Update, reconnect::sync_connection_status);

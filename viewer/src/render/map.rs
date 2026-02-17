@@ -43,11 +43,7 @@ pub fn position_to_area(pos: Vec2) -> String {
 
 /// Spawns the 2D camera with shader settings from the active theme.
 pub fn setup_camera(mut commands: Commands, theme: Res<ViewerTheme>) {
-    commands.spawn((
-        Camera2d,
-        GameCamera,
-        theme.shader_settings(),
-    ));
+    commands.spawn((Camera2d, GameCamera, theme.shader_settings()));
 }
 
 /// Spawns the map background with AI-generated area art.
@@ -56,8 +52,7 @@ pub fn setup_map_background(
     asset_server: Res<AssetServer>,
     map_state: Res<MapState>,
 ) {
-    let path = assets::map_for(&map_state.current_area)
-        .unwrap_or(assets::paths::MAP_AREA_A);
+    let path = assets::map_for(&map_state.current_area).unwrap_or(assets::paths::MAP_AREA_A);
     let texture = asset_server.load(path);
     commands.spawn((
         Sprite {
@@ -111,8 +106,7 @@ pub fn update_map_texture(
         return;
     }
 
-    let path = assets::map_for(&map_state.current_area)
-        .unwrap_or(assets::paths::MAP_AREA_A);
+    let path = assets::map_for(&map_state.current_area).unwrap_or(assets::paths::MAP_AREA_A);
 
     for mut sprite in &mut backgrounds {
         sprite.image = asset_server.load(path);

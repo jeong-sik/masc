@@ -1,14 +1,20 @@
-//! Turn Controls — advance turn and session management buttons.
+//! Turn Controls — execute one TRPG round and show round-run status.
 //!
 //! Binds DOM event listeners on `#turn-controls`:
-//! - Advance Turn button → POST `/api/v1/trpg/turns/advance`
+//! - Run Round button → POST `/api/v1/trpg/rounds/run`
 //!
-//! Visible when the room is in an active TRPG phase.
+//! Visible when a round run assignment is present:
+//! - claimed keeper/actor for local manual play, or
+//! - hidden round-run plan fields for AI auto-run flow.
+//! Follows the same OnEnter/OnExit lifecycle as `action_panel.rs`.
 
 use bevy::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use serde_json::json;
+use serde_json::{json, Value};
+
+#[cfg(target_arch = "wasm32")]
+use web_sys::{HtmlButtonElement, HtmlInputElement};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -48,11 +54,8 @@ pub fn unbind_turn_controls(mut commands: Commands) {
 
 // ─── Visibility Sync ────────────────────────
 
-/// Show turn controls only when a keeper is claimed (Keeper/GM privilege).
-pub fn sync_turn_controls_visibility(
-    room_state: Res<RoomState>,
-    progress: Res<TurnProgressState>,
-) {
+/// Show turn controls only when a round-run capable assignment exists.
+pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<TurnProgressState>) {
     let _ = (&room_state, &progress);
 
     #[cfg(target_arch = "wasm32")]
@@ -79,12 +82,31 @@ pub fn sync_turn_controls_visibility(
         let Some(panel) = doc.get_element_by_id("turn-controls") else {
             return;
         };
-        let has_keeper = doc
-            .get_element_by_id("claimed-keeper")
-            .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
-            .map_or(false, |v| !v.trim().is_empty());
 
-        let style = if room_allows_control || has_keeper {
+
+        let claimed_keeper = doc
+            .get_element_by_id("claimed-keeper")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            .map(|i| i.value());
+        let claimed_actor = doc
+            .get_element_by_id("claimed-actor-id")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            .map(|i| i.value());
+        let has_manual_claim = claimed_keeper
+            .as_ref()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+            || claimed_actor
+                .as_ref()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+
+        let has_auto_plan = doc
+            .get_element_by_id("round-run-dm")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            .is_some_and(|input| !input.value().trim().is_empty());
+
+        let style = if (has_manual_claim || has_auto_plan) && room_allows_control {
             ""
         } else {
             "display:none"
@@ -135,16 +157,14 @@ fn bind_advance_button() {
 
 #[cfg(target_arch = "wasm32")]
 fn on_advance_click() {
-    set_turn_status("Advancing...", "");
+    set_turn_status("Running round...", "");
     set_advance_disabled(true);
 
     wasm_bindgen_futures::spawn_local(async move {
         match advance_turn().await {
             Ok(msg) => set_turn_status(&msg, "status-ok"),
             Err(e) => {
-                let detail = e
-                    .as_string()
-                    .unwrap_or_else(|| format!("{:?}", e));
+                let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                 log::warn!("Advance turn failed: {}", detail);
                 set_turn_status(&format!("Failed: {}", detail), "status-error");
             }
@@ -159,11 +179,24 @@ fn on_advance_click() {
 async fn advance_turn() -> Result<String, JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
-    let url = format!("{}/api/v1/trpg/turns/advance", config::MASC_MCP_URL);
-    let room_id = config::current_room_id();
+    let doc = web_sys::window()
+        .and_then(|w| w.document())
+        .ok_or_else(|| JsValue::from_str("No document"))?;
+    let plan = read_round_run_plan(&doc).map_err(|err| JsValue::from_str(&err))?;
 
+    let mut player_keepers = serde_json::Map::new();
+    for (actor_id, keeper_name) in &plan.player_keepers {
+        player_keepers.insert(actor_id.clone(), Value::String(keeper_name.clone()));
+    }
+
+    let url = format!("{}/api/v1/trpg/rounds/run", config::MASC_MCP_URL);
     let body = json!({
-        "room_id": room_id
+        "room_id": config::current_room_id(),
+        "dm_keeper": plan.dm_keeper,
+        "player_keepers": Value::Object(player_keepers),
+        "phase": plan.phase,
+        "timeout_sec": plan.timeout_sec,
+        "lang": plan.lang
     })
     .to_string();
 
@@ -196,13 +229,23 @@ async fn advance_turn() -> Result<String, JsValue> {
         )));
     }
 
-    // Extract the new turn number from the response JSON
     let resp_text = JsFuture::from(resp.text()?)
         .await
         .ok()
         .and_then(|v| v.as_string())
         .unwrap_or_default();
-    log::info!("TurnControls: turn advanced — {}", resp_text);
+    log::info!("TurnControls: round run response — {}", resp_text);
+
+    if let Ok(json) = serde_json::from_str::<Value>(&resp_text) {
+        let turn_before = json.get("turn_before").and_then(Value::as_u64).unwrap_or(0);
+        let turn_after = json.get("turn_after").and_then(Value::as_u64).unwrap_or(0);
+        if turn_after > 0 {
+            return Ok(format!(
+                "Round progressed: turn {} → {}",
+                turn_before, turn_after
+            ));
+        }
+    }
 
     Ok("Turn advanced.".to_string())
 }
@@ -231,8 +274,96 @@ fn set_advance_disabled(disabled: bool) {
         return;
     };
     if let Some(el) = doc.get_element_by_id("advance-turn-btn") {
-        if let Some(btn) = el.dyn_ref::<web_sys::HtmlButtonElement>() {
+        if let Some(btn) = el.dyn_into::<HtmlButtonElement>().ok() {
             btn.set_disabled(disabled);
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct RoundRunPlan {
+    dm_keeper: String,
+    phase: String,
+    timeout_sec: f64,
+    lang: String,
+    player_keepers: Vec<(String, String)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> {
+    let dm_keeper = doc
+        .get_element_by_id("round-run-dm")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        .map(|i| i.value())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if dm_keeper.is_empty() {
+        return Err("DM keeper가 설정되지 않았습니다. 새 게임을 먼저 시작하세요.".to_string());
+    }
+
+    let phase = doc
+        .get_element_by_id("round-run-phase")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        .map(|i| i.value())
+        .unwrap_or_else(|| "round".to_string())
+        .trim()
+        .to_string();
+    let lang = doc
+        .get_element_by_id("round-run-lang")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        .map(|i| i.value())
+        .unwrap_or_else(|| "ko".to_string())
+        .trim()
+        .to_string();
+    let timeout_sec = doc
+        .get_element_by_id("round-run-timeout")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        .map(|i| i.value())
+        .unwrap_or_else(|| "90".to_string())
+        .trim()
+        .parse::<f64>()
+        .unwrap_or(90.0);
+
+    let player_pairs_raw = doc
+        .get_element_by_id("round-run-players")
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        .map(|i| i.value())
+        .unwrap_or_default();
+    let player_keepers = player_pairs_raw
+        .split(',')
+        .filter_map(|part| {
+            let pair = part.trim();
+            if pair.is_empty() {
+                return None;
+            }
+            let mut pieces = pair.splitn(2, '=');
+            let actor_id = pieces.next()?.trim();
+            let keeper = pieces.next()?.trim();
+            if actor_id.is_empty() || keeper.is_empty() {
+                None
+            } else {
+                Some((actor_id.to_string(), keeper.to_string()))
+            }
+        })
+        .collect::<Vec<_>>();
+    if player_keepers.is_empty() {
+        return Err("player keepers가 없습니다. 새 게임에서 참가자 할당을 확인하세요.".to_string());
+    }
+
+    Ok(RoundRunPlan {
+        dm_keeper,
+        phase: if phase.is_empty() {
+            "round".to_string()
+        } else {
+            phase
+        },
+        timeout_sec,
+        lang: if lang.is_empty() {
+            "ko".to_string()
+        } else {
+            lang
+        },
+        player_keepers,
+    })
 }

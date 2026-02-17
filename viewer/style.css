@@ -1597,6 +1597,17 @@ body.mode-lobby #dashboard {
     margin-bottom: 8px;
 }
 
+#round-run-summary {
+    margin: 6px 0 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(196, 162, 101, 0.2);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
 #advance-turn-btn {
     background: var(--bg-card);
     border: 1px solid var(--border-highlight, rgba(196, 162, 101, 0.2));

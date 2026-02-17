@@ -77,10 +77,8 @@ pub fn poll_masc_events(
     for (event_type, data) in msgs.drain(..) {
         match event_type.as_str() {
             "broadcast" => {
-                let message = extract_field(&data, "message")
-                    .unwrap_or("(no message)");
-                let agent = extract_field(&data, "agent_name")
-                    .unwrap_or("unknown");
+                let message = extract_field(&data, "message").unwrap_or("(no message)");
+                let agent = extract_field(&data, "agent_name").unwrap_or("unknown");
                 let summary = format!("[{}] {}", agent, message);
 
                 event_log.entries.push(MascLogEntry {
@@ -98,8 +96,7 @@ pub fn poll_masc_events(
                 log::debug!("MASC heartbeat received");
             }
             "agent_joined" => {
-                let agent = extract_field(&data, "agent_name")
-                    .unwrap_or("unknown");
+                let agent = extract_field(&data, "agent_name").unwrap_or("unknown");
                 event_log.agent_count = event_log.agent_count.saturating_add(1);
 
                 let summary = format!("{} joined", agent);
@@ -111,11 +108,14 @@ pub fn poll_masc_events(
 
                 update_monitor_agents(event_log.agent_count, &summary);
 
-                log::info!("MASC agent joined: {} (total: {})", agent, event_log.agent_count);
+                log::info!(
+                    "MASC agent joined: {} (total: {})",
+                    agent,
+                    event_log.agent_count
+                );
             }
             "agent_left" => {
-                let agent = extract_field(&data, "agent_name")
-                    .unwrap_or("unknown");
+                let agent = extract_field(&data, "agent_name").unwrap_or("unknown");
                 event_log.agent_count = event_log.agent_count.saturating_sub(1);
 
                 let summary = format!("{} left", agent);
@@ -127,13 +127,15 @@ pub fn poll_masc_events(
 
                 update_monitor_agents(event_log.agent_count, &summary);
 
-                log::info!("MASC agent left: {} (total: {})", agent, event_log.agent_count);
+                log::info!(
+                    "MASC agent left: {} (total: {})",
+                    agent,
+                    event_log.agent_count
+                );
             }
             "task_update" => {
-                let task_id = extract_field(&data, "task_id")
-                    .unwrap_or("?");
-                let status = extract_field(&data, "status")
-                    .unwrap_or("unknown");
+                let task_id = extract_field(&data, "task_id").unwrap_or("?");
+                let status = extract_field(&data, "status").unwrap_or("unknown");
 
                 let summary = format!("Task {} -> {}", task_id, status);
                 event_log.entries.push(MascLogEntry {

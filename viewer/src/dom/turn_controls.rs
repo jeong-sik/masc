@@ -166,7 +166,8 @@ async fn advance_turn() -> Result<String, JsValue> {
         "player_keepers": Value::Object(player_keepers),
         "phase": plan.phase,
         "timeout_sec": plan.timeout_sec,
-        "lang": plan.lang
+        "lang": plan.lang,
+        "require_claim": true
     })
     .to_string();
 

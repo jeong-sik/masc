@@ -22,6 +22,8 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::config;
 use crate::game::state::{RoomState, TurnProgressState};
+#[cfg(target_arch = "wasm32")]
+use crate::game::lifecycle::TrpgLifecycleState;
 
 // ─── Marker Resource ────────────────────────
 
@@ -60,21 +62,9 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
 
     #[cfg(target_arch = "wasm32")]
     {
-        fn normalize_room_status(raw: &str) -> String {
-            let normalized = raw.trim().to_ascii_lowercase();
-            if normalized.is_empty() {
-                "unknown".to_string()
-            } else {
-                normalized
-            }
-        }
-
-        let status = if !progress.room_status.trim().is_empty() {
-            normalize_room_status(&progress.room_status)
-        } else {
-            normalize_room_status(&room_state.status)
-        };
-        let room_allows_control = is_room_active_for_controls(&status);
+        let lifecycle =
+            TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+        let room_allows_control = lifecycle.allows_round_control();
 
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
@@ -112,28 +102,8 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
             "display:none"
         };
         let _ = panel.set_attribute("style", style);
+        let _ = panel.set_attribute("data-lifecycle", lifecycle.css_class());
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn is_room_active_for_controls(status: &str) -> bool {
-    matches!(
-        status,
-        "active"
-            | "running"
-            | "in_progress"
-            | "round"
-            | "combat"
-            | "briefing"
-            | "dm_narration"
-            | "party_discussion"
-            | "action_declaration"
-            | "dice_resolution"
-            | "outcome_narration"
-            | "state_update"
-            | "transition"
-            | "paused"
-    )
 }
 
 // ─── Event: Advance Button ──────────────────

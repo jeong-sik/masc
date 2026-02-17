@@ -486,6 +486,27 @@ body.mode-lobby #dashboard {
     white-space: nowrap;
 }
 
+.widget-pill[data-lifecycle] {
+    border-color: rgba(109, 122, 164, 0.45);
+}
+
+.widget-pill[data-lifecycle="state-running"] {
+    border-color: rgba(88, 184, 116, 0.42);
+    color: var(--status-connected);
+}
+
+.widget-pill[data-lifecycle="state-stopped"],
+.widget-pill[data-lifecycle="state-loading"] {
+    border-color: rgba(168, 119, 45, 0.42);
+    color: var(--status-connecting);
+}
+
+.widget-pill[data-lifecycle="state-ended"],
+.widget-pill[data-lifecycle="state-unavailable"] {
+    border-color: rgba(177, 116, 116, 0.32);
+    color: var(--status-disconnected);
+}
+
 .inline-toggle.primary {
     border-color: var(--accent-primary);
     box-shadow: inset 0 0 0 1px rgba(201, 165, 90, 0.35);
@@ -573,7 +594,7 @@ body.mode-lobby #dashboard {
     border-radius: var(--panel-radius);
     background: rgba(10, 14, 28, 0.86);
     display: grid;
-    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    grid-template-columns: repeat(5, minmax(120px, 1fr));
     gap: 8px;
     max-height: 192px;
     overflow: hidden;
@@ -603,6 +624,11 @@ body.mode-lobby #dashboard {
 
 .room-lane[data-lane="ended"] {
     border-color: rgba(177, 116, 116, 0.32);
+}
+
+.room-lane[data-lane="unavailable"] {
+    border-color: rgba(177, 116, 116, 0.55);
+    box-shadow: inset 0 0 0 1px rgba(136, 66, 66, 0.35);
 }
 
 .room-lane-title {
@@ -653,11 +679,26 @@ body.mode-lobby #dashboard {
 .room-chip-id {
     font-size: 11px;
     font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
 }
 
 .room-chip-meta {
     font-size: 10px;
     color: var(--text-dim);
+}
+
+.room-chip-state {
+    font-size: 9px;
+    font-family: var(--font-ui);
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--text-dim);
+    border: 1px solid rgba(100, 100, 120, 0.4);
+    border-radius: 999px;
+    padding: 1px 6px;
 }
 
 @media (max-width: 1280px) {
@@ -1553,6 +1594,10 @@ body.mode-lobby #dashboard {
     gap: 6px 10px;
 }
 
+.turn-runtime-item.turn-runtime-item-wide {
+    grid-column: 1 / -1;
+}
+
 .turn-runtime-item {
     display: flex;
     justify-content: space-between;
@@ -1593,6 +1638,53 @@ body.mode-lobby #dashboard {
 
 .turn-runtime-item .v.status-idle {
     color: var(--text-dim);
+}
+
+.turn-runtime-item .v.state-running,
+.room-chip-state.state-running {
+    color: var(--status-connected);
+    border-color: rgba(88, 184, 116, 0.42);
+}
+
+.turn-runtime-item .v.state-stopped,
+.room-chip-state.state-stopped,
+.turn-runtime-item .v.state-loading,
+.room-chip-state.state-loading {
+    color: var(--status-connecting);
+    border-color: rgba(168, 119, 45, 0.42);
+}
+
+.turn-runtime-item .v.state-ended,
+.room-chip-state.state-ended,
+.turn-runtime-item .v.state-unavailable,
+.room-chip-state.state-unavailable {
+    color: var(--status-disconnected);
+    border-color: rgba(177, 116, 116, 0.32);
+}
+
+.turn-runtime-item .v.state-lobby,
+.room-chip-state.state-lobby,
+.turn-runtime-item .v.state-unknown,
+.room-chip-state.state-unknown {
+    color: var(--text-dim);
+}
+
+#state-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 8px;
+}
+
+.state-chip {
+    font-size: 9px;
+    border: 1px solid var(--border-main);
+    border-radius: 999px;
+    padding: 2px 6px;
+    color: var(--text-dim);
+    background: rgba(20, 24, 40, 0.65);
+    letter-spacing: 0.55px;
+    text-transform: uppercase;
 }
 
 /* ─── Turn Controls (advance turn button) ─── */

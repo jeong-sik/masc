@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::game::components::Actor;
+use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::state::{RoomState, TurnProgressState};
 
 /// Tracks last-rendered runtime status snapshot to avoid redundant DOM updates.
@@ -22,64 +23,21 @@ fn pretty_phase(phase: &str) -> String {
     }
 }
 
-fn normalize_room_status(raw: &str) -> String {
-    let normalized = raw.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        "unknown".to_string()
-    } else {
-        normalized
+#[cfg(target_arch = "wasm32")]
+fn room_status_class(state: TrpgLifecycleState) -> &'static str {
+    match state {
+        TrpgLifecycleState::Running => "status-active",
+        TrpgLifecycleState::Stopped => "status-paused",
+        TrpgLifecycleState::Ended => "status-ended",
+        TrpgLifecycleState::Unavailable => "status-unavailable",
+        TrpgLifecycleState::Loading => "status-loading",
+        TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => "status-idle",
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn room_status_class(status: &str) -> &'static str {
-    match status {
-        "active" | "running" | "in_progress" | "round" | "combat" | "briefing" => {
-            "status-active"
-        }
-        "dm_narration" | "party_discussion" | "action_declaration" | "dice_resolution"
-        | "outcome_narration" | "state_update" | "transition" => "status-active",
-        "paused" | "stopped" => "status-paused",
-        "ended" => "status-ended",
-        "unavailable" => "status-unavailable",
-        "loading" => "status-loading",
-        _ => "status-idle",
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn room_status_label(status: &str) -> &'static str {
-    match status {
-        "active" | "running" | "in_progress" | "round" | "combat" | "briefing" => "RUNNING",
-        "dm_narration" | "party_discussion" | "action_declaration" | "dice_resolution"
-        | "outcome_narration" | "state_update" | "transition" => "RUNNING",
-        "paused" => "PAUSED",
-        "stopped" => "STOPPED",
-        "ended" => "ENDED",
-        "idle" => "IDLE",
-        "loading" => "LOADING",
-        "unavailable" => "UNAVAILABLE",
-        _ => "UNKNOWN",
-    }
-}
-
-fn room_accepts_input(status: &str) -> bool {
-    matches!(
-        status,
-        "active"
-            | "running"
-            | "in_progress"
-            | "round"
-            | "combat"
-            | "briefing"
-            | "dm_narration"
-            | "party_discussion"
-            | "action_declaration"
-            | "dice_resolution"
-            | "outcome_narration"
-            | "state_update"
-            | "transition"
-    )
+fn room_status_label(state: TrpgLifecycleState) -> &'static str {
+    state.label()
 }
 
 /// Render live TRPG runtime progress:
@@ -97,7 +55,8 @@ pub fn update_turn_runtime_dom(
     } else {
         "unknown".to_string()
     };
-    let room_status = normalize_room_status(&room_status_raw);
+    let lifecycle = TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+    let room_status_key = crate::game::lifecycle::normalize_status(&room_status_raw);
     let turn = if progress.turn > 0 {
         progress.turn
     } else if room_state.turn > 0 {
@@ -152,15 +111,15 @@ pub fn update_turn_runtime_dom(
         format!("{}/{} alive", alive_party, total_party)
     };
 
-    let current_status = if !room_accepts_input(&room_status) {
-        room_status.as_str()
+    let current_status = if !lifecycle.accepts_player_input() {
+        lifecycle.label_ko()
     } else if current_actor != "-" {
         "thinking"
     } else {
         "waiting"
     };
 
-    let input_status = if room_accepts_input(&room_status) {
+    let input_status = if lifecycle.accepts_player_input() {
         "enabled"
     } else {
         "disabled"
@@ -168,7 +127,7 @@ pub fn update_turn_runtime_dom(
 
     let snapshot = format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        room_status,
+        room_status_key,
         turn,
         phase,
         current_actor,
@@ -192,21 +151,43 @@ pub fn update_turn_runtime_dom(
             return;
         };
 
-        let room_class = room_status_class(&room_status);
+        let room_class = room_status_class(lifecycle);
         let party_class = if total_party > 0 && alive_party <= 0 {
             "status-wipe"
         } else {
             "status-active"
         };
-        let input_class = if room_accepts_input(&room_status) {
+        let input_class = if lifecycle.accepts_player_input() {
             "status-active"
         } else {
             room_class
         };
 
+        if let Some(room_status_el) = document.get_element_by_id("room-status") {
+            let room_id = crate::config::current_room_id();
+            room_status_el.set_text_content(Some(&format!(
+                "room {} · {}",
+                room_id,
+                lifecycle.label_ko()
+            )));
+            let _ = room_status_el.set_attribute("data-lifecycle", lifecycle.css_class());
+            let _ = room_status_el.set_attribute(
+                "title",
+                &format!(
+                    "{} | turn {} | phase {} | raw {}",
+                    lifecycle.help_text(),
+                    turn,
+                    phase,
+                    room_status_key
+                ),
+            );
+        }
+
         let html = format!(
             r#"
 <div class="turn-runtime-grid">
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Lifecycle</span><span class="v {lifecycle_class}">{lifecycle_label}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Definition</span><span class="v">{lifecycle_help}</span></div>
   <div class="turn-runtime-item"><span class="k">State</span><span class="v {room_class}">{room}</span></div>
   <div class="turn-runtime-item"><span class="k">Turn</span><span class="v">{turn}</span></div>
   <div class="turn-runtime-item"><span class="k">Phase</span><span class="v">{phase}</span></div>
@@ -217,8 +198,11 @@ pub fn update_turn_runtime_dom(
   <div class="turn-runtime-item"><span class="k">Party</span><span class="v {party_class}">{party}</span></div>
 </div>
 "#,
+            lifecycle_class = format!("{} {}", room_class, lifecycle.css_class()),
+            lifecycle_label = html_escape(&format!("{} ({})", lifecycle.label(), lifecycle.label_ko())),
+            lifecycle_help = html_escape(lifecycle.help_text()),
             room_class = room_class,
-            room = html_escape(room_status_label(&room_status)),
+            room = html_escape(room_status_label(lifecycle)),
             turn = turn,
             phase = html_escape(&pretty_phase(&phase)),
             input_class = input_class,

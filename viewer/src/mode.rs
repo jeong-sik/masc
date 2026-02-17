@@ -23,6 +23,8 @@ use wasm_bindgen::JsCast;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::JsFuture;
+#[cfg(target_arch = "wasm32")]
+use crate::game::lifecycle::TrpgLifecycleState;
 
 /// Top-level viewer mode. Determines which plugins/systems are active
 /// and which SSE endpoint the viewer connects to.
@@ -809,13 +811,7 @@ struct RoomSnapshot {
 
 #[cfg(target_arch = "wasm32")]
 fn room_lane_label(status: &str) -> &'static str {
-    let key = status.trim().to_ascii_lowercase();
-    match key.as_str() {
-        "active" | "running" | "in_progress" => "running",
-        "stopped" | "suspended" | "paused" => "stopped",
-        "ended" | "completed" | "done" | "retired" | "closed" => "ended",
-        _ => "lobby",
-    }
+    TrpgLifecycleState::from_status(status).lane()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -826,6 +822,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     let mut running = Vec::new();
     let mut stopped = Vec::new();
     let mut lobby = Vec::new();
+    let mut unavailable = Vec::new();
     let mut ended = Vec::new();
 
     for room in rooms {
@@ -840,16 +837,19 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         } else {
             room.status.clone()
         };
+        let lifecycle = TrpgLifecycleState::from_status(&status_text);
         let card = format!(
             concat!(
                 "<button class=\"room-chip\" data-room-id=\"{id}\" data-room-status=\"{status}\"{current}>",
-                "<span class=\"room-chip-id\">{id}</span>",
+                "<span class=\"room-chip-id\">{id}<span class=\"room-chip-state {state_class}\">{state_label}</span></span>",
                 "<span class=\"room-chip-meta\">turn {turn} · {phase} · a{agents}/t{tasks}</span>",
                 "</button>"
             ),
             id = html_escape(&room.id),
             status = html_escape(&status_text),
             current = current_attr,
+            state_class = lifecycle.css_class(),
+            state_label = lifecycle.label_ko(),
             turn = room.turn,
             phase = html_escape(&room.phase),
             agents = room.agent_count,
@@ -858,6 +858,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         match lane {
             "running" => running.push(card),
             "stopped" => stopped.push(card),
+            "unavailable" => unavailable.push(card),
             "ended" => ended.push(card),
             _ => lobby.push(card),
         }
@@ -878,10 +879,11 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     };
 
     let html = format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         lane_html("진행 중", running, "running"),
         lane_html("멈춤", stopped, "stopped"),
         lane_html("로비", lobby, "lobby"),
+        lane_html("오류", unavailable, "unavailable"),
         lane_html("종료", ended, "ended")
     );
     hub.set_inner_html(&html);
@@ -1099,7 +1101,14 @@ fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
         input.set_value(&selected);
     }
     if let Some(pill) = doc.get_element_by_id("room-status") {
-        pill.set_text_content(Some(&format!("현재 방: {}", selected)));
+        let lifecycle = TrpgLifecycleState::Lobby;
+        pill.set_text_content(Some(&format!(
+            "현재 방: {} · {}",
+            selected,
+            lifecycle.label_ko()
+        )));
+        let _ = pill.set_attribute("data-lifecycle", lifecycle.css_class());
+        let _ = pill.set_attribute("title", lifecycle.help_text());
     }
     sync_room_hub_selection(doc, &selected);
 }

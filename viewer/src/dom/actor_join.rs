@@ -16,6 +16,8 @@ use wasm_bindgen::prelude::*;
 use crate::config;
 #[cfg(target_arch = "wasm32")]
 use crate::dom::action_panel::friendly_js_error;
+#[cfg(target_arch = "wasm32")]
+use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::state::{RoomState, TurnProgressState};
 
 // ─── Marker Resource ────────────────────────
@@ -59,53 +61,9 @@ pub fn sync_join_panel_interaction_state(
 
     #[cfg(target_arch = "wasm32")]
     {
-        fn normalize_room_status(raw: &str) -> String {
-            let normalized = raw.trim().to_ascii_lowercase();
-            if normalized.is_empty() {
-                "unknown".to_string()
-            } else {
-                normalized
-            }
-        }
-
-        fn effective_room_status(room_status: &str, progress_status: &str) -> String {
-            if !progress_status.is_empty() {
-                normalize_room_status(progress_status)
-            } else {
-                normalize_room_status(room_status)
-            }
-        }
-
-        fn room_accepts_join(status: &str) -> bool {
-            matches!(
-                status,
-                "active"
-                    | "running"
-                    | "in_progress"
-                    | "round"
-                    | "combat"
-                    | "briefing"
-                    | "dm_narration"
-                    | "party_discussion"
-                    | "action_declaration"
-                    | "dice_resolution"
-                    | "outcome_narration"
-                    | "state_update"
-                    | "transition"
-            )
-        }
-
-        fn room_blocked_join_message(status: &str) -> Option<&'static str> {
-            match status {
-                "ended" => Some("Game Ended"),
-                "archived" => Some("Archived"),
-                "error" => Some("Error State"),
-                _ => None,
-            }
-        }
-
-        let status = effective_room_status(&room_state.status, &progress.room_status);
-        let can_join = room_accepts_join(&status);
+        let lifecycle =
+            TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+        let can_join = lifecycle.accepts_player_input();
 
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
@@ -117,8 +75,7 @@ pub fn sync_join_panel_interaction_state(
                 let _ = btn.set_attribute("title", "Claim actor and join game");
             } else {
                 let _ = btn.set_attribute("disabled", "true");
-                let reason = room_blocked_join_message(&status).unwrap_or("Unavailable");
-                let _ = btn.set_attribute("title", reason);
+                let _ = btn.set_attribute("title", lifecycle.help_text());
             }
         }
     }

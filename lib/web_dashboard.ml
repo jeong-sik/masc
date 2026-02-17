@@ -1561,6 +1561,31 @@ let cached_html = lazy ({|<!DOCTYPE html>
       margin-bottom: 8px;
       font-weight: 600;
     }
+    .trpg-section-title.with-action {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .trpg-history-toggle-btn {
+      border: 1px solid rgba(148,163,184,0.35);
+      border-radius: 8px;
+      background: rgba(15,23,42,0.65);
+      color: #cbd5e1;
+      font-size: 0.72em;
+      padding: 4px 8px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .trpg-history-toggle-btn:hover {
+      border-color: rgba(34,211,238,0.55);
+      color: #e2e8f0;
+    }
+    .trpg-history-toggle-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      border-color: rgba(100,116,139,0.35);
+    }
     .trpg-round-list {
       display: flex;
       flex-direction: column;
@@ -1951,6 +1976,38 @@ let cached_html = lazy ({|<!DOCTYPE html>
       font-size: 0.84em;
       padding: 8px 10px;
       line-height: 1.4;
+    }
+    .trpg-next-action-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .trpg-next-action-btn {
+      border: 1px solid rgba(34,211,238,0.45);
+      border-radius: 8px;
+      background: rgba(8,47,73,0.68);
+      color: #67e8f9;
+      font-weight: 700;
+      font-size: 0.78em;
+      padding: 8px 10px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .trpg-next-action-btn:hover {
+      border-color: rgba(103,232,249,0.8);
+      color: #cffafe;
+    }
+    .trpg-next-action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      border-color: rgba(100,116,139,0.35);
+      color: #94a3b8;
+      background: rgba(15,23,42,0.55);
+    }
+    .trpg-next-action-note {
+      font-size: 0.72em;
+      color: #94a3b8;
+      line-height: 1.35;
     }
     .trpg-dev-note {
       margin-top: 6px;
@@ -2366,6 +2423,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <div class="title">다음 액션</div>
                 <div id="trpg-next-action-desc" class="desc">세션 상태를 확인하고, 상단 메인 버튼에서 다음 단계를 진행하세요.</div>
                 <div id="trpg-next-action-target" class="target">권장 클릭: 1) 세션 시작 (상단 버튼)</div>
+                <div class="trpg-next-action-controls">
+                  <button id="trpg-next-action-btn" class="trpg-next-action-btn" onclick="runTrpgNextAction()">권장 액션 실행</button>
+                  <div id="trpg-next-action-note" class="trpg-next-action-note">권장 액션이 실행 가능한 상태일 때 버튼이 활성화됩니다.</div>
+                </div>
               </div>
               <div class="trpg-section-title" style="margin-top:10px;">액터 관리</div>
               <div class="trpg-control-grid">
@@ -2445,7 +2506,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
             <div id="trpg-round-log" class="trpg-round-list">
               <div class="trpg-empty" style="padding:18px 8px;">라운드 이벤트가 없습니다.</div>
             </div>
-            <div class="trpg-section-title" style="margin-top:8px;">이전 세션 히스토리</div>
+            <div class="trpg-section-title with-action" style="margin-top:8px;">
+              <span>이전 세션 히스토리</span>
+              <button id="trpg-history-toggle-btn" class="trpg-history-toggle-btn" onclick="toggleTrpgHistoryExpanded()">이전 세션 없음</button>
+            </div>
             <div id="trpg-game-history" class="trpg-round-list">
               <div class="trpg-empty" style="padding:18px 8px;">이 room의 이전 세션 기록이 없습니다.</div>
             </div>
@@ -7356,6 +7420,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
     let trpgKeepersLoaded = false;
     let trpgKeeperSelectorsKey = '';
     let trpgIncludePastSessions = false;
+    let trpgHistoryExpanded = false;
     let trpgMcpCallSeq = 1000;
     let trpgMcpSessionId = null;
     let trpgPresetCatalog = { dm_presets: [], world_presets: [] };
@@ -7452,6 +7517,51 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return '';
     }
 
+    function trpgNextActionRunLabel(kind) {
+      const key = String(kind || '');
+      if (key === 'bootstrap') return '권장 액션 실행: 1) 세션 시작';
+      if (key === 'run_round') return '권장 액션 실행: 2) 라운드 실행';
+      return '권장 액션 없음';
+    }
+
+    function updateTrpgNextActionButton() {
+      const btn = document.getElementById('trpg-next-action-btn');
+      const note = document.getElementById('trpg-next-action-note');
+      if (!btn) return;
+      const isRunnable = trpgNextActionKind === 'bootstrap' || trpgNextActionKind === 'run_round';
+      const disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating || !isRunnable;
+      const reason = trpgRoundRunning
+        ? '현재 라운드 실행 중입니다.'
+        : (trpgBootstrapping
+            ? '세션 시작 작업이 진행 중입니다.'
+            : (trpgActorMutating
+                ? '액터 생성/수정/삭제가 진행 중입니다.'
+                : String(trpgRunBlockedReason || '현재 권장 액션이 실행 가능한 상태가 아닙니다.')));
+      btn.textContent = trpgNextActionRunLabel(trpgNextActionKind);
+      btn.disabled = disabled;
+      btn.title = disabled ? reason : '현재 추천된 다음 단계를 즉시 실행합니다.';
+      if (note) {
+        note.textContent = disabled ? reason : '버튼을 누르면 현재 추천 단계가 바로 실행됩니다.';
+      }
+    }
+
+    function runTrpgNextAction() {
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) {
+        showToast('현재 실행 중인 작업이 있어 대기 중입니다.', 'error');
+        return;
+      }
+      if (trpgNextActionKind === 'bootstrap') {
+        bootstrapTrpgSession();
+        return;
+      }
+      if (trpgNextActionKind === 'run_round') {
+        runTrpgRound();
+        return;
+      }
+      const reason = String(trpgRunBlockedReason || '현재 실행 가능한 권장 액션이 없습니다.');
+      showToast(reason, 'error');
+    }
+
     function trpgSetActionRowHighlight(buttonId, enabled = true) {
       ['trpg-bootstrap-btn', 'trpg-run-round-btn', 'trpg-auto-round-btn', 'trpg-new-game-btn', 'trpg-reload-btn'].forEach((id) => {
         const el = document.getElementById(id);
@@ -7482,6 +7592,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
       trpgSetActionRowHighlight(targetBtnId, !!enabled);
       updateTrpgButtons();
+      updateTrpgNextActionButton();
     }
 
     function trpgUpdateNextAction(state, events) {
@@ -7903,6 +8014,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const nextRoom = String((roomInput && roomInput.value) || '').trim() || TRPG_DEFAULT_ROOM_ID;
       if (nextRoom !== trpgRoomId) {
         trpgRoomId = nextRoom;
+        trpgHistoryExpanded = false;
         resetTrpgEventWindow();
         setTrpgRoomQueryState();
       }
@@ -9118,6 +9230,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         actorDeleteBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
         actorDeleteBtn.textContent = trpgActorMutating ? '처리 중...' : '액터 삭제';
       }
+      updateTrpgNextActionButton();
       syncTrpgAutoRoundUi();
     }
 
@@ -10296,12 +10409,29 @@ let cached_html = lazy ({|<!DOCTYPE html>
     function renderTrpgGameHistory(events) {
       const el = document.getElementById('trpg-game-history');
       if (!el) return;
+      const toggleBtn = document.getElementById('trpg-history-toggle-btn');
       const fullHistory = trpgBuildSessionHistory(events);
       if (!fullHistory.length) {
+        trpgHistoryExpanded = false;
+        if (toggleBtn) {
+          toggleBtn.disabled = true;
+          toggleBtn.textContent = '이전 세션 없음';
+          toggleBtn.title = '이 room에 기록된 세션이 없습니다.';
+        }
         el.innerHTML = '<div class="trpg-empty" style="padding:18px 8px;">이 room의 이전 세션 기록이 없습니다.</div>';
         return;
       }
-      const visibleHistory = trpgIncludePastSessions ? fullHistory : fullHistory.slice(0, 1);
+      const pastCount = Math.max(0, fullHistory.length - 1);
+      if (toggleBtn) {
+        toggleBtn.disabled = pastCount === 0;
+        toggleBtn.textContent = pastCount === 0
+          ? '이전 세션 없음'
+          : (trpgHistoryExpanded ? `이전 세션 접기 (${pastCount})` : `이전 세션 펼치기 (${pastCount})`);
+        toggleBtn.title = pastCount === 0
+          ? '현재 세션만 있습니다.'
+          : (trpgHistoryExpanded ? '이전 세션 목록을 접습니다.' : '이전 세션 목록을 펼칩니다.');
+      }
+      const visibleHistory = trpgHistoryExpanded ? fullHistory : fullHistory.slice(0, 1);
       const hiddenCount = Math.max(0, fullHistory.length - visibleHistory.length);
       const cards = visibleHistory.map((session, idx) => {
         const isLatest = idx === 0;
@@ -10324,11 +10454,22 @@ let cached_html = lazy ({|<!DOCTYPE html>
         cards.push(`
           <div class="trpg-round-item">
             <div class="meta">history</div>
-            <div>이전 ${hiddenCount}개 세션은 숨김 상태입니다. "이전 세션 로그 포함 보기"를 켜면 모두 표시됩니다.</div>
+            <div>이전 ${hiddenCount}개 세션은 접힌 상태입니다. 상단 "이전 세션 펼치기" 버튼으로 확인할 수 있습니다.</div>
           </div>
         `);
       }
       el.innerHTML = cards.join('');
+    }
+
+    function toggleTrpgHistoryExpanded() {
+      const fullHistory = trpgBuildSessionHistory(trpgEventsCache);
+      if (fullHistory.length <= 1) {
+        showToast('현재 room에는 펼칠 이전 세션이 없습니다.', 'error');
+        return;
+      }
+      trpgHistoryExpanded = !trpgHistoryExpanded;
+      renderTrpgGameHistory(trpgEventsCache);
+      showToast(trpgHistoryExpanded ? '이전 세션 목록 펼침' : '이전 세션 목록 접음', 'success');
     }
 
     function renderTrpgStatus(state, summary, phase) {

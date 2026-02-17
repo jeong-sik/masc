@@ -1107,6 +1107,230 @@ body.mode-lobby #dashboard {
     border: 1px solid rgba(204, 68, 34, 0.25);
 }
 
+/* MP bar */
+.mp-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.mp-bar-container {
+    flex: 1;
+    height: 8px;
+    background: var(--bg-deep);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+.mp-bar-fill {
+    height: 100%;
+    transition: width 0.5s ease;
+    border-radius: 3px;
+    position: relative;
+}
+
+.mp-bar-fill::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.15), transparent);
+    border-radius: 3px 3px 0 0;
+}
+
+.mp-bar-fill.mp-full {
+    background: linear-gradient(90deg, #1a3a6b, #3366cc, #4488ee);
+    box-shadow: 0 0 6px rgba(68, 136, 238, 0.3);
+}
+
+.mp-bar-fill.mp-low {
+    background: linear-gradient(90deg, #2a2a5a, #5555aa, #7777cc);
+    box-shadow: 0 0 4px rgba(119, 119, 204, 0.2);
+}
+
+.mp-bar-fill.mp-depleted {
+    background: linear-gradient(90deg, #1a1a3a, #333366, #444488);
+    box-shadow: 0 0 4px rgba(68, 68, 136, 0.2);
+}
+
+.mp-text {
+    font-family: 'JetBrains Mono', var(--font-ui);
+    font-size: 10px;
+    color: #7799cc;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 52px;
+    text-align: right;
+}
+
+/* Conditions row */
+.conditions-row {
+    margin-top: 4px;
+    margin-bottom: 2px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.condition-badge {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(180, 60, 180, 0.15);
+    color: #cc88cc;
+    border: 1px solid rgba(180, 60, 180, 0.25);
+    white-space: nowrap;
+}
+
+.condition-turns {
+    font-size: 8px;
+    color: var(--text-dim);
+    margin-left: 2px;
+}
+
+/* Collapsible section toggle (CSS checkbox hack) */
+.section-toggle {
+    display: none;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    padding: 4px 0 2px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    user-select: none;
+    transition: color 0.15s ease;
+}
+
+.section-header::before {
+    content: "\25B6";
+    font-size: 7px;
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+
+.section-header:hover {
+    color: var(--accent-primary);
+}
+
+.section-count {
+    font-weight: 400;
+    color: var(--text-dim);
+    opacity: 0.7;
+}
+
+.section-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+}
+
+.section-toggle:checked + .section-header::before {
+    transform: rotate(90deg);
+}
+
+.section-toggle:checked + .section-header + .section-body {
+    max-height: 500px;
+}
+
+/* Skills list */
+.skills-list {
+    padding: 0 2px;
+}
+
+.skill-row {
+    display: grid;
+    grid-template-columns: 1fr 28px 32px;
+    gap: 4px;
+    padding: 2px 4px;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.skill-row:last-child {
+    border-bottom: none;
+}
+
+.skill-name {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.skill-level {
+    text-align: center;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', var(--font-ui);
+}
+
+.skill-mod {
+    text-align: right;
+    font-family: 'JetBrains Mono', var(--font-ui);
+    font-weight: 700;
+    font-size: 9px;
+}
+
+.mod-positive { color: #66cc66; }
+.mod-negative { color: #cc6644; }
+.mod-neutral  { color: var(--text-dim); }
+
+/* Equipment list */
+.equip-list {
+    padding: 0 2px;
+}
+
+.equip-row {
+    display: grid;
+    grid-template-columns: 18px auto 1fr;
+    gap: 4px;
+    padding: 2px 4px;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.equip-row:last-child {
+    border-bottom: none;
+}
+
+.equip-icon {
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
+}
+
+.equip-slot {
+    color: var(--text-dim);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.equip-name {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Dice entries */
 .dice-entry {
     flex-shrink: 0;

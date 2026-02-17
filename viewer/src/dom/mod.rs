@@ -66,6 +66,7 @@ fn reset_trpg_dom_state(
     mut overlay_cache: ResMut<overlay::OverlayCache>,
 ) {
     character_cache.last_snapshot.clear();
+    character_cache.last_full.clear();
     turn_cache.last_turn = 0;
     turn_cache.last_phase.clear();
     runtime_cache.last_snapshot.clear();

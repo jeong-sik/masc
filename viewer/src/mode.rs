@@ -491,6 +491,9 @@ fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(el) = doc.get_element_by_id("dice-log") {
         el.set_inner_html("");
     }
+    if let Some(el) = doc.get_element_by_id("session-history") {
+        el.set_inner_html("");
+    }
     if let Some(el) = doc.get_element_by_id("character-panel") {
         el.set_inner_html("");
     }

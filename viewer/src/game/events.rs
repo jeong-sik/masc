@@ -32,6 +32,8 @@ pub struct NarrativePayload {
     pub text: String,
     pub phase: String,
     #[serde(default)]
+    pub turn: u32,
+    #[serde(default)]
     pub speaker: Option<String>,
 }
 

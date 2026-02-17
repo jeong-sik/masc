@@ -443,6 +443,45 @@ let test_handoff_cooldown_reset () =
   check (float 0.001) "reset to 0" 0.0 !Tool_mitosis.last_handoff_time
 
 (* ============================================================
+   Structured Logging Tests (P1-6)
+   ============================================================ *)
+
+module Mitosis = Masc_mcp.Mitosis
+
+let test_log_state_transition_does_not_raise () =
+  (* log_state_transition should not raise regardless of log level *)
+  Mitosis.log_state_transition
+    ~old_state:Mitosis.Active ~new_state:Mitosis.Prepared
+    ~agent_name:"test-cell-01"
+    ~reason:"DNA extraction at 50%";
+  check bool "no exception" true true
+
+let test_log_state_transition_all_states () =
+  (* Exercise all state combinations to verify formatting *)
+  let states = [Mitosis.Stem; Active; Prepared; Dividing; Apoptotic] in
+  List.iter (fun old_st ->
+    List.iter (fun new_st ->
+      Mitosis.log_state_transition
+        ~old_state:old_st ~new_state:new_st
+        ~agent_name:"test-cell"
+        ~reason:"test";
+    ) states
+  ) states;
+  check bool "all state pairs logged" true true
+
+let test_state_to_string () =
+  check string "stem" "stem" (Mitosis.state_to_string Mitosis.Stem);
+  check string "active" "active" (Mitosis.state_to_string Mitosis.Active);
+  check string "prepared" "prepared" (Mitosis.state_to_string Mitosis.Prepared);
+  check string "dividing" "dividing" (Mitosis.state_to_string Mitosis.Dividing);
+  check string "apoptotic" "apoptotic" (Mitosis.state_to_string Mitosis.Apoptotic)
+
+let test_phase_to_string () =
+  check string "idle" "idle" (Mitosis.phase_to_string Mitosis.Idle);
+  check string "ready" "ready_for_handoff"
+    (Mitosis.phase_to_string (Mitosis.ReadyForHandoff "dna"))
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -502,5 +541,11 @@ let () =
       test_case "blocks rapid calls" `Quick test_handoff_cooldown_blocks_rapid_calls;
       test_case "allows after expiry" `Quick test_handoff_cooldown_allows_after_expiry;
       test_case "reset" `Quick test_handoff_cooldown_reset;
+    ];
+    "state_logging", [
+      test_case "transition does not raise" `Quick test_log_state_transition_does_not_raise;
+      test_case "all state pairs" `Quick test_log_state_transition_all_states;
+      test_case "state_to_string" `Quick test_state_to_string;
+      test_case "phase_to_string" `Quick test_phase_to_string;
     ];
   ]

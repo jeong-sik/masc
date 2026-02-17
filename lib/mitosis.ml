@@ -248,6 +248,30 @@ let default_config = {
   min_delta_len = Defaults.min_delta_len;
 }
 
+(** Cell state to string *)
+let state_to_string = function
+  | Stem -> "stem"
+  | Active -> "active"
+  | Prepared -> "prepared"
+  | Dividing -> "dividing"
+  | Apoptotic -> "apoptotic"
+
+(** Mitosis phase to string *)
+let phase_to_string = function
+  | Idle -> "idle"
+  | ReadyForHandoff _ -> "ready_for_handoff"
+
+(** P1-6: Structured logging for state transitions.
+    Emits key-value pairs for observability: old_state, new_state, agent, timestamp, reason. *)
+let log_state_transition ~old_state ~new_state ~agent_name ~reason =
+  Log.Mitosis_log.info
+    "state_transition old_state=%s new_state=%s agent=%s timestamp=%.3f reason=%s"
+    (state_to_string old_state)
+    (state_to_string new_state)
+    agent_name
+    (Time_compat.now ())
+    reason
+
 (** Create a new stem cell with collision-resistant ID *)
 let create_stem_cell ~generation =
   (* Use random bytes instead of timestamp mod to avoid ID collision *)
@@ -621,8 +645,11 @@ let prepare_for_division ~config ~cell ~full_context =
     prepared_dna = Some dna;
     prepare_context_len = context_len;  (* Track for delta calculation *)
   } in
-  Printf.printf "[MITOSIS/PREPARE] Cell %s (gen %d) prepared at %.0f%% - DNA extracted (%d chars), waiting for handoff threshold\n%!"
-    cell.id cell.generation (config.prepare_threshold *. 100.0) context_len;
+  log_state_transition
+    ~old_state:cell.state ~new_state:Prepared
+    ~agent_name:cell.id
+    ~reason:(Printf.sprintf "DNA extracted (%d chars) at %.0f%% threshold"
+      context_len (config.prepare_threshold *. 100.0));
   prepared_cell
 
 (** Activate a stem cell with DNA from parent *)
@@ -638,6 +665,10 @@ let activate_stem ~pool ~dna =
       prepared_dna = None;
       last_activity = Time_compat.now ();
     } in
+    log_state_transition
+      ~old_state:Stem ~new_state:Active
+      ~agent_name:activated.id
+      ~reason:"emergency activation (no stem cells available)";
     (activated, pool)
   | Some stem ->
     let activated = { stem with
@@ -647,11 +678,19 @@ let activate_stem ~pool ~dna =
       prepared_dna = None;
       last_activity = Time_compat.now ();
     } in
+    log_state_transition
+      ~old_state:Stem ~new_state:Active
+      ~agent_name:stem.id
+      ~reason:"stem cell activation with parent DNA";
     let remaining = List.filter (fun c -> c.id <> stem.id) pool.cells in
     (activated, { pool with cells = remaining })
 
 (** Trigger apoptosis on a cell *)
 let begin_apoptosis cell =
+  log_state_transition
+    ~old_state:cell.state ~new_state:Apoptotic
+    ~agent_name:cell.id
+    ~reason:"mitosis division complete, entering graceful shutdown";
   { cell with state = Apoptotic }
 
 (** Complete apoptosis - cell is now dead *)
@@ -769,19 +808,6 @@ let auto_mitosis_check ~config ~pool ~cell ~context_ratio ~full_context ~spawn_f
   end
   else
     None
-
-(** Cell state to string *)
-let state_to_string = function
-  | Stem -> "stem"
-  | Active -> "active"
-  | Prepared -> "prepared"
-  | Dividing -> "dividing"
-  | Apoptotic -> "apoptotic"
-
-(** Mitosis phase to string *)
-let phase_to_string = function
-  | Idle -> "idle"
-  | ReadyForHandoff _ -> "ready_for_handoff"
 
 (** Cell to JSON *)
 let cell_to_json cell =

@@ -152,3 +152,137 @@ pub struct MoodChanged(pub MoodChangePayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct TurnProgressUpdated(pub TurnProgressPayload);
+
+// ─── Phase 1: High-Frequency Events ─────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PartySelectedPayload {
+    pub room_id: String,
+    #[serde(default)]
+    pub selected_player_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoomCreatedPayload {
+    pub room_id: String,
+    #[serde(default)]
+    pub preset: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoomLifecyclePayload {
+    pub room_id: String,
+    #[serde(default)]
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionStartedPayload {
+    pub room_id: String,
+    #[serde(default)]
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KeeperUnavailablePayload {
+    pub keeper: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct PartySelected(pub PartySelectedPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct RoomCreated(pub RoomCreatedPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct RoomStarted(pub RoomLifecyclePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct SessionStarted(pub SessionStartedPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct PhaseChanged(pub TurnAdvancePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct TurnStarted(pub TurnAdvancePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct KeeperUnavailable(pub KeeperUnavailablePayload);
+
+// ─── Phase 2: Intervention + Actor Events ────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InterventionPayload {
+    pub intervention_type: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ActorLifecyclePayload {
+    pub actor_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub class: String,
+    #[serde(default)]
+    pub keeper: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoomEndedPayload {
+    pub room_id: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TurnActionResolvedPayload {
+    #[serde(default)]
+    pub turn: u32,
+    pub actor_id: String,
+    pub action: String,
+    pub result: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SceneTransitionPayload {
+    pub from_scene: String,
+    pub to_scene: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct InterventionSubmitted(pub InterventionPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct InterventionApplied(pub InterventionPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct ActorSpawned(pub ActorLifecyclePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct ActorDeleted(pub ActorLifecyclePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct ActorClaimed(pub ActorLifecyclePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct ActorReleased(pub ActorLifecyclePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct ActorUpdated(pub ActorLifecyclePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct RoomEnded(pub RoomEndedPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct TurnActionResolved(pub TurnActionResolvedPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct SceneTransitioned(pub SceneTransitionPayload);

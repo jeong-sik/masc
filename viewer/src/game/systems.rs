@@ -316,3 +316,105 @@ pub fn apply_combat_started(
         combat_state.enemies = payload.enemies.clone();
     }
 }
+
+// ─── Actor Lifecycle Systems ────────────────────
+
+/// Spawn a new Actor entity when ActorSpawned fires.
+/// Skips if an actor with the same ID already exists (idempotent).
+pub fn apply_actor_spawned(
+    mut events: MessageReader<ActorSpawned>,
+    mut commands: Commands,
+    existing: Query<&Actor>,
+) {
+    for ActorSpawned(payload) in events.read() {
+        if existing.iter().any(|a| a.id == payload.actor_id) {
+            continue;
+        }
+        let actor = Actor {
+            id: payload.actor_id.clone(),
+            name: if payload.name.is_empty() { payload.actor_id.clone() } else { payload.name.clone() },
+            class: payload.class.clone(),
+            hp: 100,
+            max_hp: 100,
+            mp: 50,
+            max_mp: 50,
+            stats: Stats { atk: 10, def: 10, int: 10, luck: 10 },
+            area: String::new(),
+            is_dead: false,
+            inventory: Vec::new(),
+            buffs: Vec::new(),
+            debuffs: Vec::new(),
+            skills: Vec::new(),
+            conditions: Vec::new(),
+            equipment: Vec::new(),
+            keeper: payload.keeper.clone(),
+        };
+        commands.spawn((actor, MapToken));
+    }
+}
+
+/// Update Actor fields when ActorUpdated fires.
+/// Only overwrites non-empty payload fields.
+pub fn apply_actor_updated(
+    mut events: MessageReader<ActorUpdated>,
+    mut actors: Query<&mut Actor>,
+) {
+    for ActorUpdated(payload) in events.read() {
+        for mut actor in &mut actors {
+            if actor.id == payload.actor_id {
+                if !payload.name.is_empty() {
+                    actor.name = payload.name.clone();
+                }
+                if !payload.class.is_empty() {
+                    actor.class = payload.class.clone();
+                }
+                if !payload.keeper.is_empty() {
+                    actor.keeper = payload.keeper.clone();
+                }
+            }
+        }
+    }
+}
+
+/// Despawn Actor entity when ActorDeleted fires.
+pub fn apply_actor_deleted(
+    mut events: MessageReader<ActorDeleted>,
+    mut commands: Commands,
+    actors: Query<(Entity, &Actor)>,
+) {
+    for ActorDeleted(payload) in events.read() {
+        for (entity, actor) in &actors {
+            if actor.id == payload.actor_id {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+/// Bind a keeper to an Actor when ActorClaimed fires.
+pub fn apply_actor_claimed(
+    mut events: MessageReader<ActorClaimed>,
+    mut actors: Query<&mut Actor>,
+) {
+    for ActorClaimed(payload) in events.read() {
+        for mut actor in &mut actors {
+            if actor.id == payload.actor_id {
+                actor.keeper = payload.keeper.clone();
+            }
+        }
+    }
+}
+
+/// Unbind a keeper from an Actor when ActorReleased fires.
+pub fn apply_actor_released(
+    mut events: MessageReader<ActorReleased>,
+    mut actors: Query<&mut Actor>,
+) {
+    for ActorReleased(payload) in events.read() {
+        for mut actor in &mut actors {
+            if actor.id == payload.actor_id {
+                actor.keeper.clear();
+            }
+        }
+    }
+}

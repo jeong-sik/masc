@@ -86,6 +86,11 @@ impl Plugin for GameStatePlugin {
                 systems::apply_choice_available,
                 systems::apply_choice_resolved,
                 systems::apply_combat_started,
+                systems::apply_actor_spawned,
+                systems::apply_actor_updated,
+                systems::apply_actor_deleted,
+                systems::apply_actor_claimed,
+                systems::apply_actor_released,
                 crate::dom::endgame::detect_endgame,
             ).run_if(in_state(ViewerMode::Trpg)));
     }

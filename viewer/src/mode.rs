@@ -757,6 +757,32 @@ struct RoomSnapshot {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PresetOption {
+    id: String,
+    title: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone)]
+struct NewGameBootstrap {
+    keepers: Vec<String>,
+    world_presets: Vec<PresetOption>,
+    dm_presets: Vec<PresetOption>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActorAdminRow {
+    actor_id: String,
+    name: String,
+    role: String,
+    hp: i32,
+    max_hp: i32,
+    keeper: String,
+}
+
+#[cfg(target_arch = "wasm32")]
 fn room_lane_label(status: &str) -> &'static str {
     TrpgLifecycleState::from_status(status).lane()
 }
@@ -1070,6 +1096,16 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
     set_current_room_id(doc, &room);
     clear_trpg_dom(doc);
     sync_room_hub_selection(doc, &room);
+    let doc_for_refresh = doc.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Ok(rows) = refresh_actor_admin_list(&doc_for_refresh).await {
+            actor_admin_set_status(
+                &doc_for_refresh,
+                &format!("room {} 액터 {}명", actor_admin_room_id(), rows.len()),
+                "status-ok",
+            );
+        }
+    });
     log::info!("Viewer room switched to {}", room);
 }
 
@@ -1674,12 +1710,16 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
 
     if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
         let preserve_existing_selection = !previous_players.is_empty();
+        let mut default_selected = 0_usize;
         let mut html = String::new();
         for name in keepers.iter().filter(|name| **name != dm_default) {
             let safe = html_escape(name);
             let selected_attr = if preserve_existing_selection
                 && previous_players.iter().any(|picked| picked == name)
             {
+                " selected"
+            } else if !preserve_existing_selection && default_selected < 4 {
+                default_selected += 1;
                 " selected"
             } else {
                 ""
@@ -1694,6 +1734,467 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
     }
 
     Ok(keepers)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_admin_room_id() -> String {
+    crate::config::current_room_id()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_admin_set_status(doc: &web_sys::Document, message: &str, css_class: &str) {
+    if let Some(el) = doc.get_element_by_id("actor-admin-status") {
+        el.set_inner_html(&html_escape(message));
+        let class_name = if css_class.trim().is_empty() {
+            "new-game-status".to_string()
+        } else {
+            format!("new-game-status {}", css_class)
+        };
+        let _ = el.set_attribute("class", &class_name);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_admin_set_busy(doc: &web_sys::Document, busy: bool) {
+    for id in [
+        "actor-admin-refresh",
+        "actor-admin-spawn",
+        "actor-admin-update",
+        "actor-admin-delete",
+    ] {
+        if let Some(btn) = doc
+            .get_element_by_id(id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+        {
+            btn.set_disabled(busy);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_admin_input_value(doc: &web_sys::Document, id: &str) -> String {
+    doc.get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .map(|input| input.value().trim().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_admin_select_value(doc: &web_sys::Document, id: &str) -> String {
+    doc.get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value().trim().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_admin_input_i64(doc: &web_sys::Document, id: &str) -> Option<i64> {
+    let raw = actor_admin_input_value(doc, id);
+    if raw.is_empty() {
+        None
+    } else {
+        raw.parse::<i64>().ok()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_room_state_payload(room_id: &str) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/v1/trpg/state?room_id={}",
+        crate::config::MASC_MCP_URL,
+        room_id
+    );
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(web_sys::RequestMode::Cors);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
+        .map_err(|e| format!("request 생성 실패: {:?}", e))?;
+    request
+        .headers()
+        .set("Accept", "application/json")
+        .map_err(|e| format!("헤더 설정 실패: {:?}", e))?;
+
+    let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("fetch 실패: {:?}", e))?;
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| "response 변환 실패".to_string())?;
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    let body_js = JsFuture::from(
+        resp.text()
+            .map_err(|e| format!("response.text() 실패: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("본문 읽기 실패: {:?}", e))?;
+    let body = body_js.as_string().unwrap_or_default();
+    if body.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_str::<Value>(&body).map_err(|e| format!("state JSON 파싱 실패: {}", e))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
+    let state = state_root.get("state").unwrap_or(state_root);
+    let actor_control = state
+        .get("actor_control")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let control_keeper = |actor_id: &str| -> String {
+        actor_control
+            .get(actor_id)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+
+    let mut rows = Vec::new();
+    if let Some(characters) = state.get("characters").and_then(Value::as_array) {
+        for ch in characters {
+            let actor_id = ch
+                .get("id")
+                .or_else(|| ch.get("actor_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if actor_id.is_empty() {
+                continue;
+            }
+            let name = ch
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(&actor_id)
+                .trim()
+                .to_string();
+            let role = ch
+                .get("role")
+                .or_else(|| ch.get("class"))
+                .or_else(|| ch.get("archetype"))
+                .and_then(Value::as_str)
+                .unwrap_or("player")
+                .trim()
+                .to_string();
+            let hp = ch.get("hp").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let max_hp = ch.get("max_hp").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let keeper = ch
+                .get("keeper")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            rows.push(ActorAdminRow {
+                actor_id: actor_id.clone(),
+                name,
+                role,
+                hp,
+                max_hp,
+                keeper: if keeper.is_empty() {
+                    control_keeper(&actor_id)
+                } else {
+                    keeper
+                },
+            });
+        }
+    } else if let Some(party) = state.get("party").and_then(Value::as_object) {
+        for (actor_id, row) in party {
+            let actor_id = actor_id.trim();
+            if actor_id.is_empty() {
+                continue;
+            }
+            let name = row
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(actor_id)
+                .trim()
+                .to_string();
+            let role = row
+                .get("role")
+                .or_else(|| row.get("class"))
+                .or_else(|| row.get("archetype"))
+                .and_then(Value::as_str)
+                .unwrap_or("player")
+                .trim()
+                .to_string();
+            let hp = row.get("hp").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let max_hp = row.get("max_hp").and_then(Value::as_i64).unwrap_or(0) as i32;
+            rows.push(ActorAdminRow {
+                actor_id: actor_id.to_string(),
+                name,
+                role,
+                hp,
+                max_hp,
+                keeper: control_keeper(actor_id),
+            });
+        }
+    }
+    rows.sort_by(|a, b| a.actor_id.cmp(&b.actor_id));
+    rows
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_actor_admin_rows(doc: &web_sys::Document, rows: &[ActorAdminRow]) {
+    let Some(list) = doc.get_element_by_id("actor-admin-list") else {
+        return;
+    };
+    if rows.is_empty() {
+        list.set_inner_html("<div class=\"room-chip-empty\">액터가 없습니다.</div>");
+        return;
+    }
+    let html = rows
+        .iter()
+        .map(|row| {
+            format!(
+                concat!(
+                    "<button class=\"actor-admin-row\" ",
+                    "data-actor-id=\"{id}\" data-name=\"{name}\" data-role=\"{role}\" ",
+                    "data-keeper=\"{keeper}\" data-hp=\"{hp}\" data-max-hp=\"{max_hp}\">",
+                    "{id} · {role} · HP {hp}/{max_hp}{keeper_text}",
+                    "</button>"
+                ),
+                id = html_escape(&row.actor_id),
+                name = html_escape(&row.name),
+                role = html_escape(&row.role),
+                keeper = html_escape(&row.keeper),
+                hp = row.hp,
+                max_hp = row.max_hp,
+                keeper_text = if row.keeper.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(" · keeper {}", html_escape(&row.keeper))
+                },
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    list.set_inner_html(&html);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_actor_admin_row_clicks(doc: &web_sys::Document) {
+    let Ok(nodes) = doc.query_selector_all("#actor-admin-list .actor-admin-row") else {
+        return;
+    };
+    for i in 0..nodes.length() {
+        let Some(node) = nodes.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        if el.get_attribute("data-bound").as_deref() == Some("1") {
+            continue;
+        }
+        let _ = el.set_attribute("data-bound", "1");
+        let id = el.get_attribute("data-actor-id").unwrap_or_default();
+        let name = el.get_attribute("data-name").unwrap_or_default();
+        let role = el.get_attribute("data-role").unwrap_or_default();
+        let keeper = el.get_attribute("data-keeper").unwrap_or_default();
+        let hp = el.get_attribute("data-hp").unwrap_or_default();
+        let max_hp = el.get_attribute("data-max-hp").unwrap_or_default();
+        let cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-id")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&id);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-name")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&name);
+            }
+            if let Some(select) = doc
+                .get_element_by_id("actor-admin-role")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+            {
+                if !role.trim().is_empty() {
+                    select.set_value(&role);
+                }
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-keeper")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&keeper);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-hp")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&hp);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-max-hp")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&max_hp);
+            }
+        }) as Box<dyn FnMut()>);
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
+        cb.forget();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn refresh_actor_admin_list(doc: &web_sys::Document) -> Result<Vec<ActorAdminRow>, String> {
+    let room_id = actor_admin_room_id();
+    let payload = fetch_room_state_payload(&room_id).await?;
+    let rows = parse_actor_admin_rows(&payload);
+    render_actor_admin_rows(doc, &rows);
+    bind_actor_admin_row_clicks(doc);
+    Ok(rows)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBootstrap, String> {
+    let keepers = refresh_keeper_selectors(doc).await?;
+    let (world_presets, dm_presets) = refresh_preset_selectors(doc).await?;
+    if let Err(err) = refresh_actor_admin_list(doc).await {
+        actor_admin_set_status(doc, &format!("액터 목록 로드 실패: {}", err), "status-warn");
+    }
+    Ok(NewGameBootstrap {
+        keepers,
+        world_presets,
+        dm_presets,
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn actor_admin_spawn(doc: &web_sys::Document) -> Result<String, String> {
+    let room_id = actor_admin_room_id();
+    let actor_id = actor_admin_input_value(doc, "actor-admin-id");
+    if actor_id.is_empty() {
+        return Err("Actor ID를 입력하세요.".to_string());
+    }
+    let role = {
+        let role_raw = actor_admin_select_value(doc, "actor-admin-role");
+        if role_raw.is_empty() {
+            "player".to_string()
+        } else {
+            role_raw
+        }
+    };
+    let name = actor_admin_input_value(doc, "actor-admin-name");
+    let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
+    let max_hp = actor_admin_input_i64(doc, "actor-admin-max-hp").unwrap_or(20);
+    let hp = actor_admin_input_i64(doc, "actor-admin-hp").unwrap_or(max_hp);
+
+    let mut args = json!({
+        "room_id": room_id,
+        "actor_id": actor_id,
+        "role": role,
+        "hp": hp.max(0),
+        "max_hp": max_hp.max(1),
+        "alive": hp > 0
+    });
+    if !name.is_empty() {
+        args["name"] = Value::String(name);
+    }
+    mcp_tool_call("trpg.actor.spawn", args).await?;
+    if !keeper.is_empty() {
+        mcp_tool_call(
+            "trpg.actor.claim",
+            json!({
+                "room_id": actor_admin_room_id(),
+                "actor_id": actor_id,
+                "keeper_name": keeper
+            }),
+        )
+        .await?;
+    }
+    let rows = refresh_actor_admin_list(doc).await?;
+    Ok(format!("액터 생성 완료 ({}명): {}", rows.len(), actor_id))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn actor_admin_update(doc: &web_sys::Document) -> Result<String, String> {
+    let room_id = actor_admin_room_id();
+    let actor_id = actor_admin_input_value(doc, "actor-admin-id");
+    if actor_id.is_empty() {
+        return Err("수정할 Actor ID를 입력하세요.".to_string());
+    }
+    let name = actor_admin_input_value(doc, "actor-admin-name");
+    let role = actor_admin_select_value(doc, "actor-admin-role");
+    let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
+    let hp = actor_admin_input_i64(doc, "actor-admin-hp");
+    let max_hp = actor_admin_input_i64(doc, "actor-admin-max-hp");
+
+    let mut args = json!({
+        "room_id": room_id,
+        "actor_id": actor_id
+    });
+    let mut has_patch = false;
+    if !name.is_empty() {
+        args["name"] = Value::String(name);
+        has_patch = true;
+    }
+    if !role.is_empty() {
+        args["role"] = Value::String(role);
+        has_patch = true;
+    }
+    if let Some(hp) = hp {
+        args["hp"] = Value::Number(hp.max(0).into());
+        args["alive"] = Value::Bool(hp > 0);
+        has_patch = true;
+    }
+    if let Some(max_hp) = max_hp {
+        args["max_hp"] = Value::Number(max_hp.max(1).into());
+        has_patch = true;
+    }
+    if !has_patch && keeper.is_empty() {
+        return Err("수정할 필드 또는 keeper를 입력하세요.".to_string());
+    }
+
+    if has_patch {
+        mcp_tool_call("trpg.actor.update", args).await?;
+    }
+    if !keeper.is_empty() {
+        mcp_tool_call(
+            "trpg.actor.claim",
+            json!({
+                "room_id": actor_admin_room_id(),
+                "actor_id": actor_id,
+                "keeper_name": keeper
+            }),
+        )
+        .await?;
+    }
+    let rows = refresh_actor_admin_list(doc).await?;
+    Ok(format!("액터 수정 완료 ({}명): {}", rows.len(), actor_id))
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn actor_admin_delete(doc: &web_sys::Document) -> Result<String, String> {
+    let room_id = actor_admin_room_id();
+    let actor_id = actor_admin_input_value(doc, "actor-admin-id");
+    if actor_id.is_empty() {
+        return Err("삭제할 Actor ID를 입력하세요.".to_string());
+    }
+    let reason = actor_admin_input_value(doc, "actor-admin-delete-reason");
+    let mut args = json!({
+        "room_id": room_id,
+        "actor_id": actor_id
+    });
+    if !reason.is_empty() {
+        args["reason"] = Value::String(reason);
+    }
+    mcp_tool_call("trpg.actor.delete", args).await?;
+    let rows = refresh_actor_admin_list(doc).await?;
+    Ok(format!("액터 삭제 완료 ({}명): {}", rows.len(), actor_id))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1741,23 +2242,61 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .unwrap_or_default();
     let models = parse_keeper_models(&model_text);
 
-    let preset_catalog = mcp_tool_call(
-        "trpg.preset.list",
-        json!({
-            "include_characters": false,
-            "include_skills": false
-        }),
-    )
-    .await?;
-    let preset_catalog = normalize_preset_catalog(&preset_catalog);
-    let world_preset_id = extract_first_preset_id(&preset_catalog, "world_presets")
-        .or_else(|| extract_first_preset_id(&preset_catalog, "world"))
-        .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "world"))
-        .unwrap_or_default();
-    let dm_preset_id = extract_first_preset_id(&preset_catalog, "dm_presets")
-        .or_else(|| extract_first_preset_id(&preset_catalog, "dm"))
-        .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "dm"))
-        .unwrap_or_default();
+    let mut world_preset_id = doc
+        .get_element_by_id("new-game-world-select")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let mut dm_preset_id = doc
+        .get_element_by_id("new-game-dm-preset-select")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    if world_preset_id.is_empty() || dm_preset_id.is_empty() {
+        if let Ok((world_options, dm_options)) = refresh_preset_selectors(doc).await {
+            if world_preset_id.is_empty() {
+                world_preset_id = world_options
+                    .first()
+                    .map(|row| row.id.clone())
+                    .unwrap_or_default();
+            }
+            if dm_preset_id.is_empty() {
+                dm_preset_id = dm_options
+                    .first()
+                    .map(|row| row.id.clone())
+                    .unwrap_or_default();
+            }
+        }
+    }
+
+    if world_preset_id.is_empty() || dm_preset_id.is_empty() {
+        let preset_catalog = mcp_tool_call(
+            "trpg.preset.list",
+            json!({
+                "include_characters": false,
+                "include_skills": false
+            }),
+        )
+        .await?;
+        let preset_catalog = normalize_preset_catalog(&preset_catalog);
+        if world_preset_id.is_empty() {
+            world_preset_id = extract_first_preset_id(&preset_catalog, "world_presets")
+                .or_else(|| extract_first_preset_id(&preset_catalog, "world"))
+                .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "world"))
+                .unwrap_or_default();
+        }
+        if dm_preset_id.is_empty() {
+            dm_preset_id = extract_first_preset_id(&preset_catalog, "dm_presets")
+                .or_else(|| extract_first_preset_id(&preset_catalog, "dm"))
+                .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "dm"))
+                .unwrap_or_default();
+        }
+    }
     if world_preset_id.is_empty() || dm_preset_id.is_empty() {
         return Err(format!(
             "trpg preset 목록 파싱 실패: world_preset_id={}, dm_preset_id={}",
@@ -1916,6 +2455,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     set_current_room_id(doc, &room_id);
     clear_trpg_dom(doc);
     set_round_run_fields(doc, &dm_keeper, &actor_ids, &player_map);
+    set_new_game_assignment(doc, &dm_keeper, &player_map, &actor_ids);
 
     Ok(format!(
         "새 게임 시작 완료: room {} / DM {} / players {}",
@@ -2050,6 +2590,161 @@ fn extract_first_preset_id_by_key(catalog: &Value, alt_key: &str) -> Option<Stri
 }
 
 #[cfg(target_arch = "wasm32")]
+fn preset_option_from_value(node: &Value) -> Option<PresetOption> {
+    let id = node
+        .get("id")
+        .and_then(Value::as_str)
+        .or_else(|| node.get("preset_id").and_then(Value::as_str))
+        .or_else(|| node.get("uid").and_then(Value::as_str))
+        .or_else(|| node.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+
+    let title = node
+        .get("title")
+        .and_then(Value::as_str)
+        .or_else(|| node.get("label").and_then(Value::as_str))
+        .or_else(|| node.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&id)
+        .to_string();
+
+    Some(PresetOption { id, title })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_preset_options_from_node(
+    node: &Value,
+    out: &mut Vec<PresetOption>,
+    depth: usize,
+) {
+    if depth > 6 {
+        return;
+    }
+    match node {
+        Value::String(raw) => {
+            let value = raw.trim();
+            if value.is_empty() {
+                return;
+            }
+            if out.iter().any(|item| item.id == value) {
+                return;
+            }
+            out.push(PresetOption {
+                id: value.to_string(),
+                title: value.to_string(),
+            });
+        }
+        Value::Array(rows) => {
+            for row in rows {
+                collect_preset_options_from_node(row, out, depth + 1);
+            }
+        }
+        Value::Object(fields) => {
+            if let Some(option) = preset_option_from_value(node) {
+                if !out.iter().any(|item| item.id == option.id) {
+                    out.push(option);
+                }
+            }
+            for value in fields.values() {
+                if value.is_array() || value.is_object() {
+                    collect_preset_options_from_node(value, out, depth + 1);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_preset_options_from_catalog(catalog: &Value, keys: &[&str]) -> Vec<PresetOption> {
+    let mut out = Vec::new();
+    for key in keys {
+        if let Some(node) = catalog.get(*key) {
+            collect_preset_options_from_node(node, &mut out, 0);
+        }
+    }
+    if out.is_empty() {
+        for fallback_key in ["items", "presets"] {
+            if let Some(node) = catalog.get(fallback_key) {
+                collect_preset_options_from_node(node, &mut out, 0);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(target_arch = "wasm32")]
+fn select_options_set(
+    doc: &web_sys::Document,
+    select_id: &str,
+    options: &[PresetOption],
+) -> Option<String> {
+    let select = doc
+        .get_element_by_id(select_id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())?;
+
+    let previous = select.value();
+    if options.is_empty() {
+        select.set_inner_html(r#"<option value="">(none)</option>"#);
+        select.set_value("");
+        return None;
+    }
+
+    let html = options
+        .iter()
+        .map(|option| {
+            format!(
+                r#"<option value="{id}">{title} ({id})</option>"#,
+                id = html_escape(&option.id),
+                title = html_escape(&option.title),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    select.set_inner_html(&html);
+
+    let selected = if !previous.trim().is_empty()
+        && options.iter().any(|option| option.id == previous)
+    {
+        previous
+    } else {
+        options[0].id.clone()
+    };
+    select.set_value(&selected);
+    Some(selected)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn refresh_preset_selectors(
+    doc: &web_sys::Document,
+) -> Result<(Vec<PresetOption>, Vec<PresetOption>), String> {
+    let raw_catalog = mcp_tool_call(
+        "trpg.preset.list",
+        json!({
+            "include_characters": false,
+            "include_skills": false
+        }),
+    )
+    .await?;
+    let catalog = normalize_preset_catalog(&raw_catalog);
+
+    let world_presets = collect_preset_options_from_catalog(
+        &catalog,
+        &["world_presets", "world", "world_preset", "worlds"],
+    );
+    let dm_presets =
+        collect_preset_options_from_catalog(&catalog, &["dm_presets", "dm", "dm_preset", "dms"]);
+
+    let _ = select_options_set(doc, "new-game-world-select", &world_presets);
+    let _ = select_options_set(doc, "new-game-dm-preset-select", &dm_presets);
+
+    Ok((world_presets, dm_presets))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn bind_new_game_controls(doc: &web_sys::Document) {
     let Some(open_btn) = doc.get_element_by_id("new-game-toggle") else {
         return;
@@ -2073,16 +2768,26 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
             }
         }
         set_new_game_status(&doc, "Keeper 목록을 불러오는 중...");
+        actor_admin_set_status(&doc, "액터 목록을 불러오는 중...", "status-info");
         let doc_for_fetch = doc.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            match refresh_keeper_selectors(&doc_for_fetch).await {
-                Ok(keepers) => {
+            match refresh_new_game_bootstrap(&doc_for_fetch).await {
+                Ok(bootstrap) => {
                     set_new_game_status(
                         &doc_for_fetch,
-                        &format!("Keeper {}개 로드됨. DM/Player를 선택하세요.", keepers.len()),
+                        &format!(
+                            "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
+                            bootstrap.keepers.len(),
+                            bootstrap.world_presets.len(),
+                            bootstrap.dm_presets.len()
+                        ),
                     );
+                    actor_admin_set_status(&doc_for_fetch, "액터 목록 로드 완료", "status-ok");
                 }
-                Err(e) => set_new_game_status(&doc_for_fetch, &format!("Keeper 로드 실패: {}", e)),
+                Err(e) => {
+                    set_new_game_status(&doc_for_fetch, &format!("초기 로드 실패: {}", e));
+                    actor_admin_set_status(&doc_for_fetch, &format!("로드 실패: {}", e), "status-error");
+                }
             }
         });
     }) as Box<dyn FnMut()>);
@@ -2127,17 +2832,27 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
-            set_new_game_status(&doc, "Keeper 목록을 새로고침 중...");
+            set_new_game_status(&doc, "세션/프리셋/keeper 정보를 새로고침 중...");
+            actor_admin_set_status(&doc, "액터 목록 새로고침 중...", "status-info");
             let doc_for_fetch = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match refresh_keeper_selectors(&doc_for_fetch).await {
-                    Ok(keepers) => {
+                match refresh_new_game_bootstrap(&doc_for_fetch).await {
+                    Ok(bootstrap) => {
                         set_new_game_status(
                             &doc_for_fetch,
-                            &format!("Keeper {}개 새로고침 완료", keepers.len()),
+                            &format!(
+                                "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 새로고침 완료",
+                                bootstrap.keepers.len(),
+                                bootstrap.world_presets.len(),
+                                bootstrap.dm_presets.len()
+                            ),
                         );
+                        actor_admin_set_status(&doc_for_fetch, "액터 목록 새로고침 완료", "status-ok");
                     }
-                    Err(e) => set_new_game_status(&doc_for_fetch, &format!("새로고침 실패: {}", e)),
+                    Err(e) => {
+                        set_new_game_status(&doc_for_fetch, &format!("새로고침 실패: {}", e));
+                        actor_admin_set_status(&doc_for_fetch, &format!("새로고침 실패: {}", e), "status-error");
+                    }
                 }
             });
         }) as Box<dyn FnMut()>);
@@ -2177,6 +2892,147 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
             target.add_event_listener_with_callback("click", start_cb.as_ref().unchecked_ref())
         });
         start_cb.forget();
+    }
+
+    bind_actor_admin_controls(doc);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_actor_admin_controls(doc: &web_sys::Document) {
+    let Some(refresh_btn) = doc.get_element_by_id("actor-admin-refresh") else {
+        return;
+    };
+    if refresh_btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = refresh_btn.set_attribute("data-bound", "1");
+
+    let refresh_cb = Closure::wrap(Box::new(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        actor_admin_set_busy(&doc, true);
+        actor_admin_set_status(&doc, "액터 목록을 불러오는 중...", "status-info");
+        let doc_for_task = doc.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = refresh_actor_admin_list(&doc_for_task).await;
+            match result {
+                Ok(rows) => actor_admin_set_status(
+                    &doc_for_task,
+                    &format!(
+                        "room {} 액터 {}명",
+                        html_escape(&actor_admin_room_id()),
+                        rows.len()
+                    ),
+                    "status-ok",
+                ),
+                Err(e) => actor_admin_set_status(
+                    &doc_for_task,
+                    &format!("액터 목록 조회 실패: {}", e),
+                    "status-error",
+                ),
+            }
+            actor_admin_set_busy(&doc_for_task, false);
+        });
+    }) as Box<dyn FnMut()>);
+    let _ = refresh_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", refresh_cb.as_ref().unchecked_ref())
+    });
+    refresh_cb.forget();
+
+    if let Some(spawn_btn) = doc.get_element_by_id("actor-admin-spawn") {
+        let spawn_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            actor_admin_set_busy(&doc, true);
+            actor_admin_set_status(&doc, "액터 생성 중...", "status-info");
+            let doc_for_task = doc.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let result = actor_admin_spawn(&doc_for_task).await;
+                match result {
+                    Ok(msg) => actor_admin_set_status(&doc_for_task, &msg, "status-ok"),
+                    Err(e) => actor_admin_set_status(
+                        &doc_for_task,
+                        &format!("액터 생성 실패: {}", e),
+                        "status-error",
+                    ),
+                }
+                actor_admin_set_busy(&doc_for_task, false);
+            });
+        }) as Box<dyn FnMut()>);
+        let _ = spawn_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", spawn_cb.as_ref().unchecked_ref())
+        });
+        spawn_cb.forget();
+    }
+
+    if let Some(update_btn) = doc.get_element_by_id("actor-admin-update") {
+        let update_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            actor_admin_set_busy(&doc, true);
+            actor_admin_set_status(&doc, "액터 수정 중...", "status-info");
+            let doc_for_task = doc.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let result = actor_admin_update(&doc_for_task).await;
+                match result {
+                    Ok(msg) => actor_admin_set_status(&doc_for_task, &msg, "status-ok"),
+                    Err(e) => actor_admin_set_status(
+                        &doc_for_task,
+                        &format!("액터 수정 실패: {}", e),
+                        "status-error",
+                    ),
+                }
+                actor_admin_set_busy(&doc_for_task, false);
+            });
+        }) as Box<dyn FnMut()>);
+        let _ = update_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", update_cb.as_ref().unchecked_ref())
+        });
+        update_cb.forget();
+    }
+
+    if let Some(delete_btn) = doc.get_element_by_id("actor-admin-delete") {
+        let delete_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let actor_id = actor_admin_input_value(&doc, "actor-admin-id");
+            if actor_id.is_empty() {
+                actor_admin_set_status(&doc, "삭제할 Actor ID를 입력하세요.", "status-error");
+                return;
+            }
+            let confirmed = web_sys::window()
+                .and_then(|w| {
+                    w.confirm_with_message(&format!("actor {} 를 삭제할까요?", actor_id))
+                        .ok()
+                })
+                .unwrap_or(false);
+            if !confirmed {
+                return;
+            }
+            actor_admin_set_busy(&doc, true);
+            actor_admin_set_status(&doc, "액터 삭제 중...", "status-info");
+            let doc_for_task = doc.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let result = actor_admin_delete(&doc_for_task).await;
+                match result {
+                    Ok(msg) => actor_admin_set_status(&doc_for_task, &msg, "status-ok"),
+                    Err(e) => actor_admin_set_status(
+                        &doc_for_task,
+                        &format!("액터 삭제 실패: {}", e),
+                        "status-error",
+                    ),
+                }
+                actor_admin_set_busy(&doc_for_task, false);
+            });
+        }) as Box<dyn FnMut()>);
+        let _ = delete_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", delete_cb.as_ref().unchecked_ref())
+        });
+        delete_cb.forget();
     }
 }
 

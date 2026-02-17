@@ -29,3 +29,11 @@
  (public_name masc-perpetual)
  (package masc_mcp)
  (libraries masc_mcp yojson unix str))
+
+;; Mitosis Test CLI - Standalone mitosis testing and debugging tool
+(executable
+ (name mitosis_cli)
+ (modules mitosis_cli)
+ (public_name masc-mitosis-cli)
+ (package masc_mcp)
+ (libraries masc_mcp cmdliner unix yojson))

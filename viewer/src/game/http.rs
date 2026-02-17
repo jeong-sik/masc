@@ -101,6 +101,7 @@ pub struct InitialStateBuffer {
 #[derive(Resource, Default)]
 pub struct ActiveTrpgRoom {
     pub room_id: String,
+    pub room_rev: u64,
 }
 
 fn normalize_room_status(raw: &str) -> String {
@@ -110,7 +111,7 @@ fn normalize_room_status(raw: &str) -> String {
 fn room_requires_new_game(raw_status: &str) -> bool {
     matches!(
         normalize_room_status(raw_status).as_str(),
-        "" | "idle" | "ended" | "unavailable"
+        "" | "idle" | "lobby" | "ended" | "unavailable"
     )
 }
 
@@ -151,6 +152,7 @@ pub fn fetch_initial_state(
     mut connection: ResMut<ConnectionStatus>,
 ) {
     active_room.room_id = config::current_room_id();
+    active_room.room_rev = config::current_room_revision();
     *connection = ConnectionStatus::Connecting;
     queue_initial_state_fetch(&mut commands);
 }
@@ -166,11 +168,13 @@ pub fn refresh_state_on_room_change(
     mut connection: ResMut<ConnectionStatus>,
 ) {
     let current_room = config::current_room_id();
-    if active_room.room_id == current_room {
+    let current_room_rev = config::current_room_revision();
+    if active_room.room_id == current_room && active_room.room_rev == current_room_rev {
         return;
     }
 
     active_room.room_id = current_room.clone();
+    active_room.room_rev = current_room_rev;
 
     for entity in &actors {
         commands.entity(entity).despawn();
@@ -184,7 +188,11 @@ pub fn refresh_state_on_room_change(
     *connection = ConnectionStatus::Connecting;
 
     queue_initial_state_fetch(&mut commands);
-    log::info!("TRPG room changed — reloading state for room {}", current_room);
+    log::info!(
+        "TRPG room changed — reloading state for room {} (rev {})",
+        current_room,
+        current_room_rev
+    );
 }
 
 /// Update system: polls the buffer each frame. Once data arrives,

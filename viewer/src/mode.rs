@@ -924,7 +924,7 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
     let room = json.get("room").unwrap_or(&Value::Null);
     let state = json.get("state").unwrap_or(&Value::Null);
 
-    let status = room
+    let mut status = room
         .get("status")
         .and_then(Value::as_str)
         .or_else(|| state.get("status").and_then(Value::as_str))
@@ -941,6 +941,26 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
         .or_else(|| state.get("phase").and_then(Value::as_str))
         .unwrap_or("-")
         .to_string();
+
+    // Staleness detection: override "active" to "paused" when last event is old
+    if status == "active" {
+        let last_event_ts = state
+            .get("last_event_ts")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !last_event_ts.is_empty() {
+            let event_ms = js_sys::Date::parse(last_event_ts);
+            if event_ms.is_finite() {
+                let now_ms = js_sys::Date::now();
+                let elapsed_sec = (now_ms - event_ms) / 1000.0;
+                // 30 minutes without any event → stale game
+                if elapsed_sec > 1800.0 {
+                    status = "paused".to_string();
+                }
+            }
+        }
+    }
+
     Ok((status, turn, phase))
 }
 

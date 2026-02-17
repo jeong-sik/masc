@@ -34,8 +34,19 @@ type metric = {
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
 let metrics_mutex = Eio.Mutex.create ()
 
+(** Whether Eio runtime is available.  Set to [true] by {!enable_eio}
+    which should be called once inside [Eio_main.run]. *)
+let eio_available = ref false
+
+let enable_eio () = eio_available := true
+
 let with_lock f =
-  Eio.Mutex.use_rw ~protect:true metrics_mutex (fun () -> f ())
+  if !eio_available then
+    Eio.Mutex.use_rw ~protect:true metrics_mutex (fun () -> f ())
+  else
+    (* No Eio runtime (module init or non-Eio tests) — run unlocked.
+       Single-threaded in those contexts, so no race. *)
+    f ()
 
 (** {1 Metric Registration} *)
 
@@ -51,6 +62,13 @@ let register_gauge ~name ~help ?(labels=[]) () =
     let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels }
+  )
+
+let register_histogram ~name ~help ?(labels=[]) () =
+  with_lock (fun () ->
+    let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+    if not (Hashtbl.mem metrics key) then
+      Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }
   )
 
 (** {1 Metric Updates} *)
@@ -102,6 +120,28 @@ let inc_gauge name ?(labels=[]) ?(delta=1.0) () =
 
 let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
   inc_gauge name ~labels ~delta:(-.delta) ()
+
+(** Observe a histogram value.
+    Tracks cumulative sum in the metric value; a matching _count counter
+    is auto-created for computing averages. *)
+let observe_histogram name ?(labels=[]) value =
+  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  let count_key = name ^ "_count" ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  with_lock (fun () ->
+    (match Hashtbl.find_opt metrics key with
+    | Some m -> m.value <- m.value +. value
+    | None ->
+        Hashtbl.add metrics key {
+          name; help = name; metric_type = Histogram; value; labels;
+        });
+    (match Hashtbl.find_opt metrics count_key with
+    | Some m -> m.value <- m.value +. 1.0
+    | None ->
+        Hashtbl.add metrics count_key {
+          name = name ^ "_count"; help = name ^ " observation count";
+          metric_type = Counter; value = 1.0; labels;
+        })
+  )
 
 (** {1 Built-in Metrics} *)
 

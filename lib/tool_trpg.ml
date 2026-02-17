@@ -1086,6 +1086,8 @@ let append_timeout_and_unavailable_events
     ~timeout_sec
     =
   let ( let* ) = Result.bind in
+  let timeout_reason = "timeout" in
+  let timeout_stage = "masc_keeper_msg" in
   let timeout_payload =
     `Assoc
       [
@@ -1094,8 +1096,9 @@ let append_timeout_and_unavailable_events
         ("role", `String (role_to_string role));
         ("actor_id", `String actor_id);
         ("keeper", `String keeper_name);
+        ("reason", `String timeout_reason);
         ("timeout_sec", `Float timeout_sec);
-        ("stage", `String "masc_keeper_msg");
+        ("stage", `String timeout_stage);
       ]
   in
   let* timeout_event =
@@ -1115,7 +1118,9 @@ let append_timeout_and_unavailable_events
         ("role", `String (role_to_string role));
         ("actor_id", `String actor_id);
         ("keeper", `String keeper_name);
-        ("reason", `String "timeout");
+        ("reason", `String timeout_reason);
+        ("timeout_sec", `Float timeout_sec);
+        ("stage", `String timeout_stage);
       ]
   in
   let* unavailable_event =
@@ -1130,7 +1135,8 @@ let append_timeout_and_unavailable_events
   Ok [ timeout_event; unavailable_event ]
 
 let append_unavailable_event
-    ~base_dir ~room_id ~phase ~turn ~role ~actor_id ~keeper_name ~reason () =
+    ~base_dir ~room_id ~phase ~turn ~role ~actor_id ~keeper_name ~reason ~stage ()
+    =
   let payload =
     `Assoc
       [
@@ -1140,6 +1146,7 @@ let append_unavailable_event
         ("actor_id", `String actor_id);
         ("keeper", `String keeper_name);
         ("reason", `String reason);
+        ("stage", `String stage);
       ]
   in
   append_event
@@ -2247,7 +2254,7 @@ let handle_round_run ctx args : result =
       let timeout_count = ref 0 in
 
       let process_one ~role ~actor_id ~keeper_name =
-        let record_unavailable_status ~status ~error =
+        let record_unavailable_status ~status ~error ~stage =
           let* unavailable_event =
             append_unavailable_event
               ~base_dir
@@ -2258,6 +2265,7 @@ let handle_round_run ctx args : result =
               ~actor_id
               ~keeper_name
               ~reason:error
+              ~stage
               ()
           in
           unavailable_count := !unavailable_count + 1;
@@ -2269,6 +2277,8 @@ let handle_round_run ctx args : result =
                 ("role", `String (role_to_string role));
                 ("keeper", `String keeper_name);
                 ("status", `String status);
+                ("reason", `String error);
+                ("stage", `String stage);
                 ("error", `String error);
               ]
             :: !statuses;
@@ -2292,7 +2302,11 @@ let handle_round_run ctx args : result =
               | _ -> Ok () )
         in
         match lease_check with
-        | Error lease_error -> record_unavailable_status ~status:"lease_denied" ~error:lease_error
+        | Error lease_error ->
+            record_unavailable_status
+              ~status:"lease_denied"
+              ~error:lease_error
+              ~stage:"lease_check"
         | Ok () ->
         let prompt =
           build_keeper_prompt
@@ -2327,16 +2341,24 @@ let handle_round_run ctx args : result =
                   ("role", `String (role_to_string role));
                   ("keeper", `String keeper_name);
                   ("status", `String "timeout");
+                  ("reason", `String "timeout");
+                  ("stage", `String "masc_keeper_msg");
                   ("timeout_sec", `Float timeout_sec);
                 ]
               :: !statuses;
             Ok ()
         | `Error keeper_error ->
-            record_unavailable_status ~status:"unavailable" ~error:keeper_error
+            record_unavailable_status
+              ~status:"unavailable"
+              ~error:keeper_error
+              ~stage:"keeper_call"
         | `Ok keeper_json -> (
             match parse_keeper_reply keeper_json with
             | Error parse_error ->
-                record_unavailable_status ~status:"invalid_response" ~error:parse_error
+                record_unavailable_status
+                  ~status:"invalid_response"
+                  ~error:parse_error
+                  ~stage:"parse_keeper_reply"
             | Ok reply ->
                 let* reply_event =
                   append_keeper_reply_event

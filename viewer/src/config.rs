@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Infrastructure config — many items used only in wasm32 builds.
+
 use crate::mode::ViewerMode;
 
 // ─── Configuration ──────────────────────────
@@ -41,7 +43,7 @@ pub fn current_room_id() -> String {
 
 /// Set current room ID (persisted via URL or just runtime state).
 /// In this viewer, we primarily use the dashboard data attribute.
-pub fn set_current_room_id(room_id: &str) {
+pub fn set_current_room_id(_room_id: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {

@@ -4,7 +4,7 @@ use wasm_bindgen::JsCast;
 
 use crate::game::events::NarrativeReceived;
 
-use super::escape::{scroll_to_bottom, trim_log};
+use super::escape::{sanitize_text, scroll_to_bottom, trim_log};
 
 fn normalize_phase_suffix(phase: &str) -> String {
     let mut out = String::with_capacity(phase.len());
@@ -23,17 +23,6 @@ fn normalize_phase_suffix(phase: &str) -> String {
     } else {
         normalized.to_string()
     }
-}
-
-fn sanitize_text(raw: &str) -> String {
-    raw.chars()
-        .filter(|ch| {
-            let code = *ch as u32;
-            *ch != '\u{feff}'
-                && *ch != '\u{fffd}'
-                && !(code <= 0x08 || code == 0x0b || code == 0x0c || (0x0e..=0x1f).contains(&code))
-        })
-        .collect()
 }
 
 fn is_debug_narrative(text: &str) -> bool {
@@ -77,6 +66,59 @@ fn toggle_selected_class(el: &web_sys::Element) {
     el.set_class_name(next.trim());
 }
 
+fn bump_dedup_narrative(document: &web_sys::Document, sample: &str) {
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    let next = dashboard
+        .get_attribute("data-dedup-narrative")
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(0)
+        .saturating_add(1);
+    let _ = dashboard.set_attribute("data-dedup-narrative", &next.to_string());
+
+    let mut lines = dashboard
+        .get_attribute("data-dedup-samples-narrative")
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let trimmed = sample.trim();
+    if !trimmed.is_empty() {
+        lines.push(trimmed.chars().take(160).collect());
+    }
+    if lines.len() > 24 {
+        let drain = lines.len() - 24;
+        lines.drain(0..drain);
+    }
+    let _ = dashboard.set_attribute("data-dedup-samples-narrative", &lines.join("\n"));
+}
+
+fn is_duplicate_narrative_entry(
+    log_el: &web_sys::Element,
+    dedup_key: &str,
+) -> bool {
+    let mut scanned = 0_u32;
+    let mut cursor = log_el.last_element_child();
+    while scanned < 40 {
+        let Some(el) = cursor else {
+            break;
+        };
+        if el
+            .get_attribute("data-dedup-key")
+            .map(|value| value == dedup_key)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        cursor = el.previous_element_sibling();
+        scanned += 1;
+    }
+    false
+}
+
 /// Appends narrative entries to the #narrative-log DOM element.
 pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -98,6 +140,39 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         let _ = entry.set_attribute("tabindex", "0");
         let _ = entry.set_attribute("title", "클릭하면 이 내러티브를 강조합니다.");
         let clean_text = sanitize_text(&payload.text);
+        if clean_text.trim().is_empty() {
+            continue;
+        }
+        let speaker_raw = payload
+            .speaker
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("system");
+        let dedup_key = format!(
+            "{}|{}|{}|{}",
+            payload.turn,
+            phase_text.trim().to_ascii_lowercase(),
+            speaker_raw.to_ascii_lowercase(),
+            clean_text.trim()
+        );
+        if is_duplicate_narrative_entry(&log_el, &dedup_key) {
+            bump_dedup_narrative(
+                &document,
+                &format!(
+                    "t{} | {} | {} | {}",
+                    payload.turn,
+                    phase_text.trim(),
+                    speaker_raw,
+                    clean_text.trim()
+                ),
+            );
+            continue;
+        }
+        let _ = entry.set_attribute("data-dedup-key", &dedup_key);
+        if payload.turn > 0 {
+            let _ = entry.set_attribute("data-turn", &payload.turn.to_string());
+        }
         let is_debug_entry = is_debug_narrative(&clean_text);
         if is_debug_entry {
             let _ = entry.set_attribute("data-debug-entry", "1");

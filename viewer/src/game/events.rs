@@ -158,6 +158,7 @@ pub struct TurnProgressUpdated(pub TurnProgressPayload);
 
 // ─── Phase 1: High-Frequency Events ─────────
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PartySelectedPayload {
     #[allow(dead_code)]
@@ -166,6 +167,7 @@ pub struct PartySelectedPayload {
     pub selected_player_ids: Vec<String>,
 }
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomCreatedPayload {
     pub room_id: String,
@@ -173,6 +175,7 @@ pub struct RoomCreatedPayload {
     pub preset: String,
 }
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomLifecyclePayload {
     pub room_id: String,
@@ -180,6 +183,7 @@ pub struct RoomLifecyclePayload {
     pub status: String,
 }
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionStartedPayload {
     #[allow(dead_code)]
@@ -188,6 +192,7 @@ pub struct SessionStartedPayload {
     pub session_id: String,
 }
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct KeeperUnavailablePayload {
     pub keeper: String,
@@ -218,6 +223,7 @@ pub struct KeeperUnavailable(pub KeeperUnavailablePayload);
 
 // ─── Phase 2: Intervention + Actor Events ────
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct InterventionPayload {
     pub intervention_type: String,
@@ -238,6 +244,7 @@ pub struct ActorLifecyclePayload {
     pub keeper: String,
 }
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomEndedPayload {
     pub room_id: String,
@@ -246,6 +253,7 @@ pub struct RoomEndedPayload {
     pub reason: String,
 }
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TurnActionResolvedPayload {
     #[serde(default)]
@@ -256,6 +264,7 @@ pub struct TurnActionResolvedPayload {
     pub result: String,
 }
 
+#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SceneTransitionPayload {
     pub from_scene: String,

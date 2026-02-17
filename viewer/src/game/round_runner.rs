@@ -11,12 +11,12 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use crate::config;
 use crate::game::state::TurnProgressState;
 
 // ─── Resource ──────────────────────────────────
 
 /// Shared state between the Bevy ECS world and the async WASM loop.
+#[allow(dead_code)] // Fields read by wasm32 async loop, not visible to native cargo check.
 #[derive(Resource)]
 pub struct RoundRunner {
     /// Whether an auto-run loop is currently active.
@@ -41,12 +41,15 @@ impl Default for RoundRunner {
 }
 
 /// Safety cap — prevent infinite runaway.
+#[allow(dead_code)]
 const MAX_ROUNDS: u32 = 50;
 
 /// Delay between rounds (ms) — gives SSE events time to stream + user to read.
+#[allow(dead_code)]
 const INTER_ROUND_DELAY_MS: i32 = 5000;
 
 /// Initial delay before first round (ms) — wait for SSE + initial state.
+#[allow(dead_code)]
 const STARTUP_DELAY_MS: i32 = 3000;
 
 // ─── OnEnter System ────────────────────────────

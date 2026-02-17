@@ -4,6 +4,8 @@ use crate::game::events::{
     PartySelected, PhaseChanged, RoomCreated, RoomStarted,
     SessionStarted, TurnActionResolved, TurnStarted,
 };
+#[cfg(target_arch = "wasm32")]
+use crate::dom::escape::html_escape;
 
 pub fn update_session_events_dom(
     mut party: MessageReader<PartySelected>,
@@ -134,8 +136,4 @@ fn append_entry(
         // Auto-scroll
         log.set_scroll_top(log.scroll_height());
     }
-}
-
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }

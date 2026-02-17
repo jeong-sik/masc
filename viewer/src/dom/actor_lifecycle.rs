@@ -4,13 +4,8 @@ use crate::game::events::{
     ActorClaimed, ActorDeleted, ActorReleased, ActorSpawned, SceneTransitioned,
 };
 
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
+#[cfg(target_arch = "wasm32")]
+use crate::dom::escape::html_escape;
 
 pub fn update_actor_lifecycle_dom(
     mut spawns: MessageReader<ActorSpawned>,

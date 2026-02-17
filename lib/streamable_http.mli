@@ -54,13 +54,18 @@ type response_mode =
   | Sse_upgrade                          (** Upgrade to SSE stream *)
   | Error_response of int * string       (** HTTP error (status, message) *)
 
+type request_handler =
+  Yojson.Safe.t -> Yojson.Safe.t
+
 (** Handle POST /mcp request
     @param session_id Optional session ID from mcp-session-id header
     @param body Request body (JSON-RPC)
+    @param request_handler Handler for each JSON-RPC request
     @return (response_mode, session option) *)
 val handle_post :
   ?session_id:string ->
   body:string ->
+  ?request_handler:request_handler ->
   unit ->
   (response_mode * session option)
 

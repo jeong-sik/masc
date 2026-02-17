@@ -10,11 +10,7 @@ pub struct TurnRuntimeCache {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn sanitize_text(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| *c != '<' && *c != '>' && *c != '"')
-        .collect::<String>()
-}
+use super::escape::html_escape;
 
 #[cfg(target_arch = "wasm32")]
 fn pretty_phase(phase: &str) -> String {
@@ -221,17 +217,17 @@ pub fn update_turn_runtime_dom(
 </div>
 "#,
             room_class = room_class,
-            room = sanitize_text(room_status_label(&room_status)),
+            room = html_escape(room_status_label(&room_status)),
             turn = turn,
-            phase = sanitize_text(&pretty_phase(&phase)),
+            phase = html_escape(&pretty_phase(&phase)),
             input_class = input_class,
-            input = sanitize_text(input_status),
-            current = sanitize_text(&current_actor),
-            current_status = sanitize_text(current_status),
-            next = sanitize_text(&next_actor),
-            last = sanitize_text(&last_result),
+            input = html_escape(input_status),
+            current = html_escape(&current_actor),
+            current_status = html_escape(current_status),
+            next = html_escape(&next_actor),
+            last = html_escape(&last_result),
             party_class = party_class,
-            party = sanitize_text(&party_status),
+            party = html_escape(&party_status),
         );
         el.set_inner_html(&html);
     }

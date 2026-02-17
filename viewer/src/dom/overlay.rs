@@ -5,6 +5,9 @@ use wasm_bindgen::JsCast;
 
 use crate::game::state::{ChoiceState, CombatState, OverlayState};
 
+#[cfg(target_arch = "wasm32")]
+use super::escape::html_escape;
+
 /// Cache to avoid redundant DOM writes.
 #[derive(Resource, Debug, Default)]
 pub struct OverlayCache {
@@ -69,12 +72,12 @@ pub fn update_overlay_dom(
                 if choice.active {
                     let html = format!(
                         "<strong>{}</strong><p>{}</p><ul>{}</ul>",
-                        choice.character,
-                        choice.description,
+                        html_escape(&choice.character),
+                        html_escape(&choice.description),
                         choice
                             .options
                             .iter()
-                            .map(|o| format!("<li>{}</li>", o))
+                            .map(|o| format!("<li>{}</li>", html_escape(o)))
                             .collect::<Vec<_>>()
                             .join("")
                     );
@@ -98,7 +101,8 @@ pub fn update_overlay_dom(
                     let enemies_str = combat.enemies.join(", ");
                     let html = format!(
                         "<strong>COMBAT</strong> <span>{}</span><p>{}</p>",
-                        combat.area, enemies_str
+                        html_escape(&combat.area),
+                        html_escape(&enemies_str)
                     );
                     el.set_inner_html(&html);
                     if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {

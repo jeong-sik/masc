@@ -37,6 +37,12 @@ val make_context_with_eio :
 (** Internal logging helper (for testing) *)
 val log : context -> string -> unit
 
+(** Last successful handoff timestamp for cooldown enforcement *)
+val last_handoff_time : float ref
+
+(** Reset handoff cooldown timer (for testing) *)
+val reset_handoff_cooldown : unit -> unit
+
 (** Tool result type *)
 type result = bool * string
 

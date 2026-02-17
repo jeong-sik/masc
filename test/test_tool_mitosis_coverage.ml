@@ -380,6 +380,69 @@ let test_mitosis_check_nonzero_ratio_no_warning () =
   | None -> fail "expected Some for mitosis_check"
 
 (* ============================================================
+   Handoff Cooldown Tests (P1-3)
+   ============================================================ *)
+
+let test_handoff_cooldown_blocks_rapid_calls () =
+  (* Simulate a recent handoff by setting last_handoff_time to now *)
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday ();
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (false, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let action = json |> member "action" |> to_string in
+      check string "cooldown action" "cooldown" action;
+      let remaining = json |> member "cooldown_remaining_sec" |> to_float in
+      check bool "remaining > 0" true (remaining > 0.0);
+      Tool_mitosis.reset_handoff_cooldown ()
+  | Some (true, _) ->
+      Tool_mitosis.reset_handoff_cooldown ();
+      fail "expected cooldown to block"
+  | None ->
+      Tool_mitosis.reset_handoff_cooldown ();
+      fail "expected Some for mitosis_handoff"
+
+let test_handoff_cooldown_allows_after_expiry () =
+  (* Set last_handoff_time far in the past *)
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday () -. 9999.0;
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (true, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let action = json |> member "action" |> to_string in
+      (* Should proceed normally, not cooldown *)
+      check bool "not cooldown" true (action <> "cooldown");
+      Tool_mitosis.reset_handoff_cooldown ()
+  | Some (false, result) ->
+      (* Also acceptable if action is not cooldown *)
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let action = json |> member "action" |> to_string_option in
+      check bool "not cooldown" true (Option.value ~default:"" action <> "cooldown");
+      Tool_mitosis.reset_handoff_cooldown ()
+  | None ->
+      Tool_mitosis.reset_handoff_cooldown ();
+      fail "expected Some for mitosis_handoff"
+
+let test_handoff_cooldown_reset () =
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday ();
+  check bool "last_handoff_time set" true (!Tool_mitosis.last_handoff_time > 0.0);
+  Tool_mitosis.reset_handoff_cooldown ();
+  check (float 0.001) "reset to 0" 0.0 !Tool_mitosis.last_handoff_time
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -434,5 +497,10 @@ let () =
       test_case "profile + research metrics" `Slow test_handoff_verifier_profile_and_research_metrics;
       test_case "min_judges clamp to model count" `Slow
         test_handoff_verifier_min_judges_clamped_to_available_models;
+    ];
+    "handoff_cooldown", [
+      test_case "blocks rapid calls" `Quick test_handoff_cooldown_blocks_rapid_calls;
+      test_case "allows after expiry" `Quick test_handoff_cooldown_allows_after_expiry;
+      test_case "reset" `Quick test_handoff_cooldown_reset;
     ];
   ]

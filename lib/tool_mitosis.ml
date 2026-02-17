@@ -45,6 +45,13 @@ let log ctx msg =
   | Some f -> f msg
   | None -> ()
 
+(** Last successful handoff timestamp for cooldown enforcement *)
+let last_handoff_time : float ref = ref 0.0
+
+(** Reset handoff cooldown timer (for testing) *)
+let reset_handoff_cooldown () =
+  last_handoff_time := 0.0
+
 (** Convert Spawn_eio result to Spawn result for Mitosis compatibility *)
 let spawn_eio_to_spawn (r : Spawn_eio.spawn_result) : Spawn.spawn_result =
   { Spawn.success = r.Spawn_eio.success;
@@ -1255,6 +1262,21 @@ let continuity_regression_check ~full_context ~compressed_context =
     On spawn failure: Returns "fallback" with compaction suggestion instead of silent failure
 *)
 let run_sync_handoff ctx args : result =
+  (* P1-3: Handoff cooldown — prevent rapid repeated handoffs *)
+  let cooldown = Env_config.Mitosis.handoff_cooldown_seconds in
+  let now = Time_compat.now () in
+  let elapsed = now -. !last_handoff_time in
+  if !last_handoff_time > 0.0 && elapsed < cooldown then begin
+    let remaining = cooldown -. elapsed in
+    let json = `Assoc [
+      ("action", `String "cooldown");
+      ("message", `String (Printf.sprintf "Handoff cooldown active. %.0fs remaining (cooldown: %.0fs)" remaining cooldown));
+      ("cooldown_remaining_sec", `Float remaining);
+      ("cooldown_total_sec", `Float cooldown);
+    ] in
+    (false, Yojson.Safe.pretty_to_string json)
+  end else
+
   let raw_ratio = get_float args "context_ratio" 0.0 in
   let context_ratio = validate_context_ratio raw_ratio in
   let full_context = get_string args "full_context" "" in
@@ -1396,6 +1418,8 @@ let run_sync_handoff ctx args : result =
         Mcp_server.current_cell := new_cell;
         Mcp_server.stem_pool := new_pool;
         Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
+        (* P1-3: Update cooldown timer after successful handoff *)
+        last_handoff_time := Time_compat.now ();
 
         (* Agent Being Protocol: Queue Episode for persistence *)
         let base_path = ctx.config.Room_utils.base_path in

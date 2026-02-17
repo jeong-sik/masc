@@ -1710,12 +1710,16 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
 
     if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
         let preserve_existing_selection = !previous_players.is_empty();
+        let mut default_selected = 0_usize;
         let mut html = String::new();
         for name in keepers.iter().filter(|name| **name != dm_default) {
             let safe = html_escape(name);
             let selected_attr = if preserve_existing_selection
                 && previous_players.iter().any(|picked| picked == name)
             {
+                " selected"
+            } else if !preserve_existing_selection && default_selected < 4 {
+                default_selected += 1;
                 " selected"
             } else {
                 ""

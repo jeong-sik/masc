@@ -14,6 +14,8 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+#[cfg(target_arch = "wasm32")]
+use crate::dom::action_panel::friendly_js_error;
 use crate::game::state::{RoomState, TurnProgressState};
 
 // ─── Marker Resource ────────────────────────
@@ -75,10 +77,23 @@ pub fn sync_join_panel_interaction_state(
         }
 
         fn room_accepts_join(status: &str) -> bool {
-            match status {
-                "idle" | "active" | "combat" | "roleplay" => true,
-                _ => false, // "ended", "archived", "error", etc.
-            }
+            matches!(
+                status,
+                "active"
+                    | "running"
+                    | "in_progress"
+                    | "round"
+                    | "combat"
+                    | "briefing"
+                    | "dm_narration"
+                    | "party_discussion"
+                    | "action_declaration"
+                    | "dice_resolution"
+                    | "outcome_narration"
+                    | "state_update"
+                    | "transition"
+                    | "paused"
+            )
         }
 
         fn room_blocked_join_message(status: &str) -> Option<&'static str> {
@@ -348,16 +363,6 @@ fn set_join_status(text: &str, css_class: &str) {
             el.set_class_name(css_class);
         }
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn friendly_js_error(val: &JsValue) -> String {
-    val.as_string()
-        .or_else(|| {
-            val.dyn_ref::<js_sys::Error>()
-                .map(|e| e.message().into())
-        })
-        .unwrap_or_else(|| format!("{:?}", val))
 }
 
 #[cfg(target_arch = "wasm32")]

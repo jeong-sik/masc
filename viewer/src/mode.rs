@@ -509,6 +509,9 @@ fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(el) = doc.get_element_by_id("join-status") {
         el.set_text_content(Some(""));
     }
+    if let Some(el) = doc.get_element_by_id("new-game-assignment") {
+        el.set_inner_html("세션 정보를 준비 중입니다.");
+    }
     if let Some(el) = doc.get_element_by_id("action-status") {
         el.set_text_content(Some(""));
     }
@@ -1182,7 +1185,9 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
     let rpc: Value = if body_text.trim().is_empty() {
         json!({})
     } else {
-        parse_mcp_rpc_response(&body_text).map_err(|e| {
+        parse_mcp_rpc_response(&body_text).or_else(|_| {
+            parse_embedded_tool_payload(&body_text)
+        }).map_err(|e| {
             format!(
                 "RPC 응답 JSON 파싱 실패: {} / {}",
                 e,
@@ -1269,28 +1274,30 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
         return Ok(json!({}));
     }
 
-    let parsed: Value = match serde_json::from_str(&text) {
+    let parsed: Value = match parse_embedded_tool_payload(&text) {
         Ok(v) => v,
-        Err(primary) => parse_mcp_rpc_response(&text).map_err(|secondary| {
-            format!(
+        Err(primary) => {
+            let secondary = parse_mcp_rpc_response(&text).unwrap_or_else(|e| Value::String(format!("파싱 실패: {}", e)));
+            return Err(format!(
                 "{} 응답 JSON 파싱 실패: {} / {} / raw={}",
-                tool_name,
-                primary,
-                secondary,
-                text
-            )
-        })?,
+                tool_name, primary, secondary, text
+            ));
+        }
     };
     Ok(parsed.get("payload").cloned().unwrap_or(parsed))
 }
 
 #[cfg(target_arch = "wasm32")]
 fn parse_mcp_rpc_response(raw: &str) -> Result<Value, String> {
+    if let Some(v) = parse_embedded_json(raw) {
+        return Ok(v);
+    }
+
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(json!({}));
     }
-    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+    if let Some(v) = parse_embedded_json(trimmed) {
         return Ok(v);
     }
 
@@ -1300,10 +1307,8 @@ fn parse_mcp_rpc_response(raw: &str) -> Result<Value, String> {
         if piece.is_empty() {
             continue;
         }
-        if piece.starts_with('{') || piece.starts_with('[') {
-            if let Ok(v) = serde_json::from_str::<Value>(piece) {
-                return Ok(v);
-            }
+        if let Some(v) = parse_embedded_json(piece) {
+            return Ok(v);
         }
 
         let data_text = piece
@@ -1316,12 +1321,120 @@ fn parse_mcp_rpc_response(raw: &str) -> Result<Value, String> {
         if data_text.is_empty() || data_text == "[DONE]" {
             continue;
         }
-        if let Ok(v) = serde_json::from_str::<Value>(data_text) {
+        if let Some(v) = parse_embedded_json(data_text) {
             return Ok(v);
         }
     }
 
     Err("SSE frame parsing failed".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_embedded_tool_payload(raw: &str) -> Result<Value, String> {
+    parse_embedded_json(raw).ok_or_else(|| "JSON payload를 찾지 못했습니다".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_embedded_json(raw: &str) -> Option<Value> {
+    for candidate in collect_json_candidates(raw) {
+        if let Ok(v) = serde_json::from_str::<Value>(&candidate) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_json_candidates(raw: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let src = raw.trim();
+    if src.is_empty() {
+        return candidates;
+    }
+
+    // 1) Strict full-text parse
+    candidates.push(src.to_string());
+
+    // 2) SSE payload-only lines
+    candidates.extend(
+        src
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim_start)
+            .filter(|line| !line.is_empty() && *line != "[DONE]")
+            .map(ToString::to_string),
+    );
+
+    // 3) Event-frame chunks
+    candidates.extend(
+        src.split("\n\n")
+            .map(str::trim)
+            .filter(|piece| !piece.is_empty() && *piece != "[DONE]")
+            .map(ToString::to_string),
+    );
+
+    // 4) Top-level embedded JSON span
+    if let Some((start, end)) = extract_top_level_json_span(src) {
+        candidates.push(src[start..end].to_string());
+    }
+
+    candidates
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_top_level_json_span(raw: &str) -> Option<(usize, usize)> {
+    let mut stack: Vec<u8> = Vec::new();
+    let mut in_string = false;
+    let mut escape = false;
+    let mut start: Option<usize> = None;
+
+    for (idx, byte) in raw.bytes().enumerate() {
+        if in_string {
+            if escape {
+                escape = false;
+                continue;
+            }
+            match byte {
+                b'\\' => escape = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match byte {
+            b'"' => in_string = true,
+            b'{' => {
+                if stack.is_empty() {
+                    start = Some(idx);
+                }
+                stack.push(b'}');
+            }
+            b'[' => {
+                if stack.is_empty() {
+                    start = Some(idx);
+                }
+                stack.push(b']');
+            }
+            b'}' | b']' => {
+                if let Some(expected) = stack.pop() {
+                    if expected != byte {
+                        return None;
+                    }
+                    if stack.is_empty() {
+                        if let Some(begin) = start {
+                            return Some((begin, idx + 1));
+                        }
+                    }
+                } else {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1454,24 +1567,15 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         }),
     )
     .await?;
-    let world_preset_id = preset_catalog
-        .get("world_presets")
-        .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|preset| preset.get("id"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let dm_preset_id = preset_catalog
-        .get("dm_presets")
-        .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|preset| preset.get("id"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let preset_catalog = normalize_preset_catalog(&preset_catalog);
+    let world_preset_id = extract_first_preset_id(&preset_catalog, "world_presets")
+        .or_else(|| extract_first_preset_id(&preset_catalog, "world"))
+        .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "world"))
+        .unwrap_or_default();
+    let dm_preset_id = extract_first_preset_id(&preset_catalog, "dm_presets")
+        .or_else(|| extract_first_preset_id(&preset_catalog, "dm"))
+        .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "dm"))
+        .unwrap_or_default();
     if world_preset_id.is_empty() || dm_preset_id.is_empty() {
         return Err("trpg preset 목록이 비어 있습니다.".to_string());
     }
@@ -1600,6 +1704,10 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         player_map.insert(actor_id.clone(), Value::String(candidate));
     }
 
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        set_new_game_assignment(&doc, &dm_keeper, &player_map, &actor_ids);
+    }
+
     if !models.is_empty() {
         let models_value = Value::Array(
             models
@@ -1652,6 +1760,152 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         dm_keeper,
         player_map.len()
     ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_new_game_assignment(
+    doc: &web_sys::Document,
+    dm_keeper: &str,
+    player_map: &serde_json::Map<String, Value>,
+    actor_ids: &[String],
+) {
+    let Some(el) = doc.get_element_by_id("new-game-assignment") else {
+        return;
+    };
+    let mut html = String::from("<strong>배정 확인</strong><ul>");
+    html.push_str(&format!("<li>DM: {}</li>", html_escape(dm_keeper)));
+    for actor_id in actor_ids {
+        let keeper = player_map
+            .get(actor_id)
+            .and_then(Value::as_str)
+            .unwrap_or("미정");
+        html.push_str(&format!(
+            "<li>{} → {}</li>",
+            html_escape(actor_id),
+            html_escape(keeper)
+        ));
+    }
+    html.push_str("</ul>");
+    el.set_inner_html(&html);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_preset_catalog(raw: &Value) -> Value {
+    let mut value = raw.clone();
+    for _ in 0..6 {
+        if let Some(next_value) = preset_unwrap_payload(&value) {
+            value = next_value;
+            continue;
+        }
+        if let Some(parsed) = preset_unwrap_content(&value) {
+            value = parsed;
+            continue;
+        }
+        break;
+    }
+
+    if value.is_array() {
+        let mut obj = serde_json::Map::new();
+        obj.insert("items".to_string(), value);
+        return Value::Object(obj);
+    }
+    if let Some(presets) = value.get("presets") {
+        presets.clone()
+    } else {
+        value
+    };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn preset_unwrap_payload(value: &Value) -> Option<Value> {
+    value
+        .get("payload")
+        .or_else(|| value.get("result"))
+        .or_else(|| value.get("data"))
+        .or_else(|| value.get("structuredContent"))
+        .filter(Value::is_object)
+        .cloned()
+        .or_else(|| value.get("presets").filter(Value::is_object).cloned())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn preset_unwrap_content(value: &Value) -> Option<Value> {
+    if let Some(presets_text) = value
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter().find_map(|row| {
+                if row.get("type").and_then(Value::as_str) == Some("text") {
+                    row.get("text").and_then(Value::as_str)
+                } else {
+                    None
+                }
+            })
+        })
+    {
+        parse_embedded_tool_payload(presets_text).ok()
+    } else if let Some(raw_text) = value.get("content").and_then(Value::as_str) {
+        parse_embedded_tool_payload(raw_text).ok()
+    } else {
+        None
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_first_preset_id(catalog: &Value, list_key: &str) -> Option<String> {
+    catalog
+        .get(list_key)
+        .and_then(extract_first_preset_id_from_node)
+        .or_else(|| catalog.get("items").and_then(extract_first_preset_id_from_node))
+        .or_else(|| catalog.get("presets").and_then(extract_first_preset_id_from_node))
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_first_preset_id_from_node(raw: &Value) -> Option<String> {
+    if let Some(id) = raw.get("id").and_then(Value::as_str) {
+        return Some(id.to_string());
+    }
+    if let Some(id) = raw
+        .get("preset_id")
+        .and_then(Value::as_str)
+    {
+        return Some(id.to_string());
+    }
+    if let Some(id) = raw.get("uid").and_then(Value::as_str) {
+        return Some(id.to_string());
+    }
+    if let Some(id) = raw.get("name").and_then(Value::as_str) {
+        return Some(id.to_string());
+    }
+    if let Some(items) = raw.get("items").or_else(|| raw.get("presets")) {
+        return extract_first_preset_id_from_node(items);
+    }
+    if let Some(list) = raw.as_array() {
+        for item in list {
+            if let Some(id) = extract_first_preset_id_from_node(item) {
+                return Some(id);
+            }
+        }
+    }
+    if let Some(obj) = raw.as_object() {
+        for (_, value) in obj {
+            if let Some(id) = extract_first_preset_id_from_node(value) {
+                return Some(id);
+            }
+        }
+    }
+    raw.as_str().map(|raw| raw.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_first_preset_id_by_key(catalog: &Value, alt_key: &str) -> Option<String> {
+    catalog
+        .get(alt_key)
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| name.trim().to_string())
 }
 
 #[cfg(target_arch = "wasm32")]

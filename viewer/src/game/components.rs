@@ -10,6 +10,35 @@ pub struct Stats {
     pub luck: i32,
 }
 
+/// A single skill with name and proficiency level (1-20).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Skill {
+    pub name: String,
+    pub level: i32,
+}
+
+impl Skill {
+    /// Modifier derived from proficiency level: (level - 10) / 2, floored.
+    pub fn modifier(&self) -> i32 {
+        (self.level - 10) / 2
+    }
+}
+
+/// An active condition affecting the character (e.g. poisoned, stunned).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Condition {
+    pub name: String,
+    #[serde(default)]
+    pub remaining_turns: Option<i32>,
+}
+
+/// A piece of equipped gear.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Equipment {
+    pub slot: String,
+    pub name: String,
+}
+
 /// Core actor component — represents a party member or NPC on the map.
 #[derive(Component, Debug, Clone)]
 pub struct Actor {
@@ -18,12 +47,17 @@ pub struct Actor {
     pub class: String,
     pub hp: i32,
     pub max_hp: i32,
+    pub mp: i32,
+    pub max_mp: i32,
     pub stats: Stats,
     pub area: String,
     pub is_dead: bool,
     pub inventory: Vec<String>,
     pub buffs: Vec<String>,
     pub debuffs: Vec<String>,
+    pub skills: Vec<Skill>,
+    pub conditions: Vec<Condition>,
+    pub equipment: Vec<Equipment>,
 }
 
 /// Marker component for entities rendered as map tokens.

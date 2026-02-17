@@ -2334,10 +2334,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
                 <div class="trpg-control-field">
                   <label for="trpg-phase-select">Phase</label>
                   <select id="trpg-phase-select">
-                    <option value="round">round</option>
-                    <option value="briefing">briefing</option>
-                    <option value="resolution">resolution</option>
-                    <option value="ended">ended</option>
+                    <option value="round">round (PARTY ACT)</option>
+                    <option value="briefing">briefing (DM DISCUSS)</option>
+                    <option value="resolution">resolution (RESOLVE)</option>
+                    <option value="ended">ended (SCENE END)</option>
                   </select>
                 </div>
                 <div class="trpg-control-field">
@@ -2356,6 +2356,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
                   <label for="trpg-player-keepers-input">Player Keepers (한 줄에 1명, actor=keeper 또는 keeper)</label>
                   <textarea id="trpg-player-keepers-input" placeholder="grimja=grimja&#10;luna=luna&#10;songarak=songarak&#10;miso=miso"></textarea>
                   <div class="trpg-control-help">예: grimja 또는 grimja=grimja. keeper만 쓰면 actor와 keeper를 동일 이름으로 처리합니다.</div>
+                </div>
+                <div class="trpg-control-field full">
+                  <label>Phase Quick Run</label>
+                  <div class="trpg-action-row compact">
+                    <button id="trpg-phase-briefing-btn" class="trpg-run-btn secondary" onclick="runTrpgPhaseQuick('briefing', 'DM DISCUSS')">DM DISCUSS</button>
+                    <button id="trpg-phase-round-btn" class="trpg-run-btn secondary" onclick="runTrpgPhaseQuick('round', 'PARTY ACT')">PARTY ACT</button>
+                    <button id="trpg-phase-resolution-btn" class="trpg-run-btn secondary" onclick="runTrpgPhaseQuick('resolution', 'RESOLVE')">RESOLVE</button>
+                    <button id="trpg-phase-ended-btn" class="trpg-run-btn secondary" onclick="runTrpgPhaseQuick('ended', 'SCENE END')">SCENE END</button>
+                  </div>
+                  <div class="trpg-control-help">버튼을 누르면 phase를 해당 단계로 맞춘 뒤 즉시 라운드를 실행합니다.</div>
                 </div>
                 <div class="trpg-control-field full">
                   <label for="trpg-player-keepers-select">AI Player 선택 (다중 선택)</label>
@@ -7517,6 +7527,25 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return '';
     }
 
+    function setTrpgPhaseSelection(phase) {
+      const next = String(phase || '').trim();
+      if (!next) return;
+      const phaseSelect = document.getElementById('trpg-phase-select');
+      if (!phaseSelect) return;
+      const hasOption = Array.from(phaseSelect.options || []).some((opt) => String(opt.value || '') === next);
+      if (hasOption) phaseSelect.value = next;
+    }
+
+    function runTrpgPhaseQuick(phase, label = '') {
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
+      const next = String(phase || '').trim();
+      if (!next) return;
+      setTrpgPhaseSelection(next);
+      const pretty = String(label || next).trim();
+      showToast(`Phase quick run: ${pretty}`, 'info');
+      runTrpgRound({ source: `quick:${next}`, phase: next });
+    }
+
     function trpgNextActionRunLabel(kind) {
       const key = String(kind || '');
       if (key === 'bootstrap') return '권장 액션 실행: 1) 세션 시작';
@@ -9230,6 +9259,11 @@ let cached_html = lazy ({|<!DOCTYPE html>
         actorDeleteBtn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
         actorDeleteBtn.textContent = trpgActorMutating ? '처리 중...' : '액터 삭제';
       }
+      ['trpg-phase-briefing-btn', 'trpg-phase-round-btn', 'trpg-phase-resolution-btn', 'trpg-phase-ended-btn'].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.disabled = trpgRoundRunning || trpgBootstrapping || trpgActorMutating || !trpgCanRunRound;
+      });
       updateTrpgNextActionButton();
       syncTrpgAutoRoundUi();
     }
@@ -9909,7 +9943,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
       ensureTrpgControlDefaults();
       const roomId = applyTrpgRoomFromInput();
       const dmKeeper = String((document.getElementById('trpg-dm-keeper-input') || {}).value || '').trim();
-      const phase = String((document.getElementById('trpg-phase-select') || {}).value || 'round').trim() || 'round';
+      const phaseOverride = String((options && options.phase) || '').trim();
+      const phase = phaseOverride || String((document.getElementById('trpg-phase-select') || {}).value || 'round').trim() || 'round';
+      if (phaseOverride) setTrpgPhaseSelection(phaseOverride);
       const lang = trpgLanguageFromSelect();
       const timeoutRaw = Number((document.getElementById('trpg-timeout-sec-input') || {}).value);
       const timeoutSec = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 90;

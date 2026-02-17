@@ -592,12 +592,17 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                 class,
                 hp,
                 max_hp,
+                mp: 0,
+                max_mp: 0,
                 stats,
                 area,
                 is_dead,
                 inventory,
                 buffs,
                 debuffs,
+                skills: vec![],
+                conditions: vec![],
+                equipment: vec![],
             }
         })
         .collect()

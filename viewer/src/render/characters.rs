@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::assets;
 use crate::game::components::*;
-use super::map::area_to_position;
+use super::map::{area_to_position, position_to_area};
 
 /// Marker component for entities that can be dragged by the player.
 #[derive(Component)]
@@ -133,15 +133,14 @@ pub fn update_hp_bars(
 pub fn handle_drag_start(
     mut drag_state: ResMut<DragState>,
     windows: Query<&Window>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     mut query: Query<(Entity, &Transform), (With<Draggable>, Without<ChildOf>)>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
 ) {
-    // Only start drag on left mouse button press
     if !mouse_button_input.just_pressed(MouseButton::Left) {
         return;
     }
 
-    // Check if cursor is over any draggable entity
     let Ok(window) = windows.single() else {
         return;
     };
@@ -149,19 +148,22 @@ pub fn handle_drag_start(
         return;
     };
 
-    // Convert cursor position to world space
-    // TODO: Proper camera projection - for now use simple mapping
-    // This is a simplified approach; proper implementation needs camera query
+    // Project screen cursor to world space via the game camera
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        return;
+    };
+    let Ok(world_pos) = camera.viewport_to_world_2d(camera_transform, cursor_pos) else {
+        return;
+    };
 
     for (entity, transform) in &mut query {
         let entity_pos = Vec2::new(transform.translation.x, transform.translation.y);
         let size = 32.0; // Approximate token size
 
-        // Simple hit test
-        let diff = cursor_pos - entity_pos;
+        let diff = world_pos - entity_pos;
         if diff.x.abs() < size && diff.y.abs() < size {
             drag_state.dragged_entity = Some(entity);
-            drag_state.drag_offset = entity_pos - cursor_pos;
+            drag_state.drag_offset = entity_pos - world_pos;
             log::info!("Drag started: entity {:?}", entity);
             break;
         }
@@ -172,6 +174,7 @@ pub fn handle_drag_start(
 pub fn handle_drag(
     mut drag_state: ResMut<DragState>,
     windows: Query<&Window>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<GameCamera>>,
     mut query: Query<&mut Transform, With<Draggable>>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
 ) {
@@ -179,7 +182,6 @@ pub fn handle_drag(
         return;
     };
 
-    // Cancel drag if mouse released
     if !mouse_button_input.pressed(MouseButton::Left) {
         drag_state.dragged_entity = None;
         return;
@@ -197,8 +199,14 @@ pub fn handle_drag(
         return;
     };
 
-    // Update position with offset
-    let new_pos = cursor_pos + drag_state.drag_offset;
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        return;
+    };
+    let Ok(world_pos) = camera.viewport_to_world_2d(camera_transform, cursor_pos) else {
+        return;
+    };
+
+    let new_pos = world_pos + drag_state.drag_offset;
     transform.translation.x = new_pos.x;
     transform.translation.y = new_pos.y;
 }
@@ -210,7 +218,6 @@ pub fn handle_drag_end(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     map_query: Query<&Transform, (With<MapToken>, With<Draggable>)>,
 ) {
-    // Check if mouse was just released
     if !mouse_button_input.just_released(MouseButton::Left) {
         return;
     }
@@ -219,7 +226,6 @@ pub fn handle_drag_end(
         return;
     };
 
-    // Get final position
     let Ok(transform) = map_query.get(entity) else {
         drag_state.dragged_entity = None;
         return;
@@ -227,14 +233,9 @@ pub fn handle_drag_end(
 
     let final_pos = Vec2::new(transform.translation.x, transform.translation.y);
 
-    // Convert position to area (simple grid-based approach)
-    // TODO: Implement proper reverse mapping from position to area
-    let grid_x = (final_pos.x / 64.0).floor() as i32;
-    let grid_y = (final_pos.y / 64.0).floor() as i32;
-
-    // Update actor's area
+    // Snap to nearest named area using the same coordinate system as area_to_position
     if let Ok(mut actor) = actors.get_mut(entity) {
-        actor.area = format!("{}_{}", grid_x, grid_y);
+        actor.area = position_to_area(final_pos);
         log::info!("Drag ended: entity {:?} moved to area {}", entity, actor.area);
     }
 

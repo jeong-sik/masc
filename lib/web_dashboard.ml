@@ -9546,7 +9546,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
       try {
         await mcpToolCall('trpg.actor.spawn', spawnArgs);
         if (form.keeperName) {
-          await mcpToolCall('trpg.actor.claim', {
+          await trpgActorClaimCall({
             room_id: form.roomId,
             actor_id: form.actorId,
             keeper_name: form.keeperName,
@@ -9620,7 +9620,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
           await mcpToolCall('trpg.actor.update', updateArgs);
         }
         if (hasKeeperClaim) {
-          await mcpToolCall('trpg.actor.claim', {
+          await trpgActorClaimCall({
             room_id: form.roomId,
             actor_id: form.actorId,
             keeper_name: form.keeperName,
@@ -10532,12 +10532,21 @@ let cached_html = lazy ({|<!DOCTYPE html>
         const keeperText = actor.keeper || '-';
         const stateCls = actor.alive ? 'ok' : 'mismatch';
         const stateText = actor.alive ? 'alive' : 'dead';
+        const busy = trpgRoundRunning || trpgBootstrapping || trpgActorMutating;
+        const claimDisabled = busy;
+        const releaseDisabled = busy || !actor.keeper;
+        const claimTitle = busy ? '실행 중에는 변경할 수 없습니다.' : '이 actor를 지정한 keeper로 claim합니다.';
+        const releaseTitle = busy
+          ? '실행 중에는 변경할 수 없습니다.'
+          : (!actor.keeper ? '현재 keeper 할당 정보가 없어 release할 수 없습니다.' : '현재 keeper 점유를 해제합니다.');
         return `
           <div class="trpg-round-item ${stateCls}">
             <div class="meta">${escapeHtml(actor.actorId)} · ${escapeHtml(roleText)} · ${escapeHtml(stateText)} · ${escapeHtml(hpText)}</div>
             <div><b>${escapeHtml(actor.name)}</b> · keeper <b>${escapeHtml(keeperText)}</b></div>
             <div style="margin-top:6px;">
               <button type="button" class="trpg-mini-btn" onclick="loadTrpgActorToForm('${token}')">불러오기</button>
+              <button type="button" class="trpg-mini-btn" ${claimDisabled ? 'disabled' : ''} title="${escapeHtml(claimTitle)}" onclick="quickClaimTrpgActor('${token}')">Claim</button>
+              <button type="button" class="trpg-mini-btn" ${releaseDisabled ? 'disabled' : ''} title="${escapeHtml(releaseTitle)}" onclick="quickReleaseTrpgActor('${token}')">Release</button>
             </div>
           </div>
         `;
@@ -10576,6 +10585,142 @@ let cached_html = lazy ({|<!DOCTYPE html>
       setList('trpg-actor-skills-input', actor.skills);
       setList('trpg-actor-inventory-input', actor.inventory);
       showToast(`액터 불러오기: ${actor.actorId}`, 'success');
+    }
+
+    function trpgActorDefaultKeeper(actorId) {
+      return `pk-${String(actorId || '').trim()}`;
+    }
+
+    function trpgActorKeeperFromFormOrPrompt(actor) {
+      const actorId = String((actor && actor.actorId) || '').trim();
+      const formKeeper = trpgActorTextInput('trpg-actor-keeper-input');
+      if (formKeeper) return formKeeper;
+      const existing = String((actor && actor.keeper) || '').trim();
+      if (existing) return existing;
+      const suggested = trpgActorDefaultKeeper(actorId);
+      const entered = window.prompt(`keeper 이름을 입력하세요 (actor ${actorId})`, suggested);
+      return String(entered || '').trim();
+    }
+
+    async function trpgActorClaimCall(args) {
+      try {
+        return await mcpToolCall('trpg.actor.claim', args);
+      } catch (primaryErr) {
+        try {
+          return await mcpToolCall('masc_trpg_actor_claim', args);
+        } catch (legacyErr) {
+          const primaryMsg = String((primaryErr && primaryErr.message) || primaryErr || 'unknown error');
+          const legacyMsg = String((legacyErr && legacyErr.message) || legacyErr || 'unknown error');
+          throw new Error(`actor claim 실패: canonical(${primaryMsg}) / legacy(${legacyMsg})`);
+        }
+      }
+    }
+
+    async function trpgActorReleaseCall(args) {
+      try {
+        return await mcpToolCall('trpg.actor.release', args);
+      } catch (primaryErr) {
+        try {
+          return await mcpToolCall('masc_trpg_actor_release', args);
+        } catch (legacyErr) {
+          const primaryMsg = String((primaryErr && primaryErr.message) || primaryErr || 'unknown error');
+          const legacyMsg = String((legacyErr && legacyErr.message) || legacyErr || 'unknown error');
+          throw new Error(`actor release 실패: canonical(${primaryMsg}) / legacy(${legacyMsg})`);
+        }
+      }
+    }
+
+    async function quickClaimTrpgActor(token) {
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
+      const actorId = decodeURIComponent(String(token || ''));
+      const actor = trpgActorBrowserCache && trpgActorBrowserCache[actorId];
+      if (!actor) {
+        showToast('액터 정보를 찾지 못했습니다. 새로고침 후 다시 시도하세요.', 'error');
+        return;
+      }
+      const roomId = applyTrpgRoomFromInput();
+      const keeperName = trpgActorKeeperFromFormOrPrompt(actor);
+      if (!keeperName) {
+        setTrpgStatusBoth('오류: claim할 keeper 이름이 필요합니다.', 'error');
+        return;
+      }
+      setTrpgActorMutationBusy(true);
+      setTrpgStatusBoth(
+        `액터 claim 중: <b>${escapeHtml(actorId)}</b> → keeper <b>${escapeHtml(keeperName)}</b> / room <b>${escapeHtml(roomId)}</b>`,
+        'running'
+      );
+      try {
+        await trpgActorClaimCall({
+          room_id: roomId,
+          actor_id: actorId,
+          keeper_name: keeperName,
+        });
+        const role = String((actor && actor.role) || '').trim().toLowerCase();
+        if (role === 'player') {
+          upsertTrpgPlayerKeeperLine(actorId, keeperName);
+        }
+        setTrpgStatusBoth(
+          `액터 claim 완료: <b>${escapeHtml(actorId)}</b> → keeper <b>${escapeHtml(keeperName)}</b>`,
+          'ok'
+        );
+        showToast(`Actor claim 완료: ${actorId}`, 'success');
+        await fetchTrpg();
+      } catch (e) {
+        const msg = String((e && e.message) || e || 'unknown error');
+        setTrpgStatusBoth(`액터 claim 실패: ${escapeHtml(msg)}`, 'error');
+        showToast('Actor claim 실패', 'error');
+      } finally {
+        setTrpgActorMutationBusy(false);
+      }
+    }
+
+    async function quickReleaseTrpgActor(token) {
+      if (trpgRoundRunning || trpgBootstrapping || trpgActorMutating) return;
+      const actorId = decodeURIComponent(String(token || ''));
+      const actor = trpgActorBrowserCache && trpgActorBrowserCache[actorId];
+      if (!actor) {
+        showToast('액터 정보를 찾지 못했습니다. 새로고침 후 다시 시도하세요.', 'error');
+        return;
+      }
+      const roomId = applyTrpgRoomFromInput();
+      const keeperName = String((actor && actor.keeper) || '').trim() || trpgActorTextInput('trpg-actor-keeper-input');
+      if (!keeperName) {
+        setTrpgStatusBoth(
+          `오류: actor <b>${escapeHtml(actorId)}</b>의 keeper 정보가 없어 release를 실행할 수 없습니다.`,
+          'error'
+        );
+        return;
+      }
+      setTrpgActorMutationBusy(true);
+      setTrpgStatusBoth(
+        `액터 release 중: <b>${escapeHtml(actorId)}</b> / keeper <b>${escapeHtml(keeperName)}</b> / room <b>${escapeHtml(roomId)}</b>`,
+        'running'
+      );
+      try {
+        await trpgActorReleaseCall({
+          room_id: roomId,
+          actor_id: actorId,
+          keeper_name: keeperName,
+        });
+        removeTrpgPlayerKeeperLine(actorId);
+        const keeperInput = document.getElementById('trpg-actor-keeper-input');
+        const formActorId = trpgActorTextInput('trpg-actor-id-input');
+        if (keeperInput && formActorId === actorId) {
+          keeperInput.value = '';
+        }
+        setTrpgStatusBoth(
+          `액터 release 완료: <b>${escapeHtml(actorId)}</b> (keeper <b>${escapeHtml(keeperName)}</b>)`,
+          'ok'
+        );
+        showToast(`Actor release 완료: ${actorId}`, 'success');
+        await fetchTrpg();
+      } catch (e) {
+        const msg = String((e && e.message) || e || 'unknown error');
+        setTrpgStatusBoth(`액터 release 실패: ${escapeHtml(msg)}`, 'error');
+        showToast('Actor release 실패', 'error');
+      } finally {
+        setTrpgActorMutationBusy(false);
+      }
     }
 
     function renderTrpgGameHistory(events) {

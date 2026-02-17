@@ -179,20 +179,20 @@ let set_thread_id ~post_id ~thread_id =
 let search ~query ~limit =
   match backend () with
   | Jsonl store ->
-      (* JSONL: reuse existing in-memory search logic *)
-      let all_posts = Board.list_posts store ~limit:(max limit 100) () in
+      (* Full-scan search: match query against content, author, hearth.
+         Uses Board.search_posts to scan all posts (not limited by list_posts cap). *)
       let query_lower = String.lowercase_ascii query in
       let pattern = Str.regexp_string query_lower in
       let matches_str s =
         try ignore (Str.search_forward pattern (String.lowercase_ascii s) 0); true
         with Not_found -> false
       in
-      List.filter (fun (p : Board.post) ->
+      let predicate (p : Board.post) =
         matches_str p.content
         || matches_str (Board.Agent_id.to_string p.author)
         || (match p.hearth with Some h -> matches_str h | None -> false)
-      ) all_posts
-      |> List.filteri (fun i _ -> i < limit)
+      in
+      Board.search_posts store ~predicate ~limit
   | Postgres t ->
       Board_pg.search t ~query ~limit
 

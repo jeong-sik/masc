@@ -2681,3 +2681,10 @@ body.mode-lobby #dashboard {
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
+
+/* ── Gameplay event blocks in narrative log ── */
+.move-block { color: var(--text-dim, #999); font-style: italic; }
+.item-block { border-left: 3px solid var(--accent-primary, #c4a265); padding-left: 0.8em; }
+.item-block strong { color: var(--accent-primary, #c4a265); }
+.death-block { border-left: 3px solid #e74c3c; padding-left: 0.8em; color: #e74c3c; font-weight: bold; }
+.death-block strong { color: #ff6b6b; }

@@ -809,6 +809,7 @@ fn room_lane_label(status: &str) -> &'static str {
     let key = status.trim().to_ascii_lowercase();
     match key.as_str() {
         "active" | "running" | "in_progress" => "running",
+        "stopped" | "suspended" | "paused" => "stopped",
         "ended" | "completed" | "done" | "retired" | "closed" => "ended",
         _ => "lobby",
     }
@@ -820,6 +821,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         return;
     };
     let mut running = Vec::new();
+    let mut stopped = Vec::new();
     let mut lobby = Vec::new();
     let mut ended = Vec::new();
 
@@ -852,6 +854,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         );
         match lane {
             "running" => running.push(card),
+            "stopped" => stopped.push(card),
             "ended" => ended.push(card),
             _ => lobby.push(card),
         }
@@ -872,8 +875,9 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     };
 
     let html = format!(
-        "{}{}{}",
+        "{}{}{}{}",
         lane_html("진행 중", running, "running"),
+        lane_html("멈춤", stopped, "stopped"),
         lane_html("로비", lobby, "lobby"),
         lane_html("종료", ended, "ended")
     );

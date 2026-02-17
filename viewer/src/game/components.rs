@@ -58,6 +58,7 @@ pub struct Actor {
     pub skills: Vec<Skill>,
     pub conditions: Vec<Condition>,
     pub equipment: Vec<Equipment>,
+    pub keeper: String,
 }
 
 /// Marker component for entities rendered as map tokens.

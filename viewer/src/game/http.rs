@@ -449,6 +449,7 @@ pub fn apply_initial_state(
             skills,
             conditions,
             equipment,
+            keeper: String::new(),
         });
     }
 

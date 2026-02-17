@@ -86,7 +86,32 @@ impl Plugin for GameStatePlugin {
                 systems::apply_choice_available,
                 systems::apply_choice_resolved,
                 systems::apply_combat_started,
+            ).run_if(in_state(ViewerMode::Trpg)))
+            .add_systems(Update, (
+                systems::apply_actor_spawned,
+                systems::apply_actor_updated,
+                systems::apply_actor_deleted,
+                systems::apply_actor_claimed,
+                systems::apply_actor_released,
+                systems::apply_room_ended,
+                systems::apply_scene_transitioned,
                 crate::dom::endgame::detect_endgame,
-            ).run_if(in_state(ViewerMode::Trpg)));
+            ).run_if(in_state(ViewerMode::Trpg)))
+            .add_systems(
+                Update,
+                (
+                    systems::apply_party_selected,
+                    systems::apply_room_created,
+                    systems::apply_room_started,
+                    systems::apply_session_started,
+                    systems::apply_phase_changed,
+                    systems::apply_turn_started,
+                    systems::apply_turn_action_resolved,
+                    systems::apply_intervention_submitted,
+                    systems::apply_intervention_applied,
+                    systems::apply_keeper_unavailable,
+                )
+                    .run_if(in_state(ViewerMode::Trpg)),
+            );
     }
 }

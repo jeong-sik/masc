@@ -316,3 +316,219 @@ pub fn apply_combat_started(
         combat_state.enemies = payload.enemies.clone();
     }
 }
+
+// ─── Actor Lifecycle Systems ────────────────────
+
+/// Spawn a new Actor entity when ActorSpawned fires.
+/// Skips if an actor with the same ID already exists (idempotent).
+pub fn apply_actor_spawned(
+    mut events: MessageReader<ActorSpawned>,
+    mut commands: Commands,
+    existing: Query<&Actor>,
+) {
+    for ActorSpawned(payload) in events.read() {
+        if existing.iter().any(|a| a.id == payload.actor_id) {
+            continue;
+        }
+        let actor = Actor {
+            id: payload.actor_id.clone(),
+            name: if payload.name.is_empty() { payload.actor_id.clone() } else { payload.name.clone() },
+            class: payload.class.clone(),
+            hp: 100,
+            max_hp: 100,
+            mp: 50,
+            max_mp: 50,
+            stats: Stats { atk: 10, def: 10, int: 10, luck: 10 },
+            area: String::new(),
+            is_dead: false,
+            inventory: Vec::new(),
+            buffs: Vec::new(),
+            debuffs: Vec::new(),
+            skills: Vec::new(),
+            conditions: Vec::new(),
+            equipment: Vec::new(),
+            keeper: payload.keeper.clone(),
+        };
+        commands.spawn((actor, MapToken));
+    }
+}
+
+/// Update Actor fields when ActorUpdated fires.
+/// Only overwrites non-empty payload fields.
+pub fn apply_actor_updated(
+    mut events: MessageReader<ActorUpdated>,
+    mut actors: Query<&mut Actor>,
+) {
+    for ActorUpdated(payload) in events.read() {
+        for mut actor in &mut actors {
+            if actor.id == payload.actor_id {
+                if !payload.name.is_empty() {
+                    actor.name = payload.name.clone();
+                }
+                if !payload.class.is_empty() {
+                    actor.class = payload.class.clone();
+                }
+                if !payload.keeper.is_empty() {
+                    actor.keeper = payload.keeper.clone();
+                }
+            }
+        }
+    }
+}
+
+/// Despawn Actor entity when ActorDeleted fires.
+pub fn apply_actor_deleted(
+    mut events: MessageReader<ActorDeleted>,
+    mut commands: Commands,
+    actors: Query<(Entity, &Actor)>,
+) {
+    for ActorDeleted(payload) in events.read() {
+        for (entity, actor) in &actors {
+            if actor.id == payload.actor_id {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+/// Bind a keeper to an Actor when ActorClaimed fires.
+pub fn apply_actor_claimed(
+    mut events: MessageReader<ActorClaimed>,
+    mut actors: Query<&mut Actor>,
+) {
+    for ActorClaimed(payload) in events.read() {
+        for mut actor in &mut actors {
+            if actor.id == payload.actor_id {
+                actor.keeper = payload.keeper.clone();
+            }
+        }
+    }
+}
+
+/// Unbind a keeper from an Actor when ActorReleased fires.
+pub fn apply_actor_released(
+    mut events: MessageReader<ActorReleased>,
+    mut actors: Query<&mut Actor>,
+) {
+    for ActorReleased(payload) in events.read() {
+        for mut actor in &mut actors {
+            if actor.id == payload.actor_id {
+                actor.keeper.clear();
+            }
+        }
+    }
+}
+
+/// Mark room as ended when RoomEnded event fires.
+pub fn apply_room_ended(
+    mut events: MessageReader<RoomEnded>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for RoomEnded(payload) in events.read() {
+        if room_state.id == payload.room_id || payload.room_id.is_empty() {
+            room_state.status = "ended".to_string();
+        }
+    }
+}
+
+/// Update room state on scene transitions.
+pub fn apply_scene_transitioned(
+    mut events: MessageReader<SceneTransitioned>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for SceneTransitioned(payload) in events.read() {
+        room_state.current_scenario = payload.to_scene.clone();
+    }
+}
+
+// --- Session / Turn lifecycle systems ---
+
+pub fn apply_party_selected(
+    mut events: MessageReader<PartySelected>,
+) {
+    for PartySelected(_p) in events.read() {
+        // Log-only: no ECS state mutation needed
+    }
+}
+
+pub fn apply_room_created(
+    mut events: MessageReader<RoomCreated>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for RoomCreated(p) in events.read() {
+        room_state.id = p.room_id.clone();
+        room_state.status = "created".to_string();
+    }
+}
+
+pub fn apply_room_started(
+    mut events: MessageReader<RoomStarted>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for RoomStarted(p) in events.read() {
+        if !p.status.is_empty() {
+            room_state.status = p.status.clone();
+        } else {
+            room_state.status = "started".to_string();
+        }
+    }
+}
+
+pub fn apply_session_started(
+    mut events: MessageReader<SessionStarted>,
+) {
+    for SessionStarted(_p) in events.read() {
+        // Log-only: session ID is informational
+    }
+}
+
+pub fn apply_phase_changed(
+    mut events: MessageReader<PhaseChanged>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for PhaseChanged(p) in events.read() {
+        room_state.phase = TurnPhase::from_str(&p.phase);
+    }
+}
+
+pub fn apply_turn_started(
+    mut events: MessageReader<TurnStarted>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for TurnStarted(p) in events.read() {
+        room_state.turn = p.turn;
+        room_state.phase = TurnPhase::from_str(&p.phase);
+    }
+}
+
+pub fn apply_turn_action_resolved(
+    mut events: MessageReader<TurnActionResolved>,
+) {
+    for TurnActionResolved(_p) in events.read() {
+        // Log-only: action result is rendered by DOM system
+    }
+}
+
+pub fn apply_intervention_submitted(
+    mut events: MessageReader<InterventionSubmitted>,
+) {
+    for InterventionSubmitted(_p) in events.read() {
+        // Log-only: rendered by DOM system
+    }
+}
+
+pub fn apply_intervention_applied(
+    mut events: MessageReader<InterventionApplied>,
+) {
+    for InterventionApplied(_p) in events.read() {
+        // Log-only: rendered by DOM system
+    }
+}
+
+pub fn apply_keeper_unavailable(
+    mut events: MessageReader<KeeperUnavailable>,
+) {
+    for KeeperUnavailable(_p) in events.read() {
+        // Log-only: warning rendered by DOM system
+    }
+}

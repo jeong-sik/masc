@@ -126,9 +126,9 @@ fn parse_query_param(search: &str, key: &str) -> Option<String> {
 // ─── Endpoints ──────────────────────────────
 
 pub fn trpg_uses_polling() -> bool {
-    // Backend only exposes GET /api/v1/trpg/stream (JSON polling).
-    // No dedicated SSE endpoint for TRPG yet.
-    true
+    // Backend now exposes /api/v1/trpg/stream/sse (SSE endpoint, PR #222).
+    // Polling is kept as fallback but SSE is preferred.
+    false
 }
 
 pub fn trpg_state_url() -> String {
@@ -141,7 +141,7 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
 
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
-        ViewerMode::Trpg => None, // No dedicated TRPG SSE endpoint; uses polling
+        ViewerMode::Trpg => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
         ViewerMode::Monitor => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
         ViewerMode::Experiment => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
         ViewerMode::Council => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
@@ -154,7 +154,7 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
 /// that don't have access to Bevy State<ViewerMode>).
 pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
     match mode_name {
-        "Trpg" => Some(format!("{}/api/v1/trpg/stream/sse/{}", MASC_MCP_URL, current_room_id())),
+        "Trpg" => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
         "Monitor" => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
         "Experiment" => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
         "Council" => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),

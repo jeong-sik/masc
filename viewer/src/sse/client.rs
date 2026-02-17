@@ -183,6 +183,49 @@ fn map_turn_progress_event(
             "phase": phase,
             "room_status": "ended"
         }),
+        "world.event" | "scene.transition" | "quest.update" => {
+            let sub = payload.get("event_type")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("title").and_then(Value::as_str))
+                .unwrap_or(event_type);
+            json!({
+                "event_type": event_type,
+                "turn": turn,
+                "phase": phase,
+                "reason": sub
+            })
+        }
+        "intervention.submitted" | "intervention.applied" => {
+            let itype = payload.get("intervention_type")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let reason = payload.get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let mut base = json!({
+                "event_type": event_type,
+                "turn": turn,
+                "phase": phase,
+                "reason": format!("{}: {}", itype, reason)
+            });
+            if let Some(aid) = actor_id {
+                base["actor_id"] = json!(aid);
+            }
+            base
+        }
+        "actor.spawned" | "actor.updated" | "actor.deleted"
+        | "actor.claimed" | "actor.released" => {
+            let aid = payload.get("actor_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            json!({
+                "event_type": event_type,
+                "turn": turn,
+                "phase": phase,
+                "actor_id": aid,
+                "reason": event_type
+            })
+        }
         _ => return None,
     };
 
@@ -357,6 +400,91 @@ fn map_trpg_event(
                 "speaker": actor_id
             });
             out.push(("narrative".to_string(), mapped.to_string()));
+        }
+        // -- world.event: dispatch to weather/mood/death based on subtype --
+        "world.event" => {
+            let sub = payload.get("event_type")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let desc = payload.get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if sub.contains("weather") {
+                let mapped = json!({ "weather": desc });
+                out.push(("weather_change".to_string(), mapped.to_string()));
+            } else if sub.contains("mood") || sub.contains("atmosphere") {
+                let mapped = json!({ "mood": desc });
+                out.push(("mood_change".to_string(), mapped.to_string()));
+            } else if sub.contains("death") || sub.contains("died") || sub.contains("kill") {
+                let actor = resolve_actor_id(payload, actor_id);
+                let mapped = json!({
+                    "character": actor,
+                    "cause": desc,
+                });
+                out.push(("character_death".to_string(), mapped.to_string()));
+            } else {
+                let mapped = json!({
+                    "text": format!("[world] {}", desc),
+                    "phase": state.last_phase,
+                });
+                out.push(("narrative".to_string(), mapped.to_string()));
+            }
+        }
+        // -- scene.transition → area_move --
+        "scene.transition" => {
+            let from = payload.get("from_scene")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let to = payload.get("to_scene")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let trigger = payload.get("trigger")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let mapped = json!({
+                "character": trigger,
+                "from_area": from,
+                "to_area": to,
+            });
+            out.push(("area_move".to_string(), mapped.to_string()));
+        }
+        // -- quest.update → narrative --
+        "quest.update" => {
+            let title = payload.get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown quest");
+            let status = payload.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("updated");
+            let mapped = json!({
+                "text": format!("[quest] {} \u{2014} {}", title, status),
+                "phase": state.last_phase,
+            });
+            out.push(("narrative".to_string(), mapped.to_string()));
+        }
+        // -- intervention.submitted / applied → narrative --
+        "intervention.submitted" | "intervention.applied" => {
+            let itype = payload.get("intervention_type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let reason = payload.get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let status_label = if event_type == "intervention.applied" {
+                "applied"
+            } else {
+                "pending"
+            };
+            let mapped = json!({
+                "text": format!("[intervention:{}] {} \u{2014} {}", status_label, itype, reason),
+                "phase": state.last_phase,
+            });
+            out.push(("narrative".to_string(), mapped.to_string()));
+        }
+        // -- actor lifecycle → turn_progress only (handled below) --
+        "actor.spawned" | "actor.updated" | "actor.deleted"
+        | "actor.claimed" | "actor.released" => {
+            // No primary event; lifecycle tracked via turn_progress
         }
         _ => {}
     }

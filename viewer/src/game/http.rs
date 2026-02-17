@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::config;
-use crate::game::components::{Actor, Stats};
+use crate::game::components::{Actor, Condition, Equipment, Skill, Stats};
 use crate::game::state::{ConnectionStatus, MapState, RoomState, TurnPhase, TurnProgressState};
 
 // ─── Expected API Response Types ─────────────
@@ -44,6 +44,30 @@ fn default_int_field() -> i32 {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SkillData {
+    pub name: String,
+    #[serde(default = "default_skill_level")]
+    pub level: i32,
+}
+
+fn default_skill_level() -> i32 {
+    10
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConditionData {
+    pub name: String,
+    #[serde(default)]
+    pub remaining_turns: Option<i32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EquipmentData {
+    pub slot: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct CharacterData {
     pub id: String,
     pub name: String,
@@ -53,6 +77,10 @@ pub struct CharacterData {
     pub hp: i32,
     #[serde(default = "default_hp")]
     pub max_hp: i32,
+    #[serde(default)]
+    pub mp: i32,
+    #[serde(default)]
+    pub max_mp: i32,
     #[serde(default)]
     pub stats: Option<StatsData>,
     #[serde(default = "default_area")]
@@ -65,6 +93,12 @@ pub struct CharacterData {
     pub buffs: Vec<String>,
     #[serde(default)]
     pub debuffs: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<SkillData>,
+    #[serde(default)]
+    pub conditions: Vec<ConditionData>,
+    #[serde(default)]
+    pub equipment: Vec<EquipmentData>,
 }
 
 fn default_hp() -> i32 {
@@ -330,18 +364,50 @@ pub fn apply_initial_state(
                 luck: 10,
             });
 
+        let skills: Vec<Skill> = ch
+            .skills
+            .into_iter()
+            .map(|s| Skill {
+                name: s.name,
+                level: s.level,
+            })
+            .collect();
+
+        let conditions: Vec<Condition> = ch
+            .conditions
+            .into_iter()
+            .map(|c| Condition {
+                name: c.name,
+                remaining_turns: c.remaining_turns,
+            })
+            .collect();
+
+        let equipment: Vec<Equipment> = ch
+            .equipment
+            .into_iter()
+            .map(|e| Equipment {
+                slot: e.slot,
+                name: e.name,
+            })
+            .collect();
+
         commands.spawn(Actor {
             id: ch.id,
             name: ch.name,
             class: ch.class,
             hp: ch.hp,
             max_hp: ch.max_hp,
+            mp: ch.mp,
+            max_mp: ch.max_mp,
             stats,
             area: ch.area,
             is_dead: ch.is_dead,
             inventory: ch.inventory,
             buffs: ch.buffs,
             debuffs: ch.debuffs,
+            skills,
+            conditions,
+            equipment,
         });
     }
 

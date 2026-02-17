@@ -4,6 +4,7 @@ pub mod character_panel;
 pub mod connection;
 pub mod dice_log;
 pub mod narrative;
+pub mod overlay;
 pub mod turn_controls;
 pub mod turn_runtime;
 pub mod turn_phase;
@@ -27,6 +28,7 @@ impl Plugin for DomBridgePlugin {
             .init_resource::<turn_phase::TurnPhaseCache>()
             .init_resource::<turn_runtime::TurnRuntimeCache>()
             .init_resource::<connection::ConnectionStatusCache>()
+            .init_resource::<overlay::OverlayCache>()
             .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
             // TRPG-specific DOM update systems
             .add_systems(Update, (
@@ -39,6 +41,7 @@ impl Plugin for DomBridgePlugin {
                 actor_join::sync_join_panel_interaction_state,
                 action_panel::sync_action_panel_interaction_state,
                 turn_controls::sync_turn_controls_visibility,
+                overlay::update_overlay_dom,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Action panel lifecycle: bind listeners on enter, unbind on exit
             .add_systems(OnEnter(ViewerMode::Trpg), (
@@ -60,12 +63,15 @@ fn reset_trpg_dom_state(
     mut turn_cache: ResMut<turn_phase::TurnPhaseCache>,
     mut runtime_cache: ResMut<turn_runtime::TurnRuntimeCache>,
     mut connection_cache: ResMut<connection::ConnectionStatusCache>,
+    mut overlay_cache: ResMut<overlay::OverlayCache>,
 ) {
     character_cache.last_snapshot.clear();
+    character_cache.last_full.clear();
     turn_cache.last_turn = 0;
     turn_cache.last_phase.clear();
     runtime_cache.last_snapshot.clear();
     connection_cache.last_status.clear();
+    *overlay_cache = overlay::OverlayCache::default();
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -85,6 +91,18 @@ fn reset_trpg_dom_state(
             el.set_text_content(Some("1"));
         }
         if let Some(el) = document.get_element_by_id("turn-runtime") {
+            el.set_inner_html("");
+        }
+        if let Some(el) = document.get_element_by_id("weather-indicator") {
+            el.set_text_content(None);
+        }
+        if let Some(el) = document.get_element_by_id("mood-indicator") {
+            el.set_text_content(None);
+        }
+        if let Some(el) = document.get_element_by_id("choice-overlay") {
+            el.set_inner_html("");
+        }
+        if let Some(el) = document.get_element_by_id("combat-overlay") {
             el.set_inner_html("");
         }
     }

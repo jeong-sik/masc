@@ -1118,17 +1118,6 @@ let handle_mitosis_prepare ctx args : result =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
-(** DNA quality validation - BALTHASAR feedback
-    Ensures extracted DNA contains meaningful content *)
-let validate_dna dna =
-  let min_length = 50 in
-  let len = String.length dna in
-  if len < min_length then
-    Error (Printf.sprintf "DNA too short: %d chars (min: %d)" len min_length)
-  else
-    Ok dna
-
-
 let contains_substring_ci ~haystack ~needle =
   let h = String.lowercase_ascii haystack in
   let n = String.lowercase_ascii needle in
@@ -1145,6 +1134,43 @@ let contains_substring_ci ~haystack ~needle =
       else loop (i + 1)
     in
     loop 0
+
+(** DNA quality validation - BALTHASAR feedback (P1-7: enhanced semantic checks)
+    Ensures extracted DNA contains meaningful, structured content.
+    Checks: length, goal/task markers, whitespace ratio, structural markers. *)
+let validate_dna dna =
+  let min_length = 50 in
+  let len = String.length dna in
+  if len < min_length then
+    Error (Printf.sprintf "DNA too short: %d chars (min: %d)" len min_length)
+  else
+    (* Check for goal/task markers (case-insensitive) *)
+    let has_marker =
+      List.exists (fun needle -> contains_substring_ci ~haystack:dna ~needle)
+        ["goal"; "task"; "objective"; "context"]
+    in
+    if not has_marker then
+      Error "DNA lacks goal/task markers (expected: goal, task, objective, or context)"
+    else
+      (* Check whitespace ratio < 0.5 *)
+      let ws_count = String.fold_left (fun acc c ->
+        if c = ' ' || c = '\t' || c = '\n' || c = '\r' then acc + 1 else acc
+      ) 0 dna in
+      let ws_ratio = Float.of_int ws_count /. Float.of_int len in
+      if ws_ratio >= 0.5 then
+        Error (Printf.sprintf "DNA is mostly whitespace: %.0f%% (max: 50%%)" (ws_ratio *. 100.0))
+      else
+        (* Check for structural markers: newline, bullet, colon, dash *)
+        let has_structure =
+          String.contains dna '\n' ||
+          contains_substring_ci ~haystack:dna ~needle:"- " ||
+          contains_substring_ci ~haystack:dna ~needle:": " ||
+          contains_substring_ci ~haystack:dna ~needle:"* "
+        in
+        if not has_structure then
+          Error "DNA lacks structure (expected: newlines, bullets, colons, or dashes)"
+        else
+          Ok dna
 
 let normalize_for_overlap s =
   let b = Buffer.create (String.length s) in

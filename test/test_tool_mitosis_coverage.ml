@@ -482,6 +482,52 @@ let test_phase_to_string () =
     (Mitosis.phase_to_string (Mitosis.ReadyForHandoff "dna"))
 
 (* ============================================================
+   DNA Validation Tests (P1-7)
+   ============================================================ *)
+
+let test_validate_dna_too_short () =
+  match Tool_mitosis.validate_dna "short" with
+  | Error msg -> check bool "mentions too short" true
+      (try Str.search_forward (Str.regexp_string "too short") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for short DNA"
+
+let test_validate_dna_no_markers () =
+  (* 60 chars, no goal/task/objective/context markers *)
+  let dna = "This is a long enough string with plenty of characters here- but no markers" in
+  match Tool_mitosis.validate_dna dna with
+  | Error msg -> check bool "mentions markers" true
+      (try Str.search_forward (Str.regexp_string "markers") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for DNA without markers"
+
+let test_validate_dna_mostly_whitespace () =
+  (* Build a string that's >50% whitespace but has markers and structure *)
+  let dna = "goal: test\n" ^ String.make 100 ' ' ^ "something" in
+  match Tool_mitosis.validate_dna dna with
+  | Error msg -> check bool "mentions whitespace" true
+      (try Str.search_forward (Str.regexp_string "whitespace") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for mostly-whitespace DNA"
+
+let test_validate_dna_no_structure () =
+  (* Has markers, not too short, not mostly whitespace, but no structural markers *)
+  let dna = "This goal has enough content and no excessive whitespace padding text here ok" in
+  match Tool_mitosis.validate_dna dna with
+  | Error msg -> check bool "mentions structure" true
+      (try Str.search_forward (Str.regexp_string "structure") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for unstructured DNA"
+
+let test_validate_dna_valid () =
+  let dna = "## Goal\n- Complete the task objective\n- Context: migration project\n- Handle edge cases" in
+  match Tool_mitosis.validate_dna dna with
+  | Ok validated -> check string "returns dna" dna validated
+  | Error msg -> fail ("expected Ok for valid DNA: " ^ msg)
+
+let test_validate_dna_case_insensitive_markers () =
+  let dna = "## OBJECTIVE\n- First item\n- Second item with enough content to pass length check" in
+  match Tool_mitosis.validate_dna dna with
+  | Ok _ -> check bool "OBJECTIVE accepted" true true
+  | Error msg -> fail ("case-insensitive marker should pass: " ^ msg)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -547,5 +593,13 @@ let () =
       test_case "all state pairs" `Quick test_log_state_transition_all_states;
       test_case "state_to_string" `Quick test_state_to_string;
       test_case "phase_to_string" `Quick test_phase_to_string;
+    ];
+    "dna_validation", [
+      test_case "too short" `Quick test_validate_dna_too_short;
+      test_case "no markers" `Quick test_validate_dna_no_markers;
+      test_case "mostly whitespace" `Quick test_validate_dna_mostly_whitespace;
+      test_case "no structure" `Quick test_validate_dna_no_structure;
+      test_case "valid DNA" `Quick test_validate_dna_valid;
+      test_case "case-insensitive markers" `Quick test_validate_dna_case_insensitive_markers;
     ];
   ]

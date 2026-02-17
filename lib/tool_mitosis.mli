@@ -52,6 +52,11 @@ val get_string : Yojson.Safe.t -> string -> string -> string
 val get_float : Yojson.Safe.t -> string -> float -> float
 val get_bool : Yojson.Safe.t -> string -> bool -> bool
 
+(** {1 DNA Validation} *)
+
+(** Validate DNA quality: length, goal/task markers, whitespace ratio, structure *)
+val validate_dna : string -> (string, string) Stdlib.result
+
 (** {1 Individual Handlers} *)
 
 val handle_mitosis_status : context -> Yojson.Safe.t -> result

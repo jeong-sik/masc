@@ -375,6 +375,9 @@ body.mode-lobby #dashboard {
 #dashboard[data-debug="off"] #bottom-zone {
     display: none;
 }
+#dashboard[data-debug="off"] .debug-only {
+    display: none !important;
+}
 
 /* ─── Top Bar ──────────────────────────── */
 

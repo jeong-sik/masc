@@ -153,25 +153,25 @@
             <span id="mode-title">—</span>
             <div class="top-bar-right">
                 <div class="room-switch-inline">
-                    <select id="room-selector-inline" class="inline-select" title="TRPG room 목록">
+                    <select id="room-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
                         <option value="default" selected>default</option>
                     </select>
-                    <input id="room-input-inline" class="inline-input" type="text" value="default" placeholder="room-id" maxlength="64" />
-                    <button id="room-apply-btn" class="inline-toggle" type="button">Room 적용</button>
-                    <button id="room-refresh-btn" class="inline-toggle" type="button">목록 새로고침</button>
-                    <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false">Rooms OFF</button>
-                    <span id="room-status" class="widget-pill">room default</span>
+                    <input id="room-input-inline" class="inline-input" type="text" value="default" placeholder="방 이름 입력" maxlength="64" title="이동할 방 이름을 직접 입력" />
+                    <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방으로 이동합니다">이동</button>
+                    <button id="room-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
+                    <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
+                    <span id="room-status" class="widget-pill">현재 방: default</span>
                 </div>
-                <button id="new-game-toggle" class="inline-toggle" type="button">새 게임</button>
+                <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>
                     <option value="terminal">Terminal</option>
                     <option value="parchment">Parchment</option>
                 </select>
-                <button id="debug-log-toggle" class="inline-toggle" type="button" aria-pressed="true">Debug ON</button>
-                <span id="debug-log-status" class="widget-pill">DEBUG ON</span>
-                <span id="widget-status" class="widget-pill">Widgets N:0 P:0 D:0</span>
+                <button id="debug-log-toggle" class="inline-toggle debug-only" type="button" aria-pressed="false" title="개발자 디버그 로그 표시/숨김">Debug</button>
+                <span id="debug-log-status" class="widget-pill debug-only" style="display:none">DEBUG</span>
+                <span id="widget-status" class="widget-pill debug-only" style="display:none">Widgets N:0 P:0 D:0</span>
                 <div id="connection-status" class="disconnected">
                     <span class="status-dot"></span>
                     <span class="status-text">Disconnected</span>
@@ -187,30 +187,30 @@
                 </div>
                 <div class="new-game-grid">
                     <label class="new-game-field">
-                        <span>Room ID</span>
+                        <span>방 이름</span>
                         <div class="new-game-inline">
-                            <input id="new-game-room-id" type="text" maxlength="64" placeholder="adventure-..." />
-                            <button id="new-game-room-regenerate" class="inline-toggle" type="button">재생성</button>
+                            <input id="new-game-room-id" type="text" maxlength="64" placeholder="adventure-..." title="게임 방의 고유 이름" />
+                            <button id="new-game-room-regenerate" class="inline-toggle" type="button" title="랜덤 방 이름 다시 생성">재생성</button>
                         </div>
                     </label>
 
                     <label class="new-game-field">
-                        <span>DM Keeper</span>
-                        <select id="new-game-dm-select">
+                        <span>진행자 (DM)</span>
+                        <select id="new-game-dm-select" title="게임을 진행할 AI 에이전트 선택">
                             <option value="">로딩 중...</option>
                         </select>
                     </label>
 
                     <label class="new-game-field">
-                        <span>Player Keepers (다중 선택)</span>
-                        <select id="new-game-player-select" multiple size="6">
+                        <span>플레이어 AI (다중 선택)</span>
+                        <select id="new-game-player-select" multiple size="6" title="게임에 참여할 AI 에이전트 선택 (Ctrl/Cmd+클릭)">
                             <option value="">로딩 중...</option>
                         </select>
                     </label>
 
                     <label class="new-game-field">
-                        <span>Keeper Models (comma-separated)</span>
-                        <input id="new-game-models" type="text" value="ollama:glm-4.7-flash" />
+                        <span>AI 모델 (쉼표로 구분)</span>
+                        <input id="new-game-models" type="text" value="ollama:glm-4.7-flash" title="AI가 사용할 LLM 모델 지정" />
                     </label>
                 </div>
 
@@ -268,30 +268,33 @@
                     <div id="join-panel">
                         <div id="join-input-row">
                             <input type="text" id="actor-id-input"
-                                   placeholder="Actor ID (e.g. warrior-1)"
+                                   placeholder="캐릭터 ID (예: warrior-1)"
                                    maxlength="100"
-                                   autocomplete="off" />
+                                   autocomplete="off"
+                                   title="참여할 캐릭터의 ID를 입력하세요" />
                             <input type="text" id="keeper-input"
-                                   placeholder="Your name"
+                                   placeholder="플레이어 이름"
                                    maxlength="100"
-                                   autocomplete="off" />
-                            <button id="join-btn" title="Claim actor and join game">Join</button>
+                                   autocomplete="off"
+                                   title="게임에서 사용할 이름" />
+                            <button id="join-btn" title="캐릭터를 선택하고 게임에 참여합니다">참여</button>
                         </div>
                         <div id="join-status"></div>
                     </div>
                     <!-- Action Panel: player input for TRPG actions -->
                     <div id="action-panel" style="display:none">
                         <div id="player-info">
-                            Playing as: <span id="player-actor-id"></span>
-                            <button id="leave-btn" title="Release actor">Leave</button>
+                            현재 캐릭터: <span id="player-actor-id"></span>
+                            <button id="leave-btn" title="캐릭터를 놓고 게임에서 나갑니다">나가기</button>
                         </div>
                         <div id="action-input-row">
                             <input type="text" id="action-input"
-                                   placeholder="Describe your action..."
+                                   placeholder="행동을 입력하세요..."
                                    maxlength="500"
-                                   autocomplete="off" />
-                            <button id="action-submit-btn" title="Submit action">Submit</button>
-                            <button id="dice-roll-btn" title="Roll 1d20">Roll</button>
+                                   autocomplete="off"
+                                   title="캐릭터가 수행할 행동을 설명합니다" />
+                            <button id="action-submit-btn" title="행동을 제출합니다">제출</button>
+                            <button id="dice-roll-btn" title="1d20 주사위를 굴립니다">주사위</button>
                         </div>
                         <div id="action-status"></div>
                         <input type="hidden" id="claimed-actor-id" value="" />

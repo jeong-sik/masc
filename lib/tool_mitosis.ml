@@ -1110,6 +1110,8 @@ let handle_mitosis_prepare ctx args : result =
   let prepared = Mitosis.prepare_for_division ~config:config_mitosis ~cell ~full_context in
   Mcp_server.current_cell := prepared;
   Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared ~config:config_mitosis;
+  (* P2-3: Record prepare metric *)
+  Mitosis_metrics.inc_prepare ();
   let json = `Assoc [
     ("status", `String "prepared");
     ("phase", `String (Mitosis.phase_to_string prepared.Mitosis.phase));
@@ -1288,12 +1290,17 @@ let continuity_regression_check ~full_context ~compressed_context =
     On spawn failure: Returns "fallback" with compaction suggestion instead of silent failure
 *)
 let run_sync_handoff ctx args : result =
+  (* P2-2: Experiment flag — log when experimental mitosis path is active *)
+  if Env_config.Mitosis.experiment_enabled then
+    Printf.eprintf "[MITOSIS/EXPERIMENT] Experimental mitosis path active\n%!";
   (* P1-3: Handoff cooldown — prevent rapid repeated handoffs *)
   let cooldown = Env_config.Mitosis.handoff_cooldown_seconds in
   let now = Time_compat.now () in
   let elapsed = now -. !last_handoff_time in
   if !last_handoff_time > 0.0 && elapsed < cooldown then begin
     let remaining = cooldown -. elapsed in
+    (* P2-3: Expose cooldown remaining to Prometheus *)
+    Mitosis_metrics.set_cooldown_remaining remaining;
     let json = `Assoc [
       ("action", `String "cooldown");
       ("message", `String (Printf.sprintf "Handoff cooldown active. %.0fs remaining (cooldown: %.0fs)" remaining cooldown));
@@ -1412,6 +1419,8 @@ let run_sync_handoff ctx args : result =
       
       (* Check spawn success - BALTHASAR feedback: handle failures gracefully *)
       if not spawn_result.Spawn.success then begin
+        (* P2-3: Record spawn failure metric *)
+        Mitosis_metrics.inc_error ~reason:"spawn_failed" ();
         (* Spawn failed! Suggest fallback to compaction instead of losing context *)
         Printf.eprintf "[MITOSIS/ERROR] Spawn failed for %s, suggesting fallback\n%!" target_agent;
         let base_path = ctx.config.Room_utils.base_path in
@@ -1446,6 +1455,12 @@ let run_sync_handoff ctx args : result =
         Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
         (* P1-3: Update cooldown timer after successful handoff *)
         last_handoff_time := Time_compat.now ();
+        (* P2-3: Record handoff success metrics *)
+        Mitosis_metrics.inc_handoff ();
+        Mitosis_metrics.set_generation new_cell.Mitosis.generation;
+        Mitosis_metrics.set_cooldown_remaining 0.0;
+        let duration_sec = (float_of_int spawn_result.Spawn.elapsed_ms) /. 1000.0 in
+        Mitosis_metrics.observe_handoff_duration duration_sec;
 
         (* Agent Being Protocol: Queue Episode for persistence *)
         let base_path = ctx.config.Room_utils.base_path in

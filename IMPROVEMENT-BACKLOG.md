@@ -51,8 +51,8 @@
 | ID | File:Line | Issue | Fix |
 |----|-----------|-------|-----|
 | P2-1 | - | No adaptive thresholds | ML-based threshold |
-| P2-2 | - | No A/B test support | Add experiment flag |
-| P2-3 | - | No dashboard integration | Export to Prometheus |
+| P2-2 | lib/env_config.ml, lib/tool_mitosis.ml | No A/B test support | **DONE** — `MASC_MITOSIS_EXPERIMENT_ENABLED` env var + run_sync_handoff guard |
+| P2-3 | lib/mitosis_metrics.ml, lib/prometheus.ml, lib/tool_mitosis.ml | No dashboard integration | **DONE** — 6 metrics (3 counters, 2 gauges, 1 histogram) + Prometheus text export |
 | P2-4 | - | Doc strings incomplete | Add odoc |
 | P2-5 | - | No CLI for manual testing | Add subcommand |
 

@@ -372,6 +372,12 @@
  (modules test_mitosis_metrics)
  (libraries masc_mcp alcotest str yojson))
 
+; Adaptive Thresholds — P2-1 EMA-based threshold learning
+(test
+ (name test_adaptive_thresholds)
+ (modules test_adaptive_thresholds)
+ (libraries masc_mcp alcotest str yojson unix))
+
 ; Perpetual Agent Runtime tests (infinite context system)
 (test
  (name test_perpetual)

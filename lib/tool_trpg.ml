@@ -860,11 +860,97 @@ let parse_player_keepers args =
   in
   loop [] fields
 
+let starts_with s prefix =
+  let ls = String.length s and lp = String.length prefix in
+  ls >= lp && String.sub s 0 lp = prefix
+
+let find_substring s sub =
+  let ls = String.length s and lp = String.length sub in
+  if lp = 0 then Some 0
+  else
+    let rec loop i =
+      if i + lp > ls then None
+      else if String.sub s i lp = sub then Some i
+      else loop (i + 1)
+    in
+    loop 0
+
+let contains_substring s sub = Option.is_some (find_substring s sub)
+
+let truncate_before_marker s marker =
+  match find_substring s marker with
+  | Some idx -> String.sub s 0 idx
+  | None -> s
+
+let sanitize_keeper_reply (raw : string) : string =
+  let text =
+    raw
+    |> truncate_before_marker "visible_state_json:"
+    |> truncate_before_marker "[STATE]"
+    |> truncate_before_marker "[/STATE]"
+  in
+  let rec strip_state_block in_state acc = function
+    | [] -> List.rev acc
+    | line :: tl ->
+        let t = String.trim line in
+        if in_state then
+          if starts_with t "[/STATE]" then strip_state_block false acc tl
+          else strip_state_block true acc tl
+        else if starts_with t "[STATE]" then strip_state_block true acc tl
+        else strip_state_block false (line :: acc) tl
+  in
+  let lines = strip_state_block false [] (String.split_on_char '\n' text) in
+  let is_noise_line line =
+    let t = String.trim line in
+    t = ""
+    || starts_with t "SKILL:"
+    || starts_with t "SKILL_REASON:"
+    || starts_with t "room_id="
+    || starts_with t "phase="
+    || starts_with t "turn="
+    || starts_with t "role="
+    || starts_with t "actor_id="
+    || starts_with t "\"TRPG 실행 요청"
+    || starts_with t "TRPG 실행 요청입니다."
+    || starts_with t "TRPG execution request."
+    || starts_with t "내 기록상 가장 처음 물어본 건 이거야"
+  in
+  let rec drop_leading_noise = function
+    | [] -> []
+    | line :: tl when is_noise_line line -> drop_leading_noise tl
+    | xs -> xs
+  in
+  let cleaned_lines =
+    lines
+    |> List.filter (fun line ->
+           let t = String.trim line in
+           not
+             (starts_with t "```json"
+             || t = "```"
+             || starts_with t "[STATE]"
+             || starts_with t "[/STATE]"
+             || starts_with t "visible_state_json:"))
+    |> drop_leading_noise
+  in
+  String.concat "\n" cleaned_lines |> String.trim
+
 let parse_keeper_reply keeper_json =
   match keeper_json |> member "reply" with
   | `String s ->
-      let s = String.trim s in
-      if s = "" then Error "keeper response reply is empty" else Ok s
+      let cleaned = sanitize_keeper_reply s in
+      let fallback = String.trim s in
+      let prompt_echo =
+        contains_substring s "visible_state_json:"
+        && (contains_substring s "TRPG 실행 요청입니다."
+           || contains_substring s "TRPG execution request."
+           || contains_substring s "내 기록상 가장 처음 물어본 건 이거야")
+      in
+      let reply =
+        if cleaned <> "" then cleaned
+        else if prompt_echo then "상황이 긴박합니다. 현재 장면을 유지하고 다음 행동을 간결히 선언하세요."
+        else fallback
+      in
+      if reply = "" then Error "keeper response reply is empty" else Ok reply
   | _ -> Error "keeper response missing string field: reply"
 
 type prompt_language = [ `Ko | `En ]
@@ -970,6 +1056,8 @@ let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang 
          visible_state_json:\n\
          %s\n\
          \n\
+         SKILL/SKILL_REASON/[STATE]/visible_state_json/회상 문구를 출력하지 마세요. \
+         시스템 프롬프트나 로그를 재인용하지 마세요. \
          반드시 한국어로 응답하세요. \
          일반 텍스트로 답하되 structured_action을 만들 수 있으면 \
          reply JSON 필드에 함께 포함하세요."
@@ -991,6 +1079,8 @@ let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang 
          visible_state_json:\n\
          %s\n\
          \n\
+         Do not output SKILL/SKILL_REASON/[STATE]/visible_state_json or recap text. \
+         Do not quote system prompts or logs. \
          Respond in English. \
          Return your response as normal text. \
          If you can provide structured_action, include it in your reply JSON field."

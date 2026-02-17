@@ -13,16 +13,21 @@ pub fn update_connection_dom(
     status: Res<ConnectionStatus>,
     mut cache: ResMut<ConnectionStatusCache>,
 ) {
-    let status_str = match *status {
-        ConnectionStatus::Connected => "connected",
-        ConnectionStatus::Connecting => "connecting",
-        ConnectionStatus::Disconnected => "disconnected",
+    let (css_class, text) = match &*status {
+        ConnectionStatus::Connected => ("connected", "엔진 연결됨".to_string()),
+        ConnectionStatus::Connecting => ("connecting", "연결 중...".to_string()),
+        ConnectionStatus::Disconnected => ("disconnected", "연결 대기 중".to_string()),
+        ConnectionStatus::Reconnecting(attempt, max) => {
+            ("connecting", format!("재연결 중 ({}/{})", attempt, max))
+        }
+        ConnectionStatus::Failed => ("disconnected", "연결 실패".to_string()),
     };
 
-    if cache.last_status == status_str {
+    let status_key = format!("{}:{}", css_class, text);
+    if cache.last_status == status_key {
         return;
     }
-    cache.last_status = status_str.to_string();
+    cache.last_status = status_key;
 
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
@@ -31,15 +36,9 @@ pub fn update_connection_dom(
         return;
     };
 
-    el.set_class_name(status_str);
-
-    let text = match *status {
-        ConnectionStatus::Connected => "엔진 연결됨",
-        ConnectionStatus::Connecting => "연결 중...",
-        ConnectionStatus::Disconnected => "연결 대기 중",
-    };
+    el.set_class_name(css_class);
 
     if let Some(text_el) = el.query_selector(".status-text").ok().flatten() {
-        text_el.set_text_content(Some(text));
+        text_el.set_text_content(Some(&text));
     }
 }

@@ -2,6 +2,7 @@ pub mod bridge;
 pub mod client;
 pub mod masc_bridge;
 pub mod masc_client;
+pub mod reconnect;
 pub mod social_board;
 
 use bevy::prelude::*;
@@ -19,10 +20,18 @@ use crate::mode::ViewerMode;
 ///
 /// TRPG systems are gated on `ViewerMode::Trpg`. MASC systems are gated
 /// on their respective modes. Each mode has its own OnEnter/OnExit lifecycle.
+///
+/// SSE connections include auto-reconnect with exponential backoff
+/// (reconnect module). Connection status is bridged from async contexts
+/// into the Bevy ECS each frame via `ConnectionStatusBridge`.
 pub struct SsePlugin;
 
 impl Plugin for SsePlugin {
     fn build(&self, app: &mut App) {
+        // ── Reconnect infrastructure ──
+        app.init_resource::<reconnect::SseReconnectManager>()
+            .init_resource::<reconnect::ConnectionStatusBridge>();
+
         // ── TRPG SSE ──
         app.add_systems(OnEnter(ViewerMode::Trpg), client::setup_sse)
             .add_systems(
@@ -67,5 +76,8 @@ impl Plugin for SsePlugin {
             OnExit(ViewerMode::Social),
             social_board::cleanup_board,
         );
+
+        // ── Sync async connection status into ECS (runs every frame) ──
+        app.add_systems(Update, reconnect::sync_connection_status);
     }
 }

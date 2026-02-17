@@ -74,6 +74,10 @@ pub enum ConnectionStatus {
     #[allow(dead_code)]
     Connecting,
     Connected,
+    /// Reconnecting after a lost connection. (current_attempt, max_attempts)
+    Reconnecting(u32, u32),
+    /// All retry attempts exhausted.
+    Failed,
 }
 
 /// Runtime progress derived from TRPG stream events.

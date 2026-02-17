@@ -540,12 +540,6 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                 .get("max_hp")
                 .and_then(Value::as_i64)
                 .unwrap_or(i64::from(hp.max(1))) as i32;
-            let mp = info.get("mp").and_then(Value::as_i64).unwrap_or(0) as i32;
-            let max_mp = info
-                .get("max_mp")
-                .and_then(Value::as_i64)
-                .or_else(|| info.get("mp_max").and_then(Value::as_i64))
-                .unwrap_or(i64::from(mp.max(0))) as i32;
             let area = info
                 .get("position")
                 .and_then(Value::as_str)

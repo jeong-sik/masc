@@ -235,7 +235,7 @@ fn enter_trpg() {
         bind_room_controls(&doc);
 
         if let Some(pill) = doc.get_element_by_id("room-status") {
-            pill.set_text_content(Some(&format!("room {} · 목록 불러오는 중...", room)));
+            pill.set_text_content(Some(&format!("현재 방: {} · 목록 불러오는 중...", room)));
         }
         let doc_for_rooms = doc.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -244,7 +244,7 @@ fn enter_trpg() {
                     let room_now = crate::config::current_room_id();
                     if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
                         pill.set_text_content(Some(&format!(
-                            "room {} · 목록 {}",
+                            "현재 방: {} · {}개 방",
                             room_now,
                             rooms.len()
                         )));
@@ -254,7 +254,7 @@ fn enter_trpg() {
                     log::warn!("room 목록 로딩 실패: {}", e);
                     let room_now = crate::config::current_room_id();
                     if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
-                        pill.set_text_content(Some(&format!("room {} · 목록 로딩 실패", room_now)));
+                        pill.set_text_content(Some(&format!("현재 방: {} · 목록 실패", room_now)));
                     }
                 }
             }
@@ -412,11 +412,11 @@ fn set_debug_state(doc: &web_sys::Document, enabled: bool) {
         let _ = dashboard.set_attribute("data-debug", if enabled { "on" } else { "off" });
     }
     if let Some(toggle) = doc.get_element_by_id("debug-log-toggle") {
-        toggle.set_text_content(Some(if enabled { "Debug ON" } else { "Debug OFF" }));
+        toggle.set_text_content(Some(if enabled { "Debug ON" } else { "Debug" }));
         let _ = toggle.set_attribute("aria-pressed", if enabled { "true" } else { "false" });
     }
     if let Some(status) = doc.get_element_by_id("debug-log-status") {
-        status.set_text_content(Some(if enabled { "DEBUG ON" } else { "DEBUG OFF" }));
+        status.set_text_content(Some(if enabled { "DEBUG" } else { "" }));
     }
     apply_debug_visibility_in_dom(doc, enabled);
 }
@@ -1047,7 +1047,7 @@ fn set_room_hub_visible(doc: &web_sys::Document, visible: bool) {
     set_element_display(doc, "room-hub", if visible { "grid" } else { "none" });
     if let Some(toggle) = doc.get_element_by_id("room-hub-toggle") {
         let _ = toggle.set_attribute("aria-pressed", if visible { "true" } else { "false" });
-        toggle.set_text_content(Some(if visible { "Rooms ON" } else { "Rooms OFF" }));
+        toggle.set_text_content(Some(if visible { "방 목록 닫기" } else { "방 목록" }));
     }
 }
 
@@ -1103,7 +1103,7 @@ fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     if let Some(pill) = doc.get_element_by_id("room-status") {
         let lifecycle = TrpgLifecycleState::Lobby;
         pill.set_text_content(Some(&format!(
-            "room {} · {}",
+            "현재 방: {} · {}",
             selected,
             lifecycle.label_ko()
         )));
@@ -1285,7 +1285,7 @@ fn bind_room_controls(doc: &web_sys::Document) {
             };
             if let Some(pill) = doc.get_element_by_id("room-status") {
                 let current = crate::config::current_room_id();
-                pill.set_text_content(Some(&format!("room {} · 목록 불러오는 중...", current)));
+                pill.set_text_content(Some(&format!("현재 방: {} · 목록 불러오는 중...", current)));
             }
             let doc_for_fetch = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
@@ -1294,7 +1294,7 @@ fn bind_room_controls(doc: &web_sys::Document) {
                         let current = crate::config::current_room_id();
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
                             pill.set_text_content(Some(&format!(
-                                "room {} · 목록 {}",
+                                "현재 방: {} · {}개 방",
                                 current,
                                 rooms.len()
                             )));
@@ -1305,7 +1305,7 @@ fn bind_room_controls(doc: &web_sys::Document) {
                         let current = crate::config::current_room_id();
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
                             pill.set_text_content(Some(&format!(
-                                "room {} · 목록 로딩 실패",
+                                "현재 방: {} · 목록 실패",
                                 current
                             )));
                         }

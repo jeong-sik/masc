@@ -537,6 +537,10 @@ fn map_trpg_event(
         | "actor.released" => {
             // No primary event; lifecycle tracked via turn_progress
         }
+        // -- Phase 1 lifecycle: pass raw payload to bridge as-is --
+        "party.selected" | "room.created" | "room.started" | "session.started" => {
+            out.push((event_type.to_string(), payload.to_string()));
+        }
         _ => {}
     }
 

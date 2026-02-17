@@ -9,10 +9,8 @@ pub const MASC_MCP_URL: &str = "";
 
 pub const DEFAULT_ROOM_ID: &str = "default";
 
-/// Polling interval for TRPG stream (milliseconds).
-/// Backend exposes GET /api/v1/trpg/stream (JSON), no dedicated SSE endpoint.
-pub const TRPG_POLL_INTERVAL_MS: u64 = 500;
-
+/// Polling interval for TRPG stream fallback (milliseconds).
+pub const TRPG_POLL_INTERVAL_MS: u64 = 2000;
 /// Legacy TRPG Engine URL (for direct mode)
 #[cfg(debug_assertions)]
 pub const TRPG_ENGINE_URL: &str = "http://localhost:8000";
@@ -142,10 +140,10 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
         ViewerMode::Trpg => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
-        ViewerMode::Monitor => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
-        ViewerMode::Experiment => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
-        ViewerMode::Council => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
-        ViewerMode::Social => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
+        ViewerMode::Monitor => Some(format!("{}/sse?room=monitor", MASC_MCP_URL)),
+        ViewerMode::Experiment => Some(format!("{}/sse?room=experiment", MASC_MCP_URL)),
+        ViewerMode::Council => Some(format!("{}/sse?room=council", MASC_MCP_URL)),
+        ViewerMode::Social => Some(format!("{}/sse?room=social", MASC_MCP_URL)),
         ViewerMode::Lobby => None,
     }
 }
@@ -155,10 +153,10 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
 pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
     match mode_name {
         "Trpg" => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
-        "Monitor" => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
-        "Experiment" => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
-        "Council" => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
-        "Social" => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
+        "Monitor" => Some(format!("{}/sse?room=monitor", MASC_MCP_URL)),
+        "Experiment" => Some(format!("{}/sse?room=experiment", MASC_MCP_URL)),
+        "Council" => Some(format!("{}/sse?room=council", MASC_MCP_URL)),
+        "Social" => Some(format!("{}/sse?room=social", MASC_MCP_URL)),
         _ => None,
     }
 }

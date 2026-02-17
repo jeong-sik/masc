@@ -877,6 +877,83 @@ let prompt_language_of_string_opt = function
       | _ -> `Ko)
   | None -> `Ko
 
+let take_last n xs =
+  if n <= 0 then []
+  else
+    let len = List.length xs in
+    let drop = max 0 (len - n) in
+    let rec skip k ys =
+      if k <= 0 then ys
+      else
+        match ys with
+        | [] -> []
+        | _ :: tl -> skip (k - 1) tl
+    in
+    skip drop xs
+
+let compact_text ?(max_len = 320) s =
+  let chunks =
+    s |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  in
+  let flat = String.concat " " chunks in
+  if String.length flat <= max_len then flat
+  else String.sub flat 0 max_len ^ "..."
+
+let compact_narration_entry (entry : Yojson.Safe.t) : Yojson.Safe.t =
+  match entry with
+  | `Assoc fields ->
+      let keep_key key =
+        match List.assoc_opt key fields with Some v -> Some (key, v) | None -> None
+      in
+      let core =
+        [ "phase"; "turn"; "role"; "actor_id"; "keeper" ]
+        |> List.filter_map keep_key
+      in
+      let reply =
+        match List.assoc_opt "reply" fields with
+        | Some (`String s) when String.trim s <> "" ->
+            [ ("reply", `String (compact_text ~max_len:360 s)) ]
+        | _ -> []
+      in
+      `Assoc (core @ reply)
+  | _ -> entry
+
+let compact_state_for_prompt (state : Yojson.Safe.t) : Yojson.Safe.t =
+  match state with
+  | `Assoc fields ->
+      let get key = List.assoc_opt key fields in
+      let pick keys =
+        keys |> List.filter_map (fun key ->
+            match get key with Some v -> Some (key, v) | None -> None)
+      in
+      let narration_log =
+        match get "narration_log" with
+        | Some (`List xs) ->
+            `List (xs |> take_last 8 |> List.map compact_narration_entry)
+        | _ -> `List []
+      in
+      let dice_log =
+        match get "dice_log" with
+        | Some (`List xs) -> `List (take_last 8 xs)
+        | _ -> `List []
+      in
+      `Assoc
+        (pick
+           [
+             "turn";
+             "phase";
+             "status";
+             "current_node";
+             "world";
+             "party";
+             "actor_control";
+             "interventions";
+           ]
+        @ [ ("narration_log", narration_log); ("dice_log", dice_log) ])
+  | _ -> state
+
 let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
   let state_text = Yojson.Safe.pretty_to_string state_json in
@@ -2279,6 +2356,7 @@ let handle_round_run ctx args : result =
       in
       let state_for_prompt =
         inject_interventions_into_state state interventions_applied
+        |> compact_state_for_prompt
       in
 
       let appended_events = ref (phase_event :: intervention_events) in

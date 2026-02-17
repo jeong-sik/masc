@@ -627,59 +627,6 @@ fn assign_keepers_to_actor_ids(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn parse_preset_id(value: &Value, field: &str) -> Option<String> {
-    match value.get(field) {
-        Some(Value::Array(items)) if !items.is_empty() => {
-            items.first().and_then(Value::as_object).and_then(|obj| {
-                obj.get("id")
-                    .and_then(Value::as_str)
-                    .map(|id| id.trim().to_string())
-            })
-        }
-        Some(Value::String(v)) if !v.trim().is_empty() => Some(v.trim().to_string()),
-        Some(value_obj) if value_obj.is_object() => value_obj
-            .get("id")
-            .and_then(Value::as_str)
-            .map(|id| id.trim().to_string()),
-        _ => None,
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn pick_preset_id_from_catalog(catalog: &Value, field: &str) -> Option<String> {
-    let mut candidates: Vec<&Value> = vec![catalog];
-
-    if let Some(payload) = catalog.get("payload") {
-        candidates.push(payload);
-    }
-    if let Some(result) = catalog.get("result") {
-        candidates.push(result);
-    }
-    if let Some(structured) = catalog
-        .get("result")
-        .and_then(|r| r.get("structuredContent"))
-    {
-        candidates.push(structured);
-    }
-    candidates.push(catalog);
-    let direct = candidates
-        .into_iter()
-        .find_map(|node| parse_preset_id(node, field));
-    if direct.is_some() {
-        return direct;
-    }
-    let nested = catalog
-        .get("result")
-        .and_then(|result| result.get("payload"))
-        .and_then(|payload| payload.get(field))
-        .and_then(|value| parse_preset_id(value, field));
-    if nested.is_some() {
-        return nested;
-    }
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
 fn format_round_plan_for_display(dm_keeper: &str, players: &[(String, String)]) -> String {
     let mut lines = vec![format!("DM: {}", dm_keeper)];
     if players.is_empty() {
@@ -1976,33 +1923,6 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         dm_keeper,
         player_map.len()
     ))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn set_new_game_assignment(
-    doc: &web_sys::Document,
-    dm_keeper: &str,
-    player_map: &std::collections::HashMap<String, String>,
-    actor_ids: &[String],
-) {
-    let Some(el) = doc.get_element_by_id("new-game-assignment") else {
-        return;
-    };
-    let mut html = String::from("<strong>배정 확인</strong><ul>");
-    html.push_str(&format!("<li>DM: {}</li>", html_escape(dm_keeper)));
-    for actor_id in actor_ids {
-        let keeper = player_map
-            .get(actor_id)
-            .map(String::as_str)
-            .unwrap_or("미정");
-        html.push_str(&format!(
-            "<li>{} → {}</li>",
-            html_escape(actor_id),
-            html_escape(keeper)
-        ));
-    }
-    html.push_str("</ul>");
-    el.set_inner_html(&html);
 }
 
 #[cfg(target_arch = "wasm32")]

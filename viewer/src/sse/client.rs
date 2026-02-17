@@ -481,6 +481,44 @@ fn map_trpg_event(
             });
             out.push(("narrative".to_string(), mapped.to_string()));
         }
+        // -- choice.available → choice_available --
+        "choice.available" => {
+            let mapped = json!({
+                "character": payload.get("actor_id").and_then(Value::as_str)
+                    .or(actor_id).unwrap_or("unknown"),
+                "description": payload.get("description").and_then(Value::as_str).unwrap_or(""),
+                "options": payload.get("options").and_then(Value::as_array)
+                    .cloned().unwrap_or_default()
+            });
+            out.push(("choice_available".to_string(), mapped.to_string()));
+        }
+        // -- choice.resolved → choice_resolved --
+        "choice.resolved" => {
+            let mapped = json!({
+                "character": payload.get("actor_id").and_then(Value::as_str)
+                    .or(actor_id).unwrap_or("unknown"),
+                "description": payload.get("chosen").and_then(Value::as_str).unwrap_or(""),
+                "options": []
+            });
+            out.push(("choice_resolved".to_string(), mapped.to_string()));
+        }
+        // -- combat.started → combat_start --
+        "combat.started" => {
+            let mapped = json!({
+                "area": payload.get("area").and_then(Value::as_str).unwrap_or("unknown"),
+                "enemies": payload.get("enemies").and_then(Value::as_array)
+                    .cloned().unwrap_or_default()
+            });
+            out.push(("combat_start".to_string(), mapped.to_string()));
+        }
+        // -- game.ended / quest.completed → narrative with endgame phase --
+        "game.ended" | "quest.completed" => {
+            let text = payload.get("summary").and_then(Value::as_str)
+                .or_else(|| payload.get("text").and_then(Value::as_str))
+                .unwrap_or("The adventure has ended.");
+            let mapped = json!({ "text": text, "phase": "endgame", "speaker": "DM" });
+            out.push(("narrative".to_string(), mapped.to_string()));
+        }
         // -- actor lifecycle → turn_progress only (handled below) --
         "actor.spawned" | "actor.updated" | "actor.deleted"
         | "actor.claimed" | "actor.released" => {

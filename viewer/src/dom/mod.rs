@@ -1,6 +1,7 @@
 pub mod action_panel;
 pub mod actor_join;
 pub mod character_panel;
+pub mod choice_panel;
 pub mod connection;
 pub mod dice_log;
 pub mod endgame;
@@ -37,6 +38,7 @@ impl Plugin for DomBridgePlugin {
                 narrative::update_narrative_dom,
                 dice_log::update_dice_log_dom,
                 character_panel::update_character_panel_dom,
+                choice_panel::update_choice_dom,
                 turn_phase::update_turn_phase_dom,
                 turn_runtime::update_turn_runtime_dom,
                 connection::update_connection_dom,

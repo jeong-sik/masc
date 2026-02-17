@@ -114,6 +114,13 @@ module Mitosis = struct
       participate in experiment flag checks. *)
   let experiment_enabled =
     get_bool ~default:false "MASC_MITOSIS_EXPERIMENT_ENABLED"
+
+  (** Enable adaptive threshold learning from handoff outcomes.
+      When true, thresholds are adjusted via EMA based on handoff quality signals.
+      Persisted per room in ~/.masc/adaptive_thresholds_{room}.json.
+      Default: false (safe rollout — uses static thresholds until enabled). *)
+  let adaptive_thresholds_enabled =
+    get_bool ~default:false "MASC_ADAPTIVE_THRESHOLDS_ENABLED"
 end
 
 (** {1 Spawn Configuration} *)

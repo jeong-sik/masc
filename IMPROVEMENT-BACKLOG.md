@@ -50,7 +50,7 @@
 
 | ID | File:Line | Issue | Fix |
 |----|-----------|-------|-----|
-| P2-1 | - | No adaptive thresholds | ML-based threshold |
+| P2-1 | lib/handoff_quality.ml, lib/adaptive_thresholds.ml, lib/tool_mitosis.ml | No adaptive thresholds | **DONE** — EMA-based threshold learning from handoff outcomes. Gated by `MASC_ADAPTIVE_THRESHOLDS_ENABLED`. 28 tests. |
 | P2-2 | lib/env_config.ml, lib/tool_mitosis.ml | No A/B test support | **DONE** — `MASC_MITOSIS_EXPERIMENT_ENABLED` env var + run_sync_handoff guard |
 | P2-3 | lib/mitosis_metrics.ml, lib/prometheus.ml, lib/tool_mitosis.ml | No dashboard integration | **DONE** — 6 metrics (3 counters, 2 gauges, 1 histogram) + Prometheus text export |
 | P2-4 | - | Doc strings incomplete | Add odoc |

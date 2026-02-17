@@ -1314,15 +1314,24 @@ let run_sync_handoff ctx args : result =
   let context_ratio = validate_context_ratio raw_ratio in
   let full_context = get_string args "full_context" "" in
   let target_agent = get_string args "target_agent" "claude" in
-  (* P0-1: Configurable thresholds instead of hardcoded 0.5/0.8 *)
-  let prepare_threshold = get_float args "prepare_threshold" 0.5 in
-  let handoff_threshold = get_float args "handoff_threshold" 0.8 in
   let spawn_timeout = int_of_float (get_float args "spawn_timeout" (Float.of_int Mitosis.Defaults.spawn_timeout_seconds)) in
-  
+
   (* Warn if context_ratio is default 0.0 - likely caller forgot to provide it *)
   if raw_ratio = 0.0 then
     Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
-  
+
+  (* P2-1: Adaptive thresholds — derive room name from base_path *)
+  let room_name = Filename.basename ctx.config.Room_utils.base_path in
+  let adaptive_enabled = Env_config.Mitosis.adaptive_thresholds_enabled in
+  let effective = Adaptive_thresholds.get_effective_thresholds
+    ~enabled:adaptive_enabled ~room:room_name in
+  (* P0-1: Allow per-call overrides via args, falling back to adaptive/default *)
+  let prepare_threshold = get_float args "prepare_threshold" effective.Adaptive_thresholds.prepare in
+  let handoff_threshold = get_float args "handoff_threshold" effective.Adaptive_thresholds.handoff in
+  if adaptive_enabled then
+    Printf.eprintf "[MITOSIS/ADAPTIVE] room=%s prepare=%.3f handoff=%.3f\n%!"
+      room_name prepare_threshold handoff_threshold;
+
   let cell = !(Mcp_server.current_cell) in
   (* Override config with custom thresholds if provided *)
   let config_mitosis = { Mitosis.default_config with
@@ -1462,6 +1471,33 @@ let run_sync_handoff ctx args : result =
         let duration_sec = (float_of_int spawn_result.Spawn.elapsed_ms) /. 1000.0 in
         Mitosis_metrics.observe_handoff_duration duration_sec;
 
+        (* P2-1: Adaptive threshold learning from handoff outcome *)
+        if adaptive_enabled then begin
+          let was_emergency = match cell.Mitosis.phase with
+            | Mitosis.Idle -> true    (* handoff without Prepared state *)
+            | Mitosis.ReadyForHandoff _ -> false
+          in
+          let outcome : Handoff_quality.handoff_outcome = {
+            completion_rate = context_ratio;  (* approximate: higher ratio = more complete *)
+            error_count = 0;  (* spawn succeeded, no errors *)
+            was_emergency;
+            duration_seconds = duration_sec;
+            generation = cell.Mitosis.generation;
+          } in
+          let current_state = match Adaptive_thresholds.load_state ~room:room_name with
+            | Some s -> s
+            | None -> Adaptive_thresholds.initial_state ()
+          in
+          let new_state = Adaptive_thresholds.adapt current_state outcome in
+          (try Adaptive_thresholds.save_state ~room:room_name new_state
+           with exn ->
+             Printf.eprintf "[MITOSIS/ADAPTIVE] save failed: %s\n%!" (Printexc.to_string exn));
+          Printf.eprintf "[MITOSIS/ADAPTIVE] adapted room=%s prepare=%.3f->%.3f handoff=%.3f->%.3f\n%!"
+            room_name
+            current_state.thresholds.prepare new_state.thresholds.prepare
+            current_state.thresholds.handoff new_state.thresholds.handoff
+        end;
+
         (* Agent Being Protocol: Queue Episode for persistence *)
         let base_path = ctx.config.Room_utils.base_path in
         let session_id = get_session_id () in
@@ -1478,7 +1514,13 @@ let run_sync_handoff ctx args : result =
           () in
 
         let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
-        let json = `Assoc [
+        let adaptive_info = if adaptive_enabled then
+          [("adaptive_thresholds_enabled", `Bool true);
+           ("adaptive_thresholds",
+            `Assoc [("prepare", `Float prepare_threshold);
+                    ("handoff", `Float handoff_threshold)])]
+        else [] in
+        let json = `Assoc ([
           ("action", `String "handoff");
           ("success", `Bool true);
           ("context_ratio", `Float context_ratio);
@@ -1492,7 +1534,7 @@ let run_sync_handoff ctx args : result =
           ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
           ("continuity_regression", continuity);
           ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
-        ] in
+        ] @ adaptive_info) in
         (true, Yojson.Safe.pretty_to_string json)
       end
 

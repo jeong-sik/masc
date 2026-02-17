@@ -78,6 +78,8 @@
    mcp_session
    metrics_store_eio
    generational_metrics
+   handoff_quality
+   adaptive_thresholds
    mention
    message_schema
    verification

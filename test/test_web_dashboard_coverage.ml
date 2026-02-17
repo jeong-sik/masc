@@ -153,9 +153,19 @@ let test_html_contains_trpg_session_history_and_assignment () =
     (String.length html > 0
     && contains_substr "id=\"trpg-session-meta\"" html
     && contains_substr "id=\"trpg-party-assignment\"" html
+    && contains_substr "id=\"trpg-actor-browser\"" html
     && contains_substr "id=\"trpg-game-history\"" html
     && contains_substr "function trpgBuildSessionHistory(events)" html
     && contains_substr "function trpgPartyActorsFromStateOrEvents(state, events)" html
+    && contains_substr "function trpgActorsFromStateOrEvents(state, events)" html
+    && contains_substr "function renderTrpgActorBrowser(state, events)" html
+    && contains_substr "function loadTrpgActorToForm(token)" html
+    && contains_substr "function quickClaimTrpgActor(token)" html
+    && contains_substr "function quickReleaseTrpgActor(token)" html
+    && contains_substr "function trpgActorClaimCall(args)" html
+    && contains_substr "function trpgActorReleaseCall(args)" html
+    && contains_substr "Actor claim 완료" html
+    && contains_substr "Actor release 완료" html
     && contains_substr "function renderTrpgSessionMeta(_state, events, summary, phase)" html
     && contains_substr "function renderTrpgPartyAssignment(state, events)" html
     && contains_substr "function renderTrpgGameHistory(events)" html)

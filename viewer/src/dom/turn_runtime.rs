@@ -38,7 +38,11 @@ fn normalize_room_status(raw: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 fn room_status_class(status: &str) -> &'static str {
     match status {
-        "active" | "running" => "status-active",
+        "active" | "running" | "in_progress" | "round" | "combat" | "briefing" => {
+            "status-active"
+        }
+        "dm_narration" | "party_discussion" | "action_declaration" | "dice_resolution"
+        | "outcome_narration" | "state_update" | "transition" => "status-active",
         "paused" => "status-paused",
         "ended" => "status-ended",
         "unavailable" => "status-unavailable",
@@ -50,7 +54,9 @@ fn room_status_class(status: &str) -> &'static str {
 #[cfg(target_arch = "wasm32")]
 fn room_status_label(status: &str) -> &'static str {
     match status {
-        "active" | "running" => "RUNNING",
+        "active" | "running" | "in_progress" | "round" | "combat" | "briefing" => "RUNNING",
+        "dm_narration" | "party_discussion" | "action_declaration" | "dice_resolution"
+        | "outcome_narration" | "state_update" | "transition" => "RUNNING",
         "paused" => "PAUSED",
         "ended" => "ENDED",
         "idle" => "IDLE",
@@ -61,7 +67,22 @@ fn room_status_label(status: &str) -> &'static str {
 }
 
 fn room_accepts_input(status: &str) -> bool {
-    matches!(status, "active" | "running")
+    matches!(
+        status,
+        "active"
+            | "running"
+            | "in_progress"
+            | "round"
+            | "combat"
+            | "briefing"
+            | "dm_narration"
+            | "party_discussion"
+            | "action_declaration"
+            | "dice_resolution"
+            | "outcome_narration"
+            | "state_update"
+            | "transition"
+    )
 }
 
 /// Render live TRPG runtime progress:

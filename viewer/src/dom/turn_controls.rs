@@ -3,8 +3,7 @@
 //! Binds DOM event listeners on `#turn-controls`:
 //! - Advance Turn button → POST `/api/v1/trpg/turns/advance`
 //!
-//! Visible only when the player has claimed a keeper role.
-//! Follows the same OnEnter/OnExit lifecycle as `action_panel.rs`.
+//! Visible when the room is in an active TRPG phase.
 
 use bevy::prelude::*;
 
@@ -72,7 +71,7 @@ pub fn sync_turn_controls_visibility(
         } else {
             normalize_room_status(&room_state.status)
         };
-        let room_allows_control = matches!(status.as_str(), "active" | "running");
+        let room_allows_control = is_room_active_for_controls(&status);
 
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
@@ -80,18 +79,39 @@ pub fn sync_turn_controls_visibility(
         let Some(panel) = doc.get_element_by_id("turn-controls") else {
             return;
         };
-        let keeper = doc
+        let has_keeper = doc
             .get_element_by_id("claimed-keeper")
-            .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()));
-        let has_keeper = keeper.map_or(false, |v| !v.trim().is_empty());
+            .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
+            .map_or(false, |v| !v.trim().is_empty());
 
-        let style = if has_keeper && room_allows_control {
+        let style = if room_allows_control || has_keeper {
             ""
         } else {
             "display:none"
         };
         let _ = panel.set_attribute("style", style);
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_room_active_for_controls(status: &str) -> bool {
+    matches!(
+        status,
+        "active"
+            | "running"
+            | "in_progress"
+            | "round"
+            | "combat"
+            | "briefing"
+            | "dm_narration"
+            | "party_discussion"
+            | "action_declaration"
+            | "dice_resolution"
+            | "outcome_narration"
+            | "state_update"
+            | "transition"
+            | "paused"
+    )
 }
 
 // ─── Event: Advance Button ──────────────────

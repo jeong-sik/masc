@@ -41,6 +41,58 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids =
+  let party =
+    `Assoc
+      (List.map
+         (fun id ->
+           ( id,
+             `Assoc
+               [
+                 ("name", `String id);
+                 ("role", `String "player");
+                 ("hp", `Int 10);
+                 ("max_hp", `Int 10);
+                 ("alive", `Bool true);
+               ] ))
+         actor_ids)
+  in
+  let config =
+    `Assoc
+      [
+        ("party", party);
+        ("world", `Assoc [ ("story_flags", `List []) ]);
+        ("dm", `Assoc [ ("keeper_name", `String "dm-keeper") ]);
+      ]
+  in
+  let room_created_payload =
+    `Assoc
+      [
+        ("session_id", `String "test-session");
+        ("rule_module", `String "dnd5e-lite");
+        ("scenario_id", `String "test");
+        ("dm_preset_id", `String "test");
+        ("world_preset_id", `String "test");
+        ("config", config);
+      ]
+  in
+  let room_created =
+    Trpg_engine_event.make ~seq:1 ~room_id ~ts:(Types.now_iso ())
+      ~event_type:Trpg_engine_event.Room_created ~payload:room_created_payload ()
+  in
+  (match Trpg_engine_store_sqlite.append_event ~base_dir ~event:room_created with
+  | Ok () -> ()
+  | Error e -> failwith ("bootstrap Room_created failed: " ^ e));
+  let room_started =
+    Trpg_engine_event.make ~seq:2 ~room_id ~ts:(Types.now_iso ())
+      ~event_type:Trpg_engine_event.Room_started
+      ~payload:(`Assoc [ ("phase", `String "round") ])
+      ()
+  in
+  (match Trpg_engine_store_sqlite.append_event ~base_dir ~event:room_started with
+  | Ok () -> ()
+  | Error e -> failwith ("bootstrap Room_started failed: " ^ e))
+
 let dispatch_exn ctx ~name ~args =
   match Tool_trpg.dispatch ctx ~name ~args with
   | Some r -> r
@@ -56,6 +108,7 @@ let test_round_run_success_path () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-success" ~actor_ids:["p1"; "p2"];
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
     | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The scene opens in rain.") ])
@@ -121,6 +174,7 @@ let test_round_run_timeout_policy () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-timeout" ~actor_ids:["p1"];
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
     | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "Round starts.") ])
@@ -163,7 +217,8 @@ let test_round_run_timeout_policy () =
   let summary = Yojson.Safe.Util.member "summary" json in
   Alcotest.(check int) "timeouts" 1 (Yojson.Safe.Util.member "timeouts" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "unavailable" 1 (Yojson.Safe.Util.member "unavailable" summary |> Yojson.Safe.Util.to_int);
-  Alcotest.(check int) "successes" 1 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
+  (* DM is gated on player success; with 0 player successes, DM is skipped *)
+  Alcotest.(check int) "successes" 0 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
   let events = json |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list in
   let timeout_event =
     List.find_opt
@@ -260,6 +315,7 @@ let test_round_run_lang_english_prompt () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-lang-en" ~actor_ids:["p1"];
   let prompts = ref [] in
   let keeper_call ~name ~message ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     prompts := (name, message) :: !prompts;

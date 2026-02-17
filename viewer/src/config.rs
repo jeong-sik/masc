@@ -10,8 +10,8 @@ pub const MASC_MCP_URL: &str = "";
 pub const DEFAULT_ROOM_ID: &str = "default";
 
 /// Polling interval for TRPG stream fallback (milliseconds).
+/// Backend exposes GET /api/v1/trpg/stream (JSON), no dedicated SSE endpoint.
 pub const TRPG_POLL_INTERVAL_MS: u64 = 2000;
-
 /// Legacy TRPG Engine URL (for direct mode)
 #[cfg(debug_assertions)]
 pub const TRPG_ENGINE_URL: &str = "http://localhost:8000";
@@ -125,29 +125,40 @@ fn parse_query_param(search: &str, key: &str) -> Option<String> {
 // ─── Endpoints ──────────────────────────────
 
 pub fn trpg_uses_polling() -> bool {
-    // MASC API supports SSE, so polling is fallback or for legacy engine.
-    // If using MASC API, we use SSE.
-    // If using Legacy Engine, we might need polling if SSE not exposed?
-    // Actually MASC API exposes /stream/sse.
+    // Backend now exposes /api/v1/trpg/stream/sse (SSE endpoint, PR #222).
+    // Polling is kept as fallback but SSE is preferred.
     false
 }
 
 pub fn trpg_state_url() -> String {
-    format!("{}/api/v1/trpg/state/{}", MASC_MCP_URL, current_room_id())
+    format!("{}/api/v1/trpg/state?room_id={}", MASC_MCP_URL, current_room_id())
 }
 
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
-    format!("{}/api/v1/trpg/stream/poll/{}?after={}", MASC_MCP_URL, current_room_id(), after_seq)
+    format!("{}/api/v1/trpg/stream?room_id={}&after_seq={}", MASC_MCP_URL, current_room_id(), after_seq)
 }
 
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
-        ViewerMode::Trpg => Some(format!("{}/api/v1/trpg/stream/sse/{}", MASC_MCP_URL, current_room_id())),
+        ViewerMode::Trpg => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
         ViewerMode::Monitor => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
         ViewerMode::Experiment => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
         ViewerMode::Council => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
         ViewerMode::Social => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
         ViewerMode::Lobby => None,
+    }
+}
+
+/// Resolve SSE endpoint by mode name string (for use from async contexts
+/// that don't have access to Bevy State<ViewerMode>).
+pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
+    match mode_name {
+        "Trpg" => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
+        "Monitor" => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
+        "Experiment" => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
+        "Council" => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
+        "Social" => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
+        _ => None,
     }
 }
 

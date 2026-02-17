@@ -287,3 +287,38 @@ pub fn apply_character_death(
         }
     }
 }
+
+/// Apply choice available events to ChoiceState.
+pub fn apply_choice_available(
+    mut events: MessageReader<ChoiceAvailable>,
+    mut choice_state: ResMut<ChoiceState>,
+) {
+    for ChoiceAvailable(payload) in events.read() {
+        choice_state.active = true;
+        choice_state.character = payload.character.clone();
+        choice_state.description = payload.description.clone();
+        choice_state.options = payload.options.clone();
+    }
+}
+
+/// Apply choice resolved events — deactivate choice state.
+pub fn apply_choice_resolved(
+    mut events: MessageReader<ChoiceResolved>,
+    mut choice_state: ResMut<ChoiceState>,
+) {
+    for ChoiceResolved(_payload) in events.read() {
+        choice_state.active = false;
+    }
+}
+
+/// Apply combat started events to CombatState.
+pub fn apply_combat_started(
+    mut events: MessageReader<CombatStarted>,
+    mut combat_state: ResMut<CombatState>,
+) {
+    for CombatStarted(payload) in events.read() {
+        combat_state.active = true;
+        combat_state.area = payload.area.clone();
+        combat_state.enemies = payload.enemies.clone();
+    }
+}

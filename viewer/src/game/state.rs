@@ -74,6 +74,10 @@ pub enum ConnectionStatus {
     #[allow(dead_code)]
     Connecting,
     Connected,
+    /// Reconnecting after a lost connection. (current_attempt, max_attempts)
+    Reconnecting(u32, u32),
+    /// All retry attempts exhausted.
+    Failed,
 }
 
 /// Runtime progress derived from TRPG stream events.
@@ -91,4 +95,19 @@ pub struct TurnProgressState {
     pub last_actor: String,
     pub last_result: String,
     pub last_event: String,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct ChoiceState {
+    pub active: bool,
+    pub character: String,
+    pub description: String,
+    pub options: Vec<String>,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct CombatState {
+    pub active: bool,
+    pub area: String,
+    pub enemies: Vec<String>,
 }

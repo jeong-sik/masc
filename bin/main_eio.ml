@@ -3776,6 +3776,150 @@ let sse_simple_handler request reqd =
   let response = Httpun.Response.create ~headers `OK in
   Httpun.Reqd.respond_with_string reqd response event
 
+(** TRPG SSE poll interval in seconds *)
+let trpg_sse_poll_interval_s = 2.0
+
+(** TRPG SSE keepalive interval in seconds *)
+let trpg_sse_keepalive_s = 30.0
+
+(** Format a single TRPG event as an SSE frame.
+    Uses the event's seq as the SSE id, and the event_type string as the SSE event field. *)
+let trpg_event_to_sse (ev : Masc_mcp.Trpg_engine_event.t) : string =
+  let data = Yojson.Safe.to_string (Masc_mcp.Trpg_engine_event.to_yojson ev) in
+  let event_type_str = Masc_mcp.Trpg_engine_event.string_of_event_type ev.event_type in
+  Printf.sprintf "id: %d\nevent: %s\ndata: %s\n\n" ev.seq event_type_str data
+
+(** Handle TRPG SSE streaming endpoint (HTTP/1.1).
+    Opens a long-lived text/event-stream connection, replays events after Last-Event-ID,
+    then polls SQLite every 2s for new events. Sends keepalive comments every 30s. *)
+let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
+  let room_id = String.trim room_id in
+  if room_id = "" then begin
+    let origin = get_origin request in
+    Http.Response.json ~status:`Bad_request
+      ~extra_headers:(cors_headers origin)
+      (Yojson.Safe.to_string (trpg_error_json "room_id is required")) reqd
+  end else
+    let origin = get_origin request in
+    match trpg_parse_event_type_filter event_type_filter with
+    | Error (`Bad_request, msg) ->
+        Http.Response.json ~status:`Bad_request
+          ~extra_headers:(cors_headers origin)
+          (Yojson.Safe.to_string (trpg_error_json msg)) reqd
+    | Ok event_type_opt ->
+        let last_event_id =
+          match Httpun.Headers.get request.Httpun.Request.headers "last-event-id" with
+          | Some id -> (try int_of_string id with Failure _ -> 0)
+          | None -> 0
+        in
+        let headers = Httpun.Headers.of_list ([
+          ("content-type", "text/event-stream");
+          ("cache-control", "no-cache");
+          ("connection", "keep-alive");
+        ] @ cors_headers origin) in
+        let response = Httpun.Response.create ~headers `OK in
+        let writer = Httpun.Reqd.respond_with_streaming reqd response in
+        let mutex = Eio.Mutex.create () in
+        let closed = ref false in
+        let last_seq = ref last_event_id in
+
+        let send_raw_data data =
+          if !closed || Httpun.Body.Writer.is_closed writer then begin
+            closed := true; false
+          end else
+            try
+              Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+                Httpun.Body.Writer.write_string writer data;
+                Httpun.Body.Writer.flush writer (fun _ -> ()));
+              true
+            with _exn ->
+              closed := true; false
+        in
+
+        (* Send initial comment to confirm connection *)
+        ignore (send_raw_data
+          (Printf.sprintf ": TRPG SSE stream for room %s (after_seq=%d)\nretry: 3000\n\n"
+             room_id !last_seq));
+
+        (* Replay existing events newer than last_seq *)
+        (match
+           (if !last_seq > 0 then
+              Masc_mcp.Trpg_engine_store_sqlite.read_events_after
+                ~base_dir ~room_id ~after_seq:!last_seq
+            else
+              Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id)
+         with
+         | Ok events ->
+             let events = match event_type_opt with
+               | None -> events
+               | Some et ->
+                   List.filter
+                     (fun (ev : Masc_mcp.Trpg_engine_event.t) -> ev.event_type = et)
+                     events
+             in
+             List.iter (fun ev ->
+               if not !closed then begin
+                 ignore (send_raw_data (trpg_event_to_sse ev));
+                 last_seq := max !last_seq ev.Masc_mcp.Trpg_engine_event.seq
+               end) events
+         | Error _ -> ());
+
+        (* Start polling fiber for new events + keepalive *)
+        (match !current_sw, !current_clock with
+         | Some sw, Some clock ->
+             Eio.Fiber.fork ~sw (fun () ->
+               let is_cancelled = function
+                 | Eio.Cancel.Cancelled _ -> true | _ -> false
+               in
+               let keepalive_counter = ref 0 in
+               let polls_per_keepalive =
+                 max 1 (int_of_float (trpg_sse_keepalive_s /. trpg_sse_poll_interval_s))
+               in
+               let rec loop () =
+                 if not !closed then begin
+                   (try Eio.Time.sleep clock trpg_sse_poll_interval_s
+                    with exn -> if is_cancelled exn then raise exn);
+                   if not !closed then begin
+                     (match
+                        Masc_mcp.Trpg_engine_store_sqlite.read_events_after
+                          ~base_dir ~room_id ~after_seq:!last_seq
+                      with
+                      | Ok events ->
+                          let events = match event_type_opt with
+                            | None -> events
+                            | Some et ->
+                                List.filter
+                                  (fun (ev : Masc_mcp.Trpg_engine_event.t) ->
+                                    ev.event_type = et)
+                                  events
+                          in
+                          List.iter (fun ev ->
+                            if not !closed then begin
+                              if not (send_raw_data (trpg_event_to_sse ev)) then
+                                closed := true
+                              else
+                                last_seq := max !last_seq
+                                  ev.Masc_mcp.Trpg_engine_event.seq
+                            end) events
+                      | Error _ -> ());
+                     incr keepalive_counter;
+                     if !keepalive_counter >= polls_per_keepalive then begin
+                       keepalive_counter := 0;
+                       if not !closed then
+                         ignore (send_raw_data ": keepalive\n\n")
+                     end
+                   end;
+                   loop ()
+                 end
+               in
+               try loop () with exn ->
+                 if not (is_cancelled exn) then
+                   Printf.eprintf "[TRPG-SSE] poll loop error for room %s: %s\n%!"
+                     room_id (Printexc.to_string exn))
+         | _ ->
+             ignore (send_raw_data
+               "event: error\ndata: {\"error\":\"server not ready\"}\n\n"))
+
 (** POST /messages - Legacy SSE transport (client->server messages) *)
 let handle_post_messages request reqd =
   let origin = get_origin request in
@@ -4274,6 +4418,13 @@ let make_routes ~port ~host =
          | Error (`Internal_server_error, msg) ->
              respond_json_with_cors ~status:`Internal_server_error request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
+       ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/stream/sse" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         let room_id = Option.value ~default:"" (query_param req "room_id") in
+         let event_type_filter = query_param req "event_type" in
+         handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/trpg/actors/spawn" (fun request reqd ->
        with_public_read (fun state _req reqd ->
@@ -5161,6 +5312,129 @@ let run_server ~sw ~env ~port ~base_path =
           | Error (`Internal_server_error, msg) ->
               h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
                 ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `GET, "/api/v1/trpg/stream/sse" ->
+          let state = get_server_state () in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
+          let event_type_filter = query_param httpun_request "event_type" in
+          let room_id_trimmed = String.trim room_id in
+          if room_id_trimmed = "" then
+            h2_respond_json h2_reqd
+              (Yojson.Safe.to_string (trpg_error_json "room_id is required"))
+              ~status:`Bad_request ~extra_headers:cors
+          else begin
+            match trpg_parse_event_type_filter event_type_filter with
+            | Error (`Bad_request, msg) ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
+            | Ok event_type_opt ->
+                let last_event_id =
+                  match H2.Headers.get (H2.Reqd.request h2_reqd).headers "last-event-id" with
+                  | Some id -> (try int_of_string id with Failure _ -> 0)
+                  | None -> 0
+                in
+                let headers = H2.Headers.of_list ([
+                  ("content-type", "text/event-stream");
+                  ("cache-control", "no-cache");
+                ] @ cors) in
+                let response = H2.Response.create ~headers `OK in
+                let writer = H2.Reqd.respond_with_streaming
+                  ~flush_headers_immediately:true h2_reqd response in
+                let closed = ref false in
+                let last_seq = ref last_event_id in
+
+                let send data =
+                  if !closed || H2.Body.Writer.is_closed writer then begin
+                    closed := true; false
+                  end else begin
+                    H2.Body.Writer.write_string writer data;
+                    H2.Body.Writer.flush writer ignore;
+                    true
+                  end
+                in
+
+                let init_comment =
+                  Printf.sprintf ": TRPG SSE stream for room %s (after_seq=%d)\nretry: 3000\n\n"
+                    room_id_trimmed !last_seq in
+                ignore (send init_comment);
+
+                (* Send existing events *)
+                (match
+                   (if !last_seq > 0 then
+                      Masc_mcp.Trpg_engine_store_sqlite.read_events_after
+                        ~base_dir ~room_id:room_id_trimmed ~after_seq:!last_seq
+                    else
+                      Masc_mcp.Trpg_engine_store_sqlite.read_events
+                        ~base_dir ~room_id:room_id_trimmed)
+                 with
+                 | Ok events ->
+                     let events = match event_type_opt with
+                       | None -> events
+                       | Some et ->
+                           List.filter (fun (ev : Masc_mcp.Trpg_engine_event.t) ->
+                             ev.event_type = et) events
+                     in
+                     List.iter (fun ev ->
+                       if not !closed then begin
+                         ignore (send (trpg_event_to_sse ev));
+                         last_seq := max !last_seq ev.Masc_mcp.Trpg_engine_event.seq
+                       end) events
+                 | Error _ -> ());
+
+                (* Poll loop *)
+                (match !current_sw, !current_clock with
+                 | Some sw, Some clock ->
+                     Eio.Fiber.fork ~sw (fun () ->
+                       let is_cancelled = function
+                         | Eio.Cancel.Cancelled _ -> true | _ -> false in
+                       let keepalive_counter = ref 0 in
+                       let polls_per_keepalive =
+                         max 1 (int_of_float (trpg_sse_keepalive_s /. trpg_sse_poll_interval_s)) in
+                       let rec loop () =
+                         if not !closed then begin
+                           (try Eio.Time.sleep clock trpg_sse_poll_interval_s
+                            with exn -> if is_cancelled exn then raise exn);
+                           if not !closed then begin
+                             (match
+                                Masc_mcp.Trpg_engine_store_sqlite.read_events_after
+                                  ~base_dir ~room_id:room_id_trimmed ~after_seq:!last_seq
+                              with
+                              | Ok events ->
+                                  let events = match event_type_opt with
+                                    | None -> events
+                                    | Some et ->
+                                        List.filter (fun (ev : Masc_mcp.Trpg_engine_event.t) ->
+                                          ev.event_type = et) events
+                                  in
+                                  List.iter (fun ev ->
+                                    if not !closed then begin
+                                      if not (send (trpg_event_to_sse ev)) then
+                                        closed := true
+                                      else
+                                        last_seq := max !last_seq
+                                          ev.Masc_mcp.Trpg_engine_event.seq
+                                    end) events
+                              | Error _ -> ());
+                             incr keepalive_counter;
+                             if !keepalive_counter >= polls_per_keepalive then begin
+                               keepalive_counter := 0;
+                               if not !closed then ignore (send ": keepalive\n\n")
+                             end
+                           end;
+                           loop ()
+                         end else
+                           H2.Body.Writer.close writer
+                       in
+                       try loop () with exn ->
+                         if not (is_cancelled exn) then
+                           Printf.eprintf "[TRPG-SSE/H2] poll error for room %s: %s\n%!"
+                             room_id_trimmed (Printexc.to_string exn))
+                 | _ ->
+                     ignore (send "event: error\ndata: {\"error\":\"server not ready\"}\n\n");
+                     H2.Body.Writer.close writer)
+          end
 
       | `POST, "/api/v1/trpg/actors/spawn" ->
           let state = get_server_state () in

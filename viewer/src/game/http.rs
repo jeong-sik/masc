@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::config;
-use crate::game::components::{Actor, Stats};
+use crate::game::components::{Actor, Condition, Equipment, Skill, Stats};
 use crate::game::state::{ConnectionStatus, MapState, RoomState, TurnPhase, TurnProgressState};
 
 // ─── Expected API Response Types ─────────────
@@ -44,6 +44,30 @@ fn default_int_field() -> i32 {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SkillData {
+    pub name: String,
+    #[serde(default = "default_skill_level")]
+    pub level: i32,
+}
+
+fn default_skill_level() -> i32 {
+    10
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConditionData {
+    pub name: String,
+    #[serde(default)]
+    pub remaining_turns: Option<i32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EquipmentData {
+    pub slot: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct CharacterData {
     pub id: String,
     pub name: String,
@@ -53,6 +77,10 @@ pub struct CharacterData {
     pub hp: i32,
     #[serde(default = "default_hp")]
     pub max_hp: i32,
+    #[serde(default)]
+    pub mp: i32,
+    #[serde(default)]
+    pub max_mp: i32,
     #[serde(default)]
     pub stats: Option<StatsData>,
     #[serde(default = "default_area")]
@@ -65,6 +93,12 @@ pub struct CharacterData {
     pub buffs: Vec<String>,
     #[serde(default)]
     pub debuffs: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<SkillData>,
+    #[serde(default)]
+    pub conditions: Vec<ConditionData>,
+    #[serde(default)]
+    pub equipment: Vec<EquipmentData>,
 }
 
 fn default_hp() -> i32 {
@@ -330,18 +364,50 @@ pub fn apply_initial_state(
                 luck: 10,
             });
 
+        let skills: Vec<Skill> = ch
+            .skills
+            .into_iter()
+            .map(|s| Skill {
+                name: s.name,
+                level: s.level,
+            })
+            .collect();
+
+        let conditions: Vec<Condition> = ch
+            .conditions
+            .into_iter()
+            .map(|c| Condition {
+                name: c.name,
+                remaining_turns: c.remaining_turns,
+            })
+            .collect();
+
+        let equipment: Vec<Equipment> = ch
+            .equipment
+            .into_iter()
+            .map(|e| Equipment {
+                slot: e.slot,
+                name: e.name,
+            })
+            .collect();
+
         commands.spawn(Actor {
             id: ch.id,
             name: ch.name,
             class: ch.class,
             hp: ch.hp,
             max_hp: ch.max_hp,
+            mp: ch.mp,
+            max_mp: ch.max_mp,
             stats,
             area: ch.area,
             is_dead: ch.is_dead,
             inventory: ch.inventory,
             buffs: ch.buffs,
             debuffs: ch.debuffs,
+            skills,
+            conditions,
+            equipment,
         });
     }
 
@@ -419,7 +485,8 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         .get("characters")
         .cloned()
         .and_then(|v| serde_json::from_value::<Vec<CharacterData>>(v).ok())
-        .unwrap_or_default();
+        .filter(|rows| !rows.is_empty())
+        .unwrap_or_else(|| parse_party_characters(state));
 
     GameStateResponse {
         room: Some(RoomResponse {
@@ -446,6 +513,94 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         current_area,
         area_label,
     }
+}
+
+fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
+    let Some(party) = state.get("party").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+
+    party
+        .iter()
+        .map(|(actor_id, info)| {
+            let name = info
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(actor_id)
+                .to_string();
+            let class = info
+                .get("class")
+                .and_then(Value::as_str)
+                .or_else(|| info.get("role").and_then(Value::as_str))
+                .or_else(|| info.get("archetype").and_then(Value::as_str))
+                .unwrap_or("")
+                .to_string();
+            let hp = info.get("hp").and_then(Value::as_i64).unwrap_or(20) as i32;
+            let max_hp = info
+                .get("max_hp")
+                .and_then(Value::as_i64)
+                .unwrap_or(i64::from(hp.max(1))) as i32;
+            let area = info
+                .get("position")
+                .and_then(Value::as_str)
+                .or_else(|| info.get("area").and_then(Value::as_str))
+                .unwrap_or("A")
+                .to_string();
+            let is_dead = info
+                .get("alive")
+                .and_then(Value::as_bool)
+                .map(|alive| !alive)
+                .unwrap_or_else(|| hp <= 0);
+            let inventory = info
+                .get("inventory")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let buffs = info
+                .get("buffs")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let debuffs = info
+                .get("debuffs")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let stats = info
+                .get("stats")
+                .cloned()
+                .and_then(|v| serde_json::from_value::<StatsData>(v).ok());
+
+            CharacterData {
+                id: actor_id.to_string(),
+                name,
+                class,
+                hp,
+                max_hp,
+                stats,
+                area,
+                is_dead,
+                inventory,
+                buffs,
+                debuffs,
+            }
+        })
+        .collect()
 }
 
 /// When the fetched room is not resumable, auto-show the new-game panel
@@ -548,6 +703,35 @@ mod tests {
         assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(5));
         assert_eq!(parsed.current_area, "C");
         assert!(parsed.characters.is_empty(), "no fallback party should be injected");
+    }
+
+    #[test]
+    fn normalize_masc_shape_reads_party_as_characters() {
+        let root = json!({
+            "ok": true,
+            "room_id": "default",
+            "state": {
+                "turn": 3,
+                "phase": "round",
+                "party": {
+                    "grimja": {
+                        "name": "그림자",
+                        "role": "fighter",
+                        "hp": 28,
+                        "max_hp": 30,
+                        "position": "C",
+                        "alive": true
+                    }
+                }
+            }
+        });
+
+        let parsed = normalize_state_response(root).expect("masc parse should succeed");
+        assert_eq!(parsed.characters.len(), 1);
+        assert_eq!(parsed.characters[0].id, "grimja");
+        assert_eq!(parsed.characters[0].name, "그림자");
+        assert_eq!(parsed.characters[0].class, "fighter");
+        assert_eq!(parsed.characters[0].hp, 28);
     }
 
     #[test]

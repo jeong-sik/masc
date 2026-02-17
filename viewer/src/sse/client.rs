@@ -18,6 +18,10 @@ use web_sys::{EventSource, MessageEvent};
 use crate::config;
 use crate::game::state::ConnectionStatus;
 
+use super::reconnect::{
+    self, ConnectionStatusBridge, ConnectionStatusProxy, ReconnectState, SseReconnectManager,
+};
+
 /// Wrapper around `EventSource` that is `Send + Sync`.
 /// Safe because WASM is single-threaded — there are no real threads to race with.
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +42,11 @@ pub struct SseReceiver {
     polling_active: Arc<AtomicBool>,
     #[cfg(target_arch = "wasm32")]
     event_source: Arc<Mutex<Option<SendEventSource>>>,
+    /// Shared reconnect state for the legacy EventSource path.
+    /// Kept alive so the Arc clones in EventSource callbacks remain valid.
+    #[cfg(target_arch = "wasm32")]
+    #[allow(dead_code)]
+    reconnect: Arc<Mutex<ReconnectState>>,
 }
 
 /// Legacy SSE event names (used only with LegacyEngine mode).
@@ -617,20 +626,156 @@ fn start_polling_loop(messages: Arc<Mutex<Vec<(String, String)>>>, active: Arc<A
                 }
             }
 
-            if sleep_ms(config::TRPG_POLL_INTERVAL_MS as i32).await.is_err() {
+            if sleep_ms(500).await.is_err() {
                 break;
             }
         }
     });
 }
 
+/// Create a legacy EventSource with reconnect support.
+#[cfg(target_arch = "wasm32")]
+fn create_legacy_event_source(
+    url: &str,
+    messages: Arc<Mutex<Vec<(String, String)>>>,
+    es_handle: Arc<Mutex<Option<SendEventSource>>>,
+    reconnect_state: Arc<Mutex<ReconnectState>>,
+    status_proxy: Arc<Mutex<ConnectionStatusProxy>>,
+) {
+    let es = match EventSource::new(url) {
+        Ok(es) => es,
+        Err(e) => {
+            log::warn!("Failed to create EventSource at {}: {:?}", url, e);
+            attempt_trpg_reconnect(messages, es_handle, reconnect_state, status_proxy);
+            return;
+        }
+    };
+
+    for &event_type in LEGACY_SSE_EVENT_TYPES {
+        let msgs = messages.clone();
+        let etype = event_type.to_string();
+        let rs = reconnect_state.clone();
+        let callback = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
+            if let Some(data) = e.data().as_string() {
+                if let Ok(mut buf) = msgs.lock() {
+                    buf.push((etype.clone(), data));
+                }
+            }
+            let event_id = e.last_event_id();
+            if !event_id.is_empty() {
+                if let Ok(mut state) = rs.lock() {
+                    state.record_event_id(&event_id);
+                }
+            }
+        });
+        let _ = es.add_event_listener_with_callback(event_type, callback.as_ref().unchecked_ref());
+        callback.forget();
+    }
+
+    {
+        let connected_url = url.to_string();
+        let rs = reconnect_state.clone();
+        let sp = status_proxy.clone();
+        let callback = Closure::<dyn FnMut()>::new(move || {
+            log::info!("Legacy TRPG SSE connected to {}", connected_url);
+            if let Ok(mut state) = rs.lock() {
+                state.reset();
+            }
+            if let Ok(mut proxy) = sp.lock() {
+                proxy.set(ConnectionStatus::Connected);
+            }
+        });
+        es.set_onopen(Some(callback.as_ref().unchecked_ref()));
+        callback.forget();
+    }
+
+    {
+        let msgs = messages.clone();
+        let esh = es_handle.clone();
+        let rs = reconnect_state.clone();
+        let sp = status_proxy.clone();
+        let callback = Closure::<dyn FnMut()>::new(move || {
+            log::warn!("Legacy TRPG SSE connection error — scheduling reconnect");
+            if let Ok(guard) = esh.lock() {
+                if let Some(es) = guard.as_ref() {
+                    es.0.close();
+                }
+            }
+            attempt_trpg_reconnect(msgs.clone(), esh.clone(), rs.clone(), sp.clone());
+        });
+        es.set_onerror(Some(callback.as_ref().unchecked_ref()));
+        callback.forget();
+    }
+
+    if let Ok(mut guard) = es_handle.lock() {
+        *guard = Some(SendEventSource(es));
+    }
+}
+
+/// Attempt TRPG legacy EventSource reconnection with backoff.
+#[cfg(target_arch = "wasm32")]
+fn attempt_trpg_reconnect(
+    messages: Arc<Mutex<Vec<(String, String)>>>,
+    es_handle: Arc<Mutex<Option<SendEventSource>>>,
+    reconnect_state: Arc<Mutex<ReconnectState>>,
+    status_proxy: Arc<Mutex<ConnectionStatusProxy>>,
+) {
+    let (delay, attempt, max_retries, last_event_id) = {
+        let mut state = match reconnect_state.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        match state.next_delay() {
+            Some(d) => (d, state.attempt, state.max_retries, state.last_event_id.clone()),
+            None => {
+                log::error!(
+                    "TRPG SSE reconnect exhausted ({} attempts) — giving up",
+                    state.max_retries
+                );
+                if let Ok(mut proxy) = status_proxy.lock() {
+                    proxy.set(ConnectionStatus::Failed);
+                }
+                return;
+            }
+        }
+    };
+
+    log::info!(
+        "TRPG SSE reconnect attempt {}/{} in {}ms",
+        attempt,
+        max_retries,
+        delay
+    );
+
+    reconnect::schedule_reconnect(
+        delay,
+        attempt,
+        max_retries,
+        status_proxy.clone(),
+        move || {
+            let base_url = config::trpg_stream_poll_url(0);
+            let url = reconnect::url_with_last_event_id(&base_url, &last_event_id);
+            create_legacy_event_source(&url, messages, es_handle, reconnect_state, status_proxy);
+        },
+    );
+}
+
 /// Startup system that creates TRPG stream input (polling or legacy EventSource).
 #[cfg(target_arch = "wasm32")]
-pub fn setup_sse(mut commands: Commands, mut connection: ResMut<ConnectionStatus>) {
+pub fn setup_sse(
+    mut commands: Commands,
+    mut connection: ResMut<ConnectionStatus>,
+    bridge: Res<ConnectionStatusBridge>,
+    mut reconnect_mgr: ResMut<SseReconnectManager>,
+) {
     *connection = ConnectionStatus::Connecting;
     let messages = Arc::new(Mutex::new(Vec::new()));
     let active = Arc::new(AtomicBool::new(true));
     let es_handle: Arc<Mutex<Option<SendEventSource>>> = Arc::new(Mutex::new(None));
+
+    // Reset TRPG reconnect state
+    reconnect_mgr.trpg = ReconnectState::default();
+    let reconnect_state = Arc::new(Mutex::new(reconnect_mgr.trpg.clone()));
 
     if config::trpg_uses_polling() {
         start_polling_loop(messages.clone(), active.clone());
@@ -638,6 +783,7 @@ pub fn setup_sse(mut commands: Commands, mut connection: ResMut<ConnectionStatus
             messages,
             polling_active: active,
             event_source: es_handle,
+            reconnect: reconnect_state,
         });
         log::info!(
             "TRPG poll client initialized: {}",
@@ -647,64 +793,32 @@ pub fn setup_sse(mut commands: Commands, mut connection: ResMut<ConnectionStatus
     }
 
     let url = config::trpg_stream_poll_url(0);
-    let es = match EventSource::new(&url) {
-        Ok(es) => es,
-        Err(e) => {
-            log::warn!("Failed to create EventSource at {}: {:?}", url, e);
-            commands.insert_resource(SseReceiver {
-                messages,
-                polling_active: active,
-                event_source: es_handle,
-            });
-            return;
-        }
-    };
 
-    for &event_type in LEGACY_SSE_EVENT_TYPES {
-        let msgs = messages.clone();
-        let etype = event_type.to_string();
-        let callback = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
-            if let Some(data) = e.data().as_string() {
-                if let Ok(mut buf) = msgs.lock() {
-                    buf.push((etype.clone(), data));
-                }
-            }
-        });
-        let _ = es.add_event_listener_with_callback(event_type, callback.as_ref().unchecked_ref());
-        callback.forget();
-    }
-
-    {
-        let connected_url = url.clone();
-        let callback = Closure::<dyn FnMut()>::new(move || {
-            log::info!("Legacy TRPG SSE connected to {}", connected_url);
-        });
-        es.set_onopen(Some(callback.as_ref().unchecked_ref()));
-        callback.forget();
-    }
-
-    {
-        let callback = Closure::<dyn FnMut()>::new(move || {
-            log::warn!("Legacy TRPG SSE connection error");
-        });
-        es.set_onerror(Some(callback.as_ref().unchecked_ref()));
-        callback.forget();
-    }
-
-    if let Ok(mut guard) = es_handle.lock() {
-        *guard = Some(SendEventSource(es));
-    }
+    create_legacy_event_source(
+        &url,
+        messages.clone(),
+        es_handle.clone(),
+        reconnect_state.clone(),
+        bridge.proxy.clone(),
+    );
 
     commands.insert_resource(SseReceiver {
         messages,
         polling_active: active,
         event_source: es_handle,
+        reconnect: reconnect_state,
     });
 }
 
 /// Native no-op for setup_sse.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn setup_sse(mut _commands: Commands, mut _connection: ResMut<ConnectionStatus>) {}
+pub fn setup_sse(
+    mut _commands: Commands,
+    mut _connection: ResMut<ConnectionStatus>,
+    _bridge: Res<ConnectionStatusBridge>,
+    _reconnect_mgr: ResMut<SseReconnectManager>,
+) {
+}
 
 /// OnExit(Trpg) system: stops polling, closes EventSource, and removes resource.
 pub fn teardown_sse(

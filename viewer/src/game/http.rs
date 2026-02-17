@@ -540,6 +540,12 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                 .get("max_hp")
                 .and_then(Value::as_i64)
                 .unwrap_or(i64::from(hp.max(1))) as i32;
+            let mp = info.get("mp").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let max_mp = info
+                .get("max_mp")
+                .and_then(Value::as_i64)
+                .or_else(|| info.get("mp_max").and_then(Value::as_i64))
+                .unwrap_or(i64::from(mp.max(0))) as i32;
             let area = info
                 .get("position")
                 .and_then(Value::as_str)
@@ -590,66 +596,9 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                 .get("stats")
                 .cloned()
                 .and_then(|v| serde_json::from_value::<StatsData>(v).ok());
-            let skills = info
-                .get("skills")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|skill| {
-                            if let Ok(parsed) = serde_json::from_value::<SkillData>(skill.clone()) {
-                                Some(parsed)
-                            } else if let Some(name) = skill.as_str() {
-                                Some(SkillData {
-                                    name: name.to_string(),
-                                    level: 10,
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let conditions = info
-                .get("conditions")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|cond| {
-                            if let Ok(parsed) = serde_json::from_value::<ConditionData>(cond.clone()) {
-                                Some(parsed)
-                            } else if let Some(name) = cond.as_str() {
-                                Some(ConditionData {
-                                    name: name.to_string(),
-                                    remaining_turns: None,
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let equipment = info
-                .get("equipment")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|slot| {
-                            if let Ok(parsed) = serde_json::from_value::<EquipmentData>(slot.clone()) {
-                                Some(parsed)
-                            } else if let Some(name) = slot.as_str() {
-                                Some(EquipmentData {
-                                    slot: "item".to_string(),
-                                    name: name.to_string(),
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+            let skills = parse_party_skills(info.get("skills"));
+            let conditions = parse_party_conditions(info.get("conditions"));
+            let equipment = parse_party_equipment(info.get("equipment"));
 
             CharacterData {
                 id: actor_id.to_string(),
@@ -662,13 +611,126 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                 stats,
                 area,
                 is_dead,
-                inventory,
-                buffs,
-                debuffs,
                 skills,
                 conditions,
                 equipment,
+                inventory,
+                buffs,
+                debuffs,
             }
+        })
+        .collect()
+}
+
+fn parse_party_skills(raw: Option<&Value>) -> Vec<SkillData> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+
+    let arr = match raw {
+        Value::Array(rows) => rows,
+        _ => return Vec::new(),
+    };
+
+    arr.iter()
+        .filter_map(|row| {
+            if let Some(name) = row.as_str() {
+                return Some(SkillData {
+                    name: name.to_string(),
+                    level: default_skill_level(),
+                });
+            }
+
+            let obj = row.as_object()?;
+            Some(SkillData {
+                name: obj
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .or_else(|| obj.get("skill").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string(),
+                level: obj
+                    .get("level")
+                    .and_then(Value::as_i64)
+                    .and_then(|v| i32::try_from(v).ok())
+                    .unwrap_or_else(default_skill_level),
+            })
+            .filter(|s| !s.name.is_empty())
+        })
+        .collect()
+}
+
+fn parse_party_conditions(raw: Option<&Value>) -> Vec<ConditionData> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+
+    let arr = match raw {
+        Value::Array(rows) => rows,
+        _ => return Vec::new(),
+    };
+
+    arr.iter()
+        .filter_map(|row| {
+            if let Some(name) = row.as_str() {
+                return Some(ConditionData {
+                    name: name.to_string(),
+                    remaining_turns: None,
+                });
+            }
+
+            let obj = row.as_object()?;
+            let name = obj
+                .get("name")
+                .and_then(Value::as_str)
+                .or_else(|| obj.get("condition").and_then(Value::as_str))
+                .unwrap_or("")
+                .to_string();
+            let remaining_turns = obj
+                .get("remaining_turns")
+                .and_then(Value::as_i64)
+                .and_then(|v| i32::try_from(v).ok());
+            Some(ConditionData { name, remaining_turns })
+                .filter(|c| !c.name.is_empty())
+        })
+        .collect()
+}
+
+fn parse_party_equipment(raw: Option<&Value>) -> Vec<EquipmentData> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+
+    let arr = match raw {
+        Value::Array(rows) => rows,
+        _ => return Vec::new(),
+    };
+
+    arr.iter()
+        .filter_map(|row| {
+            if let Some(name) = row.as_str() {
+                return Some(EquipmentData {
+                    slot: "item".to_string(),
+                    name: name.to_string(),
+                });
+            }
+
+            let obj = row.as_object()?;
+            Some(EquipmentData {
+                slot: obj
+                    .get("slot")
+                    .and_then(Value::as_str)
+                    .or_else(|| obj.get("slot_name").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string(),
+                name: obj
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .or_else(|| obj.get("item").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string(),
+            })
+            .filter(|e| !e.name.is_empty() && !e.slot.is_empty())
         })
         .collect()
 }

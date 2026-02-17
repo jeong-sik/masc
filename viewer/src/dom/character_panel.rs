@@ -174,16 +174,10 @@ pub fn update_character_panel_dom(
     };
 
     // Read which sections are expanded before we wipe innerHTML
-    let expanded = {
-        #[cfg(target_arch = "wasm32")]
-        {
-            read_collapse_state(&document)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            read_collapse_state()
-        }
-    };
+    #[cfg(target_arch = "wasm32")]
+    let expanded = read_collapse_state(&document);
+    #[cfg(not(target_arch = "wasm32"))]
+    let expanded: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     let mut html = String::new();
 

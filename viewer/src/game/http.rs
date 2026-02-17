@@ -101,7 +101,7 @@ pub struct InitialStateBuffer {
 #[derive(Resource, Default)]
 pub struct ActiveTrpgRoom {
     pub room_id: String,
-    pub room_rev: u64,
+    pub room_rev: u32,
 }
 
 fn normalize_room_status(raw: &str) -> String {

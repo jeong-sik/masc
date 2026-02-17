@@ -421,6 +421,16 @@ fn get_active_actor_from_dom() -> Option<String> {
         }
     }
 
+    // 2. Fallback: claimed actor state stored in join panel (survives UI transitions).
+    if let Some(el) = doc.get_element_by_id("claimed-actor-id") {
+        if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+            let claimed = input.value();
+            if !claimed.trim().is_empty() {
+                return Some(claimed);
+            }
+        }
+    }
+
     // 2. Fallback: Dashboard-selected actor
     config::current_actor_id()
 }

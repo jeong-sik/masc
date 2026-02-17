@@ -105,6 +105,7 @@ module Hat = Hat
 module Heartbeat = Heartbeat
 module Guardian = Guardian
 module Mitosis = Mitosis
+module Generational_metrics = Generational_metrics
 module Dashboard = Dashboard
 module Tempo = Tempo
 module Federation = Federation

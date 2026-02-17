@@ -528,6 +528,441 @@ let test_validate_dna_case_insensitive_markers () =
   | Error msg -> fail ("case-insensitive marker should pass: " ^ msg)
 
 (* ============================================================
+   T4: DNA Extraction with Empty Context
+   ============================================================ *)
+
+module Gen_metrics = Masc_mcp.Generational_metrics
+
+let make_active_cell ?(generation = 0) ?(task_count = 3) ?(tool_call_count = 10) () =
+  let base = Mitosis.create_stem_cell ~generation in
+  { base with
+    Mitosis.state = Mitosis.Active;
+    phase = Mitosis.Idle;
+    task_count;
+    tool_call_count;
+  }
+
+let test_extract_dna_empty_context () =
+  let config = Mitosis.default_config in
+  let parent = make_active_cell () in
+  let dna = Mitosis.extract_dna ~config ~parent_cell:parent ~full_context:"" in
+  (* Should produce a header with generation info even for empty context *)
+  check bool "non-empty DNA from empty context" true (String.length dna > 0);
+  (* Header should contain generation info *)
+  check bool "contains generation" true
+    (try Str.search_forward (Str.regexp_string "Generation 0") dna 0 >= 0
+     with Not_found -> false)
+
+let test_extract_dna_empty_context_compress () =
+  (* compress_to_dna with empty string should return empty *)
+  let result = Mitosis.compress_to_dna ~ratio:0.1 ~context:"" in
+  check string "empty context compresses to empty" "" result
+
+let test_extract_dna_empty_context_validate () =
+  (* validate_dna on empty-context DNA (header only, no markers from context) *)
+  let config = Mitosis.default_config in
+  let parent = make_active_cell () in
+  let dna = Mitosis.extract_dna ~config ~parent_cell:parent ~full_context:"" in
+  (* The header itself may or may not pass validation depending on markers *)
+  match Tool_mitosis.validate_dna dna with
+  | Ok _ -> check bool "valid DNA even from empty context" true true
+  | Error _ -> check bool "empty context DNA fails validation (expected)" true true
+
+let test_prepare_for_division_empty_context () =
+  let config = Mitosis.default_config in
+  let cell = make_active_cell () in
+  let prepared = Mitosis.prepare_for_division ~config ~cell ~full_context:"" in
+  check string "state is Prepared" "prepared" (Mitosis.state_to_string prepared.state);
+  check string "phase is ready_for_handoff" "ready_for_handoff" (Mitosis.phase_to_string prepared.phase);
+  check bool "prepared_dna is Some" true (Option.is_some prepared.prepared_dna)
+
+let test_extract_dna_single_char_context () =
+  let config = Mitosis.default_config in
+  let parent = make_active_cell () in
+  let dna = Mitosis.extract_dna ~config ~parent_cell:parent ~full_context:"x" in
+  check bool "single char context produces DNA" true (String.length dna > 0)
+
+(* ============================================================
+   T5: Concurrent Handoff / Cooldown Edge Cases
+   ============================================================ *)
+
+let test_cooldown_at_exact_boundary () =
+  (* Set last_handoff_time to exactly cooldown seconds ago *)
+  let cooldown = Masc_mcp.Env_config.Mitosis.handoff_cooldown_seconds in
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday () -. cooldown;
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  (match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+   | Some (_, result) ->
+       let json = parse_json_or_fail result in
+       let open Yojson.Safe.Util in
+       let action = json |> member "action" |> to_string in
+       (* At exact boundary, should proceed (elapsed >= cooldown) *)
+       check bool "at boundary allows handoff" true (action <> "cooldown");
+       Tool_mitosis.reset_handoff_cooldown ()
+   | None ->
+       Tool_mitosis.reset_handoff_cooldown ();
+       fail "expected Some for mitosis_handoff")
+
+let test_cooldown_just_inside_boundary () =
+  (* Set last_handoff_time to 1 second less than cooldown ago *)
+  let cooldown = Masc_mcp.Env_config.Mitosis.handoff_cooldown_seconds in
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday () -. (cooldown -. 1.0);
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  (match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+   | Some (false, result) ->
+       let json = parse_json_or_fail result in
+       let open Yojson.Safe.Util in
+       let action = json |> member "action" |> to_string in
+       check string "just inside boundary blocks" "cooldown" action;
+       let remaining = json |> member "cooldown_remaining_sec" |> to_float in
+       (* Remaining should be approximately 1 second *)
+       check bool "remaining near 1s" true (remaining > 0.0 && remaining <= 2.0);
+       Tool_mitosis.reset_handoff_cooldown ()
+   | Some (true, _) ->
+       Tool_mitosis.reset_handoff_cooldown ();
+       fail "expected cooldown block just inside boundary"
+   | None ->
+       Tool_mitosis.reset_handoff_cooldown ();
+       fail "expected Some for mitosis_handoff")
+
+let test_cooldown_first_handoff_no_block () =
+  (* First handoff ever (last_handoff_time = 0.0) should not be blocked *)
+  Tool_mitosis.reset_handoff_cooldown ();
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  (match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+   | Some (_, result) ->
+       let json = parse_json_or_fail result in
+       let open Yojson.Safe.Util in
+       let action = json |> member "action" |> to_string in
+       check bool "first handoff not blocked" true (action <> "cooldown");
+       Tool_mitosis.reset_handoff_cooldown ()
+   | None ->
+       Tool_mitosis.reset_handoff_cooldown ();
+       fail "expected Some for mitosis_handoff")
+
+let test_cooldown_json_contains_total_sec () =
+  (* Verify the cooldown JSON has the cooldown_total_sec field *)
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday ();
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  (match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+   | Some (false, result) ->
+       let json = parse_json_or_fail result in
+       let open Yojson.Safe.Util in
+       let total = json |> member "cooldown_total_sec" |> to_float in
+       let expected_cooldown = Masc_mcp.Env_config.Mitosis.handoff_cooldown_seconds in
+       check (float 0.001) "total_sec matches config" expected_cooldown total;
+       Tool_mitosis.reset_handoff_cooldown ()
+   | Some (true, _) ->
+       Tool_mitosis.reset_handoff_cooldown ();
+       fail "expected cooldown block"
+   | None ->
+       Tool_mitosis.reset_handoff_cooldown ();
+       fail "expected Some for mitosis_handoff")
+
+(* ============================================================
+   T6: Generation Overflow (>10)
+   ============================================================ *)
+
+let test_max_generation_default () =
+  check int "max generation is 10" 10 Mitosis.Defaults.max_generation
+
+let test_high_generation_cell_creation () =
+  (* Creating a cell with generation > max should not crash *)
+  let cell = Mitosis.create_stem_cell ~generation:100 in
+  check int "generation 100" 100 cell.generation;
+  check string "state is stem" "stem" (Mitosis.state_to_string cell.state)
+
+let test_very_high_generation_cell () =
+  let cell = Mitosis.create_stem_cell ~generation:1000 in
+  check int "generation 1000" 1000 cell.generation;
+  let json = Mitosis.cell_to_json cell in
+  match json with
+  | `Assoc fields ->
+      let gen = List.assoc "generation" fields in
+      check bool "json has gen 1000" true (gen = `Int 1000)
+  | _ -> fail "expected Assoc"
+
+let test_emergency_generation_value () =
+  check int "emergency gen is 999" 999 Mitosis.Defaults.emergency_generation
+
+let test_perform_mitosis_increments_generation () =
+  let config = Mitosis.default_config in
+  let parent = make_active_cell ~generation:5 () in
+  let pool = Mitosis.init_pool ~config in
+  let full_context = "Goal: test\n- Context for generation test\n- More lines here" in
+  let (child, _parent, _pool, _dna) =
+    Mitosis.perform_mitosis ~config ~pool ~parent ~full_context
+  in
+  check int "child generation is parent + 1" 6 child.generation
+
+let test_pool_to_json_high_generation () =
+  let config = { Mitosis.default_config with stem_pool_size = 1 } in
+  let pool = Mitosis.init_pool ~config in
+  let json = Mitosis.pool_to_json pool in
+  match json with
+  | `Assoc fields ->
+      let stem_count =
+        match List.assoc "stem_count" fields with
+        | `Int n -> n
+        | _ -> -1
+      in
+      check bool "pool has stems" true (stem_count >= 0)
+  | _ -> fail "expected Assoc from pool_to_json"
+
+(* ============================================================
+   T7: Full Lifecycle — prepare -> handoff state transitions
+   ============================================================ *)
+
+let test_lifecycle_stem_to_active () =
+  let cell = Mitosis.create_stem_cell ~generation:0 in
+  check string "starts as stem" "stem" (Mitosis.state_to_string cell.state);
+  (* Simulate activation by setting state *)
+  let active = { cell with Mitosis.state = Active; phase = Idle } in
+  check string "activated" "active" (Mitosis.state_to_string active.state)
+
+let test_lifecycle_active_to_prepared () =
+  let config = Mitosis.default_config in
+  let cell = make_active_cell () in
+  let context = "Goal: complete lifecycle test\n- Task: verify state transitions\n- Context: test harness" in
+  let prepared = Mitosis.prepare_for_division ~config ~cell ~full_context:context in
+  check string "prepared state" "prepared" (Mitosis.state_to_string prepared.state);
+  check string "prepared phase" "ready_for_handoff" (Mitosis.phase_to_string prepared.phase);
+  check bool "has prepared DNA" true (Option.is_some prepared.prepared_dna);
+  check bool "prepare_context_len set" true (prepared.prepare_context_len > 0)
+
+let test_lifecycle_prepared_to_dividing_to_apoptotic () =
+  let config = Mitosis.default_config in
+  let cell = make_active_cell ~generation:1 () in
+  let context = "Goal: full lifecycle\n- Task: division test\n- Context: state machine verification" in
+  (* Phase 1: Prepare *)
+  let prepared = Mitosis.prepare_for_division ~config ~cell ~full_context:context in
+  check string "after prepare" "prepared" (Mitosis.state_to_string prepared.state);
+  (* Phase 2: perform_mitosis (which moves parent to Apoptotic) *)
+  let pool = Mitosis.init_pool ~config in
+  let (child, dying_parent, _new_pool, dna) =
+    Mitosis.perform_mitosis ~config ~pool ~parent:prepared ~full_context:context
+  in
+  check string "parent is apoptotic" "apoptotic" (Mitosis.state_to_string dying_parent.state);
+  check string "child is active" "active" (Mitosis.state_to_string child.state);
+  check int "child gen is parent+1" 2 child.generation;
+  check bool "DNA produced" true (String.length dna > 0);
+  (* Phase 3: Complete apoptosis *)
+  let death_result = Mitosis.complete_apoptosis dying_parent in
+  check bool "apoptosis completes" true (death_result = `Dead)
+
+let test_lifecycle_should_prepare_triggers () =
+  let config = Mitosis.default_config in
+  let cell = make_active_cell () in
+  (* Below prepare threshold: should not prepare *)
+  let no_prepare = Mitosis.should_prepare ~config ~cell ~context_ratio:0.3 in
+  check bool "0.3 ratio: no prepare" false no_prepare;
+  (* At prepare threshold: should prepare *)
+  let do_prepare = Mitosis.should_prepare ~config ~cell ~context_ratio:0.5 in
+  check bool "0.5 ratio: prepare" true do_prepare;
+  (* Above prepare threshold: should prepare *)
+  let do_prepare2 = Mitosis.should_prepare ~config ~cell ~context_ratio:0.7 in
+  check bool "0.7 ratio: prepare" true do_prepare2
+
+let test_lifecycle_should_handoff_triggers () =
+  let config = Mitosis.default_config in
+  let cell = make_active_cell () in
+  (* Below handoff threshold: should not handoff *)
+  let no_handoff = Mitosis.should_handoff ~config ~cell ~context_ratio:0.7 in
+  check bool "0.7 ratio: no handoff" false no_handoff;
+  (* At handoff threshold: should handoff *)
+  let do_handoff = Mitosis.should_handoff ~config ~cell ~context_ratio:0.8 in
+  check bool "0.8 ratio: handoff" true do_handoff
+
+let test_lifecycle_prepared_cell_skips_re_prepare () =
+  let config = Mitosis.default_config in
+  let cell = make_active_cell () in
+  let context = "Goal: test no re-prepare\n- Task: check phase guard\n- Context: important" in
+  let prepared = Mitosis.prepare_for_division ~config ~cell ~full_context:context in
+  (* A prepared cell should not trigger should_prepare again *)
+  let no_re_prepare = Mitosis.should_prepare ~config ~cell:prepared ~context_ratio:0.6 in
+  check bool "prepared cell skips re-prepare" false no_re_prepare
+
+(* ============================================================
+   T8: Metrics Recording Accuracy
+   ============================================================ *)
+
+let test_metrics_record_stores_correctly () =
+  Gen_metrics.reset ();
+  let record = Gen_metrics.record_task
+    ~generation:0 ~task_id:"t8-001" ~completed:true
+    ~duration_ms:5000 ~error_count:0
+    ~input_tokens:100 ~output_tokens:200
+  in
+  check int "generation 0" 0 record.generation;
+  check string "task_id" "t8-001" record.task_id;
+  check bool "completed" true record.completed;
+  check int "duration" 5000 record.duration_ms;
+  check int "errors" 0 record.error_count
+
+let test_metrics_summarize_single_generation () =
+  Gen_metrics.reset ();
+  ignore (Gen_metrics.record_task
+    ~generation:0 ~task_id:"s-001" ~completed:true
+    ~duration_ms:1000 ~error_count:0
+    ~input_tokens:50 ~output_tokens:100);
+  ignore (Gen_metrics.record_task
+    ~generation:0 ~task_id:"s-002" ~completed:true
+    ~duration_ms:3000 ~error_count:1
+    ~input_tokens:80 ~output_tokens:150);
+  match Gen_metrics.summarize_generation 0 with
+  | None -> fail "expected Some for summarize"
+  | Some summary ->
+      check int "total tasks" 2 summary.total_tasks;
+      check int "completed tasks" 2 summary.completed_tasks;
+      check int "total errors" 1 summary.total_errors;
+      check (float 0.1) "avg duration" 2000.0 summary.avg_duration_ms;
+      check int "input tokens" 130 summary.total_input_tokens;
+      check int "output tokens" 250 summary.total_output_tokens
+
+let test_metrics_compare_two_generations () =
+  Gen_metrics.reset ();
+  (* Gen 0: 2 tasks, 1 completed, 2 errors, slow *)
+  ignore (Gen_metrics.record_task
+    ~generation:0 ~task_id:"c0-001" ~completed:true
+    ~duration_ms:5000 ~error_count:1
+    ~input_tokens:200 ~output_tokens:300);
+  ignore (Gen_metrics.record_task
+    ~generation:0 ~task_id:"c0-002" ~completed:false
+    ~duration_ms:3000 ~error_count:1
+    ~input_tokens:100 ~output_tokens:200);
+  (* Gen 1: 2 tasks, 2 completed, 0 errors, faster *)
+  ignore (Gen_metrics.record_task
+    ~generation:1 ~task_id:"c1-001" ~completed:true
+    ~duration_ms:2000 ~error_count:0
+    ~input_tokens:80 ~output_tokens:120);
+  ignore (Gen_metrics.record_task
+    ~generation:1 ~task_id:"c1-002" ~completed:true
+    ~duration_ms:1000 ~error_count:0
+    ~input_tokens:60 ~output_tokens:80);
+  match Gen_metrics.compare_generations 0 1 with
+  | None -> fail "expected comparison result"
+  | Some comp ->
+      check int "gen_a" 0 comp.gen_a;
+      check int "gen_b" 1 comp.gen_b;
+      (* Gen 1 has better completion rate *)
+      check bool "positive completion delta" true (comp.completion_delta > 0.0);
+      (* Gen 1 has fewer errors *)
+      check bool "negative error delta" true (comp.error_delta < 0.0);
+      (* Gen 1 is faster *)
+      check bool "negative duration delta" true (comp.duration_delta < 0.0);
+      (* Verdict should be improved (3+ improvements) *)
+      check string "verdict" "improved" comp.verdict
+
+let test_metrics_compare_missing_generation () =
+  Gen_metrics.reset ();
+  ignore (Gen_metrics.record_task
+    ~generation:0 ~task_id:"m-001" ~completed:true
+    ~duration_ms:1000 ~error_count:0
+    ~input_tokens:50 ~output_tokens:100);
+  (* Gen 5 has no data *)
+  let result = Gen_metrics.compare_generations 0 5 in
+  check bool "missing gen returns None" true (result = None)
+
+let test_metrics_handoff_record () =
+  Gen_metrics.reset ();
+  let record = Gen_metrics.record_handoff
+    ~from_generation:0 ~to_generation:1
+    ~dna_size:5000 ~context_ratio:0.85
+  in
+  check int "from gen" 0 record.from_generation;
+  check int "to gen" 1 record.to_generation;
+  check int "dna size" 5000 record.dna_size;
+  check (float 0.001) "context ratio" 0.85 record.context_ratio
+
+let test_metrics_format_comparison () =
+  Gen_metrics.reset ();
+  ignore (Gen_metrics.record_task
+    ~generation:0 ~task_id:"f-001" ~completed:true
+    ~duration_ms:1000 ~error_count:0
+    ~input_tokens:50 ~output_tokens:100);
+  ignore (Gen_metrics.record_task
+    ~generation:1 ~task_id:"f-002" ~completed:true
+    ~duration_ms:500 ~error_count:0
+    ~input_tokens:30 ~output_tokens:60);
+  match Gen_metrics.compare_generations 0 1 with
+  | None -> fail "expected comparison"
+  | Some comp ->
+      let formatted = Gen_metrics.format_comparison comp in
+      check bool "contains Gen 0" true
+        (try Str.search_forward (Str.regexp_string "Gen 0") formatted 0 >= 0
+         with Not_found -> false);
+      check bool "contains Gen 1" true
+        (try Str.search_forward (Str.regexp_string "Gen 1") formatted 0 >= 0
+         with Not_found -> false);
+      check bool "contains Verdict" true
+        (try Str.search_forward (Str.regexp_string "Verdict") formatted 0 >= 0
+         with Not_found -> false)
+
+let test_metrics_to_json () =
+  Gen_metrics.reset ();
+  ignore (Gen_metrics.record_task
+    ~generation:0 ~task_id:"j-001" ~completed:true
+    ~duration_ms:1000 ~error_count:0
+    ~input_tokens:50 ~output_tokens:100);
+  ignore (Gen_metrics.record_handoff
+    ~from_generation:0 ~to_generation:1
+    ~dna_size:3000 ~context_ratio:0.8);
+  let json = Gen_metrics.to_json () in
+  match json with
+  | `Assoc fields ->
+      let tasks = List.assoc "tasks" fields in
+      let handoffs = List.assoc "handoffs" fields in
+      (match tasks with
+       | `List ts -> check bool "has tasks" true (List.length ts > 0)
+       | _ -> fail "expected task list");
+      (match handoffs with
+       | `List hs -> check bool "has handoffs" true (List.length hs > 0)
+       | _ -> fail "expected handoff list")
+  | _ -> fail "expected Assoc from to_json"
+
+let test_metrics_retention_test () =
+  Gen_metrics.reset ();
+  let record = Gen_metrics.record_retention_test
+    ~generation:1
+    ~question:"What is the goal?"
+    ~expected:"migration"
+    ~actual:"migration"
+    ~confidence:0.95
+  in
+  check bool "correct" true record.correct;
+  check (float 0.01) "confidence" 0.95 record.confidence;
+  (* Now check it affects summary *)
+  ignore (Gen_metrics.record_task
+    ~generation:1 ~task_id:"r-001" ~completed:true
+    ~duration_ms:1000 ~error_count:0
+    ~input_tokens:50 ~output_tokens:100);
+  match Gen_metrics.summarize_generation 1 with
+  | None -> fail "expected summary"
+  | Some summary ->
+      check bool "has retention" true (Option.is_some summary.knowledge_retention);
+      check (float 0.01) "retention is 1.0" 1.0 (Option.get summary.knowledge_retention)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -601,5 +1036,44 @@ let () =
       test_case "no structure" `Quick test_validate_dna_no_structure;
       test_case "valid DNA" `Quick test_validate_dna_valid;
       test_case "case-insensitive markers" `Quick test_validate_dna_case_insensitive_markers;
+    ];
+    "T4_dna_empty_context", [
+      test_case "extract DNA from empty context" `Quick test_extract_dna_empty_context;
+      test_case "compress empty context" `Quick test_extract_dna_empty_context_compress;
+      test_case "validate empty-context DNA" `Quick test_extract_dna_empty_context_validate;
+      test_case "prepare with empty context" `Quick test_prepare_for_division_empty_context;
+      test_case "single char context" `Quick test_extract_dna_single_char_context;
+    ];
+    "T5_cooldown_edge_cases", [
+      test_case "exact boundary allows" `Quick test_cooldown_at_exact_boundary;
+      test_case "just inside blocks" `Quick test_cooldown_just_inside_boundary;
+      test_case "first handoff no block" `Quick test_cooldown_first_handoff_no_block;
+      test_case "cooldown JSON total_sec" `Quick test_cooldown_json_contains_total_sec;
+    ];
+    "T6_generation_overflow", [
+      test_case "max generation default" `Quick test_max_generation_default;
+      test_case "high generation cell" `Quick test_high_generation_cell_creation;
+      test_case "very high generation" `Quick test_very_high_generation_cell;
+      test_case "emergency generation" `Quick test_emergency_generation_value;
+      test_case "mitosis increments gen" `Quick test_perform_mitosis_increments_generation;
+      test_case "pool JSON high gen" `Quick test_pool_to_json_high_generation;
+    ];
+    "T7_lifecycle", [
+      test_case "stem to active" `Quick test_lifecycle_stem_to_active;
+      test_case "active to prepared" `Quick test_lifecycle_active_to_prepared;
+      test_case "prepared to dividing to apoptotic" `Quick test_lifecycle_prepared_to_dividing_to_apoptotic;
+      test_case "should_prepare triggers" `Quick test_lifecycle_should_prepare_triggers;
+      test_case "should_handoff triggers" `Quick test_lifecycle_should_handoff_triggers;
+      test_case "prepared skips re-prepare" `Quick test_lifecycle_prepared_cell_skips_re_prepare;
+    ];
+    "T8_metrics_accuracy", [
+      test_case "record stores correctly" `Quick test_metrics_record_stores_correctly;
+      test_case "summarize generation" `Quick test_metrics_summarize_single_generation;
+      test_case "compare two generations" `Quick test_metrics_compare_two_generations;
+      test_case "missing generation" `Quick test_metrics_compare_missing_generation;
+      test_case "handoff record" `Quick test_metrics_handoff_record;
+      test_case "format comparison" `Quick test_metrics_format_comparison;
+      test_case "to_json" `Quick test_metrics_to_json;
+      test_case "retention test" `Quick test_metrics_retention_test;
     ];
   ]

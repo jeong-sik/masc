@@ -19,6 +19,9 @@
 
 open Types
 
+let keeper_debug =
+  try Sys.getenv "MASC_KEEPER_DEBUG" = "1" with Not_found -> false
+
 type 'a context = {
   config: Room.config;
   sw: Eio.Switch.t;
@@ -1260,7 +1263,8 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
 
 let read_meta config name : (keeper_meta option, string) result =
   let path = keeper_meta_path config name in
-  Printf.eprintf "[KEEPER-DEBUG] read_meta name=%s path=%s exists=%b\n%!" name path (Sys.file_exists path);
+  if keeper_debug then
+    Printf.eprintf "[KEEPER-DEBUG] read_meta name=%s path=%s exists=%b\n%!" name path (Sys.file_exists path);
   if not (Sys.file_exists path) then Ok None
   else
     match Safe_ops.read_json_file_safe path with
@@ -5020,9 +5024,9 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
           let meta_after_proactive =
             try maybe_emit_proactive ctx meta_current with _ -> meta_current
           in
-          Eio.Time.sleep
-            ctx.clock
-            (float_of_int (max 5 (min 300 meta_after_proactive.presence_keepalive_sec)));
+          let base = float_of_int (max 30 (min 300 meta_after_proactive.presence_keepalive_sec)) in
+          let jitter = base *. 0.2 *. Random.float 1.0 in
+          Eio.Time.sleep ctx.clock (base +. jitter);
           loop ()
         end
       in

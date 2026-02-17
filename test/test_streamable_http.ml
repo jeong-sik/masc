@@ -57,6 +57,27 @@ let test_handle_post_batch () =
   | _ ->
       Alcotest.fail "expected Json_batch"
 
+let test_handle_post_handler_dispatch () =
+  let called = ref 0 in
+  let handler (req : Yojson.Safe.t) =
+    incr called;
+    match req with
+    | `Assoc _ ->
+        let id = `Int 99 in
+        `Assoc [("jsonrpc", `String "2.0"); ("id", id); ("result", `Assoc [("ok", `Bool true)])]
+    | _ ->
+        `Null
+  in
+  let body = {|{"jsonrpc":"2.0","method":"ping","id":99}|} in
+  let (response, _session) = SH.handle_post ~body ~request_handler:handler () in
+  Alcotest.(check int) "handler called once" 1 !called;
+  match response with
+  | SH.Json_response json ->
+      let json_str = Yojson.Safe.to_string json in
+      Alcotest.(check bool) "handler result returned" true (String.length json_str > 0)
+  | _ ->
+      Alcotest.fail "expected Json_response"
+
 let test_handle_get () =
   match SH.handle_get () with
   | Ok session ->
@@ -87,6 +108,7 @@ let () =
       Alcotest.test_case "valid json" `Quick test_handle_post_valid_json;
       Alcotest.test_case "invalid json" `Quick test_handle_post_invalid_json;
       Alcotest.test_case "batch" `Quick test_handle_post_batch;
+      Alcotest.test_case "handler dispatch" `Quick test_handle_post_handler_dispatch;
     ];
     "Handle GET", [
       Alcotest.test_case "create session" `Quick test_handle_get;

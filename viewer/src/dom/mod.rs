@@ -3,6 +3,7 @@ pub mod actor_join;
 pub mod character_panel;
 pub mod connection;
 pub mod dice_log;
+pub mod endgame;
 pub mod narrative;
 pub mod overlay;
 pub mod turn_controls;
@@ -29,6 +30,7 @@ impl Plugin for DomBridgePlugin {
             .init_resource::<turn_runtime::TurnRuntimeCache>()
             .init_resource::<connection::ConnectionStatusCache>()
             .init_resource::<overlay::OverlayCache>()
+            .init_resource::<endgame::EndgameState>()
             .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
             // TRPG-specific DOM update systems
             .add_systems(Update, (
@@ -64,6 +66,7 @@ fn reset_trpg_dom_state(
     mut runtime_cache: ResMut<turn_runtime::TurnRuntimeCache>,
     mut connection_cache: ResMut<connection::ConnectionStatusCache>,
     mut overlay_cache: ResMut<overlay::OverlayCache>,
+    mut endgame_state: ResMut<endgame::EndgameState>,
 ) {
     character_cache.last_snapshot.clear();
     turn_cache.last_turn = 0;
@@ -71,6 +74,7 @@ fn reset_trpg_dom_state(
     runtime_cache.last_snapshot.clear();
     connection_cache.last_status.clear();
     *overlay_cache = overlay::OverlayCache::default();
+    endgame_state.triggered = false;
 
     #[cfg(target_arch = "wasm32")]
     {

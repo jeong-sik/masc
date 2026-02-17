@@ -92,3 +92,18 @@ pub struct TurnProgressState {
     pub last_result: String,
     pub last_event: String,
 }
+
+#[derive(Resource, Debug, Default)]
+pub struct ChoiceState {
+    pub active: bool,
+    pub character: String,
+    pub description: String,
+    pub options: Vec<String>,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct CombatState {
+    pub active: bool,
+    pub area: String,
+    pub enemies: Vec<String>,
+}

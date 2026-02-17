@@ -617,7 +617,7 @@ fn start_polling_loop(messages: Arc<Mutex<Vec<(String, String)>>>, active: Arc<A
                 }
             }
 
-            if sleep_ms(config::TRPG_POLL_INTERVAL_MS as i32).await.is_err() {
+            if sleep_ms(500).await.is_err() {
                 break;
             }
         }

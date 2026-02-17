@@ -25,6 +25,8 @@ impl Plugin for GameStatePlugin {
             .init_resource::<ConnectionStatus>()
             .init_resource::<OverlayState>()
             .init_resource::<TurnProgressState>()
+            .init_resource::<ChoiceState>()
+            .init_resource::<CombatState>()
             .init_resource::<http::ActiveTrpgRoom>()
             // Events (type registrations — always available)
             .add_message::<DiceRolled>()
@@ -56,6 +58,9 @@ impl Plugin for GameStatePlugin {
                 systems::apply_character_death,
                 systems::apply_weather_change,
                 systems::apply_mood_change,
+                systems::apply_choice_available,
+                systems::apply_choice_resolved,
+                systems::apply_combat_started,
             ).run_if(in_state(ViewerMode::Trpg)));
     }
 }

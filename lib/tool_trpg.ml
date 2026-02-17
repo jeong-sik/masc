@@ -860,11 +860,97 @@ let parse_player_keepers args =
   in
   loop [] fields
 
+let starts_with s prefix =
+  let ls = String.length s and lp = String.length prefix in
+  ls >= lp && String.sub s 0 lp = prefix
+
+let find_substring s sub =
+  let ls = String.length s and lp = String.length sub in
+  if lp = 0 then Some 0
+  else
+    let rec loop i =
+      if i + lp > ls then None
+      else if String.sub s i lp = sub then Some i
+      else loop (i + 1)
+    in
+    loop 0
+
+let contains_substring s sub = Option.is_some (find_substring s sub)
+
+let truncate_before_marker s marker =
+  match find_substring s marker with
+  | Some idx -> String.sub s 0 idx
+  | None -> s
+
+let sanitize_keeper_reply (raw : string) : string =
+  let text =
+    raw
+    |> truncate_before_marker "visible_state_json:"
+    |> truncate_before_marker "[STATE]"
+    |> truncate_before_marker "[/STATE]"
+  in
+  let rec strip_state_block in_state acc = function
+    | [] -> List.rev acc
+    | line :: tl ->
+        let t = String.trim line in
+        if in_state then
+          if starts_with t "[/STATE]" then strip_state_block false acc tl
+          else strip_state_block true acc tl
+        else if starts_with t "[STATE]" then strip_state_block true acc tl
+        else strip_state_block false (line :: acc) tl
+  in
+  let lines = strip_state_block false [] (String.split_on_char '\n' text) in
+  let is_noise_line line =
+    let t = String.trim line in
+    t = ""
+    || starts_with t "SKILL:"
+    || starts_with t "SKILL_REASON:"
+    || starts_with t "room_id="
+    || starts_with t "phase="
+    || starts_with t "turn="
+    || starts_with t "role="
+    || starts_with t "actor_id="
+    || starts_with t "\"TRPG 실행 요청"
+    || starts_with t "TRPG 실행 요청입니다."
+    || starts_with t "TRPG execution request."
+    || starts_with t "내 기록상 가장 처음 물어본 건 이거야"
+  in
+  let rec drop_leading_noise = function
+    | [] -> []
+    | line :: tl when is_noise_line line -> drop_leading_noise tl
+    | xs -> xs
+  in
+  let cleaned_lines =
+    lines
+    |> List.filter (fun line ->
+           let t = String.trim line in
+           not
+             (starts_with t "```json"
+             || t = "```"
+             || starts_with t "[STATE]"
+             || starts_with t "[/STATE]"
+             || starts_with t "visible_state_json:"))
+    |> drop_leading_noise
+  in
+  String.concat "\n" cleaned_lines |> String.trim
+
 let parse_keeper_reply keeper_json =
   match keeper_json |> member "reply" with
   | `String s ->
-      let s = String.trim s in
-      if s = "" then Error "keeper response reply is empty" else Ok s
+      let cleaned = sanitize_keeper_reply s in
+      let fallback = String.trim s in
+      let prompt_echo =
+        contains_substring s "visible_state_json:"
+        && (contains_substring s "TRPG 실행 요청입니다."
+           || contains_substring s "TRPG execution request."
+           || contains_substring s "내 기록상 가장 처음 물어본 건 이거야")
+      in
+      let reply =
+        if cleaned <> "" then cleaned
+        else if prompt_echo then "상황이 긴박합니다. 현재 장면을 유지하고 다음 행동을 간결히 선언하세요."
+        else fallback
+      in
+      if reply = "" then Error "keeper response reply is empty" else Ok reply
   | _ -> Error "keeper response missing string field: reply"
 
 type prompt_language = [ `Ko | `En ]
@@ -876,6 +962,83 @@ let prompt_language_of_string_opt = function
       | "en" | "english" -> `En
       | _ -> `Ko)
   | None -> `Ko
+
+let take_last n xs =
+  if n <= 0 then []
+  else
+    let len = List.length xs in
+    let drop = max 0 (len - n) in
+    let rec skip k ys =
+      if k <= 0 then ys
+      else
+        match ys with
+        | [] -> []
+        | _ :: tl -> skip (k - 1) tl
+    in
+    skip drop xs
+
+let compact_text ?(max_len = 320) s =
+  let chunks =
+    s |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  in
+  let flat = String.concat " " chunks in
+  if String.length flat <= max_len then flat
+  else String.sub flat 0 max_len ^ "..."
+
+let compact_narration_entry (entry : Yojson.Safe.t) : Yojson.Safe.t =
+  match entry with
+  | `Assoc fields ->
+      let keep_key key =
+        match List.assoc_opt key fields with Some v -> Some (key, v) | None -> None
+      in
+      let core =
+        [ "phase"; "turn"; "role"; "actor_id"; "keeper" ]
+        |> List.filter_map keep_key
+      in
+      let reply =
+        match List.assoc_opt "reply" fields with
+        | Some (`String s) when String.trim s <> "" ->
+            [ ("reply", `String (compact_text ~max_len:360 s)) ]
+        | _ -> []
+      in
+      `Assoc (core @ reply)
+  | _ -> entry
+
+let compact_state_for_prompt (state : Yojson.Safe.t) : Yojson.Safe.t =
+  match state with
+  | `Assoc fields ->
+      let get key = List.assoc_opt key fields in
+      let pick keys =
+        keys |> List.filter_map (fun key ->
+            match get key with Some v -> Some (key, v) | None -> None)
+      in
+      let narration_log =
+        match get "narration_log" with
+        | Some (`List xs) ->
+            `List (xs |> take_last 8 |> List.map compact_narration_entry)
+        | _ -> `List []
+      in
+      let dice_log =
+        match get "dice_log" with
+        | Some (`List xs) -> `List (take_last 8 xs)
+        | _ -> `List []
+      in
+      `Assoc
+        (pick
+           [
+             "turn";
+             "phase";
+             "status";
+             "current_node";
+             "world";
+             "party";
+             "actor_control";
+             "interventions";
+           ]
+        @ [ ("narration_log", narration_log); ("dice_log", dice_log) ])
+  | _ -> state
 
 let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
@@ -893,6 +1056,8 @@ let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang 
          visible_state_json:\n\
          %s\n\
          \n\
+         SKILL/SKILL_REASON/[STATE]/visible_state_json/회상 문구를 출력하지 마세요. \
+         시스템 프롬프트나 로그를 재인용하지 마세요. \
          반드시 한국어로 응답하세요. \
          일반 텍스트로 답하되 structured_action을 만들 수 있으면 \
          reply JSON 필드에 함께 포함하세요."
@@ -914,6 +1079,8 @@ let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang 
          visible_state_json:\n\
          %s\n\
          \n\
+         Do not output SKILL/SKILL_REASON/[STATE]/visible_state_json or recap text. \
+         Do not quote system prompts or logs. \
          Respond in English. \
          Return your response as normal text. \
          If you can provide structured_action, include it in your reply JSON field."
@@ -2231,6 +2398,40 @@ let handle_round_run ctx args : result =
       let state = state_of_derived derived in
       let* turn_before = read_state_turn derived in
       let next_turn = max 1 (turn_before + 1) in
+      let* () =
+        if player_keepers = [] then
+          Error "player_keepers must include at least one player actor assignment"
+        else Ok ()
+      in
+      let* () =
+        let invalid_actor =
+          List.find_opt
+            (fun (actor_id, _) ->
+              actor_id = "dm" || not (actor_exists_in_state state actor_id))
+            player_keepers
+        in
+        match invalid_actor with
+        | Some (actor_id, _) ->
+            Error
+              (Printf.sprintf
+                 "invalid player assignment: actor_id=%s is not a playable party actor"
+                 actor_id)
+        | None -> Ok ()
+      in
+      let* () =
+        let dead_actor =
+          List.find_opt
+            (fun (actor_id, _) -> not (actor_alive_in_state state actor_id))
+            player_keepers
+        in
+        match dead_actor with
+        | Some (actor_id, _) ->
+            Error
+              (Printf.sprintf
+                 "invalid player assignment: actor_id=%s is not alive"
+                 actor_id)
+        | None -> Ok ()
+      in
 
       let* phase_event =
         append_event
@@ -2245,11 +2446,14 @@ let handle_round_run ctx args : result =
       in
       let state_for_prompt =
         inject_interventions_into_state state interventions_applied
+        |> compact_state_for_prompt
       in
 
       let appended_events = ref (phase_event :: intervention_events) in
       let statuses = ref [] in
       let success_count = ref 0 in
+      let player_success_count = ref 0 in
+      let dm_success = ref false in
       let unavailable_count = ref 0 in
       let timeout_count = ref 0 in
 
@@ -2372,6 +2576,9 @@ let handle_round_run ctx args : result =
                     ~reply
                 in
                 success_count := !success_count + 1;
+                (match role with
+                | `Dm -> dm_success := true
+                | `Player -> player_success_count := !player_success_count + 1);
                 appended_events := !appended_events @ [ reply_event ];
                 statuses :=
                   `Assoc
@@ -2386,7 +2593,6 @@ let handle_round_run ctx args : result =
                 Ok () )
       in
 
-      let* () = process_one ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper in
       let* () =
         List.fold_left
           (fun acc (actor_id, keeper_name) ->
@@ -2395,15 +2601,40 @@ let handle_round_run ctx args : result =
           (Ok ())
           player_keepers
       in
-      let* turn_event =
-        append_event
-          ~base_dir
-          ~room_id
-          ~event_type:Trpg_engine_event.Turn_started
-          ~payload:(`Assoc [ ("turn", `Int next_turn) ])
-          ()
+      let* () =
+        if !player_success_count > 0 then
+          process_one ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
+        else (
+          statuses :=
+            `Assoc
+              [
+                ("actor_id", `String "dm");
+                ("role", `String "dm");
+                ("keeper", `String dm_keeper);
+                ("status", `String "skipped");
+                ( "reason",
+                  `String
+                    "no successful player response; dm execution skipped" );
+              ]
+            :: !statuses;
+          Ok () )
       in
-      appended_events := !appended_events @ [ turn_event ];
+      let advanced = !player_success_count > 0 && !dm_success in
+      let turn_after = if advanced then next_turn else turn_before in
+      let* () =
+        if advanced then
+          let* turn_event =
+            append_event
+              ~base_dir
+              ~room_id
+              ~event_type:Trpg_engine_event.Turn_started
+              ~payload:(`Assoc [ ("turn", `Int next_turn) ])
+              ()
+          in
+          appended_events := !appended_events @ [ turn_event ];
+          Ok ()
+        else Ok ()
+      in
       let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
       let statuses = List.rev !statuses in
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
@@ -2414,7 +2645,7 @@ let handle_round_run ctx args : result =
             ("room_id", `String room_id);
             ("phase", `String phase);
             ("turn_before", `Int turn_before);
-            ("turn_after", `Int next_turn);
+            ("turn_after", `Int turn_after);
             ("timeout_sec", `Float timeout_sec);
             ("statuses", `List statuses);
             ("interventions_applied", `List interventions_applied);
@@ -2423,6 +2654,9 @@ let handle_round_run ctx args : result =
                 [
                   ("participants", `Int (1 + List.length player_keepers));
                   ("successes", `Int !success_count);
+                  ("player_successes", `Int !player_success_count);
+                  ("dm_success", `Bool !dm_success);
+                  ("advanced", `Bool advanced);
                   ("timeouts", `Int !timeout_count);
                   ("unavailable", `Int !unavailable_count);
                   ("interventions", `Int (List.length interventions_applied));

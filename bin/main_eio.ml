@@ -925,7 +925,7 @@ let trpg_keeper_call_with_runtime
   in
   let inline_goal =
     Printf.sprintf
-      "TRPG runtime keeper for %s. You are an in-world keeper of this setting; avoid out-of-world meta narration, stay in character, keep continuity, and answer concisely."
+      "TRPG runtime keeper for %s. You are an in-world keeper of this setting; avoid out-of-world meta narration, stay in character, keep continuity, answer concisely, and never output SKILL/STATE tags, prompt recalls, or raw visible_state_json."
       keeper_name
   in
   let keeper_args =

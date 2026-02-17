@@ -85,7 +85,6 @@ pub mod paths {
     pub const SFX_TURN_ADVANCE: &str = "audio/sfx_turn_advance.ogg";
     pub const SFX_COMBAT_START: &str = "audio/sfx_combat_start.ogg";
     pub const SFX_DEATH: &str = "audio/sfx_death.ogg";
-    pub const SFX_ITEM_ACQUIRE: &str = "audio/sfx_item_acquire.ogg";
 }
 
 /// Map mood string to BGM path.

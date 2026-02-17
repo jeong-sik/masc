@@ -9,26 +9,6 @@ pub const MASC_MCP_URL: &str = "";
 
 pub const DEFAULT_ROOM_ID: &str = "default";
 
-/// Polling interval for TRPG stream fallback (milliseconds).
-/// Backend exposes GET /api/v1/trpg/stream (JSON), no dedicated SSE endpoint.
-pub const TRPG_POLL_INTERVAL_MS: u64 = 2000;
-/// Legacy TRPG Engine URL (for direct mode)
-#[cfg(debug_assertions)]
-pub const TRPG_ENGINE_URL: &str = "http://localhost:8000";
-
-#[cfg(not(debug_assertions))]
-pub const TRPG_ENGINE_URL: &str = "";
-
-// ─── Backend Mode ───────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrpgBackendMode {
-    MascApi,      // Uses /api/v1/trpg endpoints (default)
-    LegacyEngine, // Uses direct engine endpoints (if needed)
-}
-
-pub const DEFAULT_TRPG_BACKEND: TrpgBackendMode = TrpgBackendMode::MascApi;
-
 // ─── Room ID Management ─────────────────────
 
 /// Get current room ID from DOM attribute (set by dashboard/lobby) or URL param.
@@ -151,16 +131,6 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
     )
 }
 
-/// SSE poll endpoint (JSON event stream) for browsers that can consume
-/// EventSource from `/api/v1/trpg/stream/sse`.
-pub fn trpg_stream_sse_url() -> String {
-    format!(
-        "{}/api/v1/trpg/stream/sse?room_id={}",
-        MASC_MCP_URL,
-        current_room_id()
-    )
-}
-
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
         ViewerMode::Trpg => Some(format!(
@@ -193,35 +163,3 @@ pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
     }
 }
 
-/// Helper to get full room URL for external links (if needed)
-pub fn trpg_room_url(path: &str) -> String {
-    format!(
-        "{}/rooms/{}/{}",
-        MASC_MCP_URL,
-        current_room_id(),
-        path.trim_start_matches('/')
-    )
-}
-
-// ─── Actor ID Management ─────────────────────
-
-/// Get current actor ID from dashboard attribute (selected player in lobby).
-/// This serves as a fallback when TurnProgressState doesn't have an active actor.
-pub fn current_actor_id() -> Option<String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            // 1. Try dashboard attribute (set by lobby/character selection)
-            if let Some(el) = doc.get_element_by_id("dashboard") {
-                if let Some(actor) = el.get_attribute("data-current-actor") {
-                    let actor = actor.trim().to_string();
-                    if !actor.is_empty() {
-                        return Some(actor);
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}

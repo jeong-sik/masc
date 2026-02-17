@@ -215,7 +215,7 @@ fn map_snapshot_result(result: &Value) -> String {
 }
 
 #[allow(dead_code)]
-fn map_snapshot_dice_roll(entry: &Value, fallback_turn: u32, fallback_phase: &str) -> Option<(String, String)> {
+fn map_snapshot_dice_roll(entry: &Value, fallback_turn: u32, _fallback_phase: &str) -> Option<(String, String)> {
     if !entry.is_object() {
         return None;
     }
@@ -770,7 +770,7 @@ fn decode_stream_events(
     }
 
     let out = decode_snapshot_events(&parsed, state);
-    let mut max_seq = 0_i64;
+    let max_seq = 0_i64;
     Ok((max_seq, out))
 }
 

@@ -40,11 +40,11 @@
 |----|-----------|-------|-----|--------|
 | P1-1 | mitosis.ml:71 | Time_based 300.0 magic number | Named constant | DONE |
 | P1-2 | mitosis.ml:89 | ID generation uses mod 10000 | Use UUID (Uuidm) | DONE |
-| P1-3 | tool_mitosis.ml | No rate limiting for handoffs | Add cooldown | OPEN |
-| P1-4 | - | No MCP tool for metrics query | Add masc_metrics_compare | OPEN |
-| P1-5 | - | Spawn timeout hardcoded 600s | Make configurable | OPEN |
-| P1-6 | mitosis.ml | No logging/tracing | Add structured logs | OPEN |
-| P1-7 | - | DNA quality not validated before handoff | Add check | OPEN |
+| P1-3 | tool_mitosis.ml | No rate limiting for handoffs | Add cooldown | DONE — handoff cooldown via MASC_MITOSIS_HANDOFF_COOLDOWN_SEC (default 60s) |
+| P1-4 | - | No MCP tool for metrics query | Add masc_metrics_compare | DONE — already exists: handle_metrics_compare, handle_metrics_record in tool_mitosis.ml |
+| P1-5 | - | Spawn timeout hardcoded 600s | Make configurable | DONE — already configurable via MASC_SPAWN_TIMEOUT_SEC env var |
+| P1-6 | mitosis.ml | No logging/tracing | Add structured logs | DONE — structured logging for state transitions via log_state_transition |
+| P1-7 | - | DNA quality not validated before handoff | Add check | DONE — semantic DNA validation: goal markers, whitespace ratio, structure checks |
 
 ### P2 - Nice to Have (Could Fix)
 
@@ -109,7 +109,7 @@
 - **Started**: 2026-02-01
 - **Current Iteration**: 9
 - **P0 Completed**: 4/5 (P0-4 addressed via cascade fallback)
-- **P1 Completed**: 2/7
+- **P1 Completed**: 7/7
 - **P2 Completed**: 0/5
 - **Test Gaps Closed**: 3/8 (T1, T2, T3)
-- **Items Remaining**: P1-3..P1-7, P2-1..P2-5, T4..T8
+- **Items Remaining**: P2-1..P2-5, T4..T8

@@ -79,7 +79,9 @@ let init_state ~config =
   `Assoc
     [
       ("status", `String "lobby");
+      ("phase", `String "lobby");
       ("turn", `Int 1);
+      ("last_event_ts", `Null);
       ("current_node", `Null);
       ("party", if party = `Null then `Assoc [] else party);
       ("actor_control", `Assoc []);
@@ -390,26 +392,52 @@ let apply_node_advanced ~state ~event =
   | _ -> state
 
 let apply_event ~state ~(event : Trpg_engine_event.t) =
+  (* Track last_event_ts for every event — enables staleness detection *)
+  let state =
+    match state with
+    | `Assoc fields ->
+        `Assoc (assoc_put "last_event_ts" (`String event.ts) fields)
+    | _ -> state
+  in
   match event.event_type with
   | Trpg_engine_event.Room_created ->
       (match state with
-      | `Assoc fields -> `Assoc (assoc_put "status" (`String "lobby") fields)
+      | `Assoc fields ->
+          `Assoc (fields
+            |> assoc_put "status" (`String "lobby")
+            |> assoc_put "phase" (`String "lobby"))
       | _ -> state)
   | Trpg_engine_event.Room_started ->
       (match state with
-      | `Assoc fields -> `Assoc (assoc_put "status" (`String "active") fields)
+      | `Assoc fields ->
+          `Assoc (fields
+            |> assoc_put "status" (`String "active")
+            |> assoc_put "phase" (`String "briefing"))
       | _ -> state)
   | Trpg_engine_event.Room_ended ->
       (match state with
-      | `Assoc fields -> `Assoc (assoc_put "status" (`String "ended") fields)
+      | `Assoc fields ->
+          `Assoc (fields
+            |> assoc_put "status" (`String "ended")
+            |> assoc_put "phase" (`String "ended"))
       | _ -> state)
   | Trpg_engine_event.Turn_started ->
       let next_turn =
         event.payload |> member "turn" |> to_int_option |> Option.value ~default:1
       in
       (match state with
-      | `Assoc fields -> `Assoc (assoc_put "turn" (`Int next_turn) fields)
+      | `Assoc fields ->
+          `Assoc (fields
+            |> assoc_put "turn" (`Int next_turn)
+            |> assoc_put "phase" (`String "round"))
       | _ -> state)
+  | Trpg_engine_event.Phase_changed ->
+      let phase = get_string_opt "phase" event.payload |> Option.value ~default:"" in
+      if phase = "" then state
+      else
+        (match state with
+        | `Assoc fields -> `Assoc (assoc_put "phase" (`String phase) fields)
+        | _ -> state)
   | Trpg_engine_event.Dice_rolled | Trpg_engine_event.Turn_action_resolved ->
       append_to_list "dice_log" event.payload state
   | Trpg_engine_event.Narration_posted ->
@@ -423,7 +451,6 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Actor_deleted -> apply_actor_deleted ~state ~event
   | Trpg_engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
   | Trpg_engine_event.Actor_released -> apply_actor_released ~state ~event
-  | Trpg_engine_event.Phase_changed
   | Trpg_engine_event.Turn_action_proposed
   | Trpg_engine_event.Turn_timeout
   | Trpg_engine_event.Keeper_unavailable

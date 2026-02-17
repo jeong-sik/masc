@@ -252,6 +252,13 @@
                     </div>
                     <!-- Turn Runtime: live game status grid (populated by turn_runtime.rs) -->
                     <div id="turn-runtime"></div>
+                    <div id="state-legend" class="state-legend">
+                        <span class="state-chip state-running">RUNNING: 라운드 순환 중</span>
+                        <span class="state-chip state-stopped">STOPPED: 일시 정지/재개 대기</span>
+                        <span class="state-chip state-lobby">LOBBY: 세션 시작 전</span>
+                        <span class="state-chip state-ended">ENDED: 세션 종료</span>
+                        <span class="state-chip state-unavailable">UNAVAILABLE: 연결/키퍼 오류</span>
+                    </div>
                     <!-- Turn Controls: advance turn (Keeper/GM only) -->
                     <div id="turn-controls" style="display:none">
                         <button id="advance-turn-btn" title="Run next TRPG round">Run Round</button>

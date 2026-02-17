@@ -142,10 +142,67 @@ let test_round_run_timeout_policy () =
   let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
   Alcotest.(check bool) "round_run success despite timeout" true ok;
   let json = parse_json_exn body in
+  let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
+  let timeout_status =
+    List.find_opt
+      (fun s ->
+        s |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string = "timeout")
+      statuses
+  in
+  (match timeout_status with
+  | Some status_json ->
+      Alcotest.(check string)
+        "timeout status reason"
+        "timeout"
+        (status_json |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string)
+        "timeout status stage"
+        "masc_keeper_msg"
+        (status_json |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "timeout status is missing");
   let summary = Yojson.Safe.Util.member "summary" json in
   Alcotest.(check int) "timeouts" 1 (Yojson.Safe.Util.member "timeouts" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "unavailable" 1 (Yojson.Safe.Util.member "unavailable" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "successes" 1 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
+  let events = json |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list in
+  let timeout_event =
+    List.find_opt
+      (fun event_json ->
+        event_json |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string
+        = "turn.timeout")
+      events
+  in
+  (match timeout_event with
+  | Some event_json ->
+      let payload = event_json |> Yojson.Safe.Util.member "payload" in
+      Alcotest.(check string)
+        "turn.timeout payload reason"
+        "timeout"
+        (payload |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string)
+        "turn.timeout payload stage"
+        "masc_keeper_msg"
+        (payload |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "turn.timeout event is missing");
+  let unavailable_event =
+    List.find_opt
+      (fun event_json ->
+        event_json |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string
+        = "keeper.unavailable")
+      events
+  in
+  (match unavailable_event with
+  | Some event_json ->
+      let payload = event_json |> Yojson.Safe.Util.member "payload" in
+      Alcotest.(check string)
+        "keeper.unavailable payload reason"
+        "timeout"
+        (payload |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string)
+        "keeper.unavailable payload stage"
+        "masc_keeper_msg"
+        (payload |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "keeper.unavailable event is missing");
 
   let _, timeout_stream =
     dispatch_exn ctx ~name:"masc_trpg_stream"

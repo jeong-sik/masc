@@ -1,6 +1,7 @@
 pub mod action_panel;
 pub mod actor_join;
 pub mod character_panel;
+pub mod session_history;
 pub mod choice_panel;
 pub mod connection;
 pub mod escape;
@@ -28,7 +29,8 @@ impl Plugin for DomBridgePlugin {
     fn build(&self, app: &mut App) {
         app
             // DOM caches for change detection (inert when unused)
-            .init_resource::<character_panel::CharacterPanelCache>()
+        .init_resource::<character_panel::CharacterPanelCache>()
+            .init_resource::<session_history::SessionHistoryCache>()
             .init_resource::<turn_phase::TurnPhaseCache>()
             .init_resource::<turn_runtime::TurnRuntimeCache>()
             .init_resource::<connection::ConnectionStatusCache>()
@@ -39,6 +41,7 @@ impl Plugin for DomBridgePlugin {
             .add_systems(Update, (
                 narrative::update_narrative_dom,
                 dice_log::update_dice_log_dom,
+                session_history::update_session_history_dom,
                 character_panel::update_character_panel_dom,
                 choice_panel::update_choice_dom,
                 gameplay_events::update_gameplay_events_dom,
@@ -91,6 +94,9 @@ fn reset_trpg_dom_state(
             el.set_inner_html("");
         }
         if let Some(el) = document.get_element_by_id("dice-log") {
+            el.set_inner_html("");
+        }
+        if let Some(el) = document.get_element_by_id("session-history") {
             el.set_inner_html("");
         }
         if let Some(el) = document.get_element_by_id("character-panel") {

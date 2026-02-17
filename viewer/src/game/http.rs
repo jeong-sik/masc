@@ -2,11 +2,12 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::config;
+use crate::game::events::*;
 use crate::game::components::{Actor, Condition, Equipment, Skill, Stats};
 use crate::game::state::{ConnectionStatus, MapState, RoomState, TurnPhase, TurnProgressState};
 
@@ -119,6 +120,8 @@ pub struct GameStateResponse {
     pub current_area: String,
     #[serde(default)]
     pub area_label: String,
+    #[serde(default)]
+    pub dice_log: Vec<DiceRollPayload>,
 }
 
 // ─── Shared Buffer Resource ──────────────────
@@ -239,6 +242,9 @@ pub fn apply_initial_state(
     mut map_state: ResMut<MapState>,
     mut turn_progress: ResMut<TurnProgressState>,
     mut connection: ResMut<ConnectionStatus>,
+    mut dice_writer: MessageWriter<DiceRolled>,
+    mut turn_writer: MessageWriter<TurnAdvanced>,
+    mut progress_writer: MessageWriter<TurnProgressUpdated>,
 ) {
     if buffer.consumed {
         return;
@@ -261,6 +267,45 @@ pub fn apply_initial_state(
         .unwrap_or(false);
 
     let actor_ids: Vec<String> = state.characters.iter().map(|ch| ch.id.clone()).collect();
+    if let Some(room) = &state.room {
+        if !state_unavailable {
+            let status = normalize_room_status(&room.status);
+            let room_event = if matches!(
+                status.as_str(),
+                "ended" | "completed" | "done" | "retired" | "closed"
+            ) {
+                "room.ended"
+            } else {
+                "room.started"
+            };
+            let selected_players = actor_ids
+                .iter()
+                .filter(|id| id.as_str() != "dm")
+                .cloned()
+                .collect::<Vec<_>>();
+            progress_writer.write(TurnProgressUpdated(TurnProgressPayload {
+                event_type: room_event.to_string(),
+                turn: room.turn,
+                phase: room.phase.clone(),
+                actor_id: "".to_string(),
+                keeper: "".to_string(),
+                role: "".to_string(),
+                reason: "".to_string(),
+                room_status: room.status.clone(),
+                dm_keeper: "".to_string(),
+                selected_player_ids: selected_players,
+            }));
+            if room.turn > 0 {
+                turn_writer.write(TurnAdvanced(TurnAdvancePayload {
+                    turn: room.turn,
+                    phase: room.phase.clone(),
+                }));
+            }
+            for roll in &state.dice_log {
+                dice_writer.write(DiceRolled(roll.clone()));
+            }
+        }
+    }
 
     for entity in &actors {
         commands.entity(entity).despawn();
@@ -447,14 +492,19 @@ fn normalize_state_response(root: Value) -> Result<GameStateResponse, String> {
         return Ok(parse_masc_state_response(&root));
     }
 
+    if root.get("dice_log").is_some() || root.get("status").is_some() {
+        return Ok(parse_masc_state_response(&root));
+    }
+
     Err("unsupported state payload shape".to_string())
 }
 
 fn parse_masc_state_response(root: &Value) -> GameStateResponse {
-    let state = root.get("state").unwrap_or(&Value::Null);
+    let state = root.get("state").unwrap_or(root);
 
     let room_id = root
         .get("room_id")
+        .or_else(|| state.get("room_id"))
         .and_then(Value::as_str)
         .unwrap_or(config::DEFAULT_ROOM_ID)
         .to_string();
@@ -483,12 +533,14 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         .and_then(|v| serde_json::from_value::<Vec<CharacterData>>(v).ok())
         .filter(|rows| !rows.is_empty())
         .unwrap_or_else(|| parse_party_characters(state));
+    let dice_log = parse_dice_log(root).unwrap_or_else(|| parse_dice_log(state).unwrap_or_default());
 
     GameStateResponse {
         room: Some(RoomResponse {
             id: room_id,
             status: state
                 .get("status")
+                .or_else(|| root.get("status"))
                 .and_then(Value::as_str)
                 .unwrap_or("idle")
                 .to_string(),
@@ -508,7 +560,127 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         characters,
         current_area,
         area_label,
+        dice_log,
     }
+}
+
+fn parse_dice_log(root: &Value) -> Option<Vec<DiceRollPayload>> {
+    let entries = root.get("dice_log")?.as_array()?;
+    let fallback_turn = root.get("turn").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let fallback_phase = root
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("dm_narration");
+
+    let mut output = Vec::new();
+    for entry in entries {
+        if let Some(row) = parse_dice_log_entry(entry, fallback_turn, fallback_phase) {
+            output.push(row);
+        }
+    }
+    Some(output)
+}
+
+fn parse_dice_log_entry(
+    entry: &Value,
+    fallback_turn: u32,
+    fallback_phase: &str,
+) -> Option<DiceRollPayload> {
+    if !entry.is_object() {
+        return None;
+    }
+
+    let turn = entry
+        .get("turn")
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(fallback_turn);
+    let character = entry
+        .get("character")
+        .or_else(|| entry.get("actor_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let action = entry
+        .get("action")
+        .or_else(|| entry.get("result"))
+        .and_then(Value::as_str)
+        .unwrap_or("manual_roll")
+        .to_string();
+    let bonus = entry
+        .get("bonus")
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok())
+        .unwrap_or(0);
+    let raw_d20 = entry
+        .get("raw_d20")
+        .or_else(|| entry.get("d20"))
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok())
+        .unwrap_or(0);
+    let dc = entry
+        .get("dc")
+        .or_else(|| entry.get("difficulty"))
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok())
+        .unwrap_or(0);
+    let total = entry
+        .get("total")
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok())
+        .unwrap_or(raw_d20 + bonus);
+    let raw_result = entry
+        .get("label")
+        .or_else(|| entry.get("tier"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let result = map_dice_result_label(raw_result);
+
+    Some(DiceRollPayload {
+        turn,
+        character,
+        action,
+        d20: raw_d20,
+        bonus,
+        total,
+        dc,
+        result,
+        note: entry.get("note").and_then(Value::as_str).map(str::to_string),
+    })
+}
+
+fn map_dice_result_label(raw: &str) -> String {
+    let raw = raw.trim().to_ascii_lowercase();
+    match raw.as_str() {
+        "critical_fail" | "critical failure" | "fumble" | "대실패" => "critical_fail".to_string(),
+        "fail" | "failure" | "실패" => "fail".to_string(),
+        "partial" | "partial_success" | "부분성공" => "partial_success".to_string(),
+        "success" | "성공" => "success".to_string(),
+        "great" | "great_success" | "대성공" => "great_success".to_string(),
+        "miracle" | "기적" => "miracle".to_string(),
+        "대승리" => "miracle".to_string(),
+        "pass" | "passed" | "true" | "1" | "success!" => "success".to_string(),
+        "false" | "0" => "fail".to_string(),
+        _ => {
+            let passed = entry_passed_marker(&raw);
+            if passed {
+                "success"
+            } else {
+                "fail"
+            }
+            .to_string()
+        }
+    }
+}
+
+fn entry_passed_marker(raw: &str) -> bool {
+    let compact = raw.replace(['\n', '\r', '\t'], " ");
+    compact
+        .split_whitespace()
+        .find(|token| !token.is_empty())
+        .is_some_and(|token| {
+            matches!(token, "pass" | "passed" | "success" | "성공" | "true" | "1")
+        })
 }
 
 fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
@@ -731,6 +903,7 @@ fn unavailable_game_state(room_id: &str) -> GameStateResponse {
         characters: Vec::new(),
         current_area: "".to_string(),
         area_label: "".to_string(),
+        dice_log: Vec::new(),
     }
 }
 

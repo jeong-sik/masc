@@ -92,7 +92,6 @@ pub fn sync_join_panel_interaction_state(
                     | "outcome_narration"
                     | "state_update"
                     | "transition"
-                    | "paused"
             )
         }
 

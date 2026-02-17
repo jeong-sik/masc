@@ -39,7 +39,7 @@ fn room_status_class(status: &str) -> &'static str {
         }
         "dm_narration" | "party_discussion" | "action_declaration" | "dice_resolution"
         | "outcome_narration" | "state_update" | "transition" => "status-active",
-        "paused" => "status-paused",
+        "paused" | "stopped" => "status-paused",
         "ended" => "status-ended",
         "unavailable" => "status-unavailable",
         "loading" => "status-loading",
@@ -54,6 +54,7 @@ fn room_status_label(status: &str) -> &'static str {
         "dm_narration" | "party_discussion" | "action_declaration" | "dice_resolution"
         | "outcome_narration" | "state_update" | "transition" => "RUNNING",
         "paused" => "PAUSED",
+        "stopped" => "STOPPED",
         "ended" => "ENDED",
         "idle" => "IDLE",
         "loading" => "LOADING",

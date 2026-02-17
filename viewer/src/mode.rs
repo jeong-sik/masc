@@ -2338,6 +2338,14 @@ fn set_panel_active(doc: &web_sys::Document, id: &str, active: bool) {
         } else {
             let _ = class_list.remove_1("active");
         }
+
+        if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = if active {
+                html_el.style().set_property("display", "block")
+            } else {
+                html_el.style().set_property("display", "none")
+            };
+        }
     }
 }
 

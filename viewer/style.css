@@ -1910,6 +1910,7 @@ body.mode-lobby #dashboard {
 
 /* Mode Panels (shared) */
 .mode-panel {
+    display: none;
     position: fixed;
     inset: 0;
     background: var(--bg-deep, #0a0a12);
@@ -1917,6 +1918,10 @@ body.mode-lobby #dashboard {
     overflow-y: auto;
     padding: 24px;
     z-index: 100;
+}
+
+.mode-panel.active {
+    display: block;
 }
 
 .mode-panel-header {

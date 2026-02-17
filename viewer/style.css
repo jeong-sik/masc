@@ -2697,3 +2697,12 @@ body.mode-lobby #dashboard {
 .item-block strong { color: var(--accent-primary, #c4a265); }
 .death-block { border-left: 3px solid #e74c3c; padding-left: 0.8em; color: #e74c3c; font-weight: bold; }
 .death-block strong { color: #ff6b6b; }
+
+/* Actor lifecycle entries in narrative log */
+.actor-spawn { border-left: 3px solid #27ae60; padding-left: 0.8em; }
+.actor-delete { border-left: 3px solid #7f8c8d; padding-left: 0.8em; opacity: 0.8; }
+.actor-claim { border-left: 3px solid #2980b9; padding-left: 0.8em; }
+.actor-release { border-left: 3px solid #8e44ad; padding-left: 0.8em; }
+.actor-icon { font-weight: bold; margin-right: 0.3em; }
+.scene-transition { border-left: 3px solid #f39c12; padding-left: 0.8em; font-style: italic; }
+.scene-icon { font-weight: bold; margin-right: 0.3em; color: #f39c12; }

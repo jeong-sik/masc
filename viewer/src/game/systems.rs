@@ -418,3 +418,25 @@ pub fn apply_actor_released(
         }
     }
 }
+
+/// Mark room as ended when RoomEnded event fires.
+pub fn apply_room_ended(
+    mut events: MessageReader<RoomEnded>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for RoomEnded(payload) in events.read() {
+        if room_state.id == payload.room_id || payload.room_id.is_empty() {
+            room_state.status = "ended".to_string();
+        }
+    }
+}
+
+/// Update room state on scene transitions.
+pub fn apply_scene_transitioned(
+    mut events: MessageReader<SceneTransitioned>,
+    mut room_state: ResMut<RoomState>,
+) {
+    for SceneTransitioned(payload) in events.read() {
+        room_state.current_scenario = payload.to_scene.clone();
+    }
+}

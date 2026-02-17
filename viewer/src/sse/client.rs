@@ -88,6 +88,7 @@ struct TrpgStreamEvent {
 struct TrpgMapperState {
     last_turn: u32,
     last_phase: String,
+    snapshot_signature: Option<String>,
 }
 
 impl Default for TrpgMapperState {
@@ -95,6 +96,7 @@ impl Default for TrpgMapperState {
         Self {
             last_turn: 1,
             last_phase: "dm_narration".to_string(),
+            snapshot_signature: None,
         }
     }
 }
@@ -134,7 +136,140 @@ fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
         .and_then(Value::as_str)
         .or(actor_id)
         .unwrap_or("")
+    .to_string()
+}
+
+#[allow(dead_code)]
+fn snapshot_fingerprint(snapshot: &Value) -> String {
+    serde_json::to_string(snapshot).unwrap_or_else(|_| snapshot.to_string())
+}
+
+#[allow(dead_code)]
+fn snapshot_root<'a>(root: &'a Value) -> &'a Value {
+    root.get("state").filter(|s| !s.is_null()).unwrap_or(root)
+}
+
+#[allow(dead_code)]
+fn snapshot_status(root: &Value) -> String {
+    let source = snapshot_root(root);
+    source
+        .get("status")
+        .and_then(Value::as_str)
+        .or_else(|| root.get("status").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+#[allow(dead_code)]
+fn snapshot_turn(root: &Value, fallback: u32) -> u32 {
+    value_to_u32(snapshot_root(root).get("turn"), fallback)
+}
+
+#[allow(dead_code)]
+fn snapshot_phase(root: &Value, fallback: &str) -> String {
+    snapshot_root(root)
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or(fallback)
         .to_string()
+}
+
+#[allow(dead_code)]
+fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
+    let source = root.get("dice_log").or_else(|| snapshot_root(root).get("dice_log"));
+    source
+        .and_then(Value::as_array)
+        .map(|rows| rows.clone())
+        .unwrap_or_default()
+}
+
+#[allow(dead_code)]
+fn map_snapshot_result(result: &Value) -> String {
+    let raw = result
+        .get("label")
+        .and_then(Value::as_str)
+        .or_else(|| result.get("tier").and_then(Value::as_str))
+        .or_else(|| result.get("result").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match raw.as_str() {
+        "critical_fail" => "critical_fail",
+        "fail" => "fail",
+        "partial" | "partial_success" | "부분성공" => "partial_success",
+        "success" | "성공" => "success",
+        "great" | "great_success" | "대성공" => "great_success",
+        "miracle" | "기적" => "miracle",
+        "success!" => "success",
+        _ => {
+            let passed = result.get("passed").and_then(Value::as_bool).unwrap_or(false);
+            if passed {
+                "success"
+            } else {
+                "fail"
+            }
+        }
+    }
+    .to_string()
+}
+
+#[allow(dead_code)]
+fn map_snapshot_dice_roll(entry: &Value, fallback_turn: u32, fallback_phase: &str) -> Option<(String, String)> {
+    if !entry.is_object() {
+        return None;
+    }
+
+    let character = entry
+        .get("character")
+        .or_else(|| entry.get("actor_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let action = entry
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("manual_roll")
+        .to_string();
+    let mapped = json!({
+        "turn": value_to_u32(entry.get("turn"), fallback_turn),
+        "character": character,
+        "action": action,
+        "d20": value_to_i32(entry.get("raw_d20"), value_to_i32(entry.get("d20"), 0)),
+        "bonus": value_to_i32(entry.get("bonus"), 0),
+        "total": value_to_i32(entry.get("total"), 0),
+        "dc": value_to_i32(entry.get("dc"), 0),
+        "result": map_snapshot_result(entry),
+        "note": entry.get("note").and_then(Value::as_str).unwrap_or("")
+    });
+    Some(("dice_roll".to_string(), mapped.to_string()))
+}
+
+#[allow(dead_code)]
+fn snapshot_room_status_progress_payload(
+    root: &Value,
+    status: &str,
+    fallback_turn: u32,
+    fallback_phase: &str,
+) -> (String, String) {
+    let turn = snapshot_turn(root, fallback_turn);
+    let phase = snapshot_phase(root, fallback_phase);
+    let event_type = match status {
+        "ended" | "completed" | "done" | "retired" | "closed" => "room.ended",
+        _ => "room.started",
+    };
+    let payload = json!({
+        "event_type": event_type,
+        "turn": turn,
+        "phase": phase,
+        "room_status": status,
+        "actor_id": "",
+        "keeper": "",
+        "role": "",
+        "reason": "",
+        "dm_keeper": snapshot_root(root).get("dm_keeper").and_then(Value::as_str).unwrap_or(""),
+    });
+    (event_type.to_string(), payload.to_string())
 }
 
 #[allow(dead_code)]
@@ -184,7 +319,11 @@ fn map_turn_progress_event(
             "event_type": event_type,
             "turn": turn,
             "phase": phase,
-            "room_status": "active"
+            "room_status": payload
+                .get("room_status")
+                .or_else(|| payload.get("status"))
+                .and_then(Value::as_str)
+                .unwrap_or("active")
         }),
         "room.ended" => json!({
             "event_type": event_type,
@@ -552,26 +691,86 @@ fn map_trpg_event(
 }
 
 #[allow(dead_code)]
+fn decode_snapshot_events(
+    body: &Value,
+    state: &mut TrpgMapperState,
+) -> Vec<(String, String)> {
+    let status = snapshot_status(body);
+    let signature = snapshot_fingerprint(body);
+    if state.snapshot_signature.as_deref() == Some(signature.as_str()) {
+        return Vec::new();
+    }
+    state.snapshot_signature = Some(signature);
+
+    let status = if status.is_empty() {
+        "unknown".to_string()
+    } else {
+        status
+    };
+    let turn = snapshot_turn(body, state.last_turn);
+    if turn > 0 {
+        state.last_turn = turn;
+    }
+    let phase = snapshot_phase(body, &state.last_phase);
+    if !phase.is_empty() {
+        state.last_phase = phase.clone();
+    }
+
+    let mut out = Vec::new();
+
+    out.push(snapshot_room_status_progress_payload(
+        body,
+        &status,
+        turn,
+        &phase,
+    ));
+
+    if turn > 0 {
+        out.push((
+            "turn_advance".to_string(),
+            json!({ "turn": turn, "phase": phase.clone() }).to_string(),
+        ));
+    }
+
+    for entry in snapshot_dice_entries(body) {
+        if let Some(mapped) = map_snapshot_dice_roll(&entry, turn, &phase) {
+            out.push(mapped);
+        }
+    }
+
+    out
+}
+
+#[allow(dead_code)]
 fn decode_stream_events(
     body: &str,
     state: &mut TrpgMapperState,
 ) -> Result<(i64, Vec<(String, String)>), String> {
-    let parsed: TrpgStreamResponse = serde_json::from_str(body).map_err(|e| e.to_string())?;
-    let mut max_seq = 0_i64;
-    let mut out = Vec::new();
+    let parsed: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
 
-    for ev in parsed.events {
-        if ev.seq > max_seq {
-            max_seq = ev.seq;
+    if parsed.get("events").is_some() {
+        let parsed: TrpgStreamResponse =
+            serde_json::from_value(parsed).map_err(|e| e.to_string())?;
+        let mut max_seq = 0_i64;
+        let mut out = Vec::new();
+
+        for ev in parsed.events {
+            if ev.seq > max_seq {
+                max_seq = ev.seq;
+            }
+            out.extend(map_trpg_event(
+                &ev.event_type,
+                ev.actor_id.as_deref(),
+                &ev.payload,
+                state,
+            ));
         }
-        out.extend(map_trpg_event(
-            &ev.event_type,
-            ev.actor_id.as_deref(),
-            &ev.payload,
-            state,
-        ));
+
+        return Ok((max_seq, out));
     }
 
+    let out = decode_snapshot_events(&parsed, state);
+    let mut max_seq = 0_i64;
     Ok((max_seq, out))
 }
 

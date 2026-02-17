@@ -42,3 +42,4 @@ figma-mcp-macos-arm64
 figma-mcp-linux-x64
 .gemini/
 config/lodge.env
+logs/

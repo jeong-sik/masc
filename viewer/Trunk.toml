@@ -10,3 +10,13 @@ watch = ["src", "assets", "index.html", "style.css"]
 addresses = ["127.0.0.1"]
 port = 8080
 open = false
+
+# Proxy /api requests to the MASC MCP server
+[[proxy]]
+rewrite = "/api/"
+backend = "http://localhost:8935/api/"
+
+# Proxy /mcp requests (JSON-RPC)
+[[proxy]]
+rewrite = "/mcp"
+backend = "http://localhost:8935/mcp"

@@ -2,11 +2,10 @@ use crate::mode::ViewerMode;
 
 // ─── Configuration ──────────────────────────
 
-#[cfg(debug_assertions)]
-pub const MASC_MCP_URL: &str = "http://localhost:8935"; // Updated to match active server port
-
-#[cfg(not(debug_assertions))]
-pub const MASC_MCP_URL: &str = ""; // Relative path in production
+// With Trunk Proxy configured in Trunk.toml, we can use relative paths
+// for both debug and release builds.
+// This avoids CORS issues and hardcoded ports in the binary.
+pub const MASC_MCP_URL: &str = ""; 
 
 pub const DEFAULT_ROOM_ID: &str = "default";
 
@@ -29,33 +28,24 @@ pub const DEFAULT_TRPG_BACKEND: TrpgBackendMode = TrpgBackendMode::MascApi;
 
 // ─── Room ID Management ─────────────────────
 
-/// Read `?room=...` from URL and return a sanitized room id.
-pub fn room_id_from_url() -> Option<String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Some(win) = web_sys::window() {
-            if let Ok(search) = win.location().search() {
-                return parse_query_param(&search, "room").and_then(|room| sanitize_room_id(&room));
-            }
-        }
-    }
-
-    None
-}
-
 /// Get current room ID from DOM attribute (set by dashboard/lobby) or URL param.
 pub fn current_room_id() -> String {
-    if let Some(room) = room_id_from_url() {
-        return room;
-    }
-
     #[cfg(target_arch = "wasm32")]
     {
+        // 1. Try URL param ?room=...
+        if let Some(win) = web_sys::window() {
+            if let Ok(search) = win.location().search() {
+                if let Some(room) = parse_query_param(&search, "room") {
+                    return sanitize_room_id(&room).unwrap_or_else(|| DEFAULT_ROOM_ID.to_string());
+                }
+            }
+        }
+
         // 2. Try dashboard attribute
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id("dashboard") {
                 if let Some(room) = el.get_attribute("data-room-id") {
-                    if let Some(room) = sanitize_room_id(&room) {
+                    if !room.is_empty() {
                         return room;
                     }
                 }
@@ -74,12 +64,6 @@ pub fn set_current_room_id(room_id: &str) {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id("dashboard") {
                 let _ = el.set_attribute("data-room-id", room_id);
-                let next_rev = el
-                    .get_attribute("data-room-rev")
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(0)
-                    .saturating_add(1);
-                let _ = el.set_attribute("data-room-rev", &next_rev.to_string());
             }
         }
         
@@ -93,21 +77,19 @@ pub fn set_current_room_id(room_id: &str) {
     }
 }
 
-/// Monotonic room revision that increments whenever the room is explicitly set.
-/// Used to detect "same room re-apply" operations.
-pub fn current_room_revision() -> u64 {
+pub fn current_room_revision() -> u32 {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id("dashboard") {
-                return el
-                    .get_attribute("data-room-rev")
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(0);
+                if let Some(rev_str) = el.get_attribute("data-room-rev") {
+                    if let Ok(rev) = rev_str.parse::<u32>() {
+                        return rev;
+                    }
+                }
             }
         }
     }
-
     0
 }
 
@@ -139,29 +121,20 @@ fn parse_query_param(search: &str, key: &str) -> Option<String> {
 
 // ─── Endpoints ──────────────────────────────
 
-// ─── Polling Configuration ──────────────────
-
-pub const TRPG_POLL_INTERVAL_MS: u64 = 500; // 500ms polling interval for stream/poll endpoint
-
 pub fn trpg_uses_polling() -> bool {
-    true
+    // MASC API supports SSE, so polling is fallback or for legacy engine.
+    // If using MASC API, we use SSE.
+    // If using Legacy Engine, we might need polling if SSE not exposed?
+    // Actually MASC API exposes /stream/sse.
+    false
 }
 
 pub fn trpg_state_url() -> String {
-    format!(
-        "{}/api/v1/trpg/state?room_id={}",
-        MASC_MCP_URL,
-        current_room_id()
-    )
+    format!("{}/api/v1/trpg/state/{}", MASC_MCP_URL, current_room_id())
 }
 
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
-    format!(
-        "{}/api/v1/trpg/stream?room_id={}&after_seq={}",
-        MASC_MCP_URL,
-        current_room_id(),
-        after_seq
-    )
+    format!("{}/api/v1/trpg/stream/poll/{}?after={}", MASC_MCP_URL, current_room_id(), after_seq)
 }
 
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {

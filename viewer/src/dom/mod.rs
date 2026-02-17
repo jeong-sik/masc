@@ -1,5 +1,7 @@
 pub mod action_panel;
 pub mod actor_join;
+pub mod actor_lifecycle;
+pub mod session_events;
 pub mod character_panel;
 pub mod session_history;
 pub mod choice_panel;
@@ -52,6 +54,8 @@ impl Plugin for DomBridgePlugin {
                 action_panel::sync_action_panel_interaction_state,
                 turn_controls::sync_turn_controls_visibility,
                 overlay::update_overlay_dom,
+                actor_lifecycle::update_actor_lifecycle_dom,
+                session_events::update_session_events_dom,
             ).run_if(in_state(ViewerMode::Trpg)))
             // Action panel lifecycle: bind listeners on enter, unbind on exit
             .add_systems(OnEnter(ViewerMode::Trpg), (

@@ -2697,3 +2697,35 @@ body.mode-lobby #dashboard {
 .item-block strong { color: var(--accent-primary, #c4a265); }
 .death-block { border-left: 3px solid #e74c3c; padding-left: 0.8em; color: #e74c3c; font-weight: bold; }
 .death-block strong { color: #ff6b6b; }
+
+/* Actor lifecycle entries in narrative log */
+.actor-spawn { border-left: 3px solid #27ae60; padding-left: 0.8em; }
+.actor-delete { border-left: 3px solid #7f8c8d; padding-left: 0.8em; opacity: 0.8; }
+.actor-claim { border-left: 3px solid #2980b9; padding-left: 0.8em; }
+.actor-release { border-left: 3px solid #8e44ad; padding-left: 0.8em; }
+.actor-icon { font-weight: bold; margin-right: 0.3em; }
+.scene-transition { border-left: 3px solid #f39c12; padding-left: 0.8em; font-style: italic; }
+.scene-icon { font-weight: bold; margin-right: 0.3em; color: #f39c12; }
+
+/* Session lifecycle events */
+.session-event { border-left: 3px solid #95a5a6; padding-left: 0.8em; margin: 0.3em 0; color: var(--text-secondary, #999); font-size: 0.9em; }
+.session-start { color: var(--text, #eee); font-weight: bold; }
+.session-icon { margin-right: 0.3em; }
+
+/* Turn lifecycle events */
+.turn-event { border-left: 3px solid #2980b9; padding-left: 0.8em; margin: 0.3em 0; }
+.turn-start { font-weight: bold; }
+.turn-icon { color: #3498db; margin-right: 0.3em; }
+
+/* Turn action result */
+.action-result { border-left: 3px solid #27ae60; padding-left: 0.8em; margin: 0.3em 0; }
+.action-icon { color: #2ecc71; margin-right: 0.3em; font-weight: bold; }
+
+/* Intervention events */
+.intervention-event { border-left: 3px solid #8e44ad; padding-left: 0.8em; margin: 0.3em 0; font-style: italic; }
+.intervention-applied { font-style: normal; font-weight: bold; }
+.intervention-icon { color: #9b59b6; margin-right: 0.3em; }
+
+/* Keeper unavailable warning */
+.keeper-warning { border-left: 3px solid #e74c3c; padding-left: 0.8em; margin: 0.3em 0; color: #e74c3c; }
+.warning-icon { margin-right: 0.3em; }

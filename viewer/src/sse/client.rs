@@ -1021,4 +1021,89 @@ mod tests {
             .expect("unavailable narrative payload json");
         assert_eq!(unavailable_payload["text"], "[unavailable] p02: LLM failed");
     }
+
+    #[test]
+    fn decode_stream_maps_choice_and_combat_events() {
+        let body = r#"{
+            "events": [
+                {"seq": 1, "type": "choice.available", "payload": {"actor_id": "elf_01", "description": "Choose your path", "options": ["Fight", "Flee"]}},
+                {"seq": 2, "type": "choice.resolved", "payload": {"actor_id": "elf_01", "chosen": "Fight"}},
+                {"seq": 3, "type": "combat.started", "payload": {"area": "Dark Cave", "enemies": ["Goblin", "Orc"]}}
+            ]
+        }"#;
+        let mut state = TrpgMapperState::default();
+        let (max_seq, mapped) =
+            decode_stream_events(body, &mut state).expect("decode should succeed");
+
+        assert_eq!(max_seq, 3);
+
+        let choice_available = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "choice_available")
+            .expect("choice_available should exist");
+        let ca_payload: Value =
+            serde_json::from_str(&choice_available.1).expect("choice_available payload json");
+        assert_eq!(ca_payload["character"], "elf_01");
+        assert_eq!(ca_payload["description"], "Choose your path");
+        assert_eq!(ca_payload["options"], json!(["Fight", "Flee"]));
+
+        let choice_resolved = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "choice_resolved")
+            .expect("choice_resolved should exist");
+        let cr_payload: Value =
+            serde_json::from_str(&choice_resolved.1).expect("choice_resolved payload json");
+        assert_eq!(cr_payload["character"], "elf_01");
+        assert_eq!(cr_payload["description"], "Fight");
+
+        let combat_start = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "combat_start")
+            .expect("combat_start should exist");
+        let cs_payload: Value =
+            serde_json::from_str(&combat_start.1).expect("combat_start payload json");
+        assert_eq!(cs_payload["area"], "Dark Cave");
+        assert_eq!(cs_payload["enemies"], json!(["Goblin", "Orc"]));
+    }
+
+    #[test]
+    fn decode_stream_maps_lifecycle_and_endgame_events() {
+        let body = r#"{
+            "events": [
+                {"seq": 1, "type": "game.ended", "payload": {"summary": "Victory!"}},
+                {"seq": 2, "type": "party.selected", "payload": {"player_ids": ["p1", "p2"]}},
+                {"seq": 3, "type": "room.created", "payload": {"room_id": "r1"}}
+            ]
+        }"#;
+        let mut state = TrpgMapperState::default();
+        let (max_seq, mapped) =
+            decode_stream_events(body, &mut state).expect("decode should succeed");
+
+        assert_eq!(max_seq, 3);
+
+        let narrative = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "narrative")
+            .expect("narrative should exist");
+        let n_payload: Value =
+            serde_json::from_str(&narrative.1).expect("narrative payload json");
+        assert_eq!(n_payload["text"], "Victory!");
+        assert_eq!(n_payload["phase"], "endgame");
+
+        let party = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "party.selected")
+            .expect("party.selected should exist");
+        let p_payload: Value =
+            serde_json::from_str(&party.1).expect("party.selected payload json");
+        assert_eq!(p_payload["player_ids"], json!(["p1", "p2"]));
+
+        let room = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "room.created")
+            .expect("room.created should exist");
+        let r_payload: Value =
+            serde_json::from_str(&room.1).expect("room.created payload json");
+        assert_eq!(r_payload["room_id"], "r1");
+    }
 }

@@ -11,9 +11,8 @@ pub struct TurnRuntimeCache {
 
 #[cfg(target_arch = "wasm32")]
 fn sanitize_text(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| *c != '<' && *c != '>' && *c != '"')
-        .collect::<String>()
+    raw.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        .replace('"', "&quot;").replace('\'', "&#39;")
 }
 
 #[cfg(target_arch = "wasm32")]

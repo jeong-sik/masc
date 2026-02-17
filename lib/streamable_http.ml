@@ -26,6 +26,9 @@ type response_mode =
   | Sse_upgrade
   | Error_response of int * string
 
+type request_handler =
+  Yojson.Safe.t -> Yojson.Safe.t
+
 (** Session storage with mutex protection *)
 module Session = struct
   let sessions : (string, session) Hashtbl.t = Hashtbl.create 64
@@ -111,25 +114,59 @@ module Jsonrpc = struct
       ]);
     ]
 
-  let _parse_error () =
+let _parse_error () =
     error_response
       ~id:`Null
       ~code:(-32700)
       ~message:"Parse error"
 
-  let invalid_request () =
-    error_response
-      ~id:`Null
-      ~code:(-32600)
-      ~message:"Invalid Request"
+  let extract_id = function
+    | `Assoc fields ->
+        List.assoc_opt "id" fields |> Option.value ~default:`Null
+    | _ -> `Null
+
+  let placeholder_success id =
+    `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", id);
+      ("result", `Assoc [("status", `String "ok"); ("transport", `String "streamable_http")]);
+    ]
+
+  let placeholder_invalid_request id =
+    `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", id);
+      ("error", `Assoc [
+        ("code", `Int (-32600));
+        ("message", `String "Invalid Request");
+      ]);
+    ]
+
+  let dispatch_request (handler : request_handler) request =
+    try
+      handler request
+    with exn ->
+      error_response
+        ~id:(extract_id request)
+        ~code:(-32603)
+        ~message:("Internal error: " ^ Printexc.to_string exn)
 end
 
 (** Handle POST /mcp - JSON-RPC request processing *)
-let handle_post ?session_id ~body () =
+let handle_post ?session_id ~body ?request_handler () =
   (* Parse JSON body *)
   let json_result =
     try Ok (Yojson.Safe.from_string body)
     with Yojson.Json_error msg -> Error msg
+  in
+  let request_handler =
+      Option.value request_handler
+      ~default:(fun request ->
+        let id = Jsonrpc.extract_id request in
+        if Jsonrpc.is_valid_request request then
+          Jsonrpc.placeholder_success id
+        else
+          Jsonrpc.placeholder_invalid_request id)
   in
 
   match json_result with
@@ -153,31 +190,18 @@ let handle_post ?session_id ~body () =
             (* Process batch: for now, return placeholder *)
             let responses = List.filter_map (fun req ->
               if Jsonrpc.is_valid_request req then
-                (* Delegate to MCP handler - placeholder *)
-                Some (`Assoc [
-                  ("jsonrpc", `String "2.0");
-                  ("id", match req with
-                    | `Assoc fields -> List.assoc_opt "id" fields |> Option.value ~default:`Null
-                    | _ -> `Null);
-                  ("result", `Assoc [("status", `String "ok")]);
-                ])
+                let response = Jsonrpc.dispatch_request request_handler req in
+                if response <> `Null then Some response else None
               else
-                Some (Jsonrpc.invalid_request ())
+                let id = Jsonrpc.extract_id req in
+                Some (Jsonrpc.placeholder_invalid_request id)
             ) requests in
             (Json_batch responses, session)
         | _ ->
             (Error_response (400, "Invalid batch format"), session)
       else if Jsonrpc.is_valid_request json then
         (* Single request - delegate to MCP handler *)
-        let id = match json with
-          | `Assoc fields -> List.assoc_opt "id" fields |> Option.value ~default:`Null
-          | _ -> `Null
-        in
-        let response = `Assoc [
-          ("jsonrpc", `String "2.0");
-          ("id", id);
-          ("result", `Assoc [("status", `String "ok"); ("transport", `String "streamable_http")]);
-        ] in
+        let response = Jsonrpc.dispatch_request request_handler json in
         (Json_response response, session)
       else
         (Error_response (400, "Invalid JSON-RPC request"), session)

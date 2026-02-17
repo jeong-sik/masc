@@ -417,16 +417,23 @@ let metrics_handler _request reqd =
   let response = Httpun.Response.create ~headers `OK in
   Httpun.Reqd.respond_with_string reqd response body
 
-(** MCP Streamable HTTP handler (POST /mcp)
-    Implements MCP spec 2025-03-26 Streamable HTTP transport *)
-let mcp_post_handler request reqd =
+let mcp_post_handler
+    ?request_handler
+    (request : Httpun.Request.t)
+    (reqd : Httpun.Reqd.t) =
   (* Read request body using sync wrapper *)
   match Request.read_body_sync reqd with
   | Error msg ->
       Response.text ~status:`Bad_request (Printf.sprintf "Body read error: %s" msg) reqd
   | Ok body ->
       let session_id = Streamable_http.get_session_id request in
-      let (response_mode, session_opt) = Streamable_http.handle_post ?session_id ~body () in
+      let (response_mode, session_opt) =
+        Streamable_http.handle_post
+          ?session_id
+          ~body
+          ?request_handler
+          ()
+      in
       match response_mode with
       | Streamable_http.Json_response json ->
           let json_str = Yojson.Safe.to_string json in
@@ -487,6 +494,28 @@ let default_routes =
   |> Router.get "/mcp" mcp_get_handler
   |> Router.get "/" (fun _req reqd ->
       Response.text "MASC MCP Server" reqd)
+
+let with_streamable_mcp_request_handler ~request_handler routes =
+  let replace_post_mcp route =
+    if String.equal route.Router.path "/mcp" && List.mem `POST route.Router.methods then
+      {
+        route with
+        Router.handler =
+          (mcp_post_handler ~request_handler:request_handler);
+      }
+    else
+      route
+  in
+  let rewritten = List.map replace_post_mcp routes in
+  let has_post_mcp =
+    List.exists
+      (fun route ->
+        String.equal route.Router.path "/mcp" && List.mem `POST route.Router.methods)
+      rewritten
+  in
+  if has_post_mcp then rewritten
+  else
+    Router.post "/mcp" (mcp_post_handler ~request_handler:request_handler) rewritten
 
 (** Create httpun request handler from router
     Note: httpun-eio wraps reqd in Gluten.Reqd.t, extract with .reqd field *)

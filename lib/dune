@@ -204,6 +204,12 @@
    trpg_rule
    trpg_rule_dnd5e_lite
    trpg_engine_replay
+   trpg_slot
+   trpg_slot_rule
+   trpg_slot_narrative
+   trpg_slot_world
+   trpg_slot_metrics
+   trpg_plugin_loader
    json_util)
  (libraries
    yojson

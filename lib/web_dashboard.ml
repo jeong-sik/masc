@@ -7661,12 +7661,21 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
       const missingActors = resolved.missingActors || [];
       const unknownActors = resolved.unknownActors || [];
-      if (missingActors.length > 0 || unknownActors.length > 0) {
+      if (missingActors.length > 0) {
         trpgSetNextAction(
           'wait',
           '할당 수정 필요',
-          '세션 상태: 확인 필요 · 파티 actor_id와 Player keepers actor_id가 일치하지 않습니다. 파티 할당 카드에서 빨간 항목을 먼저 정리하세요.',
+          `세션 상태: 확인 필요 · 파티 actor_id 일부 누락 (${missingActors.join(', ')})`,
           false
+        );
+        return;
+      }
+      if (unknownActors.length > 0) {
+        trpgSetNextAction(
+          'run_round',
+          '2) 라운드 실행',
+          `세션 상태: 실행 준비 완료 · 파티 외 actor 입력 ${unknownActors.length}개는 무시됩니다.`,
+          true
         );
         return;
       }
@@ -7897,6 +7906,8 @@ let cached_html = lazy ({|<!DOCTYPE html>
       const mapping = {};
       const unknownActors = [];
       const renamed = [];
+      const seenCanonicalActors = new Set();
+      const duplicatedActors = new Set();
 
       Object.entries(parsed.mapping || {}).forEach(([rawActor, keeperNameRaw]) => {
         const originalActor = String(rawActor || '').trim();
@@ -7915,11 +7926,12 @@ let cached_html = lazy ({|<!DOCTYPE html>
           unknownActors.push(originalActor);
           return;
         }
-        if (Object.prototype.hasOwnProperty.call(mapping, actorId)) {
-          unknownActors.push(originalActor);
+        if (seenCanonicalActors.has(actorId) || Object.prototype.hasOwnProperty.call(mapping, actorId)) {
+          duplicatedActors.add(actorId);
           return;
         }
 
+        seenCanonicalActors.add(actorId);
         mapping[actorId] = keeperName;
         if (originalActor !== actorId) {
           renamed.push([originalActor, actorId]);
@@ -7936,6 +7948,7 @@ let cached_html = lazy ({|<!DOCTYPE html>
         unknownActors: trpgUniqueStrings(unknownActors),
         missingActors,
         renamed,
+        duplicatedActors: Array.from(duplicatedActors.values()),
       };
     }
 
@@ -8342,14 +8355,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
       }
       if (expectedActors.length > 0 && resolved.ok) {
         if (missingActors.length > 0) issues.push(`파티 actor 누락: ${missingActors.join(', ')}`);
-        if (unknownActors.length > 0) issues.push(`파티 외 actor 입력: ${unknownActors.join(', ')}`);
+        if (unknownActors.length > 0) issues.push(`파티 외 actor 입력 무시: ${unknownActors.join(', ')}`);
       }
 
       const ready =
         issues.length === 0
         && dmKeeper !== ''
         && players.length > 0
-        && (expectedActors.length === 0 || (resolved.ok && missingActors.length === 0 && unknownActors.length === 0));
+        && (expectedActors.length === 0 || (resolved.ok && missingActors.length === 0));
 
       const badgeClass = ready ? 'ok' : 'warn';
       const badgeText = ready ? 'READY' : 'CHECK REQUIRED';
@@ -9035,6 +9048,53 @@ let cached_html = lazy ({|<!DOCTYPE html>
         .join('\n');
     }
 
+    function trpgUnwrapToolPayload(value) {
+      const payload = value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : null;
+      if (!payload) return value;
+
+      if (Object.prototype.hasOwnProperty.call(payload, 'payload')) {
+        const inner = payload.payload;
+        if (inner !== undefined && inner !== null) return inner;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(payload, 'result')
+        && payload.result
+        && typeof payload.result === 'object'
+        && !Array.isArray(payload.result)
+      ) {
+        if (Object.prototype.hasOwnProperty.call(payload.result, 'payload')) {
+          const inner = payload.result.payload;
+          if (inner !== undefined && inner !== null) return inner;
+        }
+        if (Object.prototype.hasOwnProperty.call(payload.result, 'structuredContent')) {
+          const structured = payload.result.structuredContent;
+          if (structured !== undefined && structured !== null) {
+            if (Object.prototype.hasOwnProperty.call(structured, 'payload')) {
+              const inner = structured.payload;
+              if (inner !== undefined && inner !== null) return inner;
+            }
+            return structured;
+          }
+        }
+      }
+
+      if (payload.status === 'ok' && Object.prototype.hasOwnProperty.call(payload, 'structured_content')) {
+        const structured = payload.structured_content;
+        if (structured !== undefined && structured !== null) {
+          if (Object.prototype.hasOwnProperty.call(structured, 'payload')) {
+            const inner = structured.payload;
+            if (inner !== undefined && inner !== null) return inner;
+          }
+          return structured;
+        }
+      }
+
+      return value;
+    }
+
     function parseTrpgToolText(name, text) {
       const raw = String(text || '').trim();
       if (raw === '') return {};
@@ -9042,10 +9102,9 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (parsed === null) {
         throw new Error(`${name} 응답이 JSON이 아닙니다: ${trpgShortText(raw, 180)}`);
       }
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-          && Object.prototype.hasOwnProperty.call(parsed, 'payload')) {
-        const payload = parsed.payload;
-        if (payload !== null && payload !== undefined) return payload;
+      const payload = trpgUnwrapToolPayload(parsed);
+      if (payload !== null && payload !== undefined && payload !== parsed) {
+        return payload;
       }
       return parsed;
     }
@@ -9232,7 +9291,19 @@ let cached_html = lazy ({|<!DOCTYPE html>
         if (contentType.includes('text/event-stream')) {
           rpc = parseMcpRpcFromSse(toolName, rawBody);
         } else {
-          const parsedDirect = trpgUnwrapRpcObject(trpgTryParseJson(rawBody));
+          let parsedDirect = trpgUnwrapRpcObject(trpgTryParseJson(rawBody));
+          if (parsedDirect === null) {
+            const candidates = trpgExtractJsonCandidates(rawBody);
+            for (let i = 0; i < candidates.length; i += 1) {
+              const candidate = candidates[i];
+              const parsed = trpgUnwrapRpcObject(trpgTryParseJson(candidate));
+              if (parsed !== null) {
+                parsedDirect = parsed;
+                break;
+              }
+            }
+          }
+
           if (parsedDirect !== null) {
             rpc = normalizeRpcEnvelope(requestId, parsedDirect);
           } else {
@@ -9282,6 +9353,23 @@ let cached_html = lazy ({|<!DOCTYPE html>
       return parseTrpgToolText(toolName, text);
     }
 
+    function trpgNormalizePresetCatalogPayload(raw) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return { dm_presets: [], world_presets: [] };
+      }
+      const payload = trpgUnwrapToolPayload(raw);
+      const source =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload
+          : raw;
+      const dmPresets = Array.isArray(source.dm_presets) ? source.dm_presets : [];
+      const worldPresets = Array.isArray(source.world_presets) ? source.world_presets : [];
+      return {
+        dm_presets: dmPresets,
+        world_presets: worldPresets,
+      };
+    }
+
     async function ensureTrpgPresetCatalog(force = false) {
       if (trpgPresetsLoaded && !force) return trpgPresetCatalog;
       let catalog = null;
@@ -9302,10 +9390,10 @@ let cached_html = lazy ({|<!DOCTYPE html>
           throw new Error(`preset 조회 실패: canonical(${primaryMsg}) / legacy(${legacyMsg})`);
         }
       }
-      trpgPresetCatalog = {
-        dm_presets: Array.isArray(catalog.dm_presets) ? catalog.dm_presets : [],
-        world_presets: Array.isArray(catalog.world_presets) ? catalog.world_presets : [],
-      };
+      trpgPresetCatalog = trpgNormalizePresetCatalogPayload(catalog);
+      if (trpgPresetCatalog.dm_presets.length === 0 && trpgPresetCatalog.world_presets.length === 0) {
+        throw new Error('preset 응답에 목록이 없습니다.');
+      }
       trpgPresetsLoaded = true;
       setTrpgPresetOptions('trpg-world-preset-select', trpgPresetCatalog.world_presets);
       setTrpgPresetOptions('trpg-dm-preset-select', trpgPresetCatalog.dm_presets);
@@ -10077,7 +10165,14 @@ let cached_html = lazy ({|<!DOCTYPE html>
       if (expectedActors.length > 0) {
         const unknownActors = resolvedPlayers.unknownActors || [];
         const missingActors = resolvedPlayers.missingActors || [];
-        if (unknownActors.length > 0 || missingActors.length > 0) {
+        if (resolvedPlayers.renamed && resolvedPlayers.renamed.length > 0) {
+          const playerInput = document.getElementById('trpg-player-keepers-input');
+          if (playerInput) {
+            playerInput.value = playerKeeperMapToText(playerMapping);
+            trpgSyncKeeperSelectorsFromInputs();
+          }
+        }
+        if (missingActors.length > 0) {
           const unknownText = unknownActors.length > 0 ? `입력만 존재: ${unknownActors.join(', ')}` : '-';
           const missingText = missingActors.length > 0 ? `누락: ${missingActors.join(', ')}` : '-';
           setTrpgRoundRunStatus(
@@ -10087,6 +10182,18 @@ let cached_html = lazy ({|<!DOCTYPE html>
             'error'
           );
           return;
+        }
+        if (unknownActors.length > 0) {
+          const unknownText = trpgShortText(unknownActors.join(', '), 120);
+          const playerInput = document.getElementById('trpg-player-keepers-input');
+          if (playerInput) {
+            playerInput.value = playerKeeperMapToText(playerMapping);
+            trpgSyncKeeperSelectorsFromInputs();
+          }
+          setTrpgRoundRunStatus(
+            `라운드 실행: 파티 외 actor 입력은 무시됩니다. (${escapeHtml(unknownText)})`,
+            'running'
+          );
         }
       }
 

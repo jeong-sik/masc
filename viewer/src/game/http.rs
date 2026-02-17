@@ -567,41 +567,6 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let mp = info
-                .get("mp")
-                .and_then(Value::as_i64)
-                .unwrap_or(i64::from(hp.max(1))) as i32;
-            let max_mp = info
-                .get("max_mp")
-                .and_then(Value::as_i64)
-                .unwrap_or(i64::from(mp.max(1))) as i32;
-            let skills = info
-                .get("skills")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|row| serde_json::from_value::<SkillData>(row.clone()).ok())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let conditions = info
-                .get("conditions")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|row| serde_json::from_value::<ConditionData>(row.clone()).ok())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let equipment = info
-                .get("equipment")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|row| serde_json::from_value::<EquipmentData>(row.clone()).ok())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
             let debuffs = info
                 .get("debuffs")
                 .and_then(Value::as_array)
@@ -612,15 +577,20 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let mp = info.get("mp").and_then(Value::as_i64).unwrap_or(20) as i32;
-            let max_mp = info
-                .get("max_mp")
-                .and_then(Value::as_i64)
-                .unwrap_or(i64::from(mp.max(1))) as i32;
             let stats = info
                 .get("stats")
                 .cloned()
                 .and_then(|v| serde_json::from_value::<StatsData>(v).ok());
+            let mp = info
+                .get("mp")
+                .and_then(Value::as_i64)
+                .and_then(|x| i32::try_from(x).ok())
+                .unwrap_or_default();
+            let max_mp = info
+                .get("max_mp")
+                .and_then(Value::as_i64)
+                .and_then(|x| i32::try_from(x).ok())
+                .unwrap_or(mp);
             let skills = info
                 .get("skills")
                 .and_then(Value::as_array)

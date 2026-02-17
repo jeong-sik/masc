@@ -1207,6 +1207,13 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
         return Err(msg.to_string());
     }
 
+    if rpc.get("result").is_none()
+        && rpc.get("error").is_none()
+        && (rpc.get("payload").is_some() || rpc.get("status").is_some())
+    {
+        return Ok(rpc.get("payload").cloned().unwrap_or(rpc));
+    }
+
     let result = rpc.get("result").cloned().unwrap_or_else(|| json!({}));
     if result
         .get("isError")
@@ -1229,6 +1236,19 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
         return Err(text.to_string());
     }
 
+    if let Some(structured) = result.get("structuredContent") {
+        return Ok(
+            structured
+                .get("payload")
+                .cloned()
+                .unwrap_or_else(|| structured.clone()),
+        );
+    }
+
+    if let Some(payload) = result.get("payload") {
+        return Ok(payload.clone());
+    }
+
     let text = result
         .get("content")
         .and_then(Value::as_array)
@@ -1249,8 +1269,18 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
         return Ok(json!({}));
     }
 
-    let parsed: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("{} 응답 JSON 파싱 실패: {} / {}", tool_name, e, text))?;
+    let parsed: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(primary) => parse_mcp_rpc_response(&text).map_err(|secondary| {
+            format!(
+                "{} 응답 JSON 파싱 실패: {} / {} / raw={}",
+                tool_name,
+                primary,
+                secondary,
+                text
+            )
+        })?,
+    };
     Ok(parsed.get("payload").cloned().unwrap_or(parsed))
 }
 

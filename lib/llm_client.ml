@@ -330,8 +330,26 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
        raise (Failure msg));
     let choice = json |> member "choices" |> index 0 in
     let msg = choice |> member "message" in
-    let content = msg |> member "content" |> to_string_option
-                  |> Option.value ~default:"" in
+    let finish_reason =
+      choice |> member "finish_reason" |> to_string_option
+      |> Option.value ~default:""
+    in
+    let content =
+      match msg |> member "content" with
+      | `String s -> s
+      | `List blocks ->
+          blocks
+          |> List.filter_map (fun block ->
+                 match block with
+                 | `String s -> Some s
+                 | `Assoc _ ->
+                     (match block |> member "text" with
+                     | `String s -> Some s
+                     | _ -> None)
+                 | _ -> None)
+          |> String.concat ""
+      | _ -> ""
+    in
     (* Parse tool calls if present *)
     let tool_calls = match msg |> member "tool_calls" with
       | `List calls ->
@@ -345,8 +363,37 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
             }
           with _ -> None
         ) calls
-      | _ -> []
+      | _ -> (
+          match msg |> member "function_call" with
+          | `Assoc _ as fn ->
+              let name = fn |> member "name" |> to_string_option in
+              let arguments =
+                fn |> member "arguments" |> to_string_option
+                |> Option.value ~default:"{}"
+              in
+              (match name with
+              | Some call_name when String.trim call_name <> "" ->
+                  [
+                    {
+                      call_id = "function_call";
+                      call_name;
+                      call_arguments = arguments;
+                    };
+                  ]
+              | _ -> [])
+          | _ -> [])
     in
+    if String.trim content = "" && tool_calls = [] then (
+      let reason =
+        match String.lowercase_ascii finish_reason with
+        | "length" ->
+            "Empty completion (finish_reason=length)"
+        | "content_filter" ->
+            "Empty completion (content filtered)"
+        | _ -> "Empty completion (no content/tool_calls)"
+      in
+      raise (Failure reason)
+    );
     (* Parse usage *)
     let usage_json = json |> member "usage" in
     let usage = {

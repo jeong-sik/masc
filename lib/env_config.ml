@@ -103,6 +103,11 @@ module Mitosis = struct
   (** Time-based trigger interval (seconds) *)
   let trigger_interval_seconds =
     get_float ~default:300.0 "MASC_MITOSIS_INTERVAL_SEC"
+
+  (** Cooldown between consecutive handoffs (seconds).
+      Prevents rapid repeated handoffs when context_ratio fluctuates near threshold. *)
+  let handoff_cooldown_seconds =
+    get_float ~default:60.0 "MASC_MITOSIS_HANDOFF_COOLDOWN_SEC"
 end
 
 (** {1 Spawn Configuration} *)

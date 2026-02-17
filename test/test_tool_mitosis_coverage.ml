@@ -380,6 +380,154 @@ let test_mitosis_check_nonzero_ratio_no_warning () =
   | None -> fail "expected Some for mitosis_check"
 
 (* ============================================================
+   Handoff Cooldown Tests (P1-3)
+   ============================================================ *)
+
+let test_handoff_cooldown_blocks_rapid_calls () =
+  (* Simulate a recent handoff by setting last_handoff_time to now *)
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday ();
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (false, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let action = json |> member "action" |> to_string in
+      check string "cooldown action" "cooldown" action;
+      let remaining = json |> member "cooldown_remaining_sec" |> to_float in
+      check bool "remaining > 0" true (remaining > 0.0);
+      Tool_mitosis.reset_handoff_cooldown ()
+  | Some (true, _) ->
+      Tool_mitosis.reset_handoff_cooldown ();
+      fail "expected cooldown to block"
+  | None ->
+      Tool_mitosis.reset_handoff_cooldown ();
+      fail "expected Some for mitosis_handoff"
+
+let test_handoff_cooldown_allows_after_expiry () =
+  (* Set last_handoff_time far in the past *)
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday () -. 9999.0;
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("context_ratio", `Float 0.3);
+    ("async", `Bool false);
+    ("verify", `Bool false);
+  ] in
+  match Tool_mitosis.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
+  | Some (true, result) ->
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let action = json |> member "action" |> to_string in
+      (* Should proceed normally, not cooldown *)
+      check bool "not cooldown" true (action <> "cooldown");
+      Tool_mitosis.reset_handoff_cooldown ()
+  | Some (false, result) ->
+      (* Also acceptable if action is not cooldown *)
+      let json = parse_json_or_fail result in
+      let open Yojson.Safe.Util in
+      let action = json |> member "action" |> to_string_option in
+      check bool "not cooldown" true (Option.value ~default:"" action <> "cooldown");
+      Tool_mitosis.reset_handoff_cooldown ()
+  | None ->
+      Tool_mitosis.reset_handoff_cooldown ();
+      fail "expected Some for mitosis_handoff"
+
+let test_handoff_cooldown_reset () =
+  Tool_mitosis.last_handoff_time := Unix.gettimeofday ();
+  check bool "last_handoff_time set" true (!Tool_mitosis.last_handoff_time > 0.0);
+  Tool_mitosis.reset_handoff_cooldown ();
+  check (float 0.001) "reset to 0" 0.0 !Tool_mitosis.last_handoff_time
+
+(* ============================================================
+   Structured Logging Tests (P1-6)
+   ============================================================ *)
+
+module Mitosis = Masc_mcp.Mitosis
+
+let test_log_state_transition_does_not_raise () =
+  (* log_state_transition should not raise regardless of log level *)
+  Mitosis.log_state_transition
+    ~old_state:Mitosis.Active ~new_state:Mitosis.Prepared
+    ~agent_name:"test-cell-01"
+    ~reason:"DNA extraction at 50%";
+  check bool "no exception" true true
+
+let test_log_state_transition_all_states () =
+  (* Exercise all state combinations to verify formatting *)
+  let states = [Mitosis.Stem; Active; Prepared; Dividing; Apoptotic] in
+  List.iter (fun old_st ->
+    List.iter (fun new_st ->
+      Mitosis.log_state_transition
+        ~old_state:old_st ~new_state:new_st
+        ~agent_name:"test-cell"
+        ~reason:"test";
+    ) states
+  ) states;
+  check bool "all state pairs logged" true true
+
+let test_state_to_string () =
+  check string "stem" "stem" (Mitosis.state_to_string Mitosis.Stem);
+  check string "active" "active" (Mitosis.state_to_string Mitosis.Active);
+  check string "prepared" "prepared" (Mitosis.state_to_string Mitosis.Prepared);
+  check string "dividing" "dividing" (Mitosis.state_to_string Mitosis.Dividing);
+  check string "apoptotic" "apoptotic" (Mitosis.state_to_string Mitosis.Apoptotic)
+
+let test_phase_to_string () =
+  check string "idle" "idle" (Mitosis.phase_to_string Mitosis.Idle);
+  check string "ready" "ready_for_handoff"
+    (Mitosis.phase_to_string (Mitosis.ReadyForHandoff "dna"))
+
+(* ============================================================
+   DNA Validation Tests (P1-7)
+   ============================================================ *)
+
+let test_validate_dna_too_short () =
+  match Tool_mitosis.validate_dna "short" with
+  | Error msg -> check bool "mentions too short" true
+      (try Str.search_forward (Str.regexp_string "too short") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for short DNA"
+
+let test_validate_dna_no_markers () =
+  (* 60 chars, no goal/task/objective/context markers *)
+  let dna = "This is a long enough string with plenty of characters here- but no markers" in
+  match Tool_mitosis.validate_dna dna with
+  | Error msg -> check bool "mentions markers" true
+      (try Str.search_forward (Str.regexp_string "markers") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for DNA without markers"
+
+let test_validate_dna_mostly_whitespace () =
+  (* Build a string that's >50% whitespace but has markers and structure *)
+  let dna = "goal: test\n" ^ String.make 100 ' ' ^ "something" in
+  match Tool_mitosis.validate_dna dna with
+  | Error msg -> check bool "mentions whitespace" true
+      (try Str.search_forward (Str.regexp_string "whitespace") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for mostly-whitespace DNA"
+
+let test_validate_dna_no_structure () =
+  (* Has markers, not too short, not mostly whitespace, but no structural markers *)
+  let dna = "This goal has enough content and no excessive whitespace padding text here ok" in
+  match Tool_mitosis.validate_dna dna with
+  | Error msg -> check bool "mentions structure" true
+      (try Str.search_forward (Str.regexp_string "structure") msg 0 >= 0 with Not_found -> false)
+  | Ok _ -> fail "expected Error for unstructured DNA"
+
+let test_validate_dna_valid () =
+  let dna = "## Goal\n- Complete the task objective\n- Context: migration project\n- Handle edge cases" in
+  match Tool_mitosis.validate_dna dna with
+  | Ok validated -> check string "returns dna" dna validated
+  | Error msg -> fail ("expected Ok for valid DNA: " ^ msg)
+
+let test_validate_dna_case_insensitive_markers () =
+  let dna = "## OBJECTIVE\n- First item\n- Second item with enough content to pass length check" in
+  match Tool_mitosis.validate_dna dna with
+  | Ok _ -> check bool "OBJECTIVE accepted" true true
+  | Error msg -> fail ("case-insensitive marker should pass: " ^ msg)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -434,5 +582,24 @@ let () =
       test_case "profile + research metrics" `Slow test_handoff_verifier_profile_and_research_metrics;
       test_case "min_judges clamp to model count" `Slow
         test_handoff_verifier_min_judges_clamped_to_available_models;
+    ];
+    "handoff_cooldown", [
+      test_case "blocks rapid calls" `Quick test_handoff_cooldown_blocks_rapid_calls;
+      test_case "allows after expiry" `Quick test_handoff_cooldown_allows_after_expiry;
+      test_case "reset" `Quick test_handoff_cooldown_reset;
+    ];
+    "state_logging", [
+      test_case "transition does not raise" `Quick test_log_state_transition_does_not_raise;
+      test_case "all state pairs" `Quick test_log_state_transition_all_states;
+      test_case "state_to_string" `Quick test_state_to_string;
+      test_case "phase_to_string" `Quick test_phase_to_string;
+    ];
+    "dna_validation", [
+      test_case "too short" `Quick test_validate_dna_too_short;
+      test_case "no markers" `Quick test_validate_dna_no_markers;
+      test_case "mostly whitespace" `Quick test_validate_dna_mostly_whitespace;
+      test_case "no structure" `Quick test_validate_dna_no_structure;
+      test_case "valid DNA" `Quick test_validate_dna_valid;
+      test_case "case-insensitive markers" `Quick test_validate_dna_case_insensitive_markers;
     ];
   ]

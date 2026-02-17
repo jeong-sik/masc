@@ -401,6 +401,11 @@ fn update_monitor_tasks(_count: u32, _summary: &str) {
 }
 
 /// Update the Social panel feed.
+///
+/// Instead of overwriting `#social-feed` with `set_text_content` (which conflicts
+/// with `social_board::render_posts_to_dom` using `set_inner_html` on the same
+/// element), SSE events are prepended as individual notification divs. This lets
+/// board posts and SSE notifications coexist in the DOM.
 fn update_social_feed(_summary: &str) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -408,10 +413,19 @@ fn update_social_feed(_summary: &str) {
             return;
         };
         if let Ok(Some(el)) = doc.query_selector("#social-feed") {
-            let current = el.text_content().unwrap_or_default();
-            let updated = format!("{}\n{}", _summary, current);
-            let lines: Vec<&str> = updated.lines().take(50).collect();
-            el.set_text_content(Some(&lines.join("\n")));
+            if let Ok(div) = doc.create_element("div") {
+                div.set_class_name("social-sse-notification");
+                div.set_text_content(Some(_summary));
+                el.insert_before(&div, el.first_child().as_ref()).ok();
+                // Trim to 100 child nodes max
+                while el.child_element_count() > 100 {
+                    if let Some(last) = el.last_element_child() {
+                        el.remove_child(&last).ok();
+                    } else {
+                        break;
+                    }
+                }
+            }
         }
     }
 }

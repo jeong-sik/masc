@@ -331,7 +331,7 @@ fn disable_buttons(disabled: bool) {
 
 pub fn sync_action_panel_interaction_state(
     _room_state: Res<RoomState>,
-    progress: Res<TurnProgressState>,
+    _progress: Res<TurnProgressState>,
 ) {
     #[cfg(target_arch = "wasm32")]
     {

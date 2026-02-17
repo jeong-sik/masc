@@ -420,6 +420,7 @@ body.mode-lobby #dashboard {
     align-items: center;
     flex-wrap: wrap;
     gap: 12px;
+    position: relative;
 }
 
 .room-switch-inline {
@@ -2925,3 +2926,10 @@ body.mode-lobby #dashboard {
 /* Keeper unavailable warning */
 .keeper-warning { border-left: 3px solid #e74c3c; padding-left: 0.8em; margin: 0.3em 0; color: #e74c3c; }
 .warning-icon { margin-right: 0.3em; }
+
+/* Disabled mode cards */
+.mode-card-disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.coming-soon { display: block; font-size: 0.7em; color: var(--text-secondary, #888); margin-top: 0.3em; text-transform: uppercase; letter-spacing: 0.1em; }
+
+/* Social SSE notifications */
+.social-sse-notification { padding: 0.3em 0.5em; border-bottom: 1px solid var(--border, #333); font-size: 0.85em; color: var(--text-secondary, #999); }

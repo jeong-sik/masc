@@ -4,6 +4,8 @@
 //! jittered exponential delays, plus a `reconnect_sse` helper that
 //! spawns a delayed reconnection attempt on the WASM event loop.
 
+#![allow(dead_code)] // Full reconnection subsystem — not yet wired to runtime.
+
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;

@@ -23,22 +23,25 @@
                 <span class="mode-desc">Dark fantasy TRPG — 5 AI agents play D&amp;D 5e</span>
             </button>
 
-            <button class="mode-card" data-mode="experiment">
+            <button class="mode-card mode-card-disabled" data-mode="experiment" disabled>
                 <span class="mode-icon">⬡</span>
                 <span class="mode-name">Experiment Lab</span>
                 <span class="mode-desc">Live experiment metrics and flow visualization</span>
+                <span class="coming-soon">Coming Soon</span>
             </button>
 
-            <button class="mode-card" data-mode="monitor">
+            <button class="mode-card mode-card-disabled" data-mode="monitor" disabled>
                 <span class="mode-icon">◉</span>
                 <span class="mode-name">System Monitor</span>
                 <span class="mode-desc">Agent health, keeper metrics, system dashboard</span>
+                <span class="coming-soon">Coming Soon</span>
             </button>
 
-            <button class="mode-card" data-mode="council">
+            <button class="mode-card mode-card-disabled" data-mode="council" disabled>
                 <span class="mode-icon">△</span>
                 <span class="mode-name">MAGI Council</span>
                 <span class="mode-desc">MAGI deliberation — consensus and debate viewer</span>
+                <span class="coming-soon">Coming Soon</span>
             </button>
 
             <button class="mode-card" data-mode="social">
@@ -169,9 +172,11 @@
                     <option value="terminal">Terminal</option>
                     <option value="parchment">Parchment</option>
                 </select>
-                <button id="debug-log-toggle" class="inline-toggle debug-only" type="button" aria-pressed="false" title="개발자 디버그 로그 표시/숨김">Debug</button>
-                <span id="debug-log-status" class="widget-pill debug-only" style="display:none">DEBUG</span>
-                <span id="widget-status" class="widget-pill debug-only" style="display:none">Widgets N:0 P:0 D:0</span>
+              <button id="debug-log-toggle" class="inline-toggle debug-only" type="button" aria-pressed="false" title="개발자 디버그 로그 표시/숨김">Debug</button>
+              <span id="debug-log-status" class="widget-pill debug-only" style="display:none">DEBUG</span>
+              <span id="widget-status" class="widget-pill debug-only" style="display:none">Widgets N:0 P:0 H:0</span>
+              <button id="dedup-status" class="widget-pill dedup-pill debug-only" type="button" aria-expanded="false" style="display:none">Dedup S:0 N:0 H:0</button>
+              <div id="dedup-popover" class="dedup-popover" style="display:none"></div>
                 <div id="connection-status" class="disconnected">
                     <span class="status-dot"></span>
                     <span class="status-text">Disconnected</span>

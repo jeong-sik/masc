@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -19,7 +20,7 @@ use crate::config;
 use crate::game::state::ConnectionStatus;
 
 use super::reconnect::{
-    self, ConnectionStatusBridge, ConnectionStatusProxy, ReconnectState, SseReconnectManager,
+    ConnectionStatusBridge, SseReconnectManager,
 };
 
 /// Wrapper around `EventSource` that is `Send + Sync`.
@@ -88,6 +89,8 @@ struct TrpgStreamEvent {
 struct TrpgMapperState {
     last_turn: u32,
     last_phase: String,
+    last_stream_seq: i64,
+    recent_stream_fingerprints: VecDeque<String>,
     snapshot_signature: Option<String>,
 }
 
@@ -96,10 +99,15 @@ impl Default for TrpgMapperState {
         Self {
             last_turn: 1,
             last_phase: "dm_narration".to_string(),
+            last_stream_seq: 0,
+            recent_stream_fingerprints: VecDeque::new(),
             snapshot_signature: None,
         }
     }
 }
+
+#[allow(dead_code)]
+const STREAM_FINGERPRINT_WINDOW: usize = 128;
 
 #[allow(dead_code)]
 fn value_to_i32(v: Option<&Value>, default: i32) -> i32 {
@@ -142,6 +150,28 @@ fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
 #[allow(dead_code)]
 fn snapshot_fingerprint(snapshot: &Value) -> String {
     serde_json::to_string(snapshot).unwrap_or_else(|_| snapshot.to_string())
+}
+
+#[allow(dead_code)]
+fn stream_event_fingerprint(event_type: &str, seq: i64, actor_id: Option<&str>, payload: &Value) -> String {
+    let actor = actor_id.unwrap_or("").trim();
+    format!("{seq}|{event_type}|{actor}|{payload}")
+}
+
+#[allow(dead_code)]
+fn seen_stream_fingerprint(state: &TrpgMapperState, fingerprint: &str) -> bool {
+    state
+        .recent_stream_fingerprints
+        .iter()
+        .any(|entry| entry == fingerprint)
+}
+
+#[allow(dead_code)]
+fn remember_stream_fingerprint(state: &mut TrpgMapperState, fingerprint: String) {
+    state.recent_stream_fingerprints.push_back(fingerprint);
+    while state.recent_stream_fingerprints.len() > STREAM_FINGERPRINT_WINDOW {
+        let _ = state.recent_stream_fingerprints.pop_front();
+    }
 }
 
 #[allow(dead_code)]
@@ -758,12 +788,36 @@ fn decode_stream_events(
             if ev.seq > max_seq {
                 max_seq = ev.seq;
             }
+            let fingerprint = stream_event_fingerprint(
+                &ev.event_type,
+                ev.seq,
+                ev.actor_id.as_deref(),
+                &ev.payload,
+            );
+            if ev.seq > 0 && ev.seq <= state.last_stream_seq {
+                #[cfg(target_arch = "wasm32")]
+                bump_dedup_stream(&format!("seq {} <= {}", ev.seq, state.last_stream_seq));
+                remember_stream_fingerprint(state, fingerprint);
+                continue;
+            }
+            if seen_stream_fingerprint(state, &fingerprint) {
+                #[cfg(target_arch = "wasm32")]
+                bump_dedup_stream(&format!("fp | {} | seq {}", ev.event_type, ev.seq));
+                continue;
+            }
+            if ev.seq > 0 {
+                state.last_stream_seq = state.last_stream_seq.max(ev.seq);
+            }
             out.extend(map_trpg_event(
                 &ev.event_type,
                 ev.actor_id.as_deref(),
                 &ev.payload,
                 state,
             ));
+            remember_stream_fingerprint(state, fingerprint);
+        }
+        if max_seq > 0 {
+            state.last_stream_seq = state.last_stream_seq.max(max_seq);
         }
 
         return Ok((max_seq, out));
@@ -772,6 +826,40 @@ fn decode_stream_events(
     let out = decode_snapshot_events(&parsed, state);
     let max_seq = 0_i64;
     Ok((max_seq, out))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bump_dedup_stream(sample: &str) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    let next = dashboard
+        .get_attribute("data-dedup-stream")
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(0)
+        .saturating_add(1);
+    let _ = dashboard.set_attribute("data-dedup-stream", &next.to_string());
+
+    let mut lines = dashboard
+        .get_attribute("data-dedup-samples-stream")
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let trimmed = sample.trim();
+    if !trimmed.is_empty() {
+        lines.push(trimmed.chars().take(160).collect());
+    }
+    if lines.len() > 24 {
+        let drain = lines.len() - 24;
+        lines.drain(0..drain);
+    }
+    let _ = dashboard.set_attribute("data-dedup-samples-stream", &lines.join("\n"));
 }
 
 #[cfg(target_arch = "wasm32")]

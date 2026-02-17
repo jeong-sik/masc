@@ -106,6 +106,10 @@ fn parse_query_param(search: &str, key: &str) -> Option<String> {
 
 // ─── Endpoints ──────────────────────────────
 
+// ─── Polling Configuration ──────────────────
+
+pub const TRPG_POLL_INTERVAL_MS: u64 = 500; // 500ms polling interval for stream/poll endpoint
+
 pub fn trpg_uses_polling() -> bool {
     // MASC API supports SSE, so polling is fallback or for legacy engine.
     // If using MASC API, we use SSE.

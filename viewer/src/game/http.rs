@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 

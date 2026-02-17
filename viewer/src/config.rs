@@ -140,10 +140,10 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
         ViewerMode::Trpg => Some(format!("{}/api/v1/trpg/stream/sse/{}", MASC_MCP_URL, current_room_id())),
-        ViewerMode::Monitor => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
-        ViewerMode::Experiment => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
-        ViewerMode::Council => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
-        ViewerMode::Social => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
+        ViewerMode::Monitor => Some(format!("{}/sse?session_id=viewer-monitor", MASC_MCP_URL)),
+        ViewerMode::Experiment => Some(format!("{}/sse?session_id=viewer-experiment", MASC_MCP_URL)),
+        ViewerMode::Council => Some(format!("{}/sse?session_id=viewer-council", MASC_MCP_URL)),
+        ViewerMode::Social => Some(format!("{}/sse?session_id=viewer-social", MASC_MCP_URL)),
         ViewerMode::Lobby => None,
     }
 }

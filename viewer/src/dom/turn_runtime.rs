@@ -12,6 +12,10 @@ pub struct TurnRuntimeCache {
 
 #[cfg(target_arch = "wasm32")]
 use super::escape::html_escape;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use web_sys::HtmlInputElement;
 
 #[cfg(target_arch = "wasm32")]
 fn pretty_phase(phase: &str) -> String {
@@ -181,6 +185,52 @@ pub fn update_turn_runtime_dom(
                     room_status_key
                 ),
             );
+        }
+
+        let inferred_dm = if !progress.dm_keeper.trim().is_empty() {
+            progress.dm_keeper.trim().to_string()
+        } else {
+            actors
+                .iter()
+                .find(|actor| actor.id == "dm" && !actor.keeper.trim().is_empty())
+                .map(|actor| actor.keeper.trim().to_string())
+                .unwrap_or_default()
+        };
+        if let Some(dm_input) = document
+            .get_element_by_id("round-run-dm")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        {
+            if dm_input.value().trim().is_empty() && !inferred_dm.is_empty() {
+                dm_input.set_value(&inferred_dm);
+            }
+        }
+
+        let inferred_player_pairs = actors
+            .iter()
+            .filter(|actor| actor.id != "dm" && !actor.keeper.trim().is_empty())
+            .map(|actor| format!("{}={}", actor.id.trim(), actor.keeper.trim()))
+            .collect::<Vec<_>>();
+        if let Some(players_input) = document
+            .get_element_by_id("round-run-players")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        {
+            if players_input.value().trim().is_empty() && !inferred_player_pairs.is_empty() {
+                players_input.set_value(&inferred_player_pairs.join(","));
+            }
+        }
+
+        if let Some(summary) = document.get_element_by_id("round-run-summary") {
+            if summary.text_content().unwrap_or_default().trim().is_empty()
+                && !inferred_dm.is_empty()
+                && !inferred_player_pairs.is_empty()
+            {
+                summary.set_text_content(Some(&format!(
+                    "DM: {} · Players: {}",
+                    inferred_dm,
+                    inferred_player_pairs.join(", ")
+                )));
+                let _ = summary.set_attribute("style", "display:block");
+            }
         }
 
         let html = format!(

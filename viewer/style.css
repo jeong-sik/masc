@@ -705,6 +705,9 @@ body.mode-lobby #dashboard {
     .new-game-grid {
         grid-template-columns: 1fr;
     }
+    .actor-admin-grid {
+        grid-template-columns: 1fr;
+    }
     .room-hub {
         grid-template-columns: 1fr;
     }
@@ -1006,6 +1009,21 @@ body.mode-lobby #dashboard {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 6px;
+}
+
+.char-owner {
+    margin-bottom: 6px;
+    font-size: 10px;
+    letter-spacing: 0.4px;
+    font-family: var(--font-ui);
+}
+
+.char-owner.owner-assigned {
+    color: #7ccfa0;
+}
+
+.char-owner.owner-unassigned {
+    color: var(--text-dim);
 }
 
 .char-name {
@@ -1741,6 +1759,14 @@ body.mode-lobby #dashboard {
     color: var(--accent-primary);
 }
 
+#turn-control-status.status-info {
+    color: var(--text-dim);
+}
+
+#turn-control-status.status-warn {
+    color: #c4a265;
+}
+
 #turn-control-status.status-error {
     color: #d44;
 }
@@ -1855,6 +1881,81 @@ body.mode-lobby #dashboard {
     font-family: var(--font-ui);
     font-size: 11px;
     color: var(--text-dim);
+}
+
+.new-game-assignment {
+    border: 1px dashed rgba(196, 162, 101, 0.22);
+    border-radius: var(--panel-radius);
+    background: rgba(16, 18, 30, 0.72);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 7px 9px;
+}
+
+.actor-admin {
+    border: 1px solid rgba(196, 162, 101, 0.2);
+    border-radius: var(--panel-radius);
+    background: rgba(14, 16, 28, 0.86);
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+}
+
+.actor-admin-head {
+    font-size: 11px;
+    letter-spacing: 0.75px;
+    text-transform: uppercase;
+    color: var(--accent-primary);
+}
+
+.actor-admin-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+}
+
+.actor-admin-field-wide {
+    grid-column: 1 / -1;
+}
+
+.actor-admin-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.actor-admin-list {
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    background: rgba(8, 10, 18, 0.76);
+    min-height: 96px;
+    max-height: 168px;
+    overflow: auto;
+    padding: 4px;
+}
+
+.actor-admin-row {
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: rgba(22, 24, 36, 0.65);
+    color: var(--text-primary);
+    text-align: left;
+    padding: 6px 8px;
+    margin-bottom: 4px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.actor-admin-row:hover {
+    border-color: rgba(196, 162, 101, 0.4);
+    background: rgba(34, 36, 52, 0.78);
+}
+
+.actor-admin-row:last-child {
+    margin-bottom: 0;
 }
 
 /* ═══════════════════════════════════════════

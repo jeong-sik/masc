@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -100,6 +101,8 @@ pub struct CharacterData {
     pub conditions: Vec<ConditionData>,
     #[serde(default)]
     pub equipment: Vec<EquipmentData>,
+    #[serde(default)]
+    pub keeper: String,
 }
 
 fn default_hp() -> i32 {
@@ -116,6 +119,8 @@ pub struct GameStateResponse {
     pub room: Option<RoomResponse>,
     #[serde(default)]
     pub characters: Vec<CharacterData>,
+    #[serde(default)]
+    pub dm_keeper: String,
     #[serde(default)]
     pub current_area: String,
     #[serde(default)]
@@ -355,6 +360,9 @@ pub fn apply_initial_state(
     turn_progress.room_status = room_state.status.clone();
     turn_progress.turn = room_state.turn;
     turn_progress.phase = room_state.phase.as_str().to_string();
+    if !state.dm_keeper.trim().is_empty() {
+        turn_progress.dm_keeper = state.dm_keeper.trim().to_string();
+    }
     turn_progress.player_order = actor_ids
         .iter()
         .filter(|id| id.as_str() != "dm")
@@ -449,7 +457,7 @@ pub fn apply_initial_state(
             skills,
             conditions,
             equipment,
-            keeper: String::new(),
+            keeper: ch.keeper,
         });
     }
 
@@ -502,6 +510,7 @@ fn normalize_state_response(root: Value) -> Result<GameStateResponse, String> {
 
 fn parse_masc_state_response(root: &Value) -> GameStateResponse {
     let state = root.get("state").unwrap_or(root);
+    let actor_control = parse_actor_control_map(state);
 
     let room_id = root
         .get("room_id")
@@ -528,12 +537,28 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         .unwrap_or("")
         .to_string();
 
-    let characters = state
+    let mut characters = state
         .get("characters")
         .cloned()
         .and_then(|v| serde_json::from_value::<Vec<CharacterData>>(v).ok())
         .filter(|rows| !rows.is_empty())
-        .unwrap_or_else(|| parse_party_characters(state));
+        .unwrap_or_else(|| parse_party_characters(state, &actor_control));
+    apply_actor_control_to_characters(&mut characters, &actor_control);
+
+    let dm_keeper = state
+        .get("dm_keeper")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            state
+                .get("dm")
+                .and_then(Value::as_object)
+                .and_then(|dm| dm.get("keeper_name"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| actor_control.get("dm").map(|value| value.as_str()))
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let dice_log = parse_dice_log(root).unwrap_or_else(|| parse_dice_log(state).unwrap_or_default());
 
     GameStateResponse {
@@ -559,9 +584,41 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
                 .to_string(),
         }),
         characters,
+        dm_keeper,
         current_area,
         area_label,
         dice_log,
+    }
+}
+
+fn parse_actor_control_map(state: &Value) -> HashMap<String, String> {
+    state
+        .get("actor_control")
+        .and_then(Value::as_object)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|(actor_id, keeper)| {
+                    keeper
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(|keeper_name| (actor_id.trim().to_string(), keeper_name.to_string()))
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default()
+}
+
+fn apply_actor_control_to_characters(
+    characters: &mut Vec<CharacterData>,
+    actor_control: &HashMap<String, String>,
+) {
+    for row in characters.iter_mut() {
+        if row.keeper.trim().is_empty() {
+            if let Some(keeper) = actor_control.get(&row.id) {
+                row.keeper = keeper.clone();
+            }
+        }
     }
 }
 
@@ -684,7 +741,10 @@ fn entry_passed_marker(raw: &str) -> bool {
         })
 }
 
-fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
+fn parse_party_characters(
+    state: &Value,
+    actor_control: &HashMap<String, String>,
+) -> Vec<CharacterData> {
     let Some(party) = state.get("party").and_then(Value::as_object) else {
         return Vec::new();
     };
@@ -824,6 +884,10 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            let keeper = actor_control
+                .get(actor_id)
+                .cloned()
+                .unwrap_or_default();
 
             CharacterData {
                 id: actor_id.to_string(),
@@ -842,6 +906,7 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                 skills,
                 conditions,
                 equipment,
+                keeper,
             }
         })
         .collect()
@@ -902,6 +967,7 @@ fn unavailable_game_state(room_id: &str) -> GameStateResponse {
             current_node: "".to_string(),
         }),
         characters: Vec::new(),
+        dm_keeper: String::new(),
         current_area: "".to_string(),
         area_label: "".to_string(),
         dice_log: Vec::new(),
@@ -982,6 +1048,57 @@ mod tests {
         assert_eq!(parsed.characters[0].name, "그림자");
         assert_eq!(parsed.characters[0].class, "fighter");
         assert_eq!(parsed.characters[0].hp, 28);
+    }
+
+    #[test]
+    fn normalize_masc_shape_maps_actor_control_and_dm_keeper() {
+        let root = json!({
+            "ok": true,
+            "room_id": "default",
+            "state": {
+                "turn": 4,
+                "phase": "round",
+                "dm": { "keeper_name": "trpg-dm" },
+                "actor_control": {
+                    "grimja": "trpg-grimja",
+                    "luna": "trpg-luna"
+                },
+                "party": {
+                    "grimja": {
+                        "name": "그림자",
+                        "role": "fighter",
+                        "hp": 28,
+                        "max_hp": 30,
+                        "position": "C",
+                        "alive": true
+                    },
+                    "luna": {
+                        "name": "루나",
+                        "role": "mage",
+                        "hp": 13,
+                        "max_hp": 15,
+                        "position": "F",
+                        "alive": true
+                    }
+                }
+            }
+        });
+
+        let parsed = normalize_state_response(root).expect("masc parse should succeed");
+        assert_eq!(parsed.dm_keeper, "trpg-dm");
+        assert_eq!(parsed.characters.len(), 2);
+        let grimja = parsed
+            .characters
+            .iter()
+            .find(|row| row.id == "grimja")
+            .expect("grimja row");
+        assert_eq!(grimja.keeper, "trpg-grimja");
+        let luna = parsed
+            .characters
+            .iter()
+            .find(|row| row.id == "luna")
+            .expect("luna row");
+        assert_eq!(luna.keeper, "trpg-luna");
     }
 
     #[test]

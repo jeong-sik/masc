@@ -7952,6 +7952,79 @@ let cached_html = lazy ({|<!DOCTYPE html>
       };
     }
 
+    function trpgBuildActorKeeperPairs(actorIds, dmKeeper, requestedMap, templateMap) {
+      const actors = trpgUniqueStrings((Array.isArray(actorIds) ? actorIds : []).map((actorId) => String(actorId || '').trim()))
+        .filter((actorId) => actorId !== '');
+      const dm = String(dmKeeper || '').trim();
+      const requested = (requestedMap && typeof requestedMap === 'object' && !Array.isArray(requestedMap))
+        ? requestedMap
+        : {};
+      const template = (templateMap && typeof templateMap === 'object' && !Array.isArray(templateMap))
+        ? templateMap
+        : {};
+
+      if (actors.length === 0) {
+        return {
+          ok: false,
+          mapping: {},
+          error: '세션 파티 actor_id가 비어 있어 할당할 수 없습니다.',
+        };
+      }
+
+      const mapping = {};
+      const usedKeepers = new Set();
+      if (dm !== '') usedKeepers.add(dm);
+      const unknownActors = [];
+
+      Object.entries(requested).forEach(([actorIdRaw, keeperRaw]) => {
+        const actorId = String(actorIdRaw || '').trim();
+        const keeper = String(keeperRaw || '').trim();
+        if (!actorId || !keeper) return;
+        if (!actors.includes(actorId)) {
+          unknownActors.push(actorId);
+        }
+      });
+
+      for (const actorId of actors) {
+        const requestedKeeper = String(requested[actorId] || '').trim();
+        const templateKeeper = String(template[actorId] || '').trim();
+        const keeper = requestedKeeper || templateKeeper;
+        if (!keeper) {
+          return {
+            ok: false,
+            mapping: {},
+            error: `할당이 누락된 actor가 있습니다: ${actorId}`,
+          };
+        }
+        if (keeper === dm) {
+          return {
+            ok: false,
+            mapping: {},
+            error: `DM keeper "${dm}"가 player keeper로 중복되었습니다. keeper는 DM과 겹칠 수 없습니다.`,
+          };
+        }
+        if (usedKeepers.has(keeper)) {
+          return {
+            ok: false,
+            mapping: {},
+            error: `player keeper 중복: ${keeper}`,
+          };
+        }
+        mapping[actorId] = keeper;
+        usedKeepers.add(keeper);
+      }
+
+      if (unknownActors.length > 0) {
+        return {
+          ok: false,
+          mapping: {},
+          error: `현재 파티에 없는 actor가 지정되었습니다: ${trpgUniqueStrings(unknownActors).join(', ')}`,
+        };
+      }
+
+      return { ok: true, mapping };
+    }
+
     function trpgBuildSessionHistory(events) {
       const sorted = (Array.isArray(events) ? events.slice() : [])
         .sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
@@ -8598,21 +8671,24 @@ let cached_html = lazy ({|<!DOCTYPE html>
           usedKeepers.add(leased);
         }
       });
-      expectedActors.forEach((actorId) => {
-        if (nextMap[actorId]) return;
+      let allocationFailed = false;
+      for (const actorId of expectedActors) {
+        if (nextMap[actorId] || allocationFailed) continue;
         const picked = candidateKeepers.find((keeper) => !usedKeepers.has(keeper));
         if (picked) {
           nextMap[actorId] = picked;
           usedKeepers.add(picked);
-          return;
+          continue;
         }
-        let fallback = `pk-${actorId}`;
-        while (usedKeepers.has(fallback) || fallback === dmKeeper) {
-          fallback = `${fallback}-1`;
-        }
-        nextMap[actorId] = fallback;
-        usedKeepers.add(fallback);
-      });
+        allocationFailed = true;
+        setTrpgRoundRunStatus(
+          `오류: actor ${escapeHtml(actorId)}에 매핑할 사용 가능한 keeper가 부족합니다. 선택 가능한 keeper를 먼저 추가하세요.`,
+          'error'
+        );
+      }
+      if (allocationFailed) {
+        return;
+      }
 
       input.value = playerKeeperMapToText(nextMap);
       trpgSyncKeeperSelectorsFromInputs();
@@ -9853,14 +9929,13 @@ let cached_html = lazy ({|<!DOCTYPE html>
           String((document.getElementById('trpg-dm-keeper-input') || {}).value || '').trim();
         const requestedPlayerRaw =
           String((document.getElementById('trpg-player-keepers-input') || {}).value || '');
-        const parsedRequestedPlayers = parseTrpgPlayerKeepers(requestedPlayerRaw);
-        const requestedPlayerKeepers = parsedRequestedPlayers.ok
-          ? trpgUniqueStrings(
-            Object.values(parsedRequestedPlayers.mapping || {})
-              .map((name) => String(name || '').trim())
-              .filter((name) => name !== '')
-          )
-          : trpgExtractKeeperNamesFromPlayerText(requestedPlayerRaw);
+        const requestedPlayerTrimmed = requestedPlayerRaw.trim();
+        const parsedRequestedPlayers = requestedPlayerTrimmed
+          ? parseTrpgPlayerKeepers(requestedPlayerRaw)
+          : { ok: true, mapping: {} };
+        if (!parsedRequestedPlayers.ok) {
+          throw new Error(parsedRequestedPlayers.error || '잘못된 player keeper 입력입니다.');
+        }
 
         const sessionId = `dashboard-${roomId}-${Date.now()}`;
         const seed = Math.floor(Date.now() % 100000);
@@ -9926,22 +10001,16 @@ let cached_html = lazy ({|<!DOCTYPE html>
           throw new Error('세션 파티 actor_id를 확인하지 못했습니다.');
         }
 
-        const usedKeepers = new Set([dmKeeper]);
-        const preferredKeepers = requestedPlayerKeepers.filter((name) => name !== dmKeeper);
-        const playerMap = {};
-        actorIds.forEach((actorId, idx) => {
-          let keeper = idx < preferredKeepers.length
-            ? preferredKeepers[idx]
-            : String(playerMapRaw[actorId] || '').trim();
-          if (!keeper || usedKeepers.has(keeper)) {
-            keeper = `pk-${actorId}`;
-          }
-          while (usedKeepers.has(keeper)) {
-            keeper = `${keeper}-1`;
-          }
-          usedKeepers.add(keeper);
-          playerMap[actorId] = keeper;
-        });
+        const assigned = trpgBuildActorKeeperPairs(
+          actorIds,
+          dmKeeper,
+          parsedRequestedPlayers.mapping || {},
+          playerMapRaw,
+        );
+        if (!assigned.ok) {
+          throw new Error(assigned.error || 'player keeper 할당 실패');
+        }
+        const playerMap = assigned.mapping || {};
         const playerLines = playerKeeperMapToText(playerMap);
         const phase = String(template.phase || 'round').trim() || 'round';
 

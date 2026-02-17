@@ -576,6 +576,51 @@ fn unique_non_empty(mut values: Vec<String>) -> Vec<String> {
     out
 }
 
+fn assign_keepers_to_actor_ids(
+    actor_ids: &[String],
+    dm_keeper: &str,
+    player_keepers: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    if actor_ids.is_empty() {
+        return Err("세션 party actor_id를 읽지 못했습니다.".to_string());
+    }
+    if player_keepers.len() < actor_ids.len() {
+        return Err(format!(
+            "player keeper가 부족합니다. actor {}명에 keeper {}명만 선택되었습니다.",
+            actor_ids.len(),
+            player_keepers.len()
+        ));
+    }
+
+    let mut assigned = Vec::with_capacity(actor_ids.len());
+    let mut used_keepers = vec![dm_keeper.trim().to_string()];
+
+    for (idx, actor_id) in actor_ids.iter().enumerate() {
+        let keeper = player_keepers
+            .get(idx)
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| format!("actor {}에 할당할 keeper가 비어 있습니다.", actor_id))?;
+
+        if keeper == dm_keeper {
+            return Err(format!(
+                "DM keeper와 player keeper는 중복될 수 없습니다: {}",
+                keeper
+            ));
+        }
+        if used_keepers.iter().any(|name| name == &keeper) {
+            return Err(format!(
+                "player keeper는 모두 유일해야 합니다. 중복: {}",
+                keeper
+            ));
+        }
+        used_keepers.push(keeper.clone());
+        assigned.push((actor_id.clone(), keeper));
+    }
+
+    Ok(assigned)
+}
+
 #[cfg(target_arch = "wasm32")]
 fn parse_preset_id(value: &Value, field: &str) -> Option<String> {
     match value.get(field) {
@@ -1861,30 +1906,9 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         return Err("세션 party actor_id를 읽지 못했습니다.".to_string());
     }
 
-    let mut used_keepers = vec![dm_keeper.clone()];
-    let mut player_map: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    for (idx, actor_id) in actor_ids.iter().enumerate() {
-        let mut keeper = players
-            .get(idx)
-            .cloned()
-            .unwrap_or_else(|| format!("pk-{}", actor_id));
-        if used_keepers.iter().any(|name| name == &keeper) {
-            keeper = format!("pk-{}", actor_id);
-        }
-        let mut candidate = keeper.clone();
-        let mut suffix = 1_i32;
-        while used_keepers.iter().any(|name| name == &candidate) {
-            candidate = format!("{}-{}", keeper, suffix);
-            suffix += 1;
-        }
-        used_keepers.push(candidate.clone());
-        player_map.insert(actor_id.clone(), candidate);
-    }
-
-    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-        set_new_game_assignment(&doc, &dm_keeper, &player_map, &actor_ids);
-    }
+    let assignments = assign_keepers_to_actor_ids(&actor_ids, &dm_keeper, &players)?;
+    let player_map: std::collections::HashMap<String, String> =
+        assignments.into_iter().collect();
 
     if !models.is_empty() {
         let models_value = Value::Array(
@@ -2365,5 +2389,43 @@ mod tests {
     fn panel_id_returns_none_for_non_panel_modes() {
         assert_eq!(ViewerMode::Lobby.panel_id(), None);
         assert_eq!(ViewerMode::Trpg.panel_id(), None);
+    }
+
+    #[test]
+    fn assign_keepers_success_with_unique_names() {
+        let actors = vec!["p01".to_string(), "p02".to_string()];
+        let keepers = vec!["grimja".to_string(), "luna".to_string()];
+        let assigned =
+            assign_keepers_to_actor_ids(&actors, "dm-keeper", &keepers).expect("assignment ok");
+        assert_eq!(
+            assigned,
+            vec![
+                ("p01".to_string(), "grimja".to_string()),
+                ("p02".to_string(), "luna".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn assign_keepers_fails_when_players_are_missing() {
+        let actors = vec!["p01".to_string(), "p02".to_string(), "p03".to_string()];
+        let keepers = vec!["grimja".to_string(), "luna".to_string()];
+        let err = assign_keepers_to_actor_ids(&actors, "dm-keeper", &keepers)
+            .expect_err("must fail on keeper shortage");
+        assert!(err.contains("부족"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn assign_keepers_fails_on_duplicate_or_dm_collision() {
+        let actors = vec!["p01".to_string(), "p02".to_string()];
+        let dup = vec!["grimja".to_string(), "grimja".to_string()];
+        let err_dup =
+            assign_keepers_to_actor_ids(&actors, "dm-keeper", &dup).expect_err("duplicate keeper");
+        assert!(err_dup.contains("중복"), "unexpected error: {err_dup}");
+
+        let dm_collision = vec!["dm-keeper".to_string(), "luna".to_string()];
+        let err_dm = assign_keepers_to_actor_ids(&actors, "dm-keeper", &dm_collision)
+            .expect_err("dm collision must fail");
+        assert!(err_dm.contains("DM keeper"), "unexpected error: {err_dm}");
     }
 }

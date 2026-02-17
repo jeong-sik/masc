@@ -150,6 +150,19 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     }
 }
 
+/// Resolve SSE endpoint by mode name string (for use from async contexts
+/// that don't have access to Bevy State<ViewerMode>).
+pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
+    match mode_name {
+        "Trpg" => Some(format!("{}/api/v1/trpg/stream/sse/{}", MASC_MCP_URL, current_room_id())),
+        "Monitor" => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
+        "Experiment" => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
+        "Council" => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
+        "Social" => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
+        _ => None,
+    }
+}
+
 /// Helper to get full room URL for external links (if needed)
 pub fn trpg_room_url(path: &str) -> String {
     format!("{}/rooms/{}/{}", MASC_MCP_URL, current_room_id(), path.trim_start_matches('/'))

@@ -5,18 +5,40 @@ use crate::game::components::{GameCamera, MapBackground};
 use crate::game::state::MapState;
 use crate::theme::ViewerTheme;
 
+/// All named area labels and their world positions.
+const AREA_POSITIONS: &[(&str, Vec2)] = &[
+    ("A", Vec2::new(-300.0, 150.0)),
+    ("B", Vec2::new(-100.0, 150.0)),
+    ("C", Vec2::new(100.0, 0.0)),
+    ("D", Vec2::new(-200.0, -100.0)),
+    ("E", Vec2::new(0.0, -150.0)),
+    ("F", Vec2::new(250.0, -100.0)),
+];
+
 /// Map area → screen position mapping.
 /// Areas A-F are zones within the current scenario map.
 pub fn area_to_position(area: &str) -> Vec2 {
-    match area {
-        "A" => Vec2::new(-300.0, 150.0),
-        "B" => Vec2::new(-100.0, 150.0),
-        "C" => Vec2::new(100.0, 0.0),
-        "D" => Vec2::new(-200.0, -100.0),
-        "E" => Vec2::new(0.0, -150.0),
-        "F" => Vec2::new(250.0, -100.0),
-        _ => Vec2::ZERO,
+    for &(label, pos) in AREA_POSITIONS {
+        if label == area {
+            return pos;
+        }
     }
+    Vec2::ZERO
+}
+
+/// Reverse mapping: find the nearest named area to a world position.
+/// Returns the area label whose center is closest to `pos`.
+pub fn position_to_area(pos: Vec2) -> String {
+    let mut best_label = "A";
+    let mut best_dist = f32::MAX;
+    for &(label, area_pos) in AREA_POSITIONS {
+        let dist = pos.distance_squared(area_pos);
+        if dist < best_dist {
+            best_dist = dist;
+            best_label = label;
+        }
+    }
+    best_label.to_string()
 }
 
 /// Spawns the 2D camera with shader settings from the active theme.

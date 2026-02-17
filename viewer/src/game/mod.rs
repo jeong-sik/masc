@@ -44,6 +44,25 @@ impl Plugin for GameStatePlugin {
             .add_message::<WeatherChanged>()
             .add_message::<MoodChanged>()
             .add_message::<TurnProgressUpdated>()
+            // Phase 1: High-frequency events
+            .add_message::<PartySelected>()
+            .add_message::<RoomCreated>()
+            .add_message::<RoomStarted>()
+            .add_message::<SessionStarted>()
+            .add_message::<PhaseChanged>()
+            .add_message::<TurnStarted>()
+            .add_message::<KeeperUnavailable>()
+            // Phase 2: Intervention + Actor events
+            .add_message::<InterventionSubmitted>()
+            .add_message::<InterventionApplied>()
+            .add_message::<ActorSpawned>()
+            .add_message::<ActorDeleted>()
+            .add_message::<ActorClaimed>()
+            .add_message::<ActorReleased>()
+            .add_message::<ActorUpdated>()
+            .add_message::<RoomEnded>()
+            .add_message::<TurnActionResolved>()
+            .add_message::<SceneTransitioned>()
             // ── TRPG-gated systems ──
             .add_systems(
                 OnEnter(ViewerMode::Trpg),

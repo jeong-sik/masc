@@ -1,25 +1,75 @@
 use bevy::prelude::*;
+use bevy::ecs::system::SystemParam;
 
 use super::client::SseReceiver;
 use crate::game::events::*;
 use crate::game::state::ConnectionStatus;
 
+/// Parse SSE JSON data into a typed payload and write the corresponding Bevy message.
+macro_rules! dispatch_event {
+    ($event_type:expr, $data:expr, $writer:expr, $payload_ty:ty, $event_ty:ident) => {
+        match serde_json::from_str::<$payload_ty>($data) {
+            Ok(payload) => { $writer.write($event_ty(payload)); }
+            Err(e) => log::warn!("Failed to parse {}: {}", $event_type, e),
+        }
+    };
+}
+
+// ── SystemParam bundles ──────────────────────────
+// Bevy's IntoSystem supports max 16 params. Bundle MessageWriters into
+// logical groups so the system function stays under the limit.
+
+/// Original 13 event types (underscore-format SSE names).
+#[derive(SystemParam)]
+pub struct OriginalEventWriters<'w> {
+    pub dice: MessageWriter<'w, DiceRolled>,
+    pub hp: MessageWriter<'w, HpChanged>,
+    pub narrative: MessageWriter<'w, NarrativeReceived>,
+    pub area: MessageWriter<'w, AreaMoved>,
+    pub turn: MessageWriter<'w, TurnAdvanced>,
+    pub choice: MessageWriter<'w, ChoiceAvailable>,
+    pub choice_resolved: MessageWriter<'w, ChoiceResolved>,
+    pub item: MessageWriter<'w, ItemAcquired>,
+    pub death: MessageWriter<'w, CharacterDied>,
+    pub combat: MessageWriter<'w, CombatStarted>,
+    pub weather: MessageWriter<'w, WeatherChanged>,
+    pub mood: MessageWriter<'w, MoodChanged>,
+    pub progress: MessageWriter<'w, TurnProgressUpdated>,
+}
+
+/// Phase 1: High-frequency lifecycle events (dot-format SSE names).
+#[derive(SystemParam)]
+pub struct Phase1EventWriters<'w> {
+    pub party_selected: MessageWriter<'w, PartySelected>,
+    pub room_created: MessageWriter<'w, RoomCreated>,
+    pub room_started: MessageWriter<'w, RoomStarted>,
+    pub session_started: MessageWriter<'w, SessionStarted>,
+    pub phase_changed: MessageWriter<'w, PhaseChanged>,
+    pub turn_started: MessageWriter<'w, TurnStarted>,
+    pub keeper_unavailable: MessageWriter<'w, KeeperUnavailable>,
+}
+
+/// Phase 2: Intervention + Actor events (dot-format SSE names).
+#[derive(SystemParam)]
+pub struct Phase2EventWriters<'w> {
+    pub intervention_submitted: MessageWriter<'w, InterventionSubmitted>,
+    pub intervention_applied: MessageWriter<'w, InterventionApplied>,
+    pub actor_spawned: MessageWriter<'w, ActorSpawned>,
+    pub actor_deleted: MessageWriter<'w, ActorDeleted>,
+    pub actor_claimed: MessageWriter<'w, ActorClaimed>,
+    pub actor_released: MessageWriter<'w, ActorReleased>,
+    pub actor_updated: MessageWriter<'w, ActorUpdated>,
+    pub room_ended: MessageWriter<'w, RoomEnded>,
+    pub turn_action_resolved: MessageWriter<'w, TurnActionResolved>,
+    pub scene_transitioned: MessageWriter<'w, SceneTransitioned>,
+}
+
 /// Each frame, drain the SSE message buffer and emit typed Bevy events.
 pub fn poll_sse_events(
     receiver: Option<Res<SseReceiver>>,
-    mut dice_events: MessageWriter<DiceRolled>,
-    mut hp_events: MessageWriter<HpChanged>,
-    mut narrative_events: MessageWriter<NarrativeReceived>,
-    mut area_events: MessageWriter<AreaMoved>,
-    mut turn_events: MessageWriter<TurnAdvanced>,
-    mut choice_events: MessageWriter<ChoiceAvailable>,
-    mut choice_resolved_events: MessageWriter<ChoiceResolved>,
-    mut item_events: MessageWriter<ItemAcquired>,
-    mut death_events: MessageWriter<CharacterDied>,
-    mut combat_events: MessageWriter<CombatStarted>,
-    mut weather_events: MessageWriter<WeatherChanged>,
-    mut mood_events: MessageWriter<MoodChanged>,
-    mut progress_events: MessageWriter<TurnProgressUpdated>,
+    mut original: OriginalEventWriters,
+    mut phase1: Phase1EventWriters,
+    mut phase2: Phase2EventWriters,
     mut connection: ResMut<ConnectionStatus>,
 ) {
     let Some(receiver) = receiver else { return };
@@ -36,84 +86,40 @@ pub fn poll_sse_events(
 
     for (event_type, data) in msgs.drain(..) {
         match event_type.as_str() {
-            "dice_roll" => {
-                match serde_json::from_str::<DiceRollPayload>(&data) {
-                    Ok(payload) => { dice_events.write(DiceRolled(payload)); }
-                    Err(e) => log::warn!("Failed to parse dice_roll: {}", e),
-                }
-            }
-            "hp_change" => {
-                match serde_json::from_str::<HpChangePayload>(&data) {
-                    Ok(payload) => { hp_events.write(HpChanged(payload)); }
-                    Err(e) => log::warn!("Failed to parse hp_change: {}", e),
-                }
-            }
-            "narrative" => {
-                match serde_json::from_str::<NarrativePayload>(&data) {
-                    Ok(payload) => { narrative_events.write(NarrativeReceived(payload)); }
-                    Err(e) => log::warn!("Failed to parse narrative: {}", e),
-                }
-            }
-            "area_move" => {
-                match serde_json::from_str::<AreaMovePayload>(&data) {
-                    Ok(payload) => { area_events.write(AreaMoved(payload)); }
-                    Err(e) => log::warn!("Failed to parse area_move: {}", e),
-                }
-            }
-            "turn_advance" => {
-                match serde_json::from_str::<TurnAdvancePayload>(&data) {
-                    Ok(payload) => { turn_events.write(TurnAdvanced(payload)); }
-                    Err(e) => log::warn!("Failed to parse turn_advance: {}", e),
-                }
-            }
-            "choice_available" => {
-                match serde_json::from_str::<ChoicePayload>(&data) {
-                    Ok(payload) => { choice_events.write(ChoiceAvailable(payload)); }
-                    Err(e) => log::warn!("Failed to parse choice_available: {}", e),
-                }
-            }
-            "choice_resolved" => {
-                match serde_json::from_str::<ChoicePayload>(&data) {
-                    Ok(payload) => { choice_resolved_events.write(ChoiceResolved(payload)); }
-                    Err(e) => log::warn!("Failed to parse choice_resolved: {}", e),
-                }
-            }
-            "item_acquired" => {
-                match serde_json::from_str::<ItemPayload>(&data) {
-                    Ok(payload) => { item_events.write(ItemAcquired(payload)); }
-                    Err(e) => log::warn!("Failed to parse item_acquired: {}", e),
-                }
-            }
-            "character_death" => {
-                match serde_json::from_str::<DeathPayload>(&data) {
-                    Ok(payload) => { death_events.write(CharacterDied(payload)); }
-                    Err(e) => log::warn!("Failed to parse character_death: {}", e),
-                }
-            }
-            "combat_start" => {
-                match serde_json::from_str::<CombatPayload>(&data) {
-                    Ok(payload) => { combat_events.write(CombatStarted(payload)); }
-                    Err(e) => log::warn!("Failed to parse combat_start: {}", e),
-                }
-            }
-            "weather_change" => {
-                match serde_json::from_str::<WeatherChangePayload>(&data) {
-                    Ok(payload) => { weather_events.write(WeatherChanged(payload)); }
-                    Err(e) => log::warn!("Failed to parse weather_change: {}", e),
-                }
-            }
-            "mood_change" => {
-                match serde_json::from_str::<MoodChangePayload>(&data) {
-                    Ok(payload) => { mood_events.write(MoodChanged(payload)); }
-                    Err(e) => log::warn!("Failed to parse mood_change: {}", e),
-                }
-            }
-            "turn_progress" => {
-                match serde_json::from_str::<TurnProgressPayload>(&data) {
-                    Ok(payload) => { progress_events.write(TurnProgressUpdated(payload)); }
-                    Err(e) => log::warn!("Failed to parse turn_progress: {}", e),
-                }
-            }
+            // ── Original events (underscore format) ──
+            "dice_roll" => dispatch_event!(event_type, &data, original.dice, DiceRollPayload, DiceRolled),
+            "hp_change" => dispatch_event!(event_type, &data, original.hp, HpChangePayload, HpChanged),
+            "narrative" => dispatch_event!(event_type, &data, original.narrative, NarrativePayload, NarrativeReceived),
+            "area_move" => dispatch_event!(event_type, &data, original.area, AreaMovePayload, AreaMoved),
+            "turn_advance" => dispatch_event!(event_type, &data, original.turn, TurnAdvancePayload, TurnAdvanced),
+            "choice_available" => dispatch_event!(event_type, &data, original.choice, ChoicePayload, ChoiceAvailable),
+            "choice_resolved" => dispatch_event!(event_type, &data, original.choice_resolved, ChoicePayload, ChoiceResolved),
+            "item_acquired" => dispatch_event!(event_type, &data, original.item, ItemPayload, ItemAcquired),
+            "character_death" => dispatch_event!(event_type, &data, original.death, DeathPayload, CharacterDied),
+            "combat_start" => dispatch_event!(event_type, &data, original.combat, CombatPayload, CombatStarted),
+            "weather_change" => dispatch_event!(event_type, &data, original.weather, WeatherChangePayload, WeatherChanged),
+            "mood_change" => dispatch_event!(event_type, &data, original.mood, MoodChangePayload, MoodChanged),
+            "turn_progress" => dispatch_event!(event_type, &data, original.progress, TurnProgressPayload, TurnProgressUpdated),
+            // ── Phase 1: High-frequency events (dot format) ──
+            "party.selected" => dispatch_event!(event_type, &data, phase1.party_selected, PartySelectedPayload, PartySelected),
+            "room.created" => dispatch_event!(event_type, &data, phase1.room_created, RoomCreatedPayload, RoomCreated),
+            "room.started" => dispatch_event!(event_type, &data, phase1.room_started, RoomLifecyclePayload, RoomStarted),
+            "session.started" => dispatch_event!(event_type, &data, phase1.session_started, SessionStartedPayload, SessionStarted),
+            "phase.changed" => dispatch_event!(event_type, &data, phase1.phase_changed, TurnAdvancePayload, PhaseChanged),
+            "turn.started" => dispatch_event!(event_type, &data, phase1.turn_started, TurnAdvancePayload, TurnStarted),
+            "keeper.unavailable" => dispatch_event!(event_type, &data, phase1.keeper_unavailable, KeeperUnavailablePayload, KeeperUnavailable),
+            // ── Phase 2: Intervention + Actor events (dot format) ──
+            "intervention.submitted" => dispatch_event!(event_type, &data, phase2.intervention_submitted, InterventionPayload, InterventionSubmitted),
+            "intervention.applied" => dispatch_event!(event_type, &data, phase2.intervention_applied, InterventionPayload, InterventionApplied),
+            "actor.spawned" => dispatch_event!(event_type, &data, phase2.actor_spawned, ActorLifecyclePayload, ActorSpawned),
+            "actor.deleted" => dispatch_event!(event_type, &data, phase2.actor_deleted, ActorLifecyclePayload, ActorDeleted),
+            "actor.claimed" => dispatch_event!(event_type, &data, phase2.actor_claimed, ActorLifecyclePayload, ActorClaimed),
+            "actor.released" => dispatch_event!(event_type, &data, phase2.actor_released, ActorLifecyclePayload, ActorReleased),
+            "actor.updated" => dispatch_event!(event_type, &data, phase2.actor_updated, ActorLifecyclePayload, ActorUpdated),
+            "room.ended" => dispatch_event!(event_type, &data, phase2.room_ended, RoomEndedPayload, RoomEnded),
+            "turn.action.resolved" => dispatch_event!(event_type, &data, phase2.turn_action_resolved, TurnActionResolvedPayload, TurnActionResolved),
+            "scene.transition" => dispatch_event!(event_type, &data, phase2.scene_transitioned, SceneTransitionPayload, SceneTransitioned),
+            // ── Fallback ──
             other => {
                 log::debug!("Unhandled SSE event type: {}", other);
             }

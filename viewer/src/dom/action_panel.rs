@@ -350,7 +350,12 @@ pub fn sync_action_panel_interaction_state(
 
     #[cfg(target_arch = "wasm32")]
     {
-        let active_actor = progress.current_actor.trim().to_string();
+        // Primary: Use turn progress state
+        // Fallback: Dashboard-selected actor (for lobby/pre-turn scenarios)
+        let mut active_actor = progress.current_actor.trim().to_string();
+        if active_actor.is_empty() {
+            active_actor = config::current_actor_id().unwrap_or_default();
+        }
         let can_act = !active_actor.is_empty() && active_actor != "dm";
 
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
@@ -406,16 +411,18 @@ fn disable_buttons(disabled: bool) {
 #[cfg(target_arch = "wasm32")]
 fn get_active_actor_from_dom() -> Option<String> {
     let doc = web_sys::window().and_then(|w| w.document())?;
-    let panel = doc.get_element_by_id("action-panel");
-    let actor_id = panel
-        .and_then(|el| el.get_attribute("data-active-actor"))
-        .unwrap_or_default();
 
-    if actor_id.trim().is_empty() {
-        None
-    } else {
-        Some(actor_id)
+    // 1. Try action-panel attribute (set by sync function)
+    if let Some(panel) = doc.get_element_by_id("action-panel") {
+        if let Some(actor_id) = panel.get_attribute("data-active-actor") {
+            if !actor_id.trim().is_empty() {
+                return Some(actor_id);
+            }
+        }
     }
+
+    // 2. Fallback: Dashboard-selected actor
+    config::current_actor_id()
 }
 
 #[cfg(test)]
@@ -429,4 +436,3 @@ mod tests {
         assert_eq!(extract_roll_display(""), "Roll completed.");
     }
 }
-// Forced update

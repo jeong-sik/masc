@@ -20,3 +20,8 @@ backend = "http://localhost:8935/api/"
 [[proxy]]
 rewrite = "/mcp"
 backend = "http://localhost:8935/mcp"
+
+# Proxy legacy SSE stream used by non-TRPG viewer modes
+[[proxy]]
+rewrite = "/sse"
+backend = "http://localhost:8935/sse"

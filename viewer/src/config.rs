@@ -133,11 +133,20 @@ pub fn trpg_uses_polling() -> bool {
 }
 
 pub fn trpg_state_url() -> String {
-    format!("{}/api/v1/trpg/state/{}", MASC_MCP_URL, current_room_id())
+    format!(
+        "{}/api/v1/trpg/state?room_id={}",
+        MASC_MCP_URL,
+        current_room_id()
+    )
 }
 
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
-    format!("{}/api/v1/trpg/stream/poll/{}?after={}", MASC_MCP_URL, current_room_id(), after_seq)
+    format!(
+        "{}/api/v1/trpg/stream?room_id={}&after_seq={}",
+        MASC_MCP_URL,
+        current_room_id(),
+        after_seq
+    )
 }
 
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {

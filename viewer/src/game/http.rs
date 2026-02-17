@@ -581,10 +581,75 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            let mp = info.get("mp").and_then(Value::as_i64).unwrap_or(20) as i32;
+            let max_mp = info
+                .get("max_mp")
+                .and_then(Value::as_i64)
+                .unwrap_or(i64::from(mp.max(1))) as i32;
             let stats = info
                 .get("stats")
                 .cloned()
                 .and_then(|v| serde_json::from_value::<StatsData>(v).ok());
+            let skills = info
+                .get("skills")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|skill| {
+                            if let Ok(parsed) = serde_json::from_value::<SkillData>(skill.clone()) {
+                                Some(parsed)
+                            } else if let Some(name) = skill.as_str() {
+                                Some(SkillData {
+                                    name: name.to_string(),
+                                    level: 10,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let conditions = info
+                .get("conditions")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|cond| {
+                            if let Ok(parsed) = serde_json::from_value::<ConditionData>(cond.clone()) {
+                                Some(parsed)
+                            } else if let Some(name) = cond.as_str() {
+                                Some(ConditionData {
+                                    name: name.to_string(),
+                                    remaining_turns: None,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let equipment = info
+                .get("equipment")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|slot| {
+                            if let Ok(parsed) = serde_json::from_value::<EquipmentData>(slot.clone()) {
+                                Some(parsed)
+                            } else if let Some(name) = slot.as_str() {
+                                Some(EquipmentData {
+                                    slot: "item".to_string(),
+                                    name: name.to_string(),
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
 
             CharacterData {
                 id: actor_id.to_string(),
@@ -592,12 +657,17 @@ fn parse_party_characters(state: &Value) -> Vec<CharacterData> {
                 class,
                 hp,
                 max_hp,
+                mp,
+                max_mp,
                 stats,
                 area,
                 is_dead,
                 inventory,
                 buffs,
                 debuffs,
+                skills,
+                conditions,
+                equipment,
             }
         })
         .collect()

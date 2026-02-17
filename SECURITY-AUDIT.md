@@ -1,26 +1,27 @@
 # MASC-MCP Security Vulnerability Audit
 
-**감사 일시**: 2025-02-02  
-**분석 대상**: `lib/*.ml` (전체 코드베이스)  
+**감사 일시**: 2025-02-02
+**검증 일시**: 2026-02-17
+**분석 대상**: `lib/*.ml` (전체 코드베이스)
 **관점**: 공격자 (Red Team)
 
 ---
 
 ## 요약
 
-| 심각도 | 개수 | 주요 영역 |
-|--------|------|-----------|
-| 🔴 Critical | 2 | 토큰 생성, Command Injection |
-| 🟠 High | 4 | 권한 검사, 인증 기본값, 쉘 실행 |
-| 🟡 Medium | 5 | 시간 비교, Rate Limit, 정보 노출 |
-| 🟢 Low | 3 | 암호화 설정, DoS, 세션 관리 |
+| 심각도 | 개수 | 해결 | 주요 영역 |
+|--------|------|------|-----------|
+| 🔴 Critical | 2 | 2/2 | 토큰 생성, Command Injection |
+| 🟠 High | 4 | 1/4 | 권한 검사, 인증 기본값, 쉘 실행 |
+| 🟡 Medium | 5 | 0/5 | 시간 비교, Rate Limit, 정보 노출 |
+| 🟢 Low | 3 | 0/3 | 암호화 설정, DoS, 세션 관리 |
 
 ---
 
 ## 🔴 Critical (즉시 수정 필요)
 
-### 1. 암호학적으로 안전하지 않은 토큰 생성
-**파일**: `auth.ml:10-14`
+### 1. 암호학적으로 안전하지 않은 토큰 생성 — ✅ RESOLVED
+**파일**: `auth.ml:10-14` → `Mirage_crypto_rng.generate 32` 사용으로 수정됨
 
 ```ocaml
 let generate_token () =
@@ -49,8 +50,8 @@ let generate_token () =
 
 ---
 
-### 2. Command Injection 취약점
-**파일**: `spawn.ml:166-167`, `spawn_eio.ml:158-165`
+### 2. Command Injection 취약점 — ✅ RESOLVED
+**파일**: `spawn.ml`, `spawn_eio.ml` → `Eio.Process.spawn` 직접 실행으로 수정됨
 
 ```ocaml
 let full_command = Printf.sprintf "echo %s | timeout %d %s%s"
@@ -310,13 +311,13 @@ else
 ## 권장 조치 우선순위
 
 1. **즉시 (Critical)**
-   - [ ] `Random.int` → `Mirage_crypto_rng.generate` 교체
-   - [ ] Command injection 수정: `Eio.Process.spawn` 직접 사용
+   - [x] `Random.int` → `Mirage_crypto_rng.generate` 교체 ✅ (auth.ml에서 CSPRNG 사용 확인, 2026-02-17)
+   - [x] Command injection 수정: `Eio.Process.spawn` 직접 사용 ✅ (spawn_eio.ml에서 직접 프로세스 실행 확인, 2026-02-17)
 
 2. **1주 내 (High)**
-   - [ ] Fail-open → Fail-close 전환 (권한 검사)
+   - [ ] Fail-open → Fail-close 전환 (권한 검사) — auth.ml:236 여전히 `None -> Ok ()`
    - [ ] 프로덕션 기본값: `auth.enabled = true`
-   - [ ] `Sys.command` → `Eio.Process` 마이그레이션
+   - [x] `Sys.command` → `Eio.Process` 마이그레이션 ✅ (spawn.ml에서 쉘 명령어 패턴 제거 확인, 2026-02-17)
 
 3. **2주 내 (Medium)**
    - [ ] 시간 비교 로직 수정 (Unix timestamp 사용)

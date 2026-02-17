@@ -1,8 +1,10 @@
 pub mod action_panel;
 pub mod actor_join;
 pub mod character_panel;
+pub mod choice_panel;
 pub mod connection;
 pub mod dice_log;
+pub mod endgame;
 pub mod narrative;
 pub mod overlay;
 pub mod turn_controls;
@@ -29,12 +31,14 @@ impl Plugin for DomBridgePlugin {
             .init_resource::<turn_runtime::TurnRuntimeCache>()
             .init_resource::<connection::ConnectionStatusCache>()
             .init_resource::<overlay::OverlayCache>()
+            .init_resource::<endgame::EndgameState>()
             .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
             // TRPG-specific DOM update systems
             .add_systems(Update, (
                 narrative::update_narrative_dom,
                 dice_log::update_dice_log_dom,
                 character_panel::update_character_panel_dom,
+                choice_panel::update_choice_dom,
                 turn_phase::update_turn_phase_dom,
                 turn_runtime::update_turn_runtime_dom,
                 connection::update_connection_dom,
@@ -64,6 +68,7 @@ fn reset_trpg_dom_state(
     mut runtime_cache: ResMut<turn_runtime::TurnRuntimeCache>,
     mut connection_cache: ResMut<connection::ConnectionStatusCache>,
     mut overlay_cache: ResMut<overlay::OverlayCache>,
+    mut endgame_state: ResMut<endgame::EndgameState>,
 ) {
     character_cache.last_snapshot.clear();
     character_cache.last_full.clear();
@@ -72,6 +77,7 @@ fn reset_trpg_dom_state(
     runtime_cache.last_snapshot.clear();
     connection_cache.last_status.clear();
     *overlay_cache = overlay::OverlayCache::default();
+    endgame_state.triggered = false;
 
     #[cfg(target_arch = "wasm32")]
     {

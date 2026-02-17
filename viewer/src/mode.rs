@@ -1813,7 +1813,7 @@ fn normalize_preset_catalog(raw: &Value) -> Value {
         presets.clone()
     } else {
         value
-    };
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1823,9 +1823,14 @@ fn preset_unwrap_payload(value: &Value) -> Option<Value> {
         .or_else(|| value.get("result"))
         .or_else(|| value.get("data"))
         .or_else(|| value.get("structuredContent"))
-        .filter(Value::is_object)
+        .filter(|v| v.is_object())
         .cloned()
-        .or_else(|| value.get("presets").filter(Value::is_object).cloned())
+        .or_else(|| {
+            value
+                .get("presets")
+                .filter(|v| v.is_object())
+                .cloned()
+        })
 }
 
 #[cfg(target_arch = "wasm32")]

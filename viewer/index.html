@@ -254,9 +254,15 @@
                     <div id="turn-runtime"></div>
                     <!-- Turn Controls: advance turn (Keeper/GM only) -->
                     <div id="turn-controls" style="display:none">
-                        <button id="advance-turn-btn" title="Advance to next turn">Advance Turn</button>
+                        <button id="advance-turn-btn" title="Run next TRPG round">Run Round</button>
                         <span id="turn-control-status"></span>
                     </div>
+                    <div id="round-run-summary" class="turn-run-summary" style="display:none"></div>
+                    <input type="hidden" id="round-run-dm" value="" />
+                    <input type="hidden" id="round-run-phase" value="" />
+                    <input type="hidden" id="round-run-timeout" value="" />
+                    <input type="hidden" id="round-run-lang" value="" />
+                    <input type="hidden" id="round-run-players" value="" />
                     <div id="narrative-log"></div>
                     <!-- Join Panel: claim an actor before playing -->
                     <div id="join-panel">

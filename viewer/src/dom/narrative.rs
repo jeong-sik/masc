@@ -151,9 +151,9 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         let click_cb = Closure::wrap(Box::new(move || {
             toggle_selected_class(&clickable_entry);
         }) as Box<dyn FnMut()>);
-        let _ = entry
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| target.add_event_listener_with_callback("click", click_cb.as_ref().unchecked_ref()));
+        let _ = entry.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", click_cb.as_ref().unchecked_ref())
+        });
         click_cb.forget();
 
         let _ = log_el.append_child(&entry);

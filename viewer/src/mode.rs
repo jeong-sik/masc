@@ -524,6 +524,40 @@ fn clear_trpg_dom(doc: &web_sys::Document) {
     {
         input.set_value("");
     }
+    if let Some(input) = doc
+        .get_element_by_id("round-run-dm")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("");
+    }
+    if let Some(input) = doc
+        .get_element_by_id("round-run-phase")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("round");
+    }
+    if let Some(input) = doc
+        .get_element_by_id("round-run-timeout")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("90");
+    }
+    if let Some(input) = doc
+        .get_element_by_id("round-run-lang")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("ko");
+    }
+    if let Some(input) = doc
+        .get_element_by_id("round-run-players")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("");
+    }
+    if let Some(summary) = doc.get_element_by_id("round-run-summary") {
+        summary.set_text_content(Some(""));
+        let _ = summary.set_attribute("style", "display:none");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -537,6 +571,136 @@ fn unique_non_empty(mut values: Vec<String>) -> Vec<String> {
         out.push(value);
     }
     out
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_preset_id(value: &Value, field: &str) -> Option<String> {
+    match value.get(field) {
+        Some(Value::Array(items)) if !items.is_empty() => {
+            items.first().and_then(Value::as_object).and_then(|obj| {
+                obj.get("id")
+                    .and_then(Value::as_str)
+                    .map(|id| id.trim().to_string())
+            })
+        }
+        Some(Value::String(v)) if !v.trim().is_empty() => Some(v.trim().to_string()),
+        Some(value_obj) if value_obj.is_object() => value_obj
+            .get("id")
+            .and_then(Value::as_str)
+            .map(|id| id.trim().to_string()),
+        _ => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pick_preset_id_from_catalog(catalog: &Value, field: &str) -> Option<String> {
+    let mut candidates: Vec<&Value> = vec![catalog];
+
+    if let Some(payload) = catalog.get("payload") {
+        candidates.push(payload);
+    }
+    if let Some(result) = catalog.get("result") {
+        candidates.push(result);
+    }
+    if let Some(structured) = catalog
+        .get("result")
+        .and_then(|r| r.get("structuredContent"))
+    {
+        candidates.push(structured);
+    }
+    candidates.push(catalog);
+    let direct = candidates
+        .into_iter()
+        .find_map(|node| parse_preset_id(node, field));
+    if direct.is_some() {
+        return direct;
+    }
+    let nested = catalog
+        .get("result")
+        .and_then(|result| result.get("payload"))
+        .and_then(|payload| payload.get(field))
+        .and_then(|value| parse_preset_id(value, field));
+    if nested.is_some() {
+        return nested;
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn format_round_plan_for_display(dm_keeper: &str, players: &[(String, String)]) -> String {
+    let mut lines = vec![format!("DM: {}", dm_keeper)];
+    if players.is_empty() {
+        lines.push("Players: -".to_string());
+        return lines.join(" · ");
+    }
+    let player_text = players
+        .iter()
+        .map(|(actor_id, keeper)| format!("{}→{}", actor_id, keeper))
+        .collect::<Vec<_>>()
+        .join(", ");
+    lines.push(format!("Players: {}", player_text));
+    lines.join(" · ")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_round_run_fields(
+    doc: &web_sys::Document,
+    dm_keeper: &str,
+    actor_ids: &[String],
+    player_map: &std::collections::HashMap<String, String>,
+) {
+    if let Some(el) = doc
+        .get_element_by_id("round-run-dm")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        el.set_value(dm_keeper);
+    }
+    if let Some(el) = doc
+        .get_element_by_id("round-run-phase")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        el.set_value("round");
+    }
+    if let Some(el) = doc
+        .get_element_by_id("round-run-timeout")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        el.set_value("90");
+    }
+    if let Some(el) = doc
+        .get_element_by_id("round-run-lang")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        el.set_value("ko");
+    }
+
+    let player_pairs = actor_ids
+        .iter()
+        .filter_map(|actor_id| player_map.get(actor_id).map(|keeper| (actor_id, keeper)))
+        .map(|(actor_id, keeper)| format!("{}={}", actor_id, keeper))
+        .collect::<Vec<_>>();
+    if let Some(el) = doc
+        .get_element_by_id("round-run-players")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        el.set_value(&player_pairs.join(","));
+    }
+
+    let summary_pairs = actor_ids
+        .iter()
+        .filter_map(|actor_id| {
+            player_map
+                .get(actor_id)
+                .map(|keeper| (actor_id.clone(), keeper.clone()))
+        })
+        .collect::<Vec<(String, String)>>();
+    if let Some(summary) = doc.get_element_by_id("round-run-summary") {
+        summary.set_text_content(Some(&format_round_plan_for_display(
+            dm_keeper,
+            &summary_pairs,
+        )));
+        let _ = summary.set_attribute("style", "display:block");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -750,7 +914,8 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
     .await
     .map_err(|e| format!("본문 읽기 실패: {:?}", e))?;
     let body = body_js.as_string().unwrap_or_default();
-    let json: Value = serde_json::from_str(&body).map_err(|e| format!("state JSON 파싱 실패: {}", e))?;
+    let json: Value =
+        serde_json::from_str(&body).map_err(|e| format!("state JSON 파싱 실패: {}", e))?;
 
     let room = json.get("room").unwrap_or(&Value::Null);
     let state = json.get("state").unwrap_or(&Value::Null);
@@ -800,7 +965,12 @@ fn save_known_rooms(rooms: &[String]) {
 fn load_room_hub_visible() -> bool {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(ROOM_HUB_VISIBLE_STORAGE_KEY).ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(ROOM_HUB_VISIBLE_STORAGE_KEY)
+                .ok()
+                .flatten()
+        })
         .map(|value| matches!(value.trim(), "1" | "true" | "on"))
         .unwrap_or(false)
 }
@@ -808,7 +978,10 @@ fn load_room_hub_visible() -> bool {
 #[cfg(target_arch = "wasm32")]
 fn save_room_hub_visible(visible: bool) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        let _ = storage.set_item(ROOM_HUB_VISIBLE_STORAGE_KEY, if visible { "1" } else { "0" });
+        let _ = storage.set_item(
+            ROOM_HUB_VISIBLE_STORAGE_KEY,
+            if visible { "1" } else { "0" },
+        );
     }
 }
 
@@ -937,7 +1110,12 @@ async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<RoomSn
         }
     }
 
-    let room_ids = unique_non_empty(snapshots.iter().map(|row| row.id.clone()).collect::<Vec<_>>());
+    let room_ids = unique_non_empty(
+        snapshots
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<Vec<_>>(),
+    );
     if room_ids.is_empty() {
         return Err("서버 room 목록이 비어 있습니다.".to_string());
     }
@@ -1091,11 +1269,9 @@ fn bind_room_controls(doc: &web_sys::Document) {
             set_room_hub_visible(&doc, next);
             save_room_hub_visible(next);
         }) as Box<dyn FnMut()>);
-        let _ = hub_toggle
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("click", hub_cb.as_ref().unchecked_ref())
-            });
+        let _ = hub_toggle.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", hub_cb.as_ref().unchecked_ref())
+        });
         hub_cb.forget();
     }
 }
@@ -1237,12 +1413,10 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
     }
 
     if let Some(structured) = result.get("structuredContent") {
-        return Ok(
-            structured
-                .get("payload")
-                .cloned()
-                .unwrap_or_else(|| structured.clone()),
-        );
+        return Ok(structured
+            .get("payload")
+            .cloned()
+            .unwrap_or_else(|| structured.clone()));
     }
 
     if let Some(payload) = result.get("payload") {
@@ -1274,10 +1448,7 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
         Err(primary) => parse_mcp_rpc_response(&text).map_err(|secondary| {
             format!(
                 "{} 응답 JSON 파싱 실패: {} / {} / raw={}",
-                tool_name,
-                primary,
-                secondary,
-                text
+                tool_name, primary, secondary, text
             )
         })?,
     };
@@ -1382,13 +1553,13 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         let mut html = String::new();
         for name in keepers.iter().filter(|name| **name != dm_default) {
             let safe = html_escape(name);
-            let selected_attr =
-                if preserve_existing_selection && previous_players.iter().any(|picked| picked == name)
-                {
-                    " selected"
-                } else {
-                    ""
-                };
+            let selected_attr = if preserve_existing_selection
+                && previous_players.iter().any(|picked| picked == name)
+            {
+                " selected"
+            } else {
+                ""
+            };
             html.push_str(&format!(
                 r#"<option value="{value}"{selected}>{value}</option>"#,
                 value = safe,
@@ -1454,26 +1625,20 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         }),
     )
     .await?;
-    let world_preset_id = preset_catalog
-        .get("world_presets")
-        .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|preset| preset.get("id"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let dm_preset_id = preset_catalog
-        .get("dm_presets")
-        .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|preset| preset.get("id"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let world_preset_id = pick_preset_id_from_catalog(&preset_catalog, "world_preset_id")
+        .unwrap_or_else(|| {
+            pick_preset_id_from_catalog(&preset_catalog, "world_presets").unwrap_or_default()
+        });
+    let dm_preset_id =
+        pick_preset_id_from_catalog(&preset_catalog, "dm_preset_id").unwrap_or_else(|| {
+            pick_preset_id_from_catalog(&preset_catalog, "dm_presets").unwrap_or_default()
+        });
+
     if world_preset_id.is_empty() || dm_preset_id.is_empty() {
-        return Err("trpg preset 목록이 비어 있습니다.".to_string());
+        return Err(format!(
+            "trpg preset 목록 파싱 실패: world_preset_id={}, dm_preset_id={}",
+            world_preset_id, dm_preset_id
+        ));
     }
 
     let party_size = players.len() as i64;
@@ -1581,7 +1746,8 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     }
 
     let mut used_keepers = vec![dm_keeper.clone()];
-    let mut player_map = serde_json::Map::new();
+    let mut player_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for (idx, actor_id) in actor_ids.iter().enumerate() {
         let mut keeper = players
             .get(idx)
@@ -1597,7 +1763,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
             suffix += 1;
         }
         used_keepers.push(candidate.clone());
-        player_map.insert(actor_id.clone(), Value::String(candidate));
+        player_map.insert(actor_id.clone(), candidate);
     }
 
     if !models.is_empty() {
@@ -1620,9 +1786,6 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         )
         .await?;
         for (actor_id, keeper_name) in &player_map {
-            let Some(keeper_name) = keeper_name.as_str() else {
-                continue;
-            };
             mcp_tool_call(
                 "masc_keeper_up",
                 json!({
@@ -1645,6 +1808,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
 
     set_current_room_id(doc, &room_id);
     clear_trpg_dom(doc);
+    set_round_run_fields(doc, &dm_keeper, &actor_ids, &player_map);
 
     Ok(format!(
         "새 게임 시작 완료: room {} / DM {} / players {}",

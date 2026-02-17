@@ -4,10 +4,7 @@ use crate::game::components::FloatingText;
 use crate::game::events::HpChanged;
 
 /// Spawns a floating damage/heal number above the affected character.
-pub fn spawn_damage_text(
-    mut commands: Commands,
-    mut hp_events: MessageReader<HpChanged>,
-) {
+pub fn spawn_damage_text(mut commands: Commands, mut hp_events: MessageReader<HpChanged>) {
     for HpChanged(payload) in hp_events.read() {
         let color = if payload.amount < 0 {
             Color::srgb(0.9, 0.2, 0.1) // damage = red

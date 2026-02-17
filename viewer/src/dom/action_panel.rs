@@ -163,9 +163,12 @@ fn submit_action_from_input() {
     if text.is_empty() {
         return;
     }
-    
+
     let actor_id_opt = get_active_actor_from_dom();
-    log::info!("ActionPanel: submitting for active actor={:?}", actor_id_opt);
+    log::info!(
+        "ActionPanel: submitting for active actor={:?}",
+        actor_id_opt
+    );
 
     let Some(actor_id) = actor_id_opt else {
         set_action_status(
@@ -283,7 +286,10 @@ async fn roll_dice() -> Result<String, JsValue> {
         )));
     }
 
-    let json_text = JsFuture::from(resp.text()?).await?.as_string().unwrap_or_default();
+    let json_text = JsFuture::from(resp.text()?)
+        .await?
+        .as_string()
+        .unwrap_or_default();
     Ok(extract_roll_display(&json_text))
 }
 
@@ -333,10 +339,7 @@ fn set_action_status(text: &str, css_class: &str) {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn friendly_js_error(val: &JsValue) -> String {
     val.as_string()
-        .or_else(|| {
-            val.dyn_ref::<js_sys::Error>()
-                .map(|e| e.message().into())
-        })
+        .or_else(|| val.dyn_ref::<js_sys::Error>().map(|e| e.message().into()))
         .unwrap_or_else(|| format!("{:?}", val))
 }
 
@@ -378,10 +381,7 @@ pub fn sync_action_panel_interaction_state(
 }
 
 /// Backward-compatible alias used by older schedule wiring.
-pub fn sync_action_panel_visibility(
-    room_state: Res<RoomState>,
-    progress: Res<TurnProgressState>,
-) {
+pub fn sync_action_panel_visibility(room_state: Res<RoomState>, progress: Res<TurnProgressState>) {
     sync_action_panel_interaction_state(room_state, progress);
 }
 
@@ -390,7 +390,7 @@ fn disable_buttons(disabled: bool) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
-    
+
     if let Some(btn) = doc.get_element_by_id("action-submit-btn") {
         if disabled {
             let _ = btn.set_attribute("disabled", "true");
@@ -398,7 +398,7 @@ fn disable_buttons(disabled: bool) {
             let _ = btn.remove_attribute("disabled");
         }
     }
-    
+
     if let Some(btn) = doc.get_element_by_id("dice-roll-btn") {
         if disabled {
             let _ = btn.set_attribute("disabled", "true");
@@ -431,7 +431,10 @@ mod tests {
 
     #[test]
     fn test_extract_roll() {
-        assert_eq!(extract_roll_display(r#"{"total": 15, "result": "Success"}"#), "Rolled 15: Success");
+        assert_eq!(
+            extract_roll_display(r#"{"total": 15, "result": "Success"}"#),
+            "Rolled 15: Success"
+        );
         assert_eq!(extract_roll_display(r#"{"total": 5}"#), "Rolled 5");
         assert_eq!(extract_roll_display(""), "Roll completed.");
     }

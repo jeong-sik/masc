@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
+use std::sync::{Arc, Mutex};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -119,10 +119,7 @@ fn create_event_source(
                 }
             }
         });
-        let _ = es.add_event_listener_with_callback(
-            event_type,
-            callback.as_ref().unchecked_ref(),
-        );
+        let _ = es.add_event_listener_with_callback(event_type, callback.as_ref().unchecked_ref());
         callback.forget();
     }
 
@@ -220,7 +217,12 @@ fn attempt_reconnect(
             Err(_) => return,
         };
         match state.next_delay() {
-            Some(d) => (d, state.attempt, state.max_retries, state.last_event_id.clone()),
+            Some(d) => (
+                d,
+                state.attempt,
+                state.max_retries,
+                state.last_event_id.clone(),
+            ),
             None => {
                 log::error!(
                     "MASC SSE reconnect exhausted ({} attempts) — giving up",
@@ -248,8 +250,7 @@ fn attempt_reconnect(
         status_proxy.clone(),
         move || {
             // Compute the URL, attaching lastEventId if we have one
-            let base_url = config::sse_endpoint_by_name(&mode_name)
-                .unwrap_or_default();
+            let base_url = config::sse_endpoint_by_name(&mode_name).unwrap_or_default();
             let url = reconnect::url_with_last_event_id(&base_url, &last_event_id);
             create_event_source(
                 &url,

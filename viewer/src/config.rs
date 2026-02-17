@@ -5,7 +5,7 @@ use crate::mode::ViewerMode;
 // With Trunk Proxy configured in Trunk.toml, we can use relative paths
 // for both debug and release builds.
 // This avoids CORS issues and hardcoded ports in the binary.
-pub const MASC_MCP_URL: &str = ""; 
+pub const MASC_MCP_URL: &str = "";
 
 pub const DEFAULT_ROOM_ID: &str = "default";
 
@@ -23,8 +23,8 @@ pub const TRPG_ENGINE_URL: &str = "";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrpgBackendMode {
-    MascApi,    // Uses /api/v1/trpg endpoints (default)
-    LegacyEngine // Uses direct engine endpoints (if needed)
+    MascApi,      // Uses /api/v1/trpg endpoints (default)
+    LegacyEngine, // Uses direct engine endpoints (if needed)
 }
 
 pub const DEFAULT_TRPG_BACKEND: TrpgBackendMode = TrpgBackendMode::MascApi;
@@ -55,7 +55,7 @@ pub fn current_room_id() -> String {
             }
         }
     }
-    
+
     DEFAULT_ROOM_ID.to_string()
 }
 
@@ -69,7 +69,7 @@ pub fn set_current_room_id(room_id: &str) {
                 let _ = el.set_attribute("data-room-id", room_id);
             }
         }
-        
+
         // Also update URL without reload?
         if let Some(win) = web_sys::window() {
             if let Ok(history) = win.history() {
@@ -101,7 +101,9 @@ pub fn sanitize_room_id(raw: &str) -> Option<String> {
     if s.is_empty() || s.len() > 64 {
         return None;
     }
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         Some(s.to_string())
     } else {
         None
@@ -125,22 +127,47 @@ fn parse_query_param(search: &str, key: &str) -> Option<String> {
 // ─── Endpoints ──────────────────────────────
 
 pub fn trpg_uses_polling() -> bool {
-    // Backend now exposes /api/v1/trpg/stream/sse (SSE endpoint, PR #222).
-    // Polling is kept as fallback but SSE is preferred.
-    false
+    // MASC exposes both poll JSON and SSE endpoints.
+    // Current viewer runtime uses polling reliably because stream responses are
+    // JSON payloads and SSE is optional when available.
+    true
 }
 
 pub fn trpg_state_url() -> String {
-    format!("{}/api/v1/trpg/state?room_id={}", MASC_MCP_URL, current_room_id())
+    format!(
+        "{}/api/v1/trpg/state?room_id={}",
+        MASC_MCP_URL,
+        current_room_id()
+    )
 }
 
+/// Legacy JSON poll endpoint.
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
-    format!("{}/api/v1/trpg/stream?room_id={}&after_seq={}", MASC_MCP_URL, current_room_id(), after_seq)
+    format!(
+        "{}/api/v1/trpg/stream?room_id={}&after_seq={}",
+        MASC_MCP_URL,
+        current_room_id(),
+        after_seq
+    )
+}
+
+/// SSE poll endpoint (JSON event stream) for browsers that can consume
+/// EventSource from `/api/v1/trpg/stream/sse`.
+pub fn trpg_stream_sse_url() -> String {
+    format!(
+        "{}/api/v1/trpg/stream/sse?room_id={}",
+        MASC_MCP_URL,
+        current_room_id()
+    )
 }
 
 pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
     match mode {
-        ViewerMode::Trpg => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
+        ViewerMode::Trpg => Some(format!(
+            "{}/api/v1/trpg/stream/sse?room_id={}",
+            MASC_MCP_URL,
+            current_room_id()
+        )),
         ViewerMode::Monitor => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
         ViewerMode::Experiment => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
         ViewerMode::Council => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
@@ -153,7 +180,11 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
 /// that don't have access to Bevy State<ViewerMode>).
 pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
     match mode_name {
-        "Trpg" => Some(format!("{}/api/v1/trpg/stream/sse?room_id={}", MASC_MCP_URL, current_room_id())),
+        "Trpg" => Some(format!(
+            "{}/api/v1/trpg/stream/sse?room_id={}",
+            MASC_MCP_URL,
+            current_room_id()
+        )),
         "Monitor" => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
         "Experiment" => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
         "Council" => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
@@ -164,7 +195,12 @@ pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
 
 /// Helper to get full room URL for external links (if needed)
 pub fn trpg_room_url(path: &str) -> String {
-    format!("{}/rooms/{}/{}", MASC_MCP_URL, current_room_id(), path.trim_start_matches('/'))
+    format!(
+        "{}/rooms/{}/{}",
+        MASC_MCP_URL,
+        current_room_id(),
+        path.trim_start_matches('/')
+    )
 }
 
 // ─── Actor ID Management ─────────────────────

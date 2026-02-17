@@ -11,8 +11,7 @@ use bevy::{
             UniformComponentPlugin,
         },
         render_graph::{
-            NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode,
-            ViewNodeRunner,
+            NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
         },
         render_resource::{
             binding_types::{sampler, texture_2d, uniform_buffer},
@@ -43,10 +42,7 @@ impl Plugin for PostProcessPlugin {
         render_app.add_systems(RenderStartup, init_post_process_pipeline);
 
         render_app
-            .add_render_graph_node::<ViewNodeRunner<OilPaintNode>>(
-                Core2d,
-                OilPaintLabel,
-            )
+            .add_render_graph_node::<ViewNodeRunner<OilPaintNode>>(Core2d, OilPaintLabel)
             .add_render_graph_edges(
                 Core2d,
                 (
@@ -83,8 +79,7 @@ impl ViewNode for OilPaintNode {
         let post_process_pipeline = world.resource::<PostProcessPipeline>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
-        let Some(pipeline) =
-            pipeline_cache.get_render_pipeline(post_process_pipeline.pipeline_id)
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(post_process_pipeline.pipeline_id)
         else {
             return Ok(());
         };
@@ -106,19 +101,18 @@ impl ViewNode for OilPaintNode {
             )),
         );
 
-        let mut render_pass =
-            render_context.begin_tracked_render_pass(RenderPassDescriptor {
-                label: Some("oil_paint_post_process"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: post_process.destination,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: Operations::default(),
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("oil_paint_post_process"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: post_process.destination,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations::default(),
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
         render_pass.set_render_pipeline(pipeline);
         render_pass.set_bind_group(0, &bind_group, &[settings_index.index()]);
@@ -205,10 +199,7 @@ pub struct PostProcessSettings {
 }
 
 /// System that updates the time field in PostProcessSettings each frame.
-pub fn update_post_process_time(
-    time: Res<Time>,
-    mut settings: Query<&mut PostProcessSettings>,
-) {
+pub fn update_post_process_time(time: Res<Time>, mut settings: Query<&mut PostProcessSettings>) {
     for mut s in &mut settings {
         s.time = time.elapsed_secs();
     }

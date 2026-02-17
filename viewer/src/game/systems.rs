@@ -105,10 +105,7 @@ pub fn reset_turn_progress(mut progress: ResMut<TurnProgressState>) {
 }
 
 /// Apply HP change events to Actor components.
-pub fn apply_hp_change(
-    mut events: MessageReader<HpChanged>,
-    mut actors: Query<&mut Actor>,
-) {
+pub fn apply_hp_change(mut events: MessageReader<HpChanged>, mut actors: Query<&mut Actor>) {
     for HpChanged(payload) in events.read() {
         for mut actor in &mut actors {
             if actor.id == payload.target {
@@ -240,10 +237,7 @@ pub fn apply_turn_progress(
 }
 
 /// Apply item acquisition events to Actor inventory.
-pub fn apply_item_acquired(
-    mut events: MessageReader<ItemAcquired>,
-    mut actors: Query<&mut Actor>,
-) {
+pub fn apply_item_acquired(mut events: MessageReader<ItemAcquired>, mut actors: Query<&mut Actor>) {
     for ItemAcquired(payload) in events.read() {
         for mut actor in &mut actors {
             if actor.id == payload.character {

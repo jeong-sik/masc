@@ -48,7 +48,6 @@ pub mod paths {
     pub const PROP_SEXTANT: &str = "props/sextant_mirror.png";
     pub const PROP_JOURNAL: &str = "props/journal_open.png";
     pub const PROP_MAPS: &str = "props/maps_recursive.png";
-
 }
 
 /// Returns the portrait asset path for a given character ID.

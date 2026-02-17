@@ -10,11 +10,11 @@ use bevy::prelude::*;
 use crate::game::components::{
     FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken, MoodOverlay, WeatherOverlay,
 };
-use crate::render::ui::UiMarker;
-use crate::render::ui::ResizeState;
-use crate::render::characters::DragState;
 use crate::mode::ViewerMode;
+use crate::render::characters::DragState;
 use crate::render::transition::{FadeOverlay, SceneTransition};
+use crate::render::ui::ResizeState;
+use crate::render::ui::UiMarker;
 
 /// Plugin for 2D scene rendering: map backgrounds, character tokens, HP bars, effects.
 ///
@@ -24,48 +24,58 @@ pub struct MapRenderPlugin;
 
 impl Plugin for MapRenderPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<SceneTransition>()
+        app.init_resource::<SceneTransition>()
             .init_resource::<DragState>()
             .init_resource::<ResizeState>()
             // Setup: camera, map background, fade overlay, UI — on TRPG mode entry
-            .add_systems(OnEnter(ViewerMode::Trpg), (
-                map::setup_camera,
-                map::setup_map_background,
-                overlay::setup_weather_overlay,
-                overlay::setup_mood_overlay,
-                transition::setup_fade_overlay,
-                ui::setup_ui,
-            ))
+            .add_systems(
+                OnEnter(ViewerMode::Trpg),
+                (
+                    map::setup_camera,
+                    map::setup_map_background,
+                    overlay::setup_weather_overlay,
+                    overlay::setup_mood_overlay,
+                    transition::setup_fade_overlay,
+                    ui::setup_ui,
+                ),
+            )
             // Update: character sprites, positions, HP bars, effects, transitions, UI
-            .add_systems(Update, (
-                characters::spawn_character_sprites,
-                characters::update_character_positions,
-                characters::update_hp_bars,
-                characters::apply_death_visuals,
-                characters::handle_drag_start,
-                characters::handle_drag,
-                characters::handle_drag_end,
-                map::update_map_label,
-                map::update_map_texture,
-                fx::spawn_damage_text,
-                fx::animate_floating_text,
-                overlay::update_weather_overlay,
-                overlay::update_mood_overlay,
-                overlay::spawn_prop_notification,
-                transition::trigger_scene_transition,
-                transition::animate_scene_transition,
-                ui::handle_button_interactions,
-                ui::manage_menus,
-                ui::handle_menu_item_clicks,
-            ).run_if(in_state(ViewerMode::Trpg)))
-            .add_systems(Update, (
-                ui::spawn_resize_handles,
-                ui::handle_resize_start,
-                ui::handle_resize,
-                ui::handle_resize_end,
-                ui::update_resize_cursors,
-            ).run_if(in_state(ViewerMode::Trpg)))
+            .add_systems(
+                Update,
+                (
+                    characters::spawn_character_sprites,
+                    characters::update_character_positions,
+                    characters::update_hp_bars,
+                    characters::apply_death_visuals,
+                    characters::handle_drag_start,
+                    characters::handle_drag,
+                    characters::handle_drag_end,
+                    map::update_map_label,
+                    map::update_map_texture,
+                    fx::spawn_damage_text,
+                    fx::animate_floating_text,
+                    overlay::update_weather_overlay,
+                    overlay::update_mood_overlay,
+                    overlay::spawn_prop_notification,
+                    transition::trigger_scene_transition,
+                    transition::animate_scene_transition,
+                    ui::handle_button_interactions,
+                    ui::manage_menus,
+                    ui::handle_menu_item_clicks,
+                )
+                    .run_if(in_state(ViewerMode::Trpg)),
+            )
+            .add_systems(
+                Update,
+                (
+                    ui::spawn_resize_handles,
+                    ui::handle_resize_start,
+                    ui::handle_resize,
+                    ui::handle_resize_end,
+                    ui::update_resize_cursors,
+                )
+                    .run_if(in_state(ViewerMode::Trpg)),
+            )
             // Cleanup: despawn all TRPG scene entities and reset resources
             .add_systems(OnExit(ViewerMode::Trpg), cleanup_trpg_scene);
     }

@@ -261,7 +261,11 @@ async fn fetch_post_comments(post_id: &str) -> Result<Vec<BoardComment>, JsValue
     let detail: PostDetailResponse = serde_wasm_bindgen::from_value(json)
         .map_err(|e| JsValue::from_str(&format!("parse error: {}", e)))?;
 
-    log::info!("Comments: fetched {} for post {}", detail.comments.len(), post_id);
+    log::info!(
+        "Comments: fetched {} for post {}",
+        detail.comments.len(),
+        post_id
+    );
     Ok(detail.comments)
 }
 
@@ -288,7 +292,10 @@ async fn submit_comment(post_id: &str, content: &str) -> Result<(), JsValue> {
     let resp: web_sys::Response = resp_value.dyn_into()?;
 
     if !resp.ok() {
-        return Err(JsValue::from_str(&format!("Comment HTTP {}", resp.status())));
+        return Err(JsValue::from_str(&format!(
+            "Comment HTTP {}",
+            resp.status()
+        )));
     }
     log::info!("Comment submitted on post {}", post_id);
     Ok(())
@@ -296,10 +303,7 @@ async fn submit_comment(post_id: &str, content: &str) -> Result<(), JsValue> {
 
 // ─── DOM Rendering ───────────────────────────
 
-fn render_posts_to_dom(
-    _posts: &[BoardPost],
-    _shared: &Arc<Mutex<Option<Vec<BoardPost>>>>,
-) {
+fn render_posts_to_dom(_posts: &[BoardPost], _shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -320,10 +324,9 @@ fn render_posts_to_dom(
 
         for post in _posts.iter().take(30) {
             let hearth_badge = match &post.hearth {
-                Some(h) if !h.is_empty() => format!(
-                    "<span class=\"post-hearth\">{}</span>",
-                    html_escape(h)
-                ),
+                Some(h) if !h.is_empty() => {
+                    format!("<span class=\"post-hearth\">{}</span>", html_escape(h))
+                }
                 _ => String::new(),
             };
 
@@ -391,8 +394,12 @@ fn bind_vote_buttons(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<Boar
     let Ok(buttons) = buttons else { return };
 
     for i in 0..buttons.length() {
-        let Some(node) = buttons.item(i) else { continue };
-        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+        let Some(node) = buttons.item(i) else {
+            continue;
+        };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
 
         let post_id = match el.get_attribute("data-post-id") {
             Some(v) => v,
@@ -425,11 +432,9 @@ fn bind_vote_buttons(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<Boar
             });
         }) as Box<dyn FnMut()>);
 
-        let _ = el
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
-            });
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
 
         cb.forget();
     }
@@ -438,8 +443,12 @@ fn bind_vote_buttons(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<Boar
 /// Optimistically increment/decrement the vote count in DOM.
 #[cfg(target_arch = "wasm32")]
 fn update_vote_count_in_dom(post_id: &str, direction: &str) {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(article) = doc.get_element_by_id(&format!("post-{}", post_id)) else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(article) = doc.get_element_by_id(&format!("post-{}", post_id)) else {
+        return;
+    };
 
     let selector = if direction == "up" {
         ".vote-count-up"
@@ -448,7 +457,8 @@ fn update_vote_count_in_dom(post_id: &str, direction: &str) {
     };
 
     if let Ok(Some(span)) = article.query_selector(selector) {
-        let current: i32 = span.text_content()
+        let current: i32 = span
+            .text_content()
             .and_then(|t| t.trim().parse().ok())
             .unwrap_or(0);
         span.set_text_content(Some(&(current + 1).to_string()));
@@ -463,8 +473,12 @@ fn bind_comment_toggles(doc: &web_sys::Document) {
     let Ok(toggles) = toggles else { return };
 
     for i in 0..toggles.length() {
-        let Some(node) = toggles.item(i) else { continue };
-        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+        let Some(node) = toggles.item(i) else {
+            continue;
+        };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
 
         let post_id = match el.get_attribute("data-post-id") {
             Some(v) => v,
@@ -478,11 +492,9 @@ fn bind_comment_toggles(doc: &web_sys::Document) {
             toggle_comments_container(&pid);
         }) as Box<dyn FnMut()>);
 
-        let _ = el
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
-            });
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
 
         cb.forget();
     }
@@ -490,11 +502,17 @@ fn bind_comment_toggles(doc: &web_sys::Document) {
 
 #[cfg(target_arch = "wasm32")]
 fn toggle_comments_container(post_id: &str) {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
     let container_id = format!("comments-{}", post_id);
-    let Some(container) = doc.get_element_by_id(&container_id) else { return };
+    let Some(container) = doc.get_element_by_id(&container_id) else {
+        return;
+    };
 
-    let Some(html_el) = container.dyn_ref::<web_sys::HtmlElement>() else { return };
+    let Some(html_el) = container.dyn_ref::<web_sys::HtmlElement>() else {
+        return;
+    };
     let style = html_el.style();
 
     let current = style.get_property_value("display").unwrap_or_default();
@@ -525,9 +543,13 @@ fn toggle_comments_container(post_id: &str) {
 
 #[cfg(target_arch = "wasm32")]
 fn render_comments_to_dom(post_id: &str, comments: &[BoardComment]) {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
     let selector = format!("#comments-{} .comments-list", post_id);
-    let Some(list) = doc.query_selector(&selector).ok().flatten() else { return };
+    let Some(list) = doc.query_selector(&selector).ok().flatten() else {
+        return;
+    };
 
     if comments.is_empty() {
         list.set_inner_html("<div class=\"comment-empty\">No comments yet.</div>");
@@ -559,8 +581,12 @@ fn bind_comment_forms(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<Boa
     let Ok(submits) = submits else { return };
 
     for i in 0..submits.length() {
-        let Some(node) = submits.item(i) else { continue };
-        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+        let Some(node) = submits.item(i) else {
+            continue;
+        };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
 
         let post_id = match el.get_attribute("data-post-id") {
             Some(v) => v,
@@ -574,10 +600,16 @@ fn bind_comment_forms(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<Boa
             let pid = pid.clone();
             let buf = buf.clone();
 
-            let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
             let input_sel = format!(".comment-input[data-post-id=\"{}\"]", pid);
-            let Some(input) = doc.query_selector(&input_sel).ok().flatten() else { return };
-            let Some(input_el) = input.dyn_ref::<web_sys::HtmlInputElement>() else { return };
+            let Some(input) = doc.query_selector(&input_sel).ok().flatten() else {
+                return;
+            };
+            let Some(input_el) = input.dyn_ref::<web_sys::HtmlInputElement>() else {
+                return;
+            };
 
             let content = input_el.value();
             let content = content.trim().to_string();
@@ -602,11 +634,9 @@ fn bind_comment_forms(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<Boa
             });
         }) as Box<dyn FnMut()>);
 
-        let _ = el
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
-            });
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
 
         cb.forget();
     }
@@ -622,7 +652,9 @@ fn bind_comment_input_enter(doc: &web_sys::Document, shared: &Arc<Mutex<Option<V
 
     for i in 0..inputs.length() {
         let Some(node) = inputs.item(i) else { continue };
-        let Some(el) = node.dyn_ref::<web_sys::Element>() else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
 
         let post_id = match el.get_attribute("data-post-id") {
             Some(v) => v,
@@ -640,7 +672,9 @@ fn bind_comment_input_enter(doc: &web_sys::Document, shared: &Arc<Mutex<Option<V
             let buf = buf.clone();
 
             let Some(target) = event.target() else { return };
-            let Some(input_el) = target.dyn_ref::<web_sys::HtmlInputElement>() else { return };
+            let Some(input_el) = target.dyn_ref::<web_sys::HtmlInputElement>() else {
+                return;
+            };
 
             let content = input_el.value();
             let content = content.trim().to_string();
@@ -660,11 +694,9 @@ fn bind_comment_input_enter(doc: &web_sys::Document, shared: &Arc<Mutex<Option<V
             });
         }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
-        let _ = el
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref())
-            });
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref())
+        });
 
         cb.forget();
     }
@@ -673,9 +705,13 @@ fn bind_comment_input_enter(doc: &web_sys::Document, shared: &Arc<Mutex<Option<V
 /// Append a new comment card to the comments list for a post (optimistic).
 #[cfg(target_arch = "wasm32")]
 fn append_comment_to_dom(post_id: &str, author: &str, content: &str) {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
     let selector = format!("#comments-{} .comments-list", post_id);
-    let Some(list) = doc.query_selector(&selector).ok().flatten() else { return };
+    let Some(list) = doc.query_selector(&selector).ok().flatten() else {
+        return;
+    };
 
     // Remove "No comments yet" or loading placeholder
     if let Ok(Some(empty)) = list.query_selector(".comment-empty, .comment-loading") {
@@ -741,7 +777,10 @@ mod tests {
 
     #[test]
     fn html_escape_covers_all_entities() {
-        assert_eq!(html_escape("<b>\"a&b\"</b>"), "&lt;b&gt;&quot;a&amp;b&quot;&lt;/b&gt;");
+        assert_eq!(
+            html_escape("<b>\"a&b\"</b>"),
+            "&lt;b&gt;&quot;a&amp;b&quot;&lt;/b&gt;"
+        );
     }
 
     #[test]

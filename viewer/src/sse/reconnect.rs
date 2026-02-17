@@ -288,17 +288,14 @@ mod tests {
 
     #[test]
     fn url_with_last_event_id_some() {
-        let url =
-            url_with_last_event_id("http://example.com/sse", &Some("42".to_string()));
+        let url = url_with_last_event_id("http://example.com/sse", &Some("42".to_string()));
         assert_eq!(url, "http://example.com/sse?lastEventId=42");
     }
 
     #[test]
     fn url_with_last_event_id_existing_params() {
-        let url = url_with_last_event_id(
-            "http://example.com/sse?room=abc",
-            &Some("99".to_string()),
-        );
+        let url =
+            url_with_last_event_id("http://example.com/sse?room=abc", &Some("99".to_string()));
         assert_eq!(url, "http://example.com/sse?room=abc&lastEventId=99");
     }
 

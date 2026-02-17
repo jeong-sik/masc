@@ -117,10 +117,10 @@ impl ViewerTheme {
     /// Background clear color for the Bevy canvas in this theme.
     pub fn clear_color(&self) -> Color {
         match self {
-            Self::DarkFantasy => Color::srgb(0.04, 0.04, 0.07),   // #0a0a12
-            Self::Cyberpunk => Color::srgb(0.02, 0.0, 0.06),      // deep indigo-black
-            Self::Terminal => Color::srgb(0.0, 0.02, 0.0),        // near-black green
-            Self::Parchment => Color::srgb(0.12, 0.10, 0.08),     // dark warm brown
+            Self::DarkFantasy => Color::srgb(0.04, 0.04, 0.07), // #0a0a12
+            Self::Cyberpunk => Color::srgb(0.02, 0.0, 0.06),    // deep indigo-black
+            Self::Terminal => Color::srgb(0.0, 0.02, 0.0),      // near-black green
+            Self::Parchment => Color::srgb(0.12, 0.10, 0.08),   // dark warm brown
         }
     }
 }
@@ -209,11 +209,9 @@ fn bind_single_theme_selector(
         }
     }) as Box<dyn FnMut(web_sys::Event)>);
 
-    let _ = select
-        .dyn_ref::<web_sys::EventTarget>()
-        .map(|target| {
-            target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
-        });
+    let _ = select.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
+    });
 
     cb.forget(); // Lives for app lifetime
 }
@@ -222,10 +220,7 @@ fn bind_single_theme_selector(
 
 /// Polls the shared buffer each frame. When a theme selector changes,
 /// updates the `ViewerTheme` resource (which triggers `apply_theme_changes`).
-fn poll_theme_transition(
-    buffer: Res<ThemeTransitionBuffer>,
-    mut theme: ResMut<ViewerTheme>,
-) {
+fn poll_theme_transition(buffer: Res<ThemeTransitionBuffer>, mut theme: ResMut<ViewerTheme>) {
     #[cfg(target_arch = "wasm32")]
     {
         let requested = {

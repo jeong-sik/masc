@@ -202,6 +202,14 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
         let mp_bar_class = mp_class(actor.mp, actor.max_mp);
         let icon = class_icon(&actor.class);
         let slug = class_slug(&actor.class);
+        let keeper_line = if actor.keeper.trim().is_empty() {
+            "<div class=\"char-owner owner-unassigned\">keeper: (unassigned)</div>".to_string()
+        } else {
+            format!(
+                "<div class=\"char-owner owner-assigned\">keeper: {}</div>",
+                actor.keeper
+            )
+        };
 
         // Buffs / debuffs
         let buffs_html = actor
@@ -344,6 +352,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 "<span class=\"char-name\">{}</span>",
                 "<span class=\"char-class\"><span class=\"class-icon\">{}</span> {}</span>",
                 "</div>",
+                "{}",
                 "<div class=\"hp-row\">",
                 "<div class=\"hp-bar-container\">",
                 "<div class=\"hp-bar-fill {}\" style=\"width: {}%\"></div>",
@@ -369,6 +378,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             actor.name,
             icon,
             actor.class,
+            keeper_line,
             bar_class,
             hp_pct,
             actor.hp,

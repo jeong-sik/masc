@@ -37,7 +37,7 @@ pub fn bind_turn_controls(mut commands: Commands) {
     #[cfg(target_arch = "wasm32")]
     {
         bind_advance_button();
-        clear_turn_status();
+        set_turn_status("라운드 실행 준비 중...", "status-info");
         log::info!("TurnControls: bound");
     }
 
@@ -72,37 +72,35 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
         let Some(panel) = doc.get_element_by_id("turn-controls") else {
             return;
         };
-
-
-        let claimed_keeper = doc
-            .get_element_by_id("claimed-keeper")
-            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-            .map(|i| i.value());
-        let claimed_actor = doc
-            .get_element_by_id("claimed-actor-id")
-            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-            .map(|i| i.value());
-        let has_manual_claim = claimed_keeper
-            .as_ref()
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false)
-            || claimed_actor
-                .as_ref()
-                .map(|v| !v.trim().is_empty())
-                .unwrap_or(false);
-
-        let has_auto_plan = doc
-            .get_element_by_id("round-run-dm")
-            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-            .is_some_and(|input| !input.value().trim().is_empty());
-
-        let style = if (has_manual_claim || has_auto_plan) && room_allows_control {
-            ""
-        } else {
-            "display:none"
-        };
-        let _ = panel.set_attribute("style", style);
+        let _ = panel.set_attribute("style", "");
         let _ = panel.set_attribute("data-lifecycle", lifecycle.css_class());
+
+        let plan_error = read_round_run_plan(&doc).err();
+        let can_run = room_allows_control && plan_error.is_none();
+        let reason = if !room_allows_control {
+            format!("실행 대기: {}", lifecycle.help_text())
+        } else if let Some(err) = &plan_error {
+            format!("준비 필요: {}", err)
+        } else {
+            "라운드 실행 가능".to_string()
+        };
+
+        let busy = doc
+            .get_element_by_id("advance-turn-btn")
+            .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+            .and_then(|btn| btn.get_attribute("data-busy"))
+            .is_some_and(|v| v == "1");
+
+        if !busy {
+            set_advance_disabled(!can_run);
+            if can_run {
+                set_turn_status(&reason, "status-ok");
+            } else if room_allows_control {
+                set_turn_status(&reason, "status-warn");
+            } else {
+                set_turn_status(&reason, "status-info");
+            }
+        }
     }
 }
 
@@ -127,8 +125,16 @@ fn bind_advance_button() {
 
 #[cfg(target_arch = "wasm32")]
 fn on_advance_click() {
-    set_turn_status("Running round...", "");
-    set_advance_disabled(true);
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Err(reason) = read_round_run_plan(&doc) {
+        set_turn_status(&format!("실행 불가: {}", reason), "status-warn");
+        return;
+    }
+
+    set_turn_status("라운드 실행 중...", "status-info");
+    set_advance_busy(true);
 
     wasm_bindgen_futures::spawn_local(async move {
         match advance_turn().await {
@@ -139,7 +145,7 @@ fn on_advance_click() {
                 set_turn_status(&format!("Failed: {}", detail), "status-error");
             }
         }
-        set_advance_disabled(false);
+        set_advance_busy(false);
     });
 }
 
@@ -251,6 +257,23 @@ fn set_advance_disabled(disabled: bool) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn set_advance_busy(busy: bool) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Some(el) = doc.get_element_by_id("advance-turn-btn") {
+        if let Some(btn) = el.dyn_into::<HtmlButtonElement>().ok() {
+            btn.set_disabled(busy);
+            if busy {
+                let _ = btn.set_attribute("data-busy", "1");
+            } else {
+                let _ = btn.remove_attribute("data-busy");
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 struct RoundRunPlan {
     dm_keeper: String,
     phase: String,
@@ -300,7 +323,7 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
         .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
         .map(|i| i.value())
         .unwrap_or_default();
-    let player_keepers = player_pairs_raw
+    let mut player_keepers = player_pairs_raw
         .split(',')
         .filter_map(|part| {
             let pair = part.trim();
@@ -317,6 +340,25 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
             }
         })
         .collect::<Vec<_>>();
+    if player_keepers.is_empty() {
+        let claimed_actor = doc
+            .get_element_by_id("claimed-actor-id")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            .map(|i| i.value())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let claimed_keeper = doc
+            .get_element_by_id("claimed-keeper")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            .map(|i| i.value())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if !claimed_actor.is_empty() && !claimed_keeper.is_empty() {
+            player_keepers.push((claimed_actor, claimed_keeper));
+        }
+    }
     if player_keepers.is_empty() {
         return Err("player keepers가 없습니다. 새 게임에서 참가자 할당을 확인하세요.".to_string());
     }

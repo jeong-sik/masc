@@ -264,7 +264,10 @@ let apply_actor_claimed ~state ~event =
   let keeper_name =
     match get_string_opt "keeper_name" payload with
     | Some keeper when String.trim keeper <> "" -> Some (String.trim keeper)
-    | _ -> None
+    | _ -> (
+        match get_string_opt "keeper" payload with
+        | Some keeper when String.trim keeper <> "" -> Some (String.trim keeper)
+        | _ -> None)
   in
   match actor_id, keeper_name with
   | Some actor_id, Some keeper_name ->

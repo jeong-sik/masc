@@ -510,6 +510,25 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
     take (min limit 100) filtered  (* Hard cap at 100 *)
   )
 
+(** Full-scan search over all posts (no limit on scan, only on results).
+    Used by Board_dispatch.search to avoid the list_posts hard cap. *)
+let search_posts store ~predicate ~limit : post list =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    let matches = Hashtbl.fold (fun _ (p : post) acc ->
+      if predicate p then p :: acc else acc
+    ) store.posts [] in
+    (* Sort by recency for search results *)
+    let sorted = List.sort (fun (a : post) (b : post) ->
+      compare b.created_at a.created_at
+    ) matches in
+    let rec take n lst = match n, lst with
+      | 0, _ | _, [] -> []
+      | n, x :: xs -> x :: take (n-1) xs
+    in
+    take limit sorted
+  )
+
 (** {1 Comment Operations} *)
 
 let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.default_ttl_hours) ()

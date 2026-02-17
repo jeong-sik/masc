@@ -4,6 +4,7 @@ mod theme;
 
 // Domain modules — compiled unconditionally, but systems are gated on ViewerMode.
 mod assets;
+mod audio;
 mod dom;
 mod game;
 mod render;
@@ -47,6 +48,7 @@ fn main() {
             render::MapRenderPlugin,
             shaders::PostProcessPlugin,
             dom::DomBridgePlugin,
+            audio::AudioPlugin,
         ))
         .add_systems(Update, shaders::post_process::update_post_process_time)
         .run();

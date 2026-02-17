@@ -1,6 +1,7 @@
 pub mod components;
 pub mod events;
 pub mod http;
+pub mod round_runner;
 pub mod state;
 pub mod systems;
 
@@ -28,6 +29,7 @@ impl Plugin for GameStatePlugin {
             .init_resource::<ChoiceState>()
             .init_resource::<CombatState>()
             .init_resource::<http::ActiveTrpgRoom>()
+            .init_resource::<round_runner::RoundRunner>()
             // Events (type registrations — always available)
             .add_message::<DiceRolled>()
             .add_message::<HpChanged>()
@@ -64,7 +66,11 @@ impl Plugin for GameStatePlugin {
             // ── TRPG-gated systems ──
             .add_systems(
                 OnEnter(ViewerMode::Trpg),
-                (systems::reset_turn_progress, http::fetch_initial_state),
+                (systems::reset_turn_progress, http::fetch_initial_state, round_runner::start_round_loop),
+            )
+            .add_systems(
+                OnExit(ViewerMode::Trpg),
+                round_runner::stop_round_loop,
             )
             .add_systems(Update, (
                 http::refresh_state_on_room_change,
@@ -80,6 +86,7 @@ impl Plugin for GameStatePlugin {
                 systems::apply_choice_available,
                 systems::apply_choice_resolved,
                 systems::apply_combat_started,
+                crate::dom::endgame::detect_endgame,
             ).run_if(in_state(ViewerMode::Trpg)));
     }
 }

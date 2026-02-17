@@ -3,6 +3,8 @@
 use bevy::prelude::*;
 use bevy::ecs::relationship::Relationship;
 
+use crate::audio::AudioSettings;
+
 /// Marker component for UI entities spawned by the TRPG viewer.
 #[derive(Component)]
 pub struct UiMarker;
@@ -472,23 +474,30 @@ fn spawn_dev_menu(commands: &mut Commands) {
 /// (audio toggles, FPS counter, state dump, etc.).
 pub fn handle_menu_item_clicks(
     interactions: Query<
-        (&Interaction, &MenuItem),
+        (Entity, &Interaction, &MenuItem),
         (Changed<Interaction>, With<Button>),
     >,
+    children_query: Query<&Children>,
+    mut text_query: Query<&mut Text>,
+    mut audio: ResMut<AudioSettings>,
 ) {
-    for (interaction, menu_item) in &interactions {
+    for (entity, interaction, menu_item) in &interactions {
         if *interaction != Interaction::Pressed {
             continue;
         }
 
         match menu_item.0 {
             MenuAction::SoundToggle => {
-                log::info!("Menu action: Sound toggled");
-                // TODO: Connect to audio system
+                audio.sound_enabled = !audio.sound_enabled;
+                let label = if audio.sound_enabled { "Sound: ON" } else { "Sound: OFF" };
+                update_button_text(entity, label, &children_query, &mut text_query);
+                log::info!("Sound toggled: {}", audio.sound_enabled);
             }
             MenuAction::MusicToggle => {
-                log::info!("Menu action: Music toggled");
-                // TODO: Connect to audio system
+                audio.music_enabled = !audio.music_enabled;
+                let label = if audio.music_enabled { "Music: ON" } else { "Music: OFF" };
+                update_button_text(entity, label, &children_query, &mut text_query);
+                log::info!("Music toggled: {}", audio.music_enabled);
             }
             MenuAction::AutoSaveToggle => {
                 log::info!("Menu action: Auto-save toggled");
@@ -513,6 +522,23 @@ pub fn handle_menu_item_clicks(
             MenuAction::DumpState => {
                 log::info!("Menu action: Dump game state");
                 // TODO: Serialize and log current state
+            }
+        }
+    }
+}
+
+/// Walk the entity's children to find the first `Text` component and overwrite it.
+fn update_button_text(
+    button: Entity,
+    label: &str,
+    children_query: &Query<&Children>,
+    text_query: &mut Query<&mut Text>,
+) {
+    if let Ok(children) = children_query.get(button) {
+        for child in children.iter() {
+            if let Ok(mut text) = text_query.get_mut(child) {
+                *text = Text::new(label);
+                return;
             }
         }
     }

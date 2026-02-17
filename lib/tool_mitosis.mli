@@ -37,6 +37,12 @@ val make_context_with_eio :
 (** Internal logging helper (for testing) *)
 val log : context -> string -> unit
 
+(** Last successful handoff timestamp for cooldown enforcement *)
+val last_handoff_time : float ref
+
+(** Reset handoff cooldown timer (for testing) *)
+val reset_handoff_cooldown : unit -> unit
+
 (** Tool result type *)
 type result = bool * string
 
@@ -45,6 +51,11 @@ type result = bool * string
 val get_string : Yojson.Safe.t -> string -> string -> string
 val get_float : Yojson.Safe.t -> string -> float -> float
 val get_bool : Yojson.Safe.t -> string -> bool -> bool
+
+(** {1 DNA Validation} *)
+
+(** Validate DNA quality: length, goal/task markers, whitespace ratio, structure *)
+val validate_dna : string -> (string, string) Stdlib.result
 
 (** {1 Individual Handlers} *)
 

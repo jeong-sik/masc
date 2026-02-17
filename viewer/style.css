@@ -570,7 +570,7 @@ body.mode-lobby #dashboard {
     border-radius: var(--panel-radius);
     background: rgba(10, 14, 28, 0.86);
     display: grid;
-    grid-template-columns: repeat(3, minmax(120px, 1fr));
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
     gap: 8px;
     max-height: 192px;
     overflow: hidden;
@@ -592,6 +592,10 @@ body.mode-lobby #dashboard {
 
 .room-lane[data-lane="running"] {
     border-color: rgba(88, 184, 116, 0.42);
+}
+
+.room-lane[data-lane="stopped"] {
+    border-color: rgba(168, 119, 45, 0.42);
 }
 
 .room-lane[data-lane="ended"] {

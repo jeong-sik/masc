@@ -78,7 +78,7 @@ module ZeroZombie = struct
     let msg = Printexc.to_string exn in
     String.length msg >= 20 && 
     (String.sub msg 0 20 = "Invalid_argument(\"MA" ||  (* MASC not initialized *)
-     String.sub msg 0 15 = "Sys_error(\"No ")         (* No such file - transient *)
+     String.sub msg 0 14 = "Sys_error(\"No ")         (* No such file - transient *)
 
   let run_loop ?(interval=60.0) ~clock ~cleanup_fn () =
     let is_cancelled exn =

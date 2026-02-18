@@ -128,11 +128,8 @@ let test_is_benign_error_masc_not_init () =
     (Resilience.ZeroZombie.is_benign_error exn)
 
 let test_is_benign_error_no_such_file () =
-  (* NOTE: is_benign_error has a latent bug — String.sub msg 0 15 extracts 15 chars
-     but the comparison string "Sys_error(\"No " is only 14 chars, so this branch
-     never matches. Test documents actual behavior (false). *)
   let exn = Sys_error "No such file or directory" in
-  check bool "Sys_error never matches (off-by-one)" false
+  check bool "Sys_error 'No such file' is benign" true
     (Resilience.ZeroZombie.is_benign_error exn)
 
 let test_is_benign_error_other () =

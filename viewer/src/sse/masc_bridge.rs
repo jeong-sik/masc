@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde_json::Value;
 
 use super::masc_client::MascSseReceiver;
 
@@ -47,6 +48,35 @@ fn extract_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     }
 }
 
+fn normalize_message_event_type(raw: &str) -> &str {
+    match raw {
+        "masc/broadcast" => "broadcast",
+        "masc/heartbeat" => "heartbeat",
+        "masc/agent_joined" => "agent_joined",
+        "masc/agent_left" => "agent_left",
+        "masc/task_update" => "task_update",
+        _ => raw,
+    }
+}
+
+/// Streamable HTTP often delivers typed events as `event: message` envelopes.
+/// Extract inner `params.type` + `params.data` so downstream routing works.
+fn unwrap_message_event(data: &str) -> Option<(String, String)> {
+    let parsed: Value = serde_json::from_str(data).ok()?;
+    let params = parsed.get("params")?;
+    let raw_type = params.get("type")?.as_str()?;
+    let event_type = normalize_message_event_type(raw_type).to_string();
+
+    let payload = params.get("data").cloned().unwrap_or(Value::Null);
+    let payload_json = if payload.is_null() {
+        "{}".to_string()
+    } else {
+        payload.to_string()
+    };
+
+    Some((event_type, payload_json))
+}
+
 /// Each frame, drain the MASC SSE message buffer and update DOM panels.
 /// MASC events render as text in HTML panels, NOT as typed Bevy events.
 pub fn poll_masc_events(
@@ -66,11 +96,21 @@ pub fn poll_masc_events(
 
     let now = 0.0_f64; // Timestamp placeholder — no js_sys::Date dependency needed
 
-    for (event_type, data) in msgs.drain(..) {
+    for (raw_event_type, raw_data) in msgs.drain(..) {
+        let (event_type, data) = if raw_event_type == "message" {
+            unwrap_message_event(&raw_data).unwrap_or((raw_event_type, raw_data))
+        } else {
+            (raw_event_type, raw_data)
+        };
+
         match event_type.as_str() {
             "broadcast" => {
-                let message = extract_field(&data, "message").unwrap_or("(no message)");
-                let agent = extract_field(&data, "agent_name").unwrap_or("unknown");
+                let message = extract_field(&data, "message")
+                    .or_else(|| extract_field(&data, "content"))
+                    .unwrap_or("(no message)");
+                let agent = extract_field(&data, "agent_name")
+                    .or_else(|| extract_field(&data, "from"))
+                    .unwrap_or("unknown");
                 let summary = format!("[{}] {}", agent, message);
 
                 event_log.entries.push(MascLogEntry {
@@ -88,7 +128,9 @@ pub fn poll_masc_events(
                 log::debug!("MASC heartbeat received");
             }
             "agent_joined" => {
-                let agent = extract_field(&data, "agent_name").unwrap_or("unknown");
+                let agent = extract_field(&data, "agent_name")
+                    .or_else(|| extract_field(&data, "agent"))
+                    .unwrap_or("unknown");
                 event_log.agent_count = event_log.agent_count.saturating_add(1);
 
                 let summary = format!("{} joined", agent);
@@ -107,7 +149,9 @@ pub fn poll_masc_events(
                 );
             }
             "agent_left" => {
-                let agent = extract_field(&data, "agent_name").unwrap_or("unknown");
+                let agent = extract_field(&data, "agent_name")
+                    .or_else(|| extract_field(&data, "agent"))
+                    .unwrap_or("unknown");
                 event_log.agent_count = event_log.agent_count.saturating_sub(1);
 
                 let summary = format!("{} left", agent);
@@ -341,6 +385,31 @@ pub fn poll_masc_events(
                 log::debug!("Unhandled MASC SSE event type: {}", other);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unwrap_message_event_extracts_inner_type_and_payload() {
+        let raw = r#"{"jsonrpc":"2.0","method":"masc/event","params":{"type":"experiment_created","agent":"tester","data":{"id":"exp-1","hypothesis":"smoke"}}}"#;
+        let (event_type, payload) = unwrap_message_event(raw).expect("envelope should parse");
+
+        assert_eq!(event_type, "experiment_created");
+        assert_eq!(extract_field(&payload, "id"), Some("exp-1"));
+        assert_eq!(extract_field(&payload, "hypothesis"), Some("smoke"));
+    }
+
+    #[test]
+    fn unwrap_message_event_normalizes_masc_broadcast() {
+        let raw = r#"{"jsonrpc":"2.0","method":"masc/event","params":{"type":"masc/broadcast","agent":"tester","data":{"from":"alice","content":"hello"}}}"#;
+        let (event_type, payload) = unwrap_message_event(raw).expect("envelope should parse");
+
+        assert_eq!(event_type, "broadcast");
+        assert_eq!(extract_field(&payload, "from"), Some("alice"));
+        assert_eq!(extract_field(&payload, "content"), Some("hello"));
     }
 }
 

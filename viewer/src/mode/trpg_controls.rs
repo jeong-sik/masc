@@ -75,6 +75,270 @@ fn selected_player_keepers(doc: &web_sys::Document) -> Vec<String> {
     unique_non_empty(keepers)
 }
 
+fn selected_dm_keeper(doc: &web_sys::Document) -> String {
+    doc.get_element_by_id("new-game-dm-select")
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlSelectElement>()
+                .map(|select| select.value())
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn set_new_game_preflight_state(doc: &web_sys::Document, state: &str) {
+    if let Some(panel) = doc.get_element_by_id("new-game-panel") {
+        let normalized = match state {
+            "ok" | "fail" | "pending" => state,
+            _ => "pending",
+        };
+        let _ = panel.set_attribute("data-preflight-state", normalized);
+        let _ = panel.set_attribute(
+            "data-preflight-ok",
+            if normalized == "ok" { "1" } else { "0" },
+        );
+    }
+}
+
+fn new_game_preflight_state(doc: &web_sys::Document) -> String {
+    doc.get_element_by_id("new-game-panel")
+        .and_then(|panel| panel.get_attribute("data-preflight-state"))
+        .unwrap_or_else(|| "pending".to_string())
+}
+
+fn set_new_game_wizard_busy(doc: &web_sys::Document, busy: bool) {
+    if let Some(panel) = doc.get_element_by_id("new-game-panel") {
+        let _ = panel.set_attribute("data-wizard-busy", if busy { "1" } else { "0" });
+    }
+    for id in [
+        "new-game-quick-start",
+        "new-game-preflight-btn",
+        "new-game-refresh",
+        "new-game-autopick-btn",
+    ] {
+        if let Some(btn) = doc
+            .get_element_by_id(id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+        {
+            btn.set_disabled(busy);
+        }
+    }
+}
+
+fn new_game_wizard_busy(doc: &web_sys::Document) -> bool {
+    doc.get_element_by_id("new-game-panel")
+        .and_then(|panel| panel.get_attribute("data-wizard-busy"))
+        .is_some_and(|flag| flag == "1")
+}
+
+fn set_step_state(doc: &web_sys::Document, id: &str, state: &str) {
+    let Some(el) = doc.get_element_by_id(id) else {
+        return;
+    };
+    let _ = el.class_list().remove_1("is-active");
+    let _ = el.class_list().remove_1("is-done");
+    let _ = el.class_list().remove_1("is-error");
+    match state {
+        "active" => {
+            let _ = el.class_list().add_1("is-active");
+        }
+        "done" => {
+            let _ = el.class_list().add_1("is-done");
+        }
+        "error" => {
+            let _ = el.class_list().add_1("is-error");
+        }
+        _ => {}
+    }
+}
+
+fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
+    let preflight_state = new_game_preflight_state(doc);
+    let dm_keeper = selected_dm_keeper(doc);
+    let players = selected_player_keepers(doc);
+    let dm_selected = !dm_keeper.is_empty();
+    let has_conflict = dm_selected && players.iter().any(|player| player == &dm_keeper);
+    let players_ok = !players.is_empty() && !has_conflict;
+    let assignment_ok = dm_selected && players_ok;
+    let ready = preflight_state == "ok" && assignment_ok;
+    let busy = new_game_wizard_busy(doc);
+
+    let step1_state = match preflight_state.as_str() {
+        "ok" => "done",
+        "fail" => "error",
+        _ => "active",
+    };
+    let step2_state = if has_conflict {
+        "error"
+    } else if assignment_ok {
+        if preflight_state == "ok" {
+            "done"
+        } else {
+            "active"
+        }
+    } else if preflight_state == "ok" {
+        "active"
+    } else {
+        "pending"
+    };
+    let step3_state = if busy {
+        "active"
+    } else if ready {
+        "active"
+    } else {
+        "pending"
+    };
+
+    set_step_state(doc, "new-game-step-1", step1_state);
+    set_step_state(doc, "new-game-step-2", step2_state);
+    set_step_state(doc, "new-game-step-3", step3_state);
+
+    if let Some(start_btn) = doc
+        .get_element_by_id("new-game-start")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        start_btn.set_disabled(!ready || busy);
+    }
+
+    if let Some(hint) = doc.get_element_by_id("new-game-step-hint") {
+        let text = if busy {
+            "세션 시작 작업 실행 중입니다. 완료될 때까지 기다려주세요.".to_string()
+        } else if preflight_state != "ok" {
+            "1단계: 사전 점검을 먼저 통과해야 세션 시작이 가능합니다.".to_string()
+        } else if !dm_selected {
+            "2단계: DM keeper를 선택하세요.".to_string()
+        } else if has_conflict {
+            "2단계: DM과 플레이어 keeper가 중복되었습니다. 서로 다른 keeper를 선택하세요."
+                .to_string()
+        } else if players.is_empty() {
+            "2단계: 플레이어 keeper를 최소 1명 선택하세요.".to_string()
+        } else {
+            format!(
+                "3단계 준비 완료: DM {} · 플레이어 {}명. 세션 시작 버튼을 누르세요.",
+                dm_keeper,
+                players.len()
+            )
+        };
+        hint.set_text_content(Some(&text));
+    }
+}
+
+fn ensure_new_game_ready(doc: &web_sys::Document) -> Result<(), String> {
+    if new_game_preflight_state(doc) != "ok" {
+        return Err("사전 점검이 완료되지 않았습니다. 1) 사전 점검을 먼저 실행하세요.".to_string());
+    }
+    let dm_keeper = selected_dm_keeper(doc);
+    if dm_keeper.is_empty() {
+        return Err("DM keeper를 선택하세요.".to_string());
+    }
+    let players = selected_player_keepers(doc);
+    if players.is_empty() {
+        return Err("플레이어 keeper를 최소 1명 선택하세요.".to_string());
+    }
+    if players.iter().any(|player| player == &dm_keeper) {
+        return Err("DM keeper와 플레이어 keeper가 중복되었습니다.".to_string());
+    }
+    Ok(())
+}
+
+fn update_new_game_player_hint(doc: &web_sys::Document) {
+    let Some(hint) = doc.get_element_by_id("new-game-player-hint") else {
+        return;
+    };
+    let players = selected_player_keepers(doc);
+    let dm_keeper = selected_dm_keeper(doc);
+
+    let mut message = format!("플레이어 {}명 선택됨", players.len());
+    if !dm_keeper.is_empty() && players.iter().any(|name| name == &dm_keeper) {
+        message.push_str(&format!(" · DM 중복: {}", dm_keeper));
+    }
+    hint.set_text_content(Some(&message));
+    sync_new_game_wizard_ui(doc);
+}
+
+fn auto_select_player_keepers(doc: &web_sys::Document, target_count: usize) -> usize {
+    let Some(select) = doc
+        .get_element_by_id("new-game-player-select")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    else {
+        return 0;
+    };
+    let dm_keeper = doc
+        .get_element_by_id("new-game-dm-select")
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlSelectElement>()
+                .map(|s| s.value())
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    let options = select.options();
+    let mut selected = 0_usize;
+    for idx in 0..options.length() {
+        let Some(option) = options
+            .item(idx)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlOptionElement>().ok())
+        else {
+            continue;
+        };
+        let value = option.value().trim().to_string();
+        if value.is_empty() || (!dm_keeper.is_empty() && value == dm_keeper) {
+            option.set_selected(false);
+            continue;
+        }
+        if selected < target_count {
+            option.set_selected(true);
+            selected += 1;
+        } else {
+            option.set_selected(false);
+        }
+    }
+    update_new_game_player_hint(doc);
+    selected
+}
+
+fn bind_new_game_selection_watchers(doc: &web_sys::Document) {
+    let Some(player_select) = doc.get_element_by_id("new-game-player-select") else {
+        return;
+    };
+    if player_select.get_attribute("data-hint-bound").as_deref() == Some("1") {
+        update_new_game_player_hint(doc);
+        return;
+    }
+    let _ = player_select.set_attribute("data-hint-bound", "1");
+
+    if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
+        let dm_cb = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let selected = selected_player_keepers(&doc).len().max(1);
+            let _ = auto_select_player_keepers(&doc, selected);
+            update_new_game_player_hint(&doc);
+        }) as Box<dyn FnMut(_)>);
+        let _ = dm_select.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("change", dm_cb.as_ref().unchecked_ref())
+        });
+        dm_cb.forget();
+    }
+
+    let player_cb = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        update_new_game_player_hint(&doc);
+    }) as Box<dyn FnMut(_)>);
+    let _ = player_select
+        .dyn_ref::<web_sys::EventTarget>()
+        .map(|target| {
+            target.add_event_listener_with_callback("change", player_cb.as_ref().unchecked_ref())
+        });
+    player_cb.forget();
+
+    update_new_game_player_hint(doc);
+}
+
 fn available_player_keepers(doc: &web_sys::Document) -> Vec<String> {
     let Ok(nodes) = doc.query_selector_all("#new-game-player-select option") else {
         return Vec::new();
@@ -145,7 +409,13 @@ fn extract_keeper_name_from_value(row: &Value) -> Option<String> {
 
 async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>, String> {
     let payload = mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await?;
-    web_sys::console::log_1(&format!("[refresh_keeper_selectors] payload keys={:?}", payload.as_object().map(|m| m.keys().collect::<Vec<_>>())).into());
+    web_sys::console::log_1(
+        &format!(
+            "[refresh_keeper_selectors] payload keys={:?}",
+            payload.as_object().map(|m| m.keys().collect::<Vec<_>>())
+        )
+        .into(),
+    );
     let mut keepers = payload
         .get("keepers")
         .and_then(Value::as_array)
@@ -177,7 +447,11 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
                     fallback.push(value);
                 }
             }
-            let text = claimed.text_content().unwrap_or_default().trim().to_string();
+            let text = claimed
+                .text_content()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             if !text.is_empty() {
                 fallback.push(text);
             }
@@ -242,6 +516,7 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         player_select.set_inner_html(&html);
     }
 
+    update_new_game_player_hint(doc);
     Ok(keepers)
 }
 
@@ -550,7 +825,9 @@ fn bind_actor_admin_row_clicks(doc: &web_sys::Document) {
     }
 }
 
-pub(super) async fn refresh_actor_admin_list(doc: &web_sys::Document) -> Result<Vec<ActorAdminRow>, String> {
+pub(super) async fn refresh_actor_admin_list(
+    doc: &web_sys::Document,
+) -> Result<Vec<ActorAdminRow>, String> {
     let room_id = actor_admin_room_id();
     let payload = fetch_room_state_payload(&room_id).await?;
     let rows = parse_actor_admin_rows(&payload);
@@ -590,8 +867,10 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 &catalog,
                 &["world_presets", "world", "world_preset", "worlds"],
             );
-            let dm =
-                collect_preset_options_from_catalog(&catalog, &["dm_presets", "dm", "dm_preset", "dms"]);
+            let dm = collect_preset_options_from_catalog(
+                &catalog,
+                &["dm_presets", "dm", "dm_preset", "dms"],
+            );
             let ok = !world.is_empty() && !dm.is_empty();
             let detail = if ok {
                 format!("월드 {}개 · DM {}개", world.len(), dm.len())
@@ -600,11 +879,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
             };
             (ok, "프리셋".to_string(), detail)
         }
-        Err(e) => (
-            false,
-            "프리셋".to_string(),
-            format!("조회 실패: {}", e),
-        ),
+        Err(e) => (false, "프리셋".to_string(), format!("조회 실패: {}", e)),
     };
     rows.push(preset_row);
 
@@ -629,11 +904,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 )
             }
         }
-        Err(e) => (
-            false,
-            "키퍼 풀".to_string(),
-            format!("조회 실패: {}", e),
-        ),
+        Err(e) => (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e)),
     };
     rows.push(keeper_row);
 
@@ -663,7 +934,10 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
     rows.push(room_row);
 
     set_new_game_preflight_rows(doc, &rows);
-    if rows.iter().all(|(ok, _, _)| *ok) {
+    let all_ok = rows.iter().all(|(ok, _, _)| *ok);
+    set_new_game_preflight_state(doc, if all_ok { "ok" } else { "fail" });
+    sync_new_game_wizard_ui(doc);
+    if all_ok {
         Ok(())
     } else {
         Err("사전 점검 실패 항목이 있습니다.".to_string())
@@ -793,6 +1067,42 @@ async fn actor_admin_delete(doc: &web_sys::Document) -> Result<String, String> {
 
 // ─── New Game Flow ──────────────────────────────────────────────
 
+async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, String> {
+    set_new_game_status(doc, "빠른 시작: keeper/preset 동기화 중...");
+    set_new_game_preflight_state(doc, "pending");
+    sync_new_game_wizard_ui(doc);
+
+    let bootstrap = refresh_new_game_bootstrap(doc).await?;
+    set_new_game_status(
+        doc,
+        &format!(
+            "빠른 시작: Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
+            bootstrap.keepers.len(),
+            bootstrap.world_presets.len(),
+            bootstrap.dm_presets.len()
+        ),
+    );
+
+    set_new_game_preflight_status(doc, "사전 점검 실행 중...");
+    run_new_game_preflight(doc).await?;
+
+    if selected_player_keepers(doc).is_empty() {
+        let selected = auto_select_player_keepers(doc, 4);
+        if selected > 0 {
+            set_new_game_status(
+                doc,
+                &format!(
+                    "빠른 시작: 플레이어 keeper {}명을 자동 선택했습니다.",
+                    selected
+                ),
+            );
+        }
+    }
+    update_new_game_player_hint(doc);
+    ensure_new_game_ready(doc)?;
+    start_new_game_flow(doc).await
+}
+
 async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> {
     let room_input = doc
         .get_element_by_id("new-game-room-id")
@@ -878,7 +1188,9 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         apply_player_keeper_selection(doc, &players);
     }
     if players.is_empty() {
-        return Err("AI Player keeper를 선택할 수 없습니다. keeper 목록을 먼저 새로고침하세요.".to_string());
+        return Err(
+            "AI Player keeper를 선택할 수 없습니다. keeper 목록을 먼저 새로고침하세요.".to_string(),
+        );
     }
 
     let model_text = doc
@@ -943,8 +1255,10 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
                 .unwrap_or_default();
         }
         if dm_preset_id.is_empty() {
-            let dm_options =
-                collect_preset_options_from_catalog(&preset_catalog, &["dm_presets", "dm", "dm_preset", "dms"]);
+            let dm_options = collect_preset_options_from_catalog(
+                &preset_catalog,
+                &["dm_presets", "dm", "dm_preset", "dms"],
+            );
             dm_preset_id = dm_options
                 .first()
                 .map(|row| row.id.clone())
@@ -1066,8 +1380,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     }
 
     let assignments = assign_keepers_to_actor_ids(&actor_ids, &dm_keeper, &players)?;
-    let player_map: std::collections::HashMap<String, String> =
-        assignments.into_iter().collect();
+    let player_map: std::collections::HashMap<String, String> = assignments.into_iter().collect();
 
     for (actor_id, keeper_name) in &player_map {
         mcp_tool_call(
@@ -1149,7 +1462,11 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         room_id,
         dm_keeper,
         player_map.len(),
-        if auto_selected_players { " (플레이어 자동 선택 적용)" } else { "" }
+        if auto_selected_players {
+            " (플레이어 자동 선택 적용)"
+        } else {
+            ""
+        }
     ))
 }
 
@@ -1223,12 +1540,7 @@ fn preset_unwrap_payload(value: &Value) -> Option<Value> {
         .or_else(|| value.get("structuredContent"))
         .filter(|v| v.is_object())
         .cloned()
-        .or_else(|| {
-            value
-                .get("presets")
-                .filter(|v| v.is_object())
-                .cloned()
-        })
+        .or_else(|| value.get("presets").filter(|v| v.is_object()).cloned())
 }
 
 fn preset_unwrap_content(value: &Value) -> Option<Value> {
@@ -1257,8 +1569,16 @@ fn extract_first_preset_id(catalog: &Value, list_key: &str) -> Option<String> {
     catalog
         .get(list_key)
         .and_then(extract_first_preset_id_from_node)
-        .or_else(|| catalog.get("items").and_then(extract_first_preset_id_from_node))
-        .or_else(|| catalog.get("presets").and_then(extract_first_preset_id_from_node))
+        .or_else(|| {
+            catalog
+                .get("items")
+                .and_then(extract_first_preset_id_from_node)
+        })
+        .or_else(|| {
+            catalog
+                .get("presets")
+                .and_then(extract_first_preset_id_from_node)
+        })
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
 }
@@ -1267,10 +1587,7 @@ fn extract_first_preset_id_from_node(raw: &Value) -> Option<String> {
     if let Some(id) = raw.get("id").and_then(Value::as_str) {
         return Some(id.to_string());
     }
-    if let Some(id) = raw
-        .get("preset_id")
-        .and_then(Value::as_str)
-    {
+    if let Some(id) = raw.get("preset_id").and_then(Value::as_str) {
         return Some(id.to_string());
     }
     if let Some(id) = raw.get("uid").and_then(Value::as_str) {
@@ -1331,11 +1648,7 @@ fn preset_option_from_value(node: &Value) -> Option<PresetOption> {
     Some(PresetOption { id, title })
 }
 
-fn collect_preset_options_from_node(
-    node: &Value,
-    out: &mut Vec<PresetOption>,
-    depth: usize,
-) {
+fn collect_preset_options_from_node(node: &Value, out: &mut Vec<PresetOption>, depth: usize) {
     if depth > 6 {
         return;
     }
@@ -1420,13 +1733,12 @@ fn select_options_set(
         .join("");
     select.set_inner_html(&html);
 
-    let selected = if !previous.trim().is_empty()
-        && options.iter().any(|option| option.id == previous)
-    {
-        previous
-    } else {
-        options[0].id.clone()
-    };
+    let selected =
+        if !previous.trim().is_empty() && options.iter().any(|option| option.id == previous) {
+            previous
+        } else {
+            options[0].id.clone()
+        };
     select.set_value(&selected);
     Some(selected)
 }
@@ -1481,6 +1793,9 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                 room_input.set_value(&generate_room_id());
             }
         }
+        set_new_game_wizard_busy(&doc, false);
+        set_new_game_preflight_state(&doc, "pending");
+        sync_new_game_wizard_ui(&doc);
         set_new_game_status(&doc, "Keeper 목록을 불러오는 중...");
         set_new_game_preflight_status(&doc, "사전 점검 준비 중...");
         actor_admin_set_status(&doc, "액터 목록을 불러오는 중...", "status-info");
@@ -1502,13 +1817,21 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                     let _ = run_new_game_preflight(&doc_for_fetch).await;
                 }
                 Err(e) => {
-                    web_sys::console::error_1(&format!("[bind_new_game_controls] bootstrap FAILED: {}", e).into());
+                    web_sys::console::error_1(
+                        &format!("[bind_new_game_controls] bootstrap FAILED: {}", e).into(),
+                    );
                     set_new_game_status(&doc_for_fetch, &format!("초기 로드 실패: {}", e));
-                    actor_admin_set_status(&doc_for_fetch, &format!("로드 실패: {}", e), "status-error");
+                    actor_admin_set_status(
+                        &doc_for_fetch,
+                        &format!("로드 실패: {}", e),
+                        "status-error",
+                    );
+                    set_new_game_preflight_state(&doc_for_fetch, "fail");
                     set_new_game_preflight_status(
                         &doc_for_fetch,
                         &format!("사전 점검 불가: {}", e),
                     );
+                    sync_new_game_wizard_ui(&doc_for_fetch);
                 }
             }
         });
@@ -1549,11 +1872,40 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
         regen_cb.forget();
     }
 
+    if let Some(autopick_btn) = doc.get_element_by_id("new-game-autopick-btn") {
+        let autopick_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            if new_game_wizard_busy(&doc) {
+                return;
+            }
+            let selected = auto_select_player_keepers(&doc, 4);
+            set_new_game_status(
+                &doc,
+                &format!("플레이어 keeper {}명을 자동 선택했습니다.", selected),
+            );
+            update_new_game_player_hint(&doc);
+        }) as Box<dyn FnMut()>);
+        let _ = autopick_btn
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target
+                    .add_event_listener_with_callback("click", autopick_cb.as_ref().unchecked_ref())
+            });
+        autopick_cb.forget();
+    }
+
     if let Some(refresh_btn) = doc.get_element_by_id("new-game-refresh") {
         let refresh_cb = Closure::wrap(Box::new(move || {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
+            if new_game_wizard_busy(&doc) {
+                return;
+            }
+            set_new_game_preflight_state(&doc, "pending");
+            sync_new_game_wizard_ui(&doc);
             set_new_game_status(&doc, "세션/프리셋/keeper 정보를 새로고침 중...");
             set_new_game_preflight_status(&doc, "사전 점검 실행 중...");
             actor_admin_set_status(&doc, "액터 목록 새로고침 중...", "status-info");
@@ -1570,16 +1922,26 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                                 bootstrap.dm_presets.len()
                             ),
                         );
-                        actor_admin_set_status(&doc_for_fetch, "액터 목록 새로고침 완료", "status-ok");
+                        actor_admin_set_status(
+                            &doc_for_fetch,
+                            "액터 목록 새로고침 완료",
+                            "status-ok",
+                        );
                         let _ = run_new_game_preflight(&doc_for_fetch).await;
                     }
                     Err(e) => {
                         set_new_game_status(&doc_for_fetch, &format!("새로고침 실패: {}", e));
-                        actor_admin_set_status(&doc_for_fetch, &format!("새로고침 실패: {}", e), "status-error");
+                        actor_admin_set_status(
+                            &doc_for_fetch,
+                            &format!("새로고침 실패: {}", e),
+                            "status-error",
+                        );
+                        set_new_game_preflight_state(&doc_for_fetch, "fail");
                         set_new_game_preflight_status(
                             &doc_for_fetch,
                             &format!("사전 점검 실패: {}", e),
                         );
+                        sync_new_game_wizard_ui(&doc_for_fetch);
                     }
                 }
             });
@@ -1595,6 +1957,11 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
+            if new_game_wizard_busy(&doc) {
+                return;
+            }
+            set_new_game_preflight_state(&doc, "pending");
+            sync_new_game_wizard_ui(&doc);
             set_new_game_preflight_status(&doc, "사전 점검 실행 중...");
             let doc_for_task = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
@@ -1603,10 +1970,52 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                 }
             });
         }) as Box<dyn FnMut()>);
-        let _ = preflight_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
-            target.add_event_listener_with_callback("click", preflight_cb.as_ref().unchecked_ref())
-        });
+        let _ = preflight_btn
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback(
+                    "click",
+                    preflight_cb.as_ref().unchecked_ref(),
+                )
+            });
         preflight_cb.forget();
+    }
+
+    if let Some(quick_start_btn) = doc.get_element_by_id("new-game-quick-start") {
+        let quick_start_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            if new_game_wizard_busy(&doc) {
+                return;
+            }
+            set_new_game_wizard_busy(&doc, true);
+            sync_new_game_wizard_ui(&doc);
+            let doc_for_start = doc.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let result = run_new_game_quick_start(&doc_for_start).await;
+                match result {
+                    Ok(message) => {
+                        set_new_game_status(&doc_for_start, &message);
+                        set_element_display(&doc_for_start, "new-game-panel", "none");
+                    }
+                    Err(e) => {
+                        set_new_game_status(&doc_for_start, &format!("빠른 시작 실패: {}", e));
+                    }
+                }
+                set_new_game_wizard_busy(&doc_for_start, false);
+                sync_new_game_wizard_ui(&doc_for_start);
+            });
+        }) as Box<dyn FnMut()>);
+        let _ = quick_start_btn
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback(
+                    "click",
+                    quick_start_cb.as_ref().unchecked_ref(),
+                )
+            });
+        quick_start_cb.forget();
     }
 
     if let Some(start_btn) = doc.get_element_by_id("new-game-start") {
@@ -1614,10 +2023,17 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
-            set_new_game_status(&doc, "새 게임 시작 중...");
-            if let Some(btn) = doc.get_element_by_id("new-game-start") {
-                let _ = btn.set_attribute("disabled", "true");
+            if new_game_wizard_busy(&doc) {
+                return;
             }
+            if let Err(reason) = ensure_new_game_ready(&doc) {
+                set_new_game_status(&doc, &format!("시작 불가: {}", reason));
+                sync_new_game_wizard_ui(&doc);
+                return;
+            }
+            set_new_game_status(&doc, "새 게임 시작 중...");
+            set_new_game_wizard_busy(&doc, true);
+            sync_new_game_wizard_ui(&doc);
             let doc_for_start = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let result = start_new_game_flow(&doc_for_start).await;
@@ -1630,9 +2046,8 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                         set_new_game_status(&doc_for_start, &format!("시작 실패: {}", e));
                     }
                 }
-                if let Some(btn) = doc_for_start.get_element_by_id("new-game-start") {
-                    let _ = btn.remove_attribute("disabled");
-                }
+                set_new_game_wizard_busy(&doc_for_start, false);
+                sync_new_game_wizard_ui(&doc_for_start);
             });
         }) as Box<dyn FnMut()>);
         let _ = start_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -1641,6 +2056,8 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
         start_cb.forget();
     }
 
+    bind_new_game_selection_watchers(doc);
+    sync_new_game_wizard_ui(doc);
     bind_actor_admin_controls(doc);
 }
 

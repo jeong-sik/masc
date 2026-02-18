@@ -332,13 +332,22 @@ pub fn apply_actor_spawned(
         }
         let actor = Actor {
             id: payload.actor_id.clone(),
-            name: if payload.name.is_empty() { payload.actor_id.clone() } else { payload.name.clone() },
+            name: if payload.name.is_empty() {
+                payload.actor_id.clone()
+            } else {
+                payload.name.clone()
+            },
             class: payload.class.clone(),
             hp: 100,
             max_hp: 100,
             mp: 50,
             max_mp: 50,
-            stats: Stats { atk: 10, def: 10, int: 10, luck: 10 },
+            stats: Stats {
+                atk: 10,
+                def: 10,
+                int: 10,
+                luck: 10,
+            },
             area: String::new(),
             is_dead: false,
             inventory: Vec::new(),
@@ -355,10 +364,7 @@ pub fn apply_actor_spawned(
 
 /// Update Actor fields when ActorUpdated fires.
 /// Only overwrites non-empty payload fields.
-pub fn apply_actor_updated(
-    mut events: MessageReader<ActorUpdated>,
-    mut actors: Query<&mut Actor>,
-) {
+pub fn apply_actor_updated(mut events: MessageReader<ActorUpdated>, mut actors: Query<&mut Actor>) {
     for ActorUpdated(payload) in events.read() {
         for mut actor in &mut actors {
             if actor.id == payload.actor_id {
@@ -392,10 +398,7 @@ pub fn apply_actor_deleted(
 }
 
 /// Bind a keeper to an Actor when ActorClaimed fires.
-pub fn apply_actor_claimed(
-    mut events: MessageReader<ActorClaimed>,
-    mut actors: Query<&mut Actor>,
-) {
+pub fn apply_actor_claimed(mut events: MessageReader<ActorClaimed>, mut actors: Query<&mut Actor>) {
     for ActorClaimed(payload) in events.read() {
         for mut actor in &mut actors {
             if actor.id == payload.actor_id {
@@ -420,10 +423,7 @@ pub fn apply_actor_released(
 }
 
 /// Mark room as ended when RoomEnded event fires.
-pub fn apply_room_ended(
-    mut events: MessageReader<RoomEnded>,
-    mut room_state: ResMut<RoomState>,
-) {
+pub fn apply_room_ended(mut events: MessageReader<RoomEnded>, mut room_state: ResMut<RoomState>) {
     for RoomEnded(payload) in events.read() {
         if room_state.id == payload.room_id || payload.room_id.is_empty() {
             room_state.status = "ended".to_string();
@@ -443,9 +443,7 @@ pub fn apply_scene_transitioned(
 
 // --- Session / Turn lifecycle systems ---
 
-pub fn apply_party_selected(
-    mut events: MessageReader<PartySelected>,
-) {
+pub fn apply_party_selected(mut events: MessageReader<PartySelected>) {
     for PartySelected(_p) in events.read() {
         // Log-only: no ECS state mutation needed
     }
@@ -474,9 +472,7 @@ pub fn apply_room_started(
     }
 }
 
-pub fn apply_session_started(
-    mut events: MessageReader<SessionStarted>,
-) {
+pub fn apply_session_started(mut events: MessageReader<SessionStarted>) {
     for SessionStarted(_p) in events.read() {
         // Log-only: session ID is informational
     }
@@ -501,33 +497,25 @@ pub fn apply_turn_started(
     }
 }
 
-pub fn apply_turn_action_resolved(
-    mut events: MessageReader<TurnActionResolved>,
-) {
+pub fn apply_turn_action_resolved(mut events: MessageReader<TurnActionResolved>) {
     for TurnActionResolved(_p) in events.read() {
         // Log-only: action result is rendered by DOM system
     }
 }
 
-pub fn apply_intervention_submitted(
-    mut events: MessageReader<InterventionSubmitted>,
-) {
+pub fn apply_intervention_submitted(mut events: MessageReader<InterventionSubmitted>) {
     for InterventionSubmitted(_p) in events.read() {
         // Log-only: rendered by DOM system
     }
 }
 
-pub fn apply_intervention_applied(
-    mut events: MessageReader<InterventionApplied>,
-) {
+pub fn apply_intervention_applied(mut events: MessageReader<InterventionApplied>) {
     for InterventionApplied(_p) in events.read() {
         // Log-only: rendered by DOM system
     }
 }
 
-pub fn apply_keeper_unavailable(
-    mut events: MessageReader<KeeperUnavailable>,
-) {
+pub fn apply_keeper_unavailable(mut events: MessageReader<KeeperUnavailable>) {
     for KeeperUnavailable(_p) in events.read() {
         // Log-only: warning rendered by DOM system
     }

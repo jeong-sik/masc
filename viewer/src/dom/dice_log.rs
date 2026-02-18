@@ -50,7 +50,12 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
         let note_html = payload
             .note
             .as_deref()
-            .map(|n| format!("<div class=\"dice-note\">{}</div>", html_escape(&sanitize_text(n))))
+            .map(|n| {
+                format!(
+                    "<div class=\"dice-note\">{}</div>",
+                    html_escape(&sanitize_text(n))
+                )
+            })
             .unwrap_or_default();
 
         entry.set_inner_html(&format!(

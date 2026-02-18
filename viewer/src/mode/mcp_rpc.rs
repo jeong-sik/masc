@@ -57,15 +57,15 @@ pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value,
     let rpc: Value = if body_text.trim().is_empty() {
         json!({})
     } else {
-        parse_mcp_rpc_response(&body_text).or_else(|_| {
-            parse_embedded_tool_payload(&body_text)
-        }).map_err(|e| {
-            format!(
-                "RPC 응답 JSON 파싱 실패: {} / {}",
-                e,
-                body_text.chars().take(240).collect::<String>()
-            )
-        })?
+        parse_mcp_rpc_response(&body_text)
+            .or_else(|_| parse_embedded_tool_payload(&body_text))
+            .map_err(|e| {
+                format!(
+                    "RPC 응답 JSON 파싱 실패: {} / {}",
+                    e,
+                    body_text.chars().take(240).collect::<String>()
+                )
+            })?
     };
 
     if !resp.ok() {
@@ -147,7 +147,8 @@ pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value,
     let parsed: Value = match parse_embedded_tool_payload(&text) {
         Ok(v) => v,
         Err(primary) => {
-            let secondary = parse_mcp_rpc_response(&text).unwrap_or_else(|e| Value::String(format!("파싱 실패: {}", e)));
+            let secondary = parse_mcp_rpc_response(&text)
+                .unwrap_or_else(|e| Value::String(format!("파싱 실패: {}", e)));
             return Err(format!(
                 "{} 응답 JSON 파싱 실패: {} / {} / raw={}",
                 tool_name, primary, secondary, text
@@ -224,8 +225,7 @@ fn collect_json_candidates(raw: &str) -> Vec<String> {
 
     // 2) SSE payload-only lines
     candidates.extend(
-        src
-            .lines()
+        src.lines()
             .filter_map(|line| line.strip_prefix("data:"))
             .map(str::trim_start)
             .filter(|line| !line.is_empty() && *line != "[DONE]")

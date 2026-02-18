@@ -1,20 +1,20 @@
 pub mod action_panel;
 pub mod actor_join;
 pub mod actor_lifecycle;
-pub mod session_events;
 pub mod character_panel;
-pub mod session_history;
 pub mod choice_panel;
 pub mod connection;
-pub mod escape;
-pub mod gameplay_events;
 pub mod dice_log;
 pub mod endgame;
+pub mod escape;
+pub mod gameplay_events;
 pub mod narrative;
 pub mod overlay;
+pub mod session_events;
+pub mod session_history;
 pub mod turn_controls;
-pub mod turn_runtime;
 pub mod turn_phase;
+pub mod turn_runtime;
 
 use bevy::prelude::*;
 
@@ -31,7 +31,7 @@ impl Plugin for DomBridgePlugin {
     fn build(&self, app: &mut App) {
         app
             // DOM caches for change detection (inert when unused)
-        .init_resource::<character_panel::CharacterPanelCache>()
+            .init_resource::<character_panel::CharacterPanelCache>()
             .init_resource::<session_history::SessionHistoryCache>()
             .init_resource::<turn_phase::TurnPhaseCache>()
             .init_resource::<turn_runtime::TurnRuntimeCache>()
@@ -40,35 +40,45 @@ impl Plugin for DomBridgePlugin {
             .init_resource::<endgame::EndgameState>()
             .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
             // TRPG-specific DOM update systems
-            .add_systems(Update, (
-                narrative::update_narrative_dom,
-                dice_log::update_dice_log_dom,
-                session_history::update_session_history_dom,
-                character_panel::update_character_panel_dom,
-                choice_panel::update_choice_dom,
-                gameplay_events::update_gameplay_events_dom,
-                turn_phase::update_turn_phase_dom,
-                turn_runtime::update_turn_runtime_dom,
-                connection::update_connection_dom,
-                actor_join::sync_join_panel_interaction_state,
-                action_panel::sync_action_panel_interaction_state,
-                turn_controls::sync_turn_controls_visibility,
-                overlay::update_overlay_dom,
-                actor_lifecycle::update_actor_lifecycle_dom,
-                session_events::update_session_events_dom,
-            ).run_if(in_state(ViewerMode::Trpg)))
+            .add_systems(
+                Update,
+                (
+                    narrative::update_narrative_dom,
+                    dice_log::update_dice_log_dom,
+                    session_history::update_session_history_dom,
+                    character_panel::update_character_panel_dom,
+                    choice_panel::update_choice_dom,
+                    gameplay_events::update_gameplay_events_dom,
+                    turn_phase::update_turn_phase_dom,
+                    turn_runtime::update_turn_runtime_dom,
+                    connection::update_connection_dom,
+                    actor_join::sync_join_panel_interaction_state,
+                    action_panel::sync_action_panel_interaction_state,
+                    turn_controls::sync_turn_controls_visibility,
+                    overlay::update_overlay_dom,
+                    actor_lifecycle::update_actor_lifecycle_dom,
+                    session_events::update_session_events_dom,
+                )
+                    .run_if(in_state(ViewerMode::Trpg)),
+            )
             // Action panel lifecycle: bind listeners on enter, unbind on exit
-            .add_systems(OnEnter(ViewerMode::Trpg), (
-                action_panel::bind_action_panel,
-                action_panel::sync_action_panel_interaction_state,
-                actor_join::bind_actor_join,
-                turn_controls::bind_turn_controls,
-            ))
-            .add_systems(OnExit(ViewerMode::Trpg), (
-                action_panel::unbind_action_panel,
-                actor_join::unbind_actor_join,
-                turn_controls::unbind_turn_controls,
-            ));
+            .add_systems(
+                OnEnter(ViewerMode::Trpg),
+                (
+                    action_panel::bind_action_panel,
+                    action_panel::sync_action_panel_interaction_state,
+                    actor_join::bind_actor_join,
+                    turn_controls::bind_turn_controls,
+                ),
+            )
+            .add_systems(
+                OnExit(ViewerMode::Trpg),
+                (
+                    action_panel::unbind_action_panel,
+                    actor_join::unbind_actor_join,
+                    turn_controls::unbind_turn_controls,
+                ),
+            );
     }
 }
 

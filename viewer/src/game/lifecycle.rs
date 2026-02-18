@@ -22,19 +22,9 @@ impl TrpgLifecycleState {
     pub fn from_status(raw: &str) -> Self {
         let status = normalize_status(raw);
         match status.as_str() {
-            "active"
-            | "running"
-            | "in_progress"
-            | "round"
-            | "combat"
-            | "briefing"
-            | "dm_narration"
-            | "party_discussion"
-            | "action_declaration"
-            | "dice_resolution"
-            | "outcome_narration"
-            | "state_update"
-            | "transition" => Self::Running,
+            "active" | "running" | "in_progress" | "round" | "combat" | "briefing"
+            | "dm_narration" | "party_discussion" | "action_declaration" | "dice_resolution"
+            | "outcome_narration" | "state_update" | "transition" => Self::Running,
             "paused" | "stopped" | "suspended" | "halted" => Self::Stopped,
             "ended" | "completed" | "done" | "retired" | "closed" | "archived" => Self::Ended,
             "loading" | "bootstrapping" | "syncing" => Self::Loading,
@@ -103,7 +93,6 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn help_text(self) -> &'static str {
         match self {
             Self::Lobby => "세션 미시작 또는 초기 대기 상태",
@@ -116,7 +105,6 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn allows_round_control(self) -> bool {
         matches!(self, Self::Running | Self::Stopped)
     }

@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
 
 use super::client::SseReceiver;
 use crate::game::events::*;
@@ -9,7 +9,9 @@ use crate::game::state::ConnectionStatus;
 macro_rules! dispatch_event {
     ($event_type:expr, $data:expr, $writer:expr, $payload_ty:ty, $event_ty:ident) => {
         match serde_json::from_str::<$payload_ty>($data) {
-            Ok(payload) => { $writer.write($event_ty(payload)); }
+            Ok(payload) => {
+                $writer.write($event_ty(payload));
+            }
             Err(e) => log::warn!("Failed to parse {}: {}", $event_type, e),
         }
     };
@@ -87,38 +89,206 @@ pub fn poll_sse_events(
     for (event_type, data) in msgs.drain(..) {
         match event_type.as_str() {
             // ── Original events (underscore format) ──
-            "dice_roll" => dispatch_event!(event_type, &data, original.dice, DiceRollPayload, DiceRolled),
-            "hp_change" => dispatch_event!(event_type, &data, original.hp, HpChangePayload, HpChanged),
-            "narrative" => dispatch_event!(event_type, &data, original.narrative, NarrativePayload, NarrativeReceived),
-            "area_move" => dispatch_event!(event_type, &data, original.area, AreaMovePayload, AreaMoved),
-            "turn_advance" => dispatch_event!(event_type, &data, original.turn, TurnAdvancePayload, TurnAdvanced),
-            "choice_available" => dispatch_event!(event_type, &data, original.choice, ChoicePayload, ChoiceAvailable),
-            "choice_resolved" => dispatch_event!(event_type, &data, original.choice_resolved, ChoicePayload, ChoiceResolved),
-            "item_acquired" => dispatch_event!(event_type, &data, original.item, ItemPayload, ItemAcquired),
-            "character_death" => dispatch_event!(event_type, &data, original.death, DeathPayload, CharacterDied),
-            "combat_start" => dispatch_event!(event_type, &data, original.combat, CombatPayload, CombatStarted),
-            "weather_change" => dispatch_event!(event_type, &data, original.weather, WeatherChangePayload, WeatherChanged),
-            "mood_change" => dispatch_event!(event_type, &data, original.mood, MoodChangePayload, MoodChanged),
-            "turn_progress" => dispatch_event!(event_type, &data, original.progress, TurnProgressPayload, TurnProgressUpdated),
+            "dice_roll" => dispatch_event!(
+                event_type,
+                &data,
+                original.dice,
+                DiceRollPayload,
+                DiceRolled
+            ),
+            "hp_change" => {
+                dispatch_event!(event_type, &data, original.hp, HpChangePayload, HpChanged)
+            }
+            "narrative" => dispatch_event!(
+                event_type,
+                &data,
+                original.narrative,
+                NarrativePayload,
+                NarrativeReceived
+            ),
+            "area_move" => {
+                dispatch_event!(event_type, &data, original.area, AreaMovePayload, AreaMoved)
+            }
+            "turn_advance" => dispatch_event!(
+                event_type,
+                &data,
+                original.turn,
+                TurnAdvancePayload,
+                TurnAdvanced
+            ),
+            "choice_available" => dispatch_event!(
+                event_type,
+                &data,
+                original.choice,
+                ChoicePayload,
+                ChoiceAvailable
+            ),
+            "choice_resolved" => dispatch_event!(
+                event_type,
+                &data,
+                original.choice_resolved,
+                ChoicePayload,
+                ChoiceResolved
+            ),
+            "item_acquired" => {
+                dispatch_event!(event_type, &data, original.item, ItemPayload, ItemAcquired)
+            }
+            "character_death" => dispatch_event!(
+                event_type,
+                &data,
+                original.death,
+                DeathPayload,
+                CharacterDied
+            ),
+            "combat_start" => dispatch_event!(
+                event_type,
+                &data,
+                original.combat,
+                CombatPayload,
+                CombatStarted
+            ),
+            "weather_change" => dispatch_event!(
+                event_type,
+                &data,
+                original.weather,
+                WeatherChangePayload,
+                WeatherChanged
+            ),
+            "mood_change" => dispatch_event!(
+                event_type,
+                &data,
+                original.mood,
+                MoodChangePayload,
+                MoodChanged
+            ),
+            "turn_progress" => dispatch_event!(
+                event_type,
+                &data,
+                original.progress,
+                TurnProgressPayload,
+                TurnProgressUpdated
+            ),
             // ── Phase 1: High-frequency events (dot format) ──
-            "party.selected" => dispatch_event!(event_type, &data, phase1.party_selected, PartySelectedPayload, PartySelected),
-            "room.created" => dispatch_event!(event_type, &data, phase1.room_created, RoomCreatedPayload, RoomCreated),
-            "room.started" => dispatch_event!(event_type, &data, phase1.room_started, RoomLifecyclePayload, RoomStarted),
-            "session.started" => dispatch_event!(event_type, &data, phase1.session_started, SessionStartedPayload, SessionStarted),
-            "phase.changed" => dispatch_event!(event_type, &data, phase1.phase_changed, TurnAdvancePayload, PhaseChanged),
-            "turn.started" => dispatch_event!(event_type, &data, phase1.turn_started, TurnAdvancePayload, TurnStarted),
-            "keeper.unavailable" => dispatch_event!(event_type, &data, phase1.keeper_unavailable, KeeperUnavailablePayload, KeeperUnavailable),
+            "party.selected" => dispatch_event!(
+                event_type,
+                &data,
+                phase1.party_selected,
+                PartySelectedPayload,
+                PartySelected
+            ),
+            "room.created" => dispatch_event!(
+                event_type,
+                &data,
+                phase1.room_created,
+                RoomCreatedPayload,
+                RoomCreated
+            ),
+            "room.started" => dispatch_event!(
+                event_type,
+                &data,
+                phase1.room_started,
+                RoomLifecyclePayload,
+                RoomStarted
+            ),
+            "session.started" => dispatch_event!(
+                event_type,
+                &data,
+                phase1.session_started,
+                SessionStartedPayload,
+                SessionStarted
+            ),
+            "phase.changed" => dispatch_event!(
+                event_type,
+                &data,
+                phase1.phase_changed,
+                TurnAdvancePayload,
+                PhaseChanged
+            ),
+            "turn.started" => dispatch_event!(
+                event_type,
+                &data,
+                phase1.turn_started,
+                TurnAdvancePayload,
+                TurnStarted
+            ),
+            "keeper.unavailable" => dispatch_event!(
+                event_type,
+                &data,
+                phase1.keeper_unavailable,
+                KeeperUnavailablePayload,
+                KeeperUnavailable
+            ),
             // ── Phase 2: Intervention + Actor events (dot format) ──
-            "intervention.submitted" => dispatch_event!(event_type, &data, phase2.intervention_submitted, InterventionPayload, InterventionSubmitted),
-            "intervention.applied" => dispatch_event!(event_type, &data, phase2.intervention_applied, InterventionPayload, InterventionApplied),
-            "actor.spawned" => dispatch_event!(event_type, &data, phase2.actor_spawned, ActorLifecyclePayload, ActorSpawned),
-            "actor.deleted" => dispatch_event!(event_type, &data, phase2.actor_deleted, ActorLifecyclePayload, ActorDeleted),
-            "actor.claimed" => dispatch_event!(event_type, &data, phase2.actor_claimed, ActorLifecyclePayload, ActorClaimed),
-            "actor.released" => dispatch_event!(event_type, &data, phase2.actor_released, ActorLifecyclePayload, ActorReleased),
-            "actor.updated" => dispatch_event!(event_type, &data, phase2.actor_updated, ActorLifecyclePayload, ActorUpdated),
-            "room.ended" => dispatch_event!(event_type, &data, phase2.room_ended, RoomEndedPayload, RoomEnded),
-            "turn.action.resolved" => dispatch_event!(event_type, &data, phase2.turn_action_resolved, TurnActionResolvedPayload, TurnActionResolved),
-            "scene.transition" => dispatch_event!(event_type, &data, phase2.scene_transitioned, SceneTransitionPayload, SceneTransitioned),
+            "intervention.submitted" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.intervention_submitted,
+                InterventionPayload,
+                InterventionSubmitted
+            ),
+            "intervention.applied" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.intervention_applied,
+                InterventionPayload,
+                InterventionApplied
+            ),
+            "actor.spawned" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.actor_spawned,
+                ActorLifecyclePayload,
+                ActorSpawned
+            ),
+            "actor.deleted" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.actor_deleted,
+                ActorLifecyclePayload,
+                ActorDeleted
+            ),
+            "actor.claimed" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.actor_claimed,
+                ActorLifecyclePayload,
+                ActorClaimed
+            ),
+            "actor.released" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.actor_released,
+                ActorLifecyclePayload,
+                ActorReleased
+            ),
+            "actor.updated" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.actor_updated,
+                ActorLifecyclePayload,
+                ActorUpdated
+            ),
+            "room.ended" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.room_ended,
+                RoomEndedPayload,
+                RoomEnded
+            ),
+            "turn.action.resolved" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.turn_action_resolved,
+                TurnActionResolvedPayload,
+                TurnActionResolved
+            ),
+            "scene.transition" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.scene_transitioned,
+                SceneTransitionPayload,
+                SceneTransitioned
+            ),
             // ── Fallback ──
             other => {
                 log::debug!("Unhandled SSE event type: {}", other);

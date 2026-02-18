@@ -92,6 +92,10 @@ fn bind_join_button() {
         log::warn!("ActorJoin: #join-btn not found");
         return;
     };
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
 
     let cb = Closure::wrap(Box::new(move || {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -162,6 +166,10 @@ fn bind_leave_button() {
         log::warn!("ActorJoin: #leave-btn not found");
         return;
     };
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
 
     let cb = Closure::wrap(Box::new(move || {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -325,7 +333,7 @@ async fn release_actor(actor_id: &str) -> Result<(), JsValue> {
 fn set_join_status(text: &str, css_class: &str) {
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
         if let Some(el) = doc.get_element_by_id("join-status") {
-            el.set_inner_html(text);
+            el.set_text_content(Some(text));
             el.set_class_name(css_class);
         }
     }
@@ -349,7 +357,7 @@ fn swap_to_action_panel(actor_id: &str) {
 
     // Update player info display
     if let Some(el) = doc.get_element_by_id("player-actor-id") {
-        el.set_inner_html(actor_id);
+        el.set_text_content(Some(actor_id));
     }
 
     // Store state in hidden inputs (for persistence across re-renders if needed)
@@ -374,7 +382,7 @@ fn swap_to_join_panel() {
 
     // Clear player info
     if let Some(el) = doc.get_element_by_id("player-actor-id") {
-        el.set_inner_html("");
+        el.set_text_content(Some(""));
     }
 
     // Clear state

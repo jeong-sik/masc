@@ -1,7 +1,7 @@
 //! UI widgets and interaction systems for TRPG viewer.
 
-use bevy::prelude::*;
 use bevy::ecs::relationship::Relationship;
+use bevy::prelude::*;
 
 use crate::audio::AudioSettings;
 
@@ -228,105 +228,109 @@ fn spawn_settings_menu(commands: &mut Commands) {
             ));
 
             // Menu items (inline to avoid type annotation issues)
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::SoundToggle),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Sound: ON"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::SoundToggle),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Sound: ON"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
 
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::MusicToggle),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Music: ON"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::MusicToggle),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Music: ON"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
 
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::AutoSaveToggle),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Auto-save: ON"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::AutoSaveToggle),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Auto-save: ON"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
 
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::Fullscreen),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Fullscreen"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::Fullscreen),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Fullscreen"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
         });
 }
 
@@ -367,105 +371,109 @@ fn spawn_dev_menu(commands: &mut Commands) {
             ));
 
             // Dev options
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::ShowFps),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Show FPS"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::ShowFps),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Show FPS"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
 
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::DebugOverlay),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Debug Overlay"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::DebugOverlay),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Debug Overlay"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
 
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::ReloadAssets),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Reload Assets"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::ReloadAssets),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Reload Assets"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
 
-            parent.spawn((
-                Button,
-                MenuItem(MenuAction::DumpState),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(25.0),
-                    padding: UiRect::horizontal(Val::Px(5.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                UiMarker,
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new("Dump State"),
-                    TextFont {
-                        font_size: 13.0,
+            parent
+                .spawn((
+                    Button,
+                    MenuItem(MenuAction::DumpState),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(25.0),
+                        padding: UiRect::horizontal(Val::Px(5.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-            });
+                    BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                    UiMarker,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("Dump State"),
+                        TextFont {
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+                });
         });
 }
 
@@ -475,10 +483,7 @@ fn spawn_dev_menu(commands: &mut Commands) {
 /// (audio toggles, FPS counter, state dump, etc.).
 #[allow(clippy::type_complexity)]
 pub fn handle_menu_item_clicks(
-    interactions: Query<
-        (Entity, &Interaction, &MenuItem),
-        (Changed<Interaction>, With<Button>),
-    >,
+    interactions: Query<(Entity, &Interaction, &MenuItem), (Changed<Interaction>, With<Button>)>,
     children_query: Query<&Children>,
     mut text_query: Query<&mut Text>,
     mut audio: ResMut<AudioSettings>,
@@ -491,13 +496,21 @@ pub fn handle_menu_item_clicks(
         match menu_item.0 {
             MenuAction::SoundToggle => {
                 audio.sound_enabled = !audio.sound_enabled;
-                let label = if audio.sound_enabled { "Sound: ON" } else { "Sound: OFF" };
+                let label = if audio.sound_enabled {
+                    "Sound: ON"
+                } else {
+                    "Sound: OFF"
+                };
                 update_button_text(entity, label, &children_query, &mut text_query);
                 log::info!("Sound toggled: {}", audio.sound_enabled);
             }
             MenuAction::MusicToggle => {
                 audio.music_enabled = !audio.music_enabled;
-                let label = if audio.music_enabled { "Music: ON" } else { "Music: OFF" };
+                let label = if audio.music_enabled {
+                    "Music: ON"
+                } else {
+                    "Music: OFF"
+                };
                 update_button_text(entity, label, &children_query, &mut text_query);
                 log::info!("Music toggled: {}", audio.music_enabled);
             }
@@ -617,30 +630,60 @@ pub fn spawn_resize_handles(
         // Spawn 8 handles (corners + edges)
         let edges = [
             (ResizeEdge::NorthWest, Val::Px(0.0), Val::Px(0.0)),
-            (ResizeEdge::North, Val::Px(size.x / 2.0 - HANDLE_SIZE / 2.0), Val::Px(0.0)),
-            (ResizeEdge::NorthEast, Val::Px(size.x - HANDLE_SIZE), Val::Px(0.0)),
-            (ResizeEdge::West, Val::Px(0.0), Val::Px(size.y / 2.0 - HANDLE_SIZE / 2.0)),
-            (ResizeEdge::East, Val::Px(size.x - HANDLE_SIZE), Val::Px(size.y / 2.0 - HANDLE_SIZE / 2.0)),
-            (ResizeEdge::SouthWest, Val::Px(0.0), Val::Px(size.y - HANDLE_SIZE)),
-            (ResizeEdge::South, Val::Px(size.x / 2.0 - HANDLE_SIZE / 2.0), Val::Px(size.y - HANDLE_SIZE)),
-            (ResizeEdge::SouthEast, Val::Px(size.x - HANDLE_SIZE), Val::Px(size.y - HANDLE_SIZE)),
+            (
+                ResizeEdge::North,
+                Val::Px(size.x / 2.0 - HANDLE_SIZE / 2.0),
+                Val::Px(0.0),
+            ),
+            (
+                ResizeEdge::NorthEast,
+                Val::Px(size.x - HANDLE_SIZE),
+                Val::Px(0.0),
+            ),
+            (
+                ResizeEdge::West,
+                Val::Px(0.0),
+                Val::Px(size.y / 2.0 - HANDLE_SIZE / 2.0),
+            ),
+            (
+                ResizeEdge::East,
+                Val::Px(size.x - HANDLE_SIZE),
+                Val::Px(size.y / 2.0 - HANDLE_SIZE / 2.0),
+            ),
+            (
+                ResizeEdge::SouthWest,
+                Val::Px(0.0),
+                Val::Px(size.y - HANDLE_SIZE),
+            ),
+            (
+                ResizeEdge::South,
+                Val::Px(size.x / 2.0 - HANDLE_SIZE / 2.0),
+                Val::Px(size.y - HANDLE_SIZE),
+            ),
+            (
+                ResizeEdge::SouthEast,
+                Val::Px(size.x - HANDLE_SIZE),
+                Val::Px(size.y - HANDLE_SIZE),
+            ),
         ];
 
         for (edge, left, top) in edges {
-            let handle = commands.spawn((
-                Button,
-                ResizeHandle { edge },
-                Node {
-                    position_type: PositionType::Absolute,
-                    left,
-                    top,
-                    width: Val::Px(HANDLE_SIZE),
-                    height: Val::Px(HANDLE_SIZE),
-                    ..default()
-                },
-                BackgroundColor(HANDLE_COLOR),
-                UiMarker,
-            )).id();
+            let handle = commands
+                .spawn((
+                    Button,
+                    ResizeHandle { edge },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left,
+                        top,
+                        width: Val::Px(HANDLE_SIZE),
+                        height: Val::Px(HANDLE_SIZE),
+                        ..default()
+                    },
+                    BackgroundColor(HANDLE_COLOR),
+                    UiMarker,
+                ))
+                .id();
             commands.entity(entity).add_child(handle);
         }
     }
@@ -651,7 +694,10 @@ pub fn spawn_resize_handles(
 pub fn handle_resize_start(
     mut resize_state: ResMut<ResizeState>,
     windows: Query<&Window>,
-    resize_handles: Query<(Entity, &ResizeHandle, &ChildOf, &Interaction), (With<Button>, Changed<Interaction>)>,
+    resize_handles: Query<
+        (Entity, &ResizeHandle, &ChildOf, &Interaction),
+        (With<Button>, Changed<Interaction>),
+    >,
     nodes: Query<&Node>,
 ) {
     let Ok(window) = windows.single() else {
@@ -771,12 +817,11 @@ pub fn handle_resize_end(
     mut resize_state: ResMut<ResizeState>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
 ) {
-    if mouse_buttons.just_released(MouseButton::Left)
-        && resize_state.resizing_entity.is_some() {
-            log::info!("Resize ended");
-            resize_state.resizing_entity = None;
-            resize_state.resize_edge = None;
-        }
+    if mouse_buttons.just_released(MouseButton::Left) && resize_state.resizing_entity.is_some() {
+        log::info!("Resize ended");
+        resize_state.resizing_entity = None;
+        resize_state.resize_edge = None;
+    }
 }
 
 /// Updates handle cursor to indicate resize direction.

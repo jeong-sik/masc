@@ -98,6 +98,10 @@
    progress
    pulse
    relay
+   goal_store
+   goal_guard
+   goal_orchestrator
+   goal_scheduler
    resilience
    response
    room
@@ -140,6 +144,7 @@
    tool_a2a
    tool_handover
    tool_relay
+   tool_goals
    tool_heartbeat
    tool_encryption
    tool_auth

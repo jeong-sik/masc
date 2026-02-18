@@ -812,6 +812,8 @@ const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
 const KNOWN_ROOMS_STORAGE_KEY: &str = "masc_viewer_known_rooms";
 #[cfg(target_arch = "wasm32")]
 const ROOM_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_room_hub_visible";
+#[cfg(target_arch = "wasm32")]
+const ROOM_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_room_hub_running_only";
 
 #[cfg(target_arch = "wasm32")]
 fn load_recent_rooms() -> Vec<String> {
@@ -895,6 +897,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     let Some(hub) = doc.get_element_by_id("room-hub") else {
         return;
     };
+    let running_only = load_room_hub_running_only();
     let mut running = Vec::new();
     let mut stopped = Vec::new();
     let mut lobby = Vec::new();
@@ -954,45 +957,86 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         )
     };
 
+    let lanes_html = if running_only {
+        lane_html("진행 중", running, "running")
+    } else {
+        format!(
+            "{}{}{}{}{}",
+            lane_html("진행 중", running, "running"),
+            lane_html("멈춤", stopped, "stopped"),
+            lane_html("로비", lobby, "lobby"),
+            lane_html("오류", unavailable, "unavailable"),
+            lane_html("종료", ended, "ended")
+        )
+    };
     let html = format!(
-        "{}{}{}{}{}",
-        lane_html("진행 중", running, "running"),
-        lane_html("멈춤", stopped, "stopped"),
-        lane_html("로비", lobby, "lobby"),
-        lane_html("오류", unavailable, "unavailable"),
-        lane_html("종료", ended, "ended")
+        concat!(
+            "<div class=\"room-hub-tools\">",
+            "<button id=\"room-hub-running-toggle\" class=\"room-hub-filter\" type=\"button\" aria-pressed=\"{pressed}\">",
+            "진행 중만",
+            "</button>",
+            "</div>",
+            "{lanes}"
+        ),
+        pressed = if running_only { "true" } else { "false" },
+        lanes = lanes_html
     );
+    let _ = hub.set_attribute("data-running-only", if running_only { "1" } else { "0" });
     hub.set_inner_html(&html);
 }
 
 #[cfg(target_arch = "wasm32")]
 fn bind_room_hub_buttons(doc: &web_sys::Document) {
-    let Ok(nodes) = doc.query_selector_all("#room-hub .room-chip") else {
-        return;
-    };
-    for i in 0..nodes.length() {
-        let Some(node) = nodes.item(i) else { continue };
-        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
-            continue;
-        };
-        if el.get_attribute("data-bound").as_deref() == Some("1") {
-            continue;
-        }
-        let Some(room_id) = el.get_attribute("data-room-id") else {
-            continue;
-        };
-        let _ = el.set_attribute("data-bound", "1");
-        let room_copy = room_id.clone();
-        let cb = Closure::wrap(Box::new(move || {
-            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-                return;
+    if let Ok(nodes) = doc.query_selector_all("#room-hub .room-chip") {
+        for i in 0..nodes.length() {
+            let Some(node) = nodes.item(i) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
             };
-            apply_room_switch_from_ui(&doc, &room_copy);
-        }) as Box<dyn FnMut()>);
-        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
-            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
-        });
-        cb.forget();
+            if el.get_attribute("data-bound").as_deref() == Some("1") {
+                continue;
+            }
+            let Some(room_id) = el.get_attribute("data-room-id") else {
+                continue;
+            };
+            let _ = el.set_attribute("data-bound", "1");
+            let room_copy = room_id.clone();
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                apply_room_switch_from_ui(&doc, &room_copy);
+            }) as Box<dyn FnMut()>);
+            let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+            cb.forget();
+        }
+    }
+
+    if let Some(toggle) = doc.get_element_by_id("room-hub-running-toggle") {
+        if toggle.get_attribute("data-bound").as_deref() != Some("1") {
+            let _ = toggle.set_attribute("data-bound", "1");
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                let pressed = doc
+                    .get_element_by_id("room-hub-running-toggle")
+                    .and_then(|el| el.get_attribute("aria-pressed"))
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                save_room_hub_running_only(!pressed);
+                let doc_for_fetch = doc.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = refresh_rooms_from_server(&doc_for_fetch).await;
+                });
+            }) as Box<dyn FnMut()>);
+            let _ = toggle.dyn_ref::<web_sys::EventTarget>().map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+            cb.forget();
+        }
     }
 }
 
@@ -1134,6 +1178,30 @@ fn save_room_hub_visible(visible: bool) {
         let _ = storage.set_item(
             ROOM_HUB_VISIBLE_STORAGE_KEY,
             if visible { "1" } else { "0" },
+        );
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_room_hub_running_only() -> bool {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(ROOM_HUB_RUNNING_ONLY_STORAGE_KEY)
+                .ok()
+                .flatten()
+        })
+        .map(|value| matches!(value.trim(), "1" | "true" | "on"))
+        .unwrap_or(false)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_room_hub_running_only(enabled: bool) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(
+            ROOM_HUB_RUNNING_ONLY_STORAGE_KEY,
+            if enabled { "1" } else { "0" },
         );
     }
 }

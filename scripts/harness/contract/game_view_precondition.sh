@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
-SESSION_ID="${SESSION_ID:-harness-gv-001}"
+SESSION_ID="${SESSION_ID:-harness-gv-$(date +%s)-$$}"
 
 call_tool() {
   local id="$1"

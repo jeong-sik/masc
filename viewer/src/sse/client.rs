@@ -19,9 +19,9 @@ use web_sys::{EventSource, MessageEvent};
 use crate::config;
 use crate::game::state::ConnectionStatus;
 
-use super::reconnect::{
-    self, ConnectionStatusBridge, ConnectionStatusProxy, ReconnectState, SseReconnectManager,
-};
+#[cfg(target_arch = "wasm32")]
+use super::reconnect::{self, ConnectionStatusProxy, ReconnectState};
+use super::reconnect::{ConnectionStatusBridge, SseReconnectManager};
 
 /// Wrapper around `EventSource` that is `Send + Sync`.
 /// Safe because WASM is single-threaded — there are no real threads to race with.

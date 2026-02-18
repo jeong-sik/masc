@@ -10,11 +10,12 @@ WORLD_PRESET_ID="${WORLD_PRESET_ID:-}"
 DM_PRESET_ID="${DM_PRESET_ID:-}"
 PARTY_SIZE="${PARTY_SIZE:-4}"
 POOL_SIZE="${POOL_SIZE:-6}"
-KEEPER_TAG="${KEEPER_TAG:-auto}"
+KEEPER_TAG="${KEEPER_TAG:-smoke-$(date +%s)}"
 DM_KEEPER="${DM_KEEPER:-dm-$KEEPER_TAG}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-12}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
 PLAYER_KEEPER_NAMES=""
+CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-120}"
 
 cleanup_keepers() {
   if [ -n "${DM_KEEPER:-}" ]; then
@@ -35,10 +36,13 @@ call_tool() {
   local args_json="$3"
   local raw
   local sse_data
-  raw="$(curl -sS -m 30 -X POST "$MCP_URL" \
+  raw="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
+    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")" || {
+    printf '{"error":{"message":"curl failed: tool=%s timeout_sec=%s"}}' "$name" "$CURL_TIMEOUT_SEC"
+    return 0
+  }
   sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p' | tail -n1)"
   if [ -n "$sse_data" ]; then
     printf "%s" "$sse_data"
@@ -66,6 +70,10 @@ call_tool_checked() {
   local raw
   local err
   raw="$(call_tool "$id" "$name" "$args_json")"
+  if [ -z "$(printf "%s" "$raw" | tr -d '[:space:]')" ]; then
+    echo "FAIL: $name: empty response from MCP" >&2
+    exit 1
+  fi
   err="$(tool_error_message "$raw")"
   if [ -n "$err" ]; then
     echo "FAIL: $name: $err" >&2

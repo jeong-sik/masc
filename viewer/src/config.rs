@@ -140,10 +140,10 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
             MASC_MCP_URL,
             current_room_id()
         )),
-        ViewerMode::Monitor => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
-        ViewerMode::Experiment => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
-        ViewerMode::Council => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
-        ViewerMode::Social => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
+        ViewerMode::Monitor => Some(format!("{}/sse?room=monitor", MASC_MCP_URL)),
+        ViewerMode::Experiment => Some(format!("{}/sse?room=experiment", MASC_MCP_URL)),
+        ViewerMode::Council => Some(format!("{}/sse?room=council", MASC_MCP_URL)),
+        ViewerMode::Social => Some(format!("{}/sse?room=social", MASC_MCP_URL)),
         ViewerMode::Lobby => None,
     }
 }
@@ -157,10 +157,55 @@ pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
             MASC_MCP_URL,
             current_room_id()
         )),
-        "Monitor" => Some(format!("{}/api/v1/monitor/stream", MASC_MCP_URL)),
-        "Experiment" => Some(format!("{}/api/v1/experiment/stream", MASC_MCP_URL)),
-        "Council" => Some(format!("{}/api/v1/council/stream", MASC_MCP_URL)),
-        "Social" => Some(format!("{}/api/v1/social/stream", MASC_MCP_URL)),
+        "Monitor" => Some(format!("{}/sse?room=monitor", MASC_MCP_URL)),
+        "Experiment" => Some(format!("{}/sse?room=experiment", MASC_MCP_URL)),
+        "Council" => Some(format!("{}/sse?room=council", MASC_MCP_URL)),
+        "Social" => Some(format!("{}/sse?room=social", MASC_MCP_URL)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sse_endpoint_routes_masc_modes_to_legacy_sse() {
+        assert_eq!(
+            sse_endpoint(&ViewerMode::Monitor).as_deref(),
+            Some("/sse?room=monitor")
+        );
+        assert_eq!(
+            sse_endpoint(&ViewerMode::Experiment).as_deref(),
+            Some("/sse?room=experiment")
+        );
+        assert_eq!(
+            sse_endpoint(&ViewerMode::Council).as_deref(),
+            Some("/sse?room=council")
+        );
+        assert_eq!(
+            sse_endpoint(&ViewerMode::Social).as_deref(),
+            Some("/sse?room=social")
+        );
+    }
+
+    #[test]
+    fn sse_endpoint_by_name_matches_stateful_variant() {
+        assert_eq!(
+            sse_endpoint_by_name("Monitor").as_deref(),
+            Some("/sse?room=monitor")
+        );
+        assert_eq!(
+            sse_endpoint_by_name("Experiment").as_deref(),
+            Some("/sse?room=experiment")
+        );
+        assert_eq!(
+            sse_endpoint_by_name("Council").as_deref(),
+            Some("/sse?room=council")
+        );
+        assert_eq!(
+            sse_endpoint_by_name("Social").as_deref(),
+            Some("/sse?room=social")
+        );
     }
 }

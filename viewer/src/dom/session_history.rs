@@ -249,13 +249,13 @@ fn bump_dedup_history(document: &web_sys::Document, sample: &str) {
 
 /// Render a compact per-turn timeline from TRPG stream events.
 pub fn update_session_history_dom(
-    _room_state: Res<RoomState>,
-    _progress: Res<TurnProgressState>,
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
     mut narratives: MessageReader<NarrativeReceived>,
     mut dice_events: MessageReader<DiceRolled>,
     mut turn_events: MessageReader<TurnAdvanced>,
     mut progress_events: MessageReader<TurnProgressUpdated>,
-    _cache: ResMut<SessionHistoryCache>,
+    mut cache: ResMut<SessionHistoryCache>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     {

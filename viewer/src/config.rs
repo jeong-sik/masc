@@ -43,7 +43,7 @@ pub fn current_room_id() -> String {
 
 /// Set current room ID (persisted via URL or just runtime state).
 /// In this viewer, we primarily use the dashboard data attribute.
-pub fn set_current_room_id(_room_id: &str) {
+pub fn set_current_room_id(room_id: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
@@ -164,4 +164,3 @@ pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
         _ => None,
     }
 }
-

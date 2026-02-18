@@ -20,7 +20,7 @@ use crate::config;
 use crate::game::state::ConnectionStatus;
 
 use super::reconnect::{
-    ConnectionStatusBridge, SseReconnectManager,
+    self, ConnectionStatusBridge, ConnectionStatusProxy, ReconnectState, SseReconnectManager,
 };
 
 /// Wrapper around `EventSource` that is `Send + Sync`.

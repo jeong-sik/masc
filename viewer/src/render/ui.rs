@@ -140,6 +140,7 @@ pub fn setup_ui(mut commands: Commands) {
 }
 
 /// Handles button click interactions.
+#[allow(clippy::type_complexity)]
 pub fn handle_button_interactions(
     mut ui_state: ResMut<UiState>,
     interactions: Query<
@@ -472,6 +473,7 @@ fn spawn_dev_menu(commands: &mut Commands) {
 ///
 /// Logs the action for now. Future expansion: connect to actual systems
 /// (audio toggles, FPS counter, state dump, etc.).
+#[allow(clippy::type_complexity)]
 pub fn handle_menu_item_clicks(
     interactions: Query<
         (Entity, &Interaction, &MenuItem),
@@ -602,6 +604,7 @@ const HANDLE_HOVER_COLOR: Color = Color::srgb(0.4, 0.6, 1.0);
 const HANDLE_COLOR: Color = Color::srgb(0.3, 0.3, 0.4);
 
 /// Spawns resize handles on resizable widgets.
+#[allow(clippy::type_complexity)]
 pub fn spawn_resize_handles(
     mut commands: Commands,
     resizable_widgets: Query<(Entity, &Node, &Resizable), (Added<Resizable>, With<UiMarker>)>,
@@ -646,6 +649,7 @@ pub fn spawn_resize_handles(
 }
 
 /// Handles resize start - captures initial state.
+#[allow(clippy::type_complexity)]
 pub fn handle_resize_start(
     mut resize_state: ResMut<ResizeState>,
     windows: Query<&Window>,
@@ -769,13 +773,12 @@ pub fn handle_resize_end(
     mut resize_state: ResMut<ResizeState>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
 ) {
-    if mouse_buttons.just_released(MouseButton::Left) {
-        if resize_state.resizing_entity.is_some() {
+    if mouse_buttons.just_released(MouseButton::Left)
+        && resize_state.resizing_entity.is_some() {
             log::info!("Resize ended");
             resize_state.resizing_entity = None;
             resize_state.resize_edge = None;
         }
-    }
 }
 
 /// Updates handle cursor to indicate resize direction.

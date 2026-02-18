@@ -7,6 +7,7 @@ use crate::game::events::{
 #[cfg(target_arch = "wasm32")]
 use crate::dom::escape::html_escape;
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_session_events_dom(
     mut party: MessageReader<PartySelected>,
     mut room_created: MessageReader<RoomCreated>,

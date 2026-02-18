@@ -12,21 +12,13 @@ pub struct MascLogEntry {
 
 /// Resource holding MASC event state for DOM rendering.
 #[derive(Resource)]
+#[derive(Default)]
 pub struct MascEventLog {
     pub entries: Vec<MascLogEntry>,
     pub agent_count: u32,
     pub task_count: u32,
 }
 
-impl Default for MascEventLog {
-    fn default() -> Self {
-        Self {
-            entries: Vec::new(),
-            agent_count: 0,
-            task_count: 0,
-        }
-    }
-}
 
 /// Lightweight JSON field extractor.
 /// Finds `"key": "value"` or `"key": number` in a JSON string.

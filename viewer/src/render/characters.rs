@@ -130,6 +130,7 @@ pub fn update_hp_bars(
 }
 
 /// Handles drag start - captures entity and offset.
+#[allow(clippy::type_complexity)]
 pub fn handle_drag_start(
     mut drag_state: ResMut<DragState>,
     windows: Query<&Window>,
@@ -243,6 +244,7 @@ pub fn handle_drag_end(
 }
 
 /// Applies grayscale effect to dead actors.
+#[allow(clippy::type_complexity)]
 pub fn apply_death_visuals(
     mut actors: Query<(&Actor, &mut Sprite), (With<MapToken>, Changed<Actor>)>,
 ) {

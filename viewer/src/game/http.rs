@@ -239,6 +239,7 @@ pub fn refresh_state_on_room_change(
 
 /// Update system: polls the buffer each frame. Once data arrives,
 /// populates RoomState, MapState, and spawns Actor entities.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_initial_state(
     mut commands: Commands,
     mut buffer: ResMut<InitialStateBuffer>,
@@ -610,7 +611,7 @@ fn parse_actor_control_map(state: &Value) -> HashMap<String, String> {
 }
 
 fn apply_actor_control_to_characters(
-    characters: &mut Vec<CharacterData>,
+    characters: &mut [CharacterData],
     actor_control: &HashMap<String, String>,
 ) {
     for row in characters.iter_mut() {
@@ -832,14 +833,10 @@ fn parse_party_characters(
                         .filter_map(|skill| {
                             if let Ok(parsed) = serde_json::from_value::<SkillData>(skill.clone()) {
                                 Some(parsed)
-                            } else if let Some(name) = skill.as_str() {
-                                Some(SkillData {
+                            } else { skill.as_str().map(|name| SkillData {
                                     name: name.to_string(),
                                     level: 10,
-                                })
-                            } else {
-                                None
-                            }
+                                }) }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -852,14 +849,10 @@ fn parse_party_characters(
                         .filter_map(|cond| {
                             if let Ok(parsed) = serde_json::from_value::<ConditionData>(cond.clone()) {
                                 Some(parsed)
-                            } else if let Some(name) = cond.as_str() {
-                                Some(ConditionData {
+                            } else { cond.as_str().map(|name| ConditionData {
                                     name: name.to_string(),
                                     remaining_turns: None,
-                                })
-                            } else {
-                                None
-                            }
+                                }) }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -872,14 +865,10 @@ fn parse_party_characters(
                         .filter_map(|slot| {
                             if let Ok(parsed) = serde_json::from_value::<EquipmentData>(slot.clone()) {
                                 Some(parsed)
-                            } else if let Some(name) = slot.as_str() {
-                                Some(EquipmentData {
+                            } else { slot.as_str().map(|name| EquipmentData {
                                     slot: "item".to_string(),
                                     name: name.to_string(),
-                                })
-                            } else {
-                                None
-                            }
+                                }) }
                         })
                         .collect::<Vec<_>>()
                 })

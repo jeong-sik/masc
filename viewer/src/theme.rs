@@ -42,11 +42,11 @@ pub enum ViewerTheme {
     Parchment,
 }
 
-#[allow(dead_code)]
 impl ViewerTheme {
     /// CSS `data-theme` attribute value applied to `<html>` element.
     /// CSS selectors: `[data-theme="dark-fantasy"] { --bg-deep: #0a0a12; ... }`
     /// Used by `poll_theme_transition` and `apply_theme_changes` (wasm32 only).
+    #[cfg(target_arch = "wasm32")]
     pub fn css_value(&self) -> &'static str {
         match self {
             Self::DarkFantasy => "dark-fantasy",
@@ -58,6 +58,7 @@ impl ViewerTheme {
 
     /// Parse from the `<select>` option `value` attribute.
     /// Used by `bind_single_theme_selector` closure (wasm32 only).
+    #[cfg(target_arch = "wasm32")]
     pub fn from_css_value(s: &str) -> Option<ViewerTheme> {
         match s {
             "dark-fantasy" => Some(Self::DarkFantasy),

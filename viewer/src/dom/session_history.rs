@@ -613,6 +613,7 @@ fn bump_dedup_history(document: &web_sys::Document, sample: &str) {
 }
 
 /// Render a compact per-turn timeline from TRPG stream events.
+#[allow(unused_variables, unused_mut)]
 pub fn update_session_history_dom(
     room_state: Res<RoomState>,
     progress: Res<TurnProgressState>,

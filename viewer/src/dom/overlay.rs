@@ -24,6 +24,7 @@ pub struct OverlayCache {
 /// - `#mood-indicator` — mood/atmosphere text
 /// - `#choice-overlay` — choice panel (hidden when inactive)
 /// - `#combat-overlay` — combat indicator (hidden when inactive)
+#[allow(unused_mut)]
 pub fn update_overlay_dom(
     overlay: Res<OverlayState>,
     choice: Res<ChoiceState>,

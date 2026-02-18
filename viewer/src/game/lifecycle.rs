@@ -19,7 +19,6 @@ pub fn normalize_status(raw: &str) -> String {
 }
 
 impl TrpgLifecycleState {
-    #[allow(dead_code)]
     pub fn from_status(raw: &str) -> Self {
         let status = normalize_status(raw);
         match status.as_str() {
@@ -46,7 +45,6 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[allow(dead_code)]
     pub fn from_room_progress(room_status: &str, progress_status: &str) -> Self {
         let source = if progress_status.trim().is_empty() {
             room_status
@@ -56,7 +54,7 @@ impl TrpgLifecycleState {
         Self::from_status(source)
     }
 
-    #[allow(dead_code)]
+    #[cfg(target_arch = "wasm32")]
     pub fn lane(self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -67,7 +65,7 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(target_arch = "wasm32")]
     pub fn css_class(self) -> &'static str {
         match self {
             Self::Lobby => "state-lobby",
@@ -80,7 +78,7 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(target_arch = "wasm32")]
     pub fn label(self) -> &'static str {
         match self {
             Self::Lobby => "LOBBY",
@@ -93,7 +91,6 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[allow(dead_code)]
     pub fn label_ko(self) -> &'static str {
         match self {
             Self::Lobby => "로비",
@@ -106,7 +103,7 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(target_arch = "wasm32")]
     pub fn help_text(self) -> &'static str {
         match self {
             Self::Lobby => "세션 미시작 또는 초기 대기 상태",
@@ -119,12 +116,11 @@ impl TrpgLifecycleState {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(target_arch = "wasm32")]
     pub fn allows_round_control(self) -> bool {
         matches!(self, Self::Running | Self::Stopped)
     }
 
-    #[allow(dead_code)]
     pub fn accepts_player_input(self) -> bool {
         matches!(self, Self::Running)
     }

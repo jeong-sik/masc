@@ -26,7 +26,7 @@ pub fn update_actor_lifecycle_dom(
         };
 
         for ActorSpawned(p) in spawns.read() {
-            let div = doc.create_element("div").unwrap();
+            let div = doc.create_element("div").expect("create div for actor-spawn");
             div.set_class_name("narrative-entry actor-spawn");
             let name = if p.name.is_empty() { &p.actor_id } else { &p.name };
             let class_info = if p.class.is_empty() {
@@ -43,7 +43,7 @@ pub fn update_actor_lifecycle_dom(
         }
 
         for ActorDeleted(p) in deletes.read() {
-            let div = doc.create_element("div").unwrap();
+            let div = doc.create_element("div").expect("create div for actor-delete");
             div.set_class_name("narrative-entry actor-delete");
             let name = if p.name.is_empty() { &p.actor_id } else { &p.name };
             div.set_inner_html(&format!(
@@ -54,7 +54,7 @@ pub fn update_actor_lifecycle_dom(
         }
 
         for ActorClaimed(p) in claims.read() {
-            let div = doc.create_element("div").unwrap();
+            let div = doc.create_element("div").expect("create div for actor-claim");
             div.set_class_name("narrative-entry actor-claim");
             let name = if p.name.is_empty() { &p.actor_id } else { &p.name };
             let keeper = if p.keeper.is_empty() {
@@ -71,7 +71,7 @@ pub fn update_actor_lifecycle_dom(
         }
 
         for ActorReleased(p) in releases.read() {
-            let div = doc.create_element("div").unwrap();
+            let div = doc.create_element("div").expect("create div for actor-release");
             div.set_class_name("narrative-entry actor-release");
             let name = if p.name.is_empty() { &p.actor_id } else { &p.name };
             div.set_inner_html(&format!(
@@ -82,7 +82,7 @@ pub fn update_actor_lifecycle_dom(
         }
 
         for SceneTransitioned(p) in scenes.read() {
-            let div = doc.create_element("div").unwrap();
+            let div = doc.create_element("div").expect("create div for scene-transition");
             div.set_class_name("narrative-entry scene-transition");
             let desc = if p.description.is_empty() {
                 String::new()

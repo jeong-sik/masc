@@ -6,6 +6,10 @@
 #![allow(dead_code)] // Many helpers used only in wasm32 cfg blocks.
 
 use bevy::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::closure::Closure;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 use crate::game::events::{DiceRolled, NarrativeReceived, TurnAdvanced, TurnProgressUpdated};
 use crate::game::state::{RoomState, TurnProgressState};
@@ -167,7 +171,30 @@ fn render_session_history_html(turns: &[TurnHistory]) -> String {
         return "<div class=\"session-history-empty\">아직 세션 히스토리가 없습니다.</div>".to_string();
     }
 
-    let mut html = String::new();
+    let turn_chips = turns
+        .iter()
+        .rev()
+        .map(|row| {
+            format!(
+                r#"<button class="history-turn-chip" data-turn="{turn}" type="button">T{turn}</button>"#,
+                turn = row.turn
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let kind_chips = concat!(
+        r#"<button class="history-kind-chip" data-kind="" type="button">ALL</button>"#,
+        r#"<button class="history-kind-chip" data-kind="narrative" type="button">NARRATIVE</button>"#,
+        r#"<button class="history-kind-chip" data-kind="dice" type="button">DICE</button>"#,
+        r#"<button class="history-kind-chip" data-kind="turn" type="button">TURN</button>"#,
+        r#"<button class="history-kind-chip" data-kind="progress" type="button">PROGRESS</button>"#,
+        r#"<button class="history-kind-chip" data-kind="system" type="button">SYSTEM</button>"#
+    );
+    let mut html = format!(
+        "<div class=\"history-turn-toolbar\"><button class=\"history-turn-chip\" data-turn=\"\" type=\"button\">ALL</button>{}</div><div class=\"history-kind-toolbar\">{}</div>",
+        turn_chips,
+        kind_chips
+    );
     for (idx, row) in turns.iter().rev().enumerate() {
         let open = if idx == 0 { " open" } else { "" };
         let phase = if row.phase.is_empty() {
@@ -184,20 +211,24 @@ fn render_session_history_html(turns: &[TurnHistory]) -> String {
                     let actor = html_escape(&sanitize_text(&ev.actor));
                     let title = html_escape(&sanitize_text(&ev.title));
                     let detail = html_escape(&sanitize_text(&ev.detail));
-                    let class = history_kind_class(&sanitize_key(&ev.kind));
+                    let kind_key = sanitize_key(&ev.kind);
+                    let class = history_kind_class(&kind_key);
                     if actor.is_empty() {
                         if detail.is_empty() {
                             format!(
-                                r#"<li class="history-event {class}"><span class="history-kind">{title}</span><span class="history-detail">-</span></li>"#
+                                r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-detail">-</span></li>"#,
+                                kind = kind_key
                             )
                         } else {
                             format!(
-                                r#"<li class="history-event {class}"><span class="history-kind">{title}</span><span class="history-detail">{detail}</span></li>"#
+                                r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-detail">{detail}</span></li>"#,
+                                kind = kind_key
                             )
                         }
                     } else {
                         format!(
-                            r#"<li class="history-event {class}"><span class="history-kind">{title}</span><span class="history-actor">{actor}</span><span class="history-detail">{detail}</span></li>"#
+                            r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-actor">{actor}</span><span class="history-detail">{detail}</span></li>"#,
+                            kind = kind_key
                         )
                     }
                 })
@@ -205,7 +236,7 @@ fn render_session_history_html(turns: &[TurnHistory]) -> String {
                 .join("")
         };
         html.push_str(&format!(
-            "<details class=\"history-turn\"{open}><summary><span class=\"history-turn-header\">TURN {turn} · {phase}</span><span class=\"history-event-count\">{count}</span></summary><ul class=\"history-event-list\">{events}</ul></details>",
+            "<details class=\"history-turn\" data-turn=\"{turn}\"{open}><summary><span class=\"history-turn-header\">TURN {turn} · {phase}</span><span class=\"history-event-count\">{count}</span></summary><ul class=\"history-event-list\">{events}</ul></details>",
             open = open,
             turn = row.turn,
             phase = sanitize_text(&phase),
@@ -214,6 +245,240 @@ fn render_session_history_html(turns: &[TurnHistory]) -> String {
         ));
     }
     html
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_focus_turn(document: &web_sys::Document) -> Option<u32> {
+    document
+        .get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-focus-turn"))
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn write_focus_turn(document: &web_sys::Document, turn: Option<u32>) {
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    if let Some(turn) = turn {
+        let _ = dashboard.set_attribute("data-focus-turn", &turn.to_string());
+    } else {
+        let _ = dashboard.remove_attribute("data-focus-turn");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_focus_kind(document: &web_sys::Document) -> Option<String> {
+    document
+        .get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-focus-kind"))
+        .map(|raw| raw.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn write_focus_kind(document: &web_sys::Document, kind: Option<&str>) {
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    match kind {
+        Some(raw) if !raw.trim().is_empty() => {
+            let _ = dashboard.set_attribute("data-focus-kind", &raw.trim().to_ascii_lowercase());
+        }
+        _ => {
+            let _ = dashboard.remove_attribute("data-focus-kind");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Option<&str>) {
+    let turn_key = turn.map(|value| value.to_string());
+    let kind_key = kind
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+
+    for (selector, event_kind) in [
+        ("#narrative-log .narrative-entry", "narrative"),
+        ("#dice-log .dice-entry", "dice"),
+    ] {
+        let Ok(nodes) = document.query_selector_all(selector) else {
+            continue;
+        };
+        for idx in 0..nodes.length() {
+            let Some(node) = nodes.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let turn_ok = match turn_key.as_deref() {
+                Some(target) => el
+                    .get_attribute("data-turn")
+                    .map(|value| value == target)
+                    .unwrap_or(false),
+                None => true,
+            };
+            let kind_ok = match kind_key.as_deref() {
+                Some(target) => target == event_kind,
+                None => true,
+            };
+            if turn_ok && kind_ok {
+                let _ = el.class_list().remove_1("turn-dim");
+                let _ = el.class_list().add_1("turn-match");
+            } else {
+                let _ = el.class_list().remove_1("turn-match");
+                let _ = el.class_list().add_1("turn-dim");
+            }
+        }
+    }
+
+    if let Ok(chips) = document.query_selector_all("#session-history .history-turn-chip") {
+        for idx in 0..chips.length() {
+            let Some(node) = chips.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let chip_turn = el.get_attribute("data-turn").unwrap_or_default();
+            let active = match turn_key.as_deref() {
+                Some(target) => chip_turn == target,
+                None => chip_turn.trim().is_empty(),
+            };
+            if active {
+                let _ = el.class_list().add_1("is-active");
+            } else {
+                let _ = el.class_list().remove_1("is-active");
+            }
+        }
+    }
+
+    if let Ok(chips) = document.query_selector_all("#session-history .history-kind-chip") {
+        for idx in 0..chips.length() {
+            let Some(node) = chips.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let chip_kind = el
+                .get_attribute("data-kind")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            let active = match kind_key.as_deref() {
+                Some(target) => chip_kind == target,
+                None => chip_kind.is_empty(),
+            };
+            if active {
+                let _ = el.class_list().add_1("is-active");
+            } else {
+                let _ = el.class_list().remove_1("is-active");
+            }
+        }
+    }
+
+    if let Ok(nodes) = document.query_selector_all("#session-history .history-event") {
+        for idx in 0..nodes.length() {
+            let Some(node) = nodes.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let row_kind = el
+                .get_attribute("data-kind")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            let visible = match kind_key.as_deref() {
+                Some(target) => row_kind == target,
+                None => true,
+            };
+            if visible {
+                let _ = el.class_list().remove_1("history-event-hidden");
+            } else {
+                let _ = el.class_list().add_1("history-event-hidden");
+            }
+        }
+    }
+
+    if let Ok(nodes) = document.query_selector_all("#session-history .history-turn") {
+        for idx in 0..nodes.length() {
+            let Some(node) = nodes.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let active = match turn_key.as_deref() {
+                Some(target) => el
+                    .get_attribute("data-turn")
+                    .map(|value| value == target)
+                    .unwrap_or(false),
+                None => false,
+            };
+            if active {
+                let _ = el.class_list().add_1("is-active");
+            } else {
+                let _ = el.class_list().remove_1("is-active");
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_history_focus_controls(document: &web_sys::Document) {
+    if let Ok(chips) = document.query_selector_all("#session-history .history-turn-chip") {
+        for idx in 0..chips.length() {
+            let Some(node) = chips.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            if el.get_attribute("data-bound").as_deref() == Some("1") {
+                continue;
+            }
+            let _ = el.set_attribute("data-bound", "1");
+            let turn_raw = el.get_attribute("data-turn").unwrap_or_default();
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                let turn = turn_raw.trim().parse::<u32>().ok();
+                write_focus_turn(&document, turn);
+                let kind = read_focus_kind(&document);
+                apply_history_focus(&document, turn, kind.as_deref());
+            }) as Box<dyn FnMut()>);
+            let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+            cb.forget();
+        }
+    }
+
+    if let Ok(chips) = document.query_selector_all("#session-history .history-kind-chip") {
+        for idx in 0..chips.length() {
+            let Some(node) = chips.item(idx) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            if el.get_attribute("data-bound").as_deref() == Some("1") {
+                continue;
+            }
+            let _ = el.set_attribute("data-bound", "1");
+            let kind_raw = el.get_attribute("data-kind").unwrap_or_default();
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                let kind_trimmed = kind_raw.trim().to_ascii_lowercase();
+                let kind = if kind_trimmed.is_empty() {
+                    None
+                } else {
+                    Some(kind_trimmed.as_str())
+                };
+                write_focus_kind(&document, kind);
+                let turn = read_focus_turn(&document);
+                let focus_kind = read_focus_kind(&document);
+                apply_history_focus(&document, turn, focus_kind.as_deref());
+            }) as Box<dyn FnMut()>);
+            let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+            cb.forget();
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -279,6 +544,9 @@ pub fn update_session_history_dom(
         if cache.last_room_id != room_state.id {
             cache.last_room_id = room_state.id.clone();
             cache.turns.clear();
+            write_focus_turn(&document, None);
+            write_focus_kind(&document, None);
+            apply_history_focus(&document, None, None);
             changed = true;
         }
 
@@ -412,5 +680,9 @@ pub fn update_session_history_dom(
         }
 
         history.set_inner_html(&render_session_history_html(&cache.turns));
+        bind_history_focus_controls(&document);
+        let turn = read_focus_turn(&document);
+        let kind = read_focus_kind(&document);
+        apply_history_focus(&document, turn, kind.as_deref());
     }
 }

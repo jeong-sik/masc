@@ -599,8 +599,6 @@ pub struct ResizeState {
 }
 
 const HANDLE_SIZE: f32 = 8.0;
-#[allow(dead_code)]
-const HANDLE_HOVER_COLOR: Color = Color::srgb(0.4, 0.6, 1.0);
 const HANDLE_COLOR: Color = Color::srgb(0.3, 0.3, 0.4);
 
 /// Spawns resize handles on resizable widgets.

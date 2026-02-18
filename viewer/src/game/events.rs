@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiceRollPayload {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub turn: u32,
     pub character: String,
     pub action: String,
@@ -23,7 +23,7 @@ pub struct HpChangePayload {
     pub target: String,
     pub amount: i32,
     pub remaining_hp: i32,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub source: String,
 }
 
@@ -32,7 +32,6 @@ pub struct NarrativePayload {
     pub text: String,
     pub phase: String,
     #[serde(default)]
-    #[allow(dead_code)]
     pub turn: u32,
     #[serde(default)]
     pub speaker: Option<String>,
@@ -41,7 +40,7 @@ pub struct NarrativePayload {
 #[derive(Debug, Clone, Deserialize)]
 pub struct AreaMovePayload {
     pub character: String,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub from_area: String,
     pub to_area: String,
 }
@@ -69,7 +68,6 @@ pub struct ItemPayload {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeathPayload {
     pub character: String,
-    #[allow(dead_code)]
     pub cause: String,
 }
 
@@ -102,10 +100,9 @@ pub struct TurnProgressPayload {
     #[serde(default)]
     pub keeper: String,
     #[serde(default)]
-    #[allow(dead_code)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub role: String,
     #[serde(default)]
-    #[allow(dead_code)]
     pub reason: String,
     #[serde(default)]
     pub room_status: String,
@@ -158,41 +155,42 @@ pub struct TurnProgressUpdated(pub TurnProgressPayload);
 
 // ─── Phase 1: High-Frequency Events ─────────
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
+// Fields populated by serde deserialization; read only in wasm32 DOM code.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct PartySelectedPayload {
-    #[allow(dead_code)]
     pub room_id: String,
     #[serde(default)]
     pub selected_player_ids: Vec<String>,
 }
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomCreatedPayload {
     pub room_id: String,
     #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub preset: String,
 }
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomLifecyclePayload {
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub room_id: String,
     #[serde(default)]
     pub status: String,
 }
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
+// Fields populated by serde deserialization; read only in wasm32 DOM code.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionStartedPayload {
-    #[allow(dead_code)]
     pub room_id: String,
     #[serde(default)]
     pub session_id: String,
 }
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
+// Fields populated by serde deserialization; read only in wasm32 DOM code.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct KeeperUnavailablePayload {
     pub keeper: String,
@@ -223,7 +221,8 @@ pub struct KeeperUnavailable(pub KeeperUnavailablePayload);
 
 // ─── Phase 2: Intervention + Actor Events ────
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
+// Fields populated by serde deserialization; read only in wasm32 DOM code.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct InterventionPayload {
     pub intervention_type: String,
@@ -244,32 +243,32 @@ pub struct ActorLifecyclePayload {
     pub keeper: String,
 }
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomEndedPayload {
     pub room_id: String,
     #[serde(default)]
-    #[allow(dead_code)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub reason: String,
 }
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
+// Fields populated by serde deserialization; read only in wasm32 DOM code.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct TurnActionResolvedPayload {
     #[serde(default)]
-    #[allow(dead_code)]
     pub turn: u32,
     pub actor_id: String,
     pub action: String,
     pub result: String,
 }
 
-#[allow(dead_code)] // Deserialized from SSE JSON — fields must exist for serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SceneTransitionPayload {
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub from_scene: String,
     pub to_scene: String,
     #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
     pub description: String,
 }
 

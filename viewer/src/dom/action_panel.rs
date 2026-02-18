@@ -329,6 +329,7 @@ fn disable_buttons(disabled: bool) {
 
 // ─── System ─────────────────────────────────
 
+#[allow(unused_variables)]
 pub fn sync_action_panel_interaction_state(
     _room_state: Res<RoomState>,
     progress: Res<TurnProgressState>,

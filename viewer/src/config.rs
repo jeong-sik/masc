@@ -43,6 +43,7 @@ pub fn current_room_id() -> String {
 
 /// Set current room ID (persisted via URL or just runtime state).
 /// In this viewer, we primarily use the dashboard data attribute.
+#[allow(unused_variables)]
 pub fn set_current_room_id(room_id: &str) {
     #[cfg(target_arch = "wasm32")]
     {

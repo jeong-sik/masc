@@ -1,9 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(any(target_arch = "wasm32", test))]
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
+#[cfg(any(target_arch = "wasm32", test))]
 use serde::Deserialize;
+#[cfg(any(target_arch = "wasm32", test))]
 use serde_json::{json, Value};
 
 #[cfg(target_arch = "wasm32")]
@@ -19,9 +22,9 @@ use web_sys::{EventSource, MessageEvent};
 use crate::config;
 use crate::game::state::ConnectionStatus;
 
-use super::reconnect::{
-    self, ConnectionStatusBridge, ConnectionStatusProxy, ReconnectState, SseReconnectManager,
-};
+#[cfg(target_arch = "wasm32")]
+use super::reconnect::{self, ConnectionStatusProxy, ReconnectState};
+use super::reconnect::{ConnectionStatusBridge, SseReconnectManager};
 
 /// Wrapper around `EventSource` that is `Send + Sync`.
 /// Safe because WASM is single-threaded — there are no real threads to race with.
@@ -51,7 +54,7 @@ pub struct SseReceiver {
 }
 
 /// Legacy SSE event names (used only with LegacyEngine mode).
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 const LEGACY_SSE_EVENT_TYPES: &[&str] = &[
     "dice_roll",
     "hp_change",
@@ -66,14 +69,14 @@ const LEGACY_SSE_EVENT_TYPES: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 struct TrpgStreamResponse {
     #[serde(default)]
     events: Vec<TrpgStreamEvent>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 struct TrpgStreamEvent {
     seq: i64,
     #[serde(rename = "type")]
@@ -85,7 +88,7 @@ struct TrpgStreamEvent {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 struct TrpgMapperState {
     last_turn: u32,
     last_phase: String,
@@ -94,6 +97,7 @@ struct TrpgMapperState {
     snapshot_signature: Option<String>,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 impl Default for TrpgMapperState {
     fn default() -> Self {
         Self {
@@ -106,24 +110,24 @@ impl Default for TrpgMapperState {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 const STREAM_FINGERPRINT_WINDOW: usize = 128;
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn value_to_i32(v: Option<&Value>, default: i32) -> i32 {
     v.and_then(Value::as_i64)
         .and_then(|n| i32::try_from(n).ok())
         .unwrap_or(default)
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn value_to_u32(v: Option<&Value>, default: u32) -> u32 {
     v.and_then(Value::as_u64)
         .and_then(|n| u32::try_from(n).ok())
         .unwrap_or(default)
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn value_to_string_vec(v: Option<&Value>) -> Vec<String> {
     match v.and_then(Value::as_array) {
         Some(xs) => xs
@@ -137,7 +141,7 @@ fn value_to_string_vec(v: Option<&Value>) -> Vec<String> {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
     payload
         .get("actor_id")
@@ -147,18 +151,18 @@ fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
     .to_string()
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_fingerprint(snapshot: &Value) -> String {
     serde_json::to_string(snapshot).unwrap_or_else(|_| snapshot.to_string())
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn stream_event_fingerprint(event_type: &str, seq: i64, actor_id: Option<&str>, payload: &Value) -> String {
     let actor = actor_id.unwrap_or("").trim();
     format!("{seq}|{event_type}|{actor}|{payload}")
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn seen_stream_fingerprint(state: &TrpgMapperState, fingerprint: &str) -> bool {
     state
         .recent_stream_fingerprints
@@ -166,7 +170,7 @@ fn seen_stream_fingerprint(state: &TrpgMapperState, fingerprint: &str) -> bool {
         .any(|entry| entry == fingerprint)
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn remember_stream_fingerprint(state: &mut TrpgMapperState, fingerprint: String) {
     state.recent_stream_fingerprints.push_back(fingerprint);
     while state.recent_stream_fingerprints.len() > STREAM_FINGERPRINT_WINDOW {
@@ -174,12 +178,12 @@ fn remember_stream_fingerprint(state: &mut TrpgMapperState, fingerprint: String)
     }
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_root(root: &Value) -> &Value {
     root.get("state").filter(|s| !s.is_null()).unwrap_or(root)
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_status(root: &Value) -> String {
     let source = snapshot_root(root);
     source
@@ -191,12 +195,12 @@ fn snapshot_status(root: &Value) -> String {
         .to_ascii_lowercase()
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_turn(root: &Value, fallback: u32) -> u32 {
     value_to_u32(snapshot_root(root).get("turn"), fallback)
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_phase(root: &Value, fallback: &str) -> String {
     snapshot_root(root)
         .get("phase")
@@ -205,7 +209,7 @@ fn snapshot_phase(root: &Value, fallback: &str) -> String {
         .to_string()
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
     let source = root.get("dice_log").or_else(|| snapshot_root(root).get("dice_log"));
     source
@@ -213,7 +217,7 @@ fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn map_snapshot_result(result: &Value) -> String {
     let raw = result
         .get("label")
@@ -243,7 +247,7 @@ fn map_snapshot_result(result: &Value) -> String {
     .to_string()
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn map_snapshot_dice_roll(entry: &Value, fallback_turn: u32, _fallback_phase: &str) -> Option<(String, String)> {
     if !entry.is_object() {
         return None;
@@ -274,7 +278,7 @@ fn map_snapshot_dice_roll(entry: &Value, fallback_turn: u32, _fallback_phase: &s
     Some(("dice_roll".to_string(), mapped.to_string()))
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_room_status_progress_payload(
     root: &Value,
     status: &str,
@@ -301,7 +305,7 @@ fn snapshot_room_status_progress_payload(
     (event_type.to_string(), payload.to_string())
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn map_turn_progress_event(
     event_type: &str,
     actor_id: Option<&str>,
@@ -410,7 +414,7 @@ fn map_turn_progress_event(
     Some(("turn_progress".to_string(), mapped.to_string()))
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn map_trpg_event(
     event_type: &str,
     actor_id: Option<&str>,
@@ -719,7 +723,7 @@ fn map_trpg_event(
     out
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn decode_snapshot_events(
     body: &Value,
     state: &mut TrpgMapperState,
@@ -770,7 +774,7 @@ fn decode_snapshot_events(
     out
 }
 
-#[allow(dead_code)]
+#[cfg(any(target_arch = "wasm32", test))]
 fn decode_stream_events(
     body: &str,
     state: &mut TrpgMapperState,

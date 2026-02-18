@@ -2080,6 +2080,42 @@ body.mode-lobby #dashboard {
     color: var(--text-dim);
 }
 
+.new-game-preflight {
+    border: 1px solid rgba(124, 207, 160, 0.2);
+    border-radius: var(--panel-radius);
+    background: rgba(10, 18, 18, 0.74);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 7px 9px;
+    display: grid;
+    gap: 4px;
+}
+
+.preflight-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.preflight-state {
+    min-width: 18px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.preflight-state.preflight-ok {
+    color: #7ccfa0;
+}
+
+.preflight-state.preflight-fail {
+    color: #d67f7f;
+}
+
+.preflight-muted {
+    color: var(--text-dim);
+}
+
 .new-game-assignment {
     border: 1px dashed rgba(196, 162, 101, 0.22);
     border-radius: var(--panel-radius);

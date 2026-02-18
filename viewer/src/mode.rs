@@ -554,6 +554,42 @@ fn set_new_game_status(doc: &web_sys::Document, message: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn set_new_game_preflight_status(doc: &web_sys::Document, message: &str) {
+    if let Some(el) = doc.get_element_by_id("new-game-preflight") {
+        el.set_inner_html(&format!(
+            "<span class=\"preflight-muted\">{}</span>",
+            html_escape(message)
+        ));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_new_game_preflight_rows(doc: &web_sys::Document, rows: &[(bool, String, String)]) {
+    if let Some(el) = doc.get_element_by_id("new-game-preflight") {
+        let html = rows
+            .iter()
+            .map(|(ok, label, detail)| {
+                let state_text = if *ok { "OK" } else { "FAIL" };
+                let state_class = if *ok {
+                    "preflight-state preflight-ok"
+                } else {
+                    "preflight-state preflight-fail"
+                };
+                format!(
+                    "<div class=\"preflight-row\"><span class=\"{state_class}\">{state_text}</span><span>{label}: {detail}</span></div>",
+                    state_class = state_class,
+                    state_text = state_text,
+                    label = html_escape(label),
+                    detail = html_escape(detail),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        el.set_inner_html(&html);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn set_current_room_id(doc: &web_sys::Document, room_id: &str) {
     crate::config::set_current_room_id(room_id);
     let room = crate::config::current_room_id();
@@ -804,7 +840,6 @@ fn set_round_run_fields(
         let _ = summary.set_attribute("style", "display:block");
     }
 }
-
 
 #[cfg(target_arch = "wasm32")]
 const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
@@ -2265,6 +2300,105 @@ async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBo
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
+    let mut rows: Vec<(bool, String, String)> = Vec::new();
+
+    let preset_row = match mcp_tool_call(
+        "trpg.preset.list",
+        json!({
+            "include_characters": false,
+            "include_skills": false
+        }),
+    )
+    .await
+    {
+        Ok(raw_catalog) => {
+            let catalog = normalize_preset_catalog(&raw_catalog);
+            let world = collect_preset_options_from_catalog(
+                &catalog,
+                &["world_presets", "world", "world_preset", "worlds"],
+            );
+            let dm =
+                collect_preset_options_from_catalog(&catalog, &["dm_presets", "dm", "dm_preset", "dms"]);
+            let ok = !world.is_empty() && !dm.is_empty();
+            let detail = if ok {
+                format!("월드 {}개 · DM {}개", world.len(), dm.len())
+            } else {
+                format!("프리셋 부족 (월드 {} / DM {})", world.len(), dm.len())
+            };
+            (ok, "프리셋".to_string(), detail)
+        }
+        Err(e) => (
+            false,
+            "프리셋".to_string(),
+            format!("조회 실패: {}", e),
+        ),
+    };
+    rows.push(preset_row);
+
+    let keeper_row = match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await {
+        Ok(payload) => {
+            let count = payload
+                .get("keepers")
+                .and_then(Value::as_array)
+                .map(|rows| rows.len())
+                .unwrap_or(0);
+            if count > 0 {
+                (
+                    true,
+                    "키퍼 풀".to_string(),
+                    format!("{}명 사용 가능", count),
+                )
+            } else {
+                (
+                    false,
+                    "키퍼 풀".to_string(),
+                    "사용 가능한 keeper가 없습니다".to_string(),
+                )
+            }
+        }
+        Err(e) => (
+            false,
+            "키퍼 풀".to_string(),
+            format!("조회 실패: {}", e),
+        ),
+    };
+    rows.push(keeper_row);
+
+    let room_id = actor_admin_room_id();
+    let room_row = match fetch_room_state_payload(&room_id).await {
+        Ok(payload) => {
+            let root = payload.get("state").unwrap_or(&payload);
+            let status = root
+                .get("status")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("status").and_then(Value::as_str))
+                .unwrap_or("unknown")
+                .trim()
+                .to_string();
+            (
+                true,
+                "룸 상태".to_string(),
+                format!("room {} · {}", room_id, status),
+            )
+        }
+        Err(e) => (
+            false,
+            "룸 상태".to_string(),
+            format!("room {} 조회 실패: {}", room_id, e),
+        ),
+    };
+    rows.push(room_row);
+
+    set_new_game_preflight_rows(doc, &rows);
+    if rows.iter().all(|(ok, _, _)| *ok) {
+        Ok(())
+    } else {
+        Err("사전 점검 실패 항목이 있습니다.".to_string())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn actor_admin_spawn(doc: &web_sys::Document) -> Result<String, String> {
     let room_id = actor_admin_room_id();
     let actor_id = actor_admin_input_value(doc, "actor-admin-id");
@@ -2999,6 +3133,7 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
             }
         }
         set_new_game_status(&doc, "Keeper 목록을 불러오는 중...");
+        set_new_game_preflight_status(&doc, "사전 점검 준비 중...");
         actor_admin_set_status(&doc, "액터 목록을 불러오는 중...", "status-info");
         let doc_for_fetch = doc.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -3014,10 +3149,16 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
                         ),
                     );
                     actor_admin_set_status(&doc_for_fetch, "액터 목록 로드 완료", "status-ok");
+                    set_new_game_preflight_status(&doc_for_fetch, "사전 점검 실행 중...");
+                    let _ = run_new_game_preflight(&doc_for_fetch).await;
                 }
                 Err(e) => {
                     set_new_game_status(&doc_for_fetch, &format!("초기 로드 실패: {}", e));
                     actor_admin_set_status(&doc_for_fetch, &format!("로드 실패: {}", e), "status-error");
+                    set_new_game_preflight_status(
+                        &doc_for_fetch,
+                        &format!("사전 점검 불가: {}", e),
+                    );
                 }
             }
         });
@@ -3064,6 +3205,7 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
                 return;
             };
             set_new_game_status(&doc, "세션/프리셋/keeper 정보를 새로고침 중...");
+            set_new_game_preflight_status(&doc, "사전 점검 실행 중...");
             actor_admin_set_status(&doc, "액터 목록 새로고침 중...", "status-info");
             let doc_for_fetch = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
@@ -3079,10 +3221,15 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
                             ),
                         );
                         actor_admin_set_status(&doc_for_fetch, "액터 목록 새로고침 완료", "status-ok");
+                        let _ = run_new_game_preflight(&doc_for_fetch).await;
                     }
                     Err(e) => {
                         set_new_game_status(&doc_for_fetch, &format!("새로고침 실패: {}", e));
                         actor_admin_set_status(&doc_for_fetch, &format!("새로고침 실패: {}", e), "status-error");
+                        set_new_game_preflight_status(
+                            &doc_for_fetch,
+                            &format!("사전 점검 실패: {}", e),
+                        );
                     }
                 }
             });
@@ -3091,6 +3238,25 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
             target.add_event_listener_with_callback("click", refresh_cb.as_ref().unchecked_ref())
         });
         refresh_cb.forget();
+    }
+
+    if let Some(preflight_btn) = doc.get_element_by_id("new-game-preflight-btn") {
+        let preflight_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            set_new_game_preflight_status(&doc, "사전 점검 실행 중...");
+            let doc_for_task = doc.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(err) = run_new_game_preflight(&doc_for_task).await {
+                    log::warn!("new-game preflight failed: {}", err);
+                }
+            });
+        }) as Box<dyn FnMut()>);
+        let _ = preflight_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", preflight_cb.as_ref().unchecked_ref())
+        });
+        preflight_cb.forget();
     }
 
     if let Some(start_btn) = doc.get_element_by_id("new-game-start") {

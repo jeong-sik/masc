@@ -34,7 +34,7 @@ struct NewGameBootstrap {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ActorAdminRow {
+pub(super) struct ActorAdminRow {
     actor_id: String,
     name: String,
     role: String,
@@ -247,11 +247,11 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
 
 // ─── Actor Admin CRUD ───────────────────────────────────────────
 
-fn actor_admin_room_id() -> String {
+pub(super) fn actor_admin_room_id() -> String {
     crate::config::current_room_id()
 }
 
-fn actor_admin_set_status(doc: &web_sys::Document, message: &str, css_class: &str) {
+pub(super) fn actor_admin_set_status(doc: &web_sys::Document, message: &str, css_class: &str) {
     if let Some(el) = doc.get_element_by_id("actor-admin-status") {
         el.set_inner_html(&html_escape(message));
         let class_name = if css_class.trim().is_empty() {
@@ -550,7 +550,7 @@ fn bind_actor_admin_row_clicks(doc: &web_sys::Document) {
     }
 }
 
-async fn refresh_actor_admin_list(doc: &web_sys::Document) -> Result<Vec<ActorAdminRow>, String> {
+pub(super) async fn refresh_actor_admin_list(doc: &web_sys::Document) -> Result<Vec<ActorAdminRow>, String> {
     let room_id = actor_admin_room_id();
     let payload = fetch_room_state_payload(&room_id).await?;
     let rows = parse_actor_admin_rows(&payload);

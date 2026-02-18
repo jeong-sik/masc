@@ -15,11 +15,11 @@ use super::{
 };
 
 const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
-const KNOWN_ROOMS_STORAGE_KEY: &str = "masc_viewer_known_rooms";
-const ROOM_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_room_hub_visible";
-const ROOM_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_room_hub_running_only";
+pub(super) const KNOWN_ROOMS_STORAGE_KEY: &str = "masc_viewer_known_rooms";
+pub(super) const ROOM_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_room_hub_visible";
+pub(super) const ROOM_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_room_hub_running_only";
 
-fn load_recent_rooms() -> Vec<String> {
+pub(super) fn load_recent_rooms() -> Vec<String> {
     let raw = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|storage| storage.get_item(RECENT_ROOMS_STORAGE_KEY).ok().flatten())
@@ -61,7 +61,7 @@ pub(super) struct RoomSnapshot {
     pub(super) task_count: i64,
 }
 
-fn room_lane_label(status: &str) -> &'static str {
+pub(super) fn room_lane_label(status: &str) -> &'static str {
     TrpgLifecycleState::from_status(status).lane()
 }
 

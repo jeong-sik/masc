@@ -718,7 +718,7 @@ pub(super) fn unique_non_empty(mut values: Vec<String>) -> Vec<String> {
     out
 }
 
-#[allow(dead_code)] // Called from wasm32-only session start block + tests.
+#[cfg(any(target_arch = "wasm32", test))]
 pub(super) fn assign_keepers_to_actor_ids(
     actor_ids: &[String],
     dm_keeper: &str,
@@ -1470,9 +1470,20 @@ mod mcp_rpc;
 use mcp_rpc::{mcp_tool_call, parse_embedded_tool_payload};
 
 #[cfg(target_arch = "wasm32")]
+mod room_hub;
+#[cfg(target_arch = "wasm32")]
+use room_hub::{
+    load_recent_rooms, remember_recent_room, room_lane_label, RoomSnapshot,
+    KNOWN_ROOMS_STORAGE_KEY, ROOM_HUB_RUNNING_ONLY_STORAGE_KEY, ROOM_HUB_VISIBLE_STORAGE_KEY,
+};
+
+#[cfg(target_arch = "wasm32")]
 mod trpg_controls;
 #[cfg(target_arch = "wasm32")]
-use trpg_controls::bind_new_game_controls;
+use trpg_controls::{
+    actor_admin_room_id, actor_admin_set_status, bind_new_game_controls,
+    refresh_actor_admin_list,
+};
 
 /// Refresh TRPG widget status counters (narrative, party, history, dedup).
 /// On non-wasm targets this is a no-op; on wasm32 it delegates to `trpg_controls`.

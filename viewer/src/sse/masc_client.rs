@@ -14,6 +14,8 @@ use crate::mode::ViewerMode;
 #[cfg(target_arch = "wasm32")]
 use crate::game::state::ConnectionStatus;
 #[cfg(target_arch = "wasm32")]
+use super::reconnect;
+#[cfg(target_arch = "wasm32")]
 use super::reconnect::{ConnectionStatusProxy, ReconnectState};
 use super::reconnect::{ConnectionStatusBridge, SseReconnectManager};
 

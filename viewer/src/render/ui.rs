@@ -82,7 +82,7 @@ pub fn setup_ui(mut commands: Commands) {
                 ))
                 .with_children(|parent| {
                     parent.spawn((
-                        Text::new("⚙"),
+                        Text::new("S"),
                         TextFont {
                             font_size: 20.0,
                             ..default()
@@ -111,7 +111,7 @@ pub fn setup_ui(mut commands: Commands) {
                 ))
                 .with_children(|parent| {
                     parent.spawn((
-                        Text::new("🔧"),
+                        Text::new("D"),
                         TextFont {
                             font_size: 20.0,
                             ..default()
@@ -212,7 +212,7 @@ fn spawn_settings_menu(commands: &mut Commands) {
         .with_children(|parent| {
             // Title
             parent.spawn((
-                Text::new("⚙️ Settings"),
+                Text::new("Settings"),
                 TextFont {
                     font_size: 16.0,
                     ..default()
@@ -351,7 +351,7 @@ fn spawn_dev_menu(commands: &mut Commands) {
         .with_children(|parent| {
             // Title
             parent.spawn((
-                Text::new("🔧 Developer"),
+                Text::new("Developer"),
                 TextFont {
                     font_size: 16.0,
                     ..default()

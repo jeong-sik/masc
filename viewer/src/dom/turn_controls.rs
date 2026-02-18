@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use serde_json::{json, Value};
 
 #[cfg(target_arch = "wasm32")]
-use web_sys::{HtmlButtonElement, HtmlInputElement};
+use web_sys::{HtmlButtonElement, HtmlInputElement, HtmlSelectElement};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -75,14 +75,19 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
         let _ = panel.set_attribute("style", "");
         let _ = panel.set_attribute("data-lifecycle", lifecycle.css_class());
 
-        let plan_error = read_round_run_plan(&doc).err();
-        let can_run = room_allows_control && plan_error.is_none();
+        let plan = read_round_run_plan(&doc);
+        let can_run = room_allows_control && plan.is_ok();
         let reason = if !room_allows_control {
             format!("실행 대기: {}", lifecycle.help_text())
-        } else if let Some(err) = &plan_error {
-            format!("준비 필요: {}", err)
         } else {
-            "라운드 실행 가능".to_string()
+            match plan {
+                Ok(ref row) => format!(
+                    "라운드 실행 가능 · DM {} · players {}명",
+                    row.dm_keeper,
+                    row.player_keepers.len()
+                ),
+                Err(ref err) => format!("준비 필요: {}", err),
+            }
         };
 
         let busy = doc
@@ -284,48 +289,31 @@ struct RoundRunPlan {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> {
-    let dm_keeper = doc
-        .get_element_by_id("round-run-dm")
-        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-        .map(|i| i.value())
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    if dm_keeper.is_empty() {
-        return Err("DM keeper가 설정되지 않았습니다. 새 게임을 먼저 시작하세요.".to_string());
+fn read_dom_text_value(doc: &web_sys::Document, id: &str) -> Option<String> {
+    let el = doc.get_element_by_id(id)?;
+    if let Ok(input) = el.clone().dyn_into::<HtmlInputElement>() {
+        return Some(input.value());
     }
+    if let Ok(select) = el.dyn_into::<HtmlSelectElement>() {
+        return Some(select.value());
+    }
+    None
+}
 
-    let phase = doc
-        .get_element_by_id("round-run-phase")
-        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-        .map(|i| i.value())
-        .unwrap_or_else(|| "round".to_string())
-        .trim()
-        .to_string();
-    let lang = doc
-        .get_element_by_id("round-run-lang")
-        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-        .map(|i| i.value())
-        .unwrap_or_else(|| "ko".to_string())
-        .trim()
-        .to_string();
-    let timeout_sec = doc
-        .get_element_by_id("round-run-timeout")
-        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-        .map(|i| i.value())
-        .unwrap_or_else(|| "90".to_string())
-        .trim()
-        .parse::<f64>()
-        .unwrap_or(90.0);
+#[cfg(target_arch = "wasm32")]
+fn read_dom_input(doc: &web_sys::Document, id: &str) -> Option<String> {
+    let value = read_dom_text_value(doc, id)?;
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
 
-    let player_pairs_raw = doc
-        .get_element_by_id("round-run-players")
-        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-        .map(|i| i.value())
-        .unwrap_or_default();
-    let mut player_keepers = player_pairs_raw
-        .split(',')
+#[cfg(target_arch = "wasm32")]
+fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
+    raw.split(',')
         .filter_map(|part| {
             let pair = part.trim();
             if pair.is_empty() {
@@ -340,22 +328,31 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
                 Some((actor_id.to_string(), keeper.to_string()))
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> {
+    let dm_keeper = read_dom_input(doc, "round-run-dm")
+        .or_else(|| read_dom_input(doc, "claimed-keeper"))
+        .or_else(|| read_dom_input(doc, "new-game-dm-select"))
+        .unwrap_or_default();
+    if dm_keeper.is_empty() {
+        return Err("DM keeper가 설정되지 않았습니다. 새 게임을 먼저 시작하세요.".to_string());
+    }
+
+    let phase = read_dom_input(doc, "round-run-phase").unwrap_or_else(|| "round".to_string());
+    let lang = read_dom_input(doc, "round-run-lang").unwrap_or_else(|| "ko".to_string());
+    let timeout_sec = read_dom_input(doc, "round-run-timeout")
+        .and_then(|raw| raw.parse::<f64>().ok())
+        .filter(|value| *value > 0.0)
+        .unwrap_or(90.0);
+
+    let player_pairs_raw = read_dom_text_value(doc, "round-run-players").unwrap_or_default();
+    let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);
     if player_keepers.is_empty() {
-        let claimed_actor = doc
-            .get_element_by_id("claimed-actor-id")
-            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-            .map(|i| i.value())
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        let claimed_keeper = doc
-            .get_element_by_id("claimed-keeper")
-            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
-            .map(|i| i.value())
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        let claimed_actor = read_dom_input(doc, "claimed-actor-id").unwrap_or_default();
+        let claimed_keeper = read_dom_input(doc, "claimed-keeper").unwrap_or_default();
         if !claimed_actor.is_empty() && !claimed_keeper.is_empty() {
             player_keepers.push((claimed_actor, claimed_keeper));
         }

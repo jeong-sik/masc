@@ -71,14 +71,13 @@ pub struct OverlayState {
 pub enum ConnectionStatus {
     #[default]
     Disconnected,
-    #[allow(dead_code)]
     Connecting,
     Connected,
     /// Reconnecting after a lost connection. (current_attempt, max_attempts)
-    #[allow(dead_code)]
+    #[allow(dead_code)] // constructed only in wasm32 reconnect logic
     Reconnecting(u32, u32),
     /// All retry attempts exhausted.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // constructed only in wasm32 reconnect logic
     Failed,
 }
 

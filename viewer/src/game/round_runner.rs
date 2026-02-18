@@ -43,15 +43,15 @@ impl Default for RoundRunner {
 }
 
 /// Safety cap — prevent infinite runaway.
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 const MAX_ROUNDS: u32 = 50;
 
 /// Delay between rounds (ms) — gives SSE events time to stream + user to read.
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 const INTER_ROUND_DELAY_MS: i32 = 5000;
 
 /// Initial delay before first round (ms) — wait for SSE + initial state.
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 const STARTUP_DELAY_MS: i32 = 3000;
 
 // ─── OnEnter System ────────────────────────────

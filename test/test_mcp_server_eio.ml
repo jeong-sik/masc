@@ -216,6 +216,10 @@ let test_handle_request_tools_list () =
                    true
                    (List.mem "trpg.round.run" names);
                  Alcotest.(check bool)
+                   "contains masc_goal_upsert"
+                   true
+                   (List.mem "masc_goal_upsert" names);
+                 Alcotest.(check bool)
                    "legacy masc_trpg_dice_roll hidden from list"
                    false
                    (List.mem "masc_trpg_dice_roll" names)

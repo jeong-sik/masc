@@ -5079,7 +5079,10 @@ let handle_keeper_up ctx args : tool_result =
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
     let context_budget_opt = Safe_ops.json_float_opt "context_budget" args in
-    let instructions_opt = get_string_opt args "instructions" in
+    let instructions_arg = get_string_opt args "instructions" in
+    let soul_path = Filename.concat (Filename.concat (Filename.concat (Filename.concat ctx.config.base_path "memory") "souls") name) "SOUL.md" in
+    let soul_content = match Safe_ops.read_file_safe soul_path with Ok c -> c | Error _ -> "" in
+    let instructions_opt = if soul_content <> "" then let base = Option.value ~default:"" instructions_arg in Some (base ^ "\n\n[SYSTEM: SOUL INFUSION]\n" ^ soul_content) else instructions_arg in
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in

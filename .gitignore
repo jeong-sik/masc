@@ -43,3 +43,6 @@ figma-mcp-linux-x64
 .gemini/
 config/lodge.env
 logs/
+
+# Trunk linter lock files
+.trunk-lock/

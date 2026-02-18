@@ -942,6 +942,14 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
             };
             el.set_inner_html(msg);
         }
+
+        // Programmatically click the toggle button to trigger data bootstrap
+        // (the click handler in mode.rs shows the panel AND loads keepers/presets)
+        if let Some(btn) = document.get_element_by_id("new-game-toggle") {
+            if let Some(html_btn) = btn.dyn_ref::<web_sys::HtmlElement>() {
+                html_btn.click();
+            }
+        }
     }
 }
 

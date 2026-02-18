@@ -46,6 +46,15 @@ fn sanitize_key(raw: &str) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn normalize_focus_kind(raw: &str) -> Option<String> {
+    let key = sanitize_key(raw);
+    match key.as_str() {
+        "narrative" | "dice" | "turn" | "progress" | "system" => Some(key),
+        _ => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn history_kind_class(kind: &str) -> &'static str {
     match kind {
         "dice" => "kind-dice",
@@ -272,8 +281,7 @@ fn read_focus_kind(document: &web_sys::Document) -> Option<String> {
     document
         .get_element_by_id("dashboard")
         .and_then(|el| el.get_attribute("data-focus-kind"))
-        .map(|raw| raw.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
+        .and_then(|raw| normalize_focus_kind(&raw))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -281,14 +289,104 @@ fn write_focus_kind(document: &web_sys::Document, kind: Option<&str>) {
     let Some(dashboard) = document.get_element_by_id("dashboard") else {
         return;
     };
-    match kind {
-        Some(raw) if !raw.trim().is_empty() => {
-            let _ = dashboard.set_attribute("data-focus-kind", &raw.trim().to_ascii_lowercase());
+    match kind.and_then(normalize_focus_kind) {
+        Some(value) => {
+            let _ = dashboard.set_attribute("data-focus-kind", &value);
         }
         _ => {
             let _ = dashboard.remove_attribute("data-focus-kind");
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_focus_from_hash() -> (Option<u32>, Option<String>) {
+    let Some(window) = web_sys::window() else {
+        return (None, None);
+    };
+    let Ok(raw_hash) = window.location().hash() else {
+        return (None, None);
+    };
+    let fragment = raw_hash.trim().trim_start_matches('#');
+    let Some((_, params)) = fragment
+        .split_once('?')
+        .or_else(|| fragment.split_once('&'))
+    else {
+        return (None, None);
+    };
+
+    let mut turn = None;
+    let mut kind = None;
+    for pair in params.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
+        let value = parts.next().unwrap_or_default().trim();
+        match key.as_str() {
+            "turn" if turn.is_none() => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    if parsed > 0 {
+                        turn = Some(parsed);
+                    }
+                }
+            }
+            "kind" if kind.is_none() => {
+                kind = normalize_focus_kind(value);
+            }
+            _ => {}
+        }
+    }
+    (turn, kind)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn write_focus_hash(turn: Option<u32>, kind: Option<&str>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let raw_hash = window.location().hash().unwrap_or_default();
+    let fragment = raw_hash.trim().trim_start_matches('#');
+    let base = fragment
+        .split(|ch| ch == '?' || ch == '&')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("trpg");
+
+    let mut params = Vec::new();
+    if let Some(turn) = turn.filter(|value| *value > 0) {
+        params.push(format!("turn={}", turn));
+    }
+    if let Some(kind) = kind.and_then(normalize_focus_kind) {
+        params.push(format!("kind={}", kind));
+    }
+
+    let next_fragment = if params.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}&{}", base, params.join("&"))
+    };
+    if fragment == next_fragment {
+        return;
+    }
+
+    if let Ok(history) = window.history() {
+        let path = window.location().pathname().unwrap_or_default();
+        let search = window.location().search().unwrap_or_default();
+        let url = format!("{}{}#{}", path, search, next_fragment);
+        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url));
+    } else {
+        let _ = window.location().set_hash(&next_fragment);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_focus_state_to_hash(document: &web_sys::Document) {
+    let turn = read_focus_turn(document);
+    let kind = read_focus_kind(document);
+    write_focus_hash(turn, kind.as_deref());
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -439,6 +537,7 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
                 write_focus_turn(&document, turn);
                 let kind = read_focus_kind(&document);
                 apply_history_focus(&document, turn, kind.as_deref());
+                sync_focus_state_to_hash(&document);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
                 target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
@@ -472,6 +571,7 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
                 let turn = read_focus_turn(&document);
                 let focus_kind = read_focus_kind(&document);
                 apply_history_focus(&document, turn, focus_kind.as_deref());
+                sync_focus_state_to_hash(&document);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
                 target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
@@ -547,6 +647,7 @@ pub fn update_session_history_dom(
             write_focus_turn(&document, None);
             write_focus_kind(&document, None);
             apply_history_focus(&document, None, None);
+            sync_focus_state_to_hash(&document);
             changed = true;
         }
 
@@ -681,8 +782,12 @@ pub fn update_session_history_dom(
 
         history.set_inner_html(&render_session_history_html(&cache.turns));
         bind_history_focus_controls(&document);
-        let turn = read_focus_turn(&document);
-        let kind = read_focus_kind(&document);
+        let (hash_turn, hash_kind) = read_focus_from_hash();
+        let turn = read_focus_turn(&document).or(hash_turn);
+        let kind = read_focus_kind(&document).or(hash_kind);
+        write_focus_turn(&document, turn);
+        write_focus_kind(&document, kind.as_deref());
         apply_history_focus(&document, turn, kind.as_deref());
+        sync_focus_state_to_hash(&document);
     }
 }

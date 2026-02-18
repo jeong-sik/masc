@@ -385,9 +385,9 @@ fn auto_round_enabled() -> bool {
 async fn sleep_ms(ms: i32) {
     let promise = js_sys::Promise::new(&mut |resolve, _| {
         web_sys::window()
-            .unwrap()
+            .expect("window not available")
             .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
-            .unwrap();
+            .expect("DOM: setTimeout failed");
     });
     wasm_bindgen_futures::JsFuture::from(promise).await.ok();
 }

@@ -82,7 +82,19 @@
 (test
  (name test_safe_ops)
  (modules test_safe_ops)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest str yojson unix))
+
+; Json_util module tests (comprehensive JSON utility coverage)
+(test
+ (name test_json_util)
+ (modules test_json_util)
+ (libraries masc_mcp alcotest yojson))
+
+; Resilience module tests (Time, Zombie, ZeroZombie pure functions)
+(test
+ (name test_resilience)
+ (modules test_resilience)
+ (libraries masc_mcp alcotest unix))
 
 ; Common module tests (finalizer guard)
 (test

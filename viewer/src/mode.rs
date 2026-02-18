@@ -2557,6 +2557,18 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     let player_map: std::collections::HashMap<String, String> =
         assignments.into_iter().collect();
 
+    for (actor_id, keeper_name) in &player_map {
+        mcp_tool_call(
+            "trpg.actor.claim",
+            json!({
+                "room_id": room_id,
+                "actor_id": actor_id,
+                "keeper_name": keeper_name
+            }),
+        )
+        .await?;
+    }
+
     if !models.is_empty() {
         let models_value = Value::Array(
             models

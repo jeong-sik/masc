@@ -2584,6 +2584,34 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
 }
 
 #[cfg(target_arch = "wasm32")]
+fn set_new_game_assignment(
+    doc: &web_sys::Document,
+    dm_keeper: &str,
+    player_map: &std::collections::HashMap<String, String>,
+    actor_ids: &[String],
+) {
+    let Some(el) = doc.get_element_by_id("new-game-assignment") else {
+        return;
+    };
+
+    let mut html = String::from("<strong>배정 확인</strong><ul>");
+    html.push_str(&format!("<li>DM: {}</li>", html_escape(dm_keeper)));
+    for actor_id in actor_ids {
+        let keeper = player_map
+            .get(actor_id)
+            .map(String::as_str)
+            .unwrap_or("미정");
+        html.push_str(&format!(
+            "<li>{} → {}</li>",
+            html_escape(actor_id),
+            html_escape(keeper)
+        ));
+    }
+    html.push_str("</ul>");
+    el.set_inner_html(&html);
+}
+
+#[cfg(target_arch = "wasm32")]
 fn normalize_preset_catalog(raw: &Value) -> Value {
     let mut value = raw.clone();
     for _ in 0..6 {

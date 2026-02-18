@@ -28,7 +28,7 @@ pub fn update_overlay_dom(
     overlay: Res<OverlayState>,
     choice: Res<ChoiceState>,
     combat: Res<CombatState>,
-    cache: ResMut<OverlayCache>,
+    mut cache: ResMut<OverlayCache>,
 ) {
     let weather_changed = overlay.weather != cache.last_weather;
     let mood_changed = overlay.mood != cache.last_mood;

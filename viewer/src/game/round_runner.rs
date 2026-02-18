@@ -11,6 +11,7 @@ use std::sync::{
     Arc, Mutex,
 };
 
+use crate::config;
 use crate::game::state::TurnProgressState;
 
 // ─── Resource ──────────────────────────────────

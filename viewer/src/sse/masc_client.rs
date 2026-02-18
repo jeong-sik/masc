@@ -9,10 +9,11 @@ use web_sys::{EventSource, MessageEvent};
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+use crate::game::state::ConnectionStatus;
 use crate::mode::ViewerMode;
 
 use super::reconnect::{
-    ConnectionStatusBridge, SseReconnectManager,
+    self, ConnectionStatusBridge, ConnectionStatusProxy, ReconnectState, SseReconnectManager,
 };
 
 /// Wrapper around `EventSource` that is `Send + Sync`.

@@ -4338,7 +4338,7 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
 
 (** All schemas including Perpetual Agent Runtime tools *)
 let all_schemas_with_perpetual =
-  all_schemas @ Tool_perpetual.schemas
+  all_schemas @ Tool_perpetual.schemas @ Tool_keeper.schemas @ Tool_goals.schemas
 
 (** Get tool by name *)
 let find_tool name =

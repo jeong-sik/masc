@@ -115,6 +115,10 @@ module Federation = Federation
 module Level2_config = Level2_config
 module Level4_config = Level4_config
 module Relay = Relay
+module Goal_store = Goal_store
+module Goal_guard = Goal_guard
+module Goal_orchestrator = Goal_orchestrator
+module Goal_scheduler = Goal_scheduler
 module Compression_dict = Compression_dict
 (* Redis_common module removed - PostgreSQL is now the only distributed backend *)
 
@@ -190,6 +194,7 @@ module Succession = Succession
 module Perpetual_loop = Perpetual_loop
 module Tool_perpetual = Tool_perpetual
 module Tool_keeper = Tool_keeper
+module Tool_goals = Tool_goals
 module Tool_trpg = Tool_trpg
 module Trpg_preset_store = Trpg_preset_store
 module Trpg_engine_types = Trpg_engine_types

@@ -961,6 +961,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
     "masc_deliver"; "masc_note_add"; "masc_error_add"; "masc_error_resolve";
     "masc_lock"; "masc_unlock";
+    "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
+    "masc_goal_dispatch"; "masc_goal_review";
   ] in
 
   (* Auto-init/auto-join for better UX.
@@ -988,7 +990,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let read_only_tools = ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
                          "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
                          "masc_worktree_list"; "masc_pending_interrupts";
-                         "masc_cost_report"; "masc_portal_status"] in
+                         "masc_cost_report"; "masc_portal_status";
+                         "masc_goal_list"] in
   let is_read_only = List.mem name read_only_tools in
 
   let can_auto_join =
@@ -1119,6 +1122,22 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     sw = Some sw;
   } in
   let simple_ctx_relay : Tool_relay.context = { config; agent_name; sw; proc_mgr = state.Mcp_server.proc_mgr } in
+  let simple_ctx_goals : Tool_goals.context =
+    {
+      config;
+      agent_name;
+      call_keeper_msg =
+        Some
+          (fun keeper_args ->
+            let keeper_ctx : _ Tool_keeper.context = { config; sw; clock } in
+            match
+              Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg"
+                ~args:keeper_args
+            with
+            | Some result -> result
+            | None -> (false, "masc_keeper_msg dispatch unavailable"));
+    }
+  in
   let simple_ctx_heartbeat = { Tool_heartbeat.config; agent_name; sw; clock } in
   let simple_ctx_encryption : Tool_encryption.context = { state } in
   let simple_ctx_auth : Tool_auth.context = { config; agent_name } in
@@ -1225,6 +1244,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_relay.dispatch simple_ctx_relay ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_goals.dispatch simple_ctx_goals ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_heartbeat.dispatch simple_ctx_heartbeat ~name ~args:arguments with
@@ -2565,6 +2587,7 @@ let handle_list_tools_eio state id =
     @ Tool_lodge.tools
     @ Tool_perpetual.schemas
     @ Tool_keeper.schemas
+    @ Tool_goals.schemas
     @ Tool_protocol_game_view.schemas
   in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->

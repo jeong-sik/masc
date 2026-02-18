@@ -129,6 +129,11 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_tool_goals)
+ (modules test_tool_goals)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_protocol_game_view)
  (modules test_protocol_game_view)
  (libraries masc_mcp alcotest yojson unix))

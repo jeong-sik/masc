@@ -1582,6 +1582,75 @@ fn selected_player_keepers(doc: &web_sys::Document) -> Vec<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn available_player_keepers(doc: &web_sys::Document) -> Vec<String> {
+    let Ok(nodes) = doc.query_selector_all("#new-game-player-select option") else {
+        return Vec::new();
+    };
+    let mut keepers = Vec::new();
+    for i in 0..nodes.length() {
+        let Some(node) = nodes.item(i) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let Some(value) = el.get_attribute("value") else {
+            continue;
+        };
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        keepers.push(value.to_string());
+    }
+    unique_non_empty(keepers)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_player_keeper_selection(doc: &web_sys::Document, selected: &[String]) {
+    let selected = unique_non_empty(selected.to_vec());
+    if let Ok(nodes) = doc.query_selector_all("#new-game-player-select option") {
+        for i in 0..nodes.length() {
+            let Some(node) = nodes.item(i) else { continue };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let value = el
+                .get_attribute("value")
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let on = !value.is_empty() && selected.iter().any(|picked| picked == &value);
+            if on {
+                let _ = el.set_attribute("selected", "selected");
+            } else {
+                let _ = el.remove_attribute("selected");
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_keeper_name_from_value(row: &Value) -> Option<String> {
+    row.as_str()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            row.get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            row.get("keeper")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+        })
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
     let url = format!("{}/mcp", crate::config::MASC_MCP_URL);
     let body = json!({
@@ -1728,7 +1797,8 @@ async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
             ));
         }
     };
-    Ok(parsed.get("payload").cloned().unwrap_or(parsed))
+    let final_val = parsed.get("payload").cloned().unwrap_or(parsed);
+    Ok(final_val)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1884,25 +1954,47 @@ fn extract_top_level_json_span(raw: &str) -> Option<(usize, usize)> {
 #[cfg(target_arch = "wasm32")]
 async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>, String> {
     let payload = mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await?;
+    web_sys::console::log_1(&format!("[refresh_keeper_selectors] payload keys={:?}", payload.as_object().map(|m| m.keys().collect::<Vec<_>>())).into());
     let mut keepers = payload
         .get("keepers")
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
-                .filter_map(Value::as_str)
-                .map(|name| name.trim().to_string())
+                .filter_map(extract_keeper_name_from_value)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
     keepers = unique_non_empty(keepers);
     if keepers.is_empty() {
-        keepers = vec![
-            "dm-keeper".to_string(),
-            "grimja".to_string(),
-            "luna".to_string(),
-            "songarak".to_string(),
-            "miso".to_string(),
-        ];
+        let mut fallback = Vec::new();
+        let dm_from_ui = doc
+            .get_element_by_id("new-game-dm-select")
+            .and_then(|el| {
+                el.dyn_ref::<web_sys::HtmlSelectElement>()
+                    .map(|s| s.value())
+            })
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if !dm_from_ui.is_empty() {
+            fallback.push(dm_from_ui);
+        }
+        if let Some(claimed) = doc.get_element_by_id("claimed-keeper") {
+            if let Some(input) = claimed.dyn_ref::<web_sys::HtmlInputElement>() {
+                let value = input.value().trim().to_string();
+                if !value.is_empty() {
+                    fallback.push(value);
+                }
+            }
+            let text = claimed.text_content().unwrap_or_default().trim().to_string();
+            if !text.is_empty() {
+                fallback.push(text);
+            }
+        }
+        keepers = unique_non_empty(fallback);
+    }
+    if keepers.is_empty() {
+        return Err("keeper 목록이 비어 있습니다. masc_keeper_list 결과를 확인하세요.".to_string());
     }
 
     let previous_dm = doc
@@ -2540,7 +2632,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         input.set_value(&room_id);
     }
 
-    let dm_keeper = doc
+    let mut dm_keeper = doc
         .get_element_by_id("new-game-dm-select")
         .and_then(|el| {
             el.dyn_ref::<web_sys::HtmlSelectElement>()
@@ -2553,12 +2645,62 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         return Err("DM keeper를 선택하세요.".to_string());
     }
 
-    let players = selected_player_keepers(doc);
+    let mut auto_selected_players = false;
+    let mut players = selected_player_keepers(doc);
     if players.is_empty() {
-        return Err("AI Player를 1명 이상 선택하세요.".to_string());
+        players = available_player_keepers(doc)
+            .into_iter()
+            .filter(|keeper| keeper != &dm_keeper)
+            .collect();
+        if players.len() > 4 {
+            players.truncate(4);
+        }
+        players = unique_non_empty(players);
+        if !players.is_empty() {
+            apply_player_keeper_selection(doc, &players);
+            auto_selected_players = true;
+        }
     }
-    if players.iter().any(|keeper| keeper == &dm_keeper) {
-        return Err("DM keeper와 player keeper는 중복될 수 없습니다.".to_string());
+    if players.is_empty() {
+        if refresh_keeper_selectors(doc).await.is_ok() {
+            let refreshed_dm = doc
+                .get_element_by_id("new-game-dm-select")
+                .and_then(|el| {
+                    el.dyn_ref::<web_sys::HtmlSelectElement>()
+                        .map(|s| s.value())
+                })
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if !refreshed_dm.is_empty() {
+                dm_keeper = refreshed_dm;
+            }
+
+            players = selected_player_keepers(doc);
+            if players.is_empty() {
+                players = available_player_keepers(doc)
+                    .into_iter()
+                    .filter(|keeper| keeper != &dm_keeper)
+                    .collect();
+            }
+            if players.len() > 4 {
+                players.truncate(4);
+            }
+            players = unique_non_empty(players);
+            if !players.is_empty() {
+                apply_player_keeper_selection(doc, &players);
+                auto_selected_players = true;
+            }
+        }
+    }
+    players.retain(|keeper| keeper != &dm_keeper);
+    players = unique_non_empty(players);
+    if players.len() > 8 {
+        players.truncate(8);
+        apply_player_keeper_selection(doc, &players);
+    }
+    if players.is_empty() {
+        return Err("AI Player keeper를 선택할 수 없습니다. keeper 목록을 먼저 새로고침하세요.".to_string());
     }
 
     let model_text = doc
@@ -2610,13 +2752,25 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .await?;
         let preset_catalog = normalize_preset_catalog(&preset_catalog);
         if world_preset_id.is_empty() {
-            world_preset_id = extract_first_preset_id(&preset_catalog, "world_presets")
+            let world_options = collect_preset_options_from_catalog(
+                &preset_catalog,
+                &["world_presets", "world", "world_preset", "worlds"],
+            );
+            world_preset_id = world_options
+                .first()
+                .map(|row| row.id.clone())
+                .or_else(|| extract_first_preset_id(&preset_catalog, "world_presets"))
                 .or_else(|| extract_first_preset_id(&preset_catalog, "world"))
                 .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "world"))
                 .unwrap_or_default();
         }
         if dm_preset_id.is_empty() {
-            dm_preset_id = extract_first_preset_id(&preset_catalog, "dm_presets")
+            let dm_options =
+                collect_preset_options_from_catalog(&preset_catalog, &["dm_presets", "dm", "dm_preset", "dms"]);
+            dm_preset_id = dm_options
+                .first()
+                .map(|row| row.id.clone())
+                .or_else(|| extract_first_preset_id(&preset_catalog, "dm_presets"))
                 .or_else(|| extract_first_preset_id(&preset_catalog, "dm"))
                 .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "dm"))
                 .unwrap_or_default();
@@ -2749,56 +2903,61 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .await?;
     }
 
-    if !models.is_empty() {
-        let models_value = Value::Array(
+    let models_value = if models.is_empty() {
+        None
+    } else {
+        Some(Value::Array(
             models
                 .iter()
                 .map(|m| Value::String(m.clone()))
                 .collect::<Vec<_>>(),
-        );
-        mcp_tool_call(
-            "masc_keeper_up",
-            json!({
-                "name": dm_keeper,
-                "goal": format!("TRPG room {}의 세계관 주민 DM keeper로 장면을 진행하세요.", room_id),
-                "models": models_value,
-                "instructions": "모든 응답은 한국어로 작성하세요.",
-                "proactive_enabled": false,
-                "presence_keepalive": true
-            }),
-        )
-        .await?;
-        for (actor_id, keeper_name) in &player_map {
-            mcp_tool_call(
-                "masc_keeper_up",
-                json!({
-                    "name": keeper_name,
-                    "goal": format!("TRPG room {}에서 {} actor를 플레이하세요.", room_id, actor_id),
-                    "models": Value::Array(
-                        models
-                            .iter()
-                            .map(|m| Value::String(m.clone()))
-                            .collect::<Vec<_>>()
-                    ),
-                    "instructions": "모든 응답은 한국어로 작성하세요.",
-                    "proactive_enabled": false,
-                    "presence_keepalive": true
-                }),
-            )
-            .await?;
+        ))
+    };
+
+    let mut dm_keeper_args = json!({
+        "name": dm_keeper,
+        "goal": format!("TRPG room {}의 세계관 주민 DM keeper로 장면을 진행하세요.", room_id),
+        "instructions": "모든 응답은 한국어로 작성하세요.",
+        "proactive_enabled": false,
+        "presence_keepalive": true
+    });
+    if let Some(models_value) = models_value.clone() {
+        dm_keeper_args["models"] = models_value;
+    }
+    mcp_tool_call("masc_keeper_up", dm_keeper_args).await?;
+
+    for (actor_id, keeper_name) in &player_map {
+        let mut keeper_args = json!({
+            "name": keeper_name,
+            "goal": format!("TRPG room {}에서 {} actor를 플레이하세요.", room_id, actor_id),
+            "instructions": "모든 응답은 한국어로 작성하세요.",
+            "proactive_enabled": false,
+            "presence_keepalive": true
+        });
+        if let Some(models_value) = models_value.clone() {
+            keeper_args["models"] = models_value;
         }
+        mcp_tool_call("masc_keeper_up", keeper_args).await?;
     }
 
     set_current_room_id(doc, &room_id);
     clear_trpg_dom(doc);
     set_round_run_fields(doc, &dm_keeper, &actor_ids, &player_map);
-    set_new_game_assignment(doc, &dm_keeper, &player_map, &actor_ids);
+    set_new_game_assignment(
+        doc,
+        &dm_keeper,
+        &dm_preset_id,
+        &world_preset_id,
+        &player_map,
+        &actor_ids,
+    );
 
     Ok(format!(
-        "새 게임 시작 완료: room {} / DM {} / players {}",
+        "새 게임 시작 완료: room {} / DM {} / players {}{}",
         room_id,
         dm_keeper,
-        player_map.len()
+        player_map.len(),
+        if auto_selected_players { " (플레이어 자동 선택 적용)" } else { "" }
     ))
 }
 
@@ -2806,6 +2965,8 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
 fn set_new_game_assignment(
     doc: &web_sys::Document,
     dm_keeper: &str,
+    dm_preset_id: &str,
+    world_preset_id: &str,
     player_map: &std::collections::HashMap<String, String>,
     actor_ids: &[String],
 ) {
@@ -2815,6 +2976,11 @@ fn set_new_game_assignment(
 
     let mut html = String::from("<strong>배정 확인</strong><ul>");
     html.push_str(&format!("<li>DM: {}</li>", html_escape(dm_keeper)));
+    html.push_str(&format!(
+        "<li>Preset: world={} / dm={}</li>",
+        html_escape(world_preset_id),
+        html_escape(dm_preset_id)
+    ));
     for actor_id in actor_ids {
         let keeper = player_map
             .get(actor_id)
@@ -3153,6 +3319,7 @@ fn bind_new_game_controls(doc: &web_sys::Document) {
                     let _ = run_new_game_preflight(&doc_for_fetch).await;
                 }
                 Err(e) => {
+                    web_sys::console::error_1(&format!("[bind_new_game_controls] bootstrap FAILED: {}", e).into());
                     set_new_game_status(&doc_for_fetch, &format!("초기 로드 실패: {}", e));
                     actor_admin_set_status(&doc_for_fetch, &format!("로드 실패: {}", e), "status-error");
                     set_new_game_preflight_status(

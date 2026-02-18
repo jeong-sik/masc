@@ -1536,27 +1536,40 @@ let handle_stream ctx args : result =
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
-let resolve_dm_preset catalog dm_preset_id_opt =
+let entropy_seed ~session_id ~salt =
+  let now_ms = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  Hashtbl.hash (Printf.sprintf "%s|%s|%d" session_id salt now_ms)
+
+let pick_by_seed ~seed xs =
+  match xs with
+  | [] -> None
+  | _ ->
+      let len = List.length xs in
+      let idx = seed mod len in
+      let idx = if idx < 0 then idx + len else idx in
+      Some (List.nth xs idx)
+
+let resolve_dm_preset ~seed catalog dm_preset_id_opt =
   match dm_preset_id_opt with
   | Some preset_id -> (
       match Trpg_preset_store.find_dm_preset catalog ~id:preset_id with
       | Some preset -> Ok preset
       | None -> Error (Printf.sprintf "unknown dm_preset_id: %s" preset_id))
   | None -> (
-      match catalog.Trpg_preset_store.dm_presets with
-      | head :: _ -> Ok head
-      | [] -> Error "no dm presets available")
+      match pick_by_seed ~seed catalog.Trpg_preset_store.dm_presets with
+      | Some preset -> Ok preset
+      | None -> Error "no dm presets available")
 
-let resolve_world_preset catalog world_preset_id_opt =
+let resolve_world_preset ~seed catalog world_preset_id_opt =
   match world_preset_id_opt with
   | Some preset_id -> (
       match Trpg_preset_store.find_world_preset catalog ~id:preset_id with
       | Some preset -> Ok preset
       | None -> Error (Printf.sprintf "unknown world_preset_id: %s" preset_id))
   | None -> (
-      match catalog.Trpg_preset_store.world_presets with
-      | head :: _ -> Ok head
-      | [] -> Error "no world presets available")
+      match pick_by_seed ~seed catalog.Trpg_preset_store.world_presets with
+      | Some preset -> Ok preset
+      | None -> Error "no world presets available")
 
 let shuffle_with_seed ~seed xs =
   let arr = Array.of_list xs in
@@ -1599,9 +1612,9 @@ let generate_pool_members ~catalog ~pool_size ~seed =
       in
       Ok (build 1 [])
 
-let default_party_from_catalog catalog party_size =
+let default_party_from_catalog ~seed catalog party_size =
   let capped = max 1 (min party_size 8) in
-  match generate_pool_members ~catalog ~pool_size:capped ~seed:42 with
+  match generate_pool_members ~catalog ~pool_size:capped ~seed with
   | Ok members -> members
   | Error _ -> []
 
@@ -1700,10 +1713,12 @@ let handle_pool_generate ctx args : result =
       Option.value ~default:4 party_size_opt
       |> max 1 |> min 8 |> min pool_size
     in
-    let seed = Option.value ~default:42 seed_opt in
+    let seed =
+      Option.value ~default:(entropy_seed ~session_id ~salt:"pool.generate") seed_opt
+    in
     let* catalog = Trpg_preset_store.load_catalog ~base_dir:ctx.config.base_path in
-    let* dm_preset = resolve_dm_preset catalog dm_preset_id in
-    let* world_preset = resolve_world_preset catalog world_preset_id in
+    let* dm_preset = resolve_dm_preset ~seed catalog dm_preset_id in
+    let* world_preset = resolve_world_preset ~seed:(seed + 17) catalog world_preset_id in
     let* pool = generate_pool_members ~catalog ~pool_size ~seed in
     let suggested =
       pool
@@ -1815,14 +1830,20 @@ let handle_session_start ctx args : result =
       | Error e -> Error e
     in
     let* () = validate_rule_module rule_module in
+    let fallback_seed =
+      entropy_seed ~session_id
+        ~salt:(Printf.sprintf "session.start|%s|%s" room_id phase)
+    in
     let* catalog = Trpg_preset_store.load_catalog ~base_dir in
-    let* dm_preset = resolve_dm_preset catalog dm_preset_id in
-    let* world_preset = resolve_world_preset catalog world_preset_id in
+    let* dm_preset = resolve_dm_preset ~seed:fallback_seed catalog dm_preset_id in
+    let* world_preset =
+      resolve_world_preset ~seed:(fallback_seed + 19) catalog world_preset_id
+    in
     let* party =
       match args |> member "party" with
       | `List xs when xs <> [] -> pool_members_of_json_list xs
       | _ ->
-          let fallback_party = default_party_from_catalog catalog 4 in
+          let fallback_party = default_party_from_catalog ~seed:(fallback_seed + 37) catalog 4 in
           if fallback_party = [] then Error "party is required (no character presets available)"
           else Ok fallback_party
     in

@@ -652,7 +652,7 @@ pub fn update_session_history_dom(
             if !event.phase.is_empty() {
                 current_phase = event.phase.clone();
             }
-            let (kind, actor, summary) = label_progress_event(&event);
+            let (kind, actor, summary) = label_progress_event(event);
             let appended = append_event(
                 &mut cache.turns,
                 current_turn,

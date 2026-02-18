@@ -6,7 +6,7 @@
 //! Visible when a round run assignment is present:
 //! - claimed keeper/actor for local manual play, or
 //! - hidden round-run plan fields for AI auto-run flow.
-//! Follows the same OnEnter/OnExit lifecycle as `action_panel.rs`.
+//!   Follows the same OnEnter/OnExit lifecycle as `action_panel.rs`.
 
 use bevy::prelude::*;
 
@@ -251,7 +251,7 @@ fn set_advance_disabled(disabled: bool) {
         return;
     };
     if let Some(el) = doc.get_element_by_id("advance-turn-btn") {
-        if let Some(btn) = el.dyn_into::<HtmlButtonElement>().ok() {
+        if let Ok(btn) = el.dyn_into::<HtmlButtonElement>() {
             btn.set_disabled(disabled);
         }
     }
@@ -263,7 +263,7 @@ fn set_advance_busy(busy: bool) {
         return;
     };
     if let Some(el) = doc.get_element_by_id("advance-turn-btn") {
-        if let Some(btn) = el.dyn_into::<HtmlButtonElement>().ok() {
+        if let Ok(btn) = el.dyn_into::<HtmlButtonElement>() {
             btn.set_disabled(busy);
             if busy {
                 let _ = btn.set_attribute("data-busy", "1");

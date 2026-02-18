@@ -85,6 +85,7 @@ impl Plugin for MapRenderPlugin {
 ///
 /// Each entity type is identified by its marker component — this is why every
 /// spawned entity in the TRPG scene must carry at least one marker.
+#[allow(clippy::type_complexity)]
 fn cleanup_trpg_scene(
     mut commands: Commands,
     trpg_entities: Query<

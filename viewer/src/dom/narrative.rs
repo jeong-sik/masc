@@ -11,8 +11,6 @@ fn normalize_phase_suffix(phase: &str) -> String {
     for ch in phase.chars() {
         if ch.is_ascii_alphanumeric() {
             out.push(ch.to_ascii_lowercase());
-        } else if ch == '-' || ch == '_' || ch.is_whitespace() {
-            out.push('-');
         } else {
             out.push('-');
         }

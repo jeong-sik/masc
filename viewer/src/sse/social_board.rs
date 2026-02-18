@@ -718,7 +718,7 @@ fn append_comment_to_dom(post_id: &str, author: &str, content: &str) {
 
     // Remove "No comments yet" or loading placeholder
     if let Ok(Some(empty)) = list.query_selector(".comment-empty, .comment-loading") {
-        let _ = empty.remove();
+        empty.remove();
     }
 
     let comment_html = format!(

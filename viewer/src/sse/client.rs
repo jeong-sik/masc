@@ -175,7 +175,7 @@ fn remember_stream_fingerprint(state: &mut TrpgMapperState, fingerprint: String)
 }
 
 #[allow(dead_code)]
-fn snapshot_root<'a>(root: &'a Value) -> &'a Value {
+fn snapshot_root(root: &Value) -> &Value {
     root.get("state").filter(|s| !s.is_null()).unwrap_or(root)
 }
 
@@ -209,8 +209,7 @@ fn snapshot_phase(root: &Value, fallback: &str) -> String {
 fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
     let source = root.get("dice_log").or_else(|| snapshot_root(root).get("dice_log"));
     source
-        .and_then(Value::as_array)
-        .map(|rows| rows.clone())
+        .and_then(Value::as_array).cloned()
         .unwrap_or_default()
 }
 

@@ -101,10 +101,8 @@ fn show_endgame_overlay(message: &str, is_victory: bool) {
         overlay.set_inner_html(&html);
 
         // Set message text safely (auto-escapes HTML entities).
-        if let Ok(msg_el) = overlay.query_selector(".endgame-message") {
-            if let Some(el) = msg_el {
-                el.set_text_content(Some(message));
-            }
+        if let Ok(Some(el)) = overlay.query_selector(".endgame-message") {
+            el.set_text_content(Some(message));
         }
 
         body.append_child(&overlay).ok();

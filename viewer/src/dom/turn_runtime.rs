@@ -233,6 +233,8 @@ pub fn update_turn_runtime_dom(
             }
         }
 
+        let lifecycle_class = format!("{} {}", room_class, lifecycle.css_class());
+        let lifecycle_label = html_escape(&format!("{} ({})", lifecycle.label(), lifecycle.label_ko()));
         let html = format!(
             r#"
 <div class="turn-runtime-grid">
@@ -248,8 +250,6 @@ pub fn update_turn_runtime_dom(
   <div class="turn-runtime-item"><span class="k">Party</span><span class="v {party_class}">{party}</span></div>
 </div>
 "#,
-            lifecycle_class = format!("{} {}", room_class, lifecycle.css_class()),
-            lifecycle_label = html_escape(&format!("{} ({})", lifecycle.label(), lifecycle.label_ko())),
             lifecycle_help = html_escape(lifecycle.help_text()),
             room_class = room_class,
             room = html_escape(room_status_label(lifecycle)),

@@ -62,6 +62,15 @@ pub fn start_round_loop(
     progress: Res<TurnProgressState>,
 ) {
     let runner = RoundRunner::default();
+
+    #[cfg(target_arch = "wasm32")]
+    if !auto_round_enabled() {
+        runner.running.store(false, Ordering::SeqCst);
+        log::info!("RoundRunner: auto round loop disabled (manual Run Round only)");
+        commands.insert_resource(runner);
+        return;
+    }
+
     runner.running.store(true, Ordering::SeqCst);
 
     #[cfg(target_arch = "wasm32")]
@@ -354,6 +363,20 @@ fn parse_http_status(detail: &str) -> Option<u16> {
     } else {
         code_text.parse::<u16>().ok()
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn auto_round_enabled() -> bool {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return false;
+    };
+    dashboard
+        .get_attribute("data-auto-round")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "on"))
+        .unwrap_or(false)
 }
 
 // ─── Sleep Helper ──────────────────────────────

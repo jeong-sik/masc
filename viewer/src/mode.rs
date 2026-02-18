@@ -2914,30 +2914,44 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         ))
     };
 
-    let mut dm_keeper_args = json!({
+    let mut dm_keeper_up_args = json!({
         "name": dm_keeper,
         "goal": format!("TRPG room {}의 세계관 주민 DM keeper로 장면을 진행하세요.", room_id),
         "instructions": "모든 응답은 한국어로 작성하세요.",
         "proactive_enabled": false,
         "presence_keepalive": true
     });
-    if let Some(models_value) = models_value.clone() {
-        dm_keeper_args["models"] = models_value;
+    if let Some(models_value) = &models_value {
+        dm_keeper_up_args["models"] = models_value.clone();
     }
-    mcp_tool_call("masc_keeper_up", dm_keeper_args).await?;
+    mcp_tool_call("masc_keeper_up", dm_keeper_up_args)
+        .await
+        .map_err(|e| {
+            format!(
+                "DM keeper 준비 실패 ({}): {}. 새 keeper 생성 시 모델 입력이 필요합니다.",
+                dm_keeper, e
+            )
+        })?;
 
     for (actor_id, keeper_name) in &player_map {
-        let mut keeper_args = json!({
+        let mut player_keeper_up_args = json!({
             "name": keeper_name,
             "goal": format!("TRPG room {}에서 {} actor를 플레이하세요.", room_id, actor_id),
             "instructions": "모든 응답은 한국어로 작성하세요.",
             "proactive_enabled": false,
             "presence_keepalive": true
         });
-        if let Some(models_value) = models_value.clone() {
-            keeper_args["models"] = models_value;
+        if let Some(models_value) = &models_value {
+            player_keeper_up_args["models"] = models_value.clone();
         }
-        mcp_tool_call("masc_keeper_up", keeper_args).await?;
+        mcp_tool_call("masc_keeper_up", player_keeper_up_args)
+            .await
+            .map_err(|e| {
+                format!(
+                    "Player keeper 준비 실패 (actor {} / keeper {}): {}. 새 keeper 생성 시 모델 입력이 필요합니다.",
+                    actor_id, keeper_name, e
+                )
+            })?;
     }
 
     set_current_room_id(doc, &room_id);

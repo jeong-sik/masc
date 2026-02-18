@@ -1718,6 +1718,7 @@ let handle_pool_generate ctx args : result =
     in
     let* catalog = Trpg_preset_store.load_catalog ~base_dir:ctx.config.base_path in
     let* dm_preset = resolve_dm_preset ~seed catalog dm_preset_id in
+    (* +17 offset decorrelates world preset selection from DM selection using the same base seed *)
     let* world_preset = resolve_world_preset ~seed:(seed + 17) catalog world_preset_id in
     let* pool = generate_pool_members ~catalog ~pool_size ~seed in
     let suggested =
@@ -1837,12 +1838,14 @@ let handle_session_start ctx args : result =
     let* catalog = Trpg_preset_store.load_catalog ~base_dir in
     let* dm_preset = resolve_dm_preset ~seed:fallback_seed catalog dm_preset_id in
     let* world_preset =
+      (* +19 offset decorrelates world preset selection from DM selection *)
       resolve_world_preset ~seed:(fallback_seed + 19) catalog world_preset_id
     in
     let* party =
       match args |> member "party" with
       | `List xs when xs <> [] -> pool_members_of_json_list xs
       | _ ->
+          (* +37 offset decorrelates party selection from DM (+0) and world (+19) picks *)
           let fallback_party = default_party_from_catalog ~seed:(fallback_seed + 37) catalog 4 in
           if fallback_party = [] then Error "party is required (no character presets available)"
           else Ok fallback_party

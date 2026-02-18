@@ -1619,7 +1619,9 @@ fn apply_player_keeper_selection(doc: &web_sys::Document, selected: &[String]) {
                 .trim()
                 .to_string();
             let on = !value.is_empty() && selected.iter().any(|picked| picked == &value);
-            if on {
+            if let Some(option) = el.dyn_ref::<web_sys::HtmlOptionElement>() {
+                option.set_selected(on);
+            } else if on {
                 let _ = el.set_attribute("selected", "selected");
             } else {
                 let _ = el.remove_attribute("selected");
@@ -2727,15 +2729,11 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     if world_preset_id.is_empty() || dm_preset_id.is_empty() {
         if let Ok((world_options, dm_options)) = refresh_preset_selectors(doc).await {
             if world_preset_id.is_empty() {
-                world_preset_id = world_options
-                    .first()
-                    .map(|row| row.id.clone())
+                world_preset_id = pick_preset_id(&world_options, "new-game-world-select-bootstrap")
                     .unwrap_or_default();
             }
             if dm_preset_id.is_empty() {
-                dm_preset_id = dm_options
-                    .first()
-                    .map(|row| row.id.clone())
+                dm_preset_id = pick_preset_id(&dm_options, "new-game-dm-preset-select-bootstrap")
                     .unwrap_or_default();
             }
         }
@@ -2756,9 +2754,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
                 &preset_catalog,
                 &["world_presets", "world", "world_preset", "worlds"],
             );
-            world_preset_id = world_options
-                .first()
-                .map(|row| row.id.clone())
+            world_preset_id = pick_preset_id(&world_options, "new-game-world-select-catalog")
                 .or_else(|| extract_first_preset_id(&preset_catalog, "world_presets"))
                 .or_else(|| extract_first_preset_id(&preset_catalog, "world"))
                 .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "world"))
@@ -2767,9 +2763,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         if dm_preset_id.is_empty() {
             let dm_options =
                 collect_preset_options_from_catalog(&preset_catalog, &["dm_presets", "dm", "dm_preset", "dms"]);
-            dm_preset_id = dm_options
-                .first()
-                .map(|row| row.id.clone())
+            dm_preset_id = pick_preset_id(&dm_options, "new-game-dm-preset-select-catalog")
                 .or_else(|| extract_first_preset_id(&preset_catalog, "dm_presets"))
                 .or_else(|| extract_first_preset_id(&preset_catalog, "dm"))
                 .or_else(|| extract_first_preset_id_by_key(&preset_catalog, "dm"))
@@ -3222,6 +3216,20 @@ fn collect_preset_options_from_catalog(catalog: &Value, keys: &[&str]) -> Vec<Pr
 }
 
 #[cfg(target_arch = "wasm32")]
+fn pick_preset_id(options: &[PresetOption], salt: &str) -> Option<String> {
+    if options.is_empty() {
+        return None;
+    }
+    let len = options.len() as i64;
+    let mut hash = js_sys::Date::now() as i64;
+    for byte in salt.bytes() {
+        hash = hash.wrapping_mul(131).wrapping_add(byte as i64);
+    }
+    let idx = hash.rem_euclid(len) as usize;
+    options.get(idx).map(|opt| opt.id.clone())
+}
+
+#[cfg(target_arch = "wasm32")]
 fn select_options_set(
     doc: &web_sys::Document,
     select_id: &str,
@@ -3256,7 +3264,7 @@ fn select_options_set(
     {
         previous
     } else {
-        options[0].id.clone()
+        pick_preset_id(options, select_id).unwrap_or_else(|| options[0].id.clone())
     };
     select.set_value(&selected);
     Some(selected)

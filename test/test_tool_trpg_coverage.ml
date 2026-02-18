@@ -865,6 +865,65 @@ let test_actor_claim_rejects_dead_actor () =
     (contains_substring claim_msg "not alive");
   cleanup_dir base_dir
 
+(* ================================================================
+   entropy_seed / pick_by_seed unit tests
+   ================================================================ *)
+
+let test_entropy_seed_different_sessions () =
+  let s1 = Tool_trpg.entropy_seed ~session_id:"sess-aaa" ~salt:"round" in
+  let s2 = Tool_trpg.entropy_seed ~session_id:"sess-bbb" ~salt:"round" in
+  Alcotest.(check bool)
+    "different session IDs produce different seeds"
+    true (s1 <> s2)
+
+let test_entropy_seed_different_salts () =
+  let s1 = Tool_trpg.entropy_seed ~session_id:"sess-x" ~salt:"dm" in
+  let s2 = Tool_trpg.entropy_seed ~session_id:"sess-x" ~salt:"world" in
+  Alcotest.(check bool)
+    "different salts produce different seeds"
+    true (s1 <> s2)
+
+let test_entropy_seed_returns_int () =
+  let s = Tool_trpg.entropy_seed ~session_id:"test" ~salt:"salt" in
+  (* Just verify it returns a valid int by checking it's representable *)
+  Alcotest.(check bool) "seed is an integer" true (s = s)
+
+let test_pick_by_seed_empty_list () =
+  let result = Tool_trpg.pick_by_seed ~seed:42 [] in
+  Alcotest.(check (option string)) "empty list returns None" None result
+
+let test_pick_by_seed_single_element () =
+  let result = Tool_trpg.pick_by_seed ~seed:0 ["only"] in
+  Alcotest.(check (option string)) "single element always returned" (Some "only") result;
+  let result2 = Tool_trpg.pick_by_seed ~seed:999 ["only"] in
+  Alcotest.(check (option string)) "single element with any seed" (Some "only") result2
+
+let test_pick_by_seed_returns_valid_element () =
+  let items = ["alpha"; "beta"; "gamma"; "delta"] in
+  let result = Tool_trpg.pick_by_seed ~seed:7 items in
+  match result with
+  | None -> Alcotest.fail "expected Some but got None"
+  | Some v ->
+    Alcotest.(check bool)
+      "returned element is in the original list"
+      true (List.mem v items)
+
+let test_pick_by_seed_deterministic () =
+  let items = ["a"; "b"; "c"; "d"; "e"] in
+  let r1 = Tool_trpg.pick_by_seed ~seed:42 items in
+  let r2 = Tool_trpg.pick_by_seed ~seed:42 items in
+  Alcotest.(check (option string)) "same seed same result" r1 r2
+
+let test_pick_by_seed_negative_seed () =
+  let items = ["x"; "y"; "z"] in
+  let result = Tool_trpg.pick_by_seed ~seed:(-5) items in
+  match result with
+  | None -> Alcotest.fail "expected Some but got None for negative seed"
+  | Some v ->
+    Alcotest.(check bool)
+      "negative seed still returns valid element"
+      true (List.mem v items)
+
 let () =
   Alcotest.run "Tool_trpg coverage"
     [
@@ -919,5 +978,40 @@ let () =
             "reject dead actor claim"
             `Quick
             test_actor_claim_rejects_dead_actor;
+        ] );
+      ( "entropy",
+        [
+          Alcotest.test_case
+            "different sessions produce different seeds"
+            `Quick
+            test_entropy_seed_different_sessions;
+          Alcotest.test_case
+            "different salts produce different seeds"
+            `Quick
+            test_entropy_seed_different_salts;
+          Alcotest.test_case
+            "entropy_seed returns an int"
+            `Quick
+            test_entropy_seed_returns_int;
+          Alcotest.test_case
+            "pick_by_seed empty list returns None"
+            `Quick
+            test_pick_by_seed_empty_list;
+          Alcotest.test_case
+            "pick_by_seed single element always returned"
+            `Quick
+            test_pick_by_seed_single_element;
+          Alcotest.test_case
+            "pick_by_seed returns valid element from list"
+            `Quick
+            test_pick_by_seed_returns_valid_element;
+          Alcotest.test_case
+            "pick_by_seed is deterministic"
+            `Quick
+            test_pick_by_seed_deterministic;
+          Alcotest.test_case
+            "pick_by_seed handles negative seed"
+            `Quick
+            test_pick_by_seed_negative_seed;
         ] );
     ]

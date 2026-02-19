@@ -293,9 +293,9 @@ fn bind_auto_round_toggle(doc: &web_sys::Document) {
         crate::game::round_runner::set_auto_round_running(next);
     }) as Box<dyn FnMut()>);
 
-    let _ = button
-        .dyn_ref::<web_sys::EventTarget>()
-        .map(|target| target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
+    let _ = button.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+    });
     cb.forget();
 }
 
@@ -1199,7 +1199,7 @@ fn load_room_hub_visible() -> bool {
                 .flatten()
         })
         .map(|value| matches!(value.trim(), "1" | "true" | "on"))
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1299,7 +1299,7 @@ fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
         input.set_value(&selected);
     }
     if let Some(pill) = doc.get_element_by_id("room-status") {
-        let lifecycle = TrpgLifecycleState::Lobby;
+        let lifecycle = TrpgLifecycleState::Loading;
         pill.set_text_content(Some(&format!(
             "현재 방: {} · {}",
             selected,

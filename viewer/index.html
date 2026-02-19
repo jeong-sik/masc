@@ -16,7 +16,7 @@
             <p class="lobby-subtitle">Multi-Agent Streaming Coordination</p>
         </div>
 
-        <div class="mode-grid">
+        <div id="mode-cards" class="mode-grid">
             <button class="mode-card" data-mode="trpg">
                 <span class="mode-icon">⚔</span>
                 <span class="mode-name">그림란드 연대기</span>
@@ -166,6 +166,11 @@
                 </div>
                 <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
                 <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="true" title="AI 턴 자동 진행을 멈춥니다">자동 진행: ON</button>
+                <div class="session-control-inline">
+                    <button id="session-pause-btn" class="inline-toggle" type="button" title="현재 세션을 멈춥니다">멈춤</button>
+                    <button id="session-resume-btn" class="inline-toggle" type="button" title="멈춘 세션을 재개합니다">재개</button>
+                    <span id="session-control-status" class="widget-pill">세션 제어 대기</span>
+                </div>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>
@@ -466,6 +471,7 @@
                         <div id="action-history" class="action-history"></div>
                         <input type="hidden" id="claimed-actor-id" value="" />
                         <input type="hidden" id="claimed-keeper" value="" />
+                        <input type="hidden" id="claimed-room-id" value="" />
                     </div>
                 </div>
             </section>

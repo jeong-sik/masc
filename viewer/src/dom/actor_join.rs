@@ -402,6 +402,7 @@ fn set_claimed_state(actor_id: &str) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
+    let room_id = config::current_room_id();
 
     if let Some(el) = doc.get_element_by_id("claimed-actor-id") {
         if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
@@ -420,6 +421,12 @@ fn set_claimed_state(actor_id: &str) {
             }
         }
     }
+
+    if let Some(el) = doc.get_element_by_id("claimed-room-id") {
+        if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+            input.set_value(&room_id);
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -434,6 +441,11 @@ fn clear_claimed_state() {
         }
     }
     if let Some(el) = doc.get_element_by_id("claimed-keeper") {
+        if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+            input.set_value("");
+        }
+    }
+    if let Some(el) = doc.get_element_by_id("claimed-room-id") {
         if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
             input.set_value("");
         }
@@ -467,12 +479,33 @@ fn get_claimed_keeper_from_dom() -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn get_claimed_room_id_from_dom() -> Option<String> {
+    let doc = web_sys::window().and_then(|w| w.document())?;
+    let el = doc.get_element_by_id("claimed-room-id")?;
+    let input = el.dyn_ref::<web_sys::HtmlInputElement>()?;
+    let val = input.value();
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn restore_join_panel_state() {
     let Some(actor_id) = get_claimed_actor_id_from_dom() else {
         // No claimed actor, ensure join panel is visible
         swap_to_join_panel();
         return;
     };
+
+    let current_room = config::current_room_id();
+    let claimed_room = get_claimed_room_id_from_dom().unwrap_or_default();
+    if claimed_room.trim().is_empty() || claimed_room.trim() != current_room {
+        clear_claimed_state();
+        swap_to_join_panel();
+        return;
+    }
 
     // Have claimed actor, show action panel
     swap_to_action_panel(&actor_id);

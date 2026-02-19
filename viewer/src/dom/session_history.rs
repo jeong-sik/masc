@@ -664,6 +664,17 @@ fn sync_focus_state_to_hash(document: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(super) fn sync_history_focus_from_dashboard(document: &web_sys::Document) {
+    let room = read_focus_room(document);
+    let turn = read_focus_turn(document);
+    apply_history_focus(document, room.as_deref(), turn);
+    sync_focus_state_to_hash(document);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn sync_history_focus_from_dashboard(_document: &web_sys::Document) {}
+
+#[cfg(target_arch = "wasm32")]
 fn resolve_focus_room(rooms: &[RoomHistory], preferred: Option<&str>) -> Option<String> {
     if rooms.is_empty() {
         return None;

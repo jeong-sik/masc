@@ -696,6 +696,19 @@ body:not(.mode-trpg) #ops-hud {
     color: var(--text-dim);
     text-transform: none;
     letter-spacing: normal;
+    line-height: 1.35;
+}
+
+.new-game-inline-hint.is-ok {
+    color: #96d8b3;
+}
+
+.new-game-inline-hint.is-warn {
+    color: #d9b06c;
+}
+
+.new-game-inline-hint.is-error {
+    color: #dfa1a1;
 }
 
 #new-game-autopick-btn {
@@ -2246,6 +2259,40 @@ body:not(.mode-trpg) #ops-hud {
 
 #turn-control-status.status-error {
     color: #d44;
+}
+
+.turn-control-gate {
+    flex: 1 1 100%;
+    border: 1px solid var(--border-main);
+    border-radius: 8px;
+    padding: 5px 8px;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    color: var(--text-dim);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.turn-control-gate.status-ok {
+    border-color: rgba(122, 206, 155, 0.4);
+    color: #96d8b3;
+    background: rgba(23, 56, 44, 0.22);
+}
+
+.turn-control-gate.status-info {
+    border-color: rgba(109, 122, 164, 0.4);
+    color: var(--text-dim);
+}
+
+.turn-control-gate.status-warn {
+    border-color: rgba(196, 162, 101, 0.42);
+    color: #d9b06c;
+    background: rgba(70, 52, 23, 0.24);
+}
+
+.turn-control-gate.status-error {
+    border-color: rgba(215, 118, 118, 0.46);
+    color: #dfa1a1;
+    background: rgba(80, 29, 29, 0.28);
 }
 
 #round-recovery-btn {

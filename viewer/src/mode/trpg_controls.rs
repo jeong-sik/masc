@@ -152,6 +152,31 @@ fn set_step_state(doc: &web_sys::Document, id: &str, state: &str) {
     }
 }
 
+fn set_inline_hint(doc: &web_sys::Document, id: &str, text: &str, state: &str) {
+    let Some(el) = doc.get_element_by_id(id) else {
+        return;
+    };
+    let class_name = match state {
+        "ok" => "new-game-inline-hint is-ok",
+        "warn" => "new-game-inline-hint is-warn",
+        "error" => "new-game-inline-hint is-error",
+        _ => "new-game-inline-hint",
+    };
+    let _ = el.set_attribute("class", class_name);
+    el.set_text_content(Some(text));
+}
+
+fn summarize_names(names: &[String], max_preview: usize) -> String {
+    if names.is_empty() {
+        return "-".to_string();
+    }
+    if names.len() <= max_preview {
+        return names.join(", ");
+    }
+    let preview = names[..max_preview].join(", ");
+    format!("{} 외 {}명", preview, names.len() - max_preview)
+}
+
 fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     let preflight_state = new_game_preflight_state(doc);
     let dm_keeper = selected_dm_keeper(doc);
@@ -193,34 +218,85 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     set_step_state(doc, "new-game-step-2", step2_state);
     set_step_state(doc, "new-game-step-3", step3_state);
 
+    let start_gate_reason = if busy {
+        "세션 시작 작업 실행 중입니다. 완료까지 기다려주세요.".to_string()
+    } else if preflight_state != "ok" {
+        "사전 점검을 먼저 통과해야 세션 시작이 가능합니다.".to_string()
+    } else if !dm_selected {
+        "DM keeper를 선택하세요.".to_string()
+    } else if has_conflict {
+        "DM keeper와 플레이어 keeper가 중복되었습니다.".to_string()
+    } else if players.is_empty() {
+        "플레이어 keeper를 최소 1명 선택하세요.".to_string()
+    } else {
+        format!(
+            "세션 시작 가능: DM {} / 플레이어 {}명",
+            dm_keeper,
+            players.len()
+        )
+    };
+
     if let Some(start_btn) = doc
         .get_element_by_id("new-game-start")
         .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
     {
         start_btn.set_disabled(!ready || busy);
+        start_btn.set_title(&start_gate_reason);
     }
 
     if let Some(hint) = doc.get_element_by_id("new-game-step-hint") {
-        let text = if busy {
-            "세션 시작 작업 실행 중입니다. 완료될 때까지 기다려주세요.".to_string()
-        } else if preflight_state != "ok" {
-            "1단계: 사전 점검을 먼저 통과해야 세션 시작이 가능합니다.".to_string()
-        } else if !dm_selected {
-            "2단계: DM keeper를 선택하세요.".to_string()
-        } else if has_conflict {
-            "2단계: DM과 플레이어 keeper가 중복되었습니다. 서로 다른 keeper를 선택하세요."
-                .to_string()
-        } else if players.is_empty() {
-            "2단계: 플레이어 keeper를 최소 1명 선택하세요.".to_string()
-        } else {
+        let text = if ready {
             format!(
-                "3단계 준비 완료: DM {} · 플레이어 {}명. 세션 시작 버튼을 누르세요.",
+                "3단계 준비 완료: DM {} · 플레이어 {}명({}). 세션 시작 버튼을 누르세요.",
                 dm_keeper,
-                players.len()
+                players.len(),
+                summarize_names(&players, 3)
             )
+        } else {
+            format!("진행 가이드: {}", start_gate_reason)
         };
         hint.set_text_content(Some(&text));
     }
+
+    let dm_hint = if dm_selected {
+        format!("선택된 DM: {}", dm_keeper)
+    } else {
+        "DM을 1명 선택하세요.".to_string()
+    };
+    set_inline_hint(
+        doc,
+        "new-game-dm-hint",
+        &dm_hint,
+        if dm_selected { "ok" } else { "warn" },
+    );
+
+    let player_hint = if has_conflict {
+        format!(
+            "플레이어 {}명 선택됨 · DM({})과 중복됨",
+            players.len(),
+            dm_keeper
+        )
+    } else if players.is_empty() {
+        "플레이어 0명 선택됨 · DM과 중복 불가".to_string()
+    } else {
+        format!(
+            "플레이어 {}명 선택됨 · {}",
+            players.len(),
+            summarize_names(&players, 4)
+        )
+    };
+    set_inline_hint(
+        doc,
+        "new-game-player-hint",
+        &player_hint,
+        if has_conflict {
+            "error"
+        } else if players.is_empty() {
+            "warn"
+        } else {
+            "ok"
+        },
+    );
 }
 
 fn ensure_new_game_ready(doc: &web_sys::Document) -> Result<(), String> {
@@ -247,12 +323,47 @@ fn update_new_game_player_hint(doc: &web_sys::Document) {
     };
     let players = selected_player_keepers(doc);
     let dm_keeper = selected_dm_keeper(doc);
-
-    let mut message = format!("플레이어 {}명 선택됨", players.len());
-    if !dm_keeper.is_empty() && players.iter().any(|name| name == &dm_keeper) {
-        message.push_str(&format!(" · DM 중복: {}", dm_keeper));
-    }
+    let conflict = !dm_keeper.is_empty() && players.iter().any(|name| name == &dm_keeper);
+    let message = if conflict {
+        format!(
+            "플레이어 {}명 선택됨 · DM({})과 중복됨",
+            players.len(),
+            dm_keeper
+        )
+    } else if players.is_empty() {
+        "플레이어 0명 선택됨 · DM과 중복 불가".to_string()
+    } else {
+        format!(
+            "플레이어 {}명 선택됨 · {}",
+            players.len(),
+            summarize_names(&players, 4)
+        )
+    };
+    let state = if conflict {
+        "error"
+    } else if players.is_empty() {
+        "warn"
+    } else {
+        "ok"
+    };
+    let class_name = match state {
+        "ok" => "new-game-inline-hint is-ok",
+        "warn" => "new-game-inline-hint is-warn",
+        "error" => "new-game-inline-hint is-error",
+        _ => "new-game-inline-hint",
+    };
+    let _ = hint.set_attribute("class", class_name);
     hint.set_text_content(Some(&message));
+
+    if let Some(dm_hint) = doc.get_element_by_id("new-game-dm-hint") {
+        if dm_keeper.is_empty() {
+            let _ = dm_hint.set_attribute("class", "new-game-inline-hint is-warn");
+            dm_hint.set_text_content(Some("DM을 1명 선택하세요."));
+        } else {
+            let _ = dm_hint.set_attribute("class", "new-game-inline-hint is-ok");
+            dm_hint.set_text_content(Some(&format!("선택된 DM: {}", dm_keeper)));
+        }
+    }
     sync_new_game_wizard_ui(doc);
 }
 

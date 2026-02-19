@@ -630,6 +630,14 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(el) = doc.get_element_by_id("turn-controls") {
         let _ = el.set_attribute("style", "display:none");
     }
+    if let Some(el) = doc.get_element_by_id("turn-control-status") {
+        el.set_text_content(Some(""));
+        let _ = el.set_attribute("class", "");
+    }
+    if let Some(el) = doc.get_element_by_id("turn-control-gate") {
+        el.set_text_content(Some("실행 조건 점검 중..."));
+        let _ = el.set_attribute("class", "turn-control-gate status-info");
+    }
     if let Some(el) = doc.get_element_by_id("action-panel") {
         let _ = el.set_attribute("style", "display:none");
     }

@@ -73,7 +73,25 @@ fn is_meta_line(line: &str) -> bool {
         || lower.contains("structured_action")
 }
 
+fn is_prompt_recall_artifact(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    let has_visible_state = lower.contains("visible_state_json:");
+    let has_state_dump =
+        lower.contains("\"narration_log\"") || lower.contains("\"dice_log\"") || lower.contains("\"party\"");
+    let has_prompt_directive =
+        lower.contains("trpg 실행 요청입니다") || lower.contains("반드시 한국어로 응답하세요");
+    let has_reply_blob = lower.contains("\"reply\":") && lower.contains("skill:");
+
+    (has_visible_state && (has_state_dump || has_prompt_directive))
+        || has_reply_blob
+        || (has_prompt_directive && lower.contains("[state]"))
+}
+
 fn normalize_narrative_text(raw: &str) -> String {
+    if is_prompt_recall_artifact(raw) {
+        return String::new();
+    }
+
     let truncated = truncate_before_meta_markers(raw);
     let no_code = strip_fenced_code_blocks(truncated);
     let no_state = strip_state_block(&no_code);
@@ -386,5 +404,18 @@ visible_state_json:
 {"turn":8}
 "#;
         assert_eq!(normalize_narrative_text(raw), "장면은 유지된다.");
+    }
+
+    #[test]
+    fn normalize_narrative_text_drops_prompt_recall_blob() {
+        let raw = r#""reply": "SKILL: masc-heartbeat ... "
+visible_state_json:
+{
+  "narration_log": [],
+  "dice_log": []
+}
+반드시 한국어로 응답하세요.
+"#;
+        assert_eq!(normalize_narrative_text(raw), "");
     }
 }

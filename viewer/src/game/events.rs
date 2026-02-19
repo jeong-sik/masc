@@ -7,6 +7,9 @@ use serde::Deserialize;
 pub struct DiceRollPayload {
     #[allow(dead_code)] // read only in wasm32 DOM code
     pub turn: u32,
+    #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
+    pub room_id: String,
     pub character: String,
     pub action: String,
     pub d20: i32,
@@ -34,6 +37,9 @@ pub struct NarrativePayload {
     #[serde(default)]
     pub turn: u32,
     #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
+    pub room_id: String,
+    #[serde(default)]
     pub speaker: Option<String>,
 }
 
@@ -49,6 +55,8 @@ pub struct AreaMovePayload {
 pub struct TurnAdvancePayload {
     pub turn: u32,
     pub phase: String,
+    #[serde(default)]
+    pub room_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,6 +103,9 @@ pub struct TurnProgressPayload {
     pub turn: u32,
     #[serde(default)]
     pub phase: String,
+    #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
+    pub room_id: String,
     #[serde(default)]
     pub actor_id: String,
     #[serde(default)]

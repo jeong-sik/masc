@@ -157,6 +157,9 @@ pub fn apply_turn_advance(
     mut room_state: ResMut<RoomState>,
 ) {
     for TurnAdvanced(payload) in events.read() {
+        if !payload.room_id.is_empty() {
+            room_state.id = payload.room_id.clone();
+        }
         room_state.turn = payload.turn;
         room_state.phase = TurnPhase::from_str(&payload.phase);
     }
@@ -487,6 +490,9 @@ pub fn apply_room_started(
     mut room_state: ResMut<RoomState>,
 ) {
     for RoomStarted(p) in events.read() {
+        if !p.room_id.is_empty() {
+            room_state.id = p.room_id.clone();
+        }
         if !p.status.is_empty() {
             room_state.status = p.status.clone();
         } else {
@@ -506,6 +512,9 @@ pub fn apply_phase_changed(
     mut room_state: ResMut<RoomState>,
 ) {
     for PhaseChanged(p) in events.read() {
+        if !p.room_id.is_empty() {
+            room_state.id = p.room_id.clone();
+        }
         room_state.phase = TurnPhase::from_str(&p.phase);
     }
 }
@@ -515,6 +524,9 @@ pub fn apply_turn_started(
     mut room_state: ResMut<RoomState>,
 ) {
     for TurnStarted(p) in events.read() {
+        if !p.room_id.is_empty() {
+            room_state.id = p.room_id.clone();
+        }
         room_state.turn = p.turn;
         room_state.phase = TurnPhase::from_str(&p.phase);
     }

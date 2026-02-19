@@ -235,6 +235,111 @@ type trpg_api_result = (Yojson.Safe.t, trpg_api_error_kind * string) result
 let trpg_error_json (msg : string) : Yojson.Safe.t =
   `Assoc [ ("ok", `Bool false); ("error", `String msg) ]
 
+let trpg_normalize_events_json
+    ?(default_room_id = "")
+    (json : Yojson.Safe.t) : Yojson.Safe.t =
+  let normalize_room_id raw =
+    let trimmed = String.trim raw in
+    if trimmed = "" then default_room_id else trimmed
+  in
+  let int_of_json = function
+    | `Int i -> Some i
+    | `Intlit s -> (try Some (int_of_string s) with Failure _ -> None)
+    | `Float f -> Some (int_of_float f)
+    | `String s -> (
+        let s = String.trim s in
+        if s = "" then None else (try Some (int_of_string s) with Failure _ -> None))
+    | _ -> None
+  in
+  let json_assoc_member key = function
+    | `Assoc fields -> List.assoc_opt key fields
+    | _ -> None
+  in
+  let event_seq idx ev =
+    match Option.bind (json_assoc_member "seq" ev) int_of_json with
+    | Some seq -> seq
+    | None -> (
+        match Option.bind (json_assoc_member "event_id" ev) int_of_json with
+        | Some seq -> seq
+        | None -> idx + 1)
+  in
+  let event_turn ev =
+    let from_keys keys src =
+      keys
+      |> List.find_map (fun key -> Option.bind (json_assoc_member key src) int_of_json)
+    in
+    match from_keys [ "turn"; "turn_after"; "turn_before" ] ev with
+    | Some turn -> turn
+    | None -> (
+        match json_assoc_member "payload" ev with
+        | Some payload ->
+            Option.value
+              ~default:0
+              (from_keys [ "turn"; "turn_after"; "turn_before" ] payload)
+        | None -> 0)
+  in
+  let event_room_id ev =
+    let direct =
+      Option.bind
+        (json_assoc_member "room_id" ev)
+        (function
+          | `String s -> Some s
+          | _ -> None)
+    in
+    match direct with
+    | Some room -> normalize_room_id room
+    | None -> (
+        match json_assoc_member "payload" ev with
+        | Some payload -> (
+            match json_assoc_member "room_id" payload with
+            | Some (`String room) -> normalize_room_id room
+            | _ -> default_room_id)
+        | None -> default_room_id)
+  in
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "events" fields with
+      | Some (`List events) ->
+          let indexed =
+            events
+            |> List.mapi (fun idx ev ->
+                   let room_id = event_room_id ev in
+                   let turn = event_turn ev in
+                   let seq = event_seq idx ev in
+                   (room_id, turn, seq, idx, ev))
+            |> List.sort (fun (room_a, turn_a, seq_a, idx_a, _) (room_b, turn_b, seq_b, idx_b, _) ->
+                   let c_room = String.compare room_a room_b in
+                   if c_room <> 0 then c_room
+                   else
+                     let c_turn = Int.compare turn_a turn_b in
+                     if c_turn <> 0 then c_turn
+                     else
+                       let c_seq = Int.compare seq_a seq_b in
+                       if c_seq <> 0 then c_seq else Int.compare idx_a idx_b)
+          in
+          let seen = Hashtbl.create (List.length indexed) in
+          let deduped =
+            indexed
+            |> List.filter_map (fun (room_id, turn, seq, _idx, ev) ->
+                   let key = Printf.sprintf "%s\x1f%d\x1f%d" room_id turn seq in
+                   if Hashtbl.mem seen key then None
+                   else (
+                     Hashtbl.add seen key ();
+                     Some ev))
+          in
+          let updated =
+            ("events", `List deduped) :: List.remove_assoc "events" fields
+          in
+          let updated =
+            if List.mem_assoc "count" fields then
+              ("count", `Int (List.length deduped)) :: List.remove_assoc "count" updated
+            else
+              updated
+          in
+          `Assoc updated
+      | _ -> json)
+  | _ -> json
+
 let trpg_rule_by_id (rule_id : string)
   : ((module Masc_mcp.Trpg_rule.S), trpg_api_error_kind * string) result =
   let normalized = String.trim rule_id |> String.lowercase_ascii in
@@ -4529,7 +4634,8 @@ let make_routes ~port ~host =
          let event_type_filter = query_param req "event_type" in
          match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
          | Ok json ->
-             respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             let normalized = trpg_normalize_events_json ~default_room_id:room_id json in
+             respond_json_with_cors request reqd (Yojson.Safe.to_string normalized)
          | Error (`Bad_request, msg) ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
@@ -4641,7 +4747,8 @@ let make_routes ~port ~host =
          let event_type_filter = query_param req "event_type" in
          match trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter with
          | Ok json ->
-             respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             let normalized = trpg_normalize_events_json ~default_room_id:room_id json in
+             respond_json_with_cors request reqd (Yojson.Safe.to_string normalized)
          | Error (`Bad_request, msg) ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
@@ -5417,7 +5524,8 @@ let run_server ~sw ~env ~port ~base_path =
           let event_type_filter = query_param httpun_request "event_type" in
           (match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
           | Ok json ->
-              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+              let normalized = trpg_normalize_events_json ~default_room_id:room_id json in
+              h2_respond_json h2_reqd (Yojson.Safe.to_string normalized) ~extra_headers:cors
           | Error (`Bad_request, msg) ->
               h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
                 ~status:`Bad_request ~extra_headers:cors
@@ -5536,7 +5644,8 @@ let run_server ~sw ~env ~port ~base_path =
           let event_type_filter = query_param httpun_request "event_type" in
           (match trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter with
           | Ok json ->
-              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+              let normalized = trpg_normalize_events_json ~default_room_id:room_id json in
+              h2_respond_json h2_reqd (Yojson.Safe.to_string normalized) ~extra_headers:cors
           | Error (`Bad_request, msg) ->
               h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
                 ~status:`Bad_request ~extra_headers:cors

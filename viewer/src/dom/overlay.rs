@@ -34,10 +34,10 @@ fn pretty_label(raw: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 fn weather_icon_path(id: &str) -> Option<&'static str> {
     match id {
-        "drizzle" => Some("assets/weather/weather_drizzle.png"),
-        "heavy_rain" => Some("assets/weather/weather_heavy_rain.png"),
-        "fog" => Some("assets/weather/weather_fog.png"),
-        "silence" => Some("assets/weather/weather_silence.png"),
+        "drizzle" => Some("/assets/weather/weather_drizzle.png"),
+        "heavy_rain" => Some("/assets/weather/weather_heavy_rain.png"),
+        "fog" => Some("/assets/weather/weather_fog.png"),
+        "silence" => Some("/assets/weather/weather_silence.png"),
         _ => None,
     }
 }
@@ -45,9 +45,9 @@ fn weather_icon_path(id: &str) -> Option<&'static str> {
 #[cfg(target_arch = "wasm32")]
 fn mood_icon_path(id: &str) -> Option<&'static str> {
     match id {
-        "quiet_unease" => Some("assets/moods/mood_quiet_unease.png"),
-        "tension_rising" => Some("assets/moods/mood_tension_rising.png"),
-        "ambiguous_calm" => Some("assets/moods/mood_ambiguous_calm.png"),
+        "quiet_unease" => Some("/assets/moods/mood_quiet_unease.png"),
+        "tension_rising" => Some("/assets/moods/mood_tension_rising.png"),
+        "ambiguous_calm" => Some("/assets/moods/mood_ambiguous_calm.png"),
         _ => None,
     }
 }

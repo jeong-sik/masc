@@ -106,6 +106,8 @@ fn reset_trpg_dom_state(
 
     #[cfg(target_arch = "wasm32")]
     {
+        use wasm_bindgen::JsCast;
+
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
@@ -126,6 +128,19 @@ fn reset_trpg_dom_state(
         }
         if let Some(el) = document.get_element_by_id("turn-runtime") {
             el.set_inner_html("");
+        }
+        for target_id in ["bevy-canvas", "primary-zone"] {
+            if let Some(target) = document
+                .get_element_by_id(target_id)
+                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let style = target.style();
+                let _ = style.set_property("background-image", "url('/assets/maps/area_a.jpg')");
+                let _ = style.set_property("background-size", "cover");
+                let _ = style.set_property("background-position", "center");
+                let _ = style.set_property("background-repeat", "no-repeat");
+                let _ = style.set_property("background-color", "#05070f");
+            }
         }
         if let Some(el) = document.get_element_by_id("weather-indicator") {
             el.set_text_content(None);

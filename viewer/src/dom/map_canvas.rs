@@ -35,16 +35,18 @@ pub fn update_canvas_map_dom(map_state: Res<MapState>, mut cache: ResMut<CanvasM
         return;
     };
 
-    if let Some(canvas) = document
-        .get_element_by_id("bevy-canvas")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
-    {
-        let style = canvas.style();
-        let _ = style.set_property("background-image", &format!("url('{}')", asset_url));
-        let _ = style.set_property("background-size", "cover");
-        let _ = style.set_property("background-position", "center");
-        let _ = style.set_property("background-repeat", "no-repeat");
-        let _ = style.set_property("background-color", "#05070f");
+    for target_id in ["bevy-canvas", "primary-zone"] {
+        if let Some(target) = document
+            .get_element_by_id(target_id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            let style = target.style();
+            let _ = style.set_property("background-image", &format!("url('{}')", asset_url));
+            let _ = style.set_property("background-size", "cover");
+            let _ = style.set_property("background-position", "center");
+            let _ = style.set_property("background-repeat", "no-repeat");
+            let _ = style.set_property("background-color", "#05070f");
+        }
     }
 
     if let Some(label_el) = document.get_element_by_id("map-label") {

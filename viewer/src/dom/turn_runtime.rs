@@ -17,7 +17,7 @@ use super::escape::html_escape;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, HtmlSelectElement};
 
 #[cfg(target_arch = "wasm32")]
 fn pretty_phase(phase: &str) -> String {
@@ -588,13 +588,42 @@ fn persist_round_plan_inputs(document: &web_sys::Document, room_id: &str) {
         .map(|input| input.value())
         .unwrap_or_default();
 
-    if dm.trim().is_empty() && players.trim().is_empty() {
+    let existing = storage
+        .get_item(&round_plan_storage_key(room_id))
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    let existing_dm = existing
+        .as_ref()
+        .and_then(|payload| payload.get("dm"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let existing_players = existing
+        .as_ref()
+        .and_then(|payload| payload.get("players"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+
+    let dm_to_store = if dm.trim().is_empty() {
+        existing_dm
+    } else {
+        dm.trim()
+    };
+    let players_to_store = if players.trim().is_empty() {
+        existing_players
+    } else {
+        players.trim()
+    };
+
+    if dm_to_store.is_empty() && players_to_store.is_empty() {
         return;
     }
 
     let payload = serde_json::json!({
-        "dm": dm.trim(),
-        "players": players.trim(),
+        "dm": dm_to_store,
+        "players": players_to_store,
     });
     let _ = storage.set_item(&round_plan_storage_key(room_id), &payload.to_string());
 }
@@ -971,6 +1000,13 @@ pub fn update_turn_runtime_dom(
                 .iter()
                 .find(|actor| actor.id == "dm" && !actor.keeper.trim().is_empty())
                 .map(|actor| actor.keeper.trim().to_string())
+                .or_else(|| {
+                    document
+                        .get_element_by_id("new-game-dm-select")
+                        .and_then(|el| el.dyn_into::<HtmlSelectElement>().ok())
+                        .map(|select| select.value().trim().to_string())
+                        .filter(|value| !value.is_empty())
+                })
                 .unwrap_or_default()
         };
         if let Some(dm_input) = document

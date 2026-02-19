@@ -616,11 +616,49 @@ fn parse_actor_control_map(state: &Value) -> HashMap<String, String> {
         })
         .unwrap_or_default();
 
+    for (actor_id, keeper_name) in infer_actor_control_from_dice(state) {
+        actor_control.entry(actor_id).or_insert(keeper_name);
+    }
     for (actor_id, keeper_name) in infer_actor_control_from_narration(state) {
         actor_control.entry(actor_id).or_insert(keeper_name);
     }
 
     actor_control
+}
+
+fn infer_actor_control_from_dice(state: &Value) -> HashMap<String, String> {
+    state
+        .get("dice_log")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let actor_id = entry
+                        .get("actor_id")
+                        .or_else(|| entry.get("character"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or("");
+                    let keeper_name = entry
+                        .get("keeper")
+                        .or_else(|| entry.get("keeper_name"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or("");
+
+                    if actor_id.is_empty()
+                        || keeper_name.is_empty()
+                        || actor_id.eq_ignore_ascii_case("dm")
+                    {
+                        None
+                    } else {
+                        Some((actor_id.to_string(), keeper_name.to_string()))
+                    }
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default()
 }
 
 fn infer_actor_control_from_narration(state: &Value) -> HashMap<String, String> {
@@ -1188,6 +1226,36 @@ mod tests {
             .find(|row| row.id == "luna")
             .expect("luna row");
         assert_eq!(luna.keeper, "trpg-luna");
+    }
+
+    #[test]
+    fn normalize_masc_shape_infers_dm_keeper_from_narration_log() {
+        let root = json!({
+            "ok": true,
+            "room_id": "default",
+            "state": {
+                "turn": 2,
+                "phase": "dm_narration",
+                "actor_control": {
+                    "grimja": "trpg-grimja"
+                },
+                "narration_log": [
+                    {
+                        "role": "player",
+                        "actor_id": "grimja",
+                        "keeper": "trpg-grimja"
+                    },
+                    {
+                        "role": "dm",
+                        "actor_id": "dm",
+                        "keeper": "  trpg-dm  "
+                    }
+                ]
+            }
+        });
+
+        let parsed = normalize_state_response(root).expect("masc parse should succeed");
+        assert_eq!(parsed.dm_keeper, "trpg-dm");
     }
 
     #[test]

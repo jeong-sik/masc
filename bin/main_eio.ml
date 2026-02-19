@@ -953,6 +953,20 @@ let trpg_keeper_call_with_runtime
   | Eio.Time.Timeout -> `Timeout
   | exn -> `Error (Printexc.to_string exn)
 
+type trpg_round_run_guard_state = {
+  mutex : Mutex.t;
+  inflight_rooms : (string, unit) Hashtbl.t;
+  idempotency_cache : (string, Yojson.Safe.t) Hashtbl.t;
+  mutable cache_writes : int;
+}
+
+let trpg_round_run_guard : trpg_round_run_guard_state =
+  {
+    mutex = Mutex.create ();
+    inflight_rooms = Hashtbl.create 64;
+    idempotency_cache = Hashtbl.create 512;
+    cache_writes = 0;
+  }
 let trpg_keeper_probe_with_runtime
     ~(config : Room.config)
     ~(sw : Eio.Switch.t)
@@ -975,44 +989,142 @@ let trpg_keeper_probe_with_runtime
   with
   | Eio.Time.Timeout -> `Error "timeout"
   | exn -> `Error (Printexc.to_string exn)
-
 let trpg_round_run_json
     ~(state : Mcp_server.server_state)
     ~(agent_name : string)
     ~(sw : Eio.Switch.t)
     ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+    ~(idempotency_key : string option)
     ~body_str
   : trpg_api_result =
+  let with_round_run_guard_lock f =
+    Mutex.lock trpg_round_run_guard.mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock trpg_round_run_guard.mutex) f
+  in
+  let trpg_round_run_extract_room_id (args : Yojson.Safe.t) : string =
+    let pick key =
+      match Yojson.Safe.Util.member key args with
+      | `String raw ->
+          let trimmed = String.trim raw in
+          if trimmed = "" then None else Some trimmed
+      | _ -> None
+    in
+    match pick "room_id" with
+    | Some room_id -> room_id
+    | None -> (
+        match pick "room" with
+        | Some room_id -> room_id
+        | None -> "default")
+  in
+  let trpg_round_run_extract_idempotency_key
+      ~(header_key : string option)
+      (args : Yojson.Safe.t) : string option =
+    let normalize = function
+      | None -> None
+      | Some raw ->
+          let trimmed = String.trim raw in
+          if trimmed = "" then None else Some trimmed
+    in
+    match normalize header_key with
+    | Some _ as key -> key
+    | None -> (
+        match Yojson.Safe.Util.member "idempotency_key" args with
+        | `String raw -> normalize (Some raw)
+        | _ -> None)
+  in
+  let trpg_round_run_cache_key ~room_id ~idempotency_key =
+    room_id ^ "\x1f" ^ idempotency_key
+  in
+  let trpg_round_run_cache_lookup ~room_id ~idempotency_key =
+    let key = trpg_round_run_cache_key ~room_id ~idempotency_key in
+    with_round_run_guard_lock (fun () ->
+      Hashtbl.find_opt trpg_round_run_guard.idempotency_cache key)
+  in
+  let trpg_round_run_cache_store ~room_id ~idempotency_key ~result_json =
+    let key = trpg_round_run_cache_key ~room_id ~idempotency_key in
+    with_round_run_guard_lock (fun () ->
+      Hashtbl.replace trpg_round_run_guard.idempotency_cache key result_json;
+      trpg_round_run_guard.cache_writes <- trpg_round_run_guard.cache_writes + 1;
+      if trpg_round_run_guard.cache_writes >= 1024
+         && Hashtbl.length trpg_round_run_guard.idempotency_cache > 4096
+      then (
+        Hashtbl.reset trpg_round_run_guard.idempotency_cache;
+        trpg_round_run_guard.cache_writes <- 0))
+  in
+  let trpg_round_run_try_acquire ~room_id =
+    with_round_run_guard_lock (fun () ->
+      if Hashtbl.mem trpg_round_run_guard.inflight_rooms room_id then false
+      else (
+        Hashtbl.replace trpg_round_run_guard.inflight_rooms room_id ();
+        true))
+  in
+  let trpg_round_run_release ~room_id =
+    with_round_run_guard_lock (fun () ->
+      Hashtbl.remove trpg_round_run_guard.inflight_rooms room_id)
+  in
   try
     let args = Yojson.Safe.from_string body_str in
-    let keeper_call =
-      trpg_keeper_call_with_runtime
-        ~config:state.Mcp_server.room_config
-        ~sw
-        ~clock
+    let room_id = trpg_round_run_extract_room_id args in
+    let idempotency_key =
+      trpg_round_run_extract_idempotency_key ~header_key:idempotency_key args
     in
-    let keeper_probe =
-      trpg_keeper_probe_with_runtime
-        ~config:state.Mcp_server.room_config
-        ~sw
-        ~clock
+    let run_once () =
+      let keeper_call =
+        trpg_keeper_call_with_runtime
+          ~config:state.Mcp_server.room_config
+          ~sw
+          ~clock
+      in
+      let keeper_probe =
+        trpg_keeper_probe_with_runtime
+          ~config:state.Mcp_server.room_config
+          ~sw
+          ~clock
+      in
+      let trpg_ctx : Masc_mcp.Tool_trpg.context =
+        {
+          config = state.Mcp_server.room_config;
+          agent_name;
+          keeper_call = Some keeper_call;
+          keeper_probe = Some keeper_probe;
+        }
+      in
+      match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with
+      | None ->
+          Error (`Internal_server_error, "masc_trpg_round_run dispatch unavailable")
+      | Some (false, msg) -> Error (`Bad_request, msg)
+      | Some (true, body) -> (
+          try Ok (Yojson.Safe.from_string body)
+          with Yojson.Json_error e ->
+            Error (`Internal_server_error, Printf.sprintf "invalid tool json: %s" e))
     in
-    let trpg_ctx : Masc_mcp.Tool_trpg.context =
-      {
-        config = state.Mcp_server.room_config;
-        agent_name;
-        keeper_call = Some keeper_call;
-        keeper_probe = Some keeper_probe;
-      }
+    let run_with_single_flight () =
+      if not (trpg_round_run_try_acquire ~room_id) then
+        Error
+          ( `Bad_request,
+            Printf.sprintf
+              "round run already in progress for room_id=%s (single-flight)"
+              room_id )
+      else
+        Fun.protect
+          ~finally:(fun () -> trpg_round_run_release ~room_id)
+          (fun () ->
+            let result = run_once () in
+            (match (result, idempotency_key) with
+            | Ok json, Some idem_key ->
+                trpg_round_run_cache_store
+                  ~room_id
+                  ~idempotency_key:idem_key
+                  ~result_json:json
+            | _ -> ());
+            result)
     in
-    match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with
-    | None ->
-        Error (`Internal_server_error, "masc_trpg_round_run dispatch unavailable")
-    | Some (false, msg) -> Error (`Bad_request, msg)
-    | Some (true, body) -> (
-        try Ok (Yojson.Safe.from_string body)
-        with Yojson.Json_error e ->
-          Error (`Internal_server_error, Printf.sprintf "invalid tool json: %s" e))
+    match idempotency_key with
+    | Some idem_key -> (
+        match trpg_round_run_cache_lookup ~room_id ~idempotency_key:idem_key with
+        | Some json -> Ok json
+        | None -> run_with_single_flight ())
+    | None -> run_with_single_flight ()
   with
   | Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
   | exn -> Error (`Internal_server_error, Printexc.to_string exn)
@@ -1064,7 +1176,7 @@ let cors_headers origin = [
   ("access-control-allow-origin", origin);
   ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
   ("access-control-allow-headers",
-   "Content-Type, Accept, Origin, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
   ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ("access-control-allow-credentials", "true");
 ]
@@ -3301,6 +3413,16 @@ let asset_content_type name =
     "text/css; charset=utf-8"
   else if Filename.check_suffix name ".js" then
     "application/javascript; charset=utf-8"
+  else if Filename.check_suffix name ".html" then
+    "text/html; charset=utf-8"
+  else if Filename.check_suffix name ".svg" then
+    "image/svg+xml"
+  else if Filename.check_suffix name ".json" then
+    "application/json"
+  else if Filename.check_suffix name ".woff2" then
+    "font/woff2"
+  else if Filename.check_suffix name ".map" then
+    "application/json"
   else
     "application/octet-stream"
 
@@ -3331,13 +3453,48 @@ let serve_playground_asset name _request reqd =
   | Error _ ->
       Http.Response.not_found reqd
 
+(** Dashboard SPA assets (Preact + HTM, built by Vite) *)
+let dashboard_asset_root () =
+  Filename.concat (assets_root ()) "dashboard"
+
+let dashboard_index_path () =
+  Filename.concat (dashboard_asset_root ()) "index.html"
+
+let dashboard_etag () =
+  try
+    let st = Unix.stat (dashboard_index_path ()) in
+    let hash =
+      Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex
+    in
+    String.sub hash 0 12
+  with _ -> "none"
+
+let serve_dashboard_index request reqd =
+  match read_file (dashboard_index_path ()) with
+  | Ok body ->
+      Http.Response.html_cached
+        ~etag:(dashboard_etag ())
+        ~request body reqd
+  | Error _ ->
+      Http.Response.html
+        "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"
+        reqd
+
+let serve_dashboard_static name _request reqd =
+  let path = Filename.concat (dashboard_asset_root ()) name in
+  match read_file path with
+  | Ok body ->
+      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
+  | Error _ ->
+      Http.Response.not_found reqd
+
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
   [
     ("access-control-allow-origin", origin);
     ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
     ("access-control-allow-headers",
-     "Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Accept, Origin");
+     "Content-Type, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Accept, Origin");
     ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ]
 
@@ -3389,6 +3546,25 @@ let health_handler _request reqd =
     ("guardian", guardian_json);
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
+
+let board_post_detail_json ~post_id =
+  match Board_dispatch.get_post ~post_id with
+  | Error _ ->
+      (`Not_found, {|{"error":"Post not found"}|})
+  | Ok post ->
+      let comments =
+        match Board_dispatch.get_comments ~post_id with
+        | Ok cs -> cs
+        | Error _ -> []
+      in
+      let json =
+        `Assoc
+          [
+            ("post", Board.post_to_yojson post);
+            ("comments", `List (List.map Board.comment_to_yojson comments));
+          ]
+      in
+      (`OK, Yojson.Safe.to_string json)
 
 (** CORS preflight handler *)
 let options_handler request reqd =
@@ -4140,13 +4316,7 @@ let make_routes ~port ~host =
                 in
                 try loop () with _ -> ())
             | _ -> ()))
-  |> Http.Router.get "/dashboard" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         Http.Response.html_cached
-           ~etag:(Masc_mcp.Web_dashboard.etag ())
-           ~request:req
-           (Masc_mcp.Web_dashboard.html ()) reqd
-       ) request reqd)
+  (* Dashboard sub-routes: credits and lodge must come before the SPA catchall *)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd
@@ -4157,6 +4327,25 @@ let make_routes ~port ~host =
            ~etag:(Masc_mcp.Lodge_dashboard.etag ())
            ~request:req
            (Masc_mcp.Lodge_dashboard.html ()) reqd
+       ) request reqd)
+  (* Dashboard SPA: static assets — prefix match for /dashboard/assets/* *)
+  |> Http.Router.prefix_get "/dashboard/assets/"
+       (fun request reqd ->
+         let req_path = Http.Request.path request in
+         let prefix_len = String.length "/dashboard/assets/" in
+         let filename = String.sub req_path prefix_len (String.length req_path - prefix_len) in
+         if Masc_mcp.Web_dashboard.is_safe_asset_relative_path filename then
+           serve_dashboard_static ("assets/" ^ filename) request reqd
+         else
+           Http.Response.not_found reqd)
+  (* Dashboard SPA: index.html *)
+  |> Http.Router.get "/dashboard" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         serve_dashboard_index req reqd
+       ) request reqd)
+  |> Http.Router.get "/dashboard/" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         serve_dashboard_index req reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
@@ -4421,7 +4610,14 @@ let make_routes ~port ~host =
            match !current_sw, !current_clock with
            | Some sw, Some clock -> (
                match
-                 trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+                 trpg_round_run_json
+                   ~state
+                   ~agent_name
+                   ~sw
+                   ~clock
+                   ~idempotency_key:
+                     (get_header_any_case req.Httpun.Request.headers "idempotency-key")
+                   ~body_str
                with
                | Ok json ->
                    respond_json_with_cors request reqd (Yojson.Safe.to_string json)
@@ -4799,18 +4995,8 @@ let make_extended_handler routes =
             Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
-            (match Board_dispatch.get_post ~post_id with
-            | Error _ ->
-                Http.Response.json {|{"error":"Post not found"}|} reqd
-            | Ok post ->
-                let comments = match Board_dispatch.get_comments ~post_id with
-                  | Ok cs -> cs | Error _ -> []
-                in
-                let json = `Assoc [
-                  ("post", Board.post_to_yojson post);
-                  ("comments", `List (List.map Board.comment_to_yojson comments));
-                ] in
-                Http.Response.json (Yojson.Safe.to_string json) reqd)
+            let (status, body) = board_post_detail_json ~post_id in
+            Http.Response.json ~status body reqd
         | _ -> Http.Router.dispatch routes request reqd
     with exn ->
       let msg = Printexc.to_string exn in
@@ -5138,21 +5324,25 @@ let run_server ~sw ~env ~port ~base_path =
       (* ─────────────────────────────────────────────────────────────────────
          Dashboard
          ───────────────────────────────────────────────────────────────────── *)
-      | `GET, "/dashboard" ->
-          let etag_value = "\"" ^ Masc_mcp.Web_dashboard.etag () ^ "\"" in
-          let if_none_match = H2.Headers.get h2_headers "if-none-match" in
-          (match if_none_match with
-           | Some inm when String.equal inm etag_value ->
-               let resp_headers = H2.Headers.of_list ([
-                 ("etag", etag_value); ("cache-control", "no-cache");
-               ] @ cors) in
-               let response = H2.Response.create ~headers:resp_headers `Not_modified in
-               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-               H2.Body.Writer.close writer
-           | _ ->
-               let body = Masc_mcp.Web_dashboard.html () in
-               let extra = [("etag", etag_value); ("cache-control", "no-cache"); ("vary", "Accept-Encoding")] @ cors in
-               h2_respond_html h2_reqd body ~extra_headers:extra)
+      | `GET, "/dashboard" | `GET, "/dashboard/" ->
+          let index_path = dashboard_index_path () in
+          (match read_file index_path with
+           | Ok body ->
+               let etag_value = "\"" ^ dashboard_etag () ^ "\"" in
+               let if_none_match = H2.Headers.get h2_headers "if-none-match" in
+               (match if_none_match with
+                | Some inm when String.equal inm etag_value ->
+                    let resp_headers = H2.Headers.of_list ([
+                      ("etag", etag_value); ("cache-control", "no-cache");
+                    ] @ cors) in
+                    let response = H2.Response.create ~headers:resp_headers `Not_modified in
+                    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+                    H2.Body.Writer.close writer
+                | _ ->
+                    let extra = [("etag", etag_value); ("cache-control", "no-cache"); ("vary", "Accept-Encoding")] @ cors in
+                    h2_respond_html h2_reqd body ~extra_headers:extra)
+           | Error _ ->
+               h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>" ~extra_headers:cors)
 
       | `GET, "/dashboard/credits" ->
           h2_respond_html h2_reqd (Masc_mcp.Credits_dashboard.html ()) ~extra_headers:cors
@@ -5311,7 +5501,14 @@ let run_server ~sw ~env ~port ~base_path =
             match !current_sw, !current_clock with
             | Some sw, Some clock -> (
                 match
-                  trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+                  trpg_round_run_json
+                    ~state
+                    ~agent_name
+                    ~sw
+                    ~clock
+                    ~idempotency_key:
+                      (get_header_any_case httpun_request.headers "idempotency-key")
+                    ~body_str
                 with
                 | Ok json ->
                     h2_respond_json h2_reqd (Yojson.Safe.to_string json)
@@ -5548,6 +5745,11 @@ let run_server ~sw ~env ~port ~base_path =
           let json = `Assoc [("flairs", `List flairs)] in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
+          let post_id = String.sub p 14 (String.length p - 14) in
+          let (status, body) = board_post_detail_json ~post_id in
+          h2_respond_json h2_reqd body ~status ~extra_headers:cors
+
       | `GET, "/api/v1/karma" ->
           let karma_list = Board_dispatch.get_all_karma () in
           let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
@@ -5586,6 +5788,28 @@ let run_server ~sw ~env ~port ~base_path =
                H2.Body.Writer.write_string writer body;
                H2.Body.Writer.close writer
            | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found)
+
+      (* Dashboard SPA: static assets *)
+      | `GET, p when String.length p > 18
+                   && String.sub p 0 18 = "/dashboard/assets/" ->
+          let filename = String.sub p 18 (String.length p - 18) in
+          if not (Masc_mcp.Web_dashboard.is_safe_asset_relative_path filename) then
+            h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+          else
+            let file_path = Filename.concat (dashboard_asset_root ()) ("assets/" ^ filename) in
+            (match read_file file_path with
+             | Ok body ->
+                 let ct = asset_content_type filename in
+                 let headers = H2.Headers.of_list [
+                   ("content-type", ct);
+                   ("content-length", string_of_int (String.length body));
+                   ("cache-control", "public, max-age=31536000, immutable");
+                 ] in
+                 let response = H2.Response.create ~headers `OK in
+                 let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+                 H2.Body.Writer.write_string writer body;
+                 H2.Body.Writer.close writer
+             | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found)
 
       (* ─────────────────────────────────────────────────────────────────────
          Fallback

@@ -34,8 +34,6 @@ _coverage/
 # Downloaded release binary
 masc-mcp-macos-arm64
 masc-mcp-linux-x64
-# Track the local release artifact
-!masc-mcp-macos-arm64
 
 # Downloaded release binary
 figma-mcp-macos-arm64
@@ -46,3 +44,7 @@ logs/
 
 # Trunk linter lock files
 .trunk-lock/
+
+# Dashboard SPA (Vite)
+dashboard/node_modules/
+dashboard/dist/

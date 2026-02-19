@@ -6,6 +6,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_PING_TIMEOUT_SEC="${MCP_PING_TIMEOUT_SEC:-8}"
+MCP_PING_RETRY_COUNT="${MCP_PING_RETRY_COUNT:-12}"
+MCP_PING_RETRY_DELAY_SEC="${MCP_PING_RETRY_DELAY_SEC:-1}"
 
 RUN_VIEWER_BUILD=0
 RUN_SMOKE=0
@@ -13,7 +15,7 @@ RUN_ROUND=0
 
 ROUNDS="${ROUNDS:-1}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-45}"
-ROOM_ID="${ROOM_ID:-default}"
+ROOM_ID="${ROOM_ID:-}"
 WORLD_PRESET_ID="${WORLD_PRESET_ID:-}"
 DM_PRESET_ID="${DM_PRESET_ID:-}"
 PARTY_SIZE="${PARTY_SIZE:-4}"
@@ -47,7 +49,7 @@ viewer-local-e2e-check.sh
   --run-round                smoke에 trpg.round.run 실행 포함 (암시적으로 --run-smoke)
   --rounds N                 smoke 라운드 수 (기본 1)
   --round-timeout-sec N      round timeout (기본 45)
-  --room-id ID               smoke room_id (기본 default)
+  --room-id ID               smoke room_id (기본: 자동 생성)
   --world-preset-id ID       smoke world preset
   --dm-preset-id ID          smoke DM preset
   --party-size N             smoke party size (기본 4)
@@ -127,14 +129,23 @@ step_check_commands() {
 
 step_check_mcp() {
   local response
-  response="$(curl -sS -m "$MCP_PING_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}')"
-  if [ -z "$(printf "%s" "$response" | tr -d '[:space:]')" ]; then
-    echo "MCP endpoint returned empty response: $MCP_URL"
-    return 1
-  fi
+  local attempt=1
+  while [ "$attempt" -le "$MCP_PING_RETRY_COUNT" ]; do
+    if response="$(curl -sS -m "$MCP_PING_TIMEOUT_SEC" -X POST "$MCP_URL" \
+      -H 'Content-Type: application/json' \
+      -H 'Accept: application/json, text/event-stream' \
+      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}')"; then
+      if [ -n "$(printf "%s" "$response" | tr -d '[:space:]')" ]; then
+        return 0
+      fi
+    fi
+    if [ "$attempt" -lt "$MCP_PING_RETRY_COUNT" ]; then
+      sleep "$MCP_PING_RETRY_DELAY_SEC"
+    fi
+    attempt=$((attempt + 1))
+  done
+  echo "MCP endpoint returned empty response after ${MCP_PING_RETRY_COUNT} retries: $MCP_URL"
+  return 1
 }
 
 step_viewer_build() {
@@ -157,10 +168,16 @@ step_trpg_smoke() {
     echo "--run-smoke requires --keeper-models (or KEEPER_MODELS env)"
     return 1
   fi
+  local smoke_room_id
+  smoke_room_id="$(trim "$ROOM_ID")"
+  if [ -z "$smoke_room_id" ]; then
+    smoke_room_id="local-e2e-$(date +%s)-$$"
+  fi
+  echo "smoke room_id=$smoke_room_id"
 
   (cd "$REPO_ROOT" && \
     MCP_URL="$MCP_URL" \
-    ROOM_ID="$ROOM_ID" \
+    ROOM_ID="$smoke_room_id" \
     WORLD_PRESET_ID="$WORLD_PRESET_ID" \
     DM_PRESET_ID="$DM_PRESET_ID" \
     PARTY_SIZE="$PARTY_SIZE" \
@@ -247,6 +264,7 @@ echo "  MCP_URL=$MCP_URL"
 echo "  RUN_VIEWER_BUILD=$RUN_VIEWER_BUILD"
 echo "  RUN_SMOKE=$RUN_SMOKE"
 echo "  RUN_ROUND=$RUN_ROUND"
+echo "  ROOM_ID=${ROOM_ID:-<auto>}"
 echo "  LOG_DIR=$LOG_DIR"
 
 run_step "command prerequisites" step_check_commands

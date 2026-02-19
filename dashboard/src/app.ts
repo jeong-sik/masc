@@ -20,13 +20,16 @@ import {
 } from './store'
 import type { TabId } from './types'
 import { Overview } from './components/overview'
+import { Council } from './components/council'
 import { Board } from './components/board'
 import { Activity } from './components/activity'
 import { Agents } from './components/agents'
 import { Tasks } from './components/tasks'
 import { Journal } from './components/journal'
 import { Trpg } from './components/trpg'
+import { ControlDock } from './components/control-dock'
 import { KeeperDetailOverlay } from './components/keeper-detail'
+import { ToastContainer } from './components/common/toast'
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -43,6 +46,7 @@ function ConnectionStatus() {
 
 const RAIL_TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
+  { id: 'council', label: 'Council' },
   { id: 'board', label: 'Board' },
   { id: 'activity', label: 'Activity' },
   { id: 'agents', label: 'Agents' },
@@ -110,6 +114,8 @@ function SideRail() {
           Refresh Now
         </button>
       </section>
+
+      <${ControlDock} />
     </aside>
   `
 }
@@ -120,6 +126,8 @@ function TabContent() {
   switch (tab) {
     case 'overview':
       return html`<${Overview} />`
+    case 'council':
+      return html`<${Council} />`
     case 'board':
       return html`<${Board} />`
     case 'activity':
@@ -199,6 +207,7 @@ export function App() {
       </div>
 
       <${KeeperDetailOverlay} />
+      <${ToastContainer} />
     </div>
   `
 }

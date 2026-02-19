@@ -21,13 +21,16 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+#[cfg(any(target_arch = "wasm32", test))]
 use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn connection_ready(status: &ConnectionStatus) -> bool {
     matches!(status, ConnectionStatus::Connected)
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn derive_round_control_state(
     lifecycle: TrpgLifecycleState,
     connection_ok: bool,
@@ -63,6 +66,7 @@ fn control_status_to_ops_class(css_class: &str) -> &'static str {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn round_advanced(turn_before: u64, turn_after: u64, summary_advanced: Option<bool>) -> bool {
     summary_advanced.unwrap_or(turn_after > turn_before)
 }

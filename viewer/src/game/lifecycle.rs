@@ -93,6 +93,7 @@ impl TrpgLifecycleState {
         }
     }
 
+    #[cfg(any(target_arch = "wasm32", test))]
     pub fn help_text(self) -> &'static str {
         match self {
             Self::Lobby => "세션 미시작 또는 초기 대기 상태",
@@ -105,6 +106,7 @@ impl TrpgLifecycleState {
         }
     }
 
+    #[cfg(any(target_arch = "wasm32", test))]
     pub fn allows_round_control(self) -> bool {
         matches!(self, Self::Running | Self::Stopped)
     }

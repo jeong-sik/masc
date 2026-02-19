@@ -251,6 +251,7 @@
                         <select id="new-game-dm-select" title="게임을 진행할 AI 에이전트 선택">
                             <option value="">로딩 중...</option>
                         </select>
+                        <div id="new-game-dm-hint" class="new-game-inline-hint">DM을 1명 선택하세요.</div>
                     </label>
 
                     <label class="new-game-field">
@@ -258,7 +259,7 @@
                         <select id="new-game-player-select" multiple size="6" title="게임에 참여할 AI 에이전트 선택 (Ctrl/Cmd+클릭)">
                             <option value="">로딩 중...</option>
                         </select>
-                        <div id="new-game-player-hint" class="new-game-inline-hint">플레이어 0명 선택됨</div>
+                        <div id="new-game-player-hint" class="new-game-inline-hint">플레이어 0명 선택됨 · DM과 중복 불가</div>
                         <button id="new-game-autopick-btn" class="inline-toggle" type="button">4인 자동선택</button>
                     </label>
 
@@ -385,6 +386,7 @@
                         <button id="advance-turn-btn" title="다음 TRPG 라운드를 실행합니다">라운드 실행</button>
                         <span id="turn-control-status"></span>
                         <button id="round-recovery-btn" type="button" style="display:none">복구 가이드 보기</button>
+                        <div id="turn-control-gate" class="turn-control-gate status-info">실행 조건 점검 중...</div>
                     </div>
                     <div id="round-recovery-actions" class="turn-recovery-actions" style="display:none">
                         <button id="round-recovery-refresh" type="button" title="키퍼/프리셋을 다시 동기화합니다">Keeper 새로고침</button>

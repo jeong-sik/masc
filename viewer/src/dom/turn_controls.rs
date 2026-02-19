@@ -87,6 +87,7 @@ pub fn bind_turn_controls(mut commands: Commands) {
         bind_recovery_action_buttons();
         clear_round_recovery();
         set_turn_status("라운드 실행 준비 중...", "status-info");
+        set_turn_gate_reason("실행 조건 점검 중...", "status-info");
         log::info!("TurnControls: bound");
     }
 
@@ -98,6 +99,7 @@ pub fn unbind_turn_controls(mut commands: Commands) {
     {
         clear_turn_status();
         clear_round_recovery();
+        set_turn_gate_reason("", "");
         log::info!("TurnControls: unbound");
     }
 
@@ -153,6 +155,14 @@ pub fn sync_turn_controls_visibility(
             set_advance_disabled(!can_run);
             set_turn_status(&reason, reason_class);
         }
+        let gate_message = if busy {
+            "라운드 실행 중입니다. 완료 후 조건을 다시 계산합니다.".to_string()
+        } else if can_run {
+            "실행 가능: DM/플레이어 keeper 배정이 준비되었습니다.".to_string()
+        } else {
+            format!("실행 대기: {}", reason)
+        };
+        set_turn_gate_reason(&gate_message, reason_class);
     }
 }
 
@@ -189,15 +199,18 @@ fn on_advance_click() {
     }
     if let Err(reason) = read_advance_gate(&doc) {
         set_turn_status(&format!("실행 불가: {}", reason), "status-warn");
+        set_turn_gate_reason(&format!("실행 대기: {}", reason), "status-warn");
         return;
     }
     if let Err(reason) = read_round_run_plan(&doc) {
         set_turn_status(&format!("실행 불가: {}", reason), "status-warn");
+        set_turn_gate_reason(&format!("실행 대기: {}", reason), "status-warn");
         return;
     }
 
     clear_round_recovery();
     set_turn_status("라운드 실행 중...", "status-info");
+    set_turn_gate_reason("라운드 실행 요청 전송 중...", "status-info");
     set_advance_busy(true);
 
     wasm_bindgen_futures::spawn_local(async move {
@@ -205,16 +218,25 @@ fn on_advance_click() {
             Ok(RoundRunOutcome::Advanced(msg)) => {
                 clear_round_recovery();
                 set_turn_status(&msg, "status-ok");
+                set_turn_gate_reason(
+                    "실행 완료: 다음 라운드 조건을 다시 계산합니다.",
+                    "status-ok",
+                );
             }
             Ok(RoundRunOutcome::Stalled { status, guide }) => {
                 set_round_recovery(Some(&guide));
                 set_turn_status(&status, "status-warn");
+                set_turn_gate_reason(&format!("실행 보류: {}", status), "status-warn");
             }
             Err(e) => {
                 let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                 log::warn!("Advance turn failed: {}", detail);
                 clear_round_recovery();
                 set_turn_status(&format!("Failed: {}", detail), "status-error");
+                set_turn_gate_reason(
+                    &format!("실행 실패: {}", shorten_reason(&detail, 180)),
+                    "status-error",
+                );
             }
         }
         set_advance_busy(false);
@@ -455,6 +477,24 @@ fn set_turn_status(text: &str, css_class: &str) {
         let _ = el.set_attribute("class", &class_name);
         let _ = el.set_attribute("title", text);
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_turn_gate_reason(text: &str, css_class: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = doc.get_element_by_id("turn-control-gate") else {
+        return;
+    };
+    el.set_text_content(Some(text));
+
+    let class_name = if css_class.trim().is_empty() {
+        "turn-control-gate".to_string()
+    } else {
+        format!("turn-control-gate {}", css_class)
+    };
+    let _ = el.set_attribute("class", &class_name);
 }
 
 #[cfg(target_arch = "wasm32")]

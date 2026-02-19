@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use serde_json::{json, Value};
 
 #[cfg(target_arch = "wasm32")]
-use web_sys::{HtmlButtonElement, HtmlInputElement, HtmlSelectElement};
+use web_sys::{Element, HtmlButtonElement, HtmlInputElement, HtmlSelectElement};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -71,6 +71,139 @@ fn round_advanced(turn_before: u64, turn_after: u64, summary_advanced: Option<bo
     summary_advanced.unwrap_or(turn_after > turn_before)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug)]
+struct RoundStallSummary {
+    successes: u64,
+    player_successes: u64,
+    dm_success: bool,
+    timeouts: u64,
+    unavailable: u64,
+    first_issue: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn derive_trpg_ui_state(
+    lifecycle: TrpgLifecycleState,
+    connection_ok: bool,
+    wizard_busy: bool,
+    preflight_ok: bool,
+    wizard_ready: bool,
+    round_running: bool,
+) -> TrpgUiState {
+    if !connection_ok || matches!(lifecycle, TrpgLifecycleState::Unavailable) {
+        return TrpgUiState::Error;
+    }
+    if round_running {
+        return TrpgUiState::RoundRunning;
+    }
+    if wizard_busy || matches!(lifecycle, TrpgLifecycleState::Loading) {
+        return TrpgUiState::SessionStarting;
+    }
+    match lifecycle {
+        TrpgLifecycleState::Running => TrpgUiState::SessionRunning,
+        TrpgLifecycleState::Stopped => TrpgUiState::Paused,
+        TrpgLifecycleState::Ended => TrpgUiState::Ended,
+        TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => {
+            if preflight_ok && wizard_ready {
+                TrpgUiState::ConfigReady
+            } else {
+                TrpgUiState::Lobby
+            }
+        }
+        TrpgLifecycleState::Loading => TrpgUiState::SessionStarting,
+        TrpgLifecycleState::Unavailable => TrpgUiState::Error,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_new_game_wizard_busy(doc: &web_sys::Document) -> bool {
+    doc.get_element_by_id("new-game-panel")
+        .and_then(|panel| panel.get_attribute("data-wizard-busy"))
+        .is_some_and(|flag| flag == "1")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_new_game_preflight_ok(doc: &web_sys::Document) -> bool {
+    doc.get_element_by_id("new-game-panel")
+        .and_then(|panel| panel.get_attribute("data-preflight-state"))
+        .is_some_and(|state| state == "ok")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_new_game_assignment_ready(doc: &web_sys::Document) -> bool {
+    let dm = doc
+        .get_element_by_id("new-game-dm-select")
+        .and_then(|el| el.dyn_into::<HtmlSelectElement>().ok())
+        .map(|select| select.value().trim().to_string())
+        .unwrap_or_default();
+    if dm.is_empty() {
+        return false;
+    }
+
+    let Ok(nodes) = doc.query_selector_all("#new-game-player-select option:checked") else {
+        return false;
+    };
+    let mut selected_count = 0_u32;
+    let mut has_conflict = false;
+    for idx in 0..nodes.length() {
+        let Some(node) = nodes.item(idx) else {
+            continue;
+        };
+        let Some(option) = node.dyn_ref::<web_sys::HtmlOptionElement>() else {
+            continue;
+        };
+        let value = option.value().trim().to_string();
+        if value.is_empty() {
+            continue;
+        }
+        if value == dm {
+            has_conflict = true;
+            continue;
+        }
+        selected_count += 1;
+    }
+    selected_count > 0 && !has_conflict
+}
+
+#[cfg(target_arch = "wasm32")]
+fn summarize_ops_detail(detail: &str, max_chars: usize) -> String {
+    let compact = detail.trim().replace('\n', " ");
+    if compact.chars().count() <= max_chars {
+        return compact;
+    }
+    let mut shortened = compact
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    shortened.push('…');
+    shortened
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_dashboard_ui_state(doc: &web_sys::Document, state: TrpgUiState, detail: &str) {
+    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        let _ = dashboard.set_attribute("data-trpg-ui-state", state.code());
+        let _ = dashboard.set_attribute("data-trpg-ui-label", state.label_ko());
+        let _ = dashboard.set_attribute("data-trpg-ui-help", state.help_text());
+    }
+
+    if let Some(el) = doc.get_element_by_id("ops-control-state") {
+        let summary = summarize_ops_detail(detail, 96);
+        let text = if summary.is_empty() {
+            state.label_ko().to_string()
+        } else {
+            format!("{} · {}", state.label_ko(), summary)
+        };
+        let class_name = format!("ops-v {}", state.ops_class());
+        el.set_text_content(Some(&text));
+        let _ = el.set_attribute("class", &class_name);
+        let _ = el.set_attribute(
+            "title",
+            &format!("{} | {}", state.help_text(), detail.trim()),
+        );
+    }
+}
 // ─── Marker Resource ────────────────────────
 
 /// Inserted on enter, removed on exit — signals that the turn controls are bound.
@@ -86,6 +219,7 @@ pub fn bind_turn_controls(mut commands: Commands) {
         bind_recovery_button();
         bind_recovery_action_buttons();
         clear_round_recovery();
+        set_round_stall_badges(None);
         set_turn_status("라운드 실행 준비 중...", "status-info");
         set_turn_gate_reason("실행 조건 점검 중...", "status-info");
         log::info!("TurnControls: bound");
@@ -103,6 +237,7 @@ pub fn unbind_turn_controls(mut commands: Commands) {
         }
         clear_turn_status();
         clear_round_recovery();
+        set_round_stall_badges(None);
         set_turn_gate_reason("", "");
         log::info!("TurnControls: unbound");
     }
@@ -246,6 +381,7 @@ fn on_advance_click() {
     }
 
     clear_round_recovery();
+    set_round_stall_badges(None);
     set_turn_status("라운드 실행 중...", "status-info");
     set_turn_gate_reason("라운드 실행 요청 전송 중...", "status-info");
     set_advance_busy(true);
@@ -254,14 +390,20 @@ fn on_advance_click() {
         match advance_turn().await {
             Ok(RoundRunOutcome::Advanced(msg)) => {
                 clear_round_recovery();
+                set_round_stall_badges(None);
                 set_turn_status(&msg, "status-ok");
                 set_turn_gate_reason(
                     "실행 완료: 다음 라운드 조건을 다시 계산합니다.",
                     "status-ok",
                 );
             }
-            Ok(RoundRunOutcome::Stalled { status, guide }) => {
+            Ok(RoundRunOutcome::Stalled {
+                status,
+                guide,
+                summary,
+            }) => {
                 set_round_recovery(Some(&guide));
+                set_round_stall_badges(Some(&summary));
                 set_turn_status(&status, "status-warn");
                 set_turn_gate_reason(&format!("실행 보류: {}", status), "status-warn");
             }
@@ -269,6 +411,7 @@ fn on_advance_click() {
                 let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                 log::warn!("Advance turn failed: {}", detail);
                 clear_round_recovery();
+                set_round_stall_badges(None);
                 set_turn_status(&format!("Failed: {}", detail), "status-error");
                 set_turn_gate_reason(
                     &format!("실행 실패: {}", shorten_reason(&detail, 180)),
@@ -286,7 +429,11 @@ fn on_advance_click() {
 #[cfg(target_arch = "wasm32")]
 enum RoundRunOutcome {
     Advanced(String),
-    Stalled { status: String, guide: String },
+    Stalled {
+        status: String,
+        guide: String,
+        summary: RoundStallSummary,
+    },
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -361,28 +508,41 @@ fn collect_stall_reasons(json: &Value) -> Vec<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn build_stalled_round_guide(json: &Value, turn_before: u64, turn_after: u64) -> String {
+fn extract_stalled_round_summary(json: &Value) -> RoundStallSummary {
     let summary = json.get("summary");
-    let successes = summary
-        .and_then(|s| s.get("successes"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let player_successes = summary
-        .and_then(|s| s.get("player_successes"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let dm_success = summary
-        .and_then(|s| s.get("dm_success"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let timeouts = summary
-        .and_then(|s| s.get("timeouts"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let unavailable = summary
-        .and_then(|s| s.get("unavailable"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let reasons = collect_stall_reasons(json);
+    RoundStallSummary {
+        successes: summary
+            .and_then(|s| s.get("successes"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        player_successes: summary
+            .and_then(|s| s.get("player_successes"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        dm_success: summary
+            .and_then(|s| s.get("dm_success"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        timeouts: summary
+            .and_then(|s| s.get("timeouts"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        unavailable: summary
+            .and_then(|s| s.get("unavailable"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        first_issue: reasons.first().cloned(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn build_stalled_round_guide(summary: &RoundStallSummary, turn_before: u64, turn_after: u64) -> String {
+    let successes = summary.successes;
+    let player_successes = summary.player_successes;
+    let dm_success = summary.dm_success;
+    let timeouts = summary.timeouts;
+    let unavailable = summary.unavailable;
 
     let mut lines = vec![
         format!(
@@ -398,7 +558,11 @@ fn build_stalled_round_guide(json: &Value, turn_before: u64, turn_after: u64) ->
             unavailable
         ),
     ];
-    let reasons = collect_stall_reasons(json);
+    let reasons = summary
+        .first_issue
+        .as_ref()
+        .map(|reason| vec![reason.clone()])
+        .unwrap_or_default();
     if !reasons.is_empty() {
         lines.push(format!("차단 원인: {}", reasons.join(" | ")));
     }
@@ -488,10 +652,12 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
             "턴이 진행되지 않았습니다 ({} → {}).",
             turn_before, turn_after
         );
-        let guide = build_stalled_round_guide(&json, turn_before, turn_after);
+        let summary = extract_stalled_round_summary(&json);
+        let guide = build_stalled_round_guide(&summary, turn_before, turn_after);
         return Ok(RoundRunOutcome::Stalled {
             status: stalled_status,
             guide,
+            summary,
         });
     }
 
@@ -533,6 +699,121 @@ fn set_turn_gate_reason(text: &str, css_class: &str) {
         format!("turn-control-gate {}", css_class)
     };
     let _ = el.set_attribute("class", &class_name);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn append_round_stall_badge(
+    doc: &web_sys::Document,
+    container: &Element,
+    label: &str,
+    value: &str,
+    tone_class: &str,
+    title: Option<&str>,
+) {
+    let Ok(badge) = doc.create_element("span") else {
+        return;
+    };
+    badge.set_class_name(&format!("round-run-badge {}", tone_class));
+    if let Some(title) = title {
+        let _ = badge.set_attribute("title", title);
+    }
+
+    let Ok(k) = doc.create_element("span") else {
+        return;
+    };
+    k.set_class_name("badge-k");
+    k.set_text_content(Some(label));
+    let _ = badge.append_child(&k);
+
+    let Ok(v) = doc.create_element("span") else {
+        return;
+    };
+    v.set_class_name("badge-v");
+    v.set_text_content(Some(value));
+    let _ = badge.append_child(&v);
+
+    let _ = container.append_child(&badge);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_round_stall_badges(summary: Option<&RoundStallSummary>) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(container) = doc.get_element_by_id("round-run-badges") else {
+        return;
+    };
+
+    container.set_text_content(None);
+    if summary.is_none() {
+        let _ = container.set_attribute("style", "display:none");
+        return;
+    }
+    let summary = summary.expect("checked is_some");
+    let _ = container.set_attribute("style", "");
+
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "SUCCESS",
+        &summary.successes.to_string(),
+        if summary.successes > 0 { "is-ok" } else { "is-warn" },
+        Some("이번 라운드 전체 성공 응답 수"),
+    );
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "PLAYER",
+        &summary.player_successes.to_string(),
+        if summary.player_successes > 0 {
+            "is-ok"
+        } else {
+            "is-warn"
+        },
+        Some("이번 라운드에서 성공한 플레이어 액션 수"),
+    );
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "DM",
+        if summary.dm_success { "ok" } else { "fail" },
+        if summary.dm_success { "is-ok" } else { "is-error" },
+        Some("DM 내레이션/판정 성공 여부"),
+    );
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "TIMEOUT",
+        &summary.timeouts.to_string(),
+        if summary.timeouts > 0 {
+            "is-warn"
+        } else {
+            "is-ok"
+        },
+        Some("턴 타임아웃 발생 횟수"),
+    );
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "UNAVAILABLE",
+        &summary.unavailable.to_string(),
+        if summary.unavailable > 0 {
+            "is-error"
+        } else {
+            "is-ok"
+        },
+        Some("keeper unavailable 발생 횟수"),
+    );
+    if let Some(issue) = summary.first_issue.as_deref() {
+        append_round_stall_badge(
+            &doc,
+            &container,
+            "ISSUE",
+            &shorten_reason(issue, 80),
+            "is-warn",
+            Some(issue),
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

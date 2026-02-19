@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
-SESSION_ID="${SESSION_ID:-harness-trpg-session-001}"
+SESSION_ID="${SESSION_ID:-harness-trpg-session-$(date +%s)-$$}"
 ROOM_ID="${ROOM_ID:-}"
 CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"

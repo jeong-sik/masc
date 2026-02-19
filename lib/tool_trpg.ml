@@ -22,6 +22,7 @@ open Yojson.Safe.Util
 type result = bool * string
 
 type keeper_call_result = [ `Ok of Yojson.Safe.t | `Timeout | `Error of string ]
+type keeper_probe_result = [ `Ok | `Error of string ]
 
 type context = {
   config : Room.config;
@@ -29,6 +30,7 @@ type context = {
   keeper_call :
     (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
     option;
+  keeper_probe : (name:string -> keeper_probe_result) option;
 }
 
 type trpg_role = [ `Dm | `Player ]
@@ -37,6 +39,12 @@ let role_to_string = function `Dm -> "dm" | `Player -> "player"
 
 let normalize_keeper_name (s : string) : string =
   s |> String.trim |> String.lowercase_ascii
+
+let unique_nonempty_keepers (keepers : string list) : string list =
+  keepers
+  |> List.map String.trim
+  |> List.filter (fun k -> k <> "")
+  |> List.sort_uniq String.compare
 
 let validate_unique_keeper_assignments ~dm_keeper
     ~(player_keepers : (string * string) list) : (unit, string) Stdlib.result =
@@ -66,6 +74,28 @@ let validate_unique_keeper_assignments ~dm_keeper
                 loop tl)
     in
     loop player_keepers
+
+let keeper_preflight ctx ~(keepers : string list) : (unit, string) Stdlib.result =
+  match ctx.keeper_probe with
+  | None -> Ok ()
+  | Some probe ->
+      let failures =
+        unique_nonempty_keepers keepers
+        |> List.filter_map (fun keeper_name ->
+               match probe ~name:keeper_name with
+               | `Ok -> None
+               | `Error raw_reason ->
+                   let reason =
+                     let trimmed = String.trim raw_reason in
+                     if trimmed = "" then "unavailable" else trimmed
+                   in
+                   Some (Printf.sprintf "%s=%s" keeper_name reason))
+      in
+      if failures = [] then Ok ()
+      else
+        Error
+          (Printf.sprintf "keeper preflight failed: %s"
+             (String.concat "; " failures))
 
 let keeper_busy_mutex = Mutex.create ()
 let keeper_busy_counts : (string, int) Hashtbl.t = Hashtbl.create 128
@@ -2419,8 +2449,10 @@ let handle_round_run ctx args : result =
         | Error e -> Error e
       in
       let* () = validate_unique_keeper_assignments ~dm_keeper ~player_keepers in
+      let assigned_keepers = dm_keeper :: List.map snd player_keepers in
+      let* () = keeper_preflight ctx ~keepers:assigned_keepers in
       with_keeper_reservation
-        ~keepers:(dm_keeper :: List.map snd player_keepers)
+        ~keepers:assigned_keepers
         (fun () ->
       let* derived = derive_state ~base_dir ~room_id ~rule_module in
       let state = state_of_derived derived in

@@ -23,7 +23,12 @@ let mk_ctx base_dir =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_protocol_game_view.context =
-    { config; agent_name = "tester"; trpg_keeper_call = None }
+    {
+      config;
+      agent_name = "tester";
+      trpg_keeper_call = None;
+      trpg_keeper_probe = None;
+    }
   in
   (config, ctx)
 

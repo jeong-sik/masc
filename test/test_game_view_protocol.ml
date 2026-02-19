@@ -65,6 +65,8 @@ let mk_trpg_ctx config =
   {
     Tool_trpg.config;
     agent_name = "tester";
+    keeper_call = None;
+    keeper_probe = None;
   }
 
 let test_precondition_required_without_finalize () =

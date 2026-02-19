@@ -414,7 +414,18 @@ pub fn sync_turn_controls_visibility(
         let locked = lock_owner.is_some() || runner_active;
         set_round_run_controls_locked(&doc, locked);
 
-        let dm_ready = read_dom_input(&doc, "round-run-dm")
+        // Sync progress.dm_keeper to DOM input if empty
+        if let Some(dm_input) = doc
+            .get_element_by_id("round-run-dm")
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        {
+            if dm_input.value().trim().is_empty() && !progress.dm_keeper.trim().is_empty() {
+                dm_input.set_value(progress.dm_keeper.trim());
+            }
+        }
+
+        let dm_ready = !progress.dm_keeper.trim().is_empty()
+            || read_dom_input(&doc, "round-run-dm")
             .or_else(|| read_claimed_keeper_for_current_room(&doc))
             .or_else(|| read_dom_input(&doc, "new-game-dm-select"))
             .is_some();

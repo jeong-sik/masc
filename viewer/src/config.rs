@@ -17,22 +17,22 @@ pub const DEFAULT_ROOM_ID: &str = "default";
 pub fn current_room_id() -> String {
     #[cfg(target_arch = "wasm32")]
     {
-        // 1. Try URL param ?room=...
-        if let Some(win) = web_sys::window() {
-            if let Ok(search) = win.location().search() {
-                if let Some(room) = parse_query_param(&search, "room") {
-                    return sanitize_room_id(&room).unwrap_or_else(|| DEFAULT_ROOM_ID.to_string());
+        // 1. Prefer runtime room bound to dashboard state.
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id("dashboard") {
+                if let Some(room) = el.get_attribute("data-room-id") {
+                    if let Some(room) = sanitize_room_id(&room) {
+                        return room;
+                    }
                 }
             }
         }
 
-        // 2. Try dashboard attribute
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            if let Some(el) = doc.get_element_by_id("dashboard") {
-                if let Some(room) = el.get_attribute("data-room-id") {
-                    if !room.is_empty() {
-                        return room;
-                    }
+        // 2. Fallback to URL param ?room=...
+        if let Some(win) = web_sys::window() {
+            if let Ok(search) = win.location().search() {
+                if let Some(room) = parse_query_param(&search, "room") {
+                    return sanitize_room_id(&room).unwrap_or_else(|| DEFAULT_ROOM_ID.to_string());
                 }
             }
         }

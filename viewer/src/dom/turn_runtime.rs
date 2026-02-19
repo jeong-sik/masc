@@ -872,8 +872,13 @@ pub fn update_turn_runtime_dom(
             room_class
         };
 
+        let room_id = crate::config::sanitize_room_id(room_state.id.trim())
+            .unwrap_or_else(crate::config::current_room_id);
+        if let Some(dashboard) = document.get_element_by_id("dashboard") {
+            let _ = dashboard.set_attribute("data-room-id", &room_id);
+        }
+
         if let Some(room_status_el) = document.get_element_by_id("room-status") {
-            let room_id = crate::config::current_room_id();
             room_status_el.set_text_content(Some(&format!(
                 "현재 게임 {} · {}",
                 room_id,
@@ -892,7 +897,6 @@ pub fn update_turn_runtime_dom(
             );
         }
 
-        let room_id = crate::config::current_room_id();
         let mut room_switched = false;
         if let Some(dashboard) = document.get_element_by_id("dashboard") {
             let previous_room = dashboard

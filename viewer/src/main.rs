@@ -7,6 +7,7 @@ mod assets;
 mod audio;
 mod dom;
 mod game;
+mod http;
 mod render;
 mod shaders;
 mod sse;

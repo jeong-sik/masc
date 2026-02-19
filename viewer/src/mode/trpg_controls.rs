@@ -225,6 +225,253 @@ fn selected_player_keepers(doc: &web_sys::Document) -> Vec<String> {
     unique_non_empty(keepers)
 }
 
+fn set_manual_mapping_order(doc: &web_sys::Document, order: &[String]) {
+    let Some(panel) = doc.get_element_by_id("new-game-panel") else {
+        return;
+    };
+    let payload = Value::Array(
+        order
+            .iter()
+            .map(|keeper| Value::String(keeper.trim().to_string()))
+            .collect::<Vec<_>>(),
+    )
+    .to_string();
+    let _ = panel.set_attribute("data-manual-order", &payload);
+}
+
+fn manual_mapping_order(doc: &web_sys::Document) -> Vec<String> {
+    let Some(raw) = doc
+        .get_element_by_id("new-game-panel")
+        .and_then(|panel| panel.get_attribute("data-manual-order"))
+    else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Value>(&raw)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .map(unique_non_empty)
+        .unwrap_or_default()
+}
+
+fn normalize_manual_keeper_order(order: Vec<String>, selected: &[String]) -> Vec<String> {
+    let selected_unique = unique_non_empty(selected.to_vec());
+    if selected_unique.is_empty() {
+        return Vec::new();
+    }
+    let mut normalized = Vec::with_capacity(selected_unique.len());
+    for keeper in order {
+        let keeper = keeper.trim().to_string();
+        if keeper.is_empty() {
+            continue;
+        }
+        if !selected_unique.iter().any(|name| name == &keeper) {
+            continue;
+        }
+        if normalized.iter().any(|name| name == &keeper) {
+            continue;
+        }
+        normalized.push(keeper);
+    }
+    for keeper in selected_unique {
+        if normalized.iter().any(|name| name == &keeper) {
+            continue;
+        }
+        normalized.push(keeper);
+    }
+    normalized
+}
+
+fn manual_player_keeper_order_for_display(
+    doc: &web_sys::Document,
+    selected: &[String],
+) -> Vec<String> {
+    normalize_manual_keeper_order(manual_mapping_order(doc), selected)
+}
+
+fn manual_player_keeper_order_for_assignment(
+    doc: &web_sys::Document,
+    selected: &[String],
+) -> Result<Vec<String>, String> {
+    let selected_unique = unique_non_empty(selected.to_vec());
+    if selected_unique.is_empty() {
+        return Ok(Vec::new());
+    }
+    let order = normalize_manual_keeper_order(manual_mapping_order(doc), &selected_unique);
+    if order.len() != selected_unique.len() {
+        return Err(format!(
+            "수동 매핑이 불완전합니다. keeper {}명 중 {}명만 매핑되었습니다.",
+            selected_unique.len(),
+            order.len()
+        ));
+    }
+    Ok(order)
+}
+
+fn bind_manual_mapping_selects(doc: &web_sys::Document) {
+    let Ok(nodes) = doc.query_selector_all("#new-game-manual-table .manual-map-select") else {
+        return;
+    };
+    for idx in 0..nodes.length() {
+        let Some(node) = nodes.item(idx) else { continue };
+        let Some(select) = node.dyn_ref::<web_sys::HtmlSelectElement>() else {
+            continue;
+        };
+        if select.get_attribute("data-bound").as_deref() == Some("1") {
+            continue;
+        }
+        let _ = select.set_attribute("data-bound", "1");
+
+        let slot_idx = select
+            .get_attribute("data-slot-index")
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .unwrap_or(0);
+        let cb = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let current_selected = selected_player_keepers(&doc);
+            if current_selected.is_empty() {
+                set_manual_mapping_order(&doc, &[]);
+                return;
+            }
+
+            let mut order =
+                normalize_manual_keeper_order(manual_mapping_order(&doc), &current_selected);
+            let Some(target_select) = doc
+                .query_selector(&format!(
+                    "#new-game-manual-table .manual-map-select[data-slot-index=\"{}\"]",
+                    slot_idx
+                ))
+                .ok()
+                .flatten()
+                .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+            else {
+                return;
+            };
+            let picked = target_select.value().trim().to_string();
+            if picked.is_empty() {
+                return;
+            }
+
+            if let Some(existing_idx) = order.iter().position(|name| name == &picked) {
+                if existing_idx != slot_idx && slot_idx < order.len() {
+                    order.swap(existing_idx, slot_idx);
+                }
+            } else if slot_idx >= order.len() {
+                order.push(picked);
+            } else {
+                order[slot_idx] = picked;
+            }
+            let normalized = normalize_manual_keeper_order(order, &current_selected);
+            set_manual_mapping_order(&doc, &normalized);
+            sync_manual_mapping_table(&doc);
+            sync_new_game_wizard_ui(&doc);
+        }) as Box<dyn FnMut(_)>);
+        let _ = select
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
+            });
+        cb.forget();
+    }
+}
+
+fn sync_manual_mapping_table(doc: &web_sys::Document) {
+    let Some(table) = doc.get_element_by_id("new-game-manual-table") else {
+        return;
+    };
+    if let Some(reset_btn) = doc
+        .get_element_by_id("new-game-manual-reset")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        reset_btn.set_disabled(new_game_wizard_busy(doc));
+    }
+    let selected = selected_player_keepers(doc);
+    if selected.is_empty() {
+        table.set_inner_html(
+            "<div class=\"room-chip-empty\">플레이어 keeper를 먼저 선택하세요.</div>",
+        );
+        if let Some(help) = doc.get_element_by_id("new-game-manual-map-help") {
+            help.set_text_content(Some(
+                "선택한 플레이어 keeper 순서를 actor slot(P01,P02,...)에 수동 고정할 수 있습니다. 플레이어를 선택한 뒤 사용하세요.",
+            ));
+        }
+        if let Some(reset_btn) = doc
+            .get_element_by_id("new-game-manual-reset")
+            .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+        {
+            reset_btn.set_disabled(true);
+        }
+        set_manual_mapping_order(doc, &[]);
+        return;
+    }
+
+    let order = normalize_manual_keeper_order(manual_mapping_order(doc), &selected);
+    set_manual_mapping_order(doc, &order);
+    let options = selected
+        .iter()
+        .map(|keeper| {
+            format!(
+                r#"<option value="{value}">{label}</option>"#,
+                value = html_escape(keeper),
+                label = html_escape(keeper),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let rows = order
+        .iter()
+        .enumerate()
+        .map(|(idx, keeper)| {
+            let selected_options = options
+                .replace(
+                    &format!(r#"value="{}""#, html_escape(keeper)),
+                    &format!(r#"value="{}" selected"#, html_escape(keeper)),
+                );
+            format!(
+                concat!(
+                    "<div class=\"manual-map-row\">",
+                    "<span class=\"manual-map-slot\">P{slot:02}</span>",
+                    "<select class=\"manual-map-select\" data-slot-index=\"{idx}\">{options}</select>",
+                    "</div>"
+                ),
+                slot = idx + 1,
+                idx = idx,
+                options = selected_options
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    table.set_inner_html(&rows);
+
+    if let Some(help) = doc.get_element_by_id("new-game-manual-map-help") {
+        let summary = order
+            .iter()
+            .enumerate()
+            .map(|(idx, keeper)| format!("P{:02}→{}", idx + 1, keeper))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        help.set_text_content(Some(&format!(
+            "수동 매핑 적용 순서: {} (세션 시작 시 party actor 순서에 맞춰 반영 · 필요하면 '선택순으로 리셋')",
+            summary
+        )));
+    }
+    if let Some(reset_btn) = doc
+        .get_element_by_id("new-game-manual-reset")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        reset_btn.set_disabled(false);
+    }
+    bind_manual_mapping_selects(doc);
+}
+
 fn selected_dm_keeper(doc: &web_sys::Document) -> String {
     doc.get_element_by_id("new-game-dm-select")
         .and_then(|el| {
@@ -332,6 +579,7 @@ fn set_new_game_wizard_busy(doc: &web_sys::Document, busy: bool) {
         "new-game-preflight-btn",
         "new-game-refresh",
         "new-game-autopick-btn",
+        "new-game-manual-reset",
     ] {
         if let Some(btn) = doc
             .get_element_by_id(id)
@@ -445,6 +693,23 @@ fn render_new_game_assignment_preview(
     } else {
         wizard_state_badge("세션 시작 준비 중", "warn")
     };
+    let issue_badge = if has_conflict {
+        wizard_state_badge("DM/플레이어 충돌", "error")
+    } else if dm_keeper.trim().is_empty() {
+        wizard_state_badge("DM 미선택", "warn")
+    } else if players.is_empty() {
+        wizard_state_badge("플레이어 미선택", "warn")
+    } else {
+        String::new()
+    };
+    let issue_note = if has_conflict {
+        format!(
+            "<div class=\"new-game-assignment-note is-error\">충돌 keeper: {} (DM과 플레이어에서 동시에 선택됨)</div>",
+            html_escape(dm_keeper)
+        )
+    } else {
+        String::new()
+    };
 
     let keeper_actor_map = keeper_actor_map_from_actor_admin_dom(doc);
 
@@ -505,7 +770,7 @@ fn render_new_game_assignment_preview(
     let html = format!(
         concat!(
             "<div class=\"new-game-assignment-preview\">",
-            "<div class=\"new-game-assignment-badges\">{preflight_badge}{ready_badge}</div>",
+            "<div class=\"new-game-assignment-badges\">{preflight_badge}{ready_badge}{issue_badge}</div>",
             "<div class=\"new-game-assignment-meta\">",
             "<span>world: <code>{world}</code></span>",
             "<span>dm preset: <code>{dm_preset}</code></span>",
@@ -514,6 +779,7 @@ fn render_new_game_assignment_preview(
             "{dm_line}",
             "{player_lines}",
             "</ul>",
+            "{issue_note}",
             "<div class=\"new-game-assignment-note\">",
             "참고: 세션 시작 후 actor_id ↔ keeper 매핑이 확정됩니다.",
             "</div>",
@@ -521,6 +787,7 @@ fn render_new_game_assignment_preview(
         ),
         preflight_badge = preflight_badge,
         ready_badge = ready_badge,
+        issue_badge = issue_badge,
         world = html_escape(if world_preset.is_empty() {
             "(none)"
         } else {
@@ -533,6 +800,7 @@ fn render_new_game_assignment_preview(
         }),
         dm_line = dm_line,
         player_lines = player_lines,
+        issue_note = issue_note,
     );
     el.set_inner_html(&html);
 }
@@ -542,7 +810,8 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     let flow_stage = new_game_flow_stage(doc);
     let flow_detail = new_game_flow_detail(doc);
     let dm_keeper = selected_dm_keeper(doc);
-    let players = selected_player_keepers(doc);
+    let selected_players = selected_player_keepers(doc);
+    let players = manual_player_keeper_order_for_display(doc, &selected_players);
     let ui_state = read_dashboard_ui_state(doc);
     let dm_selected = !dm_keeper.is_empty();
     let has_conflict = dm_selected && players.iter().any(|player| player == &dm_keeper);
@@ -566,6 +835,8 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
                 | NewGameFlowStage::Finalizing
         );
     let flow_failed = flow_stage == NewGameFlowStage::Failed;
+
+    sync_manual_mapping_table(doc);
 
     let step1_state = match preflight_state.as_str() {
         "ok" => "done",
@@ -667,6 +938,25 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         }));
     }
 
+    let gate_hint_text = if ready && !flow_running {
+        format!(
+            "세션 시작 가능: DM {} · 플레이어 {}명 ({})",
+            dm_keeper,
+            players.len(),
+            summarize_names(&players, 3)
+        )
+    } else {
+        format!("시작 대기: {}", start_gate_reason)
+    };
+    let gate_hint_state = if ready && !flow_running {
+        "ok"
+    } else if has_conflict || preflight_state == "fail" {
+        "error"
+    } else {
+        "warn"
+    };
+    set_inline_hint(doc, "new-game-ready-hint", &gate_hint_text, gate_hint_state);
+
     if let Some(hint) = doc.get_element_by_id("new-game-step-hint") {
         let state_badge = format!("[상태: {}]", ui_state.label_ko());
         let text = if ready {
@@ -702,7 +992,7 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         "사용 가능한 keeper가 없습니다. Keeper 새로고침 또는 masc_keeper_list를 확인하세요."
             .to_string()
     } else {
-        "DM을 1명 선택하세요.".to_string()
+        "DM을 1명 선택하세요. (진행자 keeper)".to_string()
     };
     set_inline_hint(
         doc,
@@ -719,12 +1009,12 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
 
     let player_hint = if has_conflict {
         format!(
-            "플레이어 {}명 선택됨 · DM({})과 중복됨",
+            "플레이어 {}명 선택됨 · DM({})과 중복됨 · 중복 keeper 선택을 해제하세요.",
             players.len(),
             dm_keeper
         )
     } else if players.is_empty() {
-        "플레이어 0명 선택됨 · DM과 중복 불가".to_string()
+        "플레이어 0명 선택됨 · Ctrl/Cmd+클릭으로 1명 이상 선택하세요.".to_string()
     } else {
         format!(
             "플레이어 {}명 선택됨 · {}",
@@ -794,6 +1084,10 @@ fn ensure_new_game_ready(doc: &web_sys::Document) -> Result<(), String> {
     if players.is_empty() {
         return Err("플레이어 keeper를 최소 1명 선택하세요.".to_string());
     }
+    let manual_order = manual_player_keeper_order_for_assignment(doc, &players)?;
+    if manual_order.is_empty() {
+        return Err("수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string());
+    }
     if players.iter().any(|player| player == &dm_keeper) {
         return Err("DM keeper와 플레이어 keeper가 중복되었습니다.".to_string());
     }
@@ -809,12 +1103,12 @@ fn update_new_game_player_hint(doc: &web_sys::Document) {
     let conflict = !dm_keeper.is_empty() && players.iter().any(|name| name == &dm_keeper);
     let message = if conflict {
         format!(
-            "플레이어 {}명 선택됨 · DM({})과 중복됨",
+            "플레이어 {}명 선택됨 · DM({})과 중복됨 · 중복 keeper 선택을 해제하세요.",
             players.len(),
             dm_keeper
         )
     } else if players.is_empty() {
-        "플레이어 0명 선택됨 · DM과 중복 불가".to_string()
+        "플레이어 0명 선택됨 · Ctrl/Cmd+클릭으로 1명 이상 선택하세요.".to_string()
     } else {
         format!(
             "플레이어 {}명 선택됨 · {}",
@@ -846,7 +1140,7 @@ fn update_new_game_player_hint(doc: &web_sys::Document) {
             ));
         } else if dm_keeper.is_empty() {
             let _ = dm_hint.set_attribute("class", "new-game-inline-hint is-warn");
-            dm_hint.set_text_content(Some("DM을 1명 선택하세요."));
+            dm_hint.set_text_content(Some("DM을 1명 선택하세요. (진행자 keeper)"));
         } else {
             let _ = dm_hint.set_attribute("class", "new-game-inline-hint is-ok");
             dm_hint.set_text_content(Some(&format!("선택된 DM: {}", dm_keeper)));
@@ -2146,6 +2440,10 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
             "AI Player keeper를 선택할 수 없습니다. keeper 목록을 먼저 새로고침하세요.".to_string(),
         );
     }
+    let manual_players = manual_player_keeper_order_for_assignment(doc, &players)?;
+    if manual_players.is_empty() {
+        return Err("수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string());
+    }
 
     let model_text = doc
         .get_element_by_id("new-game-models")
@@ -2346,7 +2644,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         return Err("세션 party actor_id를 읽지 못했습니다.".to_string());
     }
 
-    let assignments = assign_keepers_to_actor_ids(&actor_ids, &dm_keeper, &players)?;
+    let assignments = assign_keepers_to_actor_ids(&actor_ids, &dm_keeper, &manual_players)?;
     let player_map: std::collections::HashMap<String, String> = assignments.into_iter().collect();
 
     set_new_game_progress(
@@ -3052,8 +3350,42 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             .map(|target| {
                 target
                     .add_event_listener_with_callback("click", autopick_cb.as_ref().unchecked_ref())
-            });
+        });
         autopick_cb.forget();
+    }
+
+    if let Some(reset_btn) = doc.get_element_by_id("new-game-manual-reset") {
+        let reset_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            if new_game_wizard_busy(&doc) {
+                return;
+            }
+            let players = selected_player_keepers(&doc);
+            if players.is_empty() {
+                set_new_game_status(
+                    &doc,
+                    "플레이어 keeper를 먼저 선택하세요. 선택 후 수동 매핑을 리셋할 수 있습니다.",
+                );
+                sync_new_game_wizard_ui(&doc);
+                return;
+            }
+            set_manual_mapping_order(&doc, &players);
+            sync_manual_mapping_table(&doc);
+            sync_new_game_wizard_ui(&doc);
+            set_new_game_status(
+                &doc,
+                &format!(
+                    "수동 매핑을 선택 순서로 리셋했습니다. ({}명)",
+                    players.len()
+                ),
+            );
+        }) as Box<dyn FnMut()>);
+        let _ = reset_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", reset_cb.as_ref().unchecked_ref())
+        });
+        reset_cb.forget();
     }
 
     if let Some(refresh_btn) = doc.get_element_by_id("new-game-refresh") {

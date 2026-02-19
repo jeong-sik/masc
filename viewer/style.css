@@ -676,6 +676,10 @@ body:not(.mode-trpg) #ops-hud {
     letter-spacing: 0.8px;
 }
 
+.new-game-field-wide {
+    grid-column: 1 / -1;
+}
+
 .new-game-field input,
 .new-game-field select {
     width: 100%;
@@ -735,6 +739,44 @@ body:not(.mode-trpg) #ops-hud {
 
 .new-game-inline-hint.is-error {
     color: #dfa1a1;
+}
+
+.manual-map-panel {
+    border: 1px solid rgba(109, 122, 164, 0.28);
+    border-radius: var(--panel-radius);
+    padding: 8px;
+    background: rgba(14, 20, 36, 0.58);
+}
+
+.manual-map-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.manual-map-table {
+    display: grid;
+    gap: 6px;
+}
+
+.manual-map-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.manual-map-slot {
+    font-size: 10px;
+    color: var(--text-dim);
+    border: 1px solid rgba(109, 122, 164, 0.35);
+    border-radius: 999px;
+    padding: 2px 8px;
+    text-align: center;
+    background: rgba(13, 18, 32, 0.75);
+}
+
+.manual-map-select {
+    min-height: 30px;
 }
 
 #new-game-autopick-btn {
@@ -3099,6 +3141,10 @@ body:not(.mode-trpg) #ops-hud {
 .new-game-assignment-note {
     font-size: 10px;
     color: var(--text-dim);
+}
+
+.new-game-assignment-note.is-error {
+    color: #dfa1a1;
 }
 
 .actor-admin {

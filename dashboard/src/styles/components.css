@@ -1074,14 +1074,203 @@
   color: #8da4cc;
 }
 
+/* ── Control Dock ─────────────────────────────────────────── */
+.control-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.control-label {
+  font-size: 11px;
+  color: #8ca8d5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.control-input,
+.control-textarea {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(138, 163, 211, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d3e3ff;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.control-input:focus,
+.control-textarea:focus {
+  outline: none;
+  border-color: rgba(71, 184, 255, 0.55);
+}
+
+.control-textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.control-btn {
+  border: 1px solid rgba(71, 184, 255, 0.45);
+  border-radius: 8px;
+  background: rgba(71, 184, 255, 0.18);
+  color: #c9ebff;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.control-btn:hover {
+  background: rgba(71, 184, 255, 0.27);
+}
+
+.control-btn.secondary {
+  border-color: rgba(74, 222, 128, 0.48);
+  background: rgba(74, 222, 128, 0.17);
+  color: #b4f5ca;
+}
+
+.control-btn.ghost {
+  border-color: rgba(138, 163, 211, 0.35);
+  background: rgba(255, 255, 255, 0.05);
+  color: #9fb8e1;
+}
+
+.control-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Council ──────────────────────────────────────────────── */
+.council-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.council-error {
+  margin-top: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f7b6b6;
+  font-size: 12px;
+}
+
+.council-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.council-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.council-row {
+  width: 100%;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+}
+
+button.council-row {
+  cursor: pointer;
+}
+
+button.council-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+button.council-row.selected {
+  border-color: rgba(71, 184, 255, 0.5);
+  background: rgba(71, 184, 255, 0.14);
+}
+
+.council-row-main {
+  min-width: 0;
+}
+
+.council-topic {
+  color: #e8f0ff;
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.council-sub {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #8ea9d6;
+  font-size: 11px;
+}
+
+.council-state {
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  text-transform: lowercase;
+  border: 1px solid rgba(138, 163, 211, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  color: #b7cbee;
+}
+
+.council-state.open {
+  border-color: rgba(74, 222, 128, 0.48);
+  background: rgba(74, 222, 128, 0.15);
+  color: #b4f5ca;
+}
+
+.council-state.closed,
+.council-state.vote {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.14);
+  color: #ffe09b;
+}
+
+.council-detail {
+  white-space: pre-wrap;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.28);
+  color: #d3e3ff;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: "IBM Plex Mono", "Fira Code", monospace;
+}
+
 /* ── Responsive (components) ───────────────────────────────── */
 @media (max-width: 980px) {
   .keeper-detail-grid { grid-template-columns: 1fr; }
   .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
+  .council-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 900px) {
   .task-board { grid-template-columns: 1fr; }
   .trpg-layout { grid-template-columns: 1fr; }
+  .council-create { grid-template-columns: 1fr; }
+  .control-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .trpg-control-grid { grid-template-columns: 1fr; }

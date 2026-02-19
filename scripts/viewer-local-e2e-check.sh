@@ -13,7 +13,7 @@ RUN_ROUND=0
 
 ROUNDS="${ROUNDS:-1}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-45}"
-ROOM_ID="${ROOM_ID:-default}"
+ROOM_ID="${ROOM_ID:-}"
 WORLD_PRESET_ID="${WORLD_PRESET_ID:-}"
 DM_PRESET_ID="${DM_PRESET_ID:-}"
 PARTY_SIZE="${PARTY_SIZE:-4}"
@@ -47,7 +47,7 @@ viewer-local-e2e-check.sh
   --run-round                smoke에 trpg.round.run 실행 포함 (암시적으로 --run-smoke)
   --rounds N                 smoke 라운드 수 (기본 1)
   --round-timeout-sec N      round timeout (기본 45)
-  --room-id ID               smoke room_id (기본 default)
+  --room-id ID               smoke room_id (기본: 자동 생성)
   --world-preset-id ID       smoke world preset
   --dm-preset-id ID          smoke DM preset
   --party-size N             smoke party size (기본 4)
@@ -157,10 +157,16 @@ step_trpg_smoke() {
     echo "--run-smoke requires --keeper-models (or KEEPER_MODELS env)"
     return 1
   fi
+  local smoke_room_id
+  smoke_room_id="$(trim "$ROOM_ID")"
+  if [ -z "$smoke_room_id" ]; then
+    smoke_room_id="local-e2e-$(date +%s)-$$"
+  fi
+  echo "smoke room_id=$smoke_room_id"
 
   (cd "$REPO_ROOT" && \
     MCP_URL="$MCP_URL" \
-    ROOM_ID="$ROOM_ID" \
+    ROOM_ID="$smoke_room_id" \
     WORLD_PRESET_ID="$WORLD_PRESET_ID" \
     DM_PRESET_ID="$DM_PRESET_ID" \
     PARTY_SIZE="$PARTY_SIZE" \
@@ -247,6 +253,7 @@ echo "  MCP_URL=$MCP_URL"
 echo "  RUN_VIEWER_BUILD=$RUN_VIEWER_BUILD"
 echo "  RUN_SMOKE=$RUN_SMOKE"
 echo "  RUN_ROUND=$RUN_ROUND"
+echo "  ROOM_ID=${ROOM_ID:-<auto>}"
 echo "  LOG_DIR=$LOG_DIR"
 
 run_step "command prerequisites" step_check_commands

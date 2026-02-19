@@ -140,7 +140,11 @@ fn summarize_actor_issues(progress: &TurnProgressState) -> (String, bool) {
         if !is_issue_state && reason.is_empty() {
             continue;
         }
-        let state_label = if is_issue_state { state.as_str() } else { "issue" };
+        let state_label = if is_issue_state {
+            state.as_str()
+        } else {
+            "issue"
+        };
         if reason.is_empty() {
             issues.push(format!("{}: {}", actor_id, state_label));
         } else {
@@ -169,8 +173,12 @@ fn build_next_action_hint(
             TrpgLifecycleState::Loading => {
                 "로딩 중입니다. 상태 동기화 완료를 기다리세요.".to_string()
             }
-            TrpgLifecycleState::Stopped => "세션이 멈춰 있습니다. Start/Run으로 재개하세요.".to_string(),
-            TrpgLifecycleState::Ended => "세션이 종료되었습니다. New Game으로 시작하세요.".to_string(),
+            TrpgLifecycleState::Stopped => {
+                "세션이 멈춰 있습니다. Start/Run으로 재개하세요.".to_string()
+            }
+            TrpgLifecycleState::Ended => {
+                "세션이 종료되었습니다. New Game으로 시작하세요.".to_string()
+            }
             TrpgLifecycleState::Unavailable => {
                 "엔진/키퍼 연결을 복구한 뒤 다시 시도하세요.".to_string()
             }
@@ -188,6 +196,82 @@ fn build_next_action_hint(
         "Run Round를 실행하거나 플레이어 액션을 입력하세요.".to_string()
     } else {
         format!("{} 응답을 기다리는 중입니다.", actor)
+    }
+}
+
+fn build_flow_banner(
+    lifecycle: TrpgLifecycleState,
+    connection: &ConnectionStatus,
+    runner_running: bool,
+    has_actor_issues: bool,
+    current_actor: &str,
+    next_action: &str,
+) -> (&'static str, &'static str, String) {
+    match connection {
+        ConnectionStatus::Failed | ConnectionStatus::Disconnected => (
+            "연결 오류",
+            "is-error",
+            "엔진 연결이 끊겼습니다. 연결 복구 후 다시 시도하세요.".to_string(),
+        ),
+        ConnectionStatus::Connecting | ConnectionStatus::Reconnecting(_, _) => (
+            "연결 중",
+            "is-waiting",
+            "엔진 연결을 복구하고 있습니다. 잠시 기다려주세요.".to_string(),
+        ),
+        ConnectionStatus::Connected => match lifecycle {
+            TrpgLifecycleState::Unavailable => (
+                "복구 필요",
+                "is-error",
+                "세션을 계속할 수 없습니다. keeper/엔진 상태를 확인하세요.".to_string(),
+            ),
+            TrpgLifecycleState::Ended => (
+                "세션 종료",
+                "is-idle",
+                "현재 세션이 종료되었습니다. 새 게임으로 다시 시작하세요.".to_string(),
+            ),
+            TrpgLifecycleState::Stopped => (
+                "일시 정지",
+                "is-alert",
+                "세션이 멈춰 있습니다. Run Round로 다시 진행할 수 있습니다.".to_string(),
+            ),
+            TrpgLifecycleState::Loading => (
+                "세션 준비",
+                "is-waiting",
+                "초기화/동기화 중입니다. 완료 후 라운드를 실행하세요.".to_string(),
+            ),
+            TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => (
+                "로비",
+                "is-idle",
+                "새 게임을 시작하거나 실행 가능한 방으로 이동하세요.".to_string(),
+            ),
+            TrpgLifecycleState::Running => {
+                if runner_running {
+                    (
+                        "자동 진행",
+                        "is-running",
+                        format!("AI 라운드 자동 순환 중 · {}", next_action),
+                    )
+                } else if has_actor_issues {
+                    (
+                        "주의",
+                        "is-alert",
+                        format!("응답 이슈 감지 · {}", next_action),
+                    )
+                } else if !current_actor.trim().is_empty() && current_actor.trim() != "-" {
+                    (
+                        "진행 중",
+                        "is-running",
+                        format!("{} 턴 처리 중 · {}", current_actor.trim(), next_action),
+                    )
+                } else {
+                    (
+                        "대기",
+                        "is-waiting",
+                        format!("다음 액션 대기 · {}", next_action),
+                    )
+                }
+            }
+        },
     }
 }
 
@@ -445,21 +529,32 @@ pub fn update_turn_runtime_dom(
     } else {
         "idle".to_string()
     };
-    let next_action = build_next_action_hint(
+    let next_action =
+        build_next_action_hint(lifecycle, runner_running, &current_actor, has_actor_issues);
+    let (flow_state, flow_class, flow_detail) = build_flow_banner(
         lifecycle,
+        &connection,
         runner_running,
-        &current_actor,
         has_actor_issues,
+        &current_actor,
+        &next_action,
     );
 
     let connection_label = connection_status_label(&connection);
     let connection_class = connection_status_class(&connection);
 
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = (&sync_class, &control_state, &runner_last_result);
+    let _ = (
+        &sync_class,
+        &control_state,
+        &runner_last_result,
+        &flow_state,
+        &flow_class,
+        &flow_detail,
+    );
 
     let snapshot = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         room_status_key,
         turn,
         phase,
@@ -476,6 +571,9 @@ pub fn update_turn_runtime_dom(
         progress.last_event,
         issues_summary,
         next_action,
+        flow_state,
+        flow_class,
+        flow_detail,
     );
     if cache.last_snapshot == snapshot {
         return;
@@ -590,6 +688,16 @@ pub fn update_turn_runtime_dom(
             },
         );
         set_ops_hud_value(&document, "ops-sync-state", &sync_state, sync_class);
+        if let Some(flow_banner) = document.get_element_by_id("turn-flow-banner") {
+            let _ = flow_banner.set_attribute("class", &format!("turn-flow-banner {}", flow_class));
+            let html = format!(
+                "<span class=\"flow-state\">{}</span><span class=\"flow-text\">{}</span>",
+                html_escape(flow_state),
+                html_escape(&flow_detail),
+            );
+            flow_banner.set_inner_html(&html);
+            let _ = flow_banner.set_attribute("title", &next_action);
+        }
 
         let inferred_dm = if !progress.dm_keeper.trim().is_empty() {
             progress.dm_keeper.trim().to_string()
@@ -747,10 +855,9 @@ mod tests {
         progress
             .actor_states
             .insert("p01".to_string(), "timeout".to_string());
-        progress.actor_reasons.insert(
-            "p01".to_string(),
-            "keeper heartbeat timeout".to_string(),
-        );
+        progress
+            .actor_reasons
+            .insert("p01".to_string(), "keeper heartbeat timeout".to_string());
         progress
             .actor_reasons
             .insert("p99".to_string(), "no keeper".to_string());
@@ -773,5 +880,35 @@ mod tests {
     fn next_action_waits_for_current_actor_when_running() {
         let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "p03", false);
         assert_eq!(hint, "p03 응답을 기다리는 중입니다.");
+    }
+
+    #[test]
+    fn flow_banner_prioritizes_connection_failure() {
+        let (state, class_name, detail) = build_flow_banner(
+            TrpgLifecycleState::Running,
+            &ConnectionStatus::Failed,
+            false,
+            false,
+            "-",
+            "Run Round를 실행하세요.",
+        );
+        assert_eq!(state, "연결 오류");
+        assert_eq!(class_name, "is-error");
+        assert!(detail.contains("연결"));
+    }
+
+    #[test]
+    fn flow_banner_marks_auto_run_as_running() {
+        let (state, class_name, detail) = build_flow_banner(
+            TrpgLifecycleState::Running,
+            &ConnectionStatus::Connected,
+            true,
+            false,
+            "p01",
+            "Auto Run 진행 중입니다.",
+        );
+        assert_eq!(state, "자동 진행");
+        assert_eq!(class_name, "is-running");
+        assert!(detail.contains("자동"));
     }
 }

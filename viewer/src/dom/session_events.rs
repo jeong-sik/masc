@@ -1,8 +1,9 @@
 #[cfg(target_arch = "wasm32")]
 use crate::dom::escape::html_escape;
 use crate::game::events::{
-    InterventionApplied, InterventionSubmitted, KeeperUnavailable, PartySelected, PhaseChanged,
-    RoomCreated, RoomStarted, SessionStarted, TurnActionResolved, TurnStarted,
+    CombatAttack, CombatDefense, InterventionApplied, InterventionSubmitted, KeeperUnavailable,
+    PartySelected, PhaseChanged, RoomCreated, RoomStarted, SessionOutcome, SessionStarted,
+    TurnActionResolved, TurnStarted,
 };
 use bevy::prelude::*;
 
@@ -15,6 +16,9 @@ pub fn update_session_events_dom(
     mut phase_changed: MessageReader<PhaseChanged>,
     mut turn_started: MessageReader<TurnStarted>,
     mut action_resolved: MessageReader<TurnActionResolved>,
+    mut combat_attack: MessageReader<CombatAttack>,
+    mut combat_defense: MessageReader<CombatDefense>,
+    mut session_outcome: MessageReader<SessionOutcome>,
     mut intervention_sub: MessageReader<InterventionSubmitted>,
     mut intervention_app: MessageReader<InterventionApplied>,
     mut keeper_unavail: MessageReader<KeeperUnavailable>,
@@ -45,7 +49,7 @@ pub fn update_session_events_dom(
                 &log,
                 "session-event",
                 &format!(
-                    "<span class=\"session-icon\">\u{25cb}</span> Party formed: {}",
+                    "<span class=\"session-icon\">○</span> Party formed: {}",
                     ids
                 ),
             );
@@ -62,7 +66,7 @@ pub fn update_session_events_dom(
                 &log,
                 "session-event",
                 &format!(
-                    "<span class=\"session-icon\">\u{25cb}</span> Room created ({})",
+                    "<span class=\"session-icon\">○</span> Room created ({})",
                     html_escape(preset)
                 ),
             );
@@ -79,7 +83,7 @@ pub fn update_session_events_dom(
                 &log,
                 "session-event session-start",
                 &format!(
-                    "<span class=\"session-icon\">\u{25b6}</span> Adventure {} \u{2014} {}",
+                    "<span class=\"session-icon\">▶</span> Adventure {} — {}",
                     html_escape(status),
                     html_escape(&p.room_id)
                 ),
@@ -97,7 +101,7 @@ pub fn update_session_events_dom(
                 &log,
                 "session-event",
                 &format!(
-                    "<span class=\"session-icon\">\u{25cb}</span> Session: {}",
+                    "<span class=\"session-icon\">○</span> Session: {}",
                     html_escape(sid)
                 ),
             );
@@ -109,7 +113,7 @@ pub fn update_session_events_dom(
                 &log,
                 "turn-event",
                 &format!(
-                    "<span class=\"turn-icon\">\u{25c6}</span> Phase \u{2192} {} (Turn {})",
+                    "<span class=\"turn-icon\">◆</span> Phase → {} (Turn {})",
                     html_escape(&p.phase),
                     p.turn
                 ),
@@ -122,7 +126,7 @@ pub fn update_session_events_dom(
                 &log,
                 "turn-event turn-start",
                 &format!(
-                    "<span class=\"turn-icon\">\u{25c6}</span> Turn {} begins \u{2014} {}",
+                    "<span class=\"turn-icon\">◆</span> Turn {} begins — {}",
                     p.turn,
                     html_escape(&p.phase)
                 ),
@@ -135,7 +139,7 @@ pub fn update_session_events_dom(
                 &log,
                 "action-result",
                 &format!(
-                    "<span class=\"action-icon\">\u{2713}</span> {} performed {} \u{2192} {}",
+                    "<span class=\"action-icon\">✓</span> {} performed {} → {}",
                     html_escape(&p.actor_id),
                     html_escape(&p.action),
                     html_escape(&p.result)
@@ -143,13 +147,93 @@ pub fn update_session_events_dom(
             );
         }
 
+        for CombatAttack(p) in combat_attack.read() {
+            append_entry(
+                &doc,
+                &log,
+                "action-result combat-attack fx-attack",
+                &format!(
+                    "<span class=\"event-badge badge-attack\">⚔ ATTACK</span>\
+                     <span class=\"event-main\">{}</span>\
+                     <span class=\"event-sep\">→</span>\
+                     <span class=\"event-detail\">{}</span>",
+                    html_escape(&p.actor_id),
+                    html_escape(&p.action)
+                ),
+            );
+            set_event_beacon(
+                &doc,
+                "attack",
+                "공격",
+                &format!("{} · {}", p.actor_id, p.action),
+            );
+        }
+
+        for CombatDefense(p) in combat_defense.read() {
+            append_entry(
+                &doc,
+                &log,
+                "action-result combat-defense fx-defense",
+                &format!(
+                    "<span class=\"event-badge badge-defense\">🛡 DEFENSE</span>\
+                     <span class=\"event-main\">{}</span>\
+                     <span class=\"event-sep\">·</span>\
+                     <span class=\"event-detail\">{}</span>",
+                    html_escape(&p.actor_id),
+                    html_escape(&p.method)
+                ),
+            );
+            set_event_beacon(
+                &doc,
+                "defense",
+                "방어",
+                &format!("{} · {}", p.actor_id, p.method),
+            );
+        }
+
+        for SessionOutcome(p) in session_outcome.read() {
+            let (tone_class, label, icon) = match p.outcome.trim().to_ascii_lowercase().as_str() {
+                "victory" => ("outcome-victory", "승리", "🏆"),
+                "defeat" => ("outcome-defeat", "패배", "☠"),
+                _ => ("outcome-draw", "무승부", "⚖"),
+            };
+            let summary = if p.summary.trim().is_empty() {
+                format!("세션 종료 · {}", label)
+            } else {
+                p.summary.trim().to_string()
+            };
+            append_entry(
+                &doc,
+                &log,
+                &format!("session-event session-outcome {}", tone_class),
+                &format!(
+                    "<span class=\"event-badge badge-outcome\">{} {}</span>\
+                     <span class=\"event-detail\">{}</span>",
+                    icon,
+                    label,
+                    html_escape(&summary)
+                ),
+            );
+            set_event_beacon(&doc, &p.outcome, label, &summary);
+        }
+
         for InterventionSubmitted(p) in intervention_sub.read() {
             let target = if p.target.is_empty() { "" } else { &p.target };
-            append_entry(&doc, &log, "intervention-event",
-                &format!("<span class=\"intervention-icon\">\u{2691}</span> Intervention: {} {} \u{2014} {}",
+            append_entry(
+                &doc,
+                &log,
+                "intervention-event",
+                &format!(
+                    "<span class=\"intervention-icon\">⚑</span> Intervention: {} {} — {}",
                     html_escape(&p.intervention_type),
-                    if target.is_empty() { String::new() } else { format!("\u{2192} {}", html_escape(target)) },
-                    html_escape(&p.description)));
+                    if target.is_empty() {
+                        String::new()
+                    } else {
+                        format!("→ {}", html_escape(target))
+                    },
+                    html_escape(&p.description)
+                ),
+            );
         }
 
         for InterventionApplied(p) in intervention_app.read() {
@@ -159,12 +243,12 @@ pub fn update_session_events_dom(
                 &log,
                 "intervention-event intervention-applied",
                 &format!(
-                    "<span class=\"intervention-icon\">\u{2691}</span> Applied: {} {} \u{2014} {}",
+                    "<span class=\"intervention-icon\">⚑</span> Applied: {} {} — {}",
                     html_escape(&p.intervention_type),
                     if target.is_empty() {
                         String::new()
                     } else {
-                        format!("\u{2192} {}", html_escape(target))
+                        format!("→ {}", html_escape(target))
                     },
                     html_escape(&p.description)
                 ),
@@ -177,9 +261,16 @@ pub fn update_session_events_dom(
             } else {
                 &p.reason
             };
-            append_entry(&doc, &log, "keeper-warning",
-                &format!("<span class=\"warning-icon\">\u{26a0}</span> Keeper {} unavailable \u{2014} {}",
-                    html_escape(&p.keeper), html_escape(reason)));
+            append_entry(
+                &doc,
+                &log,
+                "keeper-warning",
+                &format!(
+                    "<span class=\"warning-icon\">⚠</span> Keeper {} unavailable — {}",
+                    html_escape(&p.keeper),
+                    html_escape(reason)
+                ),
+            );
         }
     }
 
@@ -192,6 +283,9 @@ pub fn update_session_events_dom(
         &mut phase_changed,
         &mut turn_started,
         &mut action_resolved,
+        &mut combat_attack,
+        &mut combat_defense,
+        &mut session_outcome,
         &mut intervention_sub,
         &mut intervention_app,
         &mut keeper_unavail,
@@ -215,4 +309,43 @@ fn append_entry(doc: &web_sys::Document, log: &web_sys::Element, class: &str, in
         // Auto-scroll
         log.set_scroll_top(log.scroll_height());
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn beacon_tone(raw: &str) -> &'static str {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "victory" => "victory",
+        "defeat" => "defeat",
+        "draw" => "draw",
+        "attack" => "attack",
+        "defense" => "defense",
+        _ => "info",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_event_beacon(doc: &web_sys::Document, tone: &str, title: &str, detail: &str) {
+    let Some(el) = doc.get_element_by_id("event-beacon") else {
+        return;
+    };
+    let tone = beacon_tone(tone);
+    let icon = match tone {
+        "attack" => "⚔",
+        "defense" => "🛡",
+        "victory" => "🏆",
+        "defeat" => "☠",
+        "draw" => "⚖",
+        _ => "✶",
+    };
+    el.set_class_name(&format!("event-beacon tone-{tone}"));
+    el.set_inner_html(&format!(
+        "<span class=\"beacon-icon\">{}</span>\
+         <span class=\"beacon-copy\">\
+           <span class=\"beacon-title\">{}</span>\
+           <span class=\"beacon-detail\">{}</span>\
+         </span>",
+        icon,
+        html_escape(title),
+        html_escape(detail)
+    ));
 }

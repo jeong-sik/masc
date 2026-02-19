@@ -63,6 +63,9 @@ impl Plugin for GameStatePlugin {
             .add_message::<ActorUpdated>()
             .add_message::<RoomEnded>()
             .add_message::<TurnActionResolved>()
+            .add_message::<CombatAttack>()
+            .add_message::<CombatDefense>()
+            .add_message::<SessionOutcome>()
             .add_message::<SceneTransitioned>()
             // ── TRPG-gated systems ──
             .add_systems(
@@ -117,6 +120,9 @@ impl Plugin for GameStatePlugin {
                     systems::apply_phase_changed,
                     systems::apply_turn_started,
                     systems::apply_turn_action_resolved,
+                    systems::apply_combat_attack,
+                    systems::apply_combat_defense,
+                    systems::apply_session_outcome,
                     systems::apply_intervention_submitted,
                     systems::apply_intervention_applied,
                     systems::apply_keeper_unavailable,

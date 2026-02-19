@@ -17,6 +17,41 @@ pub struct OverlayCache {
     pub last_combat_active: bool,
 }
 
+#[cfg(target_arch = "wasm32")]
+fn pretty_label(raw: &str) -> String {
+    raw.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn weather_icon_path(id: &str) -> Option<&'static str> {
+    match id {
+        "drizzle" => Some("assets/weather/weather_drizzle.png"),
+        "heavy_rain" => Some("assets/weather/weather_heavy_rain.png"),
+        "fog" => Some("assets/weather/weather_fog.png"),
+        "silence" => Some("assets/weather/weather_silence.png"),
+        _ => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mood_icon_path(id: &str) -> Option<&'static str> {
+    match id {
+        "quiet_unease" => Some("assets/moods/mood_quiet_unease.png"),
+        "tension_rising" => Some("assets/moods/mood_tension_rising.png"),
+        "ambiguous_calm" => Some("assets/moods/mood_ambiguous_calm.png"),
+        _ => None,
+    }
+}
+
 /// Sync OverlayState, ChoiceState, and CombatState to DOM elements.
 ///
 /// Expected HTML elements:
@@ -51,7 +86,19 @@ pub fn update_overlay_dom(
                 if overlay.weather.is_empty() {
                     el.set_text_content(None);
                 } else {
-                    el.set_text_content(Some(&overlay.weather));
+                    el.set_text_content(Some(&pretty_label(&overlay.weather)));
+                }
+            }
+            if let Some(img) = document
+                .get_element_by_id("weather-icon")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlImageElement>().ok())
+            {
+                if let Some(path) = weather_icon_path(overlay.weather.trim()) {
+                    img.set_src(path);
+                    img.set_alt(&pretty_label(&overlay.weather));
+                } else {
+                    img.set_src("");
+                    img.set_alt("");
                 }
             }
             cache.last_weather = overlay.weather.clone();
@@ -62,7 +109,19 @@ pub fn update_overlay_dom(
                 if overlay.mood.is_empty() {
                     el.set_text_content(None);
                 } else {
-                    el.set_text_content(Some(&overlay.mood));
+                    el.set_text_content(Some(&pretty_label(&overlay.mood)));
+                }
+            }
+            if let Some(img) = document
+                .get_element_by_id("mood-icon")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlImageElement>().ok())
+            {
+                if let Some(path) = mood_icon_path(overlay.mood.trim()) {
+                    img.set_src(path);
+                    img.set_alt(&pretty_label(&overlay.mood));
+                } else {
+                    img.set_src("");
+                    img.set_alt("");
                 }
             }
             cache.last_mood = overlay.mood.clone();

@@ -274,6 +274,46 @@ pub struct TurnActionResolvedPayload {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct CombatAttackPayload {
+    #[serde(default)]
+    pub turn: u32,
+    #[serde(default)]
+    pub actor_id: String,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
+    pub target_id: String,
+    #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
+    pub skill: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CombatDefensePayload {
+    #[serde(default)]
+    pub turn: u32,
+    #[serde(default)]
+    pub actor_id: String,
+    #[serde(default)]
+    pub method: String,
+    #[serde(default)]
+    #[allow(dead_code)] // read only in wasm32 DOM code
+    pub source_actor_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionOutcomePayload {
+    pub outcome: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub turn: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SceneTransitionPayload {
     #[allow(dead_code)] // read only in wasm32 DOM code
     pub from_scene: String,
@@ -309,6 +349,15 @@ pub struct RoomEnded(pub RoomEndedPayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct TurnActionResolved(pub TurnActionResolvedPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct CombatAttack(pub CombatAttackPayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct CombatDefense(pub CombatDefensePayload);
+
+#[derive(Message, Debug, Clone)]
+pub struct SessionOutcome(pub SessionOutcomePayload);
 
 #[derive(Message, Debug, Clone)]
 pub struct SceneTransitioned(pub SceneTransitionPayload);

@@ -3253,6 +3253,24 @@ body:not(.mode-trpg) #ops-hud {
     text-align: center;
 }
 
+.social-error {
+    color: var(--status-disconnected);
+    background: rgba(214, 79, 79, 0.08);
+    border: 1px solid rgba(214, 79, 79, 0.35);
+    border-radius: var(--card-radius);
+    font-size: 13px;
+    padding: 16px 18px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+.social-error-detail {
+    color: var(--text-secondary);
+    display: inline-block;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
 /* ─── Social Board Post Cards ────────────── */
 
 .social-post {

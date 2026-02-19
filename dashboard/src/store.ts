@@ -113,7 +113,8 @@ export async function refreshBoard(): Promise<void> {
 export async function refreshTrpg(): Promise<void> {
   trpgLoading.value = true
   try {
-    const room = trpgRoom.value || undefined
+    const room = trpgRoom.value || serverStatus.value?.room || 'default'
+    if (!trpgRoom.value) trpgRoom.value = room
     const data = await fetchTrpgState(room)
     trpgState.value = data
   } catch (err) {

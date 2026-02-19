@@ -33,14 +33,20 @@ body {
   min-height: 100%;
 }
 
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
 body {
   font-family: "IBM Plex Sans KR", "IBM Plex Sans", "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   color: var(--text-body);
   line-height: 1.5;
   background:
+    linear-gradient(145deg, rgba(9, 15, 28, 0.56) 0%, rgba(17, 26, 46, 0.72) 52%, rgba(22, 33, 60, 0.8) 100%),
     radial-gradient(900px 520px at -10% -20%, rgba(71, 184, 255, 0.2), transparent 58%),
     radial-gradient(800px 480px at 115% -5%, rgba(74, 222, 128, 0.16), transparent 60%),
-    linear-gradient(145deg, var(--bg-0) 0%, var(--bg-1) 55%, var(--bg-2) 100%);
+    url("../assets/bg-twisted-woods.jpg") center center / cover no-repeat;
 }
 
 a {
@@ -104,7 +110,7 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
@@ -237,6 +243,8 @@ a:hover {
 .rail-stat-row strong {
   color: var(--text-strong);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 .rail-refresh-btn {
@@ -283,6 +291,8 @@ a:hover {
   font-size: 30px;
   font-weight: 700;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 .grid-2col {
@@ -326,6 +336,7 @@ a:hover {
   gap: 8px;
   font-size: 12px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .connection-status.connected {
@@ -396,10 +407,16 @@ a:hover {
 }
 
 .event-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 2px 8px;
+  min-width: 80px;
   border: 1px solid var(--card-border);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 .pill {
@@ -520,10 +537,26 @@ a:hover {
 
   .header-right {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: space-between;
   }
 
   .dashboard-rail {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-main {
+    animation: none;
+  }
+
+  .ctx-fill,
+  .trpg-hp-bar .hp-fill {
+    transition: none;
+  }
+
+  .trpg-run-status.running {
+    animation: none;
   }
 }

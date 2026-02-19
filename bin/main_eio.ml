@@ -3267,6 +3267,16 @@ let asset_content_type name =
     "text/css; charset=utf-8"
   else if Filename.check_suffix name ".js" then
     "application/javascript; charset=utf-8"
+  else if Filename.check_suffix name ".html" then
+    "text/html; charset=utf-8"
+  else if Filename.check_suffix name ".svg" then
+    "image/svg+xml"
+  else if Filename.check_suffix name ".json" then
+    "application/json"
+  else if Filename.check_suffix name ".woff2" then
+    "font/woff2"
+  else if Filename.check_suffix name ".map" then
+    "application/json"
   else
     "application/octet-stream"
 
@@ -3291,6 +3301,41 @@ let playground_asset_path name =
 
 let serve_playground_asset name _request reqd =
   let path = playground_asset_path name in
+  match read_file path with
+  | Ok body ->
+      Http.Response.bytes ~content_type:(asset_content_type name) body reqd
+  | Error _ ->
+      Http.Response.not_found reqd
+
+(** Dashboard SPA assets (Preact + HTM, built by Vite) *)
+let dashboard_asset_root () =
+  Filename.concat (assets_root ()) "dashboard"
+
+let dashboard_index_path () =
+  Filename.concat (dashboard_asset_root ()) "index.html"
+
+let dashboard_etag () =
+  try
+    let st = Unix.stat (dashboard_index_path ()) in
+    let hash =
+      Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex
+    in
+    String.sub hash 0 12
+  with _ -> "none"
+
+let serve_dashboard_index request reqd =
+  match read_file (dashboard_index_path ()) with
+  | Ok body ->
+      Http.Response.html_cached
+        ~etag:(dashboard_etag ())
+        ~request body reqd
+  | Error _ ->
+      Http.Response.html
+        "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"
+        reqd
+
+let serve_dashboard_static name _request reqd =
+  let path = Filename.concat (dashboard_asset_root ()) name in
   match read_file path with
   | Ok body ->
       Http.Response.bytes ~content_type:(asset_content_type name) body reqd
@@ -4106,13 +4151,7 @@ let make_routes ~port ~host =
                 in
                 try loop () with _ -> ())
             | _ -> ()))
-  |> Http.Router.get "/dashboard" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         Http.Response.html_cached
-           ~etag:(Masc_mcp.Web_dashboard.etag ())
-           ~request:req
-           (Masc_mcp.Web_dashboard.html ()) reqd
-       ) request reqd)
+  (* Dashboard sub-routes: credits and lodge must come before the SPA catchall *)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          Http.Response.html (Masc_mcp.Credits_dashboard.html ()) reqd
@@ -4123,6 +4162,22 @@ let make_routes ~port ~host =
            ~etag:(Masc_mcp.Lodge_dashboard.etag ())
            ~request:req
            (Masc_mcp.Lodge_dashboard.html ()) reqd
+       ) request reqd)
+  (* Dashboard SPA: static assets — prefix match for /dashboard/assets/* *)
+  |> Http.Router.prefix_get "/dashboard/assets/"
+       (fun request reqd ->
+         let req_path = Http.Request.path request in
+         let prefix_len = String.length "/dashboard/assets/" in
+         let filename = String.sub req_path prefix_len (String.length req_path - prefix_len) in
+         serve_dashboard_static ("assets/" ^ filename) request reqd)
+  (* Dashboard SPA: index.html *)
+  |> Http.Router.get "/dashboard" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         serve_dashboard_index req reqd
+       ) request reqd)
+  |> Http.Router.get "/dashboard/" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         serve_dashboard_index req reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
@@ -5104,21 +5159,25 @@ let run_server ~sw ~env ~port ~base_path =
       (* ─────────────────────────────────────────────────────────────────────
          Dashboard
          ───────────────────────────────────────────────────────────────────── *)
-      | `GET, "/dashboard" ->
-          let etag_value = "\"" ^ Masc_mcp.Web_dashboard.etag () ^ "\"" in
-          let if_none_match = H2.Headers.get h2_headers "if-none-match" in
-          (match if_none_match with
-           | Some inm when String.equal inm etag_value ->
-               let resp_headers = H2.Headers.of_list ([
-                 ("etag", etag_value); ("cache-control", "no-cache");
-               ] @ cors) in
-               let response = H2.Response.create ~headers:resp_headers `Not_modified in
-               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-               H2.Body.Writer.close writer
-           | _ ->
-               let body = Masc_mcp.Web_dashboard.html () in
-               let extra = [("etag", etag_value); ("cache-control", "no-cache"); ("vary", "Accept-Encoding")] @ cors in
-               h2_respond_html h2_reqd body ~extra_headers:extra)
+      | `GET, "/dashboard" | `GET, "/dashboard/" ->
+          let index_path = dashboard_index_path () in
+          (match read_file index_path with
+           | Ok body ->
+               let etag_value = "\"" ^ dashboard_etag () ^ "\"" in
+               let if_none_match = H2.Headers.get h2_headers "if-none-match" in
+               (match if_none_match with
+                | Some inm when String.equal inm etag_value ->
+                    let resp_headers = H2.Headers.of_list ([
+                      ("etag", etag_value); ("cache-control", "no-cache");
+                    ] @ cors) in
+                    let response = H2.Response.create ~headers:resp_headers `Not_modified in
+                    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+                    H2.Body.Writer.close writer
+                | _ ->
+                    let extra = [("etag", etag_value); ("cache-control", "no-cache"); ("vary", "Accept-Encoding")] @ cors in
+                    h2_respond_html h2_reqd body ~extra_headers:extra)
+           | Error _ ->
+               h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>" ~extra_headers:cors)
 
       | `GET, "/dashboard/credits" ->
           h2_respond_html h2_reqd (Masc_mcp.Credits_dashboard.html ()) ~extra_headers:cors
@@ -5546,6 +5605,25 @@ let run_server ~sw ~env ~port ~base_path =
                let headers = H2.Headers.of_list [
                  ("content-type", "application/javascript; charset=utf-8");
                  ("content-length", string_of_int (String.length body));
+               ] in
+               let response = H2.Response.create ~headers `OK in
+               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+               H2.Body.Writer.write_string writer body;
+               H2.Body.Writer.close writer
+           | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found)
+
+      (* Dashboard SPA: static assets *)
+      | `GET, p when String.length p > 18
+                   && String.sub p 0 18 = "/dashboard/assets/" ->
+          let filename = String.sub p 18 (String.length p - 18) in
+          let file_path = Filename.concat (dashboard_asset_root ()) ("assets/" ^ filename) in
+          (match read_file file_path with
+           | Ok body ->
+               let ct = asset_content_type filename in
+               let headers = H2.Headers.of_list [
+                 ("content-type", ct);
+                 ("content-length", string_of_int (String.length body));
+                 ("cache-control", "public, max-age=31536000, immutable");
                ] in
                let response = H2.Response.create ~headers `OK in
                let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in

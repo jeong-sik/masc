@@ -346,6 +346,47 @@ let test_round_run_lang_english_prompt () =
   Alcotest.(check bool) "english prompt instruction injected" true has_en_instruction;
   cleanup_dir base_dir
 
+let test_round_run_dm_prompt_reflects_player_action () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors
+    ~base_dir
+    ~room_id:"room-round-dm-context"
+    ~actor_ids:["p1"];
+  let prompts = ref [] in
+  let keeper_call ~name ~message ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    prompts := (name, message) :: !prompts;
+    match name with
+    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "왼쪽 엄폐물 뒤로 이동해 정찰한다.") ])
+    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "정찰 결과를 받아 다음 장면을 연다.") ])
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-dm-context");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+      ]
+  in
+  let ok, _body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  let dm_prompt =
+    !prompts
+    |> List.find_opt (fun (name, _) -> name = "dm-keeper")
+    |> Option.map snd
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool)
+    "dm prompt includes latest player action"
+    true
+    (contains_substring dm_prompt "왼쪽 엄폐물 뒤로 이동해 정찰한다.");
+  cleanup_dir base_dir
+
 let test_round_run_rejects_non_unique_keepers () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -959,6 +1000,10 @@ let () =
             "supports lang=en prompt"
             `Quick
             test_round_run_lang_english_prompt;
+          Alcotest.test_case
+            "dm prompt reflects player action"
+            `Quick
+            test_round_run_dm_prompt_reflects_player_action;
           Alcotest.test_case
             "rejects non-unique keepers"
             `Quick

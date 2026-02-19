@@ -68,10 +68,54 @@ let test_hp_changed_event () =
   Alcotest.(check int) "hp clamped to 0" 0 hp;
   Alcotest.(check bool) "alive false on zero hp" false alive
 
+let test_turn_action_proposed_added_to_narration_log () =
+  let config =
+    `Assoc
+      [
+        ("party", `Assoc []);
+        ("world", `Assoc [ ("story_flags", `List []) ]);
+      ]
+  in
+  let ev =
+    Trpg_engine_event.make
+      ~seq:1
+      ~room_id:"room-1"
+      ~ts:"2026-02-15T00:00:00Z"
+      ~event_type:Trpg_engine_event.Turn_action_proposed
+      ~payload:
+        (`Assoc
+          [
+            ("phase", `String "round");
+            ("turn", `Int 3);
+            ("actor_id", `String "p01");
+            ("keeper", `String "pk-1");
+            ("proposed_action", `String "엄폐하며 정찰한다.");
+          ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config
+      ~events:[ ev ]
+  in
+  let narration_log = state |> member "narration_log" |> to_list in
+  Alcotest.(check int) "narration entry count" 1 (List.length narration_log);
+  let entry = List.hd narration_log in
+  Alcotest.(check string) "role preserved as player"
+    "player" (entry |> member "role" |> to_string);
+  Alcotest.(check string) "reply uses proposed_action"
+    "엄폐하며 정찰한다." (entry |> member "reply" |> to_string)
+
 let () =
   Alcotest.run "TRPG Rule DnD5e Lite"
     [
       ("math", [ Alcotest.test_case "stat bonus" `Quick test_stat_bonus ]);
       ("tier", [ Alcotest.test_case "classify roll" `Quick test_classify_roll ]);
-      ("event", [ Alcotest.test_case "hp changed applies" `Quick test_hp_changed_event ]);
+      ( "event",
+        [
+          Alcotest.test_case "hp changed applies" `Quick test_hp_changed_event;
+          Alcotest.test_case "turn action proposed logs narration" `Quick
+            test_turn_action_proposed_added_to_narration_log;
+        ] );
     ]

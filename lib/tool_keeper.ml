@@ -5837,6 +5837,7 @@ let handle_keeper_msg ctx args : tool_result =
     let new_drift_enabled_opt = get_bool_opt args "new_drift_enabled" in
     let new_drift_min_turn_gap_opt = Safe_ops.json_int_opt "new_drift_min_turn_gap" args in
     let inline_models = get_string_list args "models" in
+    let require_existing = get_bool args "require_existing" false in
     let ollama_timeout_sec_opt =
       Safe_ops.json_float_opt "ollama_timeout_sec" args
       |> Option.map (fun v ->
@@ -5851,7 +5852,10 @@ let handle_keeper_msg ctx args : tool_result =
       match read_meta ctx.config name with
       | Error e -> Error e
       | Ok (Some m) -> Ok m
-  | Ok None ->
+      | Ok None ->
+          if require_existing then
+            Error (Printf.sprintf "keeper not found: %s" name)
+          else
           let goal = Option.value ~default:"" inline_goal |> normalize_goal_horizon_text in
           if goal = "" then Error "keeper not found and goal not provided"
           else if inline_models = [] then Error "keeper not found and models not provided"

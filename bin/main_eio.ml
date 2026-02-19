@@ -1040,6 +1040,7 @@ let trpg_keeper_call_with_runtime
           ("name", `String keeper_name);
           ("message", `String message);
           ("goal", `String inline_goal);
+          ("require_existing", `Bool true);
           ("ollama_timeout_sec", `Float timeout_sec);
         ])
   in

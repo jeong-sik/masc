@@ -5,6 +5,7 @@ use wasm_bindgen::JsCast;
 use crate::game::events::NarrativeReceived;
 
 use super::escape::{sanitize_text, scroll_to_bottom, trim_log};
+use super::session_history::sync_history_focus_from_dashboard;
 
 fn normalize_phase_suffix(phase: &str) -> String {
     let mut out = String::with_capacity(phase.len());
@@ -213,6 +214,23 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         let clickable_entry = entry.clone();
         let click_cb = Closure::wrap(Box::new(move || {
             toggle_selected_class(&clickable_entry);
+            let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let Some(dashboard) = document.get_element_by_id("dashboard") else {
+                return;
+            };
+            if let Some(room_id) = clickable_entry.get_attribute("data-room-id") {
+                if !room_id.trim().is_empty() {
+                    let _ = dashboard.set_attribute("data-focus-room", room_id.trim());
+                }
+            }
+            if let Some(turn) = clickable_entry.get_attribute("data-turn") {
+                if !turn.trim().is_empty() {
+                    let _ = dashboard.set_attribute("data-focus-turn", turn.trim());
+                }
+            }
+            sync_history_focus_from_dashboard(&document);
         }) as Box<dyn FnMut()>);
         let _ = entry.dyn_ref::<web_sys::EventTarget>().map(|target| {
             target.add_event_listener_with_callback("click", click_cb.as_ref().unchecked_ref())

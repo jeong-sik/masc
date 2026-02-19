@@ -1338,6 +1338,28 @@ async fn actor_admin_delete(doc: &web_sys::Document) -> Result<String, String> {
 
 // ─── New Game Flow ──────────────────────────────────────────────
 
+async fn rollback_claimed_actors(room_id: &str, claims: &[(String, String)]) {
+    if claims.is_empty() {
+        return;
+    }
+    for (actor_id, keeper_name) in claims.iter().rev() {
+        let release_args = json!({
+            "room_id": room_id,
+            "actor_id": actor_id,
+            "keeper_name": keeper_name
+        });
+        if let Err(err) = mcp_tool_call("trpg.actor.release", release_args).await {
+            log::warn!(
+                "new-game rollback: actor release failed room={} actor={} keeper={} err={}",
+                room_id,
+                actor_id,
+                keeper_name,
+                err
+            );
+        }
+    }
+}
+
 async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, String> {
     set_new_game_status(doc, "빠른 시작: keeper/preset 동기화 중...");
     set_new_game_preflight_state(doc, "pending");
@@ -1659,8 +1681,9 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     let player_map: std::collections::HashMap<String, String> = assignments.into_iter().collect();
 
     set_new_game_status(doc, "세션 준비 5/6: actor ↔ keeper 점유 동기화 중...");
+    let mut claimed_pairs = Vec::new();
     for (actor_id, keeper_name) in &player_map {
-        mcp_tool_call(
+        if let Err(err) = mcp_tool_call(
             "trpg.actor.claim",
             json!({
                 "room_id": room_id,
@@ -1668,7 +1691,15 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
                 "keeper_name": keeper_name
             }),
         )
-        .await?;
+        .await
+        {
+            rollback_claimed_actors(&room_id, &claimed_pairs).await;
+            return Err(format!(
+                "actor claim 실패 (actor {} / keeper {}): {}. 기존 claim rollback을 시도했습니다.",
+                actor_id, keeper_name, err
+            ));
+        }
+        claimed_pairs.push((actor_id.clone(), keeper_name.clone()));
     }
 
     let models_value = if models.is_empty() {
@@ -1693,14 +1724,13 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     if let Some(models_value) = &models_value {
         dm_keeper_up_args["models"] = models_value.clone();
     }
-    mcp_tool_call("masc_keeper_up", dm_keeper_up_args)
-        .await
-        .map_err(|e| {
-            format!(
-                "DM keeper 준비 실패 ({}): {}. 새 keeper 생성 시 모델 입력이 필요합니다.",
-                dm_keeper, e
-            )
-        })?;
+    if let Err(err) = mcp_tool_call("masc_keeper_up", dm_keeper_up_args).await {
+        rollback_claimed_actors(&room_id, &claimed_pairs).await;
+        return Err(format!(
+            "DM keeper 준비 실패 ({}): {}. 기존 actor claim rollback을 시도했습니다. 새 keeper 생성 시 모델 입력이 필요합니다.",
+            dm_keeper, err
+        ));
+    }
 
     for (actor_id, keeper_name) in &player_map {
         let mut player_keeper_up_args = json!({
@@ -1713,14 +1743,13 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         if let Some(models_value) = &models_value {
             player_keeper_up_args["models"] = models_value.clone();
         }
-        mcp_tool_call("masc_keeper_up", player_keeper_up_args)
-            .await
-            .map_err(|e| {
-                format!(
-                    "Player keeper 준비 실패 (actor {} / keeper {}): {}. 새 keeper 생성 시 모델 입력이 필요합니다.",
-                    actor_id, keeper_name, e
-                )
-            })?;
+        if let Err(err) = mcp_tool_call("masc_keeper_up", player_keeper_up_args).await {
+            rollback_claimed_actors(&room_id, &claimed_pairs).await;
+            return Err(format!(
+                "Player keeper 준비 실패 (actor {} / keeper {}): {}. 기존 actor claim rollback을 시도했습니다. 새 keeper 생성 시 모델 입력이 필요합니다.",
+                actor_id, keeper_name, err
+            ));
+        }
     }
 
     set_current_room_id(doc, &room_id);

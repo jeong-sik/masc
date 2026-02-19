@@ -889,6 +889,22 @@ async fn fetch_room_state_payload(room_id: &str) -> Result<Value, String> {
     serde_json::from_str::<Value>(&body).map_err(|e| format!("state JSON 파싱 실패: {}", e))
 }
 
+fn summarize_preflight_items(items: &[String], limit: usize) -> String {
+    if items.is_empty() {
+        return "-".to_string();
+    }
+    let mut rows = items
+        .iter()
+        .take(limit)
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    if items.len() > limit {
+        rows.push(format!("외 {}건", items.len() - limit));
+    }
+    rows.join(" | ")
+}
+
 fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
     let state = state_root.get("state").unwrap_or(state_root);
     let actor_control = state
@@ -1154,30 +1170,155 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
     };
     rows.push(preset_row);
 
-    let keeper_row = match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await {
+    let (available_keepers, keeper_pool_row) =
+        match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await {
         Ok(payload) => {
-            let count = payload
+            let keepers = payload
                 .get("keepers")
                 .and_then(Value::as_array)
-                .map(|rows| rows.len())
-                .unwrap_or(0);
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(extract_keeper_name_from_value)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let keepers = unique_non_empty(keepers);
+            let count = keepers.len();
             if count > 0 {
-                (
+                (keepers,
+                 (
                     true,
                     "키퍼 풀".to_string(),
                     format!("{}명 사용 가능", count),
-                )
+                ))
             } else {
-                (
+                (Vec::new(),
+                 (
                     false,
                     "키퍼 풀".to_string(),
                     "사용 가능한 keeper가 없습니다".to_string(),
-                )
+                ))
             }
         }
-        Err(e) => (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e)),
+        Err(e) => (
+            Vec::new(),
+            (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e)),
+        ),
     };
-    rows.push(keeper_row);
+    rows.push(keeper_pool_row);
+
+    let mut selected_keepers = Vec::new();
+    let dm_keeper = selected_dm_keeper(doc);
+    if !dm_keeper.trim().is_empty() {
+        selected_keepers.push(dm_keeper);
+    }
+    selected_keepers.extend(selected_player_keepers(doc));
+    selected_keepers = unique_non_empty(selected_keepers);
+
+    let selected_keeper_row = if selected_keepers.is_empty() {
+        (
+            false,
+            "선택 키퍼".to_string(),
+            "DM/플레이어 keeper를 선택하세요.".to_string(),
+        )
+    } else {
+        let mut blockers = Vec::new();
+        let mut notes = Vec::new();
+        let mut ready_count = 0usize;
+
+        for keeper_name in &selected_keepers {
+            if !available_keepers.is_empty()
+                && !available_keepers.iter().any(|name| name == keeper_name)
+            {
+                blockers.push(format!("{}: keeper pool 없음", keeper_name));
+                continue;
+            }
+
+            let status_payload = match mcp_tool_call(
+                "masc_keeper_status",
+                json!({
+                    "name": keeper_name,
+                    "fast": true,
+                    "include_context": false,
+                    "include_metrics_overview": false,
+                    "include_memory_bank": false,
+                    "include_history_tail": false,
+                    "include_compaction_history": false
+                }),
+            )
+            .await
+            {
+                Ok(payload) => payload,
+                Err(err) => {
+                    blockers.push(format!("{}: status 조회 실패 ({})", keeper_name, err));
+                    continue;
+                }
+            };
+
+            let agent = status_payload.get("agent").unwrap_or(&Value::Null);
+            let agent_exists = agent
+                .get("exists")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let agent_status = agent
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .trim()
+                .to_ascii_lowercase();
+            let is_zombie = agent
+                .get("is_zombie")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let keepalive_running = status_payload
+                .get("keepalive_running")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            if !agent_exists {
+                blockers.push(format!("{}: agent 없음", keeper_name));
+                continue;
+            }
+            if is_zombie {
+                blockers.push(format!("{}: zombie", keeper_name));
+                continue;
+            }
+            if !matches!(agent_status.as_str(), "active" | "busy" | "listening") {
+                blockers.push(format!("{}: status={}", keeper_name, agent_status));
+                continue;
+            }
+
+            ready_count += 1;
+            if !keepalive_running {
+                notes.push(format!("{}: keepalive off", keeper_name));
+            }
+        }
+
+        if blockers.is_empty() {
+            let detail = if notes.is_empty() {
+                format!("선택 {}명 응답 가능", ready_count)
+            } else {
+                format!(
+                    "선택 {}명 응답 가능 · 주의 {}",
+                    ready_count,
+                    summarize_preflight_items(&notes, 3)
+                )
+            };
+            (true, "선택 키퍼".to_string(), detail)
+        } else {
+            (
+                false,
+                "선택 키퍼".to_string(),
+                format!(
+                    "준비 실패 {} / {} · {}",
+                    blockers.len(),
+                    selected_keepers.len(),
+                    summarize_preflight_items(&blockers, 3)
+                ),
+            )
+        }
+    };
+    rows.push(selected_keeper_row);
 
     let room_id = actor_admin_room_id();
     let room_row = match fetch_room_state_payload(&room_id).await {

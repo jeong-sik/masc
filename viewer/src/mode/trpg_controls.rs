@@ -236,6 +236,28 @@ fn selected_dm_keeper(doc: &web_sys::Document) -> String {
         .to_string()
 }
 
+fn has_selectable_keeper_option(doc: &web_sys::Document, select_id: &str) -> bool {
+    let Some(select) = doc
+        .get_element_by_id(select_id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    else {
+        return false;
+    };
+    let options = select.options();
+    for idx in 0..options.length() {
+        let Some(option) = options
+            .item(idx)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlOptionElement>().ok())
+        else {
+            continue;
+        };
+        if !option.value().trim().is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
 fn read_dashboard_ui_state(doc: &web_sys::Document) -> TrpgUiState {
     doc.get_element_by_id("dashboard")
         .and_then(|dashboard| dashboard.get_attribute("data-trpg-ui-state"))
@@ -424,10 +446,25 @@ fn render_new_game_assignment_preview(
         wizard_state_badge("세션 시작 준비 중", "warn")
     };
 
+    let keeper_actor_map = keeper_actor_map_from_actor_admin_dom(doc);
+
     let dm_line = if dm_keeper.trim().is_empty() {
         "<li><strong>DM:</strong> (미선택)</li>".to_string()
     } else {
-        format!("<li><strong>DM:</strong> {}</li>", html_escape(dm_keeper))
+        let mapped_actor = keeper_actor_map.get(dm_keeper).cloned().unwrap_or_default();
+        let map_label = if mapped_actor.is_empty() {
+            "<span class=\"assign-map\">→ actor 미할당</span>".to_string()
+        } else {
+            format!(
+                "<span class=\"assign-map\">→ actor {}</span>",
+                html_escape(&mapped_actor)
+            )
+        };
+        format!(
+            "<li><strong>DM:</strong> {} {}</li>",
+            html_escape(dm_keeper),
+            map_label
+        )
     };
 
     let player_lines = if players.is_empty() {
@@ -444,7 +481,21 @@ fn render_new_game_assignment_preview(
                         html_escape(keeper)
                     )
                 } else {
-                    format!("<li>P{:02}: {}</li>", idx + 1, html_escape(keeper))
+                    let mapped_actor = keeper_actor_map.get(keeper).cloned().unwrap_or_default();
+                    let map_label = if mapped_actor.is_empty() {
+                        "<span class=\"assign-map\">→ actor 미할당</span>".to_string()
+                    } else {
+                        format!(
+                            "<span class=\"assign-map\">→ actor {}</span>",
+                            html_escape(&mapped_actor)
+                        )
+                    };
+                    format!(
+                        "<li>P{:02}: {} {}</li>",
+                        idx + 1,
+                        html_escape(keeper),
+                        map_label
+                    )
                 }
             })
             .collect::<Vec<_>>()
@@ -647,6 +698,9 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
 
     let dm_hint = if dm_selected {
         format!("선택된 DM: {}", dm_keeper)
+    } else if !has_selectable_keeper_option(doc, "new-game-dm-select") {
+        "사용 가능한 keeper가 없습니다. Keeper 새로고침 또는 masc_keeper_list를 확인하세요."
+            .to_string()
     } else {
         "DM을 1명 선택하세요.".to_string()
     };
@@ -654,7 +708,13 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         doc,
         "new-game-dm-hint",
         &dm_hint,
-        if dm_selected { "ok" } else { "warn" },
+        if dm_selected {
+            "ok"
+        } else if !has_selectable_keeper_option(doc, "new-game-dm-select") {
+            "error"
+        } else {
+            "warn"
+        },
     );
 
     let player_hint = if has_conflict {
@@ -718,6 +778,14 @@ fn ensure_new_game_ready(doc: &web_sys::Document) -> Result<(), String> {
     if new_game_preflight_state(doc) != "ok" {
         return Err("사전 점검이 완료되지 않았습니다. 1) 사전 점검을 먼저 실행하세요.".to_string());
     }
+    if !has_selectable_keeper_option(doc, "new-game-dm-select")
+        || !has_selectable_keeper_option(doc, "new-game-player-select")
+    {
+        return Err(
+            "사용 가능한 keeper가 없습니다. Keeper를 먼저 실행한 뒤 `Keeper 새로고침`을 눌러주세요."
+                .to_string(),
+        );
+    }
     let dm_keeper = selected_dm_keeper(doc);
     if dm_keeper.is_empty() {
         return Err("DM keeper를 선택하세요.".to_string());
@@ -771,7 +839,12 @@ fn update_new_game_player_hint(doc: &web_sys::Document) {
     hint.set_text_content(Some(&message));
 
     if let Some(dm_hint) = doc.get_element_by_id("new-game-dm-hint") {
-        if dm_keeper.is_empty() {
+        if dm_keeper.is_empty() && !has_selectable_keeper_option(doc, "new-game-dm-select") {
+            let _ = dm_hint.set_attribute("class", "new-game-inline-hint is-error");
+            dm_hint.set_text_content(Some(
+                "사용 가능한 keeper가 없습니다. Keeper 새로고침 또는 masc_keeper_list를 확인하세요.",
+            ));
+        } else if dm_keeper.is_empty() {
             let _ = dm_hint.set_attribute("class", "new-game-inline-hint is-warn");
             dm_hint.set_text_content(Some("DM을 1명 선택하세요."));
         } else {
@@ -887,6 +960,34 @@ fn available_player_keepers(doc: &web_sys::Document) -> Vec<String> {
     unique_non_empty(keepers)
 }
 
+fn keeper_actor_map_from_actor_admin_dom(doc: &web_sys::Document) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let Ok(nodes) = doc.query_selector_all("#actor-admin-list .actor-admin-row") else {
+        return map;
+    };
+    for idx in 0..nodes.length() {
+        let Some(node) = nodes.item(idx) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let actor_id = el
+            .get_attribute("data-actor-id")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let keeper = el
+            .get_attribute("data-keeper")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if actor_id.is_empty() || keeper.is_empty() {
+            continue;
+        }
+        map.insert(keeper, actor_id);
+    }
+    map
+}
+
 fn apply_player_keeper_selection(doc: &web_sys::Document, selected: &[String]) {
     let selected = unique_non_empty(selected.to_vec());
     if let Ok(nodes) = doc.query_selector_all("#new-game-player-select option") {
@@ -938,7 +1039,29 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         .await
     {
         Ok(v) => v,
-        Err(_) => mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await?,
+        Err(primary_err) => match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await
+        {
+            Ok(v) => v,
+            Err(fallback_err) => {
+                log::warn!(
+                    "refresh_keeper_selectors failed: primary={} fallback={}",
+                    primary_err,
+                    fallback_err
+                );
+                if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
+                    dm_select.set_inner_html(
+                        r#"<option value="">(keeper 조회 실패: masc_keeper_list 확인)</option>"#,
+                    );
+                }
+                if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
+                    player_select.set_inner_html(
+                        r#"<option value="" disabled>(keeper 조회 실패: masc_keeper_list 확인)</option>"#,
+                    );
+                }
+                update_new_game_player_hint(doc);
+                return Ok(Vec::new());
+            }
+        },
     };
     web_sys::console::log_1(
         &format!(
@@ -990,7 +1113,14 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         keepers = unique_non_empty(fallback);
     }
     if keepers.is_empty() {
-        return Err("keeper 목록이 비어 있습니다. masc_keeper_list 결과를 확인하세요.".to_string());
+        if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
+            dm_select.set_inner_html(r#"<option value="">(사용 가능한 keeper 없음)</option>"#);
+        }
+        if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
+            player_select.set_inner_html(r#"<option value="" disabled>(사용 가능한 keeper 없음)</option>"#);
+        }
+        update_new_game_player_hint(doc);
+        return Ok(Vec::new());
     }
 
     let keeper_actor_map = match fetch_room_state_payload(&read_new_game_room_id(doc)).await {
@@ -1872,13 +2002,28 @@ async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, Str
     set_new_game_progress(
         doc,
         NewGameFlowStage::Bootstrap,
-        &format!(
-            "빠른 시작: Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
-            bootstrap.keepers.len(),
-            bootstrap.world_presets.len(),
-            bootstrap.dm_presets.len()
-        ),
+        &if bootstrap.keepers.is_empty() {
+            format!(
+                "빠른 시작: Keeper 없음 · 월드 {}개 · DM 프리셋 {}개",
+                bootstrap.world_presets.len(),
+                bootstrap.dm_presets.len()
+            )
+        } else {
+            format!(
+                "빠른 시작: Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
+                bootstrap.keepers.len(),
+                bootstrap.world_presets.len(),
+                bootstrap.dm_presets.len()
+            )
+        },
     );
+
+    if bootstrap.keepers.is_empty() {
+        return Err(
+            "사용 가능한 keeper가 없습니다. Keeper를 먼저 실행한 뒤 `Keeper 새로고침`을 눌러주세요."
+                .to_string(),
+        );
+    }
 
     set_new_game_flow_stage(doc, NewGameFlowStage::Preflight, Some("사전 점검 실행"));
     set_new_game_preflight_status(doc, "사전 점검 실행 중...");
@@ -2738,7 +2883,22 @@ fn select_options_set(
 async fn refresh_preset_selectors(
     doc: &web_sys::Document,
 ) -> Result<(Vec<PresetOption>, Vec<PresetOption>), String> {
-    let catalog = fetch_preset_catalog().await?;
+    let catalog = match fetch_preset_catalog().await {
+        Ok(catalog) => catalog,
+        Err(err) => {
+            if let Some(world_select) = doc.get_element_by_id("new-game-world-select") {
+                world_select.set_inner_html(
+                    r#"<option value="">(월드 프리셋 조회 실패)</option>"#,
+                );
+            }
+            if let Some(dm_select) = doc.get_element_by_id("new-game-dm-preset-select") {
+                dm_select.set_inner_html(
+                    r#"<option value="">(DM 프리셋 조회 실패)</option>"#,
+                );
+            }
+            return Err(err);
+        }
+    };
     let world_presets = collect_world_preset_options(&catalog);
     let dm_presets = collect_dm_preset_options(&catalog);
 
@@ -2789,12 +2949,20 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                 Ok(bootstrap) => {
                     set_new_game_status(
                         &doc_for_fetch,
-                        &format!(
-                            "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
-                            bootstrap.keepers.len(),
-                            bootstrap.world_presets.len(),
-                            bootstrap.dm_presets.len()
-                        ),
+                        &if bootstrap.keepers.is_empty() {
+                            format!(
+                                "Keeper 없음 · 월드 {}개 · DM 프리셋 {}개 (새 게임 전 keeper 실행 필요)",
+                                bootstrap.world_presets.len(),
+                                bootstrap.dm_presets.len()
+                            )
+                        } else {
+                            format!(
+                                "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
+                                bootstrap.keepers.len(),
+                                bootstrap.world_presets.len(),
+                                bootstrap.dm_presets.len()
+                            )
+                        },
                     );
                     set_new_game_flow_stage(
                         &doc_for_fetch,
@@ -2912,12 +3080,20 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                     Ok(bootstrap) => {
                         set_new_game_status(
                             &doc_for_fetch,
-                            &format!(
-                                "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 새로고침 완료",
-                                bootstrap.keepers.len(),
-                                bootstrap.world_presets.len(),
-                                bootstrap.dm_presets.len()
-                            ),
+                            &if bootstrap.keepers.is_empty() {
+                                format!(
+                                    "Keeper 없음 · 월드 {}개 · DM 프리셋 {}개 (새 게임 전 keeper 실행 필요)",
+                                    bootstrap.world_presets.len(),
+                                    bootstrap.dm_presets.len()
+                                )
+                            } else {
+                                format!(
+                                    "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 새로고침 완료",
+                                    bootstrap.keepers.len(),
+                                    bootstrap.world_presets.len(),
+                                    bootstrap.dm_presets.len()
+                                )
+                            },
                         );
                         set_new_game_flow_stage(
                             &doc_for_fetch,

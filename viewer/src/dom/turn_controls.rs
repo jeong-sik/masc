@@ -22,7 +22,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::config;
 #[cfg(any(target_arch = "wasm32", test))]
-use crate::game::lifecycle::TrpgLifecycleState;
+use crate::game::lifecycle::{TrpgLifecycleState, TrpgUiState};
 use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
 
 #[cfg(any(target_arch = "wasm32", test))]

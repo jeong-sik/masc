@@ -1150,10 +1150,22 @@ body:not(.mode-trpg) #ops-hud {
     overflow: hidden;
 }
 
+body.wasm-dom-fallback #primary-zone {
+    background-image: url('/assets/maps/area_a.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
 #bevy-canvas {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+body.wasm-dom-fallback #bevy-canvas {
+    opacity: 0;
+    pointer-events: none;
 }
 
 .overlay-label {
@@ -1553,9 +1565,48 @@ body:not(.mode-trpg) #ops-hud {
 
 .char-header {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
+    gap: 8px;
     margin-bottom: 6px;
+}
+
+.char-identity {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.char-portrait-wrap {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    border-radius: 7px;
+    overflow: hidden;
+    border: 1px solid rgba(109, 122, 164, 0.32);
+    background: rgba(12, 18, 31, 0.78);
+}
+
+.char-portrait {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.char-portrait-fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    color: var(--accent-primary);
+    background: linear-gradient(160deg, rgba(38, 48, 74, 0.75), rgba(16, 23, 40, 0.88));
 }
 
 .char-owner {

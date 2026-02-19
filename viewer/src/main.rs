@@ -22,8 +22,18 @@ use theme::ThemePlugin;
 use theme::ViewerTheme;
 
 #[cfg(target_arch = "wasm32")]
+fn mark_wasm_dom_fallback() {
+    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(body) = document.body() {
+            let _ = body.class_list().add_1("wasm-dom-fallback");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn main() {
     console_error_panic_hook::set_once();
+    mark_wasm_dom_fallback();
 
     App::new()
         // Web fallback path: avoid GPU surface creation so DOM-first viewer can boot.

@@ -2984,6 +2984,19 @@ fn set_new_game_assignment(
 
 // ─── Preset System ──────────────────────────────────────────────
 
+fn built_in_preset_catalog() -> Value {
+    json!({
+        "world_presets": [
+            { "id": "grimland-chronicle", "title": "Grimland Chronicle" },
+            { "id": "emberfall-siege", "title": "Emberfall Siege" }
+        ],
+        "dm_presets": [
+            { "id": "grim-warden", "title": "Grim Warden" },
+            { "id": "mythic-weaver", "title": "Mythic Weaver" }
+        ]
+    })
+}
+
 async fn fetch_preset_catalog() -> Result<Value, String> {
     let args = json!({
         "include_characters": false,
@@ -3008,10 +3021,14 @@ async fn fetch_preset_catalog() -> Result<Value, String> {
                     match mcp_tool_call("trpg.preset.list", args).await {
                         Ok(value) => value,
                         Err(retry_err) => {
-                            return Err(format!(
-                                "trpg.preset.list 실패: {} / fallback 실패: {} / retry 실패: {}",
-                                primary_err, legacy_err, retry_err
-                            ));
+                            let fallback = built_in_preset_catalog();
+                            log::warn!(
+                                "trpg.preset.list failed after retries; using built-in preset catalog: primary={} fallback={} retry={}",
+                                primary_err,
+                                legacy_err,
+                                retry_err
+                            );
+                            return Ok(fallback);
                         }
                     }
                 }
@@ -3373,8 +3390,17 @@ async fn refresh_preset_selectors(
             return Err(err);
         }
     };
-    let world_presets = collect_world_preset_options(&catalog);
-    let dm_presets = collect_dm_preset_options(&catalog);
+    let mut world_presets = collect_world_preset_options(&catalog);
+    let mut dm_presets = collect_dm_preset_options(&catalog);
+    if world_presets.is_empty() || dm_presets.is_empty() {
+        let fallback = built_in_preset_catalog();
+        if world_presets.is_empty() {
+            world_presets = collect_world_preset_options(&fallback);
+        }
+        if dm_presets.is_empty() {
+            dm_presets = collect_dm_preset_options(&fallback);
+        }
+    }
 
     let _ = select_options_set(doc, "new-game-world-select", &world_presets);
     let _ = select_options_set(doc, "new-game-dm-preset-select", &dm_presets);

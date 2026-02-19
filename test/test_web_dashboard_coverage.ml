@@ -142,6 +142,30 @@ let test_fallback_on_missing_asset () =
   check string "fallback etag is none" "none" etag
 
 (* ============================================================
+   Asset path safety
+   ============================================================ *)
+
+let test_safe_asset_relative_path_accepts_normal () =
+  check bool "normal asset path allowed" true
+    (Web_dashboard.is_safe_asset_relative_path "index-Dt8oKM_U.js")
+
+let test_safe_asset_relative_path_rejects_parent_traversal () =
+  check bool "parent traversal rejected" false
+    (Web_dashboard.is_safe_asset_relative_path "../secrets.txt")
+
+let test_safe_asset_relative_path_rejects_nested_parent_traversal () =
+  check bool "nested parent traversal rejected" false
+    (Web_dashboard.is_safe_asset_relative_path "js/../../etc/passwd")
+
+let test_safe_asset_relative_path_rejects_empty_segment () =
+  check bool "double slash rejected" false
+    (Web_dashboard.is_safe_asset_relative_path "js//bundle.js")
+
+let test_safe_asset_relative_path_rejects_absolute () =
+  check bool "absolute path rejected" false
+    (Web_dashboard.is_safe_asset_relative_path "/etc/passwd")
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -166,5 +190,12 @@ let () =
     ];
     "fallback", [
       test_case "missing asset dir" `Quick test_fallback_on_missing_asset;
+    ];
+    "asset_path_safety", [
+      test_case "accept normal" `Quick test_safe_asset_relative_path_accepts_normal;
+      test_case "reject parent traversal" `Quick test_safe_asset_relative_path_rejects_parent_traversal;
+      test_case "reject nested traversal" `Quick test_safe_asset_relative_path_rejects_nested_parent_traversal;
+      test_case "reject empty segment" `Quick test_safe_asset_relative_path_rejects_empty_segment;
+      test_case "reject absolute path" `Quick test_safe_asset_relative_path_rejects_absolute;
     ];
   ]

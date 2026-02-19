@@ -167,10 +167,14 @@ let find_free_port () =
     ~finally:(fun () -> Unix.close socket)
     (fun () ->
       Unix.setsockopt socket Unix.SO_REUSEADDR true;
-      Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
-      match Unix.getsockname socket with
-      | Unix.ADDR_INET (_, port) -> port
-      | _ -> fail "unexpected socket address")
+      match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
+      | () ->
+          begin
+            match Unix.getsockname socket with
+            | Unix.ADDR_INET (_, port) -> Some port
+            | _ -> fail "unexpected socket address"
+          end
+      | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) -> None)
 
 let wait_for_health ~port ~timeout_s =
   let deadline = Unix.gettimeofday () +. timeout_s in
@@ -226,7 +230,11 @@ let merge_env_overrides overrides =
 
 let with_server f =
   let exe = find_main_eio_exe () in
-  let port = find_free_port () in
+  let port =
+    match find_free_port () with
+    | Some p -> p
+    | None -> Alcotest.skip ()
+  in
   let log_file = Filename.temp_file "sse-storm-e2e-" ".log" in
   let base_path = Filename.temp_file "sse-storm-base-" "" in
   (try Sys.remove base_path with _ -> ());

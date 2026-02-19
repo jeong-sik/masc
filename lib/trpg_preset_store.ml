@@ -11,12 +11,22 @@ type dm_preset = {
   tags : string list;
 }
 
+type end_rules = {
+  max_turn : int;
+  defeat_if_all_players_dead : bool;
+  victory_flags : string list;
+  defeat_flags : string list;
+  draw_flags : string list;
+  allow_dm_end_signal : bool;
+}
+
 type world_preset = {
   id : string;
   title : string;
   description : string;
   intro : string;
   initial_flags : string list;
+  end_rules : end_rules;
 }
 
 type character_preset = {
@@ -45,9 +55,78 @@ type catalog = {
 }
 
 let string_list_of_member json key =
-  (match json |> member key with `List xs -> xs | _ -> [])
+  let value =
+    match json with
+    | `Assoc xs -> Option.value ~default:`Null (List.assoc_opt key xs)
+    | _ -> `Null
+  in
+  (match value with `List xs -> xs | _ -> [])
   |> List.filter_map
        (function `String s when String.trim s <> "" -> Some s | _ -> None)
+
+let assoc_member json key =
+  match json with
+  | `Assoc xs -> Option.value ~default:`Null (List.assoc_opt key xs)
+  | _ -> `Null
+
+let default_end_rules : end_rules =
+  {
+    max_turn = 40;
+    defeat_if_all_players_dead = true;
+    victory_flags = [ "outcome.victory"; "quest.main.completed"; "ending.victory" ];
+    defeat_flags = [ "outcome.defeat"; "party.wiped"; "ending.defeat" ];
+    draw_flags = [ "outcome.draw"; "ending.draw" ];
+    allow_dm_end_signal = true;
+  }
+
+let positive_or_default value default =
+  if value <= 0 then default else value
+
+let parse_end_rules json : end_rules =
+  let src = assoc_member json "end_rules" in
+  let int_field key default =
+    assoc_member src key |> to_int_option |> Option.value ~default
+  in
+  let bool_field key default =
+    assoc_member src key |> to_bool_option |> Option.value ~default
+  in
+  let list_field key default =
+    let xs = string_list_of_member src key in
+    if xs = [] then default else xs
+  in
+  {
+    max_turn =
+      int_field "max_turn" default_end_rules.max_turn
+      |> positive_or_default default_end_rules.max_turn;
+    defeat_if_all_players_dead =
+      bool_field
+        "defeat_if_all_players_dead"
+        default_end_rules.defeat_if_all_players_dead;
+    victory_flags =
+      list_field "victory_flags" default_end_rules.victory_flags;
+    defeat_flags =
+      list_field "defeat_flags" default_end_rules.defeat_flags;
+    draw_flags =
+      list_field "draw_flags" default_end_rules.draw_flags;
+    allow_dm_end_signal =
+      bool_field "allow_dm_end_signal" default_end_rules.allow_dm_end_signal;
+  }
+
+let parse_scenario_end_rules json : end_rules =
+  let parsed = parse_end_rules json in
+  let explicit_max_turn =
+    assoc_member (assoc_member json "end_rules") "max_turn"
+    |> to_int_option
+  in
+  match explicit_max_turn with
+  | Some n when n > 0 -> parsed
+  | _ ->
+      (match
+         assoc_member (assoc_member json "runtime") "max_rounds"
+         |> to_int_option
+       with
+      | Some n when n > 0 -> { parsed with max_turn = n }
+      | _ -> parsed)
 
 let parse_dm_preset json =
   {
@@ -66,6 +145,7 @@ let parse_world_preset json =
     description = json |> member "description" |> to_string;
     intro = json |> member "intro" |> to_string;
     initial_flags = string_list_of_member json "initial_flags";
+    end_rules = parse_end_rules json;
   }
 
 let parse_character_preset json =
@@ -99,6 +179,17 @@ let dm_preset_to_yojson (p : dm_preset) : Yojson.Safe.t =
       ("tags", `List (List.map (fun s -> `String s) p.tags));
     ]
 
+let end_rules_to_yojson (rules : end_rules) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("max_turn", `Int rules.max_turn);
+      ("defeat_if_all_players_dead", `Bool rules.defeat_if_all_players_dead);
+      ("victory_flags", `List (List.map (fun s -> `String s) rules.victory_flags));
+      ("defeat_flags", `List (List.map (fun s -> `String s) rules.defeat_flags));
+      ("draw_flags", `List (List.map (fun s -> `String s) rules.draw_flags));
+      ("allow_dm_end_signal", `Bool rules.allow_dm_end_signal);
+    ]
+
 let world_preset_to_yojson (p : world_preset) : Yojson.Safe.t =
   `Assoc
     [
@@ -107,6 +198,7 @@ let world_preset_to_yojson (p : world_preset) : Yojson.Safe.t =
       ("description", `String p.description);
       ("intro", `String p.intro);
       ("initial_flags", `List (List.map (fun s -> `String s) p.initial_flags));
+      ("end_rules", end_rules_to_yojson p.end_rules);
     ]
 
 let character_preset_to_yojson (p : character_preset) : Yojson.Safe.t =
@@ -164,6 +256,7 @@ let default_catalog : catalog =
             "Famine followed by uneasy peace. Supply lines are thin and alliances are brittle.";
           initial_flags =
             [ "scarcity.high"; "rumor.black-fleet"; "trust.public-low" ];
+          end_rules = default_end_rules;
         };
         {
           id = "emberfall-siege";
@@ -172,6 +265,7 @@ let default_catalog : catalog =
           intro =
             "Day 47 of the siege. Food reserves are measured in days, not weeks.";
           initial_flags = [ "siege.active"; "morale.volatile" ];
+          end_rules = default_end_rules;
         };
       ];
     character_presets =
@@ -345,7 +439,15 @@ let parse_scenario_world_preset json : world_preset option =
           description
       in
       let intro = Option.value ~default:description intro in
-      Some { id; title; description; intro; initial_flags }
+      Some
+        {
+          id;
+          title;
+          description;
+          intro;
+          initial_flags;
+          end_rules = parse_scenario_end_rules json;
+        }
 
 let load_scenario_world_presets ~base_dir : world_preset list =
   let scenarios_dir = config_path base_dir "examples/trpg-mvp/scenarios" in

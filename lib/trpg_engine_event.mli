@@ -5,10 +5,13 @@ type event_type =
   | Turn_started
   | Turn_action_proposed
   | Turn_action_resolved
+  | Combat_attack
+  | Combat_defense
   | Turn_timeout
   | Keeper_unavailable
   | Metric_updated
   | Room_ended
+  | Session_outcome
   | Dice_rolled
   | Hp_changed
   | Inventory_changed

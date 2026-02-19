@@ -443,6 +443,15 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
             |> assoc_put "status" (`String "ended")
             |> assoc_put "phase" (`String "ended"))
       | _ -> state)
+  | Trpg_engine_event.Session_outcome ->
+      (match state with
+      | `Assoc fields ->
+          `Assoc
+            (fields
+            |> assoc_put "status" (`String "ended")
+            |> assoc_put "phase" (`String "ended")
+            |> assoc_put "session_outcome" event.payload)
+      | _ -> state)
   | Trpg_engine_event.Turn_started ->
       let next_turn =
         event.payload |> member "turn" |> to_int_option |> Option.value ~default:1
@@ -468,6 +477,9 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
       append_to_list "narration_log"
         (normalize_player_action_for_narration ~state event.payload)
         state
+  | Trpg_engine_event.Combat_attack
+  | Trpg_engine_event.Combat_defense ->
+      append_to_list "narration_log" event.payload state
   | Trpg_engine_event.Hp_changed -> apply_hp_changed ~state ~event
   | Trpg_engine_event.Inventory_changed -> apply_inventory_changed ~state ~event
   | Trpg_engine_event.Flag_set -> apply_flag_set ~state ~event

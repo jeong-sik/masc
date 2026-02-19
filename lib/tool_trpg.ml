@@ -907,6 +907,306 @@ let find_substring s sub =
 
 let contains_substring s sub = Option.is_some (find_substring s sub)
 
+type session_outcome =
+  | Victory
+  | Defeat
+  | Draw
+
+let string_of_session_outcome = function
+  | Victory -> "victory"
+  | Defeat -> "defeat"
+  | Draw -> "draw"
+
+let summary_of_session_outcome = function
+  | Victory -> "Victory condition met."
+  | Defeat -> "Defeat condition met."
+  | Draw -> "Draw condition met."
+
+let default_end_rules_local : Trpg_preset_store.end_rules =
+  {
+    max_turn = 40;
+    defeat_if_all_players_dead = true;
+    victory_flags = [ "outcome.victory"; "quest.main.completed"; "ending.victory" ];
+    defeat_flags = [ "outcome.defeat"; "party.wiped"; "ending.defeat" ];
+    draw_flags = [ "outcome.draw"; "ending.draw" ];
+    allow_dm_end_signal = true;
+  }
+
+let string_list_member_or_default json key default =
+  match json |> member key with
+  | `List xs ->
+      let parsed =
+        xs
+        |> List.filter_map (function
+             | `String s ->
+                 let trimmed = String.trim s in
+                 if trimmed = "" then None else Some trimmed
+             | _ -> None)
+      in
+      if parsed = [] then default else parsed
+  | _ -> default
+
+let parse_end_rules_json (json : Yojson.Safe.t) : Trpg_preset_store.end_rules =
+  {
+    max_turn =
+      (match json |> member "max_turn" with
+      | `Int n when n > 0 -> n
+      | _ -> default_end_rules_local.max_turn);
+    defeat_if_all_players_dead =
+      (match json |> member "defeat_if_all_players_dead" with
+      | `Bool b -> b
+      | _ -> default_end_rules_local.defeat_if_all_players_dead);
+    victory_flags =
+      string_list_member_or_default json "victory_flags"
+        default_end_rules_local.victory_flags;
+    defeat_flags =
+      string_list_member_or_default json "defeat_flags"
+        default_end_rules_local.defeat_flags;
+    draw_flags =
+      string_list_member_or_default json "draw_flags"
+        default_end_rules_local.draw_flags;
+    allow_dm_end_signal =
+      (match json |> member "allow_dm_end_signal" with
+      | `Bool b -> b
+      | _ -> default_end_rules_local.allow_dm_end_signal);
+  }
+
+let extract_end_rules_from_room_created_payload (payload : Yojson.Safe.t) :
+    Trpg_preset_store.end_rules option =
+  match payload |> member "config" |> member "world" |> member "end_rules" with
+  | `Assoc _ as end_rules_json -> Some (parse_end_rules_json end_rules_json)
+  | _ -> None
+
+let extract_world_preset_id_from_room_created_payload (payload : Yojson.Safe.t) :
+    string option =
+  match payload |> member "world_preset_id" with
+  | `String s ->
+      let trimmed = String.trim s in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let resolve_end_rules_for_room ~base_dir ~(events : Trpg_engine_event.t list) :
+    Trpg_preset_store.end_rules =
+  match
+    events
+    |> List.find_opt (fun (ev : Trpg_engine_event.t) ->
+           ev.event_type = Trpg_engine_event.Room_created)
+  with
+  | None -> default_end_rules_local
+  | Some room_created -> (
+      match extract_end_rules_from_room_created_payload room_created.payload with
+      | Some rules -> rules
+      | None -> (
+          match
+            extract_world_preset_id_from_room_created_payload room_created.payload
+          with
+          | Some world_preset_id -> (
+              match Trpg_preset_store.load_catalog ~base_dir with
+              | Ok catalog -> (
+                  match
+                    Trpg_preset_store.find_world_preset catalog ~id:world_preset_id
+                  with
+                  | Some preset -> preset.Trpg_preset_store.end_rules
+                  | None -> default_end_rules_local)
+              | Error _ -> default_end_rules_local)
+          | None -> default_end_rules_local))
+
+let story_flags_from_state (state : Yojson.Safe.t) : string list =
+  match state |> member "world" |> member "story_flags" with
+  | `List xs ->
+      xs
+      |> List.filter_map (function
+           | `String s ->
+               let trimmed = String.trim s in
+               if trimmed = "" then None else Some trimmed
+           | _ -> None)
+  | _ -> []
+
+let actor_is_player actor_id actor_json =
+  if String.equal (String.trim actor_id) "dm" then false
+  else
+    let role =
+      match actor_json |> member "role" with
+      | `String s -> String.lowercase_ascii (String.trim s)
+      | _ -> "player"
+    in
+    role <> "npc" && role <> "dm"
+
+let actor_is_alive actor_json =
+  match actor_json |> member "alive" with
+  | `Bool b -> b
+  | _ -> (
+      match actor_json |> member "hp" with
+      | `Int hp -> hp > 0
+      | _ -> true)
+
+let all_players_dead_in_state (state : Yojson.Safe.t) : bool =
+  match state |> member "party" with
+  | `Assoc actors ->
+      let players = List.filter (fun (actor_id, actor_json) -> actor_is_player actor_id actor_json) actors in
+      players <> [] && List.for_all (fun (_, actor_json) -> not (actor_is_alive actor_json)) players
+  | _ -> false
+
+let first_matching_flag ~story_flags candidates =
+  candidates
+  |> List.find_opt (fun candidate ->
+         List.exists (fun flag -> String.equal (String.trim flag) (String.trim candidate)) story_flags)
+
+let dm_signal_outcome reply_text =
+  let upper = String.uppercase_ascii reply_text in
+  if contains_substring upper "[VICTORY]" then Some (Victory, "dm_signal:[VICTORY]")
+  else if contains_substring upper "[DEFEAT]" then
+    Some (Defeat, "dm_signal:[DEFEAT]")
+  else if contains_substring upper "[DRAW]" then Some (Draw, "dm_signal:[DRAW]")
+  else if contains_substring upper "[END]" then Some (Draw, "dm_signal:[END]")
+  else None
+
+let evaluate_session_outcome ~end_rules ~(state : Yojson.Safe.t) ~dm_reply :
+    (session_outcome * string) option =
+  let story_flags = story_flags_from_state state in
+  let draw_flag =
+    first_matching_flag ~story_flags end_rules.Trpg_preset_store.draw_flags
+  in
+  let defeat_flag =
+    first_matching_flag ~story_flags end_rules.Trpg_preset_store.defeat_flags
+  in
+  let victory_flag =
+    first_matching_flag ~story_flags end_rules.Trpg_preset_store.victory_flags
+  in
+  let all_players_dead =
+    end_rules.Trpg_preset_store.defeat_if_all_players_dead
+    && all_players_dead_in_state state
+  in
+  let max_turn_reached =
+    let turn =
+      match state |> member "turn" with
+      | `Int n -> n
+      | _ -> 0
+    in
+    turn >= end_rules.Trpg_preset_store.max_turn
+  in
+  match draw_flag with
+  | Some flag -> Some (Draw, "flag:" ^ flag)
+  | None -> (
+      match defeat_flag with
+      | Some flag -> Some (Defeat, "flag:" ^ flag)
+      | None -> (
+          match victory_flag with
+          | Some flag -> Some (Victory, "flag:" ^ flag)
+          | None ->
+              if all_players_dead then
+                Some (Defeat, "all_players_dead")
+              else (
+                match (end_rules.Trpg_preset_store.allow_dm_end_signal, dm_reply) with
+                | true, Some reply -> (
+                    match dm_signal_outcome reply with
+                    | Some outcome -> Some outcome
+                    | None ->
+                        if max_turn_reached then Some (Draw, "max_turn_reached")
+                        else None)
+                | _ ->
+                    if max_turn_reached then Some (Draw, "max_turn_reached")
+                    else None)))
+
+let has_event_type (events : Trpg_engine_event.t list) event_type =
+  List.exists
+    (fun (ev : Trpg_engine_event.t) -> ev.event_type = event_type)
+    events
+
+let latest_session_outcome_payload (events : Trpg_engine_event.t list) :
+    Yojson.Safe.t option =
+  events
+  |> List.fold_left
+       (fun acc (ev : Trpg_engine_event.t) ->
+         if ev.event_type = Trpg_engine_event.Session_outcome then Some ev.payload
+         else acc)
+       None
+
+type combat_semantic =
+  | Combat_attack_intent
+  | Combat_defense_intent
+
+let detect_combat_semantic (text : string) : combat_semantic option =
+  let lowered = String.lowercase_ascii text in
+  let has_any keywords =
+    List.exists (fun keyword -> contains_substring lowered keyword) keywords
+  in
+  if
+    has_any
+      [
+        "attack";
+        "strike";
+        "slash";
+        "stab";
+        "shoot";
+        "assault";
+        "공격";
+        "타격";
+        "베기";
+        "사격";
+        "돌격";
+      ]
+  then Some Combat_attack_intent
+  else if
+    has_any
+      [
+        "defend";
+        "defensive";
+        "guard";
+        "block";
+        "parry";
+        "shield";
+        "dodge";
+        "evade";
+        "방어";
+        "엄폐";
+        "회피";
+        "가드";
+      ]
+  then Some Combat_defense_intent
+  else None
+
+let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~reply
+    =
+  let ( let* ) = Result.bind in
+  match detect_combat_semantic reply with
+  | None -> Ok None
+  | Some Combat_attack_intent ->
+      let payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String actor_id);
+            ("action", `String reply);
+            ("target_id", `Null);
+            ("skill", `Null);
+            ("damage", `Null);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Combat_attack ~actor_id ~payload ()
+      in
+      Ok (Some event)
+  | Some Combat_defense_intent ->
+      let payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String actor_id);
+            ("method", `String reply);
+            ("source_actor_id", `Null);
+            ("mitigated", `Null);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
+      in
+      Ok (Some event)
+
 let truncate_before_marker s marker =
   match find_substring s marker with
   | Some idx -> String.sub s 0 idx
@@ -1226,6 +1526,7 @@ let world_config ~(preset : Trpg_preset_store.world_preset) : Yojson.Safe.t =
       ("description", `String preset.description);
       ("intro", `String preset.intro);
       ("story_flags", json_of_strings preset.initial_flags);
+      ("end_rules", Trpg_preset_store.end_rules_to_yojson preset.end_rules);
     ]
 
 let dm_config ~(preset : Trpg_preset_store.dm_preset) ~dm_keeper : Yojson.Safe.t =
@@ -2463,7 +2764,22 @@ let handle_round_run ctx args : result =
         ~keepers:assigned_keepers
         (fun () ->
       let* derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* existing_events_before =
+        Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+      in
       let state = state_of_derived derived in
+      let room_already_ended =
+        has_event_type existing_events_before Trpg_engine_event.Room_ended
+      in
+      let outcome_already_emitted =
+        has_event_type existing_events_before Trpg_engine_event.Session_outcome
+      in
+      let end_rules =
+        resolve_end_rules_for_room ~base_dir ~events:existing_events_before
+      in
+      let latest_outcome_payload =
+        ref (latest_session_outcome_payload existing_events_before)
+      in
       let* turn_before = read_state_turn derived in
       let next_turn = max 1 (turn_before + 1) in
       let* () =
@@ -2524,6 +2840,7 @@ let handle_round_run ctx args : result =
       let dm_success = ref false in
       let unavailable_count = ref 0 in
       let timeout_count = ref 0 in
+      let dm_reply_ref : string option ref = ref None in
 
       let process_one ~state_json ~role ~actor_id ~keeper_name =
         let record_unavailable_status ~status ~error ~stage =
@@ -2645,9 +2962,22 @@ let handle_round_run ctx args : result =
                 in
                 success_count := !success_count + 1;
                 (match role with
-                | `Dm -> dm_success := true
+                | `Dm ->
+                    dm_success := true;
+                    dm_reply_ref := Some reply
                 | `Player -> player_success_count := !player_success_count + 1);
                 appended_events := !appended_events @ [ reply_event ];
+                let* combat_event_opt =
+                  match role with
+                  | `Dm -> Ok None
+                  | `Player ->
+                      append_combat_semantic_event ~base_dir ~room_id ~phase
+                        ~turn:turn_before ~actor_id ~reply
+                in
+                (match combat_event_opt with
+                | Some combat_event ->
+                    appended_events := !appended_events @ [ combat_event ]
+                | None -> ());
                 statuses :=
                   `Assoc
                     [
@@ -2706,6 +3036,61 @@ let handle_round_run ctx args : result =
         else Ok ()
       in
       let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      let next_state = state_of_derived next_derived in
+      let computed_outcome =
+        if outcome_already_emitted then None
+        else
+          evaluate_session_outcome ~end_rules ~state:next_state
+            ~dm_reply:!dm_reply_ref
+      in
+      let* final_derived =
+        match computed_outcome with
+        | None -> Ok next_derived
+        | Some (outcome, reason) ->
+            let outcome_str = string_of_session_outcome outcome in
+            let summary = summary_of_session_outcome outcome in
+            let room_end_payload =
+              `Assoc
+                [
+                  ("room_id", `String room_id);
+                  ("reason", `String reason);
+                  ("outcome", `String outcome_str);
+                ]
+            in
+            let outcome_payload =
+              `Assoc
+                [
+                  ("outcome", `String outcome_str);
+                  ("reason", `String reason);
+                  ("summary", `String summary);
+                  ("turn", `Int turn_after);
+                  ("phase", `String phase);
+                ]
+            in
+            let* room_end_event_opt =
+              if room_already_ended then Ok None
+              else
+                let* room_end_event =
+                  append_event ~base_dir ~room_id
+                    ~event_type:Trpg_engine_event.Room_ended
+                    ~payload:room_end_payload ()
+                in
+                Ok (Some room_end_event)
+            in
+            let* outcome_event =
+              append_event ~base_dir ~room_id
+                ~event_type:Trpg_engine_event.Session_outcome
+                ~payload:outcome_payload ()
+            in
+            (match room_end_event_opt with
+            | Some room_end_event ->
+                appended_events := !appended_events @ [ room_end_event ]
+            | None -> ());
+            appended_events := !appended_events @ [ outcome_event ];
+            latest_outcome_payload := Some outcome_payload;
+            derive_state ~base_dir ~room_id ~rule_module
+      in
+      let final_state = state_of_derived final_derived in
       let statuses = List.rev !statuses in
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
       Ok
@@ -2737,8 +3122,16 @@ let handle_round_run ctx args : result =
                   ("unavailable", `Int !unavailable_count);
                   ("interventions", `Int (List.length interventions_applied));
                 ] );
+            ( "outcome",
+              match !latest_outcome_payload with
+              | Some payload -> payload
+              | None -> `Null );
             ("events", `List events_json);
-            ("state", state_of_derived next_derived);
+            ( "room_status",
+              match final_state |> member "status" with
+              | `String status -> `String status
+              | _ -> `String "active" );
+            ("state", final_state);
           ]))
   in
   match result_json with Ok j -> ok_json j | Error e -> err e

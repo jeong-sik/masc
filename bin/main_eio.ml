@@ -3600,6 +3600,17 @@ let serve_dashboard_static name _request reqd =
   | Error _ ->
       Http.Response.not_found reqd
 
+let favicon_svg = {|
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#0f172a"/>
+  <circle cx="32" cy="32" r="18" fill="#1d4ed8"/>
+  <path d="M22 42 L32 18 L42 42 Z" fill="#93c5fd"/>
+</svg>
+|}
+
+let serve_favicon _request reqd =
+  Http.Response.bytes ~content_type:"image/svg+xml" favicon_svg reqd
+
 let is_dashboard_spa_deep_link path =
   starts_with ~prefix:"/dashboard/" path
   && not (starts_with ~prefix:"/dashboard/assets/" path)
@@ -4445,6 +4456,14 @@ let make_routes ~port ~host =
            ~etag:(Masc_mcp.Lodge_dashboard.etag ())
            ~request:req
            (Masc_mcp.Lodge_dashboard.html ()) reqd
+       ) request reqd)
+  |> Http.Router.get "/favicon.ico" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         serve_favicon req reqd
+       ) request reqd)
+  |> Http.Router.get "/favicon.svg" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         serve_favicon req reqd
        ) request reqd)
   (* Dashboard SPA: static assets — prefix match for /dashboard/assets/* *)
   |> Http.Router.prefix_get "/dashboard/assets/"
@@ -5293,6 +5312,22 @@ let run_server ~sw ~env ~port ~base_path =
     H2.Body.Writer.close writer
   in
 
+  let h2_respond_bytes
+      ?(status = `OK)
+      ?(extra_headers = [])
+      ~content_type
+      h2_reqd
+      body =
+    let headers = H2.Headers.of_list ([
+      ("content-type", content_type);
+      ("content-length", string_of_int (String.length body));
+    ] @ extra_headers) in
+    let response = H2.Response.create ~headers status in
+    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+    H2.Body.Writer.write_string writer body;
+    H2.Body.Writer.close writer
+  in
+
   let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
     let headers = H2.Headers.of_list (("content-length", "0") :: extra_headers) in
     let response = H2.Response.create ~headers status in
@@ -5410,6 +5445,13 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/" ->
           h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
+
+      | `GET, "/favicon.ico" | `GET, "/favicon.svg" ->
+          h2_respond_bytes
+            h2_reqd
+            favicon_svg
+            ~content_type:"image/svg+xml"
+            ~extra_headers:cors
 
       (* ─────────────────────────────────────────────────────────────────────
          CORS Preflight

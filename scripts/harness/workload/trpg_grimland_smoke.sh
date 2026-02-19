@@ -15,11 +15,19 @@ DM_KEEPER="${DM_KEEPER:-dm-$KEEPER_TAG}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-12}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
 PLAYER_KEEPER_NAMES=""
+CLAIMED_ACTORS=""
 CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-120}"
 CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 
 cleanup_keepers() {
+  if [ -n "${room_id:-}" ] && [ -n "${CLAIMED_ACTORS:-}" ]; then
+    while IFS='|' read -r actor_id keeper_name; do
+      [ -z "$actor_id" ] && continue
+      [ -z "$keeper_name" ] && continue
+      call_tool 3899 "trpg.actor.release" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$keeper_name" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')" >/dev/null 2>&1 || true
+    done <<< "$CLAIMED_ACTORS"
+  fi
   if [ -n "${DM_KEEPER:-}" ]; then
     call_tool 3901 "masc_keeper_down" "$(jq -cn --arg name "$DM_KEEPER" '{name:$name,remove_meta:true,remove_session:true}')" >/dev/null 2>&1 || true
   fi
@@ -170,6 +178,7 @@ while IFS='|' read -r actor_id keeper_name; do
   [ -z "$keeper_name" ] && continue
   call_tool_checked 3201 "masc_keeper_up" "$(jq -cn --arg name "$keeper_name" --arg room "$room_id" --arg actor "$actor_id" --argjson models "$KEEPER_MODELS_JSON" '{name:$name,goal:("TRPG room " + $room + "에서 " + $actor + " actor를 플레이하세요."),instructions:"모든 응답은 한국어로 작성하세요.",models:$models,proactive_enabled:false,presence_keepalive:true}')" >/dev/null
   call_tool_checked 3202 "trpg.actor.claim" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$keeper_name" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')" >/dev/null
+  CLAIMED_ACTORS="${CLAIMED_ACTORS}${CLAIMED_ACTORS:+$'\n'}${actor_id}|${keeper_name}"
 done < <(printf "%s" "$player_keepers" | jq -r 'to_entries[] | "\(.key)|\(.value)"')
 
 round_template="$(jq -cn --arg room "$room_id" --arg dm "$DM_KEEPER" --argjson player_keepers "$player_keepers" '{room_id:$room,dm_keeper:$dm,player_keepers:$player_keepers}')"

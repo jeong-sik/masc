@@ -319,7 +319,9 @@ fn bind_manual_mapping_selects(doc: &web_sys::Document) {
         return;
     };
     for idx in 0..nodes.length() {
-        let Some(node) = nodes.item(idx) else { continue };
+        let Some(node) = nodes.item(idx) else {
+            continue;
+        };
         let Some(select) = node.dyn_ref::<web_sys::HtmlSelectElement>() else {
             continue;
         };
@@ -374,11 +376,9 @@ fn bind_manual_mapping_selects(doc: &web_sys::Document) {
             sync_manual_mapping_table(&doc);
             sync_new_game_wizard_ui(&doc);
         }) as Box<dyn FnMut(_)>);
-        let _ = select
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
-            });
+        let _ = select.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
+        });
         cb.forget();
     }
 }
@@ -1086,7 +1086,9 @@ fn ensure_new_game_ready(doc: &web_sys::Document) -> Result<(), String> {
     }
     let manual_order = manual_player_keeper_order_for_assignment(doc, &players)?;
     if manual_order.is_empty() {
-        return Err("수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string());
+        return Err(
+            "수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string(),
+        );
     }
     if players.iter().any(|player| player == &dm_keeper) {
         return Err("DM keeper와 플레이어 keeper가 중복되었습니다.".to_string());
@@ -1260,7 +1262,9 @@ fn keeper_actor_map_from_actor_admin_dom(doc: &web_sys::Document) -> HashMap<Str
         return map;
     };
     for idx in 0..nodes.length() {
-        let Some(node) = nodes.item(idx) else { continue };
+        let Some(node) = nodes.item(idx) else {
+            continue;
+        };
         let Some(el) = node.dyn_ref::<web_sys::Element>() else {
             continue;
         };
@@ -1329,33 +1333,37 @@ fn extract_keeper_name_from_value(row: &Value) -> Option<String> {
 // ─── Keeper Selectors ───────────────────────────────────────────
 
 async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>, String> {
-    let payload = match mcp_tool_call("masc_keeper_list", json!({ "limit": 200, "detailed": true }))
-        .await
+    let payload = match mcp_tool_call(
+        "masc_keeper_list",
+        json!({ "limit": 200, "detailed": true }),
+    )
+    .await
     {
         Ok(v) => v,
-        Err(primary_err) => match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await
-        {
-            Ok(v) => v,
-            Err(fallback_err) => {
-                log::warn!(
-                    "refresh_keeper_selectors failed: primary={} fallback={}",
-                    primary_err,
-                    fallback_err
-                );
-                if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
-                    dm_select.set_inner_html(
+        Err(primary_err) => {
+            match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await {
+                Ok(v) => v,
+                Err(fallback_err) => {
+                    log::warn!(
+                        "refresh_keeper_selectors failed: primary={} fallback={}",
+                        primary_err,
+                        fallback_err
+                    );
+                    if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
+                        dm_select.set_inner_html(
                         r#"<option value="">(keeper 조회 실패: masc_keeper_list 확인)</option>"#,
                     );
-                }
-                if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
-                    player_select.set_inner_html(
+                    }
+                    if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
+                        player_select.set_inner_html(
                         r#"<option value="" disabled>(keeper 조회 실패: masc_keeper_list 확인)</option>"#,
                     );
+                    }
+                    update_new_game_player_hint(doc);
+                    return Ok(Vec::new());
                 }
-                update_new_game_player_hint(doc);
-                return Ok(Vec::new());
             }
-        },
+        }
     };
     web_sys::console::log_1(
         &format!(
@@ -1420,7 +1428,8 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
             dm_select.set_inner_html(r#"<option value="">(사용 가능한 keeper 없음)</option>"#);
         }
         if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
-            player_select.set_inner_html(r#"<option value="" disabled>(사용 가능한 keeper 없음)</option>"#);
+            player_select
+                .set_inner_html(r#"<option value="" disabled>(사용 가능한 keeper 없음)</option>"#);
         }
         update_new_game_player_hint(doc);
         return Ok(Vec::new());
@@ -1618,9 +1627,8 @@ fn summarize_preflight_items(items: &[String], limit: usize) -> String {
 fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
     let state = state_root.get("state").unwrap_or(state_root);
     let actor_control = parse_actor_control_map(state_root);
-    let control_keeper = |actor_id: &str| -> String {
-        actor_control.get(actor_id).cloned().unwrap_or_default()
-    };
+    let control_keeper =
+        |actor_id: &str| -> String { actor_control.get(actor_id).cloned().unwrap_or_default() };
 
     let mut rows = Vec::new();
     if let Some(characters) = state.get("characters").and_then(Value::as_array) {
@@ -2246,7 +2254,11 @@ async fn actor_admin_release(doc: &web_sys::Document) -> Result<String, String> 
     .map_err(|e| explain_claim_conflict(&e))?;
 
     let rows = refresh_actor_admin_list(doc).await?;
-    Ok(format!("액터 점유 해제 완료 ({}명): {}", rows.len(), actor_id))
+    Ok(format!(
+        "액터 점유 해제 완료 ({}명): {}",
+        rows.len(),
+        actor_id
+    ))
 }
 
 async fn actor_admin_delete(doc: &web_sys::Document) -> Result<String, String> {
@@ -2366,7 +2378,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
         .unwrap_or_default();
     let room_id = if room_input.trim().is_empty() {
-        generate_room_id()
+        actor_admin_room_id()
     } else {
         room_input.trim().to_string()
     };
@@ -2451,7 +2463,9 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     }
     let manual_players = manual_player_keeper_order_for_assignment(doc, &players)?;
     if manual_players.is_empty() {
-        return Err("수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string());
+        return Err(
+            "수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string(),
+        );
     }
 
     let model_text = doc
@@ -3194,14 +3208,10 @@ async fn refresh_preset_selectors(
         Ok(catalog) => catalog,
         Err(err) => {
             if let Some(world_select) = doc.get_element_by_id("new-game-world-select") {
-                world_select.set_inner_html(
-                    r#"<option value="">(월드 프리셋 조회 실패)</option>"#,
-                );
+                world_select.set_inner_html(r#"<option value="">(월드 프리셋 조회 실패)</option>"#);
             }
             if let Some(dm_select) = doc.get_element_by_id("new-game-dm-preset-select") {
-                dm_select.set_inner_html(
-                    r#"<option value="">(DM 프리셋 조회 실패)</option>"#,
-                );
+                dm_select.set_inner_html(r#"<option value="">(DM 프리셋 조회 실패)</option>"#);
             }
             return Err(err);
         }
@@ -3236,7 +3246,12 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
         {
             if room_input.value().trim().is_empty() {
-                room_input.set_value(&generate_room_id());
+                let current_room = crate::config::current_room_id();
+                if current_room.trim().is_empty() {
+                    room_input.set_value(&generate_room_id());
+                } else {
+                    room_input.set_value(current_room.trim());
+                }
             }
         }
         set_new_game_wizard_busy(&doc, false);
@@ -3359,7 +3374,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             .map(|target| {
                 target
                     .add_event_listener_with_callback("click", autopick_cb.as_ref().unchecked_ref())
-        });
+            });
         autopick_cb.forget();
     }
 
@@ -3723,11 +3738,9 @@ fn bind_actor_admin_controls(doc: &web_sys::Document) {
                 actor_admin_set_busy(&doc_for_task, false);
             });
         }) as Box<dyn FnMut()>);
-        let _ = release_btn
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("click", release_cb.as_ref().unchecked_ref())
-            });
+        let _ = release_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", release_cb.as_ref().unchecked_ref())
+        });
         release_cb.forget();
     }
 

@@ -29,6 +29,32 @@ use crate::game::state::ConnectionStatus;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::JsFuture;
 
+#[cfg(target_arch = "wasm32")]
+const VIEWER_LAST_MODE_STORAGE_KEY: &str = "masc.viewer.last_mode";
+#[cfg(target_arch = "wasm32")]
+const VIEWER_LAYOUT_PREFS_STORAGE_KEY: &str = "masc.viewer.layout.v1";
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, Debug)]
+struct ViewLayoutPrefs {
+    show_ops: bool,
+    show_secondary: bool,
+    show_tertiary: bool,
+    show_bottom: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Default for ViewLayoutPrefs {
+    fn default() -> Self {
+        Self {
+            show_ops: true,
+            show_secondary: true,
+            show_tertiary: true,
+            show_bottom: true,
+        }
+    }
+}
+
 /// Top-level viewer mode. Determines which plugins/systems are active
 /// and which SSE endpoint the viewer connects to.
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -125,6 +151,137 @@ impl ViewerMode {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn mode_storage_value(mode: ViewerMode) -> &'static str {
+    match mode {
+        ViewerMode::Lobby => "lobby",
+        ViewerMode::Trpg => "trpg",
+        ViewerMode::Experiment => "experiment",
+        ViewerMode::Monitor => "monitor",
+        ViewerMode::Council => "council",
+        ViewerMode::Social => "social",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_mode_storage_value(raw: &str) -> Option<ViewerMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "lobby" => Some(ViewerMode::Lobby),
+        "trpg" => Some(ViewerMode::Trpg),
+        "experiment" => Some(ViewerMode::Experiment),
+        "monitor" => Some(ViewerMode::Monitor),
+        "council" => Some(ViewerMode::Council),
+        "social" => Some(ViewerMode::Social),
+        _ => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_last_mode(mode: ViewerMode) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(VIEWER_LAST_MODE_STORAGE_KEY, mode_storage_value(mode));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_last_mode() -> Option<ViewerMode> {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(VIEWER_LAST_MODE_STORAGE_KEY)
+                .ok()
+                .flatten()
+        })
+        .and_then(|raw| parse_mode_storage_value(&raw))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mode_from_query() -> Option<ViewerMode> {
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+    let query = search.trim_start_matches('?');
+    for pair in query.split('&') {
+        let mut chunks = pair.splitn(2, '=');
+        let Some(key) = chunks.next() else { continue };
+        if key != "mode" {
+            continue;
+        }
+        let Some(value) = chunks.next() else { continue };
+        if let Some(mode) = parse_mode_storage_value(value) {
+            return Some(mode);
+        }
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn initial_mode_from_url_or_storage() -> Option<ViewerMode> {
+    mode_from_query()
+        .or_else(load_last_mode)
+        .and_then(|mode| match mode {
+            ViewerMode::Lobby => None,
+            other => Some(other),
+        })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_url_for_mode(mode: ViewerMode) {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(history) = win.history() else { return };
+
+    let mode_value = mode_storage_value(mode);
+    let mut params = vec![format!("mode={}", mode_value)];
+    if mode == ViewerMode::Trpg {
+        let room_id = crate::config::current_room_id();
+        params.push(format!("room={}", room_id));
+    }
+    let query = format!("?{}", params.join("&"));
+    let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&query));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_view_layout_prefs() -> ViewLayoutPrefs {
+    let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
+        return ViewLayoutPrefs::default();
+    };
+    let Ok(Some(raw)) = storage.get_item(VIEWER_LAYOUT_PREFS_STORAGE_KEY) else {
+        return ViewLayoutPrefs::default();
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&raw) else {
+        return ViewLayoutPrefs::default();
+    };
+    let mut prefs = ViewLayoutPrefs::default();
+    if let Some(v) = json.get("show_ops").and_then(Value::as_bool) {
+        prefs.show_ops = v;
+    }
+    if let Some(v) = json.get("show_secondary").and_then(Value::as_bool) {
+        prefs.show_secondary = v;
+    }
+    if let Some(v) = json.get("show_tertiary").and_then(Value::as_bool) {
+        prefs.show_tertiary = v;
+    }
+    if let Some(v) = json.get("show_bottom").and_then(Value::as_bool) {
+        prefs.show_bottom = v;
+    }
+    prefs
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_view_layout_prefs(prefs: ViewLayoutPrefs) {
+    let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
+        return;
+    };
+    let payload = json!({
+        "show_ops": prefs.show_ops,
+        "show_secondary": prefs.show_secondary,
+        "show_tertiary": prefs.show_tertiary,
+        "show_bottom": prefs.show_bottom,
+    });
+    let _ = storage.set_item(VIEWER_LAYOUT_PREFS_STORAGE_KEY, &payload.to_string());
+}
+
 // ─── Shared Buffer Resource ──────────────────
 
 /// Holds pending mode transitions from JS click events.
@@ -213,6 +370,23 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
                 let _ = html_el.style().set_property("pointer-events", "none");
             }
         }
+
+        // Restore the last active mode once at startup so refresh returns to
+        // the game view instead of forcing lobby re-entry.
+        if let Some(body) = doc.body() {
+            let restored_once = body
+                .get_attribute("data-mode-restored")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            if !restored_once {
+                let _ = body.set_attribute("data-mode-restored", "1");
+                if let Some(mode) = initial_mode_from_url_or_storage() {
+                    if let Ok(mut pending) = buffer.pending.lock() {
+                        *pending = Some(mode);
+                    }
+                }
+            }
+        }
     }
 
     // Suppress unused warning on native
@@ -244,6 +418,7 @@ fn enter_trpg() {
         set_element_display(&doc, "new-game-panel", "none");
         clear_trpg_dom(&doc);
         bind_debug_controls(&doc);
+        bind_view_options(&doc);
         bind_new_game_controls(&doc);
         let room = crate::config::current_room_id();
         set_current_room_id(&doc, &room);
@@ -272,7 +447,10 @@ fn enter_trpg() {
                     log::warn!("room 목록 로딩 실패: {}", e);
                     let room_now = crate::config::current_room_id();
                     if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
-                        pill.set_text_content(Some(&format!("현재 게임: {} · 목록 실패", room_now)));
+                        pill.set_text_content(Some(&format!(
+                            "현재 게임: {} · 목록 실패",
+                            room_now
+                        )));
                     }
                 }
             }
@@ -559,7 +737,11 @@ fn sync_session_pause_buttons(doc: &web_sys::Document, room_status: &str) {
     let lifecycle = TrpgLifecycleState::from_status(room_status);
     let (pause_disabled, resume_disabled, title) = match lifecycle {
         TrpgLifecycleState::Running => (false, true, "세션이 진행 중입니다."),
-        TrpgLifecycleState::Lobby => (false, true, "세션이 로비 상태입니다. 필요 시 멈춤 가능합니다."),
+        TrpgLifecycleState::Lobby => (
+            false,
+            true,
+            "세션이 로비 상태입니다. 필요 시 멈춤 가능합니다.",
+        ),
         TrpgLifecycleState::Stopped => (true, false, "세션이 멈춤 상태입니다."),
         TrpgLifecycleState::Ended => (true, true, "종료된 세션은 재개할 수 없습니다."),
         TrpgLifecycleState::Unavailable => (true, true, "엔진 연결 오류 상태입니다."),
@@ -627,6 +809,15 @@ fn exit_trpg() {
             return;
         };
         set_element_display(&doc, "new-game-panel", "none");
+        if let Some(toggle) = doc.get_element_by_id("view-options-toggle") {
+            let _ = toggle.set_attribute("aria-pressed", "false");
+            toggle.set_text_content(Some("화면 옵션"));
+        }
+        if let Some(popover) = doc.get_element_by_id("view-options-popover") {
+            if let Some(el) = popover.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = el.style().set_property("display", "none");
+            }
+        }
     }
 }
 
@@ -662,6 +853,9 @@ fn poll_mode_transition(
                         el.set_text_content(Some(mode.display_name()));
                     }
                 }
+
+                persist_last_mode(mode);
+                sync_url_for_mode(mode);
 
                 next.set(mode);
             }
@@ -809,6 +1003,152 @@ fn bind_debug_controls(doc: &web_sys::Document) {
 
     cb.forget();
     bind_dedup_status_toggle(doc);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_view_layout_prefs(doc: &web_sys::Document, prefs: ViewLayoutPrefs) {
+    let Some(dashboard) = doc.get_element_by_id("dashboard") else {
+        return;
+    };
+    let _ = dashboard.set_attribute("data-show-ops", if prefs.show_ops { "1" } else { "0" });
+    let _ = dashboard.set_attribute(
+        "data-show-secondary",
+        if prefs.show_secondary { "1" } else { "0" },
+    );
+    let _ = dashboard.set_attribute(
+        "data-show-tertiary",
+        if prefs.show_tertiary { "1" } else { "0" },
+    );
+    let _ = dashboard.set_attribute(
+        "data-show-bottom",
+        if prefs.show_bottom { "1" } else { "0" },
+    );
+
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-ops")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_checked(prefs.show_ops);
+    }
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-secondary")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_checked(prefs.show_secondary);
+    }
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-tertiary")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_checked(prefs.show_tertiary);
+    }
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-bottom")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_checked(prefs.show_bottom);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_view_layout_prefs_from_dom(doc: &web_sys::Document) -> ViewLayoutPrefs {
+    let mut prefs = ViewLayoutPrefs::default();
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-ops")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        prefs.show_ops = input.checked();
+    }
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-secondary")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        prefs.show_secondary = input.checked();
+    }
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-tertiary")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        prefs.show_tertiary = input.checked();
+    }
+    if let Some(input) = doc
+        .get_element_by_id("opt-show-bottom")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        prefs.show_bottom = input.checked();
+    }
+    prefs
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_view_options(doc: &web_sys::Document) {
+    apply_view_layout_prefs(doc, load_view_layout_prefs());
+
+    if let Some(toggle) = doc.get_element_by_id("view-options-toggle") {
+        if toggle.get_attribute("data-bound").as_deref() != Some("1") {
+            let _ = toggle.set_attribute("data-bound", "1");
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                let expanded = doc
+                    .get_element_by_id("view-options-toggle")
+                    .and_then(|el| el.get_attribute("aria-pressed"))
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                let next = !expanded;
+                if let Some(btn) = doc.get_element_by_id("view-options-toggle") {
+                    let _ = btn.set_attribute("aria-pressed", if next { "true" } else { "false" });
+                    btn.set_text_content(Some(if next {
+                        "화면 옵션 ON"
+                    } else {
+                        "화면 옵션"
+                    }));
+                }
+                if let Some(popover) = doc.get_element_by_id("view-options-popover") {
+                    if let Some(el) = popover.dyn_ref::<web_sys::HtmlElement>() {
+                        let _ = el
+                            .style()
+                            .set_property("display", if next { "grid" } else { "none" });
+                    }
+                }
+            }) as Box<dyn FnMut()>);
+            let _ = toggle.dyn_ref::<web_sys::EventTarget>().map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+            cb.forget();
+        }
+    }
+
+    for input_id in [
+        "opt-show-ops",
+        "opt-show-secondary",
+        "opt-show-tertiary",
+        "opt-show-bottom",
+    ] {
+        let Some(input) = doc
+            .get_element_by_id(input_id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        else {
+            continue;
+        };
+        if input.get_attribute("data-bound").as_deref() == Some("1") {
+            continue;
+        }
+        let _ = input.set_attribute("data-bound", "1");
+        let cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            let prefs = read_view_layout_prefs_from_dom(&doc);
+            apply_view_layout_prefs(&doc, prefs);
+            save_view_layout_prefs(prefs);
+        }) as Box<dyn FnMut()>);
+        let _ = input.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
+        });
+        cb.forget();
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1282,7 +1622,8 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         )
     };
 
-    let previous_count = running.len() + stopped.len() + lobby.len() + unavailable.len() + ended.len();
+    let previous_count =
+        running.len() + stopped.len() + lobby.len() + unavailable.len() + ended.len();
     let lanes_html = if running_only {
         format!(
             "{}{}",
@@ -1451,7 +1792,8 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
         .unwrap_or("-")
         .to_string();
 
-    if let Ok(pause_status) = mcp_tool_call("masc_pause_status", json!({ "room_id": room_id })).await
+    if let Ok(pause_status) =
+        mcp_tool_call("masc_pause_status", json!({ "room_id": room_id })).await
     {
         if pause_status
             .get("paused")
@@ -1572,7 +1914,10 @@ fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
         .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
     // Keep inline selector deterministic to avoid stale/duplicated room IDs from
     // local storage history. Full room browsing is handled by the room-hub lanes.
-    let rooms = unique_non_empty(vec![selected.clone(), crate::config::DEFAULT_ROOM_ID.to_string()]);
+    let rooms = unique_non_empty(vec![
+        selected.clone(),
+        crate::config::DEFAULT_ROOM_ID.to_string(),
+    ]);
 
     if let Some(select) = doc
         .get_element_by_id("room-selector-inline")
@@ -1755,7 +2100,8 @@ fn dedup_room_snapshots(rows: Vec<RoomSnapshot>) -> Vec<RoomSnapshot> {
     let mut index_by_id: HashMap<String, usize> = HashMap::new();
 
     for mut row in rows {
-        row.id = crate::config::sanitize_room_id(&row.id).unwrap_or_else(|| row.id.trim().to_string());
+        row.id =
+            crate::config::sanitize_room_id(&row.id).unwrap_or_else(|| row.id.trim().to_string());
         if row.id.is_empty() {
             continue;
         }
@@ -1853,7 +2199,10 @@ fn bind_room_controls(doc: &web_sys::Document) {
             };
             if let Some(pill) = doc.get_element_by_id("room-status") {
                 let current = crate::config::current_room_id();
-                pill.set_text_content(Some(&format!("현재 게임: {} · 목록 불러오는 중...", current)));
+                pill.set_text_content(Some(&format!(
+                    "현재 게임: {} · 목록 불러오는 중...",
+                    current
+                )));
             }
             let doc_for_fetch = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
@@ -1917,8 +2266,8 @@ use mcp_rpc::{mcp_tool_call, parse_embedded_tool_payload};
 mod room_hub;
 #[cfg(target_arch = "wasm32")]
 use room_hub::{
-    remember_recent_room, room_lane_label, RoomSnapshot,
-    KNOWN_ROOMS_STORAGE_KEY, ROOM_HUB_RUNNING_ONLY_STORAGE_KEY, ROOM_HUB_VISIBLE_STORAGE_KEY,
+    remember_recent_room, room_lane_label, RoomSnapshot, KNOWN_ROOMS_STORAGE_KEY,
+    ROOM_HUB_RUNNING_ONLY_STORAGE_KEY, ROOM_HUB_VISIBLE_STORAGE_KEY,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -2013,7 +2362,10 @@ async fn seed_monitor_snapshot(doc: web_sys::Document) -> Result<(), String> {
     let keepers_text = if keeper_preview.is_empty() {
         format!("등록 keeper: {}명", keeper_count)
     } else {
-        format!("등록 keeper: {}명\n대표 keeper: {}", keeper_count, keeper_preview)
+        format!(
+            "등록 keeper: {}명\n대표 keeper: {}",
+            keeper_count, keeper_preview
+        )
     };
     set_element_text(&doc, "monitor-agent-list", &keepers_text);
 

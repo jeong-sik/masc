@@ -171,6 +171,13 @@
                     <button id="session-resume-btn" class="inline-toggle" type="button" title="멈춘 세션을 재개합니다">재개</button>
                     <span id="session-control-status" class="widget-pill">세션 제어 대기</span>
                 </div>
+                <button id="view-options-toggle" class="inline-toggle" type="button" aria-pressed="false" title="화면 표시 옵션 열기/닫기">화면 옵션</button>
+                <div id="view-options-popover" class="view-options-popover" style="display:none">
+                    <label><input id="opt-show-ops" type="checkbox" checked /> 운영 HUD</label>
+                    <label><input id="opt-show-secondary" type="checkbox" checked /> 내러티브 패널</label>
+                    <label><input id="opt-show-tertiary" type="checkbox" checked /> 파티 패널</label>
+                    <label><input id="opt-show-bottom" type="checkbox" checked /> 하단 로그</label>
+                </div>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>

@@ -8,6 +8,7 @@ pub mod dice_log;
 pub mod endgame;
 pub mod escape;
 pub mod gameplay_events;
+pub mod map_canvas;
 pub mod narrative;
 pub mod overlay;
 pub mod session_events;
@@ -36,6 +37,7 @@ impl Plugin for DomBridgePlugin {
             .init_resource::<turn_phase::TurnPhaseCache>()
             .init_resource::<turn_runtime::TurnRuntimeCache>()
             .init_resource::<connection::ConnectionStatusCache>()
+            .init_resource::<map_canvas::CanvasMapCache>()
             .init_resource::<overlay::OverlayCache>()
             .init_resource::<endgame::EndgameState>()
             .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
@@ -52,6 +54,7 @@ impl Plugin for DomBridgePlugin {
                     turn_phase::update_turn_phase_dom,
                     turn_runtime::update_turn_runtime_dom,
                     connection::update_connection_dom,
+                    map_canvas::update_canvas_map_dom,
                     actor_join::sync_join_panel_interaction_state,
                     action_panel::sync_action_panel_interaction_state,
                     turn_controls::sync_turn_controls_visibility,
@@ -87,6 +90,7 @@ fn reset_trpg_dom_state(
     mut turn_cache: ResMut<turn_phase::TurnPhaseCache>,
     mut runtime_cache: ResMut<turn_runtime::TurnRuntimeCache>,
     mut connection_cache: ResMut<connection::ConnectionStatusCache>,
+    mut map_canvas_cache: ResMut<map_canvas::CanvasMapCache>,
     mut overlay_cache: ResMut<overlay::OverlayCache>,
     mut endgame_state: ResMut<endgame::EndgameState>,
 ) {
@@ -96,6 +100,7 @@ fn reset_trpg_dom_state(
     turn_cache.last_phase.clear();
     runtime_cache.last_snapshot.clear();
     connection_cache.last_status.clear();
+    *map_canvas_cache = map_canvas::CanvasMapCache::default();
     *overlay_cache = overlay::OverlayCache::default();
     endgame_state.triggered = false;
 

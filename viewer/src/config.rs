@@ -56,8 +56,18 @@ pub fn set_current_room_id(room_id: &str) {
         // Also update URL without reload?
         if let Some(win) = web_sys::window() {
             if let Ok(history) = win.history() {
-                let url = format!("?room={}", room_id);
-                let _ = history.push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url));
+                let mode_param = win
+                    .location()
+                    .search()
+                    .ok()
+                    .and_then(|search| parse_query_param(&search, "mode"))
+                    .filter(|mode| !mode.trim().is_empty() && mode != "lobby");
+                let url = match mode_param {
+                    Some(mode) => format!("?mode={}&room={}", mode, room_id),
+                    None => format!("?room={}", room_id),
+                };
+                let _ =
+                    history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url));
             }
         }
     }

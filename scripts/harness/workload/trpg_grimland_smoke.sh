@@ -19,6 +19,7 @@ CLAIMED_ACTORS=""
 CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-120}"
 CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
+ROUND_HTTP_TIMEOUT_SEC="${ROUND_HTTP_TIMEOUT_SEC:-$((ROUND_TIMEOUT_SEC + 180))}"
 
 cleanup_keepers() {
   if [ -n "${room_id:-}" ] && [ -n "${CLAIMED_ACTORS:-}" ]; then
@@ -44,23 +45,25 @@ call_tool() {
   local id="$1"
   local name="$2"
   local args_json="$3"
+  local timeout_sec="${4:-$CURL_TIMEOUT_SEC}"
+  local retry_count="${5:-$CURL_RETRY_COUNT}"
   local raw=""
   local sse_data
   local attempt=1
-  while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
-    if raw="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+  while [ "$attempt" -le "$retry_count" ]; do
+    if raw="$(curl -sS -m "$timeout_sec" -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
       -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"; then
       break
     fi
-    if [ "$attempt" -lt "$CURL_RETRY_COUNT" ]; then
+    if [ "$attempt" -lt "$retry_count" ]; then
       sleep "$CURL_RETRY_DELAY_SEC"
     fi
     attempt=$((attempt + 1))
   done
   if [ -z "$raw" ]; then
-    printf '{"error":{"message":"curl failed after retries: tool=%s timeout_sec=%s retries=%s"}}' "$name" "$CURL_TIMEOUT_SEC" "$CURL_RETRY_COUNT"
+    printf '{"error":{"message":"curl failed after retries: tool=%s timeout_sec=%s retries=%s"}}' "$name" "$timeout_sec" "$retry_count"
     return 0
   fi
   sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p' | tail -n1)"
@@ -87,9 +90,11 @@ call_tool_checked() {
   local id="$1"
   local name="$2"
   local args_json="$3"
+  local timeout_sec="${4:-$CURL_TIMEOUT_SEC}"
+  local retry_count="${5:-$CURL_RETRY_COUNT}"
   local raw
   local err
-  raw="$(call_tool "$id" "$name" "$args_json")"
+  raw="$(call_tool "$id" "$name" "$args_json" "$timeout_sec" "$retry_count")"
   if [ -z "$(printf "%s" "$raw" | tr -d '[:space:]')" ]; then
     echo "FAIL: $name: empty response from MCP" >&2
     exit 1
@@ -191,10 +196,18 @@ if [ "$RUN_ROUND" = "1" ]; then
   while [ "$i" -le "$ROUNDS" ]; do
     echo "  - round $i"
     args_round="$(jq -cn --argjson t "$round_template" --argjson timeout "$ROUND_TIMEOUT_SEC" '{room_id:$t.room_id,dm_keeper:$t.dm_keeper,player_keepers:$t.player_keepers,phase:"round",timeout_sec:$timeout,require_claim:true}')"
-    r_round="$(call_tool_checked $((4000 + i)) "trpg.round.run" "$args_round")"
+    r_round="$(call_tool_checked $((4000 + i)) "trpg.round.run" "$args_round" "$ROUND_HTTP_TIMEOUT_SEC" "1")"
     advanced="$(printf "%s" "$r_round" | payload | jq -r '.summary.advanced // empty')"
     if [ "$advanced" = "false" ]; then
-      echo "FAIL: round $i did not advance"
+      timeouts="$(printf "%s" "$r_round" | payload | jq -r '.summary.timeouts // 0')"
+      unavailable="$(printf "%s" "$r_round" | payload | jq -r '.summary.unavailable // 0')"
+      player_successes="$(printf "%s" "$r_round" | payload | jq -r '.summary.player_successes // 0')"
+      dm_success="$(printf "%s" "$r_round" | payload | jq -r '.summary.dm_success // false')"
+      first_issue="$(printf "%s" "$r_round" | payload | jq -r '[.statuses[]? | select(.status != "ok" and .status != "skipped") | .reason] | map(select(. != null and . != "")) | .[0] // empty')"
+      echo "FAIL: round $i did not advance (player_successes=$player_successes dm_success=$dm_success timeouts=$timeouts unavailable=$unavailable)"
+      if [ -n "$first_issue" ]; then
+        echo "hint: first issue => $first_issue"
+      fi
       printf "%s\n" "$r_round"
       exit 1
     fi

@@ -2444,6 +2444,54 @@ body:not(.mode-trpg) #ops-hud {
     background: rgba(80, 29, 29, 0.28);
 }
 
+.round-run-badges {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.round-run-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--border-main);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.66rem;
+    line-height: 1.2;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-dim);
+}
+
+.round-run-badge .badge-k {
+    letter-spacing: 0.3px;
+    opacity: 0.82;
+}
+
+.round-run-badge .badge-v {
+    color: var(--text-primary);
+}
+
+.round-run-badge.is-ok {
+    border-color: rgba(122, 206, 155, 0.45);
+    background: rgba(23, 56, 44, 0.24);
+    color: #96d8b3;
+}
+
+.round-run-badge.is-warn {
+    border-color: rgba(196, 162, 101, 0.45);
+    background: rgba(70, 52, 23, 0.24);
+    color: #d9b06c;
+}
+
+.round-run-badge.is-error {
+    border-color: rgba(215, 118, 118, 0.5);
+    background: rgba(80, 29, 29, 0.3);
+    color: #dfa1a1;
+}
+
 #round-recovery-btn {
     background: transparent;
     border: 1px solid rgba(196, 162, 101, 0.4);

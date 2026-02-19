@@ -953,32 +953,146 @@ let trpg_keeper_call_with_runtime
   | Eio.Time.Timeout -> `Timeout
   | exn -> `Error (Printexc.to_string exn)
 
+type trpg_round_run_guard_state = {
+  mutex : Mutex.t;
+  inflight_rooms : (string, unit) Hashtbl.t;
+  idempotency_cache : (string, Yojson.Safe.t) Hashtbl.t;
+  mutable cache_writes : int;
+}
+
+let trpg_round_run_guard : trpg_round_run_guard_state =
+  {
+    mutex = Mutex.create ();
+    inflight_rooms = Hashtbl.create 64;
+    idempotency_cache = Hashtbl.create 512;
+    cache_writes = 0;
+  }
+
 let trpg_round_run_json
     ~(state : Mcp_server.server_state)
     ~(agent_name : string)
     ~(sw : Eio.Switch.t)
     ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+    ~(idempotency_key : string option)
     ~body_str
   : trpg_api_result =
+  let with_round_run_guard_lock f =
+    Mutex.lock trpg_round_run_guard.mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock trpg_round_run_guard.mutex) f
+  in
+  let trpg_round_run_extract_room_id (args : Yojson.Safe.t) : string =
+    let pick key =
+      match Yojson.Safe.Util.member key args with
+      | `String raw ->
+          let trimmed = String.trim raw in
+          if trimmed = "" then None else Some trimmed
+      | _ -> None
+    in
+    match pick "room_id" with
+    | Some room_id -> room_id
+    | None -> (
+        match pick "room" with
+        | Some room_id -> room_id
+        | None -> "default")
+  in
+  let trpg_round_run_extract_idempotency_key
+      ~(header_key : string option)
+      (args : Yojson.Safe.t) : string option =
+    let normalize = function
+      | None -> None
+      | Some raw ->
+          let trimmed = String.trim raw in
+          if trimmed = "" then None else Some trimmed
+    in
+    match normalize header_key with
+    | Some _ as key -> key
+    | None -> (
+        match Yojson.Safe.Util.member "idempotency_key" args with
+        | `String raw -> normalize (Some raw)
+        | _ -> None)
+  in
+  let trpg_round_run_cache_key ~room_id ~idempotency_key =
+    room_id ^ "\x1f" ^ idempotency_key
+  in
+  let trpg_round_run_cache_lookup ~room_id ~idempotency_key =
+    let key = trpg_round_run_cache_key ~room_id ~idempotency_key in
+    with_round_run_guard_lock (fun () ->
+      Hashtbl.find_opt trpg_round_run_guard.idempotency_cache key)
+  in
+  let trpg_round_run_cache_store ~room_id ~idempotency_key ~result_json =
+    let key = trpg_round_run_cache_key ~room_id ~idempotency_key in
+    with_round_run_guard_lock (fun () ->
+      Hashtbl.replace trpg_round_run_guard.idempotency_cache key result_json;
+      trpg_round_run_guard.cache_writes <- trpg_round_run_guard.cache_writes + 1;
+      if trpg_round_run_guard.cache_writes >= 1024
+         && Hashtbl.length trpg_round_run_guard.idempotency_cache > 4096
+      then (
+        Hashtbl.reset trpg_round_run_guard.idempotency_cache;
+        trpg_round_run_guard.cache_writes <- 0))
+  in
+  let trpg_round_run_try_acquire ~room_id =
+    with_round_run_guard_lock (fun () ->
+      if Hashtbl.mem trpg_round_run_guard.inflight_rooms room_id then false
+      else (
+        Hashtbl.replace trpg_round_run_guard.inflight_rooms room_id ();
+        true))
+  in
+  let trpg_round_run_release ~room_id =
+    with_round_run_guard_lock (fun () ->
+      Hashtbl.remove trpg_round_run_guard.inflight_rooms room_id)
+  in
   try
     let args = Yojson.Safe.from_string body_str in
-    let keeper_call =
-      trpg_keeper_call_with_runtime
-        ~config:state.Mcp_server.room_config
-        ~sw
-        ~clock
+    let room_id = trpg_round_run_extract_room_id args in
+    let idempotency_key =
+      trpg_round_run_extract_idempotency_key ~header_key:idempotency_key args
     in
-    let trpg_ctx : Masc_mcp.Tool_trpg.context =
-      { config = state.Mcp_server.room_config; agent_name; keeper_call = Some keeper_call }
+    let run_once () =
+      let keeper_call =
+        trpg_keeper_call_with_runtime
+          ~config:state.Mcp_server.room_config
+          ~sw
+          ~clock
+      in
+      let trpg_ctx : Masc_mcp.Tool_trpg.context =
+        { config = state.Mcp_server.room_config; agent_name; keeper_call = Some keeper_call }
+      in
+      match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with
+      | None ->
+          Error (`Internal_server_error, "masc_trpg_round_run dispatch unavailable")
+      | Some (false, msg) -> Error (`Bad_request, msg)
+      | Some (true, body) -> (
+          try Ok (Yojson.Safe.from_string body)
+          with Yojson.Json_error e ->
+            Error (`Internal_server_error, Printf.sprintf "invalid tool json: %s" e))
     in
-    match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with
-    | None ->
-        Error (`Internal_server_error, "masc_trpg_round_run dispatch unavailable")
-    | Some (false, msg) -> Error (`Bad_request, msg)
-    | Some (true, body) -> (
-        try Ok (Yojson.Safe.from_string body)
-        with Yojson.Json_error e ->
-          Error (`Internal_server_error, Printf.sprintf "invalid tool json: %s" e))
+    let run_with_single_flight () =
+      if not (trpg_round_run_try_acquire ~room_id) then
+        Error
+          ( `Bad_request,
+            Printf.sprintf
+              "round run already in progress for room_id=%s (single-flight)"
+              room_id )
+      else
+        Fun.protect
+          ~finally:(fun () -> trpg_round_run_release ~room_id)
+          (fun () ->
+            let result = run_once () in
+            (match (result, idempotency_key) with
+            | Ok json, Some idem_key ->
+                trpg_round_run_cache_store
+                  ~room_id
+                  ~idempotency_key:idem_key
+                  ~result_json:json
+            | _ -> ());
+            result)
+    in
+    match idempotency_key with
+    | Some idem_key -> (
+        match trpg_round_run_cache_lookup ~room_id ~idempotency_key:idem_key with
+        | Some json -> Ok json
+        | None -> run_with_single_flight ())
+    | None -> run_with_single_flight ()
   with
   | Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
   | exn -> Error (`Internal_server_error, Printexc.to_string exn)
@@ -1030,7 +1144,7 @@ let cors_headers origin = [
   ("access-control-allow-origin", origin);
   ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
   ("access-control-allow-headers",
-   "Content-Type, Accept, Origin, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
   ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ("access-control-allow-credentials", "true");
 ]
@@ -3348,7 +3462,7 @@ let cors_preflight_headers origin =
     ("access-control-allow-origin", origin);
     ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
     ("access-control-allow-headers",
-     "Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Accept, Origin");
+     "Content-Type, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Accept, Origin");
     ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ]
 
@@ -4445,7 +4559,14 @@ let make_routes ~port ~host =
            match !current_sw, !current_clock with
            | Some sw, Some clock -> (
                match
-                 trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+                 trpg_round_run_json
+                   ~state
+                   ~agent_name
+                   ~sw
+                   ~clock
+                   ~idempotency_key:
+                     (get_header_any_case req.Httpun.Request.headers "idempotency-key")
+                   ~body_str
                with
                | Ok json ->
                    respond_json_with_cors request reqd (Yojson.Safe.to_string json)
@@ -5339,7 +5460,14 @@ let run_server ~sw ~env ~port ~base_path =
             match !current_sw, !current_clock with
             | Some sw, Some clock -> (
                 match
-                  trpg_round_run_json ~state ~agent_name ~sw ~clock ~body_str
+                  trpg_round_run_json
+                    ~state
+                    ~agent_name
+                    ~sw
+                    ~clock
+                    ~idempotency_key:
+                      (get_header_any_case httpun_request.headers "idempotency-key")
+                    ~body_str
                 with
                 | Ok json ->
                     h2_respond_json h2_reqd (Yojson.Safe.to_string json)

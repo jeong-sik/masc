@@ -478,11 +478,11 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
 
     let current_bucket = if current_rooms.is_empty() {
         format!(
-            r#"<section class="history-room-bucket history-room-bucket-current"><h4 class="history-room-bucket-title">현재 세션</h4><p class="history-room-empty">현재 room({room})의 기록이 아직 없습니다.</p></section>"#,
+            r#"<section class="history-room-bucket history-room-bucket-current"><h4 class="history-room-bucket-title">현재 게임 (실시간)</h4><p class="history-room-empty">현재 game room({room})의 기록이 없습니다. 새 게임을 시작하거나 라운드를 실행하세요.</p></section>"#,
             room = html_escape(&sanitize_text(&current_room))
         )
     } else {
-        render_room_bucket_html("현재 세션", &current_rooms, "history-room-bucket-current")
+        render_room_bucket_html("현재 게임 (실시간)", &current_rooms, "history-room-bucket-current")
     };
 
     let summary_class = if current_rooms.is_empty() {
@@ -491,7 +491,7 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
         "history-session-summary"
     };
     let summary_html = format!(
-        r#"<div class="{summary_class}"><span>현재 room: <strong>{room}</strong></span><span>진행 {active} · 멈춤 {paused} · 종료 {ended}</span></div>"#,
+        r#"<div class="{summary_class}"><span>현재 게임 room: <strong>{room}</strong></span><span>이전 세션 진행 {active} · 멈춤 {paused} · 종료 {ended}</span></div>"#,
         summary_class = summary_class,
         room = html_escape(&sanitize_text(&current_room)),
         active = active_count,
@@ -500,10 +500,10 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
     );
 
     let room_column = format!(
-        r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">세션</h3>{summary}{current}{active}{paused}{ended}{other}</section>"#,
+        r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">현재 게임 / 이전 세션</h3>{summary}{current}{active}{paused}{ended}{other}</section>"#,
         summary = summary_html,
         current = current_bucket,
-        active = render_room_bucket_html("이전 세션 · 진행중", &active_rooms, ""),
+        active = render_room_bucket_html("이전 세션 · 진행 중", &active_rooms, ""),
         paused = render_room_bucket_html("이전 세션 · 멈춤", &paused_rooms, ""),
         ended = render_room_bucket_html("이전 세션 · 종료", &ended_rooms, ""),
         other = render_room_bucket_html("이전 세션 · 기타", &other_rooms, "")

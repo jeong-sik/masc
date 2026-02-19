@@ -43,7 +43,7 @@ fn room_status_class(state: TrpgLifecycleState) -> &'static str {
 
 #[cfg(target_arch = "wasm32")]
 fn room_status_label(state: TrpgLifecycleState) -> &'static str {
-    state.label()
+    state.label_ko()
 }
 
 fn connection_status_class(status: &ConnectionStatus) -> &'static str {
@@ -57,11 +57,11 @@ fn connection_status_class(status: &ConnectionStatus) -> &'static str {
 
 fn connection_status_label(status: &ConnectionStatus) -> &'static str {
     match status {
-        ConnectionStatus::Connected => "connected",
-        ConnectionStatus::Connecting => "connecting",
-        ConnectionStatus::Reconnecting(_, _) => "reconnecting",
-        ConnectionStatus::Disconnected => "disconnected",
-        ConnectionStatus::Failed => "failed",
+        ConnectionStatus::Connected => "연결됨",
+        ConnectionStatus::Connecting => "연결 중",
+        ConnectionStatus::Reconnecting(_, _) => "재연결 중",
+        ConnectionStatus::Disconnected => "연결 끊김",
+        ConnectionStatus::Failed => "연결 실패",
     }
 }
 
@@ -166,7 +166,7 @@ fn build_next_action_hint(
     has_actor_issues: bool,
 ) -> String {
     if runner_running {
-        return "Auto Run 진행 중입니다. 이벤트 수신을 기다리세요.".to_string();
+        return "자동 진행 중입니다. 이벤트 수신을 기다리세요.".to_string();
     }
     if !lifecycle.accepts_player_input() {
         return match lifecycle {
@@ -174,26 +174,26 @@ fn build_next_action_hint(
                 "로딩 중입니다. 상태 동기화 완료를 기다리세요.".to_string()
             }
             TrpgLifecycleState::Stopped => {
-                "세션이 멈춰 있습니다. Start/Run으로 재개하세요.".to_string()
+                "세션이 멈춰 있습니다. 라운드 실행으로 재개하세요.".to_string()
             }
             TrpgLifecycleState::Ended => {
-                "세션이 종료되었습니다. New Game으로 시작하세요.".to_string()
+                "세션이 종료되었습니다. 새 게임으로 시작하세요.".to_string()
             }
             TrpgLifecycleState::Unavailable => {
                 "엔진/키퍼 연결을 복구한 뒤 다시 시도하세요.".to_string()
             }
-            TrpgLifecycleState::Lobby => "세션을 시작한 뒤 Run Round를 실행하세요.".to_string(),
-            TrpgLifecycleState::Unknown => "상태 확인 후 Run Round를 다시 실행하세요.".to_string(),
+            TrpgLifecycleState::Lobby => "세션을 시작한 뒤 라운드 실행을 누르세요.".to_string(),
+            TrpgLifecycleState::Unknown => "상태 확인 후 라운드 실행을 다시 누르세요.".to_string(),
             TrpgLifecycleState::Running => "진행 상태를 확인하세요.".to_string(),
         };
     }
     if has_actor_issues {
-        return "keeper 상태를 확인한 뒤 Run Round를 다시 실행하세요.".to_string();
+        return "keeper 상태를 확인한 뒤 라운드 실행을 다시 누르세요.".to_string();
     }
 
     let actor = current_actor.trim();
     if actor.is_empty() || actor == "-" {
-        "Run Round를 실행하거나 플레이어 액션을 입력하세요.".to_string()
+        "라운드 실행을 누르거나 플레이어 액션을 입력하세요.".to_string()
     } else {
         format!("{} 응답을 기다리는 중입니다.", actor)
     }
@@ -232,7 +232,7 @@ fn build_flow_banner(
             TrpgLifecycleState::Stopped => (
                 "일시 정지",
                 "is-alert",
-                "세션이 멈춰 있습니다. Run Round로 다시 진행할 수 있습니다.".to_string(),
+                "세션이 멈춰 있습니다. 라운드 실행으로 다시 진행할 수 있습니다.".to_string(),
             ),
             TrpgLifecycleState::Loading => (
                 "세션 준비",
@@ -433,22 +433,22 @@ pub fn update_turn_runtime_dom(
     } else if alive_party <= 0 {
         "WIPE".to_string()
     } else {
-        format!("{}/{} alive", alive_party, total_party)
+        format!("{}/{} 생존", alive_party, total_party)
     };
     let (issues_summary, has_actor_issues) = summarize_actor_issues(&progress);
 
     let current_status = if !lifecycle.accepts_player_input() {
         lifecycle.label_ko()
     } else if current_actor != "-" {
-        "thinking"
+        "응답 생성 중"
     } else {
-        "waiting"
+        "대기 중"
     };
 
     let input_status = if lifecycle.accepts_player_input() {
-        "enabled"
+        "입력 가능"
     } else {
-        "disabled"
+        "입력 잠금"
     };
 
     let room_turn_for_sync = if room_state.turn > 0 {
@@ -484,21 +484,21 @@ pub fn update_turn_runtime_dom(
                 room_phase_for_sync, progress_phase_for_sync
             ));
         }
-        (format!("mismatch: {}", reasons.join(" · ")), "status-error")
+        (format!("불일치: {}", reasons.join(" · ")), "status-error")
     } else if progress.last_event.trim().is_empty() {
-        ("waiting event".to_string(), "status-idle")
+        ("이벤트 대기".to_string(), "status-idle")
     } else {
         (
-            format!("ok · {}", progress.last_event.trim()),
+            format!("정상 · {}", progress.last_event.trim()),
             "status-active",
         )
     };
 
     let control_state = if lifecycle.accepts_player_input() {
         if current_actor != "-" {
-            "manual-ready / actor-thinking".to_string()
+            "수동 실행 가능 · 액터 처리 중".to_string()
         } else {
-            "manual-ready".to_string()
+            "수동 실행 가능".to_string()
         }
     } else {
         lifecycle.label_ko().to_string()
@@ -525,9 +525,9 @@ pub fn update_turn_runtime_dom(
     };
 
     let runner_state = if runner_running {
-        format!("auto-run {} rounds", runner_rounds)
+        format!("자동 진행 {} 라운드", runner_rounds)
     } else {
-        "idle".to_string()
+        "대기".to_string()
     };
     let next_action =
         build_next_action_hint(lifecycle, runner_running, &current_actor, has_actor_issues);
@@ -609,7 +609,7 @@ pub fn update_turn_runtime_dom(
         if let Some(room_status_el) = document.get_element_by_id("room-status") {
             let room_id = crate::config::current_room_id();
             room_status_el.set_text_content(Some(&format!(
-                "room {} · {}",
+                "현재 게임 {} · {}",
                 room_id,
                 lifecycle.label_ko()
             )));
@@ -617,7 +617,7 @@ pub fn update_turn_runtime_dom(
             let _ = room_status_el.set_attribute(
                 "title",
                 &format!(
-                    "{} | turn {} | phase {} | raw {}",
+                    "{} | 턴 {} | 페이즈 {} | raw {}",
                     lifecycle.help_text(),
                     turn,
                     phase,
@@ -737,7 +737,7 @@ pub fn update_turn_runtime_dom(
                 && !inferred_player_pairs.is_empty()
             {
                 summary.set_text_content(Some(&format!(
-                    "DM: {} · Players: {}",
+                    "DM: {} · 플레이어: {}",
                     inferred_dm,
                     inferred_player_pairs.join(", ")
                 )));
@@ -765,14 +765,14 @@ pub fn update_turn_runtime_dom(
             };
             let html = format!(
                 concat!(
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Room</span><span class=\"round-sync-value\">{room_id}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Lifecycle</span><span class=\"round-sync-value {room_class}\">{lifecycle}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Turn Sync</span><span class=\"round-sync-value {turn_sync_class}\">room {room_turn} / progress {progress_turn}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Phase Sync</span><span class=\"round-sync-value {phase_sync_class}\">room {room_phase} / progress {progress_phase}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Last Event</span><span class=\"round-sync-value\">{last_event}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Last Result</span><span class=\"round-sync-value\">{last_result}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Runner</span><span class=\"round-sync-value\">{runner_state}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Runner Resp</span><span class=\"round-sync-value\">{runner_preview}</span></div>"
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">게임 방</span><span class=\"round-sync-value\">{room_id}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">세션 상태</span><span class=\"round-sync-value {room_class}\">{lifecycle}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">턴 동기화</span><span class=\"round-sync-value {turn_sync_class}\">room {room_turn} / progress {progress_turn}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">페이즈 동기화</span><span class=\"round-sync-value {phase_sync_class}\">room {room_phase} / progress {progress_phase}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">마지막 이벤트</span><span class=\"round-sync-value\">{last_event}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">마지막 결과</span><span class=\"round-sync-value\">{last_result}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">자동 진행 상태</span><span class=\"round-sync-value\">{runner_state}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">자동 진행 응답</span><span class=\"round-sync-value\">{runner_preview}</span></div>"
                 ),
                 room_id = html_escape(&room_id),
                 room_class = room_class,
@@ -801,22 +801,22 @@ pub fn update_turn_runtime_dom(
 
         let lifecycle_class = format!("{} {}", room_class, lifecycle.css_class());
         let lifecycle_label =
-            html_escape(&format!("{} ({})", lifecycle.label(), lifecycle.label_ko()));
+            html_escape(&format!("{} ({})", lifecycle.label_ko(), lifecycle.label()));
         let html = format!(
             r#"
 <div class="turn-runtime-grid">
-  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Lifecycle</span><span class="v {lifecycle_class}">{lifecycle_label}</span></div>
-  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Definition</span><span class="v">{lifecycle_help}</span></div>
-  <div class="turn-runtime-item"><span class="k">State</span><span class="v {room_class}">{room}</span></div>
-  <div class="turn-runtime-item"><span class="k">Turn</span><span class="v">{turn}</span></div>
-  <div class="turn-runtime-item"><span class="k">Phase</span><span class="v">{phase}</span></div>
-  <div class="turn-runtime-item"><span class="k">Input</span><span class="v {input_class}">{input}</span></div>
-  <div class="turn-runtime-item"><span class="k">Now</span><span class="v">{current} · {current_status}</span></div>
-  <div class="turn-runtime-item"><span class="k">Next</span><span class="v">{next}</span></div>
-  <div class="turn-runtime-item"><span class="k">Last</span><span class="v">{last}</span></div>
-  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Issues</span><span class="v {issues_class}">{issues}</span></div>
-  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Next Action</span><span class="v">{next_action}</span></div>
-  <div class="turn-runtime-item"><span class="k">Party</span><span class="v {party_class}">{party}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">세션 상태</span><span class="v {lifecycle_class}">{lifecycle_label}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">설명</span><span class="v">{lifecycle_help}</span></div>
+  <div class="turn-runtime-item"><span class="k">상태</span><span class="v {room_class}">{room}</span></div>
+  <div class="turn-runtime-item"><span class="k">턴</span><span class="v">{turn}</span></div>
+  <div class="turn-runtime-item"><span class="k">페이즈</span><span class="v">{phase}</span></div>
+  <div class="turn-runtime-item"><span class="k">입력</span><span class="v {input_class}">{input}</span></div>
+  <div class="turn-runtime-item"><span class="k">현재</span><span class="v">{current} · {current_status}</span></div>
+  <div class="turn-runtime-item"><span class="k">다음</span><span class="v">{next}</span></div>
+  <div class="turn-runtime-item"><span class="k">직전</span><span class="v">{last}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">이슈</span><span class="v {issues_class}">{issues}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">다음 행동</span><span class="v">{next_action}</span></div>
+  <div class="turn-runtime-item"><span class="k">파티</span><span class="v {party_class}">{party}</span></div>
 </div>
 "#,
             lifecycle_help = html_escape(lifecycle.help_text()),
@@ -873,7 +873,7 @@ mod tests {
     #[test]
     fn next_action_prefers_issue_recovery_when_running() {
         let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "-", true);
-        assert_eq!(hint, "keeper 상태를 확인한 뒤 Run Round를 다시 실행하세요.");
+        assert_eq!(hint, "keeper 상태를 확인한 뒤 라운드 실행을 다시 누르세요.");
     }
 
     #[test]
@@ -890,7 +890,7 @@ mod tests {
             false,
             false,
             "-",
-            "Run Round를 실행하세요.",
+            "라운드 실행을 누르세요.",
         );
         assert_eq!(state, "연결 오류");
         assert_eq!(class_name, "is-error");
@@ -905,7 +905,7 @@ mod tests {
             true,
             false,
             "p01",
-            "Auto Run 진행 중입니다.",
+            "자동 진행 중입니다.",
         );
         assert_eq!(state, "자동 진행");
         assert_eq!(class_name, "is-running");

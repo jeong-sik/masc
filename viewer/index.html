@@ -162,7 +162,7 @@
                     <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방으로 이동합니다">이동</button>
                     <button id="room-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
                     <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
-                    <span id="room-status" class="widget-pill">현재 방: default</span>
+                    <span id="room-status" class="widget-pill">현재 게임: default</span>
                 </div>
                 <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
                 <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="true" title="AI 턴 자동 진행을 멈춥니다">자동 진행: ON</button>
@@ -191,7 +191,7 @@
             </div>
             <div class="ops-hud-item">
                 <span class="ops-k">Session</span>
-                <span id="ops-session-state" class="ops-v">lobby</span>
+                <span id="ops-session-state" class="ops-v">로비</span>
             </div>
             <div class="ops-hud-item">
                 <span class="ops-k">Round</span>
@@ -199,15 +199,15 @@
             </div>
             <div class="ops-hud-item">
                 <span class="ops-k">Connection</span>
-                <span id="ops-connection-state" class="ops-v">disconnected</span>
+                <span id="ops-connection-state" class="ops-v">연결 끊김</span>
             </div>
             <div class="ops-hud-item">
                 <span class="ops-k">Control</span>
-                <span id="ops-control-state" class="ops-v">waiting</span>
+                <span id="ops-control-state" class="ops-v">대기</span>
             </div>
             <div class="ops-hud-item">
                 <span class="ops-k">Sync</span>
-                <span id="ops-sync-state" class="ops-v">idle</span>
+                <span id="ops-sync-state" class="ops-v">대기</span>
             </div>
         </section>
 
@@ -486,7 +486,7 @@
                 <div id="dice-log" class="scrollable horizontal"></div>
             </section>
             <section class="bottom-pane">
-                <h2 class="panel-title">게임 히스토리</h2>
+                <h2 class="panel-title">현재 게임 / 이전 세션</h2>
                 <div id="session-history" class="scrollable"></div>
             </section>
         </footer>

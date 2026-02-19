@@ -780,7 +780,8 @@ mod tests {
     #[test]
     fn deserialize_board_response() {
         let json = r#"{"posts":[{"id":"p1","author":"dreamer","content":"Hello","votes_up":3,"votes_down":1,"reply_count":2}]}"#;
-        let resp: BoardResponse = serde_json::from_str(json).expect("JSON: BoardResponse deserialization");
+        let resp: BoardResponse =
+            serde_json::from_str(json).expect("JSON: BoardResponse deserialization");
         assert_eq!(resp.posts.len(), 1);
         assert_eq!(resp.posts[0].author, "dreamer");
         assert_eq!(resp.posts[0].votes_up, 3);
@@ -789,14 +790,16 @@ mod tests {
     #[test]
     fn deserialize_empty_board() {
         let json = r#"{"posts":[]}"#;
-        let resp: BoardResponse = serde_json::from_str(json).expect("JSON: empty BoardResponse deserialization");
+        let resp: BoardResponse =
+            serde_json::from_str(json).expect("JSON: empty BoardResponse deserialization");
         assert!(resp.posts.is_empty());
     }
 
     #[test]
     fn deserialize_with_hearth() {
         let json = r#"{"posts":[{"id":"p2","author":"sage","content":"Thought","hearth":"philosophy","created_at":1700000000.0,"votes_up":0,"votes_down":0,"reply_count":0}]}"#;
-        let resp: BoardResponse = serde_json::from_str(json).expect("JSON: BoardResponse with hearth deserialization");
+        let resp: BoardResponse =
+            serde_json::from_str(json).expect("JSON: BoardResponse with hearth deserialization");
         assert_eq!(resp.posts[0].hearth.as_deref(), Some("philosophy"));
     }
 
@@ -809,7 +812,8 @@ mod tests {
                 {"id":"c2","author":"muse","content":"Interesting","created_at":1700000200.0,"votes_up":0,"votes_down":0}
             ]
         }"#;
-        let resp: PostDetailResponse = serde_json::from_str(json).expect("JSON: PostDetailResponse deserialization");
+        let resp: PostDetailResponse =
+            serde_json::from_str(json).expect("JSON: PostDetailResponse deserialization");
         assert_eq!(resp.post.id, "p1");
         assert_eq!(resp.comments.len(), 2);
         assert_eq!(resp.comments[0].author, "sage");
@@ -819,14 +823,16 @@ mod tests {
     #[test]
     fn deserialize_comment_with_parent() {
         let json = r#"{"id":"c3","author":"oracle","content":"Reply","parent_id":"c1","created_at":0.0,"votes_up":0,"votes_down":0}"#;
-        let comment: BoardComment = serde_json::from_str(json).expect("JSON: BoardComment deserialization");
+        let comment: BoardComment =
+            serde_json::from_str(json).expect("JSON: BoardComment deserialization");
         assert_eq!(comment.parent_id.as_deref(), Some("c1"));
     }
 
     #[test]
     fn deserialize_post_detail_no_comments() {
         let json = r#"{"post":{"id":"p3","author":"wanderer","content":"Solo"}}"#;
-        let resp: PostDetailResponse = serde_json::from_str(json).expect("JSON: PostDetailResponse no-comments deserialization");
+        let resp: PostDetailResponse = serde_json::from_str(json)
+            .expect("JSON: PostDetailResponse no-comments deserialization");
         assert!(resp.comments.is_empty());
     }
 

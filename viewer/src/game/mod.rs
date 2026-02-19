@@ -67,37 +67,46 @@ impl Plugin for GameStatePlugin {
             // ── TRPG-gated systems ──
             .add_systems(
                 OnEnter(ViewerMode::Trpg),
-                (systems::reset_turn_progress, http::fetch_initial_state, round_runner::start_round_loop),
+                (
+                    systems::reset_turn_progress,
+                    http::fetch_initial_state,
+                    round_runner::start_round_loop,
+                ),
+            )
+            .add_systems(OnExit(ViewerMode::Trpg), round_runner::stop_round_loop)
+            .add_systems(
+                Update,
+                (
+                    http::refresh_state_on_room_change,
+                    http::apply_initial_state,
+                    systems::apply_hp_change,
+                    systems::apply_area_move,
+                    systems::apply_turn_advance,
+                    systems::apply_turn_progress,
+                    systems::apply_item_acquired,
+                    systems::apply_character_death,
+                    systems::apply_weather_change,
+                    systems::apply_mood_change,
+                    systems::apply_choice_available,
+                    systems::apply_choice_resolved,
+                    systems::apply_combat_started,
+                )
+                    .run_if(in_state(ViewerMode::Trpg)),
             )
             .add_systems(
-                OnExit(ViewerMode::Trpg),
-                round_runner::stop_round_loop,
+                Update,
+                (
+                    systems::apply_actor_spawned,
+                    systems::apply_actor_updated,
+                    systems::apply_actor_deleted,
+                    systems::apply_actor_claimed,
+                    systems::apply_actor_released,
+                    systems::apply_room_ended,
+                    systems::apply_scene_transitioned,
+                    crate::dom::endgame::detect_endgame,
+                )
+                    .run_if(in_state(ViewerMode::Trpg)),
             )
-            .add_systems(Update, (
-                http::refresh_state_on_room_change,
-                http::apply_initial_state,
-                systems::apply_hp_change,
-                systems::apply_area_move,
-                systems::apply_turn_advance,
-                systems::apply_turn_progress,
-                systems::apply_item_acquired,
-                systems::apply_character_death,
-                systems::apply_weather_change,
-                systems::apply_mood_change,
-                systems::apply_choice_available,
-                systems::apply_choice_resolved,
-                systems::apply_combat_started,
-            ).run_if(in_state(ViewerMode::Trpg)))
-            .add_systems(Update, (
-                systems::apply_actor_spawned,
-                systems::apply_actor_updated,
-                systems::apply_actor_deleted,
-                systems::apply_actor_claimed,
-                systems::apply_actor_released,
-                systems::apply_room_ended,
-                systems::apply_scene_transitioned,
-                crate::dom::endgame::detect_endgame,
-            ).run_if(in_state(ViewerMode::Trpg)))
             .add_systems(
                 Update,
                 (

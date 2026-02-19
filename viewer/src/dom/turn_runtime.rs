@@ -2,7 +2,8 @@ use bevy::prelude::*;
 
 use crate::game::components::Actor;
 use crate::game::lifecycle::TrpgLifecycleState;
-use crate::game::state::{RoomState, TurnProgressState};
+use crate::game::round_runner::RoundRunner;
+use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
 
 /// Tracks last-rendered runtime status snapshot to avoid redundant DOM updates.
 #[derive(Resource, Default)]
@@ -44,11 +45,66 @@ fn room_status_label(state: TrpgLifecycleState) -> &'static str {
     state.label()
 }
 
+fn connection_status_class(status: &ConnectionStatus) -> &'static str {
+    match status {
+        ConnectionStatus::Connected => "status-active",
+        ConnectionStatus::Connecting | ConnectionStatus::Reconnecting(_, _) => "status-loading",
+        ConnectionStatus::Disconnected => "status-idle",
+        ConnectionStatus::Failed => "status-error",
+    }
+}
+
+fn connection_status_label(status: &ConnectionStatus) -> &'static str {
+    match status {
+        ConnectionStatus::Connected => "connected",
+        ConnectionStatus::Connecting => "connecting",
+        ConnectionStatus::Reconnecting(_, _) => "reconnecting",
+        ConnectionStatus::Disconnected => "disconnected",
+        ConnectionStatus::Failed => "failed",
+    }
+}
+
+fn normalize_phase_for_sync(phase: &str) -> String {
+    phase.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+fn phase_is_aggregate_round(phase: &str) -> bool {
+    normalize_phase_for_sync(phase) == "round"
+}
+
+fn phase_matches_for_sync(room_phase: &str, progress_phase: &str) -> bool {
+    let room_norm = normalize_phase_for_sync(room_phase);
+    let progress_norm = normalize_phase_for_sync(progress_phase);
+    if room_norm == progress_norm {
+        return true;
+    }
+    if room_norm.is_empty() || progress_norm.is_empty() {
+        return false;
+    }
+    phase_is_aggregate_round(&room_norm) || phase_is_aggregate_round(&progress_norm)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_ops_hud_value(document: &web_sys::Document, id: &str, text: &str, status_class: &str) {
+    let Some(el) = document.get_element_by_id(id) else {
+        return;
+    };
+    let class_name = if status_class.trim().is_empty() {
+        "ops-v".to_string()
+    } else {
+        format!("ops-v {}", status_class.trim())
+    };
+    el.set_text_content(Some(text));
+    el.set_class_name(&class_name);
+}
+
 /// Render live TRPG runtime progress:
 /// room/turn/phase, current thinker, next actor, last outcome, and party survival.
 pub fn update_turn_runtime_dom(
     room_state: Res<RoomState>,
     progress: Res<TurnProgressState>,
+    connection: Res<ConnectionStatus>,
+    runner: Option<Res<RoundRunner>>,
     actors: Query<&Actor>,
     mut cache: ResMut<TurnRuntimeCache>,
 ) {
@@ -59,7 +115,8 @@ pub fn update_turn_runtime_dom(
     } else {
         "unknown".to_string()
     };
-    let lifecycle = TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+    let lifecycle =
+        TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
     let room_status_key = crate::game::lifecycle::normalize_status(&room_status_raw);
     let turn = if progress.turn > 0 {
         progress.turn
@@ -129,8 +186,93 @@ pub fn update_turn_runtime_dom(
         "disabled"
     };
 
+    let room_turn_for_sync = if room_state.turn > 0 {
+        room_state.turn
+    } else {
+        turn
+    };
+    let room_phase_for_sync = room_state.phase.as_str().to_string();
+    let progress_turn_for_sync = if progress.turn > 0 {
+        progress.turn
+    } else {
+        turn
+    };
+    let progress_phase_for_sync = if progress.phase.trim().is_empty() {
+        room_phase_for_sync.clone()
+    } else {
+        progress.phase.trim().to_string()
+    };
+    let turn_mismatch = room_turn_for_sync != progress_turn_for_sync;
+    let phase_mismatch = !phase_matches_for_sync(&room_phase_for_sync, &progress_phase_for_sync);
+
+    let (sync_state, sync_class) = if turn_mismatch || phase_mismatch {
+        let mut reasons = Vec::new();
+        if turn_mismatch {
+            reasons.push(format!(
+                "turn {}≠{}",
+                room_turn_for_sync, progress_turn_for_sync
+            ));
+        }
+        if phase_mismatch {
+            reasons.push(format!(
+                "phase {}≠{}",
+                room_phase_for_sync, progress_phase_for_sync
+            ));
+        }
+        (format!("mismatch: {}", reasons.join(" · ")), "status-error")
+    } else if progress.last_event.trim().is_empty() {
+        ("waiting event".to_string(), "status-idle")
+    } else {
+        (
+            format!("ok · {}", progress.last_event.trim()),
+            "status-active",
+        )
+    };
+
+    let control_state = if lifecycle.accepts_player_input() {
+        if current_actor != "-" {
+            "manual-ready / actor-thinking".to_string()
+        } else {
+            "manual-ready".to_string()
+        }
+    } else {
+        lifecycle.label_ko().to_string()
+    };
+
+    let (runner_running, runner_rounds, runner_last_result) = if let Some(runner) = runner.as_ref()
+    {
+        let running = runner.running.load(std::sync::atomic::Ordering::SeqCst);
+        let rounds = runner
+            .rounds_completed
+            .lock()
+            .ok()
+            .map(|guard| *guard)
+            .unwrap_or(0);
+        let last = runner
+            .last_result
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+            .unwrap_or_default();
+        (running, rounds, last)
+    } else {
+        (false, 0, String::new())
+    };
+
+    let runner_state = if runner_running {
+        format!("auto-run {} rounds", runner_rounds)
+    } else {
+        "idle".to_string()
+    };
+
+    let connection_label = connection_status_label(&connection);
+    let connection_class = connection_status_class(&connection);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (&sync_class, &control_state, &runner_last_result);
+
     let snapshot = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         room_status_key,
         turn,
         phase,
@@ -139,7 +281,12 @@ pub fn update_turn_runtime_dom(
         last_result,
         party_status,
         current_status,
-        input_status
+        input_status,
+        connection_label,
+        connection_class,
+        sync_state,
+        runner_state,
+        progress.last_event
     );
     if cache.last_snapshot == snapshot {
         return;
@@ -187,6 +334,38 @@ pub fn update_turn_runtime_dom(
             );
         }
 
+        let room_id = crate::config::current_room_id();
+        set_ops_hud_value(&document, "ops-room-id", &room_id, room_class);
+        set_ops_hud_value(
+            &document,
+            "ops-session-state",
+            lifecycle.label_ko(),
+            room_class,
+        );
+        set_ops_hud_value(
+            &document,
+            "ops-round-phase",
+            &format!("T{} / {}", turn, pretty_phase(&phase)),
+            room_class,
+        );
+        set_ops_hud_value(
+            &document,
+            "ops-connection-state",
+            connection_label,
+            connection_class,
+        );
+        set_ops_hud_value(
+            &document,
+            "ops-control-state",
+            &control_state,
+            if lifecycle.accepts_player_input() {
+                "status-active"
+            } else {
+                room_class
+            },
+        );
+        set_ops_hud_value(&document, "ops-sync-state", &sync_state, sync_class);
+
         let inferred_dm = if !progress.dm_keeper.trim().is_empty() {
             progress.dm_keeper.trim().to_string()
         } else {
@@ -233,8 +412,62 @@ pub fn update_turn_runtime_dom(
             }
         }
 
+        if let Some(debug_el) = document.get_element_by_id("round-sync-debug-body") {
+            let runner_preview = if runner_last_result.trim().is_empty() {
+                "-".to_string()
+            } else {
+                let compact = runner_last_result.trim().replace('\n', " ");
+                compact.chars().take(180).collect::<String>()
+            };
+            let phase_sync_class = if phase_mismatch {
+                "sync-error"
+            } else {
+                "sync-ok"
+            };
+            let turn_sync_class = if turn_mismatch {
+                "sync-error"
+            } else {
+                "sync-ok"
+            };
+            let html = format!(
+                concat!(
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Room</span><span class=\"round-sync-value\">{room_id}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Lifecycle</span><span class=\"round-sync-value {room_class}\">{lifecycle}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Turn Sync</span><span class=\"round-sync-value {turn_sync_class}\">room {room_turn} / progress {progress_turn}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Phase Sync</span><span class=\"round-sync-value {phase_sync_class}\">room {room_phase} / progress {progress_phase}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Last Event</span><span class=\"round-sync-value\">{last_event}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Last Result</span><span class=\"round-sync-value\">{last_result}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Runner</span><span class=\"round-sync-value\">{runner_state}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">Runner Resp</span><span class=\"round-sync-value\">{runner_preview}</span></div>"
+                ),
+                room_id = html_escape(&room_id),
+                room_class = room_class,
+                lifecycle = html_escape(lifecycle.label_ko()),
+                turn_sync_class = turn_sync_class,
+                room_turn = room_turn_for_sync,
+                progress_turn = progress_turn_for_sync,
+                phase_sync_class = phase_sync_class,
+                room_phase = html_escape(&room_phase_for_sync),
+                progress_phase = html_escape(&progress_phase_for_sync),
+                last_event = html_escape(if progress.last_event.trim().is_empty() {
+                    "-"
+                } else {
+                    progress.last_event.trim()
+                }),
+                last_result = html_escape(if progress.last_result.trim().is_empty() {
+                    "-"
+                } else {
+                    progress.last_result.trim()
+                }),
+                runner_state = html_escape(&runner_state),
+                runner_preview = html_escape(&runner_preview),
+            );
+            debug_el.set_inner_html(&html);
+        }
+
         let lifecycle_class = format!("{} {}", room_class, lifecycle.css_class());
-        let lifecycle_label = html_escape(&format!("{} ({})", lifecycle.label(), lifecycle.label_ko()));
+        let lifecycle_label =
+            html_escape(&format!("{} ({})", lifecycle.label(), lifecycle.label_ko()));
         let html = format!(
             r#"
 <div class="turn-runtime-grid">

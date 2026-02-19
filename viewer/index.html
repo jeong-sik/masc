@@ -184,12 +184,45 @@
             </div>
         </header>
 
+        <section id="ops-hud" aria-label="TRPG 운영 상태">
+            <div class="ops-hud-item">
+                <span class="ops-k">Room</span>
+                <span id="ops-room-id" class="ops-v">default</span>
+            </div>
+            <div class="ops-hud-item">
+                <span class="ops-k">Session</span>
+                <span id="ops-session-state" class="ops-v">lobby</span>
+            </div>
+            <div class="ops-hud-item">
+                <span class="ops-k">Round</span>
+                <span id="ops-round-phase" class="ops-v">T1 / dm narration</span>
+            </div>
+            <div class="ops-hud-item">
+                <span class="ops-k">Connection</span>
+                <span id="ops-connection-state" class="ops-v">disconnected</span>
+            </div>
+            <div class="ops-hud-item">
+                <span class="ops-k">Control</span>
+                <span id="ops-control-state" class="ops-v">waiting</span>
+            </div>
+            <div class="ops-hud-item">
+                <span class="ops-k">Sync</span>
+                <span id="ops-sync-state" class="ops-v">idle</span>
+            </div>
+        </section>
+
         <section id="new-game-panel" style="display: none;">
             <div class="new-game-card">
                 <div class="new-game-panel-head">
                     <strong>새 게임 시작</strong>
                     <button id="new-game-close" class="inline-toggle" type="button">닫기</button>
                 </div>
+                <div class="new-game-steps" id="new-game-steps">
+                    <span id="new-game-step-1" class="new-game-step" data-step="1">1) 사전 점검</span>
+                    <span id="new-game-step-2" class="new-game-step" data-step="2">2) DM/플레이어 선택</span>
+                    <span id="new-game-step-3" class="new-game-step" data-step="3">3) 세션 시작</span>
+                </div>
+                <div id="new-game-step-hint" class="new-game-step-hint">1단계부터 순서대로 진행하세요.</div>
                 <div class="new-game-grid">
                     <label class="new-game-field">
                         <span>방 이름</span>
@@ -225,6 +258,8 @@
                         <select id="new-game-player-select" multiple size="6" title="게임에 참여할 AI 에이전트 선택 (Ctrl/Cmd+클릭)">
                             <option value="">로딩 중...</option>
                         </select>
+                        <div id="new-game-player-hint" class="new-game-inline-hint">플레이어 0명 선택됨</div>
+                        <button id="new-game-autopick-btn" class="inline-toggle" type="button">4인 자동선택</button>
                     </label>
 
                     <label class="new-game-field">
@@ -234,6 +269,7 @@
                 </div>
 
                 <div class="new-game-actions">
+                    <button id="new-game-quick-start" class="inline-toggle" type="button">빠른 시작</button>
                     <button id="new-game-preflight-btn" class="inline-toggle" type="button">사전 점검</button>
                     <button id="new-game-refresh" class="inline-toggle" type="button">Keeper 새로고침</button>
                     <button id="new-game-start" class="inline-toggle primary" type="button">세션 시작</button>
@@ -327,12 +363,42 @@
                         <span class="state-chip state-ended">ENDED: 세션 종료</span>
                         <span class="state-chip state-unavailable">UNAVAILABLE: 연결/키퍼 오류</span>
                     </div>
+                    <div id="lifecycle-diagram" class="lifecycle-diagram" aria-label="TRPG 상태 전이 다이어그램">
+                        <div class="lifecycle-track">
+                            <span class="lifecycle-node" data-state="lobby">LOBBY</span>
+                            <span class="lifecycle-edge">→</span>
+                            <span class="lifecycle-node" data-state="running">RUNNING</span>
+                            <span class="lifecycle-edge">↔</span>
+                            <span class="lifecycle-node" data-state="stopped">STOPPED</span>
+                            <span class="lifecycle-edge">→</span>
+                            <span class="lifecycle-node" data-state="ended">ENDED</span>
+                        </div>
+                        <div class="lifecycle-track lifecycle-track-alt">
+                            <span class="lifecycle-node" data-state="unavailable">UNAVAILABLE</span>
+                            <span class="lifecycle-edge">↩</span>
+                            <span class="lifecycle-node" data-state="recover">RECOVER</span>
+                        </div>
+                    </div>
+                    <div id="lifecycle-diagram-hint" class="lifecycle-diagram-hint">현재 상태를 불러오는 중...</div>
                     <!-- Turn Controls: advance turn (Keeper/GM only) -->
                     <div id="turn-controls" style="display:none">
                         <button id="advance-turn-btn" title="다음 TRPG 라운드를 실행합니다">라운드 실행</button>
                         <span id="turn-control-status"></span>
+                        <button id="round-recovery-btn" type="button" style="display:none">복구 가이드 보기</button>
                     </div>
+                    <div id="round-recovery-actions" class="turn-recovery-actions" style="display:none">
+                        <button id="round-recovery-refresh" type="button" title="키퍼/프리셋을 다시 동기화합니다">Keeper 새로고침</button>
+                        <button id="round-recovery-timeout" type="button" title="라운드 timeout을 30초 늘립니다">Timeout +30s</button>
+                        <button id="round-recovery-retry" type="button" title="현재 설정으로 라운드를 다시 실행합니다">재실행</button>
+                    </div>
+                    <div id="round-recovery-note" class="turn-recovery-note" style="display:none"></div>
                     <div id="round-run-summary" class="turn-run-summary" style="display:none"></div>
+                    <details id="round-sync-debug" class="round-sync-debug">
+                        <summary>라운드 동기화 디버그</summary>
+                        <div id="round-sync-debug-body" class="round-sync-debug-body">
+                            라운드 실행 후 동기화 상태를 표시합니다.
+                        </div>
+                    </details>
                     <input type="hidden" id="round-run-dm" value="" />
                     <input type="hidden" id="round-run-phase" value="" />
                     <input type="hidden" id="round-run-timeout" value="" />

@@ -21,9 +21,51 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
-use crate::game::state::{RoomState, TurnProgressState};
-#[cfg(target_arch = "wasm32")]
 use crate::game::lifecycle::TrpgLifecycleState;
+use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
+
+fn connection_ready(status: &ConnectionStatus) -> bool {
+    matches!(status, ConnectionStatus::Connected)
+}
+
+fn derive_round_control_state(
+    lifecycle: TrpgLifecycleState,
+    connection_ok: bool,
+    plan_error: Option<&str>,
+) -> (bool, String, &'static str) {
+    if !lifecycle.allows_round_control() {
+        return (
+            false,
+            format!("실행 대기: {}", lifecycle.help_text()),
+            "status-info",
+        );
+    }
+    if !connection_ok {
+        return (
+            false,
+            "실행 대기: 엔진 연결이 완료될 때까지 기다려주세요.".to_string(),
+            "status-info",
+        );
+    }
+    if let Some(err) = plan_error {
+        return (false, format!("준비 필요: {}", err), "status-warn");
+    }
+    (true, "라운드 실행 가능".to_string(), "status-ok")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn control_status_to_ops_class(css_class: &str) -> &'static str {
+    match css_class {
+        "status-ok" => "status-active",
+        "status-warn" => "status-warn",
+        "status-error" => "status-error",
+        _ => "status-idle",
+    }
+}
+
+fn round_advanced(turn_before: u64, turn_after: u64, summary_advanced: Option<bool>) -> bool {
+    summary_advanced.unwrap_or(turn_after > turn_before)
+}
 
 // ─── Marker Resource ────────────────────────
 
@@ -37,6 +79,9 @@ pub fn bind_turn_controls(mut commands: Commands) {
     #[cfg(target_arch = "wasm32")]
     {
         bind_advance_button();
+        bind_recovery_button();
+        bind_recovery_action_buttons();
+        clear_round_recovery();
         set_turn_status("라운드 실행 준비 중...", "status-info");
         log::info!("TurnControls: bound");
     }
@@ -48,6 +93,7 @@ pub fn unbind_turn_controls(mut commands: Commands) {
     #[cfg(target_arch = "wasm32")]
     {
         clear_turn_status();
+        clear_round_recovery();
         log::info!("TurnControls: unbound");
     }
 
@@ -57,14 +103,19 @@ pub fn unbind_turn_controls(mut commands: Commands) {
 // ─── Visibility Sync ────────────────────────
 
 /// Show turn controls only when a round-run capable assignment exists.
-pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<TurnProgressState>) {
+pub fn sync_turn_controls_visibility(
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
+    connection: Res<ConnectionStatus>,
+) {
     let _ = (&room_state, &progress);
+    let _ = &connection;
 
     #[cfg(target_arch = "wasm32")]
     {
         let lifecycle =
             TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
-        let room_allows_control = lifecycle.allows_round_control();
+        let connection_ok = connection_ready(&connection);
 
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
@@ -75,20 +126,9 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
         let _ = panel.set_attribute("style", "");
         let _ = panel.set_attribute("data-lifecycle", lifecycle.css_class());
 
-        let plan = read_round_run_plan(&doc);
-        let can_run = room_allows_control && plan.is_ok();
-        let reason = if !room_allows_control {
-            format!("실행 대기: {}", lifecycle.help_text())
-        } else {
-            match plan {
-                Ok(ref row) => format!(
-                    "라운드 실행 가능 · DM {} · players {}명",
-                    row.dm_keeper,
-                    row.player_keepers.len()
-                ),
-                Err(ref err) => format!("준비 필요: {}", err),
-            }
-        };
+        let plan_error = read_round_run_plan(&doc).err();
+        let (can_run, reason, reason_class) =
+            derive_round_control_state(lifecycle, connection_ok, plan_error.as_deref());
 
         let busy = doc
             .get_element_by_id("advance-turn-btn")
@@ -96,15 +136,18 @@ pub fn sync_turn_controls_visibility(room_state: Res<RoomState>, progress: Res<T
             .and_then(|btn| btn.get_attribute("data-busy"))
             .is_some_and(|v| v == "1");
 
+        if let Some(btn) = doc
+            .get_element_by_id("advance-turn-btn")
+            .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+        {
+            let _ = btn.set_attribute("data-can-run", if can_run { "1" } else { "0" });
+            let _ = btn.set_attribute("data-gate-reason", &reason);
+            btn.set_title(&reason);
+        }
+
         if !busy {
             set_advance_disabled(!can_run);
-            if can_run {
-                set_turn_status(&reason, "status-ok");
-            } else if room_allows_control {
-                set_turn_status(&reason, "status-warn");
-            } else {
-                set_turn_status(&reason, "status-info");
-            }
+            set_turn_status(&reason, reason_class);
         }
     }
 }
@@ -119,6 +162,10 @@ fn bind_advance_button() {
     let Some(btn) = doc.get_element_by_id("advance-turn-btn") else {
         return;
     };
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
 
     let cb = Closure::wrap(Box::new(move || {
         on_advance_click();
@@ -133,20 +180,36 @@ fn on_advance_click() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
+    if is_advance_busy(&doc) {
+        return;
+    }
+    if let Err(reason) = read_advance_gate(&doc) {
+        set_turn_status(&format!("실행 불가: {}", reason), "status-warn");
+        return;
+    }
     if let Err(reason) = read_round_run_plan(&doc) {
         set_turn_status(&format!("실행 불가: {}", reason), "status-warn");
         return;
     }
 
+    clear_round_recovery();
     set_turn_status("라운드 실행 중...", "status-info");
     set_advance_busy(true);
 
     wasm_bindgen_futures::spawn_local(async move {
         match advance_turn().await {
-            Ok(msg) => set_turn_status(&msg, "status-ok"),
+            Ok(RoundRunOutcome::Advanced(msg)) => {
+                clear_round_recovery();
+                set_turn_status(&msg, "status-ok");
+            }
+            Ok(RoundRunOutcome::Stalled { status, guide }) => {
+                set_round_recovery(Some(&guide));
+                set_turn_status(&status, "status-warn");
+            }
             Err(e) => {
                 let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                 log::warn!("Advance turn failed: {}", detail);
+                clear_round_recovery();
                 set_turn_status(&format!("Failed: {}", detail), "status-error");
             }
         }
@@ -157,7 +220,133 @@ fn on_advance_click() {
 // ─── HTTP: Advance Turn ─────────────────────
 
 #[cfg(target_arch = "wasm32")]
-async fn advance_turn() -> Result<String, JsValue> {
+enum RoundRunOutcome {
+    Advanced(String),
+    Stalled { status: String, guide: String },
+}
+
+#[cfg(target_arch = "wasm32")]
+fn shorten_reason(raw: &str, max_chars: usize) -> String {
+    let text = raw.trim().replace('\n', " ");
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+    let mut truncated = text
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    truncated.push('…');
+    truncated
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_stall_reasons(json: &Value) -> Vec<String> {
+    let mut rows = Vec::new();
+    let Some(statuses) = json.get("statuses").and_then(Value::as_array) else {
+        return rows;
+    };
+
+    for status in statuses {
+        let status_name = status
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if status_name.is_empty() || status_name.eq_ignore_ascii_case("ok") {
+            continue;
+        }
+        let actor_id = status
+            .get("actor_id")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .trim();
+        let keeper = status
+            .get("keeper")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .trim();
+        let stage = status
+            .get("stage")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let reason = status
+            .get("reason")
+            .or_else(|| status.get("error"))
+            .or_else(|| status.get("reply"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+
+        let mut row = format!(
+            "{}({})={} @{}",
+            actor_id,
+            keeper,
+            status_name,
+            if stage.is_empty() { "-" } else { stage }
+        );
+        if !reason.is_empty() {
+            row.push_str(&format!(" · {}", shorten_reason(reason, 90)));
+        }
+        rows.push(row);
+        if rows.len() >= 3 {
+            break;
+        }
+    }
+    rows
+}
+
+#[cfg(target_arch = "wasm32")]
+fn build_stalled_round_guide(json: &Value, turn_before: u64, turn_after: u64) -> String {
+    let summary = json.get("summary");
+    let successes = summary
+        .and_then(|s| s.get("successes"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let player_successes = summary
+        .and_then(|s| s.get("player_successes"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let dm_success = summary
+        .and_then(|s| s.get("dm_success"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeouts = summary
+        .and_then(|s| s.get("timeouts"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let unavailable = summary
+        .and_then(|s| s.get("unavailable"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+
+    let mut lines = vec![
+        format!(
+            "턴 미진행: {} -> {} (라운드 응답은 성공)",
+            turn_before, turn_after
+        ),
+        format!(
+            "요약: success {} / player {} / dm {} / timeout {} / unavailable {}",
+            successes,
+            player_successes,
+            if dm_success { "ok" } else { "fail" },
+            timeouts,
+            unavailable
+        ),
+    ];
+    let reasons = collect_stall_reasons(json);
+    if !reasons.is_empty() {
+        lines.push(format!("차단 원인: {}", reasons.join(" | ")));
+    }
+    lines.push(
+        "권장 조치: 1) keeper 상태 확인 2) actor=keeper 할당/중복 확인 3) timeout 늘려 재실행"
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
     let doc = web_sys::window()
@@ -221,15 +410,28 @@ async fn advance_turn() -> Result<String, JsValue> {
     if let Ok(json) = serde_json::from_str::<Value>(&resp_text) {
         let turn_before = json.get("turn_before").and_then(Value::as_u64).unwrap_or(0);
         let turn_after = json.get("turn_after").and_then(Value::as_u64).unwrap_or(0);
-        if turn_after > 0 {
-            return Ok(format!(
+        let summary_advanced = json
+            .get("summary")
+            .and_then(|summary| summary.get("advanced"))
+            .and_then(Value::as_bool);
+        if round_advanced(turn_before, turn_after, summary_advanced) {
+            return Ok(RoundRunOutcome::Advanced(format!(
                 "Round progressed: turn {} → {}",
                 turn_before, turn_after
-            ));
+            )));
         }
+        let stalled_status = format!(
+            "턴이 진행되지 않았습니다 ({} → {}).",
+            turn_before, turn_after
+        );
+        let guide = build_stalled_round_guide(&json, turn_before, turn_after);
+        return Ok(RoundRunOutcome::Stalled {
+            status: stalled_status,
+            guide,
+        });
     }
 
-    Ok("Turn advanced.".to_string())
+    Ok(RoundRunOutcome::Advanced("Turn advanced.".to_string()))
 }
 
 // ─── DOM Helpers ─────────────────────────────
@@ -243,11 +445,203 @@ fn set_turn_status(text: &str, css_class: &str) {
         el.set_text_content(Some(text));
         let _ = el.set_attribute("class", css_class);
     }
+    if let Some(el) = doc.get_element_by_id("ops-control-state") {
+        let class_name = format!("ops-v {}", control_status_to_ops_class(css_class));
+        el.set_text_content(Some(text));
+        let _ = el.set_attribute("class", &class_name);
+        let _ = el.set_attribute("title", text);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn clear_turn_status() {
     set_turn_status("", "");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_recovery_button() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(btn) = doc.get_element_by_id("round-recovery-btn") else {
+        return;
+    };
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
+
+    let cb = Closure::wrap(Box::new(move || {
+        toggle_round_recovery();
+    }) as Box<dyn Fn()>);
+    let _ = btn.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+    cb.forget();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_recovery_action_buttons() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+
+    if let Some(btn) = doc.get_element_by_id("round-recovery-refresh") {
+        if btn.get_attribute("data-bound").as_deref() != Some("1") {
+            let _ = btn.set_attribute("data-bound", "1");
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                if let Some(refresh_btn) = doc
+                    .get_element_by_id("new-game-refresh")
+                    .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+                {
+                    refresh_btn.click();
+                    set_turn_status("복구 액션: Keeper 새로고침 요청", "status-info");
+                } else {
+                    set_turn_status(
+                        "복구 액션 실패: 새로고침 버튼을 찾지 못했습니다.",
+                        "status-error",
+                    );
+                }
+            }) as Box<dyn Fn()>);
+            let _ = btn.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+            cb.forget();
+        }
+    }
+
+    if let Some(btn) = doc.get_element_by_id("round-recovery-timeout") {
+        if btn.get_attribute("data-bound").as_deref() != Some("1") {
+            let _ = btn.set_attribute("data-bound", "1");
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                let current = read_dom_input(&doc, "round-run-timeout")
+                    .and_then(|raw| raw.parse::<f64>().ok())
+                    .filter(|value| *value > 0.0)
+                    .unwrap_or(90.0);
+                let next = (current + 30.0).min(600.0);
+                if let Some(input) = doc
+                    .get_element_by_id("round-run-timeout")
+                    .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+                {
+                    input.set_value(&format!("{:.0}", next));
+                    set_turn_status(
+                        &format!("복구 액션: timeout {:.0}s → {:.0}s", current, next),
+                        "status-info",
+                    );
+                } else {
+                    set_turn_status(
+                        "복구 액션 실패: timeout 필드를 찾지 못했습니다.",
+                        "status-error",
+                    );
+                }
+            }) as Box<dyn Fn()>);
+            let _ = btn.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+            cb.forget();
+        }
+    }
+
+    if let Some(btn) = doc.get_element_by_id("round-recovery-retry") {
+        if btn.get_attribute("data-bound").as_deref() != Some("1") {
+            let _ = btn.set_attribute("data-bound", "1");
+            let cb = Closure::wrap(Box::new(move || {
+                let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                    return;
+                };
+                if is_advance_busy(&doc) {
+                    return;
+                }
+                on_advance_click();
+            }) as Box<dyn Fn()>);
+            let _ = btn.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+            cb.forget();
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn toggle_round_recovery() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(btn) = doc
+        .get_element_by_id("round-recovery-btn")
+        .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+    else {
+        return;
+    };
+    let Some(note) = doc.get_element_by_id("round-recovery-note") else {
+        return;
+    };
+    let is_open = btn.get_attribute("data-open").as_deref() == Some("1");
+    if is_open {
+        let _ = btn.set_attribute("data-open", "0");
+        btn.set_text_content(Some("복구 가이드 보기"));
+        let _ = note.set_attribute("style", "display:none");
+        return;
+    }
+    let message = btn
+        .get_attribute("data-guide")
+        .unwrap_or_else(|| "복구 가이드를 불러올 수 없습니다.".to_string());
+    note.set_text_content(Some(&message));
+    let _ = note.set_attribute("style", "display:block");
+    let _ = btn.set_attribute("data-open", "1");
+    btn.set_text_content(Some("복구 가이드 숨기기"));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_round_recovery() {
+    set_round_recovery(None);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_recovery_actions_visible(visible: bool) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Some(actions) = doc.get_element_by_id("round-recovery-actions") {
+        let _ = actions.set_attribute("style", if visible { "" } else { "display:none" });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_round_recovery(guide: Option<&str>) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(btn) = doc
+        .get_element_by_id("round-recovery-btn")
+        .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+    else {
+        return;
+    };
+    let note = doc.get_element_by_id("round-recovery-note");
+
+    let guide = guide.unwrap_or("").trim();
+    if guide.is_empty() {
+        set_recovery_actions_visible(false);
+        let _ = btn.set_attribute("style", "display:none");
+        let _ = btn.remove_attribute("data-guide");
+        let _ = btn.remove_attribute("data-open");
+        btn.set_text_content(Some("복구 가이드 보기"));
+        if let Some(note) = note {
+            note.set_text_content(None);
+            let _ = note.set_attribute("style", "display:none");
+        }
+        return;
+    }
+
+    set_recovery_actions_visible(true);
+    let _ = btn.set_attribute("style", "");
+    let _ = btn.set_attribute("data-guide", guide);
+    let _ = btn.set_attribute("data-open", "0");
+    btn.set_text_content(Some("복구 가이드 보기"));
+    btn.set_title("턴이 진행되지 않았습니다. 원인/조치 가이드를 확인하세요.");
+    if let Some(note) = note {
+        note.set_text_content(Some(guide));
+        let _ = note.set_attribute("style", "display:none");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -272,10 +666,38 @@ fn set_advance_busy(busy: bool) {
             btn.set_disabled(busy);
             if busy {
                 let _ = btn.set_attribute("data-busy", "1");
+                let _ = btn.set_attribute("aria-busy", "true");
             } else {
                 let _ = btn.remove_attribute("data-busy");
+                let _ = btn.remove_attribute("aria-busy");
             }
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_advance_busy(doc: &web_sys::Document) -> bool {
+    doc.get_element_by_id("advance-turn-btn")
+        .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+        .and_then(|btn| btn.get_attribute("data-busy"))
+        .is_some_and(|v| v == "1")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_advance_gate(doc: &web_sys::Document) -> Result<(), String> {
+    let Some(btn) = doc
+        .get_element_by_id("advance-turn-btn")
+        .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+    else {
+        return Err("라운드 실행 버튼을 찾을 수 없습니다.".to_string());
+    };
+    let can_run = btn.get_attribute("data-can-run").is_some_and(|v| v == "1");
+    if can_run {
+        Ok(())
+    } else {
+        Err(btn
+            .get_attribute("data-gate-reason")
+            .unwrap_or_else(|| "라운드 제어 상태를 아직 계산 중입니다.".to_string()))
     }
 }
 
@@ -376,4 +798,68 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
         },
         player_keepers,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_round_control_state_requires_running_or_stopped() {
+        let (can_run, reason, css) =
+            derive_round_control_state(TrpgLifecycleState::Lobby, true, None);
+        assert!(!can_run);
+        assert!(reason.contains("실행 대기"));
+        assert_eq!(css, "status-info");
+    }
+
+    #[test]
+    fn derive_round_control_state_requires_connection() {
+        let (can_run, reason, css) =
+            derive_round_control_state(TrpgLifecycleState::Running, false, None);
+        assert!(!can_run);
+        assert!(reason.contains("엔진 연결"));
+        assert_eq!(css, "status-info");
+    }
+
+    #[test]
+    fn derive_round_control_state_requires_plan() {
+        let (can_run, reason, css) = derive_round_control_state(
+            TrpgLifecycleState::Running,
+            true,
+            Some("player keepers가 없습니다"),
+        );
+        assert!(!can_run);
+        assert!(reason.contains("준비 필요"));
+        assert_eq!(css, "status-warn");
+    }
+
+    #[test]
+    fn derive_round_control_state_allows_run_when_ready() {
+        let (can_run, reason, css) =
+            derive_round_control_state(TrpgLifecycleState::Running, true, None);
+        assert!(can_run);
+        assert!(reason.contains("실행 가능"));
+        assert_eq!(css, "status-ok");
+    }
+
+    #[test]
+    fn connection_ready_true_only_for_connected() {
+        assert!(connection_ready(&ConnectionStatus::Connected));
+        assert!(!connection_ready(&ConnectionStatus::Disconnected));
+        assert!(!connection_ready(&ConnectionStatus::Connecting));
+        assert!(!connection_ready(&ConnectionStatus::Failed));
+    }
+
+    #[test]
+    fn round_advanced_prefers_summary_flag() {
+        assert!(!round_advanced(3, 4, Some(false)));
+        assert!(round_advanced(4, 4, Some(true)));
+    }
+
+    #[test]
+    fn round_advanced_falls_back_to_turn_delta() {
+        assert!(round_advanced(2, 3, None));
+        assert!(!round_advanced(2, 2, None));
+    }
 }

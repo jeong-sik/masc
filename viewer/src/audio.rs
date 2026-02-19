@@ -16,14 +16,17 @@ impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AudioSettings>()
             .init_resource::<AudioState>()
-            .add_systems(Update, (
-                sync_bgm_on_mood_change,
-                play_sfx_on_dice_roll,
-                play_sfx_on_turn_advance,
-                play_sfx_on_combat_start,
-                play_sfx_on_death,
-                update_bgm_volume,
-            ));
+            .add_systems(
+                Update,
+                (
+                    sync_bgm_on_mood_change,
+                    play_sfx_on_dice_roll,
+                    play_sfx_on_turn_advance,
+                    play_sfx_on_combat_start,
+                    play_sfx_on_death,
+                    update_bgm_volume,
+                ),
+            );
     }
 }
 
@@ -156,10 +159,7 @@ fn sync_bgm_on_mood_change(
 }
 
 /// Adjust BGM volume when settings change (called every frame, early-outs fast).
-fn update_bgm_volume(
-    settings: Res<AudioSettings>,
-    state: Res<AudioState>,
-) {
+fn update_bgm_volume(settings: Res<AudioSettings>, state: Res<AudioState>) {
     if !settings.is_changed() {
         return;
     }
@@ -175,10 +175,7 @@ fn update_bgm_volume(
 }
 
 /// Play dice SFX on roll events.
-fn play_sfx_on_dice_roll(
-    mut events: MessageReader<DiceRolled>,
-    settings: Res<AudioSettings>,
-) {
+fn play_sfx_on_dice_roll(mut events: MessageReader<DiceRolled>, settings: Res<AudioSettings>) {
     for ev in events.read() {
         if !settings.sound_enabled {
             continue;
@@ -195,10 +192,7 @@ fn play_sfx_on_dice_roll(
 }
 
 /// Play turn advance chime.
-fn play_sfx_on_turn_advance(
-    mut events: MessageReader<TurnAdvanced>,
-    settings: Res<AudioSettings>,
-) {
+fn play_sfx_on_turn_advance(mut events: MessageReader<TurnAdvanced>, settings: Res<AudioSettings>) {
     for _ev in events.read() {
         if settings.sound_enabled {
             play_one_shot(paths::SFX_TURN_ADVANCE, settings.sound_volume);
@@ -219,10 +213,7 @@ fn play_sfx_on_combat_start(
 }
 
 /// Play death SFX.
-fn play_sfx_on_death(
-    mut events: MessageReader<CharacterDied>,
-    settings: Res<AudioSettings>,
-) {
+fn play_sfx_on_death(mut events: MessageReader<CharacterDied>, settings: Res<AudioSettings>) {
     for _ev in events.read() {
         if settings.sound_enabled {
             play_one_shot(paths::SFX_DEATH, settings.sound_volume);

@@ -20,6 +20,8 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+#[cfg(target_arch = "wasm32")]
+use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::state::{RoomState, TurnProgressState};
 
 // ─── Marker Resource ────────────────────────
@@ -37,7 +39,7 @@ pub fn bind_action_panel(mut commands: Commands) {
         bind_enter_key();
         bind_dice_roll_button();
         clear_action_status();
-        
+
         log::info!("ActionPanel: bound complete");
     }
 
@@ -59,23 +61,40 @@ pub fn unbind_action_panel(mut commands: Commands) {
 
 #[cfg(target_arch = "wasm32")]
 fn bind_submit_button() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(btn) = doc.get_element_by_id("action-submit-btn") else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(btn) = doc.get_element_by_id("action-submit-btn") else {
+        return;
+    };
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
 
     let cb = Closure::wrap(Box::new(move || {
         log::info!("ActionPanel: Submit intervention");
         submit_intervention_from_input();
     }) as Box<dyn FnMut()>);
 
-    let _ = btn.dyn_ref::<web_sys::EventTarget>()
+    let _ = btn
+        .dyn_ref::<web_sys::EventTarget>()
         .map(|t| t.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
     cb.forget();
 }
 
 #[cfg(target_arch = "wasm32")]
 fn bind_enter_key() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(input) = doc.get_element_by_id("action-input") else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(input) = doc.get_element_by_id("action-input") else {
+        return;
+    };
+    if input.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = input.set_attribute("data-bound", "1");
 
     let cb = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
         if event.key() == "Enter" {
@@ -83,15 +102,24 @@ fn bind_enter_key() {
         }
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
-    let _ = input.dyn_ref::<web_sys::EventTarget>()
+    let _ = input
+        .dyn_ref::<web_sys::EventTarget>()
         .map(|t| t.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref()));
     cb.forget();
 }
 
 #[cfg(target_arch = "wasm32")]
 fn bind_dice_roll_button() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(btn) = doc.get_element_by_id("dice-roll-btn") else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(btn) = doc.get_element_by_id("dice-roll-btn") else {
+        return;
+    };
+    if btn.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = btn.set_attribute("data-bound", "1");
 
     let cb = Closure::wrap(Box::new(move || {
         log::info!("ActionPanel: Manual Dice Roll (Divine Intervention)");
@@ -110,7 +138,8 @@ fn bind_dice_roll_button() {
         });
     }) as Box<dyn FnMut()>);
 
-    let _ = btn.dyn_ref::<web_sys::EventTarget>()
+    let _ = btn
+        .dyn_ref::<web_sys::EventTarget>()
         .map(|t| t.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
     cb.forget();
 }
@@ -119,17 +148,25 @@ fn bind_dice_roll_button() {
 
 #[cfg(target_arch = "wasm32")]
 fn submit_intervention_from_input() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(el) = doc.get_element_by_id("action-input") else { return };
-    let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() else { return };
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = doc.get_element_by_id("action-input") else {
+        return;
+    };
+    let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() else {
+        return;
+    };
 
     let text = input.value().trim().to_string();
-    if text.is_empty() { return; }
-    
+    if text.is_empty() {
+        return;
+    }
+
     // We send this to the CURRENT ACTOR.
     // "I suggest you do this..."
     let actor_id_opt = get_active_actor_from_dom();
-    
+
     let Some(actor_id) = actor_id_opt else {
         set_action_status("No active agent to whisper to.", "status-error");
         return;
@@ -144,7 +181,10 @@ fn submit_intervention_from_input() {
             Ok(_) => set_action_status("Whisper sent. Waiting for agent...", "status-ok"),
             Err(e) => {
                 let detail = friendly_js_error(&e);
-                set_action_status(&format!("Failed to reach agent: {}", detail), "status-error");
+                set_action_status(
+                    &format!("Failed to reach agent: {}", detail),
+                    "status-error",
+                );
             }
         }
     });
@@ -178,7 +218,8 @@ async fn submit_intervention(actor_id: &str, suggestion: &str) -> Result<(), JsV
             }
         },
         "id": js_sys::Math::random().to_string()
-    }).to_string();
+    })
+    .to_string();
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
@@ -188,7 +229,7 @@ async fn submit_intervention(actor_id: &str, suggestion: &str) -> Result<(), JsV
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
     request.headers().set("Content-Type", "application/json")?;
     // Streamable HTTP headers
-    request.headers().set("Accept", "application/json")?; 
+    request.headers().set("Accept", "application/json")?;
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
@@ -196,7 +237,11 @@ async fn submit_intervention(actor_id: &str, suggestion: &str) -> Result<(), JsV
 
     if !resp.ok() {
         let err_body = JsFuture::from(resp.text()?).await?;
-        return Err(JsValue::from_str(&format!("RPC Error {}: {:?}", resp.status(), err_body.as_string())));
+        return Err(JsValue::from_str(&format!(
+            "RPC Error {}: {:?}",
+            resp.status(),
+            err_body.as_string()
+        )));
     }
 
     // We don't parse the full tool response here, just assume success if HTTP 200.
@@ -232,7 +277,8 @@ async fn roll_dice_intervention() -> Result<String, JsValue> {
             }
         },
         "id": js_sys::Math::random().to_string()
-    }).to_string();
+    })
+    .to_string();
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
@@ -253,7 +299,10 @@ async fn roll_dice_intervention() -> Result<String, JsValue> {
 
     // Parse result to show something immediately?
     // Usually result is in `result.content[0].text`
-    let json_text = JsFuture::from(resp.text()?).await?.as_string().unwrap_or_default();
+    let json_text = JsFuture::from(resp.text()?)
+        .await?
+        .as_string()
+        .unwrap_or_default();
     Ok(parse_rpc_result(&json_text))
 }
 
@@ -289,7 +338,7 @@ fn clear_action_input() {
 fn set_action_status(text: &str, css_class: &str) {
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
         if let Some(el) = doc.get_element_by_id("action-status") {
-            el.set_inner_html(text);
+            el.set_text_content(Some(text));
             el.set_class_name(css_class);
         }
     }
@@ -298,10 +347,7 @@ fn set_action_status(text: &str, css_class: &str) {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn friendly_js_error(val: &JsValue) -> String {
     val.as_string()
-        .or_else(|| {
-            val.dyn_ref::<js_sys::Error>()
-                .map(|e| e.message().into())
-        })
+        .or_else(|| val.dyn_ref::<js_sys::Error>().map(|e| e.message().into()))
         .unwrap_or_else(|| format!("{:?}", val))
 }
 
@@ -310,20 +356,32 @@ fn get_active_actor_from_dom() -> Option<String> {
     let doc = web_sys::window().and_then(|w| w.document())?;
     let panel = doc.get_element_by_id("action-panel")?;
     let actor_id = panel.get_attribute("data-active-actor").unwrap_or_default();
-    if actor_id.is_empty() { None } else { Some(actor_id) }
+    if actor_id.is_empty() {
+        None
+    } else {
+        Some(actor_id)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn disable_buttons(disabled: bool) {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+
     if let Some(btn) = doc.get_element_by_id("action-submit-btn") {
-        if disabled { let _ = btn.set_attribute("disabled", "true"); }
-        else { let _ = btn.remove_attribute("disabled"); }
+        if disabled {
+            let _ = btn.set_attribute("disabled", "true");
+        } else {
+            let _ = btn.remove_attribute("disabled");
+        }
     }
     if let Some(btn) = doc.get_element_by_id("dice-roll-btn") {
-        if disabled { let _ = btn.set_attribute("disabled", "true"); }
-        else { let _ = btn.remove_attribute("disabled"); }
+        if disabled {
+            let _ = btn.set_attribute("disabled", "true");
+        } else {
+            let _ = btn.remove_attribute("disabled");
+        }
     }
 }
 
@@ -331,25 +389,30 @@ fn disable_buttons(disabled: bool) {
 
 #[allow(unused_variables)]
 pub fn sync_action_panel_interaction_state(
-    _room_state: Res<RoomState>,
+    room_state: Res<RoomState>,
     progress: Res<TurnProgressState>,
 ) {
+    let _ = &room_state;
     #[cfg(target_arch = "wasm32")]
     {
         let active_actor = &progress.current_actor;
-        let can_act = !active_actor.is_empty() && active_actor != "dm"; 
+        let lifecycle =
+            TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+        let can_act =
+            lifecycle.accepts_player_input() && !active_actor.is_empty() && active_actor != "dm";
 
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(panel) = doc.get_element_by_id("action-panel") {
                 let _ = panel.set_attribute("data-active-actor", active_actor);
             }
-            
-            // Enable buttons if there's an actor (even if not strictly ours - we are Whisperers)
+
             disable_buttons(!can_act);
 
             if let Some(input) = doc.get_element_by_id("action-input") {
                 let placeholder = if can_act {
-                    format!("Whisper suggestion to {}...", active_actor) // Changed text
+                    format!("Whisper suggestion to {}...", active_actor)
+                } else if !lifecycle.accepts_player_input() {
+                    format!("{}...", lifecycle.help_text())
                 } else {
                     "Waiting for agent turn...".to_string()
                 };

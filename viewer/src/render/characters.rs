@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
+use super::map::{area_to_position, position_to_area};
 use crate::assets;
 use crate::game::components::*;
-use super::map::{area_to_position, position_to_area};
 
 /// Marker component for entities that can be dragged by the player.
 #[derive(Component)]
@@ -20,20 +20,20 @@ pub struct DragState {
 fn character_color(id: &str) -> Color {
     match id {
         // Grimland originals
-        "grimja" => Color::srgb(0.8, 0.3, 0.2),    // warrior red
-        "luna" => Color::srgb(0.3, 0.4, 0.8),       // mage blue
-        "songarak" => Color::srgb(0.3, 0.7, 0.3),   // rogue green
-        "miso" => Color::srgb(0.8, 0.7, 0.3),       // cleric gold
+        "grimja" => Color::srgb(0.8, 0.3, 0.2), // warrior red
+        "luna" => Color::srgb(0.3, 0.4, 0.8),   // mage blue
+        "songarak" => Color::srgb(0.3, 0.7, 0.3), // rogue green
+        "miso" => Color::srgb(0.8, 0.7, 0.3),   // cleric gold
         // Identity Erosion
-        "iron" => Color::srgb(0.9, 0.9, 0.85),      // ivory white (uncanny saint)
-        "moth" => Color::srgb(0.4, 0.3, 0.5),       // murky purple (J-horror)
-        "bell" => Color::srgb(1.0, 0.85, 0.3),      // bright gold (cult leader glow)
-        "dust" => Color::srgb(0.4, 0.4, 0.35),      // muted brown-grey (shrinking)
+        "iron" => Color::srgb(0.9, 0.9, 0.85), // ivory white (uncanny saint)
+        "moth" => Color::srgb(0.4, 0.3, 0.5),  // murky purple (J-horror)
+        "bell" => Color::srgb(1.0, 0.85, 0.3), // bright gold (cult leader glow)
+        "dust" => Color::srgb(0.4, 0.4, 0.35), // muted brown-grey (shrinking)
         // Conformity Pressure
-        "aldric" => Color::srgb(0.6, 0.2, 0.15),    // dark crimson (authority)
-        "brenna" => Color::srgb(0.7, 0.55, 0.4),    // warm tan (agreeable)
-        "cedric" => Color::srgb(0.5, 0.6, 0.7),     // pale blue (uncertain)
-        "dara" => Color::srgb(0.5, 0.45, 0.55),     // sage purple (observer)
+        "aldric" => Color::srgb(0.6, 0.2, 0.15), // dark crimson (authority)
+        "brenna" => Color::srgb(0.7, 0.55, 0.4), // warm tan (agreeable)
+        "cedric" => Color::srgb(0.5, 0.6, 0.7),  // pale blue (uncertain)
+        "dara" => Color::srgb(0.5, 0.45, 0.55),  // sage purple (observer)
         _ => Color::srgb(0.6, 0.6, 0.6),
     }
 }
@@ -71,24 +71,24 @@ pub fn spawn_character_sprites(
         ));
 
         // HP bar as child entity (positioned below the sprite)
-        let hp_bar = commands.spawn((
-            Sprite {
-                color: Color::srgb(0.2, 0.7, 0.2),
-                custom_size: Some(Vec2::new(36.0, 3.0)),
-                ..default()
-            },
-            Transform::from_xyz(0.0, -38.0, 0.1),
-            HpBarSprite { max_width: 36.0 },
-        )).id();
+        let hp_bar = commands
+            .spawn((
+                Sprite {
+                    color: Color::srgb(0.2, 0.7, 0.2),
+                    custom_size: Some(Vec2::new(36.0, 3.0)),
+                    ..default()
+                },
+                Transform::from_xyz(0.0, -38.0, 0.1),
+                HpBarSprite { max_width: 36.0 },
+            ))
+            .id();
 
         commands.entity(entity).add_child(hp_bar);
     }
 }
 
 /// Updates character positions when they move between areas.
-pub fn update_character_positions(
-    mut actors: Query<(&Actor, &mut Transform), With<MapToken>>,
-) {
+pub fn update_character_positions(mut actors: Query<(&Actor, &mut Transform), With<MapToken>>) {
     for (actor, mut transform) in &mut actors {
         let target = area_to_position(&actor.area);
         // Lerp toward target position for smooth movement
@@ -106,7 +106,6 @@ pub fn update_hp_bars(
 ) {
     for (actor, children) in &actors {
         for child in children.iter() {
-
             if let Ok((mut sprite, hp_bar)) = hp_bars.get_mut(child) {
                 let ratio = if actor.max_hp > 0 {
                     (actor.hp as f32 / actor.max_hp as f32).clamp(0.0, 1.0)
@@ -237,7 +236,11 @@ pub fn handle_drag_end(
     // Snap to nearest named area using the same coordinate system as area_to_position
     if let Ok(mut actor) = actors.get_mut(entity) {
         actor.area = position_to_area(final_pos);
-        log::info!("Drag ended: entity {:?} moved to area {}", entity, actor.area);
+        log::info!(
+            "Drag ended: entity {:?} moved to area {}",
+            entity,
+            actor.area
+        );
     }
 
     drag_state.dragged_entity = None;

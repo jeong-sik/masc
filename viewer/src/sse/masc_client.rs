@@ -12,12 +12,12 @@ use crate::config;
 use crate::mode::ViewerMode;
 
 #[cfg(target_arch = "wasm32")]
-use crate::game::state::ConnectionStatus;
-#[cfg(target_arch = "wasm32")]
 use super::reconnect;
+use super::reconnect::{ConnectionStatusBridge, SseReconnectManager};
 #[cfg(target_arch = "wasm32")]
 use super::reconnect::{ConnectionStatusProxy, ReconnectState};
-use super::reconnect::{ConnectionStatusBridge, SseReconnectManager};
+#[cfg(target_arch = "wasm32")]
+use crate::game::state::ConnectionStatus;
 
 /// Wrapper around `EventSource` that is `Send + Sync`.
 /// Safe because WASM is single-threaded — there are no real threads to race with.

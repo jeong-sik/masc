@@ -234,17 +234,23 @@ mod tests {
     fn reconnect_state_exponential_backoff() {
         let mut state = ReconnectState::default();
         // First delay should be around 1000ms (with jitter)
-        let d1 = state.next_delay().expect("next_delay should return Some on attempt 1");
+        let d1 = state
+            .next_delay()
+            .expect("next_delay should return Some on attempt 1");
         assert!(d1 >= 750 && d1 <= 1250, "d1={}", d1);
         assert_eq!(state.attempt, 1);
 
         // Second delay should be around 2000ms
-        let d2 = state.next_delay().expect("next_delay should return Some on attempt 2");
+        let d2 = state
+            .next_delay()
+            .expect("next_delay should return Some on attempt 2");
         assert!(d2 >= 1500 && d2 <= 2500, "d2={}", d2);
         assert_eq!(state.attempt, 2);
 
         // Third delay should be around 4000ms
-        let d3 = state.next_delay().expect("next_delay should return Some on attempt 3");
+        let d3 = state
+            .next_delay()
+            .expect("next_delay should return Some on attempt 3");
         assert!(d3 >= 3000 && d3 <= 5000, "d3={}", d3);
     }
 
@@ -256,7 +262,9 @@ mod tests {
             state.next_delay();
         }
         // By attempt 8, base delay should be capped at 30000ms
-        let d = state.next_delay().expect("next_delay should return Some before exhaustion");
+        let d = state
+            .next_delay()
+            .expect("next_delay should return Some before exhaustion");
         assert!(d <= 37500, "d={} should be <= 37500 (30000 + 25%)", d);
     }
 

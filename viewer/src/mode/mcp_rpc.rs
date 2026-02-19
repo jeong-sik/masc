@@ -54,16 +54,19 @@ pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value,
     .map_err(|e| format!("본문 읽기 실패: {:?}", e))?;
     let body_text = body_js.as_string().unwrap_or_default();
 
+    let body_preview = preview_text(&body_text, 240);
     let rpc: Value = if body_text.trim().is_empty() {
         json!({})
     } else {
         parse_mcp_rpc_response(&body_text)
-            .or_else(|_| parse_embedded_tool_payload(&body_text))
+            .or_else(|primary| {
+                parse_embedded_tool_payload(&body_text)
+                    .map_err(|secondary| format!("{} | {}", primary, secondary))
+            })
             .map_err(|e| {
                 format!(
-                    "RPC 응답 JSON 파싱 실패: {} / {}",
-                    e,
-                    body_text.chars().take(240).collect::<String>()
+                    "{} 응답 파싱 실패 (HTTP {}): {} / {}",
+                    tool_name, status, e, body_preview
                 )
             })?
     };
@@ -150,8 +153,8 @@ pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value,
             let secondary = parse_mcp_rpc_response(&text)
                 .unwrap_or_else(|e| Value::String(format!("파싱 실패: {}", e)));
             return Err(format!(
-                "{} 응답 JSON 파싱 실패: {} / {} / raw={}",
-                tool_name, primary, secondary, text
+                "{} 응답 JSON 파싱 실패 (HTTP {}): {} / {} / raw={}",
+                tool_name, status, primary, secondary, text
             ));
         }
     };
@@ -205,12 +208,22 @@ pub(super) fn parse_embedded_tool_payload(raw: &str) -> Result<Value, String> {
 }
 
 fn parse_embedded_json(raw: &str) -> Option<Value> {
+    let mut best: Option<(u8, Value)> = None;
     for candidate in collect_json_candidates(raw) {
-        if let Ok(v) = serde_json::from_str::<Value>(&candidate) {
-            return Some(v);
+        let Ok(parsed) = serde_json::from_str::<Value>(&candidate) else {
+            continue;
+        };
+        let normalized = unwrap_nested_json_string(parsed);
+        let score = score_json_candidate(&normalized);
+        match &best {
+            Some((current, _)) if score <= *current => {}
+            _ => best = Some((score, normalized)),
+        }
+        if score >= 100 {
+            break;
         }
     }
-    None
+    best.map(|(_, value)| value)
 }
 
 fn collect_json_candidates(raw: &str) -> Vec<String> {
@@ -246,6 +259,71 @@ fn collect_json_candidates(raw: &str) -> Vec<String> {
     }
 
     candidates
+}
+
+fn preview_text(raw: &str, max_chars: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let mut out = trimmed
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    out.push('…');
+    out
+}
+
+fn unwrap_nested_json_string(mut value: Value) -> Value {
+    for _ in 0..4 {
+        let Some(raw) = value.as_str().map(str::trim) else {
+            break;
+        };
+        if raw.is_empty() {
+            break;
+        }
+        let Ok(next) = serde_json::from_str::<Value>(raw) else {
+            break;
+        };
+        value = next;
+    }
+    value
+}
+
+fn score_json_candidate(value: &Value) -> u8 {
+    let Some(obj) = value.as_object() else {
+        return match value {
+            Value::Array(_) => 40,
+            Value::String(_) => 5,
+            _ => 10,
+        };
+    };
+
+    if obj.contains_key("jsonrpc") && (obj.contains_key("result") || obj.contains_key("error")) {
+        return 100;
+    }
+    if obj.contains_key("result") || obj.contains_key("error") {
+        return 95;
+    }
+    if obj.contains_key("payload") || obj.contains_key("structuredContent") {
+        return 90;
+    }
+    if obj.contains_key("status")
+        && (obj.contains_key("code") || obj.contains_key("message") || obj.contains_key("payload"))
+    {
+        return 85;
+    }
+    if obj.contains_key("world_presets")
+        || obj.contains_key("dm_presets")
+        || obj.contains_key("presets")
+        || obj.contains_key("keepers")
+    {
+        return 70;
+    }
+    if obj.contains_key("state") || obj.contains_key("events") || obj.contains_key("content") {
+        return 60;
+    }
+    30
 }
 
 fn extract_top_level_json_span(raw: &str) -> Option<(usize, usize)> {
@@ -301,4 +379,67 @@ fn extract_top_level_json_span(raw: &str) -> Option<(usize, usize)> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_embedded_tool_payload_unwraps_stringified_json() {
+        let raw = r#""{\"payload\":{\"world_presets\":[{\"id\":\"grimland\"}],\"dm_presets\":[{\"id\":\"grimland-dm\"}]}}""#;
+        let parsed = parse_embedded_tool_payload(raw).expect("stringified json should parse");
+        let payload = parsed.get("payload").expect("payload object");
+        assert_eq!(
+            payload
+                .get("world_presets")
+                .and_then(Value::as_array)
+                .map(|arr| arr.len()),
+            Some(1)
+        );
+        assert_eq!(
+            payload
+                .get("dm_presets")
+                .and_then(Value::as_array)
+                .map(|arr| arr.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn parse_mcp_rpc_response_prefers_rpc_envelope_over_noise() {
+        let raw = r#"{"debug":"seeded"}
+data: {"status":"ok","payload":{"note":"not-rpc"}}
+
+data: {"jsonrpc":"2.0","id":1,"result":{"payload":{"ok":true}}}"#;
+        let parsed = parse_mcp_rpc_response(raw).expect("rpc envelope should parse");
+        assert_eq!(
+            parsed.get("jsonrpc").and_then(Value::as_str),
+            Some("2.0"),
+            "must select JSON-RPC envelope over non-rpc objects"
+        );
+        assert_eq!(
+            parsed
+                .get("result")
+                .and_then(|row| row.get("payload"))
+                .and_then(|row| row.get("ok"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn parse_mcp_rpc_response_unwraps_data_stringified_json() {
+        let raw = r#"data: "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"payload\":{\"dm_presets\":[{\"id\":\"grimland-dm\"}]}}}""#;
+        let parsed = parse_mcp_rpc_response(raw).expect("stringified data frame should parse");
+        assert_eq!(
+            parsed
+                .get("result")
+                .and_then(|row| row.get("payload"))
+                .and_then(|row| row.get("dm_presets"))
+                .and_then(Value::as_array)
+                .map(|arr| arr.len()),
+            Some(1)
+        );
+    }
 }

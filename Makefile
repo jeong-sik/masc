@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-trpg-session-contract harness-trpg-grimland-smoke
+.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target
 all: build
@@ -86,3 +86,7 @@ harness-trpg-session-contract:
 # TRPG Grimland smoke workload (manual/nightly; set RUN_ROUND=1 for keeper rounds)
 harness-trpg-grimland-smoke:
 	scripts/run_trpg_grimland_smoke.sh
+
+# Local E2E checklist runner (contracts + optional viewer build/smoke)
+viewer-local-e2e-check:
+	scripts/viewer-local-e2e-check.sh

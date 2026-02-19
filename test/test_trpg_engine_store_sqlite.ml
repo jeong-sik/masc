@@ -20,6 +20,32 @@ let make_event ~seq ~room_id =
 
 let seq_of_event (e : Trpg_engine_event.t) = e.seq
 
+let sqlite_db_path base_dir =
+  Filename.concat (Filename.concat base_dir "trpg") "events.sqlite3"
+
+let test_read_events_skips_malformed_rows () =
+  let base_dir = make_base_dir () in
+  let room_id = "room-sql-malformed" in
+  get_ok (Trpg_engine_store_sqlite.append_event ~base_dir ~event:(make_event ~seq:1 ~room_id));
+  let db = Sqlite3.db_open (sqlite_db_path base_dir) in
+  let raw_insert =
+    Printf.sprintf
+      "INSERT INTO trpg_events(room_id, seq, ts, event_type, actor_id, payload) \
+       VALUES('%s', 2, '2026-02-15T01:00:02Z', 'unknown.event', 'ghost', '{}')"
+      room_id
+  in
+  (match Sqlite3.exec db raw_insert with
+  | Sqlite3.Rc.OK -> ()
+  | rc ->
+      ignore (Sqlite3.db_close db);
+      Alcotest.failf "raw insert failed: %s" (Sqlite3.Rc.to_string rc));
+  ignore (Sqlite3.db_close db);
+  get_ok (Trpg_engine_store_sqlite.append_event ~base_dir ~event:(make_event ~seq:3 ~room_id));
+  let all = get_ok (Trpg_engine_store_sqlite.read_events ~base_dir ~room_id) in
+  Alcotest.(check (list int)) "skip malformed row" [ 1; 3 ] (List.map seq_of_event all);
+  let tail = get_ok (Trpg_engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq:2) in
+  Alcotest.(check (list int)) "tail after seq=2" [ 3 ] (List.map seq_of_event tail)
+
 let test_append_and_read_events () =
   let base_dir = make_base_dir () in
   let room_id = "room-sql-1" in
@@ -86,7 +112,11 @@ let test_recovery_tail_events () =
 let () =
   Alcotest.run "TRPG Engine Store Sqlite"
     [
-      ("events", [ Alcotest.test_case "append + read + filter" `Quick test_append_and_read_events ]);
+      ( "events",
+        [
+          Alcotest.test_case "append + read + filter" `Quick test_append_and_read_events;
+          Alcotest.test_case "skip malformed row" `Quick test_read_events_skips_malformed_rows;
+        ] );
       ("snapshot", [ Alcotest.test_case "write + read" `Quick test_snapshot_roundtrip ]);
       ("recovery", [ Alcotest.test_case "snapshot + tail events" `Quick test_recovery_tail_events ]);
     ]

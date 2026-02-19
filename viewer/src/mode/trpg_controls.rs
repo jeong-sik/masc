@@ -314,12 +314,121 @@ fn manual_player_keeper_order_for_assignment(
     Ok(order)
 }
 
+fn current_player_actor_slots_from_actor_admin(doc: &web_sys::Document) -> Vec<String> {
+    let Ok(nodes) = doc.query_selector_all("#actor-admin-list .actor-admin-row") else {
+        return Vec::new();
+    };
+    let mut preferred = Vec::new();
+    let mut fallback = Vec::new();
+    for idx in 0..nodes.length() {
+        let Some(node) = nodes.item(idx) else {
+            continue;
+        };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let actor_id = el
+            .get_attribute("data-actor-id")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if actor_id.is_empty() || actor_id.eq_ignore_ascii_case("dm") {
+            continue;
+        }
+        let role = el
+            .get_attribute("data-role")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if role == "player" || role.is_empty() {
+            preferred.push(actor_id);
+            continue;
+        }
+        if role != "dm" {
+            fallback.push(actor_id);
+        }
+    }
+    let mut slots = if preferred.is_empty() {
+        fallback
+    } else {
+        preferred
+    };
+    slots = unique_non_empty(slots);
+    slots.sort();
+    slots
+}
+
+fn recommended_manual_mapping_order(
+    doc: &web_sys::Document,
+    selected: &[String],
+) -> (Vec<String>, usize, usize) {
+    let selected_unique = unique_non_empty(selected.to_vec());
+    if selected_unique.is_empty() {
+        return (Vec::new(), 0, 0);
+    }
+
+    let keeper_actor_map = keeper_actor_map_from_actor_admin_dom(doc);
+    let slot_actors = current_player_actor_slots_from_actor_admin(doc);
+    let slot_count = selected_unique.len();
+
+    let mut ordered = vec![String::new(); slot_count];
+    let mut matched_count = 0usize;
+    for keeper in &selected_unique {
+        let Some(actor_id) = keeper_actor_map.get(keeper) else {
+            continue;
+        };
+        let Some(slot_idx) = slot_actors
+            .iter()
+            .position(|slot_actor| slot_actor == actor_id)
+        else {
+            continue;
+        };
+        if slot_idx >= slot_count || !ordered[slot_idx].is_empty() {
+            continue;
+        }
+        ordered[slot_idx] = keeper.clone();
+        matched_count += 1;
+    }
+
+    let fallback_order = normalize_manual_keeper_order(manual_mapping_order(doc), &selected_unique);
+    let mut leftovers = fallback_order
+        .into_iter()
+        .filter(|keeper| !ordered.iter().any(|picked| picked == keeper))
+        .collect::<Vec<_>>();
+    for keeper in selected_unique {
+        if ordered.iter().any(|picked| picked == &keeper)
+            || leftovers.iter().any(|picked| picked == &keeper)
+        {
+            continue;
+        }
+        leftovers.push(keeper);
+    }
+
+    for slot in &mut ordered {
+        if slot.is_empty() {
+            let next = leftovers.first().cloned().unwrap_or_default();
+            if !next.is_empty() {
+                *slot = next.clone();
+                leftovers.remove(0);
+            }
+        }
+    }
+
+    let order = ordered
+        .into_iter()
+        .filter(|keeper| !keeper.trim().is_empty())
+        .collect::<Vec<_>>();
+    (order, matched_count, slot_actors.len())
+}
+
 fn bind_manual_mapping_selects(doc: &web_sys::Document) {
     let Ok(nodes) = doc.query_selector_all("#new-game-manual-table .manual-map-select") else {
         return;
     };
     for idx in 0..nodes.length() {
-        let Some(node) = nodes.item(idx) else { continue };
+        let Some(node) = nodes.item(idx) else {
+            continue;
+        };
         let Some(select) = node.dyn_ref::<web_sys::HtmlSelectElement>() else {
             continue;
         };
@@ -374,11 +483,9 @@ fn bind_manual_mapping_selects(doc: &web_sys::Document) {
             sync_manual_mapping_table(&doc);
             sync_new_game_wizard_ui(&doc);
         }) as Box<dyn FnMut(_)>);
-        let _ = select
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
-            });
+        let _ = select.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
+        });
         cb.forget();
     }
 }
@@ -387,11 +494,18 @@ fn sync_manual_mapping_table(doc: &web_sys::Document) {
     let Some(table) = doc.get_element_by_id("new-game-manual-table") else {
         return;
     };
+    let busy = new_game_wizard_busy(doc);
     if let Some(reset_btn) = doc
         .get_element_by_id("new-game-manual-reset")
         .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
     {
-        reset_btn.set_disabled(new_game_wizard_busy(doc));
+        reset_btn.set_disabled(busy);
+    }
+    if let Some(recommend_btn) = doc
+        .get_element_by_id("new-game-manual-recommend")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        recommend_btn.set_disabled(busy);
     }
     let selected = selected_player_keepers(doc);
     if selected.is_empty() {
@@ -400,7 +514,7 @@ fn sync_manual_mapping_table(doc: &web_sys::Document) {
         );
         if let Some(help) = doc.get_element_by_id("new-game-manual-map-help") {
             help.set_text_content(Some(
-                "선택한 플레이어 keeper 순서를 actor slot(P01,P02,...)에 수동 고정할 수 있습니다. 플레이어를 선택한 뒤 사용하세요.",
+                "선택한 플레이어 keeper 순서를 actor slot에 고정할 수 있습니다. 플레이어를 선택한 뒤 '점유기준 추천' 또는 수동 변경을 사용하세요.",
             ));
         }
         if let Some(reset_btn) = doc
@@ -409,42 +523,61 @@ fn sync_manual_mapping_table(doc: &web_sys::Document) {
         {
             reset_btn.set_disabled(true);
         }
+        if let Some(recommend_btn) = doc
+            .get_element_by_id("new-game-manual-recommend")
+            .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+        {
+            recommend_btn.set_disabled(true);
+        }
         set_manual_mapping_order(doc, &[]);
         return;
     }
 
     let order = normalize_manual_keeper_order(manual_mapping_order(doc), &selected);
     set_manual_mapping_order(doc, &order);
-    let options = selected
-        .iter()
-        .map(|keeper| {
-            format!(
-                r#"<option value="{value}">{label}</option>"#,
-                value = html_escape(keeper),
-                label = html_escape(keeper),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
+    let slot_actors = current_player_actor_slots_from_actor_admin(doc);
+    let keeper_actor_map = keeper_actor_map_from_actor_admin_dom(doc);
     let rows = order
         .iter()
         .enumerate()
         .map(|(idx, keeper)| {
-            let selected_options = options
-                .replace(
-                    &format!(r#"value="{}""#, html_escape(keeper)),
-                    &format!(r#"value="{}" selected"#, html_escape(keeper)),
-                );
+            let options = selected
+                .iter()
+                .map(|candidate| {
+                    let actor_hint = keeper_actor_map
+                        .get(candidate)
+                        .map(|actor_id| format!(" · 점유 {}", actor_id))
+                        .unwrap_or_default();
+                    let selected_attr = if candidate == keeper { " selected" } else { "" };
+                    format!(
+                        r#"<option value="{value}"{selected}>{label}</option>"#,
+                        value = html_escape(candidate),
+                        selected = selected_attr,
+                        label = html_escape(&format!("{}{}", candidate, actor_hint)),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            let slot_actor = slot_actors.get(idx).cloned().unwrap_or_default();
+            let slot_actor_label = if slot_actor.is_empty() {
+                "actor 미정".to_string()
+            } else {
+                format!("actor {}", slot_actor)
+            };
             format!(
                 concat!(
                     "<div class=\"manual-map-row\">",
+                    "<div class=\"manual-map-slot-wrap\">",
                     "<span class=\"manual-map-slot\">P{slot:02}</span>",
+                    "<span class=\"manual-map-actor\">{actor_label}</span>",
+                    "</div>",
                     "<select class=\"manual-map-select\" data-slot-index=\"{idx}\">{options}</select>",
                     "</div>"
                 ),
                 slot = idx + 1,
+                actor_label = html_escape(&slot_actor_label),
                 idx = idx,
-                options = selected_options
+                options = options
             )
         })
         .collect::<Vec<_>>()
@@ -458,16 +591,36 @@ fn sync_manual_mapping_table(doc: &web_sys::Document) {
             .map(|(idx, keeper)| format!("P{:02}→{}", idx + 1, keeper))
             .collect::<Vec<_>>()
             .join(" · ");
+        let slot_hint = if slot_actors.is_empty() {
+            "actor 슬롯 라벨은 액터 목록 새로고침 후 표시됩니다.".to_string()
+        } else {
+            format!(
+                "현재 actor 슬롯 기준: {}",
+                slot_actors
+                    .iter()
+                    .take(order.len())
+                    .enumerate()
+                    .map(|(idx, actor_id)| format!("P{:02}={}", idx + 1, actor_id))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            )
+        };
         help.set_text_content(Some(&format!(
-            "수동 매핑 적용 순서: {} (세션 시작 시 party actor 순서에 맞춰 반영 · 필요하면 '선택순으로 리셋')",
-            summary
+            "수동 매핑 적용 순서: {} · {} · 필요하면 '점유기준 추천' 또는 '선택순으로 리셋'을 사용하세요.",
+            summary, slot_hint
         )));
     }
     if let Some(reset_btn) = doc
         .get_element_by_id("new-game-manual-reset")
         .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
     {
-        reset_btn.set_disabled(false);
+        reset_btn.set_disabled(busy);
+    }
+    if let Some(recommend_btn) = doc
+        .get_element_by_id("new-game-manual-recommend")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        recommend_btn.set_disabled(busy);
     }
     bind_manual_mapping_selects(doc);
 }
@@ -579,6 +732,7 @@ fn set_new_game_wizard_busy(doc: &web_sys::Document, busy: bool) {
         "new-game-preflight-btn",
         "new-game-refresh",
         "new-game-autopick-btn",
+        "new-game-manual-recommend",
         "new-game-manual-reset",
     ] {
         if let Some(btn) = doc
@@ -886,16 +1040,16 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
             ui_state.label_ko()
         )
     } else if preflight_state != "ok" {
-        "사전 점검을 먼저 통과해야 세션 시작이 가능합니다.".to_string()
+        "1) 사전 점검 버튼을 먼저 실행해 통과 상태(OK)로 만드세요.".to_string()
     } else if !dm_selected {
-        "DM keeper를 선택하세요.".to_string()
+        "2) 진행자(DM) keeper를 1명 선택하세요.".to_string()
     } else if has_conflict {
-        "DM keeper와 플레이어 keeper가 중복되었습니다.".to_string()
+        "2) DM keeper와 플레이어 keeper 중복을 해제하세요.".to_string()
     } else if players.is_empty() {
-        "플레이어 keeper를 최소 1명 선택하세요.".to_string()
+        "2) 플레이어 keeper를 최소 1명 선택하고 필요하면 '점유기준 추천'으로 슬롯 매핑을 정렬하세요.".to_string()
     } else {
         format!(
-            "세션 시작 가능: DM {} / 플레이어 {}명",
+            "3) 세션 시작 가능: DM {} / 플레이어 {}명",
             dm_keeper,
             players.len()
         )
@@ -918,6 +1072,9 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         "new-game-quick-start",
         "new-game-preflight-btn",
         "new-game-refresh",
+        "new-game-autopick-btn",
+        "new-game-manual-recommend",
+        "new-game-manual-reset",
     ] {
         if let Some(btn) = doc
             .get_element_by_id(id)
@@ -1086,7 +1243,9 @@ fn ensure_new_game_ready(doc: &web_sys::Document) -> Result<(), String> {
     }
     let manual_order = manual_player_keeper_order_for_assignment(doc, &players)?;
     if manual_order.is_empty() {
-        return Err("수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string());
+        return Err(
+            "수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string(),
+        );
     }
     if players.iter().any(|player| player == &dm_keeper) {
         return Err("DM keeper와 플레이어 keeper가 중복되었습니다.".to_string());
@@ -1260,7 +1419,9 @@ fn keeper_actor_map_from_actor_admin_dom(doc: &web_sys::Document) -> HashMap<Str
         return map;
     };
     for idx in 0..nodes.length() {
-        let Some(node) = nodes.item(idx) else { continue };
+        let Some(node) = nodes.item(idx) else {
+            continue;
+        };
         let Some(el) = node.dyn_ref::<web_sys::Element>() else {
             continue;
         };
@@ -1329,33 +1490,37 @@ fn extract_keeper_name_from_value(row: &Value) -> Option<String> {
 // ─── Keeper Selectors ───────────────────────────────────────────
 
 async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>, String> {
-    let payload = match mcp_tool_call("masc_keeper_list", json!({ "limit": 200, "detailed": true }))
-        .await
+    let payload = match mcp_tool_call(
+        "masc_keeper_list",
+        json!({ "limit": 200, "detailed": true }),
+    )
+    .await
     {
         Ok(v) => v,
-        Err(primary_err) => match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await
-        {
-            Ok(v) => v,
-            Err(fallback_err) => {
-                log::warn!(
-                    "refresh_keeper_selectors failed: primary={} fallback={}",
-                    primary_err,
-                    fallback_err
-                );
-                if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
-                    dm_select.set_inner_html(
+        Err(primary_err) => {
+            match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await {
+                Ok(v) => v,
+                Err(fallback_err) => {
+                    log::warn!(
+                        "refresh_keeper_selectors failed: primary={} fallback={}",
+                        primary_err,
+                        fallback_err
+                    );
+                    if let Some(dm_select) = doc.get_element_by_id("new-game-dm-select") {
+                        dm_select.set_inner_html(
                         r#"<option value="">(keeper 조회 실패: masc_keeper_list 확인)</option>"#,
                     );
-                }
-                if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
-                    player_select.set_inner_html(
+                    }
+                    if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
+                        player_select.set_inner_html(
                         r#"<option value="" disabled>(keeper 조회 실패: masc_keeper_list 확인)</option>"#,
                     );
+                    }
+                    update_new_game_player_hint(doc);
+                    return Ok(Vec::new());
                 }
-                update_new_game_player_hint(doc);
-                return Ok(Vec::new());
             }
-        },
+        }
     };
     web_sys::console::log_1(
         &format!(
@@ -1420,7 +1585,8 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
             dm_select.set_inner_html(r#"<option value="">(사용 가능한 keeper 없음)</option>"#);
         }
         if let Some(player_select) = doc.get_element_by_id("new-game-player-select") {
-            player_select.set_inner_html(r#"<option value="" disabled>(사용 가능한 keeper 없음)</option>"#);
+            player_select
+                .set_inner_html(r#"<option value="" disabled>(사용 가능한 keeper 없음)</option>"#);
         }
         update_new_game_player_hint(doc);
         return Ok(Vec::new());
@@ -1618,9 +1784,8 @@ fn summarize_preflight_items(items: &[String], limit: usize) -> String {
 fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
     let state = state_root.get("state").unwrap_or(state_root);
     let actor_control = parse_actor_control_map(state_root);
-    let control_keeper = |actor_id: &str| -> String {
-        actor_control.get(actor_id).cloned().unwrap_or_default()
-    };
+    let control_keeper =
+        |actor_id: &str| -> String { actor_control.get(actor_id).cloned().unwrap_or_default() };
 
     let mut rows = Vec::new();
     if let Some(characters) = state.get("characters").and_then(Value::as_array) {
@@ -2246,7 +2411,11 @@ async fn actor_admin_release(doc: &web_sys::Document) -> Result<String, String> 
     .map_err(|e| explain_claim_conflict(&e))?;
 
     let rows = refresh_actor_admin_list(doc).await?;
-    Ok(format!("액터 점유 해제 완료 ({}명): {}", rows.len(), actor_id))
+    Ok(format!(
+        "액터 점유 해제 완료 ({}명): {}",
+        rows.len(),
+        actor_id
+    ))
 }
 
 async fn actor_admin_delete(doc: &web_sys::Document) -> Result<String, String> {
@@ -2366,7 +2535,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
         .unwrap_or_default();
     let room_id = if room_input.trim().is_empty() {
-        generate_room_id()
+        actor_admin_room_id()
     } else {
         room_input.trim().to_string()
     };
@@ -2451,7 +2620,9 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     }
     let manual_players = manual_player_keeper_order_for_assignment(doc, &players)?;
     if manual_players.is_empty() {
-        return Err("수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string());
+        return Err(
+            "수동 매핑 테이블이 비어 있습니다. 플레이어 keeper를 다시 선택하세요.".to_string(),
+        );
     }
 
     let model_text = doc
@@ -2813,6 +2984,19 @@ fn set_new_game_assignment(
 
 // ─── Preset System ──────────────────────────────────────────────
 
+fn built_in_preset_catalog() -> Value {
+    json!({
+        "world_presets": [
+            { "id": "grimland-chronicle", "title": "Grimland Chronicle" },
+            { "id": "emberfall-siege", "title": "Emberfall Siege" }
+        ],
+        "dm_presets": [
+            { "id": "grim-warden", "title": "Grim Warden" },
+            { "id": "mythic-weaver", "title": "Mythic Weaver" }
+        ]
+    })
+}
+
 async fn fetch_preset_catalog() -> Result<Value, String> {
     let args = json!({
         "include_characters": false,
@@ -2837,10 +3021,14 @@ async fn fetch_preset_catalog() -> Result<Value, String> {
                     match mcp_tool_call("trpg.preset.list", args).await {
                         Ok(value) => value,
                         Err(retry_err) => {
-                            return Err(format!(
-                                "trpg.preset.list 실패: {} / fallback 실패: {} / retry 실패: {}",
-                                primary_err, legacy_err, retry_err
-                            ));
+                            let fallback = built_in_preset_catalog();
+                            log::warn!(
+                                "trpg.preset.list failed after retries; using built-in preset catalog: primary={} fallback={} retry={}",
+                                primary_err,
+                                legacy_err,
+                                retry_err
+                            );
+                            return Ok(fallback);
                         }
                     }
                 }
@@ -3194,20 +3382,25 @@ async fn refresh_preset_selectors(
         Ok(catalog) => catalog,
         Err(err) => {
             if let Some(world_select) = doc.get_element_by_id("new-game-world-select") {
-                world_select.set_inner_html(
-                    r#"<option value="">(월드 프리셋 조회 실패)</option>"#,
-                );
+                world_select.set_inner_html(r#"<option value="">(월드 프리셋 조회 실패)</option>"#);
             }
             if let Some(dm_select) = doc.get_element_by_id("new-game-dm-preset-select") {
-                dm_select.set_inner_html(
-                    r#"<option value="">(DM 프리셋 조회 실패)</option>"#,
-                );
+                dm_select.set_inner_html(r#"<option value="">(DM 프리셋 조회 실패)</option>"#);
             }
             return Err(err);
         }
     };
-    let world_presets = collect_world_preset_options(&catalog);
-    let dm_presets = collect_dm_preset_options(&catalog);
+    let mut world_presets = collect_world_preset_options(&catalog);
+    let mut dm_presets = collect_dm_preset_options(&catalog);
+    if world_presets.is_empty() || dm_presets.is_empty() {
+        let fallback = built_in_preset_catalog();
+        if world_presets.is_empty() {
+            world_presets = collect_world_preset_options(&fallback);
+        }
+        if dm_presets.is_empty() {
+            dm_presets = collect_dm_preset_options(&fallback);
+        }
+    }
 
     let _ = select_options_set(doc, "new-game-world-select", &world_presets);
     let _ = select_options_set(doc, "new-game-dm-preset-select", &dm_presets);
@@ -3236,7 +3429,12 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
         {
             if room_input.value().trim().is_empty() {
-                room_input.set_value(&generate_room_id());
+                let current_room = crate::config::current_room_id();
+                if current_room.trim().is_empty() {
+                    room_input.set_value(&generate_room_id());
+                } else {
+                    room_input.set_value(current_room.trim());
+                }
             }
         }
         set_new_game_wizard_busy(&doc, false);
@@ -3359,8 +3557,68 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             .map(|target| {
                 target
                     .add_event_listener_with_callback("click", autopick_cb.as_ref().unchecked_ref())
-        });
+            });
         autopick_cb.forget();
+    }
+
+    if let Some(recommend_btn) = doc.get_element_by_id("new-game-manual-recommend") {
+        let recommend_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            if new_game_wizard_busy(&doc) {
+                return;
+            }
+            let players = selected_player_keepers(&doc);
+            if players.is_empty() {
+                set_new_game_status(
+                    &doc,
+                    "플레이어 keeper를 먼저 선택하세요. 선택 후 추천 매핑을 적용할 수 있습니다.",
+                );
+                sync_new_game_wizard_ui(&doc);
+                return;
+            }
+            let (recommended, matched_count, slot_count) =
+                recommended_manual_mapping_order(&doc, &players);
+            if recommended.is_empty() {
+                set_new_game_status(
+                    &doc,
+                    "추천 매핑을 만들지 못했습니다. 액터 목록을 새로고침한 뒤 다시 시도하세요.",
+                );
+                sync_new_game_wizard_ui(&doc);
+                return;
+            }
+            set_manual_mapping_order(&doc, &recommended);
+            sync_manual_mapping_table(&doc);
+            sync_new_game_wizard_ui(&doc);
+            let status = if slot_count == 0 {
+                format!(
+                    "추천 매핑 적용: actor 슬롯 정보가 없어 선택 순서 기반으로 정렬했습니다. ({}명)",
+                    recommended.len()
+                )
+            } else if matched_count > 0 {
+                format!(
+                    "추천 매핑 적용: {}명 중 {}명이 현재 actor 슬롯과 일치했습니다.",
+                    recommended.len(),
+                    matched_count
+                )
+            } else {
+                format!(
+                    "추천 매핑 적용: actor 슬롯 {}개를 확인했지만 일치 keeper가 없어 선택 순서를 유지했습니다.",
+                    slot_count
+                )
+            };
+            set_new_game_status(&doc, &status);
+        }) as Box<dyn FnMut()>);
+        let _ = recommend_btn
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback(
+                    "click",
+                    recommend_cb.as_ref().unchecked_ref(),
+                )
+            });
+        recommend_cb.forget();
     }
 
     if let Some(reset_btn) = doc.get_element_by_id("new-game-manual-reset") {
@@ -3723,11 +3981,9 @@ fn bind_actor_admin_controls(doc: &web_sys::Document) {
                 actor_admin_set_busy(&doc_for_task, false);
             });
         }) as Box<dyn FnMut()>);
-        let _ = release_btn
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|target| {
-                target.add_event_listener_with_callback("click", release_cb.as_ref().unchecked_ref())
-            });
+        let _ = release_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", release_cb.as_ref().unchecked_ref())
+        });
         release_cb.forget();
     }
 

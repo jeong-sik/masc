@@ -36,7 +36,10 @@ let with_db ~base_dir f =
         ~module_name:"trpg_engine_store_sqlite"
         ~finally_label:"close_db"
         ~finally:(fun () -> ignore (Sqlite3.db_close db))
-        (fun () -> f db)
+        (fun () ->
+          (* Reduce transient `SQLITE_BUSY` failures under read/write contention. *)
+          Sqlite3.busy_timeout db 3000;
+          f db)
 
 let exec_sql db sql =
   match Sqlite3.exec db sql with
@@ -139,16 +142,42 @@ let append_event ~base_dir ~(event : Trpg_engine_event.t) =
                    (Sqlite3.Rc.to_string rc)
                    (Sqlite3.errmsg db))))
 
-let read_events ~base_dir ~room_id =
+let parse_event_row ~seq ~room_id ~ts ~event_type_s ~actor_id ~payload_s =
+  match Trpg_engine_event.event_type_of_string event_type_s with
+  | Error e ->
+      Error
+        (Printf.sprintf
+           "seq=%d room=%s event_type=%S parse failed: %s"
+           seq room_id event_type_s e)
+  | Ok event_type -> (
+      try
+        let payload = Yojson.Safe.from_string payload_s in
+        Ok { seq; room_id; ts; event_type; actor_id; payload }
+      with Yojson.Json_error e ->
+        Error
+          (Printf.sprintf
+             "seq=%d room=%s payload parse failed: %s"
+             seq room_id e))
+
+let read_events_query ~base_dir ~room_id ~after_seq_opt =
   let* () = validate_room_id room_id in
   let* () = init ~base_dir in
   with_db ~base_dir (fun db ->
+      let sql =
+        match after_seq_opt with
+        | None ->
+            "SELECT seq, room_id, ts, event_type, actor_id, payload \
+             FROM trpg_events \
+             WHERE room_id = ?1 \
+             ORDER BY seq ASC"
+        | Some _ ->
+            "SELECT seq, room_id, ts, event_type, actor_id, payload \
+             FROM trpg_events \
+             WHERE room_id = ?1 AND seq > ?2 \
+             ORDER BY seq ASC"
+      in
       let stmt =
-        Sqlite3.prepare db
-          "SELECT seq, room_id, ts, event_type, actor_id, payload \
-           FROM trpg_events \
-           WHERE room_id = ?1 \
-           ORDER BY seq ASC"
+        Sqlite3.prepare db sql
       in
       Common.protect
         ~module_name:"trpg_engine_store_sqlite"
@@ -156,7 +185,12 @@ let read_events ~base_dir ~room_id =
         ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
         (fun () ->
           let* () = bind_text stmt 1 room_id in
-          let rec loop acc =
+          let* () =
+            match after_seq_opt with
+            | None -> Ok ()
+            | Some after_seq -> bind_int stmt 2 (max 0 after_seq)
+          in
+          let rec loop acc skipped =
             match Sqlite3.step stmt with
             | Sqlite3.Rc.ROW ->
                 let seq = Sqlite3.column stmt 0 |> int_of_data |> Option.value ~default:0 in
@@ -165,19 +199,19 @@ let read_events ~base_dir ~room_id =
                 let event_type_s = Sqlite3.column stmt 3 |> string_of_data |> Option.value ~default:"" in
                 let actor_id = Sqlite3.column stmt 4 |> string_of_data in
                 let payload_s = Sqlite3.column stmt 5 |> string_of_data |> Option.value ~default:"{}" in
-                let parsed =
-                  match Trpg_engine_event.event_type_of_string event_type_s with
-                  | Error e -> Error e
-                  | Ok event_type -> (
-                      try
-                        let payload = Yojson.Safe.from_string payload_s in
-                        Ok { seq; room_id; ts; event_type; actor_id; payload }
-                      with Yojson.Json_error e -> Error e)
-                in
-                (match parsed with
-                | Ok ev -> loop (ev :: acc)
-                | Error e -> Error (Printf.sprintf "event row parse failed: %s" e))
-            | Sqlite3.Rc.DONE -> Ok (List.rev acc)
+                (match parse_event_row ~seq ~room_id ~ts ~event_type_s ~actor_id ~payload_s with
+                | Ok ev -> loop (ev :: acc) skipped
+                | Error e ->
+                    Printf.eprintf
+                      "[trpg_engine_store_sqlite] skipping malformed event row: %s\n%!"
+                      e;
+                    loop acc (skipped + 1))
+            | Sqlite3.Rc.DONE ->
+                if skipped > 0 then
+                  Printf.eprintf
+                    "[trpg_engine_store_sqlite] skipped %d malformed event row(s) for room %s\n%!"
+                    skipped room_id;
+                Ok (List.rev acc)
             | rc ->
                 Error
                   (Printf.sprintf
@@ -185,11 +219,13 @@ let read_events ~base_dir ~room_id =
                      (Sqlite3.Rc.to_string rc)
                      (Sqlite3.errmsg db))
           in
-          loop []))
+          loop [] 0))
+
+let read_events ~base_dir ~room_id =
+  read_events_query ~base_dir ~room_id ~after_seq_opt:None
 
 let read_events_after ~base_dir ~room_id ~after_seq =
-  let* events = read_events ~base_dir ~room_id in
-  Ok (List.filter (fun e -> e.seq > after_seq) events)
+  read_events_query ~base_dir ~room_id ~after_seq_opt:(Some after_seq)
 
 let write_snapshot ~base_dir ~room_id ~last_seq ~ts ~state =
   let* () = validate_room_id room_id in

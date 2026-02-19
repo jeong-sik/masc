@@ -17,7 +17,7 @@ use super::escape::html_escape;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, HtmlSelectElement};
 
 #[cfg(target_arch = "wasm32")]
 fn pretty_phase(phase: &str) -> String {
@@ -95,6 +95,243 @@ fn compact_reason_text(raw: &str) -> String {
         short.push_str("...");
         short
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy)]
+enum FlowStepState {
+    Done,
+    Active,
+    Wait,
+    Error,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl FlowStepState {
+    fn css(self) -> &'static str {
+        match self {
+            Self::Done => "is-done",
+            Self::Active => "is-active",
+            Self::Wait => "is-wait",
+            Self::Error => "is-error",
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_state_is_done(state: &str) -> bool {
+    matches!(
+        state.trim().to_ascii_lowercase().as_str(),
+        "ok" | "timeout" | "unavailable"
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_state_is_error(state: &str) -> bool {
+    matches!(
+        state.trim().to_ascii_lowercase().as_str(),
+        "timeout" | "unavailable"
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgressState) {
+    let Some(el) = document.get_element_by_id("agent-round-flow") else {
+        return;
+    };
+
+    let player_ids = progress
+        .actor_order
+        .iter()
+        .filter(|actor_id| actor_id.as_str() != "dm")
+        .map(|actor_id| actor_id.as_str())
+        .collect::<Vec<_>>();
+    let player_total = player_ids.len();
+
+    let mut player_done = 0usize;
+    let mut player_success = 0usize;
+    let mut player_error = 0usize;
+    for actor_id in &player_ids {
+        let state = progress
+            .actor_states
+            .get(*actor_id)
+            .map(String::as_str)
+            .unwrap_or("pending");
+        if actor_state_is_done(state) {
+            player_done += 1;
+        }
+        if state.trim().eq_ignore_ascii_case("ok") {
+            player_success += 1;
+        }
+        if actor_state_is_error(state) {
+            player_error += 1;
+        }
+    }
+
+    let quorum_required = if player_total == 0 {
+        0
+    } else {
+        std::cmp::max(1, (player_total + 1) / 2)
+    };
+    let quorum_met = player_success >= quorum_required;
+    let quorum_impossible =
+        player_success + (player_total.saturating_sub(player_done)) < quorum_required;
+
+    let dm_state = progress
+        .actor_states
+        .get("dm")
+        .map(String::as_str)
+        .unwrap_or("pending")
+        .trim()
+        .to_ascii_lowercase();
+    let dm_done = actor_state_is_done(&dm_state);
+    let dm_error = actor_state_is_error(&dm_state);
+    let phase_label = pretty_phase(&progress.phase);
+    let current_actor = if progress.current_actor.trim().is_empty() {
+        "-".to_string()
+    } else {
+        progress.current_actor.trim().to_string()
+    };
+    let flow_head = format!(
+        "TURN {} · PHASE {} · 현재 {}",
+        progress.turn, phase_label, current_actor
+    );
+
+    let prep_state = if player_total > 0 {
+        FlowStepState::Done
+    } else if !progress.actor_order.is_empty() {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let prep_text = if player_total > 0 {
+        format!("DM/플레이어 선택 완료 ({}명)", player_total)
+    } else if !progress.actor_order.is_empty() {
+        "파티 구성/동기화 중".to_string()
+    } else {
+        "새 게임에서 DM/플레이어 선택 대기".to_string()
+    };
+
+    let player_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if player_error > 0 {
+        FlowStepState::Error
+    } else if player_done >= player_total {
+        FlowStepState::Done
+    } else if player_done > 0 {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let player_text = if player_total == 0 {
+        "플레이어 미선택".to_string()
+    } else if player_done == 0 {
+        format!(
+            "응답 대기 {}/{} · 라운드 실행 필요",
+            player_done, player_total
+        )
+    } else {
+        format!(
+            "응답 {}/{} · 성공 {} · 이슈 {}",
+            player_done, player_total, player_success, player_error
+        )
+    };
+
+    let quorum_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if quorum_met {
+        FlowStepState::Done
+    } else if quorum_impossible {
+        FlowStepState::Error
+    } else if player_done > 0 {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let quorum_text = if player_total == 0 {
+        "파티 선택 후 계산".to_string()
+    } else {
+        format!(
+            "성공 {} / 필요 {} · 남은 응답 {}",
+            player_success,
+            quorum_required,
+            player_total.saturating_sub(player_done)
+        )
+    };
+
+    let dm_step_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if !quorum_met && quorum_impossible {
+        FlowStepState::Error
+    } else if !quorum_met {
+        FlowStepState::Wait
+    } else if dm_error {
+        FlowStepState::Error
+    } else if dm_done {
+        FlowStepState::Done
+    } else if dm_state == "thinking" || progress.current_actor.trim() == "dm" {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let dm_text = if player_total == 0 {
+        "쿼럼 이후 실행".to_string()
+    } else if !quorum_met {
+        "플레이어 응답/쿼럼 대기".to_string()
+    } else if dm_done {
+        format!("DM 처리 완료 ({})", dm_state)
+    } else if dm_state == "thinking" {
+        "DM 응답 생성 중 (thinking)".to_string()
+    } else {
+        "DM 실행 대기 (라운드 실행)".to_string()
+    };
+
+    let resolve_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if dm_error {
+        FlowStepState::Error
+    } else if dm_done
+        && (progress.last_event == "turn.started"
+            || progress.last_event == "phase.changed"
+            || progress.last_event == "session.outcome")
+    {
+        FlowStepState::Done
+    } else if dm_done {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let resolve_text = match progress.last_event.as_str() {
+        "turn.started" => format!("turn.started 수신 · 다음 TURN {} 진행", progress.turn),
+        "phase.changed" => "phase.changed 반영 완료".to_string(),
+        "session.outcome" => "세션 종료 결과 반영".to_string(),
+        "" => "이벤트 대기".to_string(),
+        other => format!("이벤트 반영 대기 · {}", other),
+    };
+
+    let step_html = |title: &str, state: FlowStepState, text: String| {
+        format!(
+            "<div class=\"agent-flow-step {class}\"><span class=\"s-k\">{title}</span><span class=\"s-v\">{text}</span></div>",
+            class = state.css(),
+            title = html_escape(title),
+            text = html_escape(&text),
+        )
+    };
+
+    let html = [
+        step_html("1 준비", prep_state, prep_text),
+        step_html("2 플레이어", player_state, player_text),
+        step_html("3 쿼럼", quorum_state, quorum_text),
+        step_html("4 DM", dm_step_state, dm_text),
+        step_html("5 반영", resolve_state, resolve_text),
+    ]
+    .join("");
+
+    el.set_inner_html(&format!(
+        "<div class=\"agent-flow-head\">{}</div><div class=\"agent-flow-track\">{}</div>",
+        html_escape(&flow_head),
+        html
+    ));
 }
 
 fn ordered_actor_ids_for_issue_scan(progress: &TurnProgressState) -> Vec<String> {
@@ -351,13 +588,42 @@ fn persist_round_plan_inputs(document: &web_sys::Document, room_id: &str) {
         .map(|input| input.value())
         .unwrap_or_default();
 
-    if dm.trim().is_empty() && players.trim().is_empty() {
+    let existing = storage
+        .get_item(&round_plan_storage_key(room_id))
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    let existing_dm = existing
+        .as_ref()
+        .and_then(|payload| payload.get("dm"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let existing_players = existing
+        .as_ref()
+        .and_then(|payload| payload.get("players"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+
+    let dm_to_store = if dm.trim().is_empty() {
+        existing_dm
+    } else {
+        dm.trim()
+    };
+    let players_to_store = if players.trim().is_empty() {
+        existing_players
+    } else {
+        players.trim()
+    };
+
+    if dm_to_store.is_empty() && players_to_store.is_empty() {
         return;
     }
 
     let payload = serde_json::json!({
-        "dm": dm.trim(),
-        "players": players.trim(),
+        "dm": dm_to_store,
+        "players": players_to_store,
     });
     let _ = storage.set_item(&round_plan_storage_key(room_id), &payload.to_string());
 }
@@ -606,8 +872,13 @@ pub fn update_turn_runtime_dom(
             room_class
         };
 
+        let room_id = crate::config::sanitize_room_id(room_state.id.trim())
+            .unwrap_or_else(crate::config::current_room_id);
+        if let Some(dashboard) = document.get_element_by_id("dashboard") {
+            let _ = dashboard.set_attribute("data-room-id", &room_id);
+        }
+
         if let Some(room_status_el) = document.get_element_by_id("room-status") {
-            let room_id = crate::config::current_room_id();
             room_status_el.set_text_content(Some(&format!(
                 "현재 게임 {} · {}",
                 room_id,
@@ -626,7 +897,6 @@ pub fn update_turn_runtime_dom(
             );
         }
 
-        let room_id = crate::config::current_room_id();
         let mut room_switched = false;
         if let Some(dashboard) = document.get_element_by_id("dashboard") {
             let previous_room = dashboard
@@ -725,6 +995,7 @@ pub fn update_turn_runtime_dom(
             flow_banner.set_inner_html(&html);
             let _ = flow_banner.set_attribute("title", &next_action);
         }
+        render_agent_round_flow(&document, &progress);
 
         let inferred_dm = if !progress.dm_keeper.trim().is_empty() {
             progress.dm_keeper.trim().to_string()
@@ -733,6 +1004,13 @@ pub fn update_turn_runtime_dom(
                 .iter()
                 .find(|actor| actor.id == "dm" && !actor.keeper.trim().is_empty())
                 .map(|actor| actor.keeper.trim().to_string())
+                .or_else(|| {
+                    document
+                        .get_element_by_id("new-game-dm-select")
+                        .and_then(|el| el.dyn_into::<HtmlSelectElement>().ok())
+                        .map(|select| select.value().trim().to_string())
+                        .filter(|value| !value.is_empty())
+                })
                 .unwrap_or_default()
         };
         if let Some(dm_input) = document

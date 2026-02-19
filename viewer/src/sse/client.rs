@@ -367,16 +367,16 @@ fn map_snapshot_dice_roll(
         .to_string();
     let mapped = attach_room_id(
         json!({
-        "turn": value_to_u32(entry.get("turn"), fallback_turn),
-        "character": character,
-        "action": action,
-        "d20": value_to_i32(entry.get("raw_d20"), value_to_i32(entry.get("d20"), 0)),
-        "bonus": value_to_i32(entry.get("bonus"), 0),
-        "total": value_to_i32(entry.get("total"), 0),
-        "dc": value_to_i32(entry.get("dc"), 0),
-        "result": map_snapshot_result(entry),
-        "note": entry.get("note").and_then(Value::as_str).unwrap_or("")
-    }),
+            "turn": value_to_u32(entry.get("turn"), fallback_turn),
+            "character": character,
+            "action": action,
+            "d20": value_to_i32(entry.get("raw_d20"), value_to_i32(entry.get("d20"), 0)),
+            "bonus": value_to_i32(entry.get("bonus"), 0),
+            "total": value_to_i32(entry.get("total"), 0),
+            "dc": value_to_i32(entry.get("dc"), 0),
+            "result": map_snapshot_result(entry),
+            "note": entry.get("note").and_then(Value::as_str).unwrap_or("")
+        }),
         entry,
         Some(stream_room_id),
     );
@@ -593,15 +593,15 @@ fn map_trpg_event(
         "dice.rolled" => {
             let mapped = attach_room_id(
                 json!({
-                "turn": value_to_u32(payload.get("turn"), state.last_turn),
-                "character": payload.get("actor_id").and_then(Value::as_str).or(actor_id).unwrap_or("unknown"),
-                "action": payload.get("action").and_then(Value::as_str).unwrap_or("action"),
-                "d20": value_to_i32(payload.get("raw_d20"), 0),
-                "bonus": value_to_i32(payload.get("bonus"), 0),
-                "total": value_to_i32(payload.get("total"), 0),
-                "dc": value_to_i32(payload.get("dc"), 0),
-                "result": payload.get("label").and_then(Value::as_str).unwrap_or("unknown")
-            }),
+                    "turn": value_to_u32(payload.get("turn"), state.last_turn),
+                    "character": payload.get("actor_id").and_then(Value::as_str).or(actor_id).unwrap_or("unknown"),
+                    "action": payload.get("action").and_then(Value::as_str).unwrap_or("action"),
+                    "d20": value_to_i32(payload.get("raw_d20"), 0),
+                    "bonus": value_to_i32(payload.get("bonus"), 0),
+                    "total": value_to_i32(payload.get("total"), 0),
+                    "dc": value_to_i32(payload.get("dc"), 0),
+                    "result": payload.get("label").and_then(Value::as_str).unwrap_or("unknown")
+                }),
                 payload,
                 stream_room_id,
             );
@@ -624,15 +624,15 @@ fn map_trpg_event(
                 .unwrap_or("");
             let mapped = attach_room_id(
                 json!({
-                "text": text,
-                "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
-                "speaker": payload
-                    .get("speaker")
-                    .and_then(Value::as_str)
-                    .or_else(|| payload.get("actor_id").and_then(Value::as_str))
-                    .or(actor_id)
-                    .or_else(|| payload.get("keeper").and_then(Value::as_str))
-            }),
+                    "text": text,
+                    "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
+                    "speaker": payload
+                        .get("speaker")
+                        .and_then(Value::as_str)
+                        .or_else(|| payload.get("actor_id").and_then(Value::as_str))
+                        .or(actor_id)
+                        .or_else(|| payload.get("keeper").and_then(Value::as_str))
+                }),
                 payload,
                 stream_room_id,
             );
@@ -646,13 +646,13 @@ fn map_trpg_event(
                 .unwrap_or("action proposed");
             let mapped = attach_room_id(
                 json!({
-                "text": proposed,
-                "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
-                "speaker": payload
-                    .get("actor_id")
-                    .and_then(Value::as_str)
-                    .or(actor_id)
-            }),
+                    "text": proposed,
+                    "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
+                    "speaker": payload
+                        .get("actor_id")
+                        .and_then(Value::as_str)
+                        .or(actor_id)
+                }),
                 payload,
                 stream_room_id,
             );
@@ -671,10 +671,10 @@ fn map_trpg_event(
             };
             let mapped = attach_room_id(
                 json!({
-                "text": text,
-                "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
-                "speaker": payload.get("keeper").and_then(Value::as_str)
-            }),
+                    "text": text,
+                    "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
+                    "speaker": payload.get("keeper").and_then(Value::as_str)
+                }),
                 payload,
                 stream_room_id,
             );
@@ -692,10 +692,10 @@ fn map_trpg_event(
                 .unwrap_or("unknown");
             let mapped = attach_room_id(
                 json!({
-                "text": format!("[unavailable] {}: {}", actor, reason),
-                "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
-                "speaker": payload.get("keeper").and_then(Value::as_str)
-            }),
+                    "text": format!("[unavailable] {}: {}", actor, reason),
+                    "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
+                    "speaker": payload.get("keeper").and_then(Value::as_str)
+                }),
                 payload,
                 stream_room_id,
             );
@@ -716,9 +716,9 @@ fn map_trpg_event(
             }
             let mapped = attach_room_id(
                 json!({
-                "turn": state.last_turn,
-                "phase": state.last_phase
-            }),
+                    "turn": state.last_turn,
+                    "phase": state.last_phase
+                }),
                 payload,
                 stream_room_id,
             );
@@ -739,9 +739,9 @@ fn map_trpg_event(
             }
             let mapped = attach_room_id(
                 json!({
-                "turn": state.last_turn,
-                "phase": state.last_phase
-            }),
+                    "turn": state.last_turn,
+                    "phase": state.last_phase
+                }),
                 payload,
                 stream_room_id,
             );
@@ -772,10 +772,10 @@ fn map_trpg_event(
                 .unwrap_or("action resolved");
             let mapped = attach_room_id(
                 json!({
-                "text": narrative,
-                "phase": state.last_phase,
-                "speaker": actor_id
-            }),
+                    "text": narrative,
+                    "phase": state.last_phase,
+                    "speaker": actor_id
+                }),
                 payload,
                 stream_room_id,
             );
@@ -813,10 +813,7 @@ fn map_trpg_event(
                 .get("outcome")
                 .and_then(Value::as_str)
                 .unwrap_or("draw");
-            let summary = payload
-                .get("summary")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let summary = payload.get("summary").and_then(Value::as_str).unwrap_or("");
             let reason = payload.get("reason").and_then(Value::as_str).unwrap_or("");
             let turn = value_to_u32(payload.get("turn"), state.last_turn);
             if turn > 0 {
@@ -898,11 +895,7 @@ fn map_trpg_event(
                     .or_else(|| canonical_mood_id(desc))
                     .or_else(|| canonical_mood_id(sub))
                     .unwrap_or(id_hint);
-                let mood = if mood.trim().is_empty() {
-                    desc
-                } else {
-                    mood
-                };
+                let mood = if mood.trim().is_empty() { desc } else { mood };
                 let mapped = json!({
                     "mood": mood,
                     "intensity": severity
@@ -918,9 +911,9 @@ fn map_trpg_event(
             } else {
                 let mapped = attach_room_id(
                     json!({
-                    "text": format!("[world] {}", desc),
-                    "phase": state.last_phase,
-                }),
+                        "text": format!("[world] {}", desc),
+                        "phase": state.last_phase,
+                    }),
                     payload,
                     stream_room_id,
                 );
@@ -957,9 +950,9 @@ fn map_trpg_event(
                 .unwrap_or("updated");
             let mapped = attach_room_id(
                 json!({
-                "text": format!("[quest] {} \u{2014} {}", title, status),
-                "phase": state.last_phase,
-            }),
+                    "text": format!("[quest] {} \u{2014} {}", title, status),
+                    "phase": state.last_phase,
+                }),
                 payload,
                 stream_room_id,
             );
@@ -979,9 +972,9 @@ fn map_trpg_event(
             };
             let mapped = attach_room_id(
                 json!({
-                "text": format!("[intervention:{}] {} \u{2014} {}", status_label, itype, reason),
-                "phase": state.last_phase,
-            }),
+                    "text": format!("[intervention:{}] {} \u{2014} {}", status_label, itype, reason),
+                    "phase": state.last_phase,
+                }),
                 payload,
                 stream_room_id,
             );

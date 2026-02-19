@@ -486,7 +486,11 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
             room = html_escape(&sanitize_text(&current_room))
         )
     } else {
-        render_room_bucket_html("현재 게임 (실시간)", &current_rooms, "history-room-bucket-current")
+        render_room_bucket_html(
+            "현재 게임 (실시간)",
+            &current_rooms,
+            "history-room-bucket-current",
+        )
     };
 
     let summary_class = if current_rooms.is_empty() {

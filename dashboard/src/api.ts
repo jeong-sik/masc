@@ -61,6 +61,15 @@ async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: numb
   }
 }
 
+function defaultBoardVoter(): string {
+  const params = getQueryParams()
+  return (
+    params.get('agent')?.trim() ||
+    params.get('agent_name')?.trim() ||
+    'dashboard-user'
+  )
+}
+
 // --- Generic fetcher ---
 
 async function get<T>(path: string): Promise<T> {
@@ -171,7 +180,11 @@ export function fetchBoardFlairs(): Promise<{ flairs: BoardFlair[] }> {
 }
 
 export function votePost(postId: string, direction: 'up' | 'down'): Promise<unknown> {
-  return post(`/api/v1/board/${postId}/vote`, { direction })
+  return post('/api/v1/tools/masc_board_vote', {
+    post_id: postId,
+    vote: direction,
+    voter: defaultBoardVoter(),
+  })
 }
 
 export function voteBoardTool(postId: string, vote: 'up' | 'down', voter: string): Promise<unknown> {

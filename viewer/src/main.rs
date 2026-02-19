@@ -12,9 +12,9 @@ mod render;
 mod shaders;
 mod sse;
 
-use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::asset::{AssetMetaCheck, AssetPlugin};
+use bevy::prelude::*;
 
 use mode::ModePlugin;
 use theme::ThemePlugin;
@@ -22,8 +22,18 @@ use theme::ThemePlugin;
 use theme::ViewerTheme;
 
 #[cfg(target_arch = "wasm32")]
+fn mark_wasm_dom_fallback() {
+    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(body) = document.body() {
+            let _ = body.class_list().add_1("wasm-dom-fallback");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn main() {
     console_error_panic_hook::set_once();
+    mark_wasm_dom_fallback();
 
     App::new()
         // Web fallback path: avoid GPU surface creation so DOM-first viewer can boot.
@@ -31,11 +41,7 @@ fn main() {
         .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins((ModePlugin, ThemePlugin))
         // DOM + session systems only; renderer/audio plugins are skipped on wasm fallback.
-        .add_plugins((
-            sse::SsePlugin,
-            game::GameStatePlugin,
-            dom::DomBridgePlugin,
-        ))
+        .add_plugins((sse::SsePlugin, game::GameStatePlugin, dom::DomBridgePlugin))
         .run();
 }
 

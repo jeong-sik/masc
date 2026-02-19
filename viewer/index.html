@@ -171,6 +171,13 @@
                     <button id="session-resume-btn" class="inline-toggle" type="button" title="멈춘 세션을 재개합니다">재개</button>
                     <span id="session-control-status" class="widget-pill">세션 제어 대기</span>
                 </div>
+                <button id="view-options-toggle" class="inline-toggle" type="button" aria-pressed="false" title="화면 표시 옵션 열기/닫기">화면 옵션</button>
+                <div id="view-options-popover" class="view-options-popover" style="display:none">
+                    <label><input id="opt-show-ops" type="checkbox" checked /> 운영 HUD</label>
+                    <label><input id="opt-show-secondary" type="checkbox" checked /> 내러티브 패널</label>
+                    <label><input id="opt-show-tertiary" type="checkbox" checked /> 파티 패널</label>
+                    <label><input id="opt-show-bottom" type="checkbox" checked /> 하단 로그</label>
+                </div>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>
@@ -275,6 +282,7 @@
                             선택한 플레이어 keeper 순서를 actor slot(P01,P02,...)에 수동 고정할 수 있습니다.
                         </div>
                         <div class="manual-map-actions">
+                            <button id="new-game-manual-recommend" class="inline-toggle" type="button">점유기준 추천</button>
                             <button id="new-game-manual-reset" class="inline-toggle" type="button">선택순으로 리셋</button>
                         </div>
                         <div id="new-game-manual-table" class="manual-map-table">
@@ -405,6 +413,9 @@
                     <div id="turn-flow-banner" class="turn-flow-banner is-idle" aria-live="polite">
                         <span class="flow-state">대기</span>
                         <span class="flow-text">세션 상태를 불러오는 중입니다.</span>
+                    </div>
+                    <div id="agent-round-flow" class="agent-round-flow" aria-live="polite">
+                        <div class="agent-flow-empty">에이전트 라운드 흐름을 불러오는 중입니다.</div>
                     </div>
                     <!-- Turn Controls: advance turn (Keeper/GM only) -->
                     <div id="turn-controls" style="display:none">

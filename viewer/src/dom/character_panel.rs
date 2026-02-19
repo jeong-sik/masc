@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::assets;
+use crate::dom::escape::html_escape;
 use crate::game::components::Actor;
 
 /// Snapshot of actor state used for change detection.
@@ -110,6 +112,57 @@ fn fmt_modifier(m: i32) -> String {
     }
 }
 
+fn actor_initials(name: &str, id: &str) -> String {
+    let mut initials = String::new();
+    for token in name.split_whitespace().take(2) {
+        if let Some(ch) = token.chars().next() {
+            initials.push(ch.to_ascii_uppercase());
+        }
+    }
+    if initials.is_empty() {
+        for token in id.split(['-', '_']).take(2) {
+            if let Some(ch) = token.chars().next() {
+                initials.push(ch.to_ascii_uppercase());
+            }
+        }
+    }
+    if initials.is_empty() {
+        "AI".to_string()
+    } else {
+        initials
+    }
+}
+
+fn portrait_url_for_actor(actor: &Actor) -> Option<String> {
+    let mut keys = Vec::new();
+
+    let id = actor.id.trim().to_ascii_lowercase();
+    if !id.is_empty() {
+        keys.push(id.clone());
+        if let Some((head, _)) = id.split_once('-') {
+            keys.push(head.to_string());
+        }
+        if let Some((head, _)) = id.split_once('_') {
+            keys.push(head.to_string());
+        }
+    }
+
+    let name = actor.name.trim().to_ascii_lowercase();
+    if !name.is_empty() {
+        keys.push(name.clone());
+        if let Some(first) = name.split_whitespace().next() {
+            keys.push(first.to_string());
+        }
+    }
+
+    for key in keys {
+        if let Some(path) = assets::portrait_for(&key) {
+            return Some(format!("/assets/{}", path));
+        }
+    }
+    None
+}
+
 /// Reads the current collapse state from the DOM to preserve it across re-renders.
 /// Returns a set of section IDs that are currently expanded.
 #[cfg(target_arch = "wasm32")]
@@ -202,6 +255,18 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
         let mp_bar_class = mp_class(actor.mp, actor.max_mp);
         let icon = class_icon(&actor.class);
         let slug = class_slug(&actor.class);
+        let portrait_html = if let Some(url) = portrait_url_for_actor(actor) {
+            format!(
+                "<div class=\"char-portrait-wrap\"><img class=\"char-portrait\" src=\"{}\" alt=\"{} portrait\" loading=\"lazy\" decoding=\"async\" /></div>",
+                html_escape(&url),
+                html_escape(&actor.name),
+            )
+        } else {
+            format!(
+                "<div class=\"char-portrait-wrap\"><div class=\"char-portrait-fallback\" aria-hidden=\"true\">{}</div></div>",
+                html_escape(&actor_initials(&actor.name, &actor.id)),
+            )
+        };
         let keeper_line = if actor.keeper.trim().is_empty() {
             "<div class=\"char-owner owner-unassigned\">keeper: (unassigned)</div>".to_string()
         } else {
@@ -349,8 +414,11 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             concat!(
                 "<div class=\"character-card{}\" data-actor-id=\"{}\" data-class=\"{}\">",
                 "<div class=\"char-header\">",
+                "{}",
+                "<div class=\"char-identity\">",
                 "<span class=\"char-name\">{}</span>",
                 "<span class=\"char-class\"><span class=\"class-icon\">{}</span> {}</span>",
+                "</div>",
                 "</div>",
                 "{}",
                 "<div class=\"hp-row\">",
@@ -375,6 +443,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             dead_class,
             actor.id,
             slug,
+            portrait_html,
             actor.name,
             icon,
             actor.class,

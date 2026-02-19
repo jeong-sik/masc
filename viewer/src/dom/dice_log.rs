@@ -96,7 +96,10 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
         let note_html = if note_clean.trim().is_empty() {
             String::new()
         } else {
-            format!("<div class=\"dice-note\">{}</div>", html_escape(&note_clean))
+            format!(
+                "<div class=\"dice-note\">{}</div>",
+                html_escape(&note_clean)
+            )
         };
 
         let dedup_key = format!(

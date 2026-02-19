@@ -13,9 +13,9 @@ use std::sync::{
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+use crate::game::state::TurnProgressState;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
-use crate::game::state::TurnProgressState;
 
 // ─── Resource ──────────────────────────────────
 

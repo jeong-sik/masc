@@ -82,6 +82,8 @@ struct TrpgStreamEvent {
     #[serde(rename = "type")]
     event_type: String,
     #[serde(default)]
+    room_id: Option<String>,
+    #[serde(default)]
     actor_id: Option<String>,
     #[serde(default)]
     payload: Value,
@@ -215,6 +217,34 @@ fn snapshot_phase(root: &Value, fallback: &str) -> String {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+fn snapshot_room_id(root: &Value) -> String {
+    snapshot_root(root)
+        .get("room_id")
+        .or_else(|| root.get("room_id"))
+        .or_else(|| root.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn attach_room_id(mut mapped: Value, payload: &Value, stream_room_id: Option<&str>) -> Value {
+    let payload_room = payload
+        .get("room_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let stream_room = stream_room_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(room_id) = payload_room.or(stream_room) {
+        mapped["room_id"] = Value::String(room_id.to_string());
+    }
+    mapped
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
     let source = root
         .get("dice_log")
@@ -262,6 +292,7 @@ fn map_snapshot_result(result: &Value) -> String {
 fn map_snapshot_dice_roll(
     entry: &Value,
     fallback_turn: u32,
+    stream_room_id: &str,
     _fallback_phase: &str,
 ) -> Option<(String, String)> {
     if !entry.is_object() {
@@ -279,7 +310,8 @@ fn map_snapshot_dice_roll(
         .and_then(Value::as_str)
         .unwrap_or("manual_roll")
         .to_string();
-    let mapped = json!({
+    let mapped = attach_room_id(
+        json!({
         "turn": value_to_u32(entry.get("turn"), fallback_turn),
         "character": character,
         "action": action,
@@ -289,7 +321,10 @@ fn map_snapshot_dice_roll(
         "dc": value_to_i32(entry.get("dc"), 0),
         "result": map_snapshot_result(entry),
         "note": entry.get("note").and_then(Value::as_str).unwrap_or("")
-    });
+    }),
+        entry,
+        Some(stream_room_id),
+    );
     Some(("dice_roll".to_string(), mapped.to_string()))
 }
 
@@ -302,6 +337,7 @@ fn snapshot_room_status_progress_payload(
 ) -> (String, String) {
     let turn = snapshot_turn(root, fallback_turn);
     let phase = snapshot_phase(root, fallback_phase);
+    let dm_keeper = infer_dm_keeper_from_snapshot(root);
     let event_type = match status {
         "ended" | "completed" | "done" | "retired" | "closed" => "room.ended",
         _ => "room.started",
@@ -315,15 +351,48 @@ fn snapshot_room_status_progress_payload(
         "keeper": "",
         "role": "",
         "reason": "",
-        "dm_keeper": snapshot_root(root).get("dm_keeper").and_then(Value::as_str).unwrap_or(""),
+        "dm_keeper": dm_keeper,
     });
     (event_type.to_string(), payload.to_string())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn infer_dm_keeper_from_snapshot(root: &Value) -> String {
+    snapshot_root(root)
+        .get("dm_keeper")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            snapshot_root(root)
+                .get("narration_log")
+                .and_then(Value::as_array)
+                .and_then(|entries| {
+                    entries.iter().rev().find_map(|entry| {
+                        let role = entry.get("role").and_then(Value::as_str).unwrap_or("");
+                        let actor_id = entry.get("actor_id").and_then(Value::as_str).unwrap_or("");
+                        if role.eq_ignore_ascii_case("dm") || actor_id.eq_ignore_ascii_case("dm") {
+                            entry
+                                .get("keeper")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToString::to_string)
+                        } else {
+                            None
+                        }
+                    })
+                })
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn map_turn_progress_event(
     event_type: &str,
     actor_id: Option<&str>,
+    _stream_room_id: Option<&str>,
     payload: &Value,
     state: &TrpgMapperState,
 ) -> Option<(String, String)> {
@@ -371,7 +440,8 @@ fn map_turn_progress_event(
                 .get("room_status")
                 .or_else(|| payload.get("status"))
                 .and_then(Value::as_str)
-                .unwrap_or("active")
+                .unwrap_or("active"),
+            "dm_keeper": payload.get("dm_keeper").and_then(Value::as_str).unwrap_or("")
         }),
         "room.ended" => json!({
             "event_type": event_type,
@@ -433,6 +503,7 @@ fn map_turn_progress_event(
 fn map_trpg_event(
     event_type: &str,
     actor_id: Option<&str>,
+    stream_room_id: Option<&str>,
     payload: &Value,
     state: &mut TrpgMapperState,
 ) -> Vec<(String, String)> {

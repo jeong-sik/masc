@@ -264,7 +264,7 @@ fn sync_theme_selectors(doc: &web_sys::Document, css_value: &str) {
 /// Reacts to theme changes by updating shader settings, clear color, and DOM attributes.
 fn apply_theme_changes(
     theme: Res<ViewerTheme>,
-    mut clear_color: ResMut<ClearColor>,
+    clear_color: Option<ResMut<ClearColor>>,
     mut cameras: Query<&mut PostProcessSettings>,
 ) {
     if !theme.is_changed() {
@@ -280,8 +280,10 @@ fn apply_theme_changes(
         cam_settings.time = current_time;
     }
 
-    // Update Bevy clear color
-    clear_color.0 = theme.clear_color();
+    // Update Bevy clear color when renderer resources exist.
+    if let Some(mut clear_color) = clear_color {
+        clear_color.0 = theme.clear_color();
+    }
 
     // Update DOM theme attribute
     #[cfg(target_arch = "wasm32")]

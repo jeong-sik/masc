@@ -477,5 +477,59 @@
         </footer>
     </div>
 
+    <script>
+    (function () {
+        const loading = document.getElementById('loading-screen');
+        const loadingText = loading ? loading.querySelector('.loading-text') : null;
+        const body = document.body;
+        let booted = false;
+
+        function hideLoading(forceLobby, message) {
+            if (!loading) return;
+            loading.classList.add('hidden');
+            loading.style.opacity = '0';
+            loading.style.pointerEvents = 'none';
+            if (message && loadingText) {
+                loadingText.textContent = message;
+            }
+            if (forceLobby && body) {
+                body.classList.add('mode-lobby');
+            }
+        }
+
+        window.addEventListener('TrunkApplicationStarted', function () {
+            booted = true;
+            if (body) {
+                body.setAttribute('data-viewer-boot', 'ok');
+            }
+            hideLoading(false);
+        });
+
+        window.addEventListener('error', function () {
+            if (booted) return;
+            if (body) {
+                body.setAttribute('data-viewer-boot', 'failed');
+            }
+            hideLoading(true, '초기화 실패 (Fallback 모드)');
+        });
+
+        window.addEventListener('unhandledrejection', function () {
+            if (booted) return;
+            if (body) {
+                body.setAttribute('data-viewer-boot', 'failed');
+            }
+            hideLoading(true, '초기화 실패 (Fallback 모드)');
+        });
+
+        window.setTimeout(function () {
+            if (booted) return;
+            if (body) {
+                body.setAttribute('data-viewer-boot', 'timeout');
+            }
+            hideLoading(true, '초기화 지연 (Fallback 모드)');
+        }, 8000);
+    })();
+    </script>
+
 </body>
 </html>

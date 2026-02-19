@@ -7,7 +7,7 @@ description = "Multi-mode MASC visualization platform — WebGPU rendered via Be
 [dependencies]
 bevy = { version = "0.18", default-features = false, features = [
     "2d",
-    "webgpu",
+    "webgl2",
     "jpeg",
     "bevy_ui",
     "bevy_text",
@@ -15,6 +15,7 @@ bevy = { version = "0.18", default-features = false, features = [
 ] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = [
     "EventSource",
     "MessageEvent",

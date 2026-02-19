@@ -17,11 +17,11 @@ pub enum TurnPhase {
 impl TurnPhase {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "dm_narration" => Self::DmNarration,
-            "party_discussion" => Self::PartyDiscussion,
-            "action_declaration" => Self::ActionDeclaration,
-            "dice_resolution" => Self::DiceResolution,
-            "outcome_narration" => Self::OutcomeNarration,
+            "dm_narration" | "briefing" => Self::DmNarration,
+            "party_discussion" | "round" | "discuss" => Self::PartyDiscussion,
+            "action_declaration" | "action" => Self::ActionDeclaration,
+            "dice_resolution" | "dice" => Self::DiceResolution,
+            "outcome_narration" | "outcome" => Self::OutcomeNarration,
             "state_update" => Self::StateUpdate,
             "transition" => Self::Transition,
             _ => Self::DmNarration,

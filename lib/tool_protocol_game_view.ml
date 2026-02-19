@@ -225,6 +225,85 @@ let broadcast_deprecated_alias ~agent_name ~legacy_tool ~canonical_tool =
   in
   Sse.broadcast notification
 
+let broadcast_masc_event ~event_type ~agent ?(data = `Null) () =
+  let params =
+    `Assoc
+      [
+        ("type", `String event_type);
+        ("agent", `String agent);
+        ("data", data);
+        ("timestamp", `Float (Unix.gettimeofday ()));
+      ]
+  in
+  let notification =
+    `Assoc
+      [
+        ("jsonrpc", `String "2.0");
+        ("method", `String "masc/event");
+        ("params", params);
+      ]
+  in
+  Sse.broadcast notification
+
+let broadcast_decision_create_events ~agent (decision : Game_view_state.decision) =
+  broadcast_masc_event ~event_type:"decision_issue" ~agent
+    ~data:
+      (`Assoc
+        [
+          ("id", `String decision.decision_id);
+          ("title", `String decision.issue);
+          ("description", `String decision.issue);
+          ("urgency", `String "medium");
+        ])
+    ();
+  List.iteri
+    (fun idx option_label ->
+      broadcast_masc_event ~event_type:"decision_option" ~agent
+        ~data:
+          (`Assoc
+            [
+              ("issue_id", `String decision.decision_id);
+              ("label", `String option_label);
+              ("proposed_by", `String agent);
+              ("option_id", `String (Printf.sprintf "opt-%d" idx));
+            ])
+        ())
+    decision.options;
+  broadcast_masc_event ~event_type:"decision_phase" ~agent
+    ~data:
+      (`Assoc
+        [
+          ("issue_id", `String decision.decision_id);
+          ("phase", `String "proposal");
+        ])
+    ()
+
+let broadcast_decision_finalize_events ~agent
+    (decision : Game_view_state.decision) =
+  let chosen_option =
+    decision.selected_option |> Option.value ~default:"unknown"
+  in
+  let confidence = decision.confidence |> Option.value ~default:1.0 in
+  broadcast_masc_event ~event_type:"decision_consensus" ~agent
+    ~data:
+      (`Assoc
+        [
+          ("issue_id", `String decision.decision_id);
+          ("chosen_option_id", `String chosen_option);
+          ("method", `String "decision.finalize");
+          ("margin", `Float confidence);
+          ("dissenting", `List []);
+        ])
+    ();
+  broadcast_masc_event ~event_type:"decision_phase" ~agent
+    ~data:
+      (`Assoc
+        [
+          ("issue_id", `String decision.decision_id);
+          ("phase", `String "resolved");
+        ])
+    ()
+
 let trpg_context_of (ctx : context) : Tool_trpg.context =
   {
     config = ctx.config;
@@ -395,6 +474,7 @@ let handle_decision_create (ctx : context) ~canonical_tool args :
       Game_view_state.create_decision ctx.config ~session_id ~issue ~options
         ~criteria ~weights
     in
+    broadcast_decision_create_events ~agent:ctx.agent_name decision;
     Ok (ok_json ~canonical_tool (decision_payload decision))
 
 let handle_decision_finalize (ctx : context) ~canonical_tool args :
@@ -427,7 +507,9 @@ let handle_decision_finalize (ctx : context) ~canonical_tool args :
       Game_view_state.finalize_decision ctx.config ~session_id ~decision_id
         ~selected_option ~rationale ~confidence ~verifier ~risk_ack
     with
-    | Ok finalized -> Ok (ok_json ~canonical_tool (decision_payload finalized))
+    | Ok finalized ->
+        broadcast_decision_finalize_events ~agent:ctx.agent_name finalized;
+        Ok (ok_json ~canonical_tool (decision_payload finalized))
     | Error msg ->
         let code =
           if String.starts_with ~prefix:"decision not found" msg then "NOT_FOUND"

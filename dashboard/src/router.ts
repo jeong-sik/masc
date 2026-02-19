@@ -1,34 +1,117 @@
 // MASC Dashboard — Hash-based router
-// Reads location.hash and produces a signal-based RouteState
+// Reads location.hash and supports legacy deep-link forms:
+// #overview, #/overview, #board/post/:id, #tab=agents, /dashboard/agents
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
 
-function parseHash(hash: string): RouteState {
-  const h = (hash || '').replace(/^#/, '')
-  if (!h) return { tab: 'overview', params: {}, postId: null }
+const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 
-  const [pathPart, queryPart] = h.split('?') as [string, string | undefined]
-  const segments = pathPart.split('/')
-  const tab: TabId = VALID_TABS.includes(segments[0] as TabId)
-    ? (segments[0] as TabId)
-    : 'overview'
+function isTabId(v: string | null | undefined): v is TabId {
+  return !!v && VALID_TABS.includes(v as TabId)
+}
 
-  // #board/post/{id}
-  let postId: string | null = null
-  if (segments[0] === 'board' && segments[1] === 'post' && segments[2]) {
-    postId = segments[2]
+function decodeSafe(input: string): string {
+  try {
+    return decodeURIComponent(input)
+  } catch {
+    return input
   }
+}
 
-  // Parse query params
+function parseParams(raw: string | undefined): Record<string, string> {
   const params: Record<string, string> = {}
-  if (queryPart) {
-    const sp = new URLSearchParams(queryPart)
-    sp.forEach((v, k) => { params[k] = v })
+  if (!raw) return params
+
+  const sp = new URLSearchParams(raw)
+  sp.forEach((v, k) => {
+    params[k] = v
+  })
+  return params
+}
+
+function normalizeSegments(pathPart: string): string[] {
+  const normalized = pathPart.replace(/^\/+/, '')
+  const segments = normalized.split('/').filter(Boolean)
+  if (segments[0] === 'dashboard') return segments.slice(1)
+  return segments
+}
+
+function parseSegments(
+  segments: string[],
+  params: Record<string, string>,
+): RouteState {
+  const tabFromPath = segments[0]
+  const tabFromQuery = params.tab
+  const tab: TabId = isTabId(tabFromPath)
+    ? tabFromPath
+    : isTabId(tabFromQuery)
+      ? tabFromQuery
+      : 'overview'
+
+  let postId: string | null = null
+  if (tab === 'board') {
+    if (segments[0] === 'board' && segments[1] === 'post' && segments[2]) {
+      postId = decodeSafe(segments[2])
+    } else if (segments[0] === 'post' && segments[1]) {
+      postId = decodeSafe(segments[1])
+    }
   }
 
   return { tab, params, postId }
+}
+
+function parseHash(hash: string): RouteState {
+  const raw = (hash || '').replace(/^#/, '').trim()
+  if (!raw) return DEFAULT_ROUTE
+
+  const decoded = decodeSafe(raw)
+  let pathPart = decoded
+  let queryPart: string | undefined
+
+  if (decoded.startsWith('?')) {
+    pathPart = ''
+    queryPart = decoded.slice(1)
+  } else {
+    const qIndex = decoded.indexOf('?')
+    if (qIndex >= 0) {
+      pathPart = decoded.slice(0, qIndex)
+      queryPart = decoded.slice(qIndex + 1)
+    }
+  }
+
+  // Legacy format: #tab=agents&room=xxx
+  if (!queryPart && pathPart.includes('=') && !pathPart.includes('/')) {
+    queryPart = pathPart
+    pathPart = ''
+  }
+
+  const params = parseParams(queryPart)
+  const segments = normalizeSegments(pathPart)
+  return parseSegments(segments, params)
+}
+
+function parsePathname(pathname: string, search: string): RouteState | null {
+  const segments = pathname.replace(/^\/+/, '').split('/').filter(Boolean)
+  if (segments[0] !== 'dashboard') return null
+
+  const sub = segments.slice(1)
+  if (sub.length === 0) return { ...DEFAULT_ROUTE, params: parseParams(search.replace(/^\?/, '')) }
+  if (sub[0] === 'assets' || sub[0] === 'credits' || sub[0] === 'lodge') return null
+
+  const params = parseParams(search.replace(/^\?/, ''))
+  return parseSegments(sub, params)
+}
+
+function toHash(r: RouteState): string {
+  const path = r.postId
+    ? `board/post/${encodeURIComponent(r.postId)}`
+    : r.tab
+  const paramEntries = Object.entries(r.params).filter(([k]) => k !== 'tab')
+  if (paramEntries.length === 0) return `#${path}`
+  const sp = new URLSearchParams(paramEntries)
+  return `#${path}?${sp.toString()}`
 }
 
 // --- Reactive route signal ---
@@ -43,20 +126,15 @@ window.addEventListener('hashchange', () => {
 // --- Navigation helpers ---
 
 export function navigate(tab: TabId, params?: Record<string, string>): void {
-  let hash = `#${tab}`
-  if (params && Object.keys(params).length > 0) {
-    const sp = new URLSearchParams(params)
-    hash += `?${sp.toString()}`
-  }
-  window.location.hash = hash
+  const next = { tab, params: params ?? {}, postId: null } satisfies RouteState
+  window.location.hash = toHash(next)
 }
 
 export function navigateToPost(postId: string): void {
-  window.location.hash = `#board/post/${postId}`
+  window.location.hash = `#board/post/${encodeURIComponent(postId)}`
 }
 
 export function navigateBack(): void {
-  // Go back to the parent tab
   const current = route.value
   window.location.hash = `#${current.tab}`
 }
@@ -67,16 +145,27 @@ export function useRoute(): ReadonlySignal<RouteState> {
   return route
 }
 
-// Auto-apply initial hash from URL on load
-// (handled by signal initialization above)
-
-// --- Deep link: restore tab from initial hash on first load ---
-
 export function initRouter(): void {
-  // If no hash, set default
-  if (!window.location.hash || window.location.hash === '#') {
-    window.location.hash = '#overview'
+  // Priority 1: explicit hash route
+  if (window.location.hash && window.location.hash !== '#') {
+    route.value = parseHash(window.location.hash)
+    return
   }
-  // Parse current hash
+
+  // Priority 2: path deep-link route (/dashboard/:tab)
+  const fromPath = parsePathname(window.location.pathname, window.location.search)
+  if (fromPath) {
+    route.value = fromPath
+    const canonicalHash = toHash(fromPath)
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${canonicalHash}`,
+    )
+    return
+  }
+
+  // Default route
+  window.location.hash = '#overview'
   route.value = parseHash(window.location.hash)
 }

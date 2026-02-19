@@ -415,15 +415,13 @@ pub fn sync_turn_controls_visibility(
         set_round_run_controls_locked(&doc, locked);
 
         let dm_ready = read_dom_input(&doc, "round-run-dm")
-            .or_else(|| read_dom_input(&doc, "claimed-keeper"))
+            .or_else(|| read_claimed_keeper_for_current_room(&doc))
             .or_else(|| read_dom_input(&doc, "new-game-dm-select"))
             .is_some();
         let player_pairs_raw = read_dom_text_value(&doc, "round-run-players").unwrap_or_default();
         let mut player_count = parse_player_keeper_pairs(&player_pairs_raw).len();
         if player_count == 0 {
-            let claimed_actor = read_dom_input(&doc, "claimed-actor-id").unwrap_or_default();
-            let claimed_keeper = read_dom_input(&doc, "claimed-keeper").unwrap_or_default();
-            if !claimed_actor.is_empty() && !claimed_keeper.is_empty() {
+            if read_claimed_actor_keeper_for_current_room(&doc).is_some() {
                 player_count = 1;
             }
         }
@@ -1403,6 +1401,37 @@ fn read_dom_input(doc: &web_sys::Document, id: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn claim_matches_current_room(doc: &web_sys::Document) -> bool {
+    let claimed_room = read_dom_input(doc, "claimed-room-id").unwrap_or_default();
+    !claimed_room.is_empty() && claimed_room == config::current_room_id()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_claimed_keeper_for_current_room(doc: &web_sys::Document) -> Option<String> {
+    if claim_matches_current_room(doc) {
+        read_dom_input(doc, "claimed-keeper")
+    } else {
+        None
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_claimed_actor_keeper_for_current_room(
+    doc: &web_sys::Document,
+) -> Option<(String, String)> {
+    if !claim_matches_current_room(doc) {
+        return None;
+    }
+    let claimed_actor = read_dom_input(doc, "claimed-actor-id").unwrap_or_default();
+    let claimed_keeper = read_dom_input(doc, "claimed-keeper").unwrap_or_default();
+    if claimed_actor.is_empty() || claimed_keeper.is_empty() {
+        None
+    } else {
+        Some((claimed_actor, claimed_keeper))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
         .filter_map(|part| {
@@ -1425,7 +1454,7 @@ fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
 #[cfg(target_arch = "wasm32")]
 fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> {
     let dm_keeper = read_dom_input(doc, "round-run-dm")
-        .or_else(|| read_dom_input(doc, "claimed-keeper"))
+        .or_else(|| read_claimed_keeper_for_current_room(doc))
         .or_else(|| read_dom_input(doc, "new-game-dm-select"))
         .unwrap_or_default();
     if dm_keeper.is_empty() {
@@ -1445,9 +1474,8 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
     let player_pairs_raw = read_dom_text_value(doc, "round-run-players").unwrap_or_default();
     let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);
     if player_keepers.is_empty() {
-        let claimed_actor = read_dom_input(doc, "claimed-actor-id").unwrap_or_default();
-        let claimed_keeper = read_dom_input(doc, "claimed-keeper").unwrap_or_default();
-        if !claimed_actor.is_empty() && !claimed_keeper.is_empty() {
+        if let Some((claimed_actor, claimed_keeper)) = read_claimed_actor_keeper_for_current_room(doc)
+        {
             player_keepers.push((claimed_actor, claimed_keeper));
         }
     }

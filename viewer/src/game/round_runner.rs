@@ -156,14 +156,17 @@ pub fn set_auto_round_running(enabled: bool) {
         if enabled {
             if control.running.swap(true, Ordering::SeqCst) {
                 set_dom_runner_active(true);
+                sync_auto_round_ui(true);
                 return;
             }
             control.game_ended.store(false, Ordering::SeqCst);
             set_dom_runner_active(true);
+            sync_auto_round_ui(true);
             spawn_round_loop(control);
         } else {
             control.running.store(false, Ordering::SeqCst);
             set_dom_runner_active(false);
+            sync_auto_round_ui(false);
             release_round_flight("auto");
             log::info!("RoundRunner: auto round loop stopped by UI");
         }
@@ -279,6 +282,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
 
         running.store(false, Ordering::SeqCst);
         set_dom_runner_active(false);
+        sync_auto_round_ui(false);
         log::info!(
             "RoundRunner: loop finished (rounds={}, ended={})",
             round_num,
@@ -347,7 +351,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
 
     // 1) DM keeper: explicit round-run field > claimed keeper > new-game picker > ECS snapshot.
     let dm_keeper = read_dom_input("round-run-dm")
-        .or_else(|| read_dom_input("claimed-keeper"))
+        .or_else(read_claimed_keeper_for_current_room)
         .or_else(|| read_dom_input("new-game-dm-select"))
         .or_else(|| {
             let fallback = dm_keeper_fallback.trim();
@@ -419,6 +423,21 @@ fn read_dom_input(id: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn claim_matches_current_room() -> bool {
+    let claimed_room = read_dom_input("claimed-room-id").unwrap_or_default();
+    !claimed_room.is_empty() && claimed_room == config::current_room_id()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_claimed_keeper_for_current_room() -> Option<String> {
+    if claim_matches_current_room() {
+        read_dom_input("claimed-keeper")
+    } else {
+        None
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn round_response_advanced(resp: &str) -> Option<bool> {
     let parsed = serde_json::from_str::<serde_json::Value>(resp).ok()?;
     parsed
@@ -481,6 +500,32 @@ fn set_dom_runner_active(active: bool) {
         return;
     };
     let _ = dashboard.set_attribute("data-round-runner-active", if active { "1" } else { "0" });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_auto_round_ui(enabled: bool) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Some(dashboard) = document.get_element_by_id("dashboard") {
+        let _ = dashboard.set_attribute("data-auto-round", if enabled { "1" } else { "0" });
+    }
+    if let Some(button) = document.get_element_by_id("auto-round-toggle") {
+        button.set_text_content(Some(if enabled {
+            "자동 진행: ON"
+        } else {
+            "자동 진행: OFF"
+        }));
+        let _ = button.set_attribute("aria-pressed", if enabled { "true" } else { "false" });
+        let _ = button.set_attribute(
+            "title",
+            if enabled {
+                "AI 턴 자동 진행을 멈춥니다"
+            } else {
+                "AI 턴 자동 진행을 시작합니다"
+            },
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

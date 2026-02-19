@@ -466,9 +466,13 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 
                 let doc_async = doc_for_pause.clone();
                 wasm_bindgen_futures::spawn_local(async move {
+                    let room_id = crate::config::current_room_id();
                     match post_tool_action(
                         "masc_pause",
-                        json!({ "reason": "viewer trpg manual pause" }),
+                        json!({
+                            "room_id": room_id,
+                            "reason": "viewer trpg manual pause"
+                        }),
                     )
                     .await
                     {
@@ -517,7 +521,8 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 
                 let doc_async = doc_for_resume.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    match post_tool_action("masc_resume", json!({})).await {
+                    let room_id = crate::config::current_room_id();
+                    match post_tool_action("masc_resume", json!({ "room_id": room_id })).await {
                         Ok(raw) => {
                             let status = if raw.is_empty() {
                                 "세션 재개 완료".to_string()
@@ -1611,6 +1616,11 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
     };
     remember_known_rooms(std::slice::from_ref(&room));
     set_current_room_id(doc, &room);
+    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        let _ = dashboard.set_attribute("data-auto-round", "0");
+    }
+    render_auto_round_toggle(doc);
+    crate::game::round_runner::set_auto_round_running(false);
     clear_trpg_dom(doc);
     sync_room_hub_selection(doc, &room);
     let doc_for_refresh = doc.clone();

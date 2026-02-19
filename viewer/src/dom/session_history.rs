@@ -1108,7 +1108,16 @@ pub fn update_session_history_dom(
 
             let mut room_reset = false;
             if let Some(room) = cache.rooms.get_mut(room_idx) {
-                if !incoming_session_id.is_empty() && room.session_id != incoming_session_id {
+                let has_progress_history = room.updated_turn > 1
+                    || room.turns.iter().any(|row| row.turn > 1)
+                    || room.turns.iter().any(|row| !row.events.is_empty());
+                let should_reset = if incoming_session_id.is_empty() {
+                    has_progress_history
+                } else {
+                    room.session_id != incoming_session_id
+                };
+
+                if should_reset {
                     room.session_id = incoming_session_id.clone();
                     room.turns.clear();
                     room.updated_turn = 1;

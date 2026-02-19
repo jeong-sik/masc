@@ -1967,6 +1967,82 @@ body:not(.mode-trpg) #ops-hud {
     line-height: 1.4;
 }
 
+.turn-flow-banner {
+    margin: 0 0 10px;
+    border: 1px solid rgba(109, 122, 164, 0.34);
+    border-radius: var(--panel-radius);
+    background: rgba(12, 18, 33, 0.84);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 9px;
+}
+
+.turn-flow-banner .flow-state {
+    flex: 0 0 auto;
+    border: 1px solid rgba(109, 122, 164, 0.46);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: rgba(20, 26, 44, 0.65);
+}
+
+.turn-flow-banner .flow-text {
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-primary);
+    letter-spacing: 0.2px;
+}
+
+.turn-flow-banner.is-running {
+    border-color: rgba(88, 184, 116, 0.45);
+    background: rgba(18, 40, 31, 0.48);
+}
+
+.turn-flow-banner.is-running .flow-state {
+    border-color: rgba(88, 184, 116, 0.55);
+    color: var(--status-connected);
+}
+
+.turn-flow-banner.is-waiting {
+    border-color: rgba(196, 162, 101, 0.52);
+    background: rgba(53, 40, 20, 0.44);
+}
+
+.turn-flow-banner.is-waiting .flow-state {
+    border-color: rgba(196, 162, 101, 0.58);
+    color: #e4c895;
+}
+
+.turn-flow-banner.is-alert {
+    border-color: rgba(215, 171, 93, 0.56);
+    background: rgba(72, 49, 17, 0.5);
+}
+
+.turn-flow-banner.is-alert .flow-state {
+    border-color: rgba(215, 171, 93, 0.64);
+    color: #e8c982;
+}
+
+.turn-flow-banner.is-error {
+    border-color: rgba(215, 118, 118, 0.62);
+    background: rgba(80, 29, 29, 0.42);
+}
+
+.turn-flow-banner.is-error .flow-state {
+    border-color: rgba(215, 118, 118, 0.66);
+    color: #dfa1a1;
+}
+
+.turn-flow-banner.is-idle {
+    border-color: rgba(109, 122, 164, 0.34);
+}
+
 /* ─── Turn Controls (advance turn button) ─── */
 
 #turn-controls {

@@ -37,9 +37,7 @@ function ConnectionStatus() {
     <div class="connection-status ${isConnected ? 'connected' : 'disconnected'}">
       <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
       <span class="status-text">${isConnected ? 'Live' : 'Reconnecting...'}</span>
-      ${eventCount.value > 0
-        ? html`<span class="event-count">${eventCount.value} events</span>`
-        : null}
+      <span class="event-count">${eventCount.value} events</span>
     </div>
   `
 }

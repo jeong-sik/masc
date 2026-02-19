@@ -14,7 +14,11 @@ import type { TrpgActor, TrpgState, TrpgEvent, TrpgCharacterStats } from '../typ
 
 // ── Local control state ──────────────────────────────────
 
-const diceNotation = signal('1d20')
+const selectedActorId = signal('')
+const diceAction = signal('ability_check')
+const diceStatValue = signal('10')
+const diceDc = signal('12')
+const diceRawD20 = signal('')
 const runStatus = signal<'idle' | 'running' | 'ok' | 'error'>('idle')
 
 // ── Helpers ──────────────────────────────────────────────
@@ -145,6 +149,12 @@ function RoundHistory({ state }: { state: TrpgState }) {
 function ControlBox({ state }: { state: TrpgState }) {
   const room = trpgRoom.value || state.session?.room || ''
   const status = runStatus.value
+  const actors = state.party ?? []
+  const selectedActor = actors.find(a => a.id === selectedActorId.value)
+  if (!selectedActor && actors.length > 0) {
+    const firstActor = actors[0]
+    if (firstActor) selectedActorId.value = firstActor.id
+  }
 
   const handleRunRound = async () => {
     if (!room) { showToast('No room set', 'error'); return }
@@ -172,11 +182,32 @@ function ControlBox({ state }: { state: TrpgState }) {
   }
 
   const handleRollDice = async () => {
-    const notation = diceNotation.value.trim()
-    if (!room || !notation) return
+    if (!room) return
+    const actorId = selectedActorId.value.trim()
+    if (!actorId) {
+      showToast('Select actor first', 'warning')
+      return
+    }
+    const statValue = Number.parseInt(diceStatValue.value, 10)
+    const dc = Number.parseInt(diceDc.value, 10)
+    if (Number.isNaN(statValue) || Number.isNaN(dc)) {
+      showToast('Stat/DC must be numbers', 'warning')
+      return
+    }
+    const rawParsed = Number.parseInt(diceRawD20.value, 10)
+    const rawD20 = diceRawD20.value.trim() === '' || Number.isNaN(rawParsed)
+      ? undefined
+      : rawParsed
     try {
-      await rollTrpgDice(room, notation)
-      showToast(`Rolled ${notation}`, 'success')
+      await rollTrpgDice({
+        roomId: room,
+        actorId,
+        action: diceAction.value.trim() || 'ability_check',
+        statValue,
+        dc,
+        rawD20,
+      })
+      showToast('Dice rolled', 'success')
       refreshTrpg()
     } catch {
       showToast('Dice roll failed', 'error')
@@ -187,23 +218,61 @@ function ControlBox({ state }: { state: TrpgState }) {
     <div class="trpg-control-box">
       <div class="trpg-control-grid">
         <div class="trpg-control-field">
+          <label>Room</label>
+          <input
+            type="text"
+            value=${room}
+            onInput=${(e: Event) => { trpgRoom.value = (e.target as HTMLInputElement).value }}
+            placeholder="room_id"
+          />
+        </div>
+
+        <div class="trpg-control-field">
+          <label>Actor</label>
+          <select
+            value=${selectedActorId.value}
+            onChange=${(e: Event) => { selectedActorId.value = (e.target as HTMLSelectElement).value }}
+          >
+            <option value="">Select actor</option>
+            ${actors.map(a => html`<option value=${a.id}>${a.name} (${a.id})</option>`)}
+          </select>
+        </div>
+
+        <div class="trpg-control-field">
           <label>Dice</label>
-          <div style="display:flex; gap:4px;">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
             <input
               type="text"
-              value=${diceNotation.value}
-              onInput=${(e: Event) => { diceNotation.value = (e.target as HTMLInputElement).value }}
-              onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') handleRollDice() }}
-              placeholder="1d20+3"
-              style="flex:1;"
+              value=${diceAction.value}
+              onInput=${(e: Event) => { diceAction.value = (e.target as HTMLInputElement).value }}
+              placeholder="action"
             />
-            <button class="trpg-run-btn secondary" onClick=${handleRollDice}>Roll</button>
+            <input
+              type="text"
+              value=${diceStatValue.value}
+              onInput=${(e: Event) => { diceStatValue.value = (e.target as HTMLInputElement).value }}
+              placeholder="stat (e.g. 14)"
+            />
+            <input
+              type="text"
+              value=${diceDc.value}
+              onInput=${(e: Event) => { diceDc.value = (e.target as HTMLInputElement).value }}
+              placeholder="dc (e.g. 15)"
+            />
+            <input
+              type="text"
+              value=${diceRawD20.value}
+              onInput=${(e: Event) => { diceRawD20.value = (e.target as HTMLInputElement).value }}
+              onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') handleRollDice() }}
+              placeholder="raw d20 (optional)"
+            />
           </div>
         </div>
 
         <div class="trpg-control-field">
           <label>Actions</label>
           <div style="display:flex; gap:4px;">
+            <button class="trpg-run-btn secondary" onClick=${handleRollDice}>Roll</button>
             <button
               class="trpg-run-btn recommend"
               onClick=${handleRunRound}

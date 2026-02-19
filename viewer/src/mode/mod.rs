@@ -710,6 +710,12 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(el) = doc.get_element_by_id("turn-runtime") {
         el.set_inner_html("");
     }
+    if let Some(el) = doc.get_element_by_id("turn-flow-banner") {
+        let _ = el.set_attribute("class", "turn-flow-banner is-idle");
+        el.set_inner_html(
+            "<span class=\"flow-state\">대기</span><span class=\"flow-text\">세션 상태를 불러오는 중입니다.</span>",
+        );
+    }
     if let Some(el) = doc.get_element_by_id("turn-controls") {
         let _ = el.set_attribute("style", "display:none");
     }

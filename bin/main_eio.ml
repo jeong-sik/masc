@@ -3594,6 +3594,12 @@ let serve_dashboard_static name _request reqd =
   | Error _ ->
       Http.Response.not_found reqd
 
+let is_dashboard_spa_deep_link path =
+  starts_with ~prefix:"/dashboard/" path
+  && not (starts_with ~prefix:"/dashboard/assets/" path)
+  && path <> "/dashboard/credits"
+  && path <> "/dashboard/lodge"
+
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
   [
@@ -4453,6 +4459,15 @@ let make_routes ~port ~host =
        with_public_read (fun _state req reqd ->
          serve_dashboard_index req reqd
        ) request reqd)
+  |> Http.Router.prefix_get "/dashboard/"
+       (fun request reqd ->
+         with_public_read (fun _state req reqd ->
+           let req_path = Http.Request.path req in
+           if is_dashboard_spa_deep_link req_path then
+             serve_dashboard_index req reqd
+           else
+             Http.Response.not_found reqd
+         ) request reqd)
   |> Http.Router.get "/api/v1/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          Http.Response.json (Masc_mcp.Credits_dashboard.json_api ()) reqd
@@ -5328,6 +5343,26 @@ let run_server ~sw ~env ~port ~base_path =
     in
     let cors = cors_headers origin in
     let session_id_opt = get_session_id_any httpun_request in
+    let h2_respond_dashboard_index () =
+      let index_path = dashboard_index_path () in
+      match read_file index_path with
+      | Ok body ->
+          let etag_value = "\"" ^ dashboard_etag () ^ "\"" in
+          let if_none_match = H2.Headers.get h2_headers "if-none-match" in
+          (match if_none_match with
+           | Some inm when String.equal inm etag_value ->
+               let resp_headers = H2.Headers.of_list ([
+                 ("etag", etag_value); ("cache-control", "no-cache");
+               ] @ cors) in
+               let response = H2.Response.create ~headers:resp_headers `Not_modified in
+               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+               H2.Body.Writer.close writer
+           | _ ->
+               let extra = [("etag", etag_value); ("cache-control", "no-cache"); ("vary", "Accept-Encoding")] @ cors in
+               h2_respond_html h2_reqd body ~extra_headers:extra)
+      | Error _ ->
+          h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>" ~extra_headers:cors
+    in
 
     try
       match httpun_meth, path with
@@ -5433,24 +5468,7 @@ let run_server ~sw ~env ~port ~base_path =
          Dashboard
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/dashboard" | `GET, "/dashboard/" ->
-          let index_path = dashboard_index_path () in
-          (match read_file index_path with
-           | Ok body ->
-               let etag_value = "\"" ^ dashboard_etag () ^ "\"" in
-               let if_none_match = H2.Headers.get h2_headers "if-none-match" in
-               (match if_none_match with
-                | Some inm when String.equal inm etag_value ->
-                    let resp_headers = H2.Headers.of_list ([
-                      ("etag", etag_value); ("cache-control", "no-cache");
-                    ] @ cors) in
-                    let response = H2.Response.create ~headers:resp_headers `Not_modified in
-                    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-                    H2.Body.Writer.close writer
-                | _ ->
-                    let extra = [("etag", etag_value); ("cache-control", "no-cache"); ("vary", "Accept-Encoding")] @ cors in
-                    h2_respond_html h2_reqd body ~extra_headers:extra)
-           | Error _ ->
-               h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>" ~extra_headers:cors)
+          h2_respond_dashboard_index ()
 
       | `GET, "/dashboard/credits" ->
           h2_respond_html h2_reqd (Masc_mcp.Credits_dashboard.html ()) ~extra_headers:cors
@@ -5470,6 +5488,9 @@ let run_server ~sw ~env ~port ~base_path =
                let body = Masc_mcp.Lodge_dashboard.html () in
                let extra = [("etag", etag_value); ("cache-control", "no-cache")] @ cors in
                h2_respond_html h2_reqd body ~extra_headers:extra)
+
+      | `GET, p when is_dashboard_spa_deep_link p ->
+          h2_respond_dashboard_index ()
 
       (* ─────────────────────────────────────────────────────────────────────
          GraphQL

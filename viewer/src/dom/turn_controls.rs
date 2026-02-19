@@ -388,13 +388,17 @@ fn on_advance_click() {
 
     wasm_bindgen_futures::spawn_local(async move {
         match advance_turn().await {
-            Ok(RoundRunOutcome::Advanced(msg)) => {
+            Ok(RoundRunOutcome::Advanced {
+                status,
+                has_warning,
+            }) => {
                 clear_round_recovery();
                 set_round_stall_badges(None);
-                set_turn_status(&msg, "status-ok");
+                let css_class = if has_warning { "status-warn" } else { "status-ok" };
+                set_turn_status(&status, css_class);
                 set_turn_gate_reason(
                     "실행 완료: 다음 라운드 조건을 다시 계산합니다.",
-                    "status-ok",
+                    css_class,
                 );
             }
             Ok(RoundRunOutcome::Stalled {
@@ -428,7 +432,7 @@ fn on_advance_click() {
 
 #[cfg(target_arch = "wasm32")]
 enum RoundRunOutcome {
-    Advanced(String),
+    Advanced { status: String, has_warning: bool },
     Stalled {
         status: String,
         guide: String,
@@ -505,6 +509,35 @@ fn collect_stall_reasons(json: &Value) -> Vec<String> {
         }
     }
     rows
+}
+
+#[cfg(target_arch = "wasm32")]
+fn count_non_ok_statuses(json: &Value) -> u64 {
+    json.get("statuses")
+        .and_then(Value::as_array)
+        .map(|statuses| {
+            statuses
+                .iter()
+                .filter(|status| {
+                    let status_name = status
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .trim();
+                    !status_name.is_empty() && !status_name.eq_ignore_ascii_case("ok")
+                })
+                .count() as u64
+        })
+        .unwrap_or(0)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn preflight_warning_text(json: &Value) -> Option<String> {
+    json.get("preflight_warning")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -643,10 +676,26 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
             .and_then(|summary| summary.get("advanced"))
             .and_then(Value::as_bool);
         if round_advanced(turn_before, turn_after, summary_advanced) {
-            return Ok(RoundRunOutcome::Advanced(format!(
-                "Round progressed: turn {} → {}",
-                turn_before, turn_after
-            )));
+            let mut status = format!("Round progressed: turn {} → {}", turn_before, turn_after);
+            let mut warnings = Vec::new();
+            if let Some(preflight_warning) = preflight_warning_text(&json) {
+                warnings.push(format!(
+                    "preflight {}",
+                    shorten_reason(&preflight_warning, 90)
+                ));
+            }
+            let issue_count = count_non_ok_statuses(&json);
+            if issue_count > 0 {
+                warnings.push(format!("비정상 응답 {}건", issue_count));
+            }
+            let has_warning = !warnings.is_empty();
+            if has_warning {
+                status.push_str(&format!(" · {}", warnings.join(" / ")));
+            }
+            return Ok(RoundRunOutcome::Advanced {
+                status,
+                has_warning,
+            });
         }
         let stalled_status = format!(
             "턴이 진행되지 않았습니다 ({} → {}).",
@@ -661,7 +710,10 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         });
     }
 
-    Ok(RoundRunOutcome::Advanced("Turn advanced.".to_string()))
+    Ok(RoundRunOutcome::Advanced {
+        status: "Turn advanced.".to_string(),
+        has_warning: false,
+    })
 }
 
 // ─── DOM Helpers ─────────────────────────────
@@ -1227,7 +1279,14 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
         .unwrap_or(90.0);
 
     let player_pairs_raw = read_dom_text_value(doc, "round-run-players").unwrap_or_default();
-    let player_keepers = parse_player_keeper_pairs(&player_pairs_raw);
+    let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);
+    if player_keepers.is_empty() {
+        let claimed_actor = read_dom_input(doc, "claimed-actor-id").unwrap_or_default();
+        let claimed_keeper = read_dom_input(doc, "claimed-keeper").unwrap_or_default();
+        if !claimed_actor.is_empty() && !claimed_keeper.is_empty() {
+            player_keepers.push((claimed_actor, claimed_keeper));
+        }
+    }
     if player_keepers.is_empty() {
         return Err(
             "player keepers가 없습니다. `새 게임`에서 AI PLAYER 선택 후 `파티 자동 할당`으로 actor→keeper를 채우세요."

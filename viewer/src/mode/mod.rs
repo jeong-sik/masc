@@ -606,6 +606,7 @@ pub(super) fn set_current_room_id(doc: &web_sys::Document, room_id: &str) {
 #[cfg(target_arch = "wasm32")]
 pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        let _ = dashboard.remove_attribute("data-focus-room");
         let _ = dashboard.remove_attribute("data-focus-turn");
         let _ = dashboard.remove_attribute("data-focus-kind");
     }

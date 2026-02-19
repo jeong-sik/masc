@@ -293,6 +293,7 @@ pub fn apply_initial_state(
                 event_type: room_event.to_string(),
                 turn: room.turn,
                 phase: room.phase.clone(),
+                room_id: room.id.clone(),
                 actor_id: "".to_string(),
                 keeper: "".to_string(),
                 role: "".to_string(),
@@ -305,6 +306,7 @@ pub fn apply_initial_state(
                 turn_writer.write(TurnAdvanced(TurnAdvancePayload {
                     turn: room.turn,
                     phase: room.phase.clone(),
+                    room_id: room.id.clone(),
                 }));
             }
             for roll in &state.dice_log {
@@ -631,10 +633,22 @@ fn parse_dice_log(root: &Value) -> Option<Vec<DiceRollPayload>> {
         .get("phase")
         .and_then(Value::as_str)
         .unwrap_or("dm_narration");
+    let fallback_room_id = root
+        .get("room_id")
+        .or_else(|| root.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
 
     let mut output = Vec::new();
     for entry in entries {
-        if let Some(row) = parse_dice_log_entry(entry, fallback_turn, fallback_phase) {
+        if let Some(row) = parse_dice_log_entry(
+            entry,
+            fallback_turn,
+            fallback_phase,
+            &fallback_room_id,
+        ) {
             output.push(row);
         }
     }
@@ -645,6 +659,7 @@ fn parse_dice_log_entry(
     entry: &Value,
     fallback_turn: u32,
     _fallback_phase: &str,
+    fallback_room_id: &str,
 ) -> Option<DiceRollPayload> {
     if !entry.is_object() {
         return None;
@@ -698,6 +713,12 @@ fn parse_dice_log_entry(
 
     Some(DiceRollPayload {
         turn,
+        room_id: entry
+            .get("room_id")
+            .and_then(Value::as_str)
+            .unwrap_or(fallback_room_id)
+            .trim()
+            .to_string(),
         character,
         action,
         d20: raw_d20,

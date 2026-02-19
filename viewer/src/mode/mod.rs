@@ -1580,6 +1580,203 @@ fn refresh_trpg_widget_status() {
     trpg_controls::refresh_trpg_widget_status();
 }
 
+#[cfg(target_arch = "wasm32")]
+fn set_element_text(doc: &web_sys::Document, id: &str, text: &str) {
+    if let Some(el) = doc.get_element_by_id(id) {
+        el.set_text_content(Some(text));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn get_element_text(doc: &web_sys::Document, id: &str) -> String {
+    doc.get_element_by_id(id)
+        .and_then(|el| el.text_content())
+        .unwrap_or_default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_or_prepend_line(
+    doc: &web_sys::Document,
+    id: &str,
+    line: &str,
+    placeholder_hints: &[&str],
+    max_lines: usize,
+) {
+    let current = get_element_text(doc, id);
+    let trimmed = current.trim();
+    let should_replace = trimmed.is_empty()
+        || placeholder_hints
+            .iter()
+            .any(|hint| !hint.trim().is_empty() && trimmed.contains(hint));
+
+    if should_replace {
+        set_element_text(doc, id, line);
+        return;
+    }
+
+    let current_lines = current
+        .lines()
+        .map(str::trim)
+        .filter(|row| !row.is_empty())
+        .collect::<Vec<_>>();
+    if current_lines.first().is_some_and(|first| *first == line) {
+        return;
+    }
+
+    let mut merged = Vec::with_capacity(current_lines.len() + 1);
+    merged.push(line.to_string());
+    merged.extend(current_lines.into_iter().map(ToString::to_string));
+    merged.truncate(max_lines.max(1));
+    set_element_text(doc, id, &merged.join("\n"));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn summarize_keeper_names(payload: &Value, limit: usize) -> String {
+    let keepers = payload
+        .get("keepers")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    keepers
+        .iter()
+        .filter_map(|row| row.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .take(limit)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn seed_monitor_snapshot(doc: web_sys::Document) -> Result<(), String> {
+    let keepers_payload = mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await?;
+    let keeper_count = keepers_payload
+        .get("count")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let keeper_preview = summarize_keeper_names(&keepers_payload, 6);
+    let keepers_text = if keeper_preview.is_empty() {
+        format!("등록 keeper: {}명", keeper_count)
+    } else {
+        format!("등록 keeper: {}명\n대표 keeper: {}", keeper_count, keeper_preview)
+    };
+    set_element_text(&doc, "monitor-agent-list", &keepers_text);
+
+    let rooms_payload = mcp_tool_call("masc_rooms_list", json!({})).await?;
+    let rooms = rooms_payload
+        .get("rooms")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let room_count = rooms.len();
+    let agent_total: i64 = rooms
+        .iter()
+        .map(|row| row.get("agent_count").and_then(Value::as_i64).unwrap_or(0))
+        .sum();
+    let task_total: i64 = rooms
+        .iter()
+        .map(|row| row.get("task_count").and_then(Value::as_i64).unwrap_or(0))
+        .sum();
+    set_element_text(
+        &doc,
+        "monitor-task-list",
+        &format!(
+            "활성 room: {}개\nagent: {} · task: {}",
+            room_count, agent_total, task_total
+        ),
+    );
+    set_or_prepend_line(
+        &doc,
+        "monitor-events",
+        &format!(
+            "[snapshot] room {}개 / keeper {}명 초기 상태 로드",
+            room_count, keeper_count
+        ),
+        &["Waiting for events...", "No events yet"],
+        50,
+    );
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn seed_council_snapshot(doc: web_sys::Document) -> Result<(), String> {
+    let payload = mcp_tool_call("masc_council_status", json!({})).await?;
+    let debates = payload
+        .get("active_debates")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let votes = payload
+        .get("active_votes")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let threads = payload
+        .get("active_threads")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let line = format!(
+        "[snapshot] 활성 토론 {} · 활성 투표 {} · 활성 스레드 {}",
+        debates, votes, threads
+    );
+    set_or_prepend_line(
+        &doc,
+        "council-deliberation",
+        &line,
+        &["No deliberations in progress."],
+        80,
+    );
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn seed_experiment_snapshot(doc: web_sys::Document) -> Result<(), String> {
+    let payload = mcp_tool_call("experiment_list", json!({ "limit": 20 })).await?;
+    let total = payload.get("total").and_then(Value::as_i64).unwrap_or(0);
+    let experiments = payload
+        .get("experiments")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let running_count = experiments
+        .iter()
+        .filter(|row| row.get("status").and_then(Value::as_str) == Some("running"))
+        .count();
+    let latest = experiments.first().and_then(|row| {
+        let id = row.get("id").and_then(Value::as_str)?;
+        let hypothesis = row.get("hypothesis").and_then(Value::as_str).unwrap_or("-");
+        Some(format!("{}: {}", id, hypothesis))
+    });
+    let line = match latest {
+        Some(top) => format!(
+            "[snapshot] 실험 {}개 (running {}) · 최신 {}",
+            total, running_count, top
+        ),
+        None => format!("[snapshot] 실험 {}개 (running {})", total, running_count),
+    };
+    set_or_prepend_line(
+        &doc,
+        "experiment-dashboard",
+        &line,
+        &["No experiments running."],
+        80,
+    );
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn seed_masc_panel_snapshot(mode: ViewerMode, doc: web_sys::Document) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = match mode {
+            ViewerMode::Monitor => seed_monitor_snapshot(doc.clone()).await,
+            ViewerMode::Council => seed_council_snapshot(doc.clone()).await,
+            ViewerMode::Experiment => seed_experiment_snapshot(doc.clone()).await,
+            _ => Ok(()),
+        };
+        if let Err(e) = result {
+            log::warn!("MASC snapshot seed failed for {:?}: {}", mode, e);
+        }
+    });
+}
+
 fn count_mode_events(mode: ViewerMode, event_log: &crate::sse::masc_bridge::MascEventLog) -> usize {
     match mode {
         ViewerMode::Monitor => event_log.entries.len(),
@@ -1665,7 +1862,8 @@ fn sync_masc_panel_connection_status(
 fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuffer>) {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(panel_id) = mode.get().panel_id() else {
+        let current_mode = *mode.get();
+        let Some(panel_id) = current_mode.panel_id() else {
             return;
         };
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -1677,6 +1875,7 @@ fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuff
         set_element_display(&doc, "dashboard", "none");
 
         bind_back_buttons(&doc, &buffer.pending);
+        seed_masc_panel_snapshot(current_mode, doc.clone());
     }
     let _ = (&mode, &buffer);
 }

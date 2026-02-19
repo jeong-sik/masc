@@ -391,6 +391,28 @@ let apply_node_advanced ~state ~event =
       else `Assoc (assoc_put "current_node" (`String to_node) fields)
   | _ -> state
 
+let normalize_player_action_for_narration ~state payload =
+  let fallback_turn = state |> member "turn" |> to_int_option |> Option.value ~default:1 in
+  let phase = get_string_opt "phase" payload |> Option.value ~default:"round" in
+  let turn = get_int_opt "turn" payload |> Option.value ~default:fallback_turn in
+  let actor_id =
+    get_string_opt "actor_id" payload |> Option.value ~default:"unknown"
+  in
+  let keeper = get_string_opt "keeper" payload |> Option.value ~default:"" in
+  let reply =
+    get_string_opt "proposed_action" payload
+    |> Option.value ~default:(get_string_opt "reply" payload |> Option.value ~default:"")
+  in
+  `Assoc
+    [
+      ("phase", `String phase);
+      ("turn", `Int turn);
+      ("role", `String "player");
+      ("actor_id", `String actor_id);
+      ("keeper", `String keeper);
+      ("reply", `String reply);
+    ]
+
 let apply_event ~state ~(event : Trpg_engine_event.t) =
   (* Track last_event_ts for every event — enables staleness detection *)
   let state =
@@ -442,6 +464,10 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
       append_to_list "dice_log" event.payload state
   | Trpg_engine_event.Narration_posted ->
       append_to_list "narration_log" event.payload state
+  | Trpg_engine_event.Turn_action_proposed ->
+      append_to_list "narration_log"
+        (normalize_player_action_for_narration ~state event.payload)
+        state
   | Trpg_engine_event.Hp_changed -> apply_hp_changed ~state ~event
   | Trpg_engine_event.Inventory_changed -> apply_inventory_changed ~state ~event
   | Trpg_engine_event.Flag_set -> apply_flag_set ~state ~event
@@ -451,7 +477,6 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Actor_deleted -> apply_actor_deleted ~state ~event
   | Trpg_engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
   | Trpg_engine_event.Actor_released -> apply_actor_released ~state ~event
-  | Trpg_engine_event.Turn_action_proposed
   | Trpg_engine_event.Turn_timeout
   | Trpg_engine_event.Keeper_unavailable
   | Trpg_engine_event.Metric_updated

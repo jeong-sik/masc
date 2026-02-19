@@ -91,6 +91,7 @@ pub struct TurnProgressState {
     pub player_order: Vec<String>,
     pub actor_order: Vec<String>,
     pub actor_states: BTreeMap<String, String>,
+    pub actor_reasons: BTreeMap<String, String>,
     pub current_actor: String,
     pub next_actor: String,
     pub last_actor: String,

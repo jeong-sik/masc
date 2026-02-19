@@ -54,6 +54,28 @@ const INTER_ROUND_DELAY_MS: i32 = 5000;
 #[cfg(target_arch = "wasm32")]
 const STARTUP_DELAY_MS: i32 = 3000;
 
+/// Retry budget when a round response is successful but does not advance turn.
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)] // Used in wasm runtime path; test builds may not reference it directly.
+const MAX_STALL_RETRIES: u32 = 3;
+
+/// Base retry delay for stalled rounds (ms), doubled per retry.
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)] // Used by stall_retry_delay_ms in wasm/runtime builds.
+const STALL_RETRY_BASE_DELAY_MS: i32 = 2000;
+
+/// Upper cap for stalled-round retry delay (ms).
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)] // Used by stall_retry_delay_ms in wasm/runtime builds.
+const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn stall_retry_delay_ms(retry_count: u32) -> i32 {
+    let exponent = retry_count.saturating_sub(1).min(6);
+    let multiplied = STALL_RETRY_BASE_DELAY_MS.saturating_mul(1_i32 << exponent);
+    multiplied.min(STALL_RETRY_MAX_DELAY_MS)
+}
+
 // ─── OnEnter System ────────────────────────────
 
 /// Spawns the async round-run loop when entering TRPG mode.
@@ -89,6 +111,7 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
             sleep_ms(STARTUP_DELAY_MS).await;
 
             let mut round_num = 0u32;
+            let mut stalled_retries = 0u32;
 
             while running.load(Ordering::SeqCst)
                 && !game_ended.load(Ordering::SeqCst)
@@ -136,10 +159,25 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
                             game_ended.store(true, Ordering::SeqCst);
                             log::info!("RoundRunner: game ended signal in response");
                         } else if matches!(round_response_advanced(&resp), Some(false)) {
+                            stalled_retries = stalled_retries.saturating_add(1);
+                            if stalled_retries > MAX_STALL_RETRIES {
+                                log::warn!(
+                                    "RoundRunner: round still stalled after {} retries. Stopping auto loop.",
+                                    MAX_STALL_RETRIES
+                                );
+                                break;
+                            }
+                            let delay_ms = stall_retry_delay_ms(stalled_retries);
                             log::warn!(
-                                "RoundRunner: round did not advance (player failure/claim mismatch). Stopping auto loop."
+                                "RoundRunner: round did not advance (player failure/claim mismatch). Retry {}/{} in {}ms.",
+                                stalled_retries,
+                                MAX_STALL_RETRIES,
+                                delay_ms
                             );
-                            break;
+                            sleep_ms(delay_ms).await;
+                            continue;
+                        } else {
+                            stalled_retries = 0;
                         }
                     }
                     Err(e) => {
@@ -436,7 +474,6 @@ fn release_round_flight(owner: &str) {
         let _ = dashboard.remove_attribute("data-round-flight-owner");
     }
 }
-
 // ─── Sleep Helper ──────────────────────────────
 
 #[cfg(target_arch = "wasm32")]
@@ -448,4 +485,23 @@ async fn sleep_ms(ms: i32) {
             .expect("DOM: setTimeout failed");
     });
     wasm_bindgen_futures::JsFuture::from(promise).await.ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stall_retry_delay_ms;
+
+    #[test]
+    fn stall_retry_delay_scales_and_caps() {
+        assert_eq!(stall_retry_delay_ms(1), 2000);
+        assert_eq!(stall_retry_delay_ms(2), 4000);
+        assert_eq!(stall_retry_delay_ms(3), 8000);
+        assert_eq!(stall_retry_delay_ms(4), 12000);
+        assert_eq!(stall_retry_delay_ms(8), 12000);
+    }
+
+    #[test]
+    fn stall_retry_delay_handles_zero_retry_input() {
+        assert_eq!(stall_retry_delay_ms(0), 2000);
+    }
 }

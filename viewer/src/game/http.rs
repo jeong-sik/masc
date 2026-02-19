@@ -342,6 +342,7 @@ pub fn apply_initial_state(
         turn_progress.player_order.clear();
         turn_progress.actor_order.clear();
         turn_progress.actor_states.clear();
+        turn_progress.actor_reasons.clear();
         turn_progress.current_actor.clear();
         turn_progress.next_actor.clear();
         turn_progress.last_actor.clear();
@@ -378,6 +379,7 @@ pub fn apply_initial_state(
         }
     }
     turn_progress.actor_states.clear();
+    turn_progress.actor_reasons.clear();
     let actor_order = turn_progress.actor_order.clone();
     for actor_id in &actor_order {
         turn_progress

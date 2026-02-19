@@ -22,6 +22,7 @@ open Yojson.Safe.Util
 type result = bool * string
 
 type keeper_call_result = [ `Ok of Yojson.Safe.t | `Timeout | `Error of string ]
+type keeper_probe_result = [ `Ok | `Error of string ]
 
 type context = {
   config : Room.config;
@@ -29,6 +30,7 @@ type context = {
   keeper_call :
     (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
     option;
+  keeper_probe : (name:string -> keeper_probe_result) option;
 }
 
 type trpg_role = [ `Dm | `Player ]
@@ -37,6 +39,12 @@ let role_to_string = function `Dm -> "dm" | `Player -> "player"
 
 let normalize_keeper_name (s : string) : string =
   s |> String.trim |> String.lowercase_ascii
+
+let unique_nonempty_keepers (keepers : string list) : string list =
+  keepers
+  |> List.map String.trim
+  |> List.filter (fun k -> k <> "")
+  |> List.sort_uniq String.compare
 
 let validate_unique_keeper_assignments ~dm_keeper
     ~(player_keepers : (string * string) list) : (unit, string) Stdlib.result =
@@ -66,6 +74,28 @@ let validate_unique_keeper_assignments ~dm_keeper
                 loop tl)
     in
     loop player_keepers
+
+let keeper_preflight ctx ~(keepers : string list) : (unit, string) Stdlib.result =
+  match ctx.keeper_probe with
+  | None -> Ok ()
+  | Some probe ->
+      let failures =
+        unique_nonempty_keepers keepers
+        |> List.filter_map (fun keeper_name ->
+               match probe ~name:keeper_name with
+               | `Ok -> None
+               | `Error raw_reason ->
+                   let reason =
+                     let trimmed = String.trim raw_reason in
+                     if trimmed = "" then "unavailable" else trimmed
+                   in
+                   Some (Printf.sprintf "%s=%s" keeper_name reason))
+      in
+      if failures = [] then Ok ()
+      else
+        Error
+          (Printf.sprintf "keeper preflight failed: %s"
+             (String.concat "; " failures))
 
 let keeper_busy_mutex = Mutex.create ()
 let keeper_busy_counts : (string, int) Hashtbl.t = Hashtbl.create 128
@@ -885,7 +915,9 @@ let truncate_before_marker s marker =
 let sanitize_keeper_reply (raw : string) : string =
   let text =
     raw
+    |> truncate_before_marker "\"visible_state_json\":"
     |> truncate_before_marker "visible_state_json:"
+    |> truncate_before_marker "\"[STATE]\""
     |> truncate_before_marker "[STATE]"
     |> truncate_before_marker "[/STATE]"
   in
@@ -903,6 +935,7 @@ let sanitize_keeper_reply (raw : string) : string =
   let is_noise_line line =
     let t = String.trim line in
     t = ""
+    || starts_with t "\"reply\":"
     || starts_with t "SKILL:"
     || starts_with t "SKILL_REASON:"
     || starts_with t "room_id="
@@ -914,6 +947,7 @@ let sanitize_keeper_reply (raw : string) : string =
     || starts_with t "TRPG 실행 요청입니다."
     || starts_with t "TRPG execution request."
     || starts_with t "내 기록상 가장 처음 물어본 건 이거야"
+    || contains_substring t "visible_state_json:"
   in
   let rec drop_leading_noise = function
     | [] -> []
@@ -2415,8 +2449,10 @@ let handle_round_run ctx args : result =
         | Error e -> Error e
       in
       let* () = validate_unique_keeper_assignments ~dm_keeper ~player_keepers in
+      let assigned_keepers = dm_keeper :: List.map snd player_keepers in
+      let* () = keeper_preflight ctx ~keepers:assigned_keepers in
       with_keeper_reservation
-        ~keepers:(dm_keeper :: List.map snd player_keepers)
+        ~keepers:assigned_keepers
         (fun () ->
       let* derived = derive_state ~base_dir ~room_id ~rule_module in
       let state = state_of_derived derived in
@@ -2468,7 +2504,7 @@ let handle_round_run ctx args : result =
       let* interventions_applied, intervention_events =
         append_pending_interventions ~base_dir ~room_id ~phase ~turn:turn_before
       in
-      let state_for_prompt =
+      let base_state_for_prompt =
         inject_interventions_into_state state interventions_applied
         |> compact_state_for_prompt
       in
@@ -2481,7 +2517,7 @@ let handle_round_run ctx args : result =
       let unavailable_count = ref 0 in
       let timeout_count = ref 0 in
 
-      let process_one ~role ~actor_id ~keeper_name =
+      let process_one ~state_json ~role ~actor_id ~keeper_name =
         let record_unavailable_status ~status ~error ~stage =
           let* unavailable_event =
             append_unavailable_event
@@ -2543,7 +2579,7 @@ let handle_round_run ctx args : result =
             ~turn:turn_before
             ~role
             ~actor_id
-            ~state_json:state_for_prompt
+            ~state_json
             ~lang:prompt_lang
         in
         match call_keeper ctx ~name:keeper_name ~message:prompt ~timeout_sec with
@@ -2621,13 +2657,28 @@ let handle_round_run ctx args : result =
         List.fold_left
           (fun acc (actor_id, keeper_name) ->
             let* () = acc in
-            process_one ~role:`Player ~actor_id ~keeper_name)
+            process_one
+              ~state_json:base_state_for_prompt
+              ~role:`Player ~actor_id ~keeper_name)
           (Ok ())
           player_keepers
       in
+      let state_for_dm_prompt =
+        if !player_success_count > 0 then
+          match derive_state ~base_dir ~room_id ~rule_module with
+          | Ok derived_after_players ->
+              inject_interventions_into_state
+                (state_of_derived derived_after_players)
+                interventions_applied
+              |> compact_state_for_prompt
+          | Error _ -> base_state_for_prompt
+        else base_state_for_prompt
+      in
       let* () =
         if !player_success_count > 0 then
-          process_one ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
+          process_one
+            ~state_json:state_for_dm_prompt
+            ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
         else (
           statuses :=
             `Assoc

@@ -33,11 +33,27 @@ fn mark_current_and_next(progress: &mut TurnProgressState, actor_index: usize) {
     }
 }
 
+fn set_actor_reason(progress: &mut TurnProgressState, actor_id: &str, reason: &str) {
+    let actor_id = actor_id.trim();
+    if actor_id.is_empty() {
+        return;
+    }
+    let reason = reason.trim();
+    if reason.is_empty() {
+        progress.actor_reasons.remove(actor_id);
+    } else {
+        progress
+            .actor_reasons
+            .insert(actor_id.to_string(), reason.to_string());
+    }
+}
+
 fn reset_round_progress(progress: &mut TurnProgressState) {
     if progress.actor_order.is_empty() {
         rebuild_actor_order(progress);
     }
     progress.actor_states.clear();
+    progress.actor_reasons.clear();
     for actor_id in &progress.actor_order {
         progress
             .actor_states
@@ -193,6 +209,7 @@ pub fn apply_turn_progress(
                 }
                 progress.current_actor.clear();
                 progress.next_actor.clear();
+                progress.actor_reasons.clear();
             }
             "narration.posted" => {
                 let actor_id = if payload.actor_id.is_empty() {
@@ -201,25 +218,31 @@ pub fn apply_turn_progress(
                     payload.actor_id.as_str()
                 };
                 complete_actor(&mut progress, actor_id, "ok");
+                set_actor_reason(&mut progress, actor_id, "");
             }
             "turn.action.proposed" => {
                 complete_actor(&mut progress, &payload.actor_id, "ok");
+                set_actor_reason(&mut progress, &payload.actor_id, "");
             }
             "turn.timeout" => {
                 complete_actor(&mut progress, &payload.actor_id, "timeout");
+                set_actor_reason(&mut progress, &payload.actor_id, &payload.reason);
             }
             "keeper.unavailable" => {
                 complete_actor(&mut progress, &payload.actor_id, "unavailable");
+                set_actor_reason(&mut progress, &payload.actor_id, &payload.reason);
             }
             "room.started" => {
                 if progress.room_status.is_empty() {
                     progress.room_status = "active".to_string();
                 }
+                progress.actor_reasons.clear();
             }
             "room.ended" => {
                 progress.room_status = "ended".to_string();
                 progress.current_actor.clear();
                 progress.next_actor.clear();
+                progress.actor_reasons.clear();
             }
             _ => {}
         }

@@ -117,7 +117,7 @@ let test_round_run_success_path () =
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
   in
   let args =
     `Assoc
@@ -182,7 +182,7 @@ let test_round_run_timeout_policy () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
   in
   let args =
     `Assoc
@@ -293,7 +293,7 @@ let test_round_run_requires_keeper_runtime () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
   in
   let args =
     `Assoc
@@ -311,6 +311,54 @@ let test_round_run_requires_keeper_runtime () =
     (contains_substring msg "keeper_call is not available");
   cleanup_dir base_dir
 
+let test_round_run_preflight_blocks_unready_keeper () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors
+    ~base_dir
+    ~room_id:"room-round-preflight"
+    ~actor_ids:["p1"];
+  let keeper_called = ref false in
+  let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    keeper_called := true;
+    `Ok (`Assoc [ ("reply", `String "should not execute") ])
+  in
+  let keeper_probe ~name : Tool_trpg.keeper_probe_result =
+    match name with
+    | "dm-keeper" -> `Ok
+    | "pk-down" -> `Error "keeper not found"
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    {
+      config;
+      agent_name = "tester";
+      keeper_call = Some keeper_call;
+      keeper_probe = Some keeper_probe;
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-preflight");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-down") ]);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run should fail on preflight" false ok;
+  Alcotest.(check bool)
+    "error includes preflight marker"
+    true
+    (contains_substring msg "keeper preflight failed");
+  Alcotest.(check bool)
+    "error includes failing keeper"
+    true
+    (contains_substring msg "pk-down=");
+  Alcotest.(check bool) "keeper_call not executed when preflight fails" false !keeper_called;
+  cleanup_dir base_dir
+
 let test_round_run_lang_english_prompt () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -325,7 +373,7 @@ let test_round_run_lang_english_prompt () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
   in
   let args =
     `Assoc
@@ -346,6 +394,47 @@ let test_round_run_lang_english_prompt () =
   Alcotest.(check bool) "english prompt instruction injected" true has_en_instruction;
   cleanup_dir base_dir
 
+let test_round_run_dm_prompt_reflects_player_action () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors
+    ~base_dir
+    ~room_id:"room-round-dm-context"
+    ~actor_ids:["p1"];
+  let prompts = ref [] in
+  let keeper_call ~name ~message ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    prompts := (name, message) :: !prompts;
+    match name with
+    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "왼쪽 엄폐물 뒤로 이동해 정찰한다.") ])
+    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "정찰 결과를 받아 다음 장면을 연다.") ])
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-dm-context");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+      ]
+  in
+  let ok, _body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  let dm_prompt =
+    !prompts
+    |> List.find_opt (fun (name, _) -> name = "dm-keeper")
+    |> Option.map snd
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool)
+    "dm prompt includes latest player action"
+    true
+    (contains_substring dm_prompt "왼쪽 엄폐물 뒤로 이동해 정찰한다.");
+  cleanup_dir base_dir
+
 let test_round_run_rejects_non_unique_keepers () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -354,7 +443,7 @@ let test_round_run_rejects_non_unique_keepers () =
     `Ok (`Assoc [ ("reply", `String "noop") ])
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
   in
   let args =
     `Assoc
@@ -391,7 +480,7 @@ let test_session_bootstrap_and_intervention_flow () =
       `Error ("unknown keeper: " ^ name)
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
   in
   let session_id = "session-bootstrap-1" in
   let ok_preset, preset_body =
@@ -523,7 +612,7 @@ let test_examples_scenario_visible_as_world_preset () =
 }|};
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
   in
 
   let ok_preset, preset_body =
@@ -563,7 +652,7 @@ let test_actor_spawn_claim_release_flow () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
   in
   let room_id = "room-actor-lease-flow" in
 
@@ -712,7 +801,7 @@ let test_actor_update_delete_flow () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
   in
   let room_id = "room-actor-update-delete" in
   let actor_id = "npc-fox" in
@@ -830,7 +919,7 @@ let test_actor_claim_rejects_dead_actor () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
   in
   let room_id = "room-actor-dead-claim" in
   let ok_spawn, _spawn =
@@ -956,9 +1045,17 @@ let () =
             `Quick
             test_round_run_requires_keeper_runtime;
           Alcotest.test_case
+            "preflight blocks unready keeper"
+            `Quick
+            test_round_run_preflight_blocks_unready_keeper;
+          Alcotest.test_case
             "supports lang=en prompt"
             `Quick
             test_round_run_lang_english_prompt;
+          Alcotest.test_case
+            "dm prompt reflects player action"
+            `Quick
+            test_round_run_dm_prompt_reflects_player_action;
           Alcotest.test_case
             "rejects non-unique keepers"
             `Quick

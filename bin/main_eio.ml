@@ -967,7 +967,28 @@ let trpg_round_run_guard : trpg_round_run_guard_state =
     idempotency_cache = Hashtbl.create 512;
     cache_writes = 0;
   }
-
+let trpg_keeper_probe_with_runtime
+    ~(config : Room.config)
+    ~(sw : Eio.Switch.t)
+    ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+    ~name:keeper_name
+  : Masc_mcp.Tool_trpg.keeper_probe_result =
+  let keeper_ctx : _ Masc_mcp.Tool_keeper.context = { config; sw; clock } in
+  let keeper_args =
+    `Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ]
+  in
+  try
+    Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+      match
+        Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_status"
+          ~args:keeper_args
+      with
+      | None -> `Error "masc_keeper_status dispatch unavailable"
+      | Some (true, _body) -> `Ok
+      | Some (false, msg) -> `Error msg)
+  with
+  | Eio.Time.Timeout -> `Error "timeout"
+  | exn -> `Error (Printexc.to_string exn)
 let trpg_round_run_json
     ~(state : Mcp_server.server_state)
     ~(agent_name : string)
@@ -1054,8 +1075,19 @@ let trpg_round_run_json
           ~sw
           ~clock
       in
+      let keeper_probe =
+        trpg_keeper_probe_with_runtime
+          ~config:state.Mcp_server.room_config
+          ~sw
+          ~clock
+      in
       let trpg_ctx : Masc_mcp.Tool_trpg.context =
-        { config = state.Mcp_server.room_config; agent_name; keeper_call = Some keeper_call }
+        {
+          config = state.Mcp_server.room_config;
+          agent_name;
+          keeper_call = Some keeper_call;
+          keeper_probe = Some keeper_probe;
+        }
       in
       match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with
       | None ->

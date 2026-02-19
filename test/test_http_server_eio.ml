@@ -37,6 +37,19 @@ let test_router_add_multiple () =
   in
   Alcotest.(check int) "three routes" 3 (List.length routes)
 
+let test_router_prefix_specificity () =
+  let matched = ref "" in
+  let generic_handler _req _reqd = matched := "generic" in
+  let asset_handler _req _reqd = matched := "asset" in
+  let routes =
+    Router.empty
+    |> Router.prefix_get "/dashboard/assets/" asset_handler
+    |> Router.prefix_get "/dashboard/" generic_handler
+  in
+  let request = Httpun.Request.create `GET "/dashboard/assets/index.css" in
+  Router.dispatch routes request (Obj.magic ());
+  Alcotest.(check string) "longest prefix route should win" "asset" !matched
+
 (* ===== Unit Tests for Config ===== *)
 
 let test_default_config () =
@@ -131,6 +144,7 @@ let router_tests = [
   "add GET route", `Quick, test_router_add_get;
   "add POST route", `Quick, test_router_add_post;
   "add multiple routes", `Quick, test_router_add_multiple;
+  "prefix specificity", `Quick, test_router_prefix_specificity;
 ]
 
 let config_tests = [

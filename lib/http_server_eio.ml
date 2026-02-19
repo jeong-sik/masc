@@ -413,6 +413,14 @@ module Router = struct
             && List.mem req_method route.methods
           ) routes
         in
+        let prefix_matches =
+          List.sort
+            (fun a b ->
+              let a_len = String.length a.path - 7 in
+              let b_len = String.length b.path - 7 in
+              compare b_len a_len)
+            prefix_matches
+        in
         (match prefix_matches with
          | route :: _ -> route.handler request reqd
          | [] ->

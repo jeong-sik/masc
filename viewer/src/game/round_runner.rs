@@ -63,12 +63,15 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
     #[cfg(target_arch = "wasm32")]
     if !auto_round_enabled() {
         runner.running.store(false, Ordering::SeqCst);
+        set_dom_runner_active(false);
         log::info!("RoundRunner: auto round loop disabled (manual Run Round only)");
         commands.insert_resource(runner);
         return;
     }
 
     runner.running.store(true, Ordering::SeqCst);
+    #[cfg(target_arch = "wasm32")]
+    set_dom_runner_active(true);
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -91,9 +94,6 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
                 && !game_ended.load(Ordering::SeqCst)
                 && round_num < MAX_ROUNDS
             {
-                round_num += 1;
-                log::info!("RoundRunner: triggering round {}", round_num);
-
                 let body = match build_round_body(&dm_keeper_snapshot) {
                     Ok(body) => body,
                     Err(reason) => {
@@ -104,9 +104,18 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
                         break;
                     }
                 };
+                if !try_acquire_round_flight("auto") {
+                    log::info!("RoundRunner: round flight locked by another request; waiting");
+                    sleep_ms(750).await;
+                    continue;
+                }
+                round_num += 1;
+                log::info!("RoundRunner: triggering round {}", round_num);
 
                 let url = format!("{}/api/v1/trpg/rounds/run", config::MASC_MCP_URL);
-                match fetch_json_post(&url, &body).await {
+                let post_result = fetch_json_post(&url, &body).await;
+                release_round_flight("auto");
+                match post_result {
                     Ok(resp) => {
                         log::info!(
                             "RoundRunner: round {} done — {}",
@@ -158,6 +167,7 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
             }
 
             running.store(false, Ordering::SeqCst);
+            set_dom_runner_active(false);
             log::info!(
                 "RoundRunner: loop finished (rounds={}, ended={})",
                 round_num,
@@ -177,6 +187,11 @@ pub fn stop_round_loop(runner: Option<Res<RoundRunner>>) {
     if let Some(runner) = runner {
         runner.running.store(false, Ordering::SeqCst);
         log::info!("RoundRunner: stop signalled");
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        set_dom_runner_active(false);
+        release_round_flight("auto");
     }
 }
 
@@ -371,6 +386,55 @@ fn auto_round_enabled() -> bool {
         .get_attribute("data-auto-round")
         .map(|value| matches!(value.as_str(), "1" | "true" | "on"))
         .unwrap_or(false)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_dom_runner_active(active: bool) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    let _ = dashboard.set_attribute("data-round-runner-active", if active { "1" } else { "0" });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn try_acquire_round_flight(owner: &str) -> bool {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return true;
+    };
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return true;
+    };
+    let existing = dashboard
+        .get_attribute("data-round-flight-owner")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if existing.is_empty() {
+        let _ = dashboard.set_attribute("data-round-flight-owner", owner);
+        return true;
+    }
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+fn release_round_flight(owner: &str) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    let existing = dashboard
+        .get_attribute("data-round-flight-owner")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if existing == owner {
+        let _ = dashboard.remove_attribute("data-round-flight-owner");
+    }
 }
 
 // ─── Sleep Helper ──────────────────────────────

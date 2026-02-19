@@ -15,6 +15,57 @@ elif [[ "${NO_COLOR:-}" == "0" ]]; then
   export NO_COLOR=false
 fi
 
+resolve_serve_port() {
+  local port="8080"
+  local i=0
+
+  while (( i < ${#TRUNK_ARGS[@]} )); do
+    local arg="${TRUNK_ARGS[$i]}"
+    case "$arg" in
+      --port=*)
+        port="${arg#--port=}"
+        ;;
+      --port|-p)
+        if (( i + 1 < ${#TRUNK_ARGS[@]} )); then
+          port="${TRUNK_ARGS[$((i + 1))]}"
+          ((i++))
+        fi
+        ;;
+    esac
+    ((i++))
+  done
+
+  printf '%s' "$port"
+}
+
+check_serve_port_available() {
+  if [[ "${TRUNK_ARGS[0]:-}" != "serve" ]]; then
+    return
+  fi
+
+  local port
+  port="$(resolve_serve_port)"
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    return
+  fi
+
+  if ! command -v lsof >/dev/null 2>&1; then
+    return
+  fi
+
+  local listeners
+  listeners="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -z "$listeners" ]]; then
+    return
+  fi
+
+  echo "viewer-trunk: port ${port} is already in use." >&2
+  echo "$listeners" | head -n 4 >&2
+  echo "Stop the process above or run on another port:" >&2
+  echo "  scripts/viewer-trunk.sh serve --port 8081" >&2
+  exit 1
+}
+
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     echo "$$" > "$LOCK_DIR/pid"
@@ -41,6 +92,7 @@ release_lock() {
 
 acquire_lock
 trap release_lock EXIT INT TERM
+check_serve_port_available
 
 # Mitigate intermittent trunk stage-dir creation races.
 mkdir -p "$VIEWER_DIR/dist/.stage"

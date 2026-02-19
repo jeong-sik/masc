@@ -186,6 +186,16 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
         .to_ascii_lowercase();
     let dm_done = actor_state_is_done(&dm_state);
     let dm_error = actor_state_is_error(&dm_state);
+    let phase_label = pretty_phase(&progress.phase);
+    let current_actor = if progress.current_actor.trim().is_empty() {
+        "-".to_string()
+    } else {
+        progress.current_actor.trim().to_string()
+    };
+    let flow_head = format!(
+        "TURN {} · PHASE {} · 현재 {}",
+        progress.turn, phase_label, current_actor
+    );
 
     let prep_state = if player_total > 0 {
         FlowStepState::Done
@@ -195,11 +205,11 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
         FlowStepState::Wait
     };
     let prep_text = if player_total > 0 {
-        format!("플레이어 {}명 구성 완료", player_total)
+        format!("DM/플레이어 선택 완료 ({}명)", player_total)
     } else if !progress.actor_order.is_empty() {
-        "파티를 구성하는 중".to_string()
+        "파티 구성/동기화 중".to_string()
     } else {
-        "세션 시작/파티 선택 대기".to_string()
+        "새 게임에서 DM/플레이어 선택 대기".to_string()
     };
 
     let player_state = if player_total == 0 {
@@ -215,9 +225,14 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
     };
     let player_text = if player_total == 0 {
         "플레이어 미선택".to_string()
+    } else if player_done == 0 {
+        format!(
+            "응답 대기 {}/{} · 라운드 실행 필요",
+            player_done, player_total
+        )
     } else {
         format!(
-            "{}/{} 완료 · 성공 {} · 이슈 {}",
+            "응답 {}/{} · 성공 {} · 이슈 {}",
             player_done, player_total, player_success, player_error
         )
     };
@@ -236,7 +251,12 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
     let quorum_text = if player_total == 0 {
         "파티 선택 후 계산".to_string()
     } else {
-        format!("{} / {} (과반 필요)", player_success, quorum_required)
+        format!(
+            "성공 {} / 필요 {} · 남은 응답 {}",
+            player_success,
+            quorum_required,
+            player_total.saturating_sub(player_done)
+        )
     };
 
     let dm_step_state = if player_total == 0 {
@@ -257,13 +277,13 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
     let dm_text = if player_total == 0 {
         "쿼럼 이후 실행".to_string()
     } else if !quorum_met {
-        "플레이어 응답 대기".to_string()
+        "플레이어 응답/쿼럼 대기".to_string()
     } else if dm_done {
         format!("DM 처리 완료 ({})", dm_state)
     } else if dm_state == "thinking" {
-        "DM 응답 생성 중".to_string()
+        "DM 응답 생성 중 (thinking)".to_string()
     } else {
-        "DM 시작 대기".to_string()
+        "DM 실행 대기 (라운드 실행)".to_string()
     };
 
     let resolve_state = if player_total == 0 {
@@ -281,10 +301,12 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
     } else {
         FlowStepState::Wait
     };
-    let resolve_text = if progress.last_event.is_empty() {
-        "이벤트 대기".to_string()
-    } else {
-        format!("마지막 이벤트: {}", progress.last_event)
+    let resolve_text = match progress.last_event.as_str() {
+        "turn.started" => format!("turn.started 수신 · 다음 TURN {} 진행", progress.turn),
+        "phase.changed" => "phase.changed 반영 완료".to_string(),
+        "session.outcome" => "세션 종료 결과 반영".to_string(),
+        "" => "이벤트 대기".to_string(),
+        other => format!("이벤트 반영 대기 · {}", other),
     };
 
     let step_html = |title: &str, state: FlowStepState, text: String| {
@@ -297,15 +319,19 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
     };
 
     let html = [
-        step_html("세션 준비", prep_state, prep_text),
-        step_html("플레이어 수집", player_state, player_text),
-        step_html("쿼럼 판단", quorum_state, quorum_text),
-        step_html("DM 턴", dm_step_state, dm_text),
-        step_html("결과 반영", resolve_state, resolve_text),
+        step_html("1 준비", prep_state, prep_text),
+        step_html("2 플레이어", player_state, player_text),
+        step_html("3 쿼럼", quorum_state, quorum_text),
+        step_html("4 DM", dm_step_state, dm_text),
+        step_html("5 반영", resolve_state, resolve_text),
     ]
     .join("");
 
-    el.set_inner_html(&format!("<div class=\"agent-flow-track\">{}</div>", html));
+    el.set_inner_html(&format!(
+        "<div class=\"agent-flow-head\">{}</div><div class=\"agent-flow-track\">{}</div>",
+        html_escape(&flow_head),
+        html
+    ));
 }
 
 fn ordered_actor_ids_for_issue_scan(progress: &TurnProgressState) -> Vec<String> {

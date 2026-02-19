@@ -846,6 +846,8 @@ body:not(.mode-trpg) #ops-hud {
 .manual-map-actions {
     display: flex;
     justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .manual-map-table {
@@ -855,9 +857,14 @@ body:not(.mode-trpg) #ops-hud {
 
 .manual-map-row {
     display: grid;
-    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-columns: minmax(118px, 170px) minmax(0, 1fr);
     align-items: center;
     gap: 8px;
+}
+
+.manual-map-slot-wrap {
+    display: grid;
+    gap: 2px;
 }
 
 .manual-map-slot {
@@ -868,6 +875,19 @@ body:not(.mode-trpg) #ops-hud {
     padding: 2px 8px;
     text-align: center;
     background: rgba(13, 18, 32, 0.75);
+}
+
+.manual-map-actor {
+    font-size: 9px;
+    line-height: 1.25;
+    color: rgba(182, 192, 221, 0.88);
+    border: 1px solid rgba(109, 122, 164, 0.2);
+    border-radius: 6px;
+    background: rgba(10, 15, 29, 0.66);
+    padding: 1px 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .manual-map-select {
@@ -2389,6 +2409,16 @@ body:not(.mode-trpg) #ops-hud {
     padding: 8px;
 }
 
+.agent-flow-head {
+    font-size: 10px;
+    color: rgba(182, 192, 221, 0.88);
+    border: 1px solid rgba(109, 122, 164, 0.25);
+    border-radius: 7px;
+    background: rgba(11, 16, 29, 0.72);
+    padding: 4px 7px;
+    margin-bottom: 6px;
+}
+
 .agent-flow-track {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2443,6 +2473,10 @@ body:not(.mode-trpg) #ops-hud {
 
 .agent-flow-step.is-error .s-k {
     color: #dfa1a1;
+}
+
+.agent-flow-step.is-wait .s-k {
+    color: rgba(182, 192, 221, 0.84);
 }
 
 .agent-flow-empty {

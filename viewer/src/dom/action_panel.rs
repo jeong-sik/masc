@@ -29,9 +29,9 @@ use wasm_bindgen::prelude::*;
 use crate::config;
 #[cfg(target_arch = "wasm32")]
 use crate::game::lifecycle::TrpgLifecycleState;
+use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
 #[cfg(target_arch = "wasm32")]
 use crate::http::{self, RpcResult};
-use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
 
 // ─── Constants ──────────────────────────────
 
@@ -66,7 +66,10 @@ pub(crate) fn format_dice_result(rpc_result_json: &str) -> String {
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(rpc_result_json) {
         // MCP tool results are usually in result.content[0].text
         if let Some(content) = val.get("content").and_then(|c| c.as_array()) {
-            if let Some(text) = content.first().and_then(|c| c.get("text")).and_then(|t| t.as_str())
+            if let Some(text) = content
+                .first()
+                .and_then(|c| c.get("text"))
+                .and_then(|t| t.as_str())
             {
                 // Try to parse the text as JSON for structured dice results
                 if let Ok(inner) = serde_json::from_str::<serde_json::Value>(text) {
@@ -345,10 +348,7 @@ fn submit_intervention_from_input() {
                 schedule_status_clear();
             }
             Err(msg) => {
-                set_action_status(
-                    &format!("Failed to reach agent: {}", msg),
-                    "status-error",
-                );
+                set_action_status(&format!("Failed to reach agent: {}", msg), "status-error");
             }
         }
     });

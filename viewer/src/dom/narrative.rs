@@ -76,8 +76,9 @@ fn is_meta_line(line: &str) -> bool {
 fn is_prompt_recall_artifact(raw: &str) -> bool {
     let lower = raw.to_ascii_lowercase();
     let has_visible_state = lower.contains("visible_state_json:");
-    let has_state_dump =
-        lower.contains("\"narration_log\"") || lower.contains("\"dice_log\"") || lower.contains("\"party\"");
+    let has_state_dump = lower.contains("\"narration_log\"")
+        || lower.contains("\"dice_log\"")
+        || lower.contains("\"party\"");
     let has_prompt_directive =
         lower.contains("trpg 실행 요청입니다") || lower.contains("반드시 한국어로 응답하세요");
     let has_reply_blob = lower.contains("\"reply\":") && lower.contains("skill:");

@@ -1290,8 +1290,25 @@ let is_reply_noise_text (raw : string) : bool =
   || contains_substring t "visible_state_json:"
 
 let parse_keeper_reply keeper_json =
-  match keeper_json |> member "reply" with
-  | `String s ->
+  let raw_reply =
+    let first_string_field keys =
+      keys
+      |> List.find_map (fun key ->
+             match keeper_json |> member key with
+             | `String s when String.trim s <> "" -> Some s
+             | _ -> None)
+    in
+    match first_string_field [ "reply"; "content"; "text"; "message" ] with
+    | Some raw -> Some raw
+    | None -> (
+        match keeper_json |> member "structured_action" with
+        | `Assoc fields when fields <> [] ->
+            Some (Yojson.Safe.to_string (`Assoc [ ("structured_action", `Assoc fields) ]))
+        | _ -> None )
+  in
+  match raw_reply with
+  | None -> Error "keeper response missing reply/content/text/message field"
+  | Some s ->
       let cleaned = sanitize_keeper_reply s in
       let fallback = String.trim s in
       let prompt_echo =
@@ -1308,7 +1325,6 @@ let parse_keeper_reply keeper_json =
       (match reply with
       | Some reply when String.trim reply <> "" -> Ok reply
       | _ -> Error "keeper response reply contains only prompt/meta artifacts")
-  | _ -> Error "keeper response missing string field: reply"
 
 type prompt_language = [ `Ko | `En ]
 
@@ -3024,8 +3040,11 @@ let handle_round_run ctx args : result =
           (Ok ())
           player_keepers
       in
-      let player_required_successes = List.length player_keepers in
-      let player_quorum_met = !player_success_count = player_required_successes in
+      let player_required_successes =
+        let total = List.length player_keepers in
+        if total <= 0 then 0 else max 1 ((total + 1) / 2)
+      in
+      let player_quorum_met = !player_success_count >= player_required_successes in
       let state_for_dm_prompt =
         if player_quorum_met then
           match derive_state ~base_dir ~room_id ~rule_module with

@@ -87,8 +87,12 @@ function FlairBadge({ flair }: { flair?: string }) {
 function PostCard({ post }: { post: BoardPost }) {
   const handleVote = async (dir: 'up' | 'down', e: Event) => {
     e.stopPropagation()
-    await votePost(post.id, dir)
-    refreshBoard()
+    try {
+      await votePost(post.id, dir)
+      refreshBoard()
+    } catch {
+      showToast('Failed to vote', 'error')
+    }
   }
 
   return html`
@@ -165,8 +169,12 @@ function PostDetail({ post }: { post: BoardPost }) {
   }
 
   const handleVote = async (dir: 'up' | 'down') => {
-    await votePost(post.id, dir)
-    refreshBoard()
+    try {
+      await votePost(post.id, dir)
+      refreshBoard()
+    } catch {
+      showToast('Failed to vote', 'error')
+    }
   }
 
   return html`

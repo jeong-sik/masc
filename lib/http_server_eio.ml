@@ -383,19 +383,43 @@ module Router = struct
   let any path handler routes =
     add ~path ~methods:[`GET; `POST; `PUT; `DELETE; `OPTIONS] ~handler routes
 
+  (** Match by prefix: path field is treated as a prefix, not exact match.
+      The suffix (path after the prefix) is available via [Request.path]. *)
+  let prefix_get prefix handler routes =
+    add ~path:("PREFIX:" ^ prefix) ~methods:[`GET] ~handler routes
+
   let dispatch routes request reqd =
     let req_path = Request.path request in
     let req_method = Request.method_ request in
+    (* Try exact matches first *)
     let path_matches =
-      List.filter (fun route -> String.equal route.path req_path) routes
+      List.filter (fun route ->
+        (not (String.length route.path > 7
+              && String.sub route.path 0 7 = "PREFIX:"))
+        && String.equal route.path req_path
+      ) routes
     in
     match List.find_opt (fun route -> List.mem req_method route.methods) path_matches with
     | Some route -> route.handler request reqd
     | None ->
-        if path_matches = [] then
-          Response.not_found reqd
-        else
-          Response.method_not_allowed reqd
+        (* Try prefix matches *)
+        let prefix_matches =
+          List.filter (fun route ->
+            String.length route.path > 7
+            && String.sub route.path 0 7 = "PREFIX:"
+            && let prefix = String.sub route.path 7 (String.length route.path - 7) in
+               String.length req_path >= String.length prefix
+               && String.sub req_path 0 (String.length prefix) = prefix
+            && List.mem req_method route.methods
+          ) routes
+        in
+        (match prefix_matches with
+         | route :: _ -> route.handler request reqd
+         | [] ->
+             if path_matches = [] then
+               Response.not_found reqd
+             else
+               Response.method_not_allowed reqd)
 end
 
 (** Health check endpoint - JSON response *)

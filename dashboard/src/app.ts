@@ -22,6 +22,7 @@ import { Agents } from './components/agents'
 import { Tasks } from './components/tasks'
 import { Journal } from './components/journal'
 import { Trpg } from './components/trpg'
+import { KeeperDetailOverlay } from './components/keeper-detail'
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -105,6 +106,8 @@ export function App() {
           ? html`<div class="loading-indicator">Loading dashboard...</div>`
           : html`<${TabContent} />`}
       </main>
+
+      <${KeeperDetailOverlay} />
     </div>
   `
 }

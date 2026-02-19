@@ -169,7 +169,7 @@ pub fn apply_turn_advance(
 pub fn apply_turn_progress(
     mut events: MessageReader<TurnProgressUpdated>,
     mut progress: ResMut<TurnProgressState>,
-    room_state: Res<RoomState>,
+    mut room_state: ResMut<RoomState>,
 ) {
     for TurnProgressUpdated(payload) in events.read() {
         if payload.turn > 0 {
@@ -261,6 +261,19 @@ pub fn apply_turn_progress(
                 progress.actor_reasons.clear();
             }
             _ => {}
+        }
+
+        // Infer UI Phase from event type
+        let inferred_phase = match payload.event_type.as_str() {
+            "turn.started" => Some(TurnPhase::ActionDeclaration),
+            "turn.action.proposed" | "intervention.submitted" => Some(TurnPhase::DiceResolution),
+            "dice.rolled" => Some(TurnPhase::OutcomeNarration),
+            "narration.posted" => Some(TurnPhase::DmNarration),
+            _ => None,
+        };
+
+        if let Some(p) = inferred_phase {
+            room_state.phase = p;
         }
     }
 

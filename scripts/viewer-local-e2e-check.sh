@@ -6,6 +6,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_PING_TIMEOUT_SEC="${MCP_PING_TIMEOUT_SEC:-8}"
+MCP_PING_RETRY_COUNT="${MCP_PING_RETRY_COUNT:-12}"
+MCP_PING_RETRY_DELAY_SEC="${MCP_PING_RETRY_DELAY_SEC:-1}"
 
 RUN_VIEWER_BUILD=0
 RUN_SMOKE=0
@@ -127,14 +129,23 @@ step_check_commands() {
 
 step_check_mcp() {
   local response
-  response="$(curl -sS -m "$MCP_PING_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}')"
-  if [ -z "$(printf "%s" "$response" | tr -d '[:space:]')" ]; then
-    echo "MCP endpoint returned empty response: $MCP_URL"
-    return 1
-  fi
+  local attempt=1
+  while [ "$attempt" -le "$MCP_PING_RETRY_COUNT" ]; do
+    if response="$(curl -sS -m "$MCP_PING_TIMEOUT_SEC" -X POST "$MCP_URL" \
+      -H 'Content-Type: application/json' \
+      -H 'Accept: application/json, text/event-stream' \
+      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}')"; then
+      if [ -n "$(printf "%s" "$response" | tr -d '[:space:]')" ]; then
+        return 0
+      fi
+    fi
+    if [ "$attempt" -lt "$MCP_PING_RETRY_COUNT" ]; then
+      sleep "$MCP_PING_RETRY_DELAY_SEC"
+    fi
+    attempt=$((attempt + 1))
+  done
+  echo "MCP endpoint returned empty response after ${MCP_PING_RETRY_COUNT} retries: $MCP_URL"
+  return 1
 }
 
 step_viewer_build() {

@@ -16,6 +16,8 @@ ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-12}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
 PLAYER_KEEPER_NAMES=""
 CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-120}"
+CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
+CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 
 cleanup_keepers() {
   if [ -n "${DM_KEEPER:-}" ]; then
@@ -34,15 +36,25 @@ call_tool() {
   local id="$1"
   local name="$2"
   local args_json="$3"
-  local raw
+  local raw=""
   local sse_data
-  raw="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")" || {
-    printf '{"error":{"message":"curl failed: tool=%s timeout_sec=%s"}}' "$name" "$CURL_TIMEOUT_SEC"
+  local attempt=1
+  while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
+    if raw="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+      -H 'Content-Type: application/json' \
+      -H 'Accept: application/json, text/event-stream' \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"; then
+      break
+    fi
+    if [ "$attempt" -lt "$CURL_RETRY_COUNT" ]; then
+      sleep "$CURL_RETRY_DELAY_SEC"
+    fi
+    attempt=$((attempt + 1))
+  done
+  if [ -z "$raw" ]; then
+    printf '{"error":{"message":"curl failed after retries: tool=%s timeout_sec=%s retries=%s"}}' "$name" "$CURL_TIMEOUT_SEC" "$CURL_RETRY_COUNT"
     return 0
-  }
+  fi
   sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p' | tail -n1)"
   if [ -n "$sse_data" ]; then
     printf "%s" "$sse_data"

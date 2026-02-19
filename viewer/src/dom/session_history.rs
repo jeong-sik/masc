@@ -133,15 +133,18 @@ fn ensure_turn_entry(turns: &mut Vec<TurnHistory>, turn: u32, phase: &str) -> (u
             return (idx, changed);
         }
     }
+
     turns.push(TurnHistory {
         turn: normalized_turn,
         phase: phase.to_string(),
         events: Vec::new(),
     });
     turns.sort_by_key(|row| row.turn);
+
     while turns.len() > MAX_TURNS_TO_KEEP {
         let _ = turns.remove(0);
     }
+
     let idx = turns
         .iter()
         .position(|row| row.turn == normalized_turn)
@@ -157,6 +160,7 @@ fn ensure_room_entry(
 ) -> (usize, bool) {
     let normalized_room_id = normalize_room_id(room_id);
     let normalized_status = normalize_room_status(status);
+
     for (idx, room) in rooms.iter_mut().enumerate() {
         if room.room_id == normalized_room_id {
             let mut changed = false;
@@ -217,15 +221,16 @@ fn append_event(
     detail: &str,
 ) -> (bool, bool) {
     let normalized_turn = turn.max(1);
-    let (room_idx, mut changed) =
-        ensure_room_entry(rooms, room_id, room_status, normalized_turn);
+    let (room_idx, mut changed) = ensure_room_entry(rooms, room_id, room_status, normalized_turn);
     let Some(room) = rooms.get_mut(room_idx) else {
         return (false, changed);
     };
+
     if normalized_turn > room.updated_turn {
         room.updated_turn = normalized_turn;
         changed = true;
     }
+
     let (turn_idx, turn_changed) = ensure_turn_entry(&mut room.turns, normalized_turn, phase);
     changed = changed || turn_changed;
     let Some(row) = room.turns.get_mut(turn_idx) else {
@@ -588,7 +593,6 @@ fn read_focus_from_hash() -> (Option<String>, Option<u32>) {
 
     let mut room = None;
     let mut turn = None;
-
     for pair in params.split('&') {
         if pair.is_empty() {
             continue;
@@ -610,7 +614,6 @@ fn read_focus_from_hash() -> (Option<String>, Option<u32>) {
             _ => {}
         }
     }
-
     (room, turn)
 }
 
@@ -641,7 +644,6 @@ fn write_focus_hash(room: Option<&str>, turn: Option<u32>) {
     } else {
         format!("{}&{}", base, params.join("&"))
     };
-
     if fragment == next_fragment {
         return;
     }
@@ -972,8 +974,8 @@ pub fn update_session_history_dom(
         };
 
         let mut changed = false;
-        let room_id = normalize_room_id(&room_state.id);
-        let mut room_status = {
+        let base_room_id = normalize_room_id(&room_state.id);
+        let mut base_room_status = {
             let from_progress = normalize_room_status(&progress.room_status);
             if from_progress == "unknown" {
                 normalize_room_status(&room_state.status)
@@ -981,8 +983,8 @@ pub fn update_session_history_dom(
                 from_progress
             }
         };
-        if room_status == "unknown" {
-            room_status = "active".to_string();
+        if base_room_status == "unknown" {
+            base_room_status = "active".to_string();
         }
 
         let mut current_turn = if progress.turn > 0 {
@@ -997,7 +999,7 @@ pub fn update_session_history_dom(
         };
 
         let (room_idx, room_changed) =
-            ensure_room_entry(&mut cache.rooms, &room_id, &room_status, current_turn);
+            ensure_room_entry(&mut cache.rooms, &base_room_id, &base_room_status, current_turn);
         changed = changed || room_changed;
         if let Some(room) = cache.rooms.get_mut(room_idx) {
             let (_, turn_changed) = ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
@@ -1011,10 +1013,17 @@ pub fn update_session_history_dom(
             if !event.phase.is_empty() {
                 current_phase = event.phase.clone();
             }
+
+            let event_room_id = if event.room_id.trim().is_empty() {
+                base_room_id.clone()
+            } else {
+                normalize_room_id(&event.room_id)
+            };
+
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &room_id,
-                &room_status,
+                &event_room_id,
+                &base_room_status,
                 current_turn,
                 &current_phase,
                 "turn",
@@ -1033,32 +1042,38 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!("{} | t{} | turn | {}", room_id, current_turn, current_phase),
+                    &format!(
+                        "{} | t{} | turn | {}",
+                        event_room_id, current_turn, current_phase
+                    ),
                 );
             }
             changed = changed || updated;
         }
 
         for NarrativeReceived(event) in narratives.read() {
-            let turn = if event.turn > 0 {
+            let event_turn = if event.turn > 0 {
                 event.turn
             } else {
                 current_turn
             };
-            let phase = if !event.phase.trim().is_empty() {
+            let event_phase = if !event.phase.trim().is_empty() {
                 event.phase.clone()
             } else {
                 current_phase.clone()
             };
-            current_turn = turn.max(1);
-            current_phase = phase.clone();
+            let event_room_id = if event.room_id.trim().is_empty() {
+                base_room_id.clone()
+            } else {
+                normalize_room_id(&event.room_id)
+            };
 
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &room_id,
-                &room_status,
-                current_turn,
-                &current_phase,
+                &event_room_id,
+                &base_room_status,
+                event_turn,
+                &event_phase,
                 "narrative",
                 event.speaker.as_deref().unwrap_or(""),
                 "내러티브",
@@ -1067,31 +1082,42 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!("{} | t{} | narrative | {}", room_id, current_turn, event.text.trim()),
+                    &format!(
+                        "{} | t{} | narrative | {}",
+                        event_room_id,
+                        event_turn,
+                        event.text.trim()
+                    ),
                 );
             }
             changed = changed || updated;
+            current_turn = event_turn.max(1);
+            current_phase = event_phase;
         }
 
         for DiceRolled(payload) in dice_events.read() {
-            let turn = if payload.turn > 0 {
+            let event_turn = if payload.turn > 0 {
                 payload.turn
             } else {
                 current_turn
             };
-            current_turn = turn.max(1);
+            let event_room_id = if payload.room_id.trim().is_empty() {
+                base_room_id.clone()
+            } else {
+                normalize_room_id(&payload.room_id)
+            };
 
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &room_id,
-                &room_status,
-                current_turn,
+                &event_room_id,
+                &base_room_status,
+                event_turn,
                 &current_phase,
                 "dice",
                 &payload.character,
                 "주사위",
                 &format!(
-                    "{} — {} (d20 {} + {} = {}, DC {})",
+                    "{} - {} (d20 {} + {} = {}, DC {})",
                     payload.character,
                     payload.action,
                     payload.d20,
@@ -1105,32 +1131,46 @@ pub fn update_session_history_dom(
                     &document,
                     &format!(
                         "{} | t{} | dice | {}:{}",
-                        room_id, current_turn, payload.character, payload.action
+                        event_room_id, event_turn, payload.character, payload.action
                     ),
                 );
             }
             changed = changed || updated;
+            current_turn = event_turn.max(1);
         }
 
         for TurnProgressUpdated(event) in progress_events.read() {
-            if event.turn > 0 {
-                current_turn = event.turn;
-            }
-            if !event.phase.is_empty() {
-                current_phase = event.phase.clone();
-            }
-            let event_status = normalize_room_status(&event.room_status);
-            if event_status != "unknown" && event_status != room_status {
-                room_status = event_status;
-            }
+            let event_turn = if event.turn > 0 {
+                event.turn
+            } else {
+                current_turn
+            };
+            let event_phase = if !event.phase.is_empty() {
+                event.phase.clone()
+            } else {
+                current_phase.clone()
+            };
+            let event_room_id = if event.room_id.trim().is_empty() {
+                base_room_id.clone()
+            } else {
+                normalize_room_id(&event.room_id)
+            };
+            let event_status = {
+                let normalized = normalize_room_status(&event.room_status);
+                if normalized == "unknown" {
+                    base_room_status.clone()
+                } else {
+                    normalized
+                }
+            };
 
             let (kind, actor, summary) = label_progress_event(event);
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &room_id,
-                &room_status,
-                current_turn,
-                &current_phase,
+                &event_room_id,
+                &event_status,
+                event_turn,
+                &event_phase,
                 kind,
                 &actor,
                 if summary.is_empty() {
@@ -1143,14 +1183,20 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!("{} | t{} | progress | {}", room_id, current_turn, event.event_type),
+                    &format!(
+                        "{} | t{} | progress | {}",
+                        event_room_id, event_turn, event.event_type
+                    ),
                 );
             }
             changed = changed || updated;
+            current_turn = event_turn.max(1);
+            current_phase = event_phase;
+            base_room_status = event_status;
         }
 
         let (room_idx, room_changed) =
-            ensure_room_entry(&mut cache.rooms, &room_id, &room_status, current_turn);
+            ensure_room_entry(&mut cache.rooms, &base_room_id, &base_room_status, current_turn);
         changed = changed || room_changed;
         if let Some(room) = cache.rooms.get_mut(room_idx) {
             let (_, turn_changed) = ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
@@ -1167,10 +1213,11 @@ pub fn update_session_history_dom(
         let (hash_room, hash_turn) = read_focus_from_hash();
         let preferred_room = read_focus_room(&document)
             .or(hash_room)
-            .or_else(|| Some(room_id.clone()));
+            .or_else(|| Some(base_room_id.clone()));
         let preferred_turn = read_focus_turn(&document)
             .or(hash_turn)
             .or(Some(current_turn.max(1)));
+
         let focus_room = resolve_focus_room(&cache.rooms, preferred_room.as_deref());
         let focus_turn = resolve_focus_turn(&cache.rooms, focus_room.as_deref(), preferred_turn);
 

@@ -634,6 +634,31 @@ body:not(.mode-trpg) #ops-hud {
     letter-spacing: 0.35px;
 }
 
+.new-game-flow-state {
+    border: 1px solid rgba(109, 122, 164, 0.28);
+    border-radius: 7px;
+    background: rgba(14, 20, 36, 0.58);
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.25px;
+    padding: 5px 8px;
+}
+
+.new-game-flow-state.is-active {
+    border-color: rgba(196, 162, 101, 0.45);
+    color: #d9b06c;
+}
+
+.new-game-flow-state.is-ok {
+    border-color: rgba(122, 206, 155, 0.45);
+    color: #96d8b3;
+}
+
+.new-game-flow-state.is-error {
+    border-color: rgba(215, 118, 118, 0.45);
+    color: #dfa1a1;
+}
+
 .new-game-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(180px, 1fr));

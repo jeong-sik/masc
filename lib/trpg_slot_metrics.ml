@@ -18,10 +18,13 @@ type event_counter = {
   turn_started : int;
   turn_action_proposed : int;
   turn_action_resolved : int;
+  combat_attack : int;
+  combat_defense : int;
   turn_timeout : int;
   keeper_unavailable : int;
   metric_updated : int;
   room_ended : int;
+  session_outcome : int;
   dice_rolled : int;
   hp_changed : int;
   inventory_changed : int;
@@ -50,10 +53,13 @@ let empty_counter : event_counter = {
   turn_started = 0;
   turn_action_proposed = 0;
   turn_action_resolved = 0;
+  combat_attack = 0;
+  combat_defense = 0;
   turn_timeout = 0;
   keeper_unavailable = 0;
   metric_updated = 0;
   room_ended = 0;
+  session_outcome = 0;
   dice_rolled = 0;
   hp_changed = 0;
   inventory_changed = 0;
@@ -83,10 +89,13 @@ let increment_counter (counter : event_counter) event_type =
   | Turn_started -> { counter with turn_started = counter.turn_started + 1 }
   | Turn_action_proposed -> { counter with turn_action_proposed = counter.turn_action_proposed + 1 }
   | Turn_action_resolved -> { counter with turn_action_resolved = counter.turn_action_resolved + 1 }
+  | Combat_attack -> { counter with combat_attack = counter.combat_attack + 1 }
+  | Combat_defense -> { counter with combat_defense = counter.combat_defense + 1 }
   | Turn_timeout -> { counter with turn_timeout = counter.turn_timeout + 1 }
   | Keeper_unavailable -> { counter with keeper_unavailable = counter.keeper_unavailable + 1 }
   | Metric_updated -> { counter with metric_updated = counter.metric_updated + 1 }
   | Room_ended -> { counter with room_ended = counter.room_ended + 1 }
+  | Session_outcome -> { counter with session_outcome = counter.session_outcome + 1 }
   | Dice_rolled -> { counter with dice_rolled = counter.dice_rolled + 1 }
   | Hp_changed -> { counter with hp_changed = counter.hp_changed + 1 }
   | Inventory_changed -> { counter with inventory_changed = counter.inventory_changed + 1 }
@@ -115,10 +124,13 @@ let counter_to_yojson (counter : event_counter) : Yojson.Safe.t =
     ("turn_started", `Int counter.turn_started);
     ("turn_action_proposed", `Int counter.turn_action_proposed);
     ("turn_action_resolved", `Int counter.turn_action_resolved);
+    ("combat_attack", `Int counter.combat_attack);
+    ("combat_defense", `Int counter.combat_defense);
     ("turn_timeout", `Int counter.turn_timeout);
     ("keeper_unavailable", `Int counter.keeper_unavailable);
     ("metric_updated", `Int counter.metric_updated);
     ("room_ended", `Int counter.room_ended);
+    ("session_outcome", `Int counter.session_outcome);
     ("dice_rolled", `Int counter.dice_rolled);
     ("hp_changed", `Int counter.hp_changed);
     ("inventory_changed", `Int counter.inventory_changed);
@@ -149,10 +161,13 @@ let counter_of_yojson (json : Yojson.Safe.t) : event_counter =
     turn_started = get_int "turn_started";
     turn_action_proposed = get_int "turn_action_proposed";
     turn_action_resolved = get_int "turn_action_resolved";
+    combat_attack = get_int "combat_attack";
+    combat_defense = get_int "combat_defense";
     turn_timeout = get_int "turn_timeout";
     keeper_unavailable = get_int "keeper_unavailable";
     metric_updated = get_int "metric_updated";
     room_ended = get_int "room_ended";
+    session_outcome = get_int "session_outcome";
     dice_rolled = get_int "dice_rolled";
     hp_changed = get_int "hp_changed";
     inventory_changed = get_int "inventory_changed";
@@ -239,6 +254,8 @@ let update_actor_activity (activity : actor_activity) event_type =
   match event_type with
   | Trpg_engine_event.Turn_action_proposed -> { activity with actions_taken = activity.actions_taken + 1 }
   | Turn_action_resolved -> { activity with actions_taken = activity.actions_taken + 1 }
+  | Combat_attack -> { activity with actions_taken = activity.actions_taken + 1 }
+  | Combat_defense -> { activity with actions_taken = activity.actions_taken + 1 }
   | Dice_rolled -> { activity with dice_rolled = activity.dice_rolled + 1 }
   | Intervention_submitted -> { activity with interventions = activity.interventions + 1 }
   | Intervention_applied -> { activity with interventions = activity.interventions + 1 }

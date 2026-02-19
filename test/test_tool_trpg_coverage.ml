@@ -93,6 +93,11 @@ let bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids =
   | Ok () -> ()
   | Error e -> failwith ("bootstrap Room_started failed: " ^ e))
 
+let append_event_exn ~base_dir ~(event : Trpg_engine_event.t) =
+  match Trpg_engine_store_sqlite.append_event ~base_dir ~event with
+  | Ok () -> ()
+  | Error e -> failwith ("append event failed: " ^ e)
+
 let dispatch_exn ctx ~name ~args =
   match Tool_trpg.dispatch ctx ~name ~args with
   | Some r -> r
@@ -168,6 +173,109 @@ let test_round_run_success_path () =
   in
   let dm_json = parse_json_exn stream_dm in
   Alcotest.(check int) "dm narration count" 1 (count_from_json dm_json);
+  cleanup_dir base_dir
+
+let test_round_run_emits_combat_semantic_events () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-combat" ~actor_ids:["p1"];
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The enemy braces.") ])
+    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I attack the goblin.") ])
+    | other -> `Error ("unknown keeper: " ^ other)
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-combat");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("phase", `String "round");
+        ("timeout_sec", `Float 1.0);
+      ]
+  in
+  let ok, _body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+
+  let _, stream_attack =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String "room-round-combat");
+            ("event_type", `String "combat.attack");
+          ])
+  in
+  Alcotest.(check int)
+    "combat.attack count"
+    1
+    (count_from_json (parse_json_exn stream_attack));
+  cleanup_dir base_dir
+
+let test_round_run_emits_session_outcome_event () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-outcome" ~actor_ids:["p1"];
+  let flag_event =
+    Trpg_engine_event.make ~seq:3 ~room_id:"room-round-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg_engine_event.Flag_set
+      ~payload:(`Assoc [ ("scope", `String "world"); ("key", `String "outcome.victory") ])
+      ()
+  in
+  append_event_exn ~base_dir ~event:flag_event;
+
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The chapter closes.") ])
+    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I secure the gate.") ])
+    | other -> `Error ("unknown keeper: " ^ other)
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-outcome");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("phase", `String "round");
+        ("timeout_sec", `Float 1.0);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string)
+    "outcome payload has victory"
+    "victory"
+    (json |> Yojson.Safe.Util.member "outcome"
+    |> Yojson.Safe.Util.member "outcome"
+    |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "room_status ended"
+    "ended"
+    (json |> Yojson.Safe.Util.member "room_status" |> Yojson.Safe.Util.to_string);
+
+  let _, stream_outcome =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String "room-round-outcome");
+            ("event_type", `String "session.outcome");
+          ])
+  in
+  Alcotest.(check int)
+    "session.outcome count"
+    1
+    (count_from_json (parse_json_exn stream_outcome));
   cleanup_dir base_dir
 
 let test_round_run_timeout_policy () =
@@ -1257,6 +1365,14 @@ let () =
             "dm prompt reflects player action"
             `Quick
             test_round_run_dm_prompt_reflects_player_action;
+          Alcotest.test_case
+            "emits combat semantic events"
+            `Quick
+            test_round_run_emits_combat_semantic_events;
+          Alcotest.test_case
+            "emits session outcome event"
+            `Quick
+            test_round_run_emits_session_outcome_event;
           Alcotest.test_case
             "rejects non-unique keepers"
             `Quick

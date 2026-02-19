@@ -3,9 +3,12 @@ let public_event_types =
     Trpg_engine_event.Turn_started;
     Trpg_engine_event.Phase_changed;
     Trpg_engine_event.Turn_action_resolved;
+    Trpg_engine_event.Combat_attack;
+    Trpg_engine_event.Combat_defense;
     Trpg_engine_event.Scene_transition;
     Trpg_engine_event.Quest_update;
     Trpg_engine_event.World_event;
+    Trpg_engine_event.Session_outcome;
     Trpg_engine_event.Dice_rolled;
     Trpg_engine_event.Session_started;
     Trpg_engine_event.Party_selected;

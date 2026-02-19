@@ -1207,12 +1207,23 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Eio.Time.Timeout -> `Error "timeout"
     | exn -> `Error (Printexc.to_string exn)
   in
+  let trpg_dm_voice_emit ~agent_id ~message ~provider : Tool_trpg.dm_voice_emit_result =
+    let net = get_net () in
+    let provider =
+      match provider |> Option.map String.trim with
+      | Some p when p <> "" && not (String.equal (String.lowercase_ascii p) "auto") ->
+          Some p
+      | _ -> None
+    in
+    Voice_bridge.agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ()
+  in
   let simple_ctx_trpg : Tool_trpg.context =
     {
       config;
       agent_name;
       keeper_call = Some trpg_keeper_call;
       keeper_probe = Some trpg_keeper_probe;
+      dm_voice_emit = Some trpg_dm_voice_emit;
     }
   in
   let simple_ctx_protocol : Tool_protocol_game_view.context =
@@ -1221,6 +1232,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       agent_name;
       trpg_keeper_call = Some trpg_keeper_call;
       trpg_keeper_probe = Some trpg_keeper_probe;
+      trpg_dm_voice_emit = Some trpg_dm_voice_emit;
     }
   in
 

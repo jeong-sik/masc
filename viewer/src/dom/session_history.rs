@@ -20,6 +20,7 @@ use crate::game::state::{RoomState, TurnProgressState};
 const MAX_ROOMS_TO_KEEP: usize = 24;
 const MAX_TURNS_TO_KEEP: usize = 24;
 const MAX_EVENTS_PER_TURN: usize = 80;
+const UNKNOWN_ROOM_ID: &str = "room-unknown";
 
 #[derive(Clone, Debug, PartialEq)]
 struct HistoryEvent {
@@ -63,7 +64,7 @@ fn normalize_room_id(raw: &str) -> String {
         .trim()
         .to_ascii_lowercase();
     if normalized.is_empty() {
-        "room-unknown".to_string()
+        UNKNOWN_ROOM_ID.to_string()
     } else {
         normalized
     }
@@ -337,6 +338,10 @@ fn label_progress_event(
 #[cfg(target_arch = "wasm32")]
 fn sorted_room_refs(rooms: &[RoomHistory]) -> Vec<&RoomHistory> {
     let mut refs = rooms.iter().collect::<Vec<_>>();
+    let has_real_room = refs.iter().any(|room| room.room_id != UNKNOWN_ROOM_ID);
+    if has_real_room {
+        refs.retain(|room| room.room_id != UNKNOWN_ROOM_ID);
+    }
     refs.sort_by(|a, b| compare_room_priority(a, b));
     refs
 }
@@ -594,7 +599,7 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
 #[cfg(target_arch = "wasm32")]
 fn normalize_focus_room(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case(UNKNOWN_ROOM_ID) {
         None
     } else {
         Some(trimmed.to_string())
@@ -1045,7 +1050,11 @@ pub fn update_session_history_dom(
         };
 
         let mut changed = false;
-        let base_room_id = normalize_room_id(&room_state.id);
+        let mut base_room_id = normalize_room_id(&room_state.id);
+        let current_room_fallback = normalize_room_id(&crate::config::current_room_id());
+        if base_room_id == UNKNOWN_ROOM_ID && current_room_fallback != UNKNOWN_ROOM_ID {
+            base_room_id = current_room_fallback;
+        }
         let mut base_room_status = {
             let from_progress = normalize_room_status(&progress.room_status);
             if from_progress == "unknown" {

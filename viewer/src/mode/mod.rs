@@ -32,7 +32,7 @@ use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
 const VIEWER_LAST_MODE_STORAGE_KEY: &str = "masc.viewer.last_mode";
 #[cfg(target_arch = "wasm32")]
-const VIEWER_LAYOUT_PREFS_STORAGE_KEY: &str = "masc.viewer.layout.v1";
+const VIEWER_LAYOUT_PREFS_STORAGE_KEY: &str = "masc.viewer.layout.v2";
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Copy, Debug)]
@@ -50,7 +50,8 @@ impl Default for ViewLayoutPrefs {
             show_ops: true,
             show_secondary: true,
             show_tertiary: true,
-            show_bottom: true,
+            // Default to map-first layout for TRPG readability.
+            show_bottom: false,
         }
     }
 }

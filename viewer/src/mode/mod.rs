@@ -1330,6 +1330,11 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
             "<span class=\"flow-state\">대기</span><span class=\"flow-text\">세션 상태를 불러오는 중입니다.</span>",
         );
     }
+    if let Some(el) = doc.get_element_by_id("agent-round-flow") {
+        el.set_inner_html(
+            "<div class=\"agent-flow-empty\">에이전트 라운드 흐름을 불러오는 중입니다.</div>",
+        );
+    }
     if let Some(el) = doc.get_element_by_id("turn-controls") {
         let _ = el.set_attribute("style", "display:none");
     }

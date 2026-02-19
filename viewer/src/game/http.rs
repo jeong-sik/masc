@@ -746,12 +746,9 @@ fn parse_dice_log(root: &Value) -> Option<Vec<DiceRollPayload>> {
 
     let mut output = Vec::new();
     for entry in entries {
-        if let Some(row) = parse_dice_log_entry(
-            entry,
-            fallback_turn,
-            fallback_phase,
-            &fallback_room_id,
-        ) {
+        if let Some(row) =
+            parse_dice_log_entry(entry, fallback_turn, fallback_phase, &fallback_room_id)
+        {
             output.push(row);
         }
     }

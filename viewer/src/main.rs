@@ -12,9 +12,9 @@ mod render;
 mod shaders;
 mod sse;
 
-use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::asset::{AssetMetaCheck, AssetPlugin};
+use bevy::prelude::*;
 
 use mode::ModePlugin;
 use theme::ThemePlugin;
@@ -31,11 +31,7 @@ fn main() {
         .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins((ModePlugin, ThemePlugin))
         // DOM + session systems only; renderer/audio plugins are skipped on wasm fallback.
-        .add_plugins((
-            sse::SsePlugin,
-            game::GameStatePlugin,
-            dom::DomBridgePlugin,
-        ))
+        .add_plugins((sse::SsePlugin, game::GameStatePlugin, dom::DomBridgePlugin))
         .run();
 }
 

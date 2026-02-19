@@ -52,10 +52,7 @@ pub fn parse_jsonrpc_body(body: &str) -> RpcResult {
 
     // Check for JSON-RPC error field
     if let Some(err_obj) = parsed.get("error") {
-        let code = err_obj
-            .get("code")
-            .and_then(|c| c.as_i64())
-            .unwrap_or(-1);
+        let code = err_obj.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err_obj
             .get("message")
             .and_then(|m| m.as_str())
@@ -70,7 +67,9 @@ pub fn parse_jsonrpc_body(body: &str) -> RpcResult {
     }
 
     // No error, no result — unexpected format
-    RpcResult::NetworkError("Unexpected JSON-RPC response: missing both 'result' and 'error'".into())
+    RpcResult::NetworkError(
+        "Unexpected JSON-RPC response: missing both 'result' and 'error'".into(),
+    )
 }
 
 /// Perform a JSON-RPC POST to the given endpoint.
@@ -165,7 +164,8 @@ mod tests {
 
     #[test]
     fn parse_rpc_error() {
-        let body = r#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request"},"id":"1"}"#;
+        let body =
+            r#"{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request"},"id":"1"}"#;
         match parse_jsonrpc_body(body) {
             RpcResult::RpcError(code, msg) => {
                 assert_eq!(code, -32600);

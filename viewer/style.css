@@ -2381,6 +2381,87 @@ body:not(.mode-trpg) #ops-hud {
     border-color: rgba(109, 122, 164, 0.34);
 }
 
+.agent-round-flow {
+    margin: 0 0 10px;
+    border: 1px solid rgba(109, 122, 164, 0.26);
+    border-radius: var(--panel-radius);
+    background: rgba(12, 18, 33, 0.72);
+    padding: 8px;
+}
+
+.agent-flow-track {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.agent-flow-step {
+    border: 1px solid rgba(109, 122, 164, 0.26);
+    border-radius: 8px;
+    background: rgba(20, 26, 44, 0.5);
+    padding: 6px;
+    display: grid;
+    gap: 4px;
+    min-height: 62px;
+}
+
+.agent-flow-step .s-k {
+    font-size: 9px;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.agent-flow-step .s-v {
+    font-size: 10px;
+    color: var(--text-primary);
+    line-height: 1.35;
+}
+
+.agent-flow-step.is-done {
+    border-color: rgba(88, 184, 116, 0.4);
+    background: rgba(18, 40, 31, 0.42);
+}
+
+.agent-flow-step.is-done .s-k {
+    color: var(--status-connected);
+}
+
+.agent-flow-step.is-active {
+    border-color: rgba(196, 162, 101, 0.56);
+    background: rgba(53, 40, 20, 0.44);
+}
+
+.agent-flow-step.is-active .s-k {
+    color: #e4c895;
+}
+
+.agent-flow-step.is-error {
+    border-color: rgba(215, 118, 118, 0.58);
+    background: rgba(80, 29, 29, 0.42);
+}
+
+.agent-flow-step.is-error .s-k {
+    color: #dfa1a1;
+}
+
+.agent-flow-empty {
+    color: var(--text-dim);
+    font-size: 10px;
+}
+
+@media (max-width: 1180px) {
+    .agent-flow-track {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .agent-flow-track {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 /* ─── Turn Controls (advance turn button) ─── */
 
 #turn-controls {

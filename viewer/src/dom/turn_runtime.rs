@@ -97,6 +97,217 @@ fn compact_reason_text(raw: &str) -> String {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy)]
+enum FlowStepState {
+    Done,
+    Active,
+    Wait,
+    Error,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl FlowStepState {
+    fn css(self) -> &'static str {
+        match self {
+            Self::Done => "is-done",
+            Self::Active => "is-active",
+            Self::Wait => "is-wait",
+            Self::Error => "is-error",
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_state_is_done(state: &str) -> bool {
+    matches!(
+        state.trim().to_ascii_lowercase().as_str(),
+        "ok" | "timeout" | "unavailable"
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_state_is_error(state: &str) -> bool {
+    matches!(
+        state.trim().to_ascii_lowercase().as_str(),
+        "timeout" | "unavailable"
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgressState) {
+    let Some(el) = document.get_element_by_id("agent-round-flow") else {
+        return;
+    };
+
+    let player_ids = progress
+        .actor_order
+        .iter()
+        .filter(|actor_id| actor_id.as_str() != "dm")
+        .map(|actor_id| actor_id.as_str())
+        .collect::<Vec<_>>();
+    let player_total = player_ids.len();
+
+    let mut player_done = 0usize;
+    let mut player_success = 0usize;
+    let mut player_error = 0usize;
+    for actor_id in &player_ids {
+        let state = progress
+            .actor_states
+            .get(*actor_id)
+            .map(String::as_str)
+            .unwrap_or("pending");
+        if actor_state_is_done(state) {
+            player_done += 1;
+        }
+        if state.trim().eq_ignore_ascii_case("ok") {
+            player_success += 1;
+        }
+        if actor_state_is_error(state) {
+            player_error += 1;
+        }
+    }
+
+    let quorum_required = if player_total == 0 {
+        0
+    } else {
+        std::cmp::max(1, (player_total + 1) / 2)
+    };
+    let quorum_met = player_success >= quorum_required;
+    let quorum_impossible =
+        player_success + (player_total.saturating_sub(player_done)) < quorum_required;
+
+    let dm_state = progress
+        .actor_states
+        .get("dm")
+        .map(String::as_str)
+        .unwrap_or("pending")
+        .trim()
+        .to_ascii_lowercase();
+    let dm_done = actor_state_is_done(&dm_state);
+    let dm_error = actor_state_is_error(&dm_state);
+
+    let prep_state = if player_total > 0 {
+        FlowStepState::Done
+    } else if !progress.actor_order.is_empty() {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let prep_text = if player_total > 0 {
+        format!("플레이어 {}명 구성 완료", player_total)
+    } else if !progress.actor_order.is_empty() {
+        "파티를 구성하는 중".to_string()
+    } else {
+        "세션 시작/파티 선택 대기".to_string()
+    };
+
+    let player_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if player_error > 0 {
+        FlowStepState::Error
+    } else if player_done >= player_total {
+        FlowStepState::Done
+    } else if player_done > 0 {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let player_text = if player_total == 0 {
+        "플레이어 미선택".to_string()
+    } else {
+        format!(
+            "{}/{} 완료 · 성공 {} · 이슈 {}",
+            player_done, player_total, player_success, player_error
+        )
+    };
+
+    let quorum_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if quorum_met {
+        FlowStepState::Done
+    } else if quorum_impossible {
+        FlowStepState::Error
+    } else if player_done > 0 {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let quorum_text = if player_total == 0 {
+        "파티 선택 후 계산".to_string()
+    } else {
+        format!("{} / {} (과반 필요)", player_success, quorum_required)
+    };
+
+    let dm_step_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if !quorum_met && quorum_impossible {
+        FlowStepState::Error
+    } else if !quorum_met {
+        FlowStepState::Wait
+    } else if dm_error {
+        FlowStepState::Error
+    } else if dm_done {
+        FlowStepState::Done
+    } else if dm_state == "thinking" || progress.current_actor.trim() == "dm" {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let dm_text = if player_total == 0 {
+        "쿼럼 이후 실행".to_string()
+    } else if !quorum_met {
+        "플레이어 응답 대기".to_string()
+    } else if dm_done {
+        format!("DM 처리 완료 ({})", dm_state)
+    } else if dm_state == "thinking" {
+        "DM 응답 생성 중".to_string()
+    } else {
+        "DM 시작 대기".to_string()
+    };
+
+    let resolve_state = if player_total == 0 {
+        FlowStepState::Wait
+    } else if dm_error {
+        FlowStepState::Error
+    } else if dm_done
+        && (progress.last_event == "turn.started"
+            || progress.last_event == "phase.changed"
+            || progress.last_event == "session.outcome")
+    {
+        FlowStepState::Done
+    } else if dm_done {
+        FlowStepState::Active
+    } else {
+        FlowStepState::Wait
+    };
+    let resolve_text = if progress.last_event.is_empty() {
+        "이벤트 대기".to_string()
+    } else {
+        format!("마지막 이벤트: {}", progress.last_event)
+    };
+
+    let step_html = |title: &str, state: FlowStepState, text: String| {
+        format!(
+            "<div class=\"agent-flow-step {class}\"><span class=\"s-k\">{title}</span><span class=\"s-v\">{text}</span></div>",
+            class = state.css(),
+            title = html_escape(title),
+            text = html_escape(&text),
+        )
+    };
+
+    let html = [
+        step_html("세션 준비", prep_state, prep_text),
+        step_html("플레이어 수집", player_state, player_text),
+        step_html("쿼럼 판단", quorum_state, quorum_text),
+        step_html("DM 턴", dm_step_state, dm_text),
+        step_html("결과 반영", resolve_state, resolve_text),
+    ]
+    .join("");
+
+    el.set_inner_html(&format!("<div class=\"agent-flow-track\">{}</div>", html));
+}
+
 fn ordered_actor_ids_for_issue_scan(progress: &TurnProgressState) -> Vec<String> {
     let mut ordered = Vec::new();
     let mut seen = BTreeSet::new();
@@ -725,6 +936,7 @@ pub fn update_turn_runtime_dom(
             flow_banner.set_inner_html(&html);
             let _ = flow_banner.set_attribute("title", &next_action);
         }
+        render_agent_round_flow(&document, &progress);
 
         let inferred_dm = if !progress.dm_keeper.trim().is_empty() {
             progress.dm_keeper.trim().to_string()

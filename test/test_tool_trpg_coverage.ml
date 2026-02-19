@@ -728,6 +728,13 @@ let test_examples_scenario_visible_as_world_preset () =
     (start_json |> Yojson.Safe.Util.member "world_preset"
     |> Yojson.Safe.Util.member "id"
     |> Yojson.Safe.Util.to_string);
+  Alcotest.(check int)
+    "scenario runtime max_rounds reflected in end_rules.max_turn"
+    6
+    (start_json |> Yojson.Safe.Util.member "world_preset"
+    |> Yojson.Safe.Util.member "end_rules"
+    |> Yojson.Safe.Util.member "max_turn"
+    |> Yojson.Safe.Util.to_int);
   cleanup_dir base_dir
 
 let test_actor_spawn_claim_release_flow () =

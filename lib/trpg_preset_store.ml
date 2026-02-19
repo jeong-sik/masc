@@ -55,9 +55,19 @@ type catalog = {
 }
 
 let string_list_of_member json key =
-  (match json |> member key with `List xs -> xs | _ -> [])
+  let value =
+    match json with
+    | `Assoc xs -> Option.value ~default:`Null (List.assoc_opt key xs)
+    | _ -> `Null
+  in
+  (match value with `List xs -> xs | _ -> [])
   |> List.filter_map
        (function `String s when String.trim s <> "" -> Some s | _ -> None)
+
+let assoc_member json key =
+  match json with
+  | `Assoc xs -> Option.value ~default:`Null (List.assoc_opt key xs)
+  | _ -> `Null
 
 let default_end_rules : end_rules =
   {
@@ -73,12 +83,12 @@ let positive_or_default value default =
   if value <= 0 then default else value
 
 let parse_end_rules json : end_rules =
-  let src = json |> member "end_rules" in
+  let src = assoc_member json "end_rules" in
   let int_field key default =
-    src |> member key |> to_int_option |> Option.value ~default
+    assoc_member src key |> to_int_option |> Option.value ~default
   in
   let bool_field key default =
-    src |> member key |> to_bool_option |> Option.value ~default
+    assoc_member src key |> to_bool_option |> Option.value ~default
   in
   let list_field key default =
     let xs = string_list_of_member src key in
@@ -101,6 +111,22 @@ let parse_end_rules json : end_rules =
     allow_dm_end_signal =
       bool_field "allow_dm_end_signal" default_end_rules.allow_dm_end_signal;
   }
+
+let parse_scenario_end_rules json : end_rules =
+  let parsed = parse_end_rules json in
+  let explicit_max_turn =
+    assoc_member (assoc_member json "end_rules") "max_turn"
+    |> to_int_option
+  in
+  match explicit_max_turn with
+  | Some n when n > 0 -> parsed
+  | _ ->
+      (match
+         assoc_member (assoc_member json "runtime") "max_rounds"
+         |> to_int_option
+       with
+      | Some n when n > 0 -> { parsed with max_turn = n }
+      | _ -> parsed)
 
 let parse_dm_preset json =
   {
@@ -413,7 +439,15 @@ let parse_scenario_world_preset json : world_preset option =
           description
       in
       let intro = Option.value ~default:description intro in
-      Some { id; title; description; intro; initial_flags; end_rules = default_end_rules }
+      Some
+        {
+          id;
+          title;
+          description;
+          intro;
+          initial_flags;
+          end_rules = parse_scenario_end_rules json;
+        }
 
 let load_scenario_world_presets ~base_dir : world_preset list =
   let scenarios_dir = config_path base_dir "examples/trpg-mvp/scenarios" in

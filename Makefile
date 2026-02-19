@@ -8,11 +8,11 @@ all: build
 
 # Build the project
 build:
-	dune build
+	dune build --root .
 
 # Run tests
 test:
-	dune test
+	dune test --root .
 
 # Clean build artifacts
 clean:
@@ -22,7 +22,7 @@ clean:
 coverage:
 	rm -rf _coverage
 	mkdir -p _coverage
-	BISECT_FILE=$(CURDIR)/_coverage/bisect dune test --instrument-with bisect_ppx --force
+	BISECT_FILE=$(CURDIR)/_coverage/bisect dune test --root . --instrument-with bisect_ppx --force
 
 # Print coverage summary to stdout
 coverage-summary: coverage
@@ -35,7 +35,7 @@ coverage-html: coverage
 
 # Generate documentation
 doc:
-	dune build @doc
+	dune build --root . @doc
 	@echo "Documentation generated at _build/default/_doc/_html/index.html"
 
 # Install dependencies
@@ -48,11 +48,11 @@ dev-setup: install-deps
 
 # Format code (if ocamlformat is installed)
 fmt:
-	dune fmt || true
+	dune fmt --root . || true
 
 # Check formatting
 fmt-check:
-	dune fmt --check || true
+	dune fmt --root . --preview || true
 
 # CI target (for GitHub Actions)
 ci: fmt-check test
@@ -60,11 +60,11 @@ ci: fmt-check test
 
 # Start the MCP server (local development)
 run:
-	dune exec masc-mcp -- --port 8933
+	dune exec --root . masc-mcp -- --port 8933
 
 # Build release binary
 release:
-	dune build --release
+	dune build --root . --release
 	@echo "Release binary at _build/default/bin/main.exe"
 
 # Build viewer (Bevy + WASM via trunk) with NO_COLOR normalization.

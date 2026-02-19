@@ -88,7 +88,7 @@ pub struct PostDetailResponse {
 /// Shared buffer for async HTTP fetch results.
 #[derive(Resource)]
 pub struct BoardBuffer {
-    pub data: Arc<Mutex<Option<Vec<BoardPost>>>>,
+    pub data: Arc<Mutex<Option<BoardFetchResult>>>,
 }
 
 /// Timer controlling periodic board refresh.
@@ -97,11 +97,17 @@ pub struct BoardRefreshTimer {
     timer: Timer,
 }
 
+#[derive(Debug, Clone)]
+pub enum BoardFetchResult {
+    Posts(Vec<BoardPost>),
+    Error(String),
+}
+
 // ─── OnEnter System ──────────────────────────
 
 /// Fires initial board fetch when entering Social mode.
 pub fn fetch_board_on_enter(mut commands: Commands) {
-    let buffer: Arc<Mutex<Option<Vec<BoardPost>>>> = Arc::new(Mutex::new(None));
+    let buffer: Arc<Mutex<Option<BoardFetchResult>>> = Arc::new(Mutex::new(None));
 
     fire_board_fetch(buffer.clone());
 
@@ -133,16 +139,18 @@ pub fn board_refresh_tick(
 pub fn render_board_posts(buffer: Option<Res<BoardBuffer>>) {
     let Some(buffer) = buffer else { return };
 
-    let posts = {
+    let result = {
         let Ok(mut buf) = buffer.data.lock() else {
             return;
         };
         buf.take()
     };
 
-    let Some(posts) = posts else { return };
-
-    render_posts_to_dom(&posts, &buffer.data);
+    match result {
+        Some(BoardFetchResult::Posts(posts)) => render_posts_to_dom(&posts, &buffer.data),
+        Some(BoardFetchResult::Error(detail)) => render_board_error_to_dom(&detail),
+        None => {}
+    }
 }
 
 /// Cleanup on exit from Social mode.
@@ -154,21 +162,21 @@ pub fn cleanup_board(mut commands: Commands) {
 
 // ─── Async Fetch ─────────────────────────────
 
-fn fire_board_fetch(shared: Arc<Mutex<Option<Vec<BoardPost>>>>) {
+fn fire_board_fetch(shared: Arc<Mutex<Option<BoardFetchResult>>>) {
     #[cfg(target_arch = "wasm32")]
     {
         wasm_bindgen_futures::spawn_local(async move {
             match fetch_board_posts().await {
                 Ok(posts) => {
                     if let Ok(mut buf) = shared.lock() {
-                        *buf = Some(posts);
+                        *buf = Some(BoardFetchResult::Posts(posts));
                     }
                 }
                 Err(e) => {
                     log::warn!("Board fetch failed: {:?}", e);
-                    // On failure, write empty vec so DOM shows "no posts" state
+                    let detail = format_fetch_error(&e);
                     if let Ok(mut buf) = shared.lock() {
-                        *buf = Some(Vec::new());
+                        *buf = Some(BoardFetchResult::Error(detail));
                     }
                 }
             }
@@ -180,6 +188,14 @@ fn fire_board_fetch(shared: Arc<Mutex<Option<Vec<BoardPost>>>>) {
     {
         let _ = shared;
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn format_fetch_error(err: &JsValue) -> String {
+    err.as_string()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Unknown fetch error".to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -306,7 +322,7 @@ async fn submit_comment(post_id: &str, content: &str) -> Result<(), JsValue> {
 
 // ─── DOM Rendering ───────────────────────────
 
-fn render_posts_to_dom(_posts: &[BoardPost], _shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
+fn render_posts_to_dom(_posts: &[BoardPost], _shared: &Arc<Mutex<Option<BoardFetchResult>>>) {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -389,10 +405,27 @@ fn render_posts_to_dom(_posts: &[BoardPost], _shared: &Arc<Mutex<Option<Vec<Boar
     }
 }
 
+fn render_board_error_to_dom(_detail: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let Some(feed) = doc.query_selector("#social-feed").ok().flatten() else {
+            return;
+        };
+
+        feed.set_inner_html(&format!(
+            "<div class=\"social-error\">Lodge feed unavailable.<br><span class=\"social-error-detail\">{}</span></div>",
+            html_escape(_detail)
+        ));
+    }
+}
+
 // ─── Event Binding: Votes ────────────────────
 
 #[cfg(target_arch = "wasm32")]
-fn bind_vote_buttons(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
+fn bind_vote_buttons(doc: &web_sys::Document, shared: &Arc<Mutex<Option<BoardFetchResult>>>) {
     let buttons = doc.query_selector_all(".vote-btn");
     let Ok(buttons) = buttons else { return };
 
@@ -579,7 +612,7 @@ fn render_comments_to_dom(post_id: &str, comments: &[BoardComment]) {
 // ─── Event Binding: Comment Form ─────────────
 
 #[cfg(target_arch = "wasm32")]
-fn bind_comment_forms(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
+fn bind_comment_forms(doc: &web_sys::Document, shared: &Arc<Mutex<Option<BoardFetchResult>>>) {
     let submits = doc.query_selector_all(".comment-submit");
     let Ok(submits) = submits else { return };
 
@@ -649,7 +682,10 @@ fn bind_comment_forms(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<Boa
 }
 
 #[cfg(target_arch = "wasm32")]
-fn bind_comment_input_enter(doc: &web_sys::Document, shared: &Arc<Mutex<Option<Vec<BoardPost>>>>) {
+fn bind_comment_input_enter(
+    doc: &web_sys::Document,
+    shared: &Arc<Mutex<Option<BoardFetchResult>>>,
+) {
     let inputs = doc.query_selector_all(".comment-input");
     let Ok(inputs) = inputs else { return };
 

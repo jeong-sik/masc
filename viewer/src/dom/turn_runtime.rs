@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::BTreeSet;
 
 use crate::game::components::Actor;
 use crate::game::lifecycle::TrpgLifecycleState;
@@ -82,6 +83,112 @@ fn phase_matches_for_sync(room_phase: &str, progress_phase: &str) -> bool {
         return false;
     }
     phase_is_aggregate_round(&room_norm) || phase_is_aggregate_round(&progress_norm)
+}
+
+fn compact_reason_text(raw: &str) -> String {
+    let compact = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_REASON_CHARS: usize = 72;
+    if compact.chars().count() <= MAX_REASON_CHARS {
+        compact
+    } else {
+        let mut short = compact.chars().take(MAX_REASON_CHARS).collect::<String>();
+        short.push_str("...");
+        short
+    }
+}
+
+fn ordered_actor_ids_for_issue_scan(progress: &TurnProgressState) -> Vec<String> {
+    let mut ordered = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for actor_id in &progress.actor_order {
+        let actor_id = actor_id.trim();
+        if !actor_id.is_empty() && seen.insert(actor_id.to_string()) {
+            ordered.push(actor_id.to_string());
+        }
+    }
+    for actor_id in progress.actor_states.keys() {
+        let actor_id = actor_id.trim();
+        if !actor_id.is_empty() && seen.insert(actor_id.to_string()) {
+            ordered.push(actor_id.to_string());
+        }
+    }
+    for actor_id in progress.actor_reasons.keys() {
+        let actor_id = actor_id.trim();
+        if !actor_id.is_empty() && seen.insert(actor_id.to_string()) {
+            ordered.push(actor_id.to_string());
+        }
+    }
+
+    ordered
+}
+
+fn summarize_actor_issues(progress: &TurnProgressState) -> (String, bool) {
+    let mut issues = Vec::new();
+    for actor_id in ordered_actor_ids_for_issue_scan(progress) {
+        let state = progress
+            .actor_states
+            .get(&actor_id)
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        let reason = progress
+            .actor_reasons
+            .get(&actor_id)
+            .map(|v| compact_reason_text(v))
+            .unwrap_or_default();
+        let is_issue_state = matches!(state.as_str(), "timeout" | "unavailable");
+        if !is_issue_state && reason.is_empty() {
+            continue;
+        }
+        let state_label = if is_issue_state { state.as_str() } else { "issue" };
+        if reason.is_empty() {
+            issues.push(format!("{}: {}", actor_id, state_label));
+        } else {
+            issues.push(format!("{}: {} ({})", actor_id, state_label, reason));
+        }
+    }
+
+    if issues.is_empty() {
+        ("-".to_string(), false)
+    } else {
+        (issues.join(" · "), true)
+    }
+}
+
+fn build_next_action_hint(
+    lifecycle: TrpgLifecycleState,
+    runner_running: bool,
+    current_actor: &str,
+    has_actor_issues: bool,
+) -> String {
+    if runner_running {
+        return "Auto Run 진행 중입니다. 이벤트 수신을 기다리세요.".to_string();
+    }
+    if !lifecycle.accepts_player_input() {
+        return match lifecycle {
+            TrpgLifecycleState::Loading => {
+                "로딩 중입니다. 상태 동기화 완료를 기다리세요.".to_string()
+            }
+            TrpgLifecycleState::Stopped => "세션이 멈춰 있습니다. Start/Run으로 재개하세요.".to_string(),
+            TrpgLifecycleState::Ended => "세션이 종료되었습니다. New Game으로 시작하세요.".to_string(),
+            TrpgLifecycleState::Unavailable => {
+                "엔진/키퍼 연결을 복구한 뒤 다시 시도하세요.".to_string()
+            }
+            TrpgLifecycleState::Lobby => "세션을 시작한 뒤 Run Round를 실행하세요.".to_string(),
+            TrpgLifecycleState::Unknown => "상태 확인 후 Run Round를 다시 실행하세요.".to_string(),
+            TrpgLifecycleState::Running => "진행 상태를 확인하세요.".to_string(),
+        };
+    }
+    if has_actor_issues {
+        return "keeper 상태를 확인한 뒤 Run Round를 다시 실행하세요.".to_string();
+    }
+
+    let actor = current_actor.trim();
+    if actor.is_empty() || actor == "-" {
+        "Run Round를 실행하거나 플레이어 액션을 입력하세요.".to_string()
+    } else {
+        format!("{} 응답을 기다리는 중입니다.", actor)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -171,6 +278,7 @@ pub fn update_turn_runtime_dom(
     } else {
         format!("{}/{} alive", alive_party, total_party)
     };
+    let (issues_summary, has_actor_issues) = summarize_actor_issues(&progress);
 
     let current_status = if !lifecycle.accepts_player_input() {
         lifecycle.label_ko()
@@ -264,6 +372,12 @@ pub fn update_turn_runtime_dom(
     } else {
         "idle".to_string()
     };
+    let next_action = build_next_action_hint(
+        lifecycle,
+        runner_running,
+        &current_actor,
+        has_actor_issues,
+    );
 
     let connection_label = connection_status_label(&connection);
     let connection_class = connection_status_class(&connection);
@@ -272,7 +386,7 @@ pub fn update_turn_runtime_dom(
     let _ = (&sync_class, &control_state, &runner_last_result);
 
     let snapshot = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         room_status_key,
         turn,
         phase,
@@ -286,7 +400,9 @@ pub fn update_turn_runtime_dom(
         connection_class,
         sync_state,
         runner_state,
-        progress.last_event
+        progress.last_event,
+        issues_summary,
+        next_action,
     );
     if cache.last_snapshot == snapshot {
         return;
@@ -307,6 +423,11 @@ pub fn update_turn_runtime_dom(
             "status-wipe"
         } else {
             "status-active"
+        };
+        let issues_class = if has_actor_issues {
+            "status-error"
+        } else {
+            "status-idle"
         };
         let input_class = if lifecycle.accepts_player_input() {
             "status-active"
@@ -480,6 +601,8 @@ pub fn update_turn_runtime_dom(
   <div class="turn-runtime-item"><span class="k">Now</span><span class="v">{current} · {current_status}</span></div>
   <div class="turn-runtime-item"><span class="k">Next</span><span class="v">{next}</span></div>
   <div class="turn-runtime-item"><span class="k">Last</span><span class="v">{last}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Issues</span><span class="v {issues_class}">{issues}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">Next Action</span><span class="v">{next_action}</span></div>
   <div class="turn-runtime-item"><span class="k">Party</span><span class="v {party_class}">{party}</span></div>
 </div>
 "#,
@@ -494,9 +617,56 @@ pub fn update_turn_runtime_dom(
             current_status = html_escape(current_status),
             next = html_escape(&next_actor),
             last = html_escape(&last_result),
+            issues_class = issues_class,
+            issues = html_escape(&issues_summary),
+            next_action = html_escape(&next_action),
             party_class = party_class,
             party = html_escape(&party_status),
         );
         el.set_inner_html(&html);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::state::TurnProgressState;
+
+    #[test]
+    fn summarize_actor_issues_respects_actor_order_and_reason() {
+        let mut progress = TurnProgressState::default();
+        progress.actor_order = vec!["dm".to_string(), "p01".to_string(), "p02".to_string()];
+        progress
+            .actor_states
+            .insert("p02".to_string(), "unavailable".to_string());
+        progress
+            .actor_states
+            .insert("p01".to_string(), "timeout".to_string());
+        progress.actor_reasons.insert(
+            "p01".to_string(),
+            "keeper heartbeat timeout".to_string(),
+        );
+        progress
+            .actor_reasons
+            .insert("p99".to_string(), "no keeper".to_string());
+
+        let (summary, has_issues) = summarize_actor_issues(&progress);
+        assert!(has_issues);
+        assert_eq!(
+            summary,
+            "p01: timeout (keeper heartbeat timeout) · p02: unavailable · p99: issue (no keeper)"
+        );
+    }
+
+    #[test]
+    fn next_action_prefers_issue_recovery_when_running() {
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "-", true);
+        assert_eq!(hint, "keeper 상태를 확인한 뒤 Run Round를 다시 실행하세요.");
+    }
+
+    #[test]
+    fn next_action_waits_for_current_actor_when_running() {
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "p03", false);
+        assert_eq!(hint, "p03 응답을 기다리는 중입니다.");
     }
 }

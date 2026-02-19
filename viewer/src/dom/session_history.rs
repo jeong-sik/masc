@@ -66,11 +66,13 @@ fn normalize_room_id(raw: &str) -> String {
 fn normalize_room_status(raw: &str) -> String {
     let key = sanitize_key(raw);
     match key.as_str() {
-        "active" | "running" | "started" | "in_progress" | "in-progress" | "playing"
-        | "open" => "active",
+        "active" | "running" | "started" | "in_progress" | "in-progress" | "playing" | "open" => {
+            "active"
+        }
         "paused" | "pause" | "stopped" | "idle" | "on_hold" | "on-hold" => "paused",
-        "ended" | "finished" | "completed" | "closed" | "done" | "archived"
-        | "terminated" => "ended",
+        "ended" | "finished" | "completed" | "closed" | "done" | "archived" | "terminated" => {
+            "ended"
+        }
         _ => "unknown",
     }
     .to_string()
@@ -324,7 +326,7 @@ fn sorted_room_refs(rooms: &[RoomHistory]) -> Vec<&RoomHistory> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_room_bucket_html(title: &str, rooms: &[&RoomHistory]) -> String {
+fn render_room_bucket_html(title: &str, rooms: &[&RoomHistory], extra_class: &str) -> String {
     if rooms.is_empty() {
         return String::new();
     }
@@ -358,8 +360,9 @@ fn render_room_bucket_html(title: &str, rooms: &[&RoomHistory]) -> String {
         .join("");
 
     format!(
-        r#"<section class="history-room-bucket"><h4 class="history-room-bucket-title">{title}</h4><div class="history-room-list">{chips}</div></section>"#,
+        r#"<section class="history-room-bucket {extra_class}"><h4 class="history-room-bucket-title">{title}</h4><div class="history-room-list">{chips}</div></section>"#,
         title = html_escape(&sanitize_text(title)),
+        extra_class = html_escape(extra_class),
         chips = chips
     )
 }
@@ -421,19 +424,38 @@ fn render_turn_panel_html(room: &RoomHistory, row: &TurnHistory) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_session_history_html(rooms: &[RoomHistory]) -> String {
+fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> String {
     if rooms.is_empty() {
         return "<div class=\"session-history-empty\">아직 세션 히스토리가 없습니다.</div>"
             .to_string();
     }
 
     let sorted = sorted_room_refs(rooms);
+    let current_room = normalize_room_id(current_room_id);
+    let active_count = sorted
+        .iter()
+        .filter(|room| normalize_room_status(&room.status) == "active")
+        .count();
+    let paused_count = sorted
+        .iter()
+        .filter(|room| normalize_room_status(&room.status) == "paused")
+        .count();
+    let ended_count = sorted
+        .iter()
+        .filter(|room| normalize_room_status(&room.status) == "ended")
+        .count();
+
+    let mut current_rooms = Vec::new();
     let mut active_rooms = Vec::new();
     let mut paused_rooms = Vec::new();
     let mut ended_rooms = Vec::new();
     let mut other_rooms = Vec::new();
 
     for room in &sorted {
+        if room.room_id == current_room {
+            current_rooms.push(*room);
+            continue;
+        }
         match room_status_bucket(&room.status) {
             0 => active_rooms.push(*room),
             1 => paused_rooms.push(*room),
@@ -442,12 +464,37 @@ fn render_session_history_html(rooms: &[RoomHistory]) -> String {
         }
     }
 
+    let current_bucket = if current_rooms.is_empty() {
+        format!(
+            r#"<section class="history-room-bucket history-room-bucket-current"><h4 class="history-room-bucket-title">현재 세션</h4><p class="history-room-empty">현재 room({room})의 기록이 아직 없습니다.</p></section>"#,
+            room = html_escape(&sanitize_text(&current_room))
+        )
+    } else {
+        render_room_bucket_html("현재 세션", &current_rooms, "history-room-bucket-current")
+    };
+
+    let summary_class = if current_rooms.is_empty() {
+        "history-session-summary is-missing"
+    } else {
+        "history-session-summary"
+    };
+    let summary_html = format!(
+        r#"<div class="{summary_class}"><span>현재 room: <strong>{room}</strong></span><span>진행 {active} · 멈춤 {paused} · 종료 {ended}</span></div>"#,
+        summary_class = summary_class,
+        room = html_escape(&sanitize_text(&current_room)),
+        active = active_count,
+        paused = paused_count,
+        ended = ended_count
+    );
+
     let room_column = format!(
-        r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">게임</h3>{active}{paused}{ended}{other}</section>"#,
-        active = render_room_bucket_html("진행중", &active_rooms),
-        paused = render_room_bucket_html("멈춤", &paused_rooms),
-        ended = render_room_bucket_html("종료", &ended_rooms),
-        other = render_room_bucket_html("기타", &other_rooms)
+        r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">세션</h3>{summary}{current}{active}{paused}{ended}{other}</section>"#,
+        summary = summary_html,
+        current = current_bucket,
+        active = render_room_bucket_html("이전 세션 · 진행중", &active_rooms, ""),
+        paused = render_room_bucket_html("이전 세션 · 멈춤", &paused_rooms, ""),
+        ended = render_room_bucket_html("이전 세션 · 종료", &ended_rooms, ""),
+        other = render_room_bucket_html("이전 세션 · 기타", &other_rooms, "")
     );
 
     let turn_groups = sorted
@@ -724,7 +771,9 @@ fn resolve_focus_turn(
 #[cfg(target_arch = "wasm32")]
 fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: Option<u32>) {
     let room_key = room.and_then(normalize_focus_room);
-    let turn_key = turn.filter(|value| *value > 0).map(|value| value.to_string());
+    let turn_key = turn
+        .filter(|value| *value > 0)
+        .map(|value| value.to_string());
 
     for selector in ["#narrative-log .narrative-entry", "#dice-log .dice-entry"] {
         let Ok(nodes) = document.query_selector_all(selector) else {
@@ -1009,11 +1058,16 @@ pub fn update_session_history_dom(
             room_state.phase.as_str().to_string()
         };
 
-        let (room_idx, room_changed) =
-            ensure_room_entry(&mut cache.rooms, &base_room_id, &base_room_status, current_turn);
+        let (room_idx, room_changed) = ensure_room_entry(
+            &mut cache.rooms,
+            &base_room_id,
+            &base_room_status,
+            current_turn,
+        );
         changed = changed || room_changed;
         if let Some(room) = cache.rooms.get_mut(room_idx) {
-            let (_, turn_changed) = ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
+            let (_, turn_changed) =
+                ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
             changed = changed || turn_changed;
         }
 
@@ -1206,11 +1260,16 @@ pub fn update_session_history_dom(
             base_room_status = event_status;
         }
 
-        let (room_idx, room_changed) =
-            ensure_room_entry(&mut cache.rooms, &base_room_id, &base_room_status, current_turn);
+        let (room_idx, room_changed) = ensure_room_entry(
+            &mut cache.rooms,
+            &base_room_id,
+            &base_room_status,
+            current_turn,
+        );
         changed = changed || room_changed;
         if let Some(room) = cache.rooms.get_mut(room_idx) {
-            let (_, turn_changed) = ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
+            let (_, turn_changed) =
+                ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
             changed = changed || turn_changed;
         }
 
@@ -1218,7 +1277,8 @@ pub fn update_session_history_dom(
             return;
         }
 
-        history.set_inner_html(&render_session_history_html(&cache.rooms));
+        let current_room_id = crate::config::current_room_id();
+        history.set_inner_html(&render_session_history_html(&cache.rooms, &current_room_id));
         bind_history_focus_controls(&document);
 
         let (hash_room, hash_turn) = read_focus_from_hash();

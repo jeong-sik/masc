@@ -2030,6 +2030,32 @@ body:not(.mode-trpg) #ops-hud {
     color: var(--text-dim);
 }
 
+.history-session-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin: 0 0 8px;
+    padding: 6px 8px;
+    border: 1px solid rgba(109, 122, 164, 0.28);
+    border-radius: 8px;
+    background: rgba(18, 23, 38, 0.62);
+    font-size: 10px;
+    color: var(--text-dim);
+}
+
+.history-session-summary strong {
+    color: var(--text-primary);
+}
+
+.history-session-summary.is-missing {
+    border-color: rgba(196, 162, 101, 0.42);
+    background: rgba(53, 39, 17, 0.3);
+}
+
+.history-room-bucket-current .history-room-bucket-title {
+    color: #e4c895;
+}
+
 .history-room-bucket + .history-room-bucket {
     margin-top: 10px;
 }

@@ -140,7 +140,11 @@ fn summarize_actor_issues(progress: &TurnProgressState) -> (String, bool) {
         if !is_issue_state && reason.is_empty() {
             continue;
         }
-        let state_label = if is_issue_state { state.as_str() } else { "issue" };
+        let state_label = if is_issue_state {
+            state.as_str()
+        } else {
+            "issue"
+        };
         if reason.is_empty() {
             issues.push(format!("{}: {}", actor_id, state_label));
         } else {
@@ -169,8 +173,12 @@ fn build_next_action_hint(
             TrpgLifecycleState::Loading => {
                 "로딩 중입니다. 상태 동기화 완료를 기다리세요.".to_string()
             }
-            TrpgLifecycleState::Stopped => "세션이 멈춰 있습니다. Start/Run으로 재개하세요.".to_string(),
-            TrpgLifecycleState::Ended => "세션이 종료되었습니다. New Game으로 시작하세요.".to_string(),
+            TrpgLifecycleState::Stopped => {
+                "세션이 멈춰 있습니다. Start/Run으로 재개하세요.".to_string()
+            }
+            TrpgLifecycleState::Ended => {
+                "세션이 종료되었습니다. New Game으로 시작하세요.".to_string()
+            }
             TrpgLifecycleState::Unavailable => {
                 "엔진/키퍼 연결을 복구한 뒤 다시 시도하세요.".to_string()
             }
@@ -203,6 +211,106 @@ fn set_ops_hud_value(document: &web_sys::Document, id: &str, text: &str, status_
     };
     el.set_text_content(Some(text));
     el.set_class_name(&class_name);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn lifecycle_is_done_node(lifecycle: TrpgLifecycleState, node_state: &str) -> bool {
+    match lifecycle {
+        TrpgLifecycleState::Lobby => false,
+        TrpgLifecycleState::Loading => node_state == "lobby",
+        TrpgLifecycleState::Running => node_state == "lobby",
+        TrpgLifecycleState::Stopped => matches!(node_state, "lobby" | "running"),
+        TrpgLifecycleState::Ended => matches!(node_state, "lobby" | "running" | "stopped"),
+        TrpgLifecycleState::Unavailable | TrpgLifecycleState::Unknown => false,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn lifecycle_active_node(lifecycle: TrpgLifecycleState) -> Option<&'static str> {
+    match lifecycle {
+        TrpgLifecycleState::Lobby => Some("lobby"),
+        TrpgLifecycleState::Loading => Some("recover"),
+        TrpgLifecycleState::Running => Some("running"),
+        TrpgLifecycleState::Stopped => Some("stopped"),
+        TrpgLifecycleState::Ended => Some("ended"),
+        TrpgLifecycleState::Unavailable => Some("unavailable"),
+        TrpgLifecycleState::Unknown => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn lifecycle_hint(lifecycle: TrpgLifecycleState, runner_running: bool) -> String {
+    match lifecycle {
+        TrpgLifecycleState::Lobby => {
+            "LOBBY 단계: 새 게임에서 DM/플레이어를 배정하고 세션 시작을 실행하세요.".to_string()
+        }
+        TrpgLifecycleState::Loading => {
+            "SESSION STARTING 단계: 초기화/동기화 중입니다. 완료되면 RUNNING으로 전환됩니다."
+                .to_string()
+        }
+        TrpgLifecycleState::Running => {
+            if runner_running {
+                "RUNNING 단계: 자동 라운드가 순환 중입니다. 이벤트 수신을 기다리세요.".to_string()
+            } else {
+                "RUNNING 단계: 라운드 실행 또는 플레이어 액션으로 다음 페이즈로 진행됩니다."
+                    .to_string()
+            }
+        }
+        TrpgLifecycleState::Stopped => {
+            "STOPPED 단계: 세션은 유지되며 재개 가능합니다. 조건을 점검 후 다시 실행하세요."
+                .to_string()
+        }
+        TrpgLifecycleState::Ended => {
+            "ENDED 단계: 현재 세션이 종료되었습니다. 새 게임으로 새 라운드 루프를 시작하세요."
+                .to_string()
+        }
+        TrpgLifecycleState::Unavailable => {
+            "UNAVAILABLE 단계: keeper/엔진 연결 문제입니다. 연결 복구 후 재시도하세요.".to_string()
+        }
+        TrpgLifecycleState::Unknown => {
+            "상태 불명: LOBBY → RUNNING ↔ STOPPED → ENDED 순서를 기준으로 로그를 확인하세요."
+                .to_string()
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_lifecycle_diagram(
+    document: &web_sys::Document,
+    lifecycle: TrpgLifecycleState,
+    runner_running: bool,
+) {
+    let active = lifecycle_active_node(lifecycle);
+    if let Ok(nodes) = document.query_selector_all("#lifecycle-diagram .lifecycle-node") {
+        for idx in 0..nodes.length() {
+            let Some(node) = nodes.item(idx) else {
+                continue;
+            };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let state = el.get_attribute("data-state").unwrap_or_default();
+            let _ = el.class_list().remove_1("is-active");
+            let _ = el.class_list().remove_1("is-done");
+            let _ = el.class_list().remove_1("is-error");
+
+            if lifecycle_is_done_node(lifecycle, &state) {
+                let _ = el.class_list().add_1("is-done");
+            }
+            if active == Some(state.as_str()) {
+                let _ = el.class_list().add_1("is-active");
+            }
+            if lifecycle == TrpgLifecycleState::Unavailable && state == "unavailable" {
+                let _ = el.class_list().add_1("is-error");
+            }
+        }
+    }
+
+    if let Some(hint) = document.get_element_by_id("lifecycle-diagram-hint") {
+        let message = lifecycle_hint(lifecycle, runner_running);
+        hint.set_text_content(Some(&message));
+        let _ = hint.set_attribute("title", &message);
+    }
 }
 
 /// Render live TRPG runtime progress:
@@ -337,16 +445,6 @@ pub fn update_turn_runtime_dom(
         )
     };
 
-    let control_state = if lifecycle.accepts_player_input() {
-        if current_actor != "-" {
-            "manual-ready / actor-thinking".to_string()
-        } else {
-            "manual-ready".to_string()
-        }
-    } else {
-        lifecycle.label_ko().to_string()
-    };
-
     let (runner_running, runner_rounds, runner_last_result) = if let Some(runner) = runner.as_ref()
     {
         let running = runner.running.load(std::sync::atomic::Ordering::SeqCst);
@@ -372,18 +470,14 @@ pub fn update_turn_runtime_dom(
     } else {
         "idle".to_string()
     };
-    let next_action = build_next_action_hint(
-        lifecycle,
-        runner_running,
-        &current_actor,
-        has_actor_issues,
-    );
+    let next_action =
+        build_next_action_hint(lifecycle, runner_running, &current_actor, has_actor_issues);
 
     let connection_label = connection_status_label(&connection);
     let connection_class = connection_status_class(&connection);
 
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = (&sync_class, &control_state, &runner_last_result);
+    let _ = (&sync_class, &runner_last_result);
 
     let snapshot = format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
@@ -478,7 +572,7 @@ pub fn update_turn_runtime_dom(
         set_ops_hud_value(
             &document,
             "ops-control-state",
-            &control_state,
+            &lifecycle_hint(lifecycle, runner_running),
             if lifecycle.accepts_player_input() {
                 "status-active"
             } else {
@@ -486,6 +580,7 @@ pub fn update_turn_runtime_dom(
             },
         );
         set_ops_hud_value(&document, "ops-sync-state", &sync_state, sync_class);
+        sync_lifecycle_diagram(&document, lifecycle, runner_running);
 
         let inferred_dm = if !progress.dm_keeper.trim().is_empty() {
             progress.dm_keeper.trim().to_string()
@@ -642,10 +737,9 @@ mod tests {
         progress
             .actor_states
             .insert("p01".to_string(), "timeout".to_string());
-        progress.actor_reasons.insert(
-            "p01".to_string(),
-            "keeper heartbeat timeout".to_string(),
-        );
+        progress
+            .actor_reasons
+            .insert("p01".to_string(), "keeper heartbeat timeout".to_string());
         progress
             .actor_reasons
             .insert("p99".to_string(), "no keeper".to_string());

@@ -488,6 +488,12 @@ body:not(.mode-trpg) #ops-hud {
     gap: 6px;
 }
 
+.session-control-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .inline-select {
     font-size: 10px;
     padding: 2px 6px;
@@ -564,6 +570,26 @@ body:not(.mode-trpg) #ops-hud {
 .widget-pill[data-lifecycle="state-ended"],
 .widget-pill[data-lifecycle="state-unavailable"] {
     border-color: rgba(177, 116, 116, 0.32);
+    color: var(--status-disconnected);
+}
+
+.widget-pill.status-info {
+    border-color: rgba(109, 122, 164, 0.45);
+    color: var(--text-primary);
+}
+
+.widget-pill.status-ok {
+    border-color: rgba(88, 184, 116, 0.42);
+    color: var(--status-connected);
+}
+
+.widget-pill.status-warn {
+    border-color: rgba(168, 119, 45, 0.42);
+    color: var(--status-connecting);
+}
+
+.widget-pill.status-error {
+    border-color: rgba(177, 116, 116, 0.5);
     color: var(--status-disconnected);
 }
 

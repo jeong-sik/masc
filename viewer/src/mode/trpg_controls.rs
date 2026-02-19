@@ -1094,20 +1094,29 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         if !dm_from_ui.is_empty() {
             fallback.push(dm_from_ui);
         }
-        if let Some(claimed) = doc.get_element_by_id("claimed-keeper") {
-            if let Some(input) = claimed.dyn_ref::<web_sys::HtmlInputElement>() {
-                let value = input.value().trim().to_string();
-                if !value.is_empty() {
-                    fallback.push(value);
+        let current_room = read_new_game_room_id(doc);
+        let claimed_room = doc
+            .get_element_by_id("claimed-room-id")
+            .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if claimed_room == current_room {
+            if let Some(claimed) = doc.get_element_by_id("claimed-keeper") {
+                if let Some(input) = claimed.dyn_ref::<web_sys::HtmlInputElement>() {
+                    let value = input.value().trim().to_string();
+                    if !value.is_empty() {
+                        fallback.push(value);
+                    }
                 }
-            }
-            let text = claimed
-                .text_content()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if !text.is_empty() {
-                fallback.push(text);
+                let text = claimed
+                    .text_content()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if !text.is_empty() {
+                    fallback.push(text);
+                }
             }
         }
         keepers = unique_non_empty(fallback);

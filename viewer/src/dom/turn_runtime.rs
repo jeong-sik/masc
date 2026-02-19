@@ -651,6 +651,33 @@ pub fn update_turn_runtime_dom(
             {
                 players_input.set_value("");
             }
+            if let Some(claimed_actor) = document
+                .get_element_by_id("claimed-actor-id")
+                .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            {
+                claimed_actor.set_value("");
+            }
+            if let Some(claimed_keeper) = document
+                .get_element_by_id("claimed-keeper")
+                .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            {
+                claimed_keeper.set_value("");
+            }
+            if let Some(claimed_room) = document
+                .get_element_by_id("claimed-room-id")
+                .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            {
+                claimed_room.set_value("");
+            }
+            if let Some(el) = document.get_element_by_id("action-panel") {
+                let _ = el.set_attribute("style", "display: none;");
+            }
+            if let Some(el) = document.get_element_by_id("join-panel") {
+                let _ = el.remove_attribute("style");
+            }
+            if let Some(el) = document.get_element_by_id("player-actor-id") {
+                el.set_text_content(Some(""));
+            }
             if let Some(summary) = document.get_element_by_id("round-run-summary") {
                 summary.set_text_content(Some(""));
                 let _ = summary.set_attribute("style", "display:none");

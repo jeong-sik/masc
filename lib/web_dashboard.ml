@@ -38,3 +38,17 @@ let etag () =
     let hash = Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex in
     String.sub hash 0 12
   with _ -> "none"
+
+let is_safe_asset_relative_path rel =
+  String.length rel > 0
+  && Filename.is_relative rel
+  && not (String.contains rel '\\')
+  && not (String.contains rel '\000')
+  &&
+  let segments = String.split_on_char '/' rel in
+  List.for_all
+    (fun seg ->
+      String.length seg > 0
+      && seg <> "."
+      && seg <> "..")
+    segments

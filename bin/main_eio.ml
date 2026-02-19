@@ -4169,7 +4169,10 @@ let make_routes ~port ~host =
          let req_path = Http.Request.path request in
          let prefix_len = String.length "/dashboard/assets/" in
          let filename = String.sub req_path prefix_len (String.length req_path - prefix_len) in
-         serve_dashboard_static ("assets/" ^ filename) request reqd)
+         if Masc_mcp.Web_dashboard.is_safe_asset_relative_path filename then
+           serve_dashboard_static ("assets/" ^ filename) request reqd
+         else
+           Http.Response.not_found reqd)
   (* Dashboard SPA: index.html *)
   |> Http.Router.get "/dashboard" (fun request reqd ->
        with_public_read (fun _state req reqd ->
@@ -5616,20 +5619,23 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, p when String.length p > 18
                    && String.sub p 0 18 = "/dashboard/assets/" ->
           let filename = String.sub p 18 (String.length p - 18) in
-          let file_path = Filename.concat (dashboard_asset_root ()) ("assets/" ^ filename) in
-          (match read_file file_path with
-           | Ok body ->
-               let ct = asset_content_type filename in
-               let headers = H2.Headers.of_list [
-                 ("content-type", ct);
-                 ("content-length", string_of_int (String.length body));
-                 ("cache-control", "public, max-age=31536000, immutable");
-               ] in
-               let response = H2.Response.create ~headers `OK in
-               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-               H2.Body.Writer.write_string writer body;
-               H2.Body.Writer.close writer
-           | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found)
+          if not (Masc_mcp.Web_dashboard.is_safe_asset_relative_path filename) then
+            h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+          else
+            let file_path = Filename.concat (dashboard_asset_root ()) ("assets/" ^ filename) in
+            (match read_file file_path with
+             | Ok body ->
+                 let ct = asset_content_type filename in
+                 let headers = H2.Headers.of_list [
+                   ("content-type", ct);
+                   ("content-length", string_of_int (String.length body));
+                   ("cache-control", "public, max-age=31536000, immutable");
+                 ] in
+                 let response = H2.Response.create ~headers `OK in
+                 let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+                 H2.Body.Writer.write_string writer body;
+                 H2.Body.Writer.close writer
+             | Error _ -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found)
 
       (* ─────────────────────────────────────────────────────────────────────
          Fallback

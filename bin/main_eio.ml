@@ -3401,6 +3401,25 @@ let health_handler _request reqd =
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
 
+let board_post_detail_json ~post_id =
+  match Board_dispatch.get_post ~post_id with
+  | Error _ ->
+      (`Not_found, {|{"error":"Post not found"}|})
+  | Ok post ->
+      let comments =
+        match Board_dispatch.get_comments ~post_id with
+        | Ok cs -> cs
+        | Error _ -> []
+      in
+      let json =
+        `Assoc
+          [
+            ("post", Board.post_to_yojson post);
+            ("comments", `List (List.map Board.comment_to_yojson comments));
+          ]
+      in
+      (`OK, Yojson.Safe.to_string json)
+
 (** CORS preflight handler *)
 let options_handler request reqd =
   let origin = get_origin request in
@@ -4823,18 +4842,8 @@ let make_extended_handler routes =
             Http.Response.json (Yojson.Safe.to_string json) reqd
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
-            (match Board_dispatch.get_post ~post_id with
-            | Error _ ->
-                Http.Response.json {|{"error":"Post not found"}|} reqd
-            | Ok post ->
-                let comments = match Board_dispatch.get_comments ~post_id with
-                  | Ok cs -> cs | Error _ -> []
-                in
-                let json = `Assoc [
-                  ("post", Board.post_to_yojson post);
-                  ("comments", `List (List.map Board.comment_to_yojson comments));
-                ] in
-                Http.Response.json (Yojson.Safe.to_string json) reqd)
+            let (status, body) = board_post_detail_json ~post_id in
+            Http.Response.json ~status body reqd
         | _ -> Http.Router.dispatch routes request reqd
     with exn ->
       let msg = Printexc.to_string exn in
@@ -5575,6 +5584,11 @@ let run_server ~sw ~env ~port ~base_path =
           let flairs = List.map Board.flair_to_yojson Board.available_flairs in
           let json = `Assoc [("flairs", `List flairs)] in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
+          let post_id = String.sub p 14 (String.length p - 14) in
+          let (status, body) = board_post_detail_json ~post_id in
+          h2_respond_json h2_reqd body ~status ~extra_headers:cors
 
       | `GET, "/api/v1/karma" ->
           let karma_list = Board_dispatch.get_all_karma () in

@@ -1190,11 +1190,38 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Eio.Time.Timeout -> `Timeout
     | exn -> `Error (Printexc.to_string exn)
   in
+  let trpg_keeper_probe ~name:keeper_name : Tool_trpg.keeper_probe_result =
+    let keeper_args =
+      `Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ]
+    in
+    try
+      Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+          match
+            Tool_keeper.dispatch simple_ctx_keeper ~name:"masc_keeper_status"
+              ~args:keeper_args
+          with
+          | None -> `Error "masc_keeper_status dispatch unavailable"
+          | Some (true, _body) -> `Ok
+          | Some (false, msg) -> `Error msg)
+    with
+    | Eio.Time.Timeout -> `Error "timeout"
+    | exn -> `Error (Printexc.to_string exn)
+  in
   let simple_ctx_trpg : Tool_trpg.context =
-    { config; agent_name; keeper_call = Some trpg_keeper_call }
+    {
+      config;
+      agent_name;
+      keeper_call = Some trpg_keeper_call;
+      keeper_probe = Some trpg_keeper_probe;
+    }
   in
   let simple_ctx_protocol : Tool_protocol_game_view.context =
-    { config; agent_name; trpg_keeper_call = Some trpg_keeper_call }
+    {
+      config;
+      agent_name;
+      trpg_keeper_call = Some trpg_keeper_call;
+      trpg_keeper_probe = Some trpg_keeper_probe;
+    }
   in
 
   (* Chain through all extracted tool modules *)

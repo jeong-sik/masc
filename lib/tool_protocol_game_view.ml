@@ -20,6 +20,9 @@ type context = {
   trpg_keeper_call :
     (name:string -> message:string -> timeout_sec:float -> Tool_trpg.keeper_call_result)
       option;
+  trpg_keeper_probe :
+    (name:string -> Tool_trpg.keeper_probe_result)
+      option;
 }
 
 let ( let* ) = Result.bind
@@ -309,6 +312,7 @@ let trpg_context_of (ctx : context) : Tool_trpg.context =
     config = ctx.config;
     agent_name = ctx.agent_name;
     keeper_call = ctx.trpg_keeper_call;
+    keeper_probe = ctx.trpg_keeper_probe;
   }
 
 let experiment_context_of (ctx : context) : Tool_experiment.context =

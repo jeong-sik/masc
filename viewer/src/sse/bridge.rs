@@ -63,6 +63,9 @@ pub struct Phase2EventWriters<'w> {
     pub actor_updated: MessageWriter<'w, ActorUpdated>,
     pub room_ended: MessageWriter<'w, RoomEnded>,
     pub turn_action_resolved: MessageWriter<'w, TurnActionResolved>,
+    pub combat_attack: MessageWriter<'w, CombatAttack>,
+    pub combat_defense: MessageWriter<'w, CombatDefense>,
+    pub session_outcome: MessageWriter<'w, SessionOutcome>,
     pub scene_transitioned: MessageWriter<'w, SceneTransitioned>,
 }
 
@@ -281,6 +284,27 @@ pub fn poll_sse_events(
                 phase2.turn_action_resolved,
                 TurnActionResolvedPayload,
                 TurnActionResolved
+            ),
+            "combat.attack" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.combat_attack,
+                CombatAttackPayload,
+                CombatAttack
+            ),
+            "combat.defense" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.combat_defense,
+                CombatDefensePayload,
+                CombatDefense
+            ),
+            "session.outcome" => dispatch_event!(
+                event_type,
+                &data,
+                phase2.session_outcome,
+                SessionOutcomePayload,
+                SessionOutcome
             ),
             "scene.transition" => dispatch_event!(
                 event_type,

@@ -144,6 +144,61 @@ fn value_to_string_vec(v: Option<&Value>) -> Vec<String> {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+fn canonical_weather_id(raw: &str) -> Option<&'static str> {
+    let key = raw.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    if key.contains("drizzle") || key.contains("light_rain") || key.contains("light rain") {
+        return Some("drizzle");
+    }
+    if key.contains("heavy_rain")
+        || key.contains("heavy rain")
+        || key.contains("storm")
+        || key.contains("downpour")
+    {
+        return Some("heavy_rain");
+    }
+    if key.contains("fog") || key.contains("mist") {
+        return Some("fog");
+    }
+    if key.contains("silence") || key.contains("still") || key.contains("calm") {
+        return Some("silence");
+    }
+    None
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn canonical_mood_id(raw: &str) -> Option<&'static str> {
+    let key = raw.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    if key.contains("quiet_unease")
+        || key.contains("quiet unease")
+        || key.contains("unease")
+        || key.contains("eerie")
+    {
+        return Some("quiet_unease");
+    }
+    if key.contains("tension_rising")
+        || key.contains("tension rising")
+        || key.contains("tension")
+        || key.contains("urgent")
+    {
+        return Some("tension_rising");
+    }
+    if key.contains("ambiguous_calm")
+        || key.contains("ambiguous calm")
+        || key.contains("calm")
+        || key.contains("neutral")
+    {
+        return Some("ambiguous_calm");
+    }
+    None
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
     payload
         .get("actor_id")
@@ -432,6 +487,31 @@ fn map_turn_progress_event(
                 "reason": payload.get("reason").and_then(Value::as_str).unwrap_or("")
             })
         }
+        "combat.attack" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase,
+            "actor_id": resolve_actor_id(payload, actor_id),
+            "reason": payload.get("action").and_then(Value::as_str).unwrap_or("")
+        }),
+        "combat.defense" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase,
+            "actor_id": resolve_actor_id(payload, actor_id),
+            "reason": payload.get("method").and_then(Value::as_str).unwrap_or("")
+        }),
+        "session.outcome" => json!({
+            "event_type": event_type,
+            "turn": turn,
+            "phase": phase,
+            "room_status": "ended",
+            "reason": payload
+                .get("summary")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("reason").and_then(Value::as_str))
+                .unwrap_or("")
+        }),
         "room.started" => json!({
             "event_type": event_type,
             "turn": turn,
@@ -701,6 +781,79 @@ fn map_trpg_event(
             );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
+        "combat.attack" => {
+            let mapped = attach_room_id(
+                json!({
+                    "turn": value_to_u32(payload.get("turn"), state.last_turn),
+                    "actor_id": payload.get("actor_id").and_then(Value::as_str).or(actor_id).unwrap_or(""),
+                    "action": payload.get("action").and_then(Value::as_str).unwrap_or(""),
+                    "target_id": payload.get("target_id").and_then(Value::as_str).unwrap_or(""),
+                    "skill": payload.get("skill").and_then(Value::as_str).unwrap_or("")
+                }),
+                payload,
+                stream_room_id,
+            );
+            out.push(("combat.attack".to_string(), mapped.to_string()));
+        }
+        "combat.defense" => {
+            let mapped = attach_room_id(
+                json!({
+                    "turn": value_to_u32(payload.get("turn"), state.last_turn),
+                    "actor_id": payload.get("actor_id").and_then(Value::as_str).or(actor_id).unwrap_or(""),
+                    "method": payload.get("method").and_then(Value::as_str).unwrap_or(""),
+                    "source_actor_id": payload.get("source_actor_id").and_then(Value::as_str).unwrap_or("")
+                }),
+                payload,
+                stream_room_id,
+            );
+            out.push(("combat.defense".to_string(), mapped.to_string()));
+        }
+        "session.outcome" => {
+            let outcome = payload
+                .get("outcome")
+                .and_then(Value::as_str)
+                .unwrap_or("draw");
+            let summary = payload
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let reason = payload.get("reason").and_then(Value::as_str).unwrap_or("");
+            let turn = value_to_u32(payload.get("turn"), state.last_turn);
+            if turn > 0 {
+                state.last_turn = turn;
+            }
+            let mapped = attach_room_id(
+                json!({
+                    "outcome": outcome,
+                    "reason": reason,
+                    "summary": summary,
+                    "turn": turn
+                }),
+                payload,
+                stream_room_id,
+            );
+            out.push(("session.outcome".to_string(), mapped.to_string()));
+
+            let narrative_text = if summary.trim().is_empty() {
+                match outcome {
+                    "victory" => "승리로 세션이 종료되었습니다.",
+                    "defeat" => "패배로 세션이 종료되었습니다.",
+                    _ => "세션이 종료되었습니다.",
+                }
+            } else {
+                summary
+            };
+            let narrative = attach_room_id(
+                json!({
+                    "text": narrative_text,
+                    "phase": "endgame",
+                    "speaker": "DM"
+                }),
+                payload,
+                stream_room_id,
+            );
+            out.push(("narrative".to_string(), narrative.to_string()));
+        }
         // -- world.event: dispatch to weather/mood/death based on subtype --
         "world.event" => {
             let sub = payload
@@ -711,11 +864,49 @@ fn map_trpg_event(
                 .get("description")
                 .and_then(Value::as_str)
                 .unwrap_or("");
+            let severity = payload
+                .get("severity")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             if sub.contains("weather") {
-                let mapped = json!({ "weather": desc });
+                let id_hint = payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .or_else(|| payload.get("weather").and_then(Value::as_str))
+                    .unwrap_or("");
+                let weather = canonical_weather_id(id_hint)
+                    .or_else(|| canonical_weather_id(desc))
+                    .or_else(|| canonical_weather_id(sub))
+                    .unwrap_or(id_hint);
+                let weather = if weather.trim().is_empty() {
+                    desc
+                } else {
+                    weather
+                };
+                let mapped = json!({
+                    "weather": weather,
+                    "intensity": severity
+                });
                 out.push(("weather_change".to_string(), mapped.to_string()));
             } else if sub.contains("mood") || sub.contains("atmosphere") {
-                let mapped = json!({ "mood": desc });
+                let id_hint = payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .or_else(|| payload.get("mood").and_then(Value::as_str))
+                    .unwrap_or("");
+                let mood = canonical_mood_id(id_hint)
+                    .or_else(|| canonical_mood_id(desc))
+                    .or_else(|| canonical_mood_id(sub))
+                    .unwrap_or(id_hint);
+                let mood = if mood.trim().is_empty() {
+                    desc
+                } else {
+                    mood
+                };
+                let mapped = json!({
+                    "mood": mood,
+                    "intensity": severity
+                });
                 out.push(("mood_change".to_string(), mapped.to_string()));
             } else if sub.contains("death") || sub.contains("died") || sub.contains("kill") {
                 let actor = resolve_actor_id(payload, actor_id);
@@ -1488,6 +1679,76 @@ mod tests {
             serde_json::from_str(&combat_start.1).expect("combat_start payload json");
         assert_eq!(cs_payload["area"], "Dark Cave");
         assert_eq!(cs_payload["enemies"], json!(["Goblin", "Orc"]));
+    }
+
+    #[test]
+    fn decode_stream_maps_combat_semantic_events() {
+        let body = r#"{
+            "events": [
+                {"seq": 1, "type": "combat.attack", "actor_id": "grimja", "payload": {"turn": 4, "action": "Longsword Slash", "target_id": "ghoul-1", "skill": "melee"}},
+                {"seq": 2, "type": "combat.defense", "actor_id": "luna", "payload": {"turn": 4, "method": "shield block", "source_actor_id": "ghoul-1"}}
+            ]
+        }"#;
+
+        let mut state = TrpgMapperState::default();
+        let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
+
+        let attack = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "combat.attack")
+            .expect("combat.attack should exist");
+        let attack_payload: Value =
+            serde_json::from_str(&attack.1).expect("combat.attack payload json");
+        assert_eq!(attack_payload["actor_id"], "grimja");
+        assert_eq!(attack_payload["action"], "Longsword Slash");
+
+        let defense = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "combat.defense")
+            .expect("combat.defense should exist");
+        let defense_payload: Value =
+            serde_json::from_str(&defense.1).expect("combat.defense payload json");
+        assert_eq!(defense_payload["actor_id"], "luna");
+        assert_eq!(defense_payload["method"], "shield block");
+
+        let progress_events: Vec<&(String, String)> = mapped
+            .iter()
+            .filter(|(event_type, _)| event_type == "turn_progress")
+            .collect();
+        assert_eq!(progress_events.len(), 2);
+    }
+
+    #[test]
+    fn decode_stream_maps_session_outcome_event() {
+        let body = r#"{
+            "events": [
+                {"seq": 7, "type": "session.outcome", "payload": {"outcome": "victory", "reason": "objective_complete", "summary": "Relic recovered and party extracted.", "turn": 9}}
+            ]
+        }"#;
+
+        let mut state = TrpgMapperState::default();
+        let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
+
+        let outcome = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "session.outcome")
+            .expect("session.outcome should exist");
+        let payload: Value =
+            serde_json::from_str(&outcome.1).expect("session.outcome payload json");
+        assert_eq!(payload["outcome"], "victory");
+        assert_eq!(payload["turn"], 9);
+
+        let narrative = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "narrative")
+            .expect("narrative should exist");
+        let narrative_payload: Value =
+            serde_json::from_str(&narrative.1).expect("narrative payload json");
+        assert_eq!(narrative_payload["phase"], "endgame");
+        assert_eq!(
+            narrative_payload["text"],
+            "Relic recovered and party extracted."
+        );
     }
 
     #[test]

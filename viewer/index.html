@@ -414,6 +414,21 @@
                     <input type="hidden" id="round-run-timeout" value="" />
                     <input type="hidden" id="round-run-lang" value="" />
                     <input type="hidden" id="round-run-players" value="" />
+                    <div id="atmosphere-strip" class="atmosphere-strip" aria-live="polite">
+                        <div id="weather-chip" class="atmo-chip">
+                            <img id="weather-icon" class="atmo-icon" alt="" />
+                            <span class="atmo-label">Weather</span>
+                            <span id="weather-indicator" class="atmo-value"></span>
+                        </div>
+                        <div id="mood-chip" class="atmo-chip">
+                            <img id="mood-icon" class="atmo-icon" alt="" />
+                            <span class="atmo-label">Mood</span>
+                            <span id="mood-indicator" class="atmo-value"></span>
+                        </div>
+                        <div id="event-beacon" class="event-beacon"></div>
+                    </div>
+                    <div id="choice-overlay" class="floating-overlay choice-overlay" style="display:none"></div>
+                    <div id="combat-overlay" class="floating-overlay combat-overlay" style="display:none"></div>
                     <div id="narrative-log"></div>
                     <!-- Join Panel: claim an actor before playing -->
                     <div id="join-panel">

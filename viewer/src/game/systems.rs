@@ -235,6 +235,13 @@ pub fn apply_turn_progress(
                 complete_actor(&mut progress, &payload.actor_id, "unavailable");
                 set_actor_reason(&mut progress, &payload.actor_id, &payload.reason);
             }
+            "combat.attack" | "combat.defense" => {
+                let actor_id = payload.actor_id.trim();
+                if !actor_id.is_empty() {
+                    complete_actor(&mut progress, actor_id, "ok");
+                    set_actor_reason(&mut progress, actor_id, "");
+                }
+            }
             "room.started" => {
                 if progress.room_status.is_empty() {
                     progress.room_status = "active".to_string();
@@ -242,6 +249,12 @@ pub fn apply_turn_progress(
                 progress.actor_reasons.clear();
             }
             "room.ended" => {
+                progress.room_status = "ended".to_string();
+                progress.current_actor.clear();
+                progress.next_actor.clear();
+                progress.actor_reasons.clear();
+            }
+            "session.outcome" => {
                 progress.room_status = "ended".to_string();
                 progress.current_actor.clear();
                 progress.next_actor.clear();
@@ -535,6 +548,33 @@ pub fn apply_turn_started(
 pub fn apply_turn_action_resolved(mut events: MessageReader<TurnActionResolved>) {
     for TurnActionResolved(_p) in events.read() {
         // Log-only: action result is rendered by DOM system
+    }
+}
+
+pub fn apply_combat_attack(mut events: MessageReader<CombatAttack>) {
+    for CombatAttack(_p) in events.read() {
+        // Log-only: semantic combat event rendered by DOM systems
+    }
+}
+
+pub fn apply_combat_defense(mut events: MessageReader<CombatDefense>) {
+    for CombatDefense(_p) in events.read() {
+        // Log-only: semantic combat event rendered by DOM systems
+    }
+}
+
+pub fn apply_session_outcome(
+    mut events: MessageReader<SessionOutcome>,
+    mut room_state: ResMut<RoomState>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for SessionOutcome(payload) in events.read() {
+        room_state.status = "ended".to_string();
+        if payload.turn > 0 {
+            room_state.turn = payload.turn;
+            progress.turn = payload.turn;
+        }
+        progress.room_status = "ended".to_string();
     }
 }
 

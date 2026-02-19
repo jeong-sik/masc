@@ -968,6 +968,27 @@ let sanitize_keeper_reply (raw : string) : string =
   in
   String.concat "\n" cleaned_lines |> String.trim
 
+let is_reply_noise_text (raw : string) : bool =
+  let t = String.trim raw in
+  t = ""
+  || starts_with t "```"
+  || starts_with t "[STATE]"
+  || starts_with t "[/STATE]"
+  || starts_with t "\"reply\":"
+  || starts_with t "SKILL:"
+  || starts_with t "SKILL_REASON:"
+  || starts_with t "room_id="
+  || starts_with t "phase="
+  || starts_with t "turn="
+  || starts_with t "role="
+  || starts_with t "actor_id="
+  || starts_with t "\"TRPG 실행 요청"
+  || starts_with t "TRPG 실행 요청입니다."
+  || starts_with t "TRPG execution request."
+  || starts_with t "내 기록상 가장 처음 물어본 건 이거야"
+  || starts_with t "반드시 한국어로 응답하세요."
+  || contains_substring t "visible_state_json:"
+
 let parse_keeper_reply keeper_json =
   match keeper_json |> member "reply" with
   | `String s ->
@@ -980,11 +1001,13 @@ let parse_keeper_reply keeper_json =
            || contains_substring s "내 기록상 가장 처음 물어본 건 이거야")
       in
       let reply =
-        if cleaned <> "" then cleaned
-        else if prompt_echo then "상황이 긴박합니다. 현재 장면을 유지하고 다음 행동을 간결히 선언하세요."
-        else fallback
+        if cleaned <> "" then Some cleaned
+        else if prompt_echo || is_reply_noise_text fallback then None
+        else Some fallback
       in
-      if reply = "" then Error "keeper response reply is empty" else Ok reply
+      (match reply with
+      | Some reply when String.trim reply <> "" -> Ok reply
+      | _ -> Error "keeper response reply contains only prompt/meta artifacts")
   | _ -> Error "keeper response missing string field: reply"
 
 type prompt_language = [ `Ko | `En ]
@@ -2685,11 +2708,30 @@ let handle_round_run ctx args : result =
         else base_state_for_prompt
       in
       let* () =
-        process_one
-          ~state_json:state_for_dm_prompt
-          ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
+        if player_quorum_met then
+          process_one
+            ~state_json:state_for_dm_prompt
+            ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
+        else (
+          statuses :=
+            `Assoc
+              [
+                ("actor_id", `String "dm");
+                ("role", `String "dm");
+                ("keeper", `String dm_keeper);
+                ("status", `String "skipped");
+                ( "reason",
+                  `String
+                    (Printf.sprintf
+                       "player quorum not met: success=%d required=%d; dm execution skipped"
+                       !player_success_count
+                       player_required_successes) );
+                ("stage", `String "player_quorum");
+              ]
+            :: !statuses;
+          Ok () )
       in
-      let advanced = !dm_success in
+      let advanced = player_quorum_met && !dm_success in
       let turn_after = if advanced then next_turn else turn_before in
       let* () =
         if advanced then

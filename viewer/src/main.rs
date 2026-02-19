@@ -12,12 +12,34 @@ mod render;
 mod shaders;
 mod sse;
 
-use bevy::asset::{AssetMetaCheck, AssetPlugin};
 use bevy::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::asset::{AssetMetaCheck, AssetPlugin};
 
 use mode::ModePlugin;
-use theme::{ThemePlugin, ViewerTheme};
+use theme::ThemePlugin;
+#[cfg(not(target_arch = "wasm32"))]
+use theme::ViewerTheme;
 
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    console_error_panic_hook::set_once();
+
+    App::new()
+        // Web fallback path: avoid GPU surface creation so DOM-first viewer can boot.
+        .add_plugins(MinimalPlugins)
+        .add_plugins(bevy::state::app::StatesPlugin)
+        .add_plugins((ModePlugin, ThemePlugin))
+        // DOM + session systems only; renderer/audio plugins are skipped on wasm fallback.
+        .add_plugins((
+            sse::SsePlugin,
+            game::GameStatePlugin,
+            dom::DomBridgePlugin,
+        ))
+        .run();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let default_theme = ViewerTheme::default();
 
@@ -38,11 +60,8 @@ fn main() {
                     ..default()
                 }),
         )
-        // Initial clear color from default theme (ThemePlugin takes over on changes)
         .insert_resource(ClearColor(default_theme.clear_color()))
-        // ── Mode infrastructure (always active) ──
         .add_plugins((ModePlugin, ThemePlugin))
-        // ── Domain plugins (systems within are gated on ViewerMode) ──
         .add_plugins((
             sse::SsePlugin,
             game::GameStatePlugin,

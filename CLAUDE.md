@@ -105,6 +105,46 @@ make test                     # 테스트
 - 빌드 캐시 오염 시 `dune clean` 필수
 - plist 주석(XML comment)은 key-value 쌍 사이에 넣지 말 것 (launchd load 실패 원인)
 
+## Web Dashboard (Preact + HTM SPA)
+
+`/dashboard` — Preact (3KB) + HTM (1KB) + @preact/signals SPA. Built with Vite, served from `assets/dashboard/`.
+
+### Source & Build Output
+
+| Directory | Contents |
+|-----------|----------|
+| `dashboard/` | TypeScript source (Preact + HTM components) |
+| `assets/dashboard/` | Vite build output (committed to git) |
+
+### Development
+
+```bash
+cd dashboard && npm run dev    # Vite dev server on :5173 (HMR, proxies /api/* to :8935)
+cd dashboard && npm run build  # Production build → ../assets/dashboard/
+```
+
+### Architecture
+
+- **Router**: Hash-based (`#overview`, `#board`, `#agents`, `#trpg`) via `useRoute()` hook
+- **State**: `@preact/signals` — SSE events update signals, only affected components re-render
+- **SSE**: `useSSE()` hook with auto-reconnect, dispatches to signal stores
+- **API**: Typed fetch client in `api.ts` — 13 endpoints, all under `/api/v1/`
+- **Components**: `src/components/` — overview, board, agents, agent-detail, trpg, common/
+
+### Modifying the Dashboard
+
+1. Edit TypeScript source in `dashboard/src/`
+2. Test with `npm run dev` (hot reload)
+3. Build: `npm run build`
+4. Commit both source changes AND `assets/dashboard/` build output
+5. `dune build` + `make test` (OCaml side unchanged since Phase 2)
+
+### OCaml Integration
+
+- `lib/web_dashboard.ml` — File-serving wrapper (~54 lines). Reads `assets/dashboard/index.html`
+- `bin/main_eio.ml` — Routes: `/dashboard` (SPA index), `/dashboard/assets/*` (static files)
+- `/dashboard/credits` and `/dashboard/lodge` remain separate OCaml-rendered dashboards
+
 ## Board System
 
 - Posts: `.masc/board_posts.jsonl` (JSONL mode)

@@ -5,6 +5,7 @@
 //! (the parent `mod trpg_controls` declaration carries the gate).
 
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -42,6 +43,70 @@ pub(super) struct ActorAdminRow {
     hp: i32,
     max_hp: i32,
     keeper: String,
+    claimed: bool,
+}
+
+fn parse_actor_control_map(state_root: &Value) -> HashMap<String, String> {
+    let state = state_root.get("state").unwrap_or(state_root);
+    state
+        .get("actor_control")
+        .and_then(Value::as_object)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|(actor_id, keeper)| {
+                    let actor_id = actor_id.trim();
+                    let keeper = keeper.as_str().unwrap_or("").trim();
+                    if actor_id.is_empty() || keeper.is_empty() {
+                        None
+                    } else {
+                        Some((actor_id.to_string(), keeper.to_string()))
+                    }
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_keeper_actor_map(state_root: &Value) -> HashMap<String, String> {
+    parse_actor_control_map(state_root)
+        .into_iter()
+        .map(|(actor_id, keeper)| (keeper, actor_id))
+        .collect::<HashMap<_, _>>()
+}
+
+fn read_new_game_room_id(doc: &web_sys::Document) -> String {
+    let ui_room = doc
+        .get_element_by_id("new-game-room-id")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .map(|input| input.value())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if ui_room.is_empty() {
+        actor_admin_room_id()
+    } else {
+        ui_room
+    }
+}
+
+fn explain_claim_conflict(raw: &str) -> String {
+    let msg = raw.trim();
+    let normalized = msg.to_ascii_lowercase();
+    if normalized.contains("actor already claimed") {
+        format!(
+            "{} · 이미 다른 keeper가 점유 중입니다. 기존 owner를 확인한 뒤 점유 해제 후 다시 시도하세요.",
+            msg
+        )
+    } else if normalized.contains("keeper already controls actor") {
+        format!(
+            "{} · keeper는 한 번에 한 actor만 점유할 수 있습니다. 기존 점유를 해제하거나 다른 keeper를 선택하세요.",
+            msg
+        )
+    } else if normalized.contains("actor is not claimed") {
+        format!("{} · 이미 점유 해제된 상태입니다.", msg)
+    } else {
+        msg.to_string()
+    }
 }
 
 // ─── Helpers (moved from mod.rs, only used here) ────────────────
@@ -679,7 +744,12 @@ fn extract_keeper_name_from_value(row: &Value) -> Option<String> {
 // ─── Keeper Selectors ───────────────────────────────────────────
 
 async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>, String> {
-    let payload = mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await?;
+    let payload = match mcp_tool_call("masc_keeper_list", json!({ "limit": 200, "detailed": true }))
+        .await
+    {
+        Ok(v) => v,
+        Err(_) => mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await?,
+    };
     web_sys::console::log_1(
         &format!(
             "[refresh_keeper_selectors] payload keys={:?}",
@@ -733,6 +803,19 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         return Err("keeper 목록이 비어 있습니다. masc_keeper_list 결과를 확인하세요.".to_string());
     }
 
+    let keeper_actor_map = match fetch_room_state_payload(&read_new_game_room_id(doc)).await {
+        Ok(state_payload) => parse_keeper_actor_map(&state_payload),
+        Err(_) => HashMap::new(),
+    };
+
+    let option_label = |name: &str| -> String {
+        let suffix = keeper_actor_map
+            .get(name)
+            .map(|actor_id| format!(" · 점유 {}", actor_id))
+            .unwrap_or_default();
+        format!("{}{}", name, suffix)
+    };
+
     let previous_dm = doc
         .get_element_by_id("new-game-dm-select")
         .and_then(|el| {
@@ -752,7 +835,8 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
             .iter()
             .map(|name| {
                 let safe = html_escape(name);
-                format!(r#"<option value="{}">{}</option>"#, safe, safe)
+                let label = html_escape(&option_label(name));
+                format!(r#"<option value="{}">{}</option>"#, safe, label)
             })
             .collect::<Vec<_>>()
             .join("");
@@ -768,6 +852,7 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
         let mut html = String::new();
         for name in keepers.iter().filter(|name| **name != dm_default) {
             let safe = html_escape(name);
+            let label = html_escape(&option_label(name));
             let selected_attr = if preserve_existing_selection
                 && previous_players.iter().any(|picked| picked == name)
             {
@@ -779,8 +864,9 @@ async fn refresh_keeper_selectors(doc: &web_sys::Document) -> Result<Vec<String>
                 ""
             };
             html.push_str(&format!(
-                r#"<option value="{value}"{selected}>{value}</option>"#,
+                r#"<option value="{value}"{selected}>{label}</option>"#,
                 value = safe,
+                label = label,
                 selected = selected_attr
             ));
         }
@@ -814,6 +900,7 @@ fn actor_admin_set_busy(doc: &web_sys::Document, busy: bool) {
         "actor-admin-refresh",
         "actor-admin-spawn",
         "actor-admin-update",
+        "actor-admin-release",
         "actor-admin-delete",
     ] {
         if let Some(btn) = doc
@@ -907,18 +994,9 @@ fn summarize_preflight_items(items: &[String], limit: usize) -> String {
 
 fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
     let state = state_root.get("state").unwrap_or(state_root);
-    let actor_control = state
-        .get("actor_control")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
+    let actor_control = parse_actor_control_map(state_root);
     let control_keeper = |actor_id: &str| -> String {
-        actor_control
-            .get(actor_id)
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string()
+        actor_control.get(actor_id).cloned().unwrap_or_default()
     };
 
     let mut rows = Vec::new();
@@ -956,17 +1034,19 @@ fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
                 .unwrap_or("")
                 .trim()
                 .to_string();
+            let final_keeper = if keeper.is_empty() {
+                control_keeper(&actor_id)
+            } else {
+                keeper
+            };
             rows.push(ActorAdminRow {
                 actor_id: actor_id.clone(),
                 name,
                 role,
                 hp,
                 max_hp,
-                keeper: if keeper.is_empty() {
-                    control_keeper(&actor_id)
-                } else {
-                    keeper
-                },
+                keeper: final_keeper.clone(),
+                claimed: !final_keeper.trim().is_empty(),
             });
         }
     } else if let Some(party) = state.get("party").and_then(Value::as_object) {
@@ -991,13 +1071,15 @@ fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
                 .to_string();
             let hp = row.get("hp").and_then(Value::as_i64).unwrap_or(0) as i32;
             let max_hp = row.get("max_hp").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let keeper = control_keeper(actor_id);
             rows.push(ActorAdminRow {
                 actor_id: actor_id.to_string(),
                 name,
                 role,
                 hp,
                 max_hp,
-                keeper: control_keeper(actor_id),
+                keeper: keeper.clone(),
+                claimed: !keeper.trim().is_empty(),
             });
         }
     }
@@ -1016,12 +1098,21 @@ fn render_actor_admin_rows(doc: &web_sys::Document, rows: &[ActorAdminRow]) {
     let html = rows
         .iter()
         .map(|row| {
+            let claim_badge = if row.claimed {
+                format!(
+                    "<span class=\"actor-claim-badge is-claimed\">점유 {}</span>",
+                    html_escape(&row.keeper)
+                )
+            } else {
+                "<span class=\"actor-claim-badge is-free\">비점유</span>".to_string()
+            };
             format!(
                 concat!(
                     "<button class=\"actor-admin-row\" ",
                     "data-actor-id=\"{id}\" data-name=\"{name}\" data-role=\"{role}\" ",
-                    "data-keeper=\"{keeper}\" data-hp=\"{hp}\" data-max-hp=\"{max_hp}\">",
-                    "{id} · {role} · HP {hp}/{max_hp}{keeper_text}",
+                    "data-keeper=\"{keeper}\" data-hp=\"{hp}\" data-max-hp=\"{max_hp}\" ",
+                    "data-claimed=\"{claimed}\">",
+                    "{id} · {role} · HP {hp}/{max_hp} {claim_badge}",
                     "</button>"
                 ),
                 id = html_escape(&row.actor_id),
@@ -1030,11 +1121,8 @@ fn render_actor_admin_rows(doc: &web_sys::Document, rows: &[ActorAdminRow]) {
                 keeper = html_escape(&row.keeper),
                 hp = row.hp,
                 max_hp = row.max_hp,
-                keeper_text = if row.keeper.is_empty() {
-                    "".to_string()
-                } else {
-                    format!(" · keeper {}", html_escape(&row.keeper))
-                },
+                claimed = if row.claimed { "1" } else { "0" },
+                claim_badge = claim_badge,
             )
         })
         .collect::<Vec<_>>()
@@ -1320,8 +1408,42 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
     };
     rows.push(selected_keeper_row);
 
-    let room_id = actor_admin_room_id();
-    let room_row = match fetch_room_state_payload(&room_id).await {
+    let room_id = read_new_game_room_id(doc);
+    let room_state = fetch_room_state_payload(&room_id).await;
+    let occupancy_row = match &room_state {
+        Ok(payload) => {
+            let keeper_actor_map = parse_keeper_actor_map(payload);
+            let conflicts = selected_keepers
+                .iter()
+                .filter_map(|keeper| {
+                    keeper_actor_map
+                        .get(keeper)
+                        .map(|actor_id| format!("{}→{}", keeper, actor_id))
+                })
+                .collect::<Vec<_>>();
+            if conflicts.is_empty() {
+                (
+                    true,
+                    "점유 충돌".to_string(),
+                    format!("선택 keeper {}명 모두 비점유", selected_keepers.len()),
+                )
+            } else {
+                (
+                    false,
+                    "점유 충돌".to_string(),
+                    format!("이미 점유 중: {}", summarize_preflight_items(&conflicts, 3)),
+                )
+            }
+        }
+        Err(_) => (
+            true,
+            "점유 충돌".to_string(),
+            "신규 room으로 판단되어 충돌 검사를 건너뜁니다.".to_string(),
+        ),
+    };
+    rows.push(occupancy_row);
+
+    let room_row = match room_state {
         Ok(payload) => {
             let root = payload.get("state").unwrap_or(&payload);
             let status = root
@@ -1337,10 +1459,10 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 format!("room {} · {}", room_id, status),
             )
         }
-        Err(e) => (
-            false,
+        Err(_) => (
+            true,
             "룸 상태".to_string(),
-            format!("room {} 조회 실패: {}", room_id, e),
+            format!("room {} · 신규 room (아직 초기화 전)", room_id),
         ),
     };
     rows.push(room_row);
@@ -1388,7 +1510,7 @@ async fn actor_admin_spawn(doc: &web_sys::Document) -> Result<String, String> {
     }
     mcp_tool_call("trpg.actor.spawn", args).await?;
     if !keeper.is_empty() {
-        mcp_tool_call(
+        if let Err(err) = mcp_tool_call(
             "trpg.actor.claim",
             json!({
                 "room_id": actor_admin_room_id(),
@@ -1396,7 +1518,10 @@ async fn actor_admin_spawn(doc: &web_sys::Document) -> Result<String, String> {
                 "keeper_name": keeper
             }),
         )
-        .await?;
+        .await
+        {
+            return Err(explain_claim_conflict(&err));
+        }
     }
     let rows = refresh_actor_admin_list(doc).await?;
     Ok(format!("액터 생성 완료 ({}명): {}", rows.len(), actor_id))
@@ -1444,7 +1569,7 @@ async fn actor_admin_update(doc: &web_sys::Document) -> Result<String, String> {
         mcp_tool_call("trpg.actor.update", args).await?;
     }
     if !keeper.is_empty() {
-        mcp_tool_call(
+        if let Err(err) = mcp_tool_call(
             "trpg.actor.claim",
             json!({
                 "room_id": actor_admin_room_id(),
@@ -1452,10 +1577,50 @@ async fn actor_admin_update(doc: &web_sys::Document) -> Result<String, String> {
                 "keeper_name": keeper
             }),
         )
-        .await?;
+        .await
+        {
+            return Err(explain_claim_conflict(&err));
+        }
     }
     let rows = refresh_actor_admin_list(doc).await?;
     Ok(format!("액터 수정 완료 ({}명): {}", rows.len(), actor_id))
+}
+
+async fn actor_admin_release(doc: &web_sys::Document) -> Result<String, String> {
+    let room_id = actor_admin_room_id();
+    let actor_id = actor_admin_input_value(doc, "actor-admin-id");
+    if actor_id.is_empty() {
+        return Err("점유 해제할 Actor ID를 입력하세요.".to_string());
+    }
+
+    let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
+    let keeper_name = if keeper.is_empty() {
+        let payload = fetch_room_state_payload(&room_id).await?;
+        parse_actor_control_map(&payload)
+            .get(&actor_id)
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        keeper
+    };
+    if keeper_name.is_empty() {
+        return Err(format!("actor {} 는 현재 점유자가 없습니다.", actor_id));
+    }
+
+    mcp_tool_call(
+        "trpg.actor.release",
+        json!({
+            "room_id": room_id,
+            "actor_id": actor_id,
+            "keeper_name": keeper_name,
+            "reason": "viewer admin release"
+        }),
+    )
+    .await
+    .map_err(|e| explain_claim_conflict(&e))?;
+
+    let rows = refresh_actor_admin_list(doc).await?;
+    Ok(format!("액터 점유 해제 완료 ({}명): {}", rows.len(), actor_id))
 }
 
 async fn actor_admin_delete(doc: &web_sys::Document) -> Result<String, String> {
@@ -1837,7 +2002,9 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
             rollback_claimed_actors(&room_id, &claimed_pairs).await;
             return Err(format!(
                 "actor claim 실패 (actor {} / keeper {}): {}. 기존 claim rollback을 시도했습니다.",
-                actor_id, keeper_name, err
+                actor_id,
+                keeper_name,
+                explain_claim_conflict(&err)
             ));
         }
         claimed_pairs.push((actor_id.clone(), keeper_name.clone()));
@@ -2612,6 +2779,35 @@ fn bind_actor_admin_controls(doc: &web_sys::Document) {
             target.add_event_listener_with_callback("click", update_cb.as_ref().unchecked_ref())
         });
         update_cb.forget();
+    }
+
+    if let Some(release_btn) = doc.get_element_by_id("actor-admin-release") {
+        let release_cb = Closure::wrap(Box::new(move || {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            actor_admin_set_busy(&doc, true);
+            actor_admin_set_status(&doc, "액터 점유 해제 중...", "status-info");
+            let doc_for_task = doc.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let result = actor_admin_release(&doc_for_task).await;
+                match result {
+                    Ok(msg) => actor_admin_set_status(&doc_for_task, &msg, "status-ok"),
+                    Err(e) => actor_admin_set_status(
+                        &doc_for_task,
+                        &format!("액터 점유 해제 실패: {}", e),
+                        "status-error",
+                    ),
+                }
+                actor_admin_set_busy(&doc_for_task, false);
+            });
+        }) as Box<dyn FnMut()>);
+        let _ = release_btn
+            .dyn_ref::<web_sys::EventTarget>()
+            .map(|target| {
+                target.add_event_listener_with_callback("click", release_cb.as_ref().unchecked_ref())
+            });
+        release_cb.forget();
     }
 
     if let Some(delete_btn) = doc.get_element_by_id("actor-admin-delete") {

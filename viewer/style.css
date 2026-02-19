@@ -2957,6 +2957,28 @@ body:not(.mode-trpg) #ops-hud {
     margin-bottom: 0;
 }
 
+.actor-claim-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    letter-spacing: 0.2px;
+    border: 1px solid transparent;
+}
+
+.actor-claim-badge.is-claimed {
+    border-color: rgba(214, 127, 127, 0.42);
+    color: #dfa1a1;
+    background: rgba(48, 14, 18, 0.42);
+}
+
+.actor-claim-badge.is-free {
+    border-color: rgba(124, 207, 160, 0.4);
+    color: #97d8b3;
+    background: rgba(13, 38, 24, 0.38);
+}
+
 /* ═══════════════════════════════════════════
    MONITOR Mode — Agent health cards
    ═══════════════════════════════════════════ */

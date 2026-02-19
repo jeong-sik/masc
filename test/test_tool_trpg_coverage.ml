@@ -217,16 +217,29 @@ let test_round_run_timeout_policy () =
   let summary = Yojson.Safe.Util.member "summary" json in
   Alcotest.(check int) "timeouts" 1 (Yojson.Safe.Util.member "timeouts" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "unavailable" 1 (Yojson.Safe.Util.member "unavailable" summary |> Yojson.Safe.Util.to_int);
-  (* Player timeout does not block DM execution; DM response can still advance. *)
-  Alcotest.(check int) "successes" 1 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
+  (* Player timeout blocks DM execution until full quorum is restored. *)
+  Alcotest.(check int) "successes" 0 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check bool)
     "dm success"
-    true
+    false
     (Yojson.Safe.Util.member "dm_success" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check bool)
     "round advanced"
-    true
+    false
     (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
+  let dm_status =
+    List.find_opt
+      (fun s ->
+        s |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string = "dm")
+      statuses
+  in
+  (match dm_status with
+  | Some status_json ->
+      Alcotest.(check string)
+        "dm status is skipped"
+        "skipped"
+        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "dm status is missing");
   let events = json |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list in
   let timeout_event =
     List.find_opt
@@ -296,7 +309,7 @@ let test_round_run_timeout_policy () =
     (count_from_json (parse_json_exn unavailable_stream));
   cleanup_dir base_dir
 
-let test_round_run_allows_dm_without_full_player_quorum () =
+let test_round_run_requires_full_player_quorum () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -328,7 +341,7 @@ let test_round_run_allows_dm_without_full_player_quorum () =
   in
   let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
   Alcotest.(check bool) "round_run returns payload" true ok;
-  Alcotest.(check bool) "dm call executes with partial quorum" true !dm_called;
+  Alcotest.(check bool) "dm call is skipped when quorum fails" false !dm_called;
 
   let json = parse_json_exn body in
   let summary = Yojson.Safe.Util.member "summary" json in
@@ -346,15 +359,15 @@ let test_round_run_allows_dm_without_full_player_quorum () =
     (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check bool)
     "dm success"
-    true
+    false
     (Yojson.Safe.Util.member "dm_success" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check bool)
     "round advanced"
-    true
+    false
     (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check int)
-    "turn_after advanced"
-    2
+    "turn_after unchanged"
+    1
     (Yojson.Safe.Util.member "turn_after" json |> Yojson.Safe.Util.to_int);
 
   let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
@@ -367,10 +380,85 @@ let test_round_run_allows_dm_without_full_player_quorum () =
   (match dm_status with
   | Some status_json ->
       Alcotest.(check string)
-        "dm status is ok"
-        "ok"
+        "dm status is skipped"
+        "skipped"
         (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string)
+      ;
+      Alcotest.(check bool)
+        "dm skip reason mentions quorum"
+        true
+        (contains_substring
+           (status_json |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string)
+           "player quorum not met")
   | None -> Alcotest.fail "dm status is missing");
+  cleanup_dir base_dir
+
+let test_round_run_rejects_meta_only_keeper_reply () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-meta-reply" ~actor_ids:["p1"];
+  let dm_called = ref false in
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        dm_called := true;
+        `Ok (`Assoc [ ("reply", `String "DM should be skipped.") ])
+    | "pk-meta" -> `Ok (`Assoc [ ("reply", `String "[/STATE]") ])
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-meta-reply");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-meta") ]);
+        ("timeout_sec", `Float 0.2);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run returns payload" true ok;
+  Alcotest.(check bool)
+    "dm call is skipped when player reply is meta-only"
+    false
+    !dm_called;
+
+  let json = parse_json_exn body in
+  let summary = Yojson.Safe.Util.member "summary" json in
+  Alcotest.(check int)
+    "player_successes"
+    0
+    (Yojson.Safe.Util.member "player_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool)
+    "player quorum met"
+    false
+    (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check bool)
+    "round advanced"
+    false
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
+
+  let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
+  let p1_status =
+    List.find_opt
+      (fun s ->
+        s |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string = "p1")
+      statuses
+  in
+  (match p1_status with
+  | Some status_json ->
+      Alcotest.(check string)
+        "p1 status is invalid_response"
+        "invalid_response"
+        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string)
+        "p1 stage is parse_keeper_reply"
+        "parse_keeper_reply"
+        (status_json |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "p1 status is missing");
   cleanup_dir base_dir
 
 let test_round_run_requires_keeper_runtime () =
@@ -1146,9 +1234,13 @@ let () =
             `Quick
             test_round_run_timeout_policy;
           Alcotest.test_case
-            "allows dm execution with partial player quorum"
+            "requires full player quorum before dm/advance"
             `Quick
-            test_round_run_allows_dm_without_full_player_quorum;
+            test_round_run_requires_full_player_quorum;
+          Alcotest.test_case
+            "rejects meta-only keeper replies"
+            `Quick
+            test_round_run_rejects_meta_only_keeper_reply;
           Alcotest.test_case
             "requires keeper runtime"
             `Quick

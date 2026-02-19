@@ -257,7 +257,7 @@
                         <select id="new-game-dm-select" title="게임을 진행할 AI 에이전트 선택">
                             <option value="">로딩 중...</option>
                         </select>
-                        <div id="new-game-dm-hint" class="new-game-inline-hint">DM을 1명 선택하세요.</div>
+                        <div id="new-game-dm-hint" class="new-game-inline-hint">DM을 1명 선택하세요. (진행자 keeper)</div>
                     </label>
 
                     <label class="new-game-field">
@@ -265,9 +265,22 @@
                         <select id="new-game-player-select" multiple size="6" title="게임에 참여할 AI 에이전트 선택 (Ctrl/Cmd+클릭)">
                             <option value="">로딩 중...</option>
                         </select>
-                        <div id="new-game-player-hint" class="new-game-inline-hint">플레이어 0명 선택됨 · DM과 중복 불가</div>
+                        <div id="new-game-player-hint" class="new-game-inline-hint">플레이어 0명 선택됨 · Ctrl/Cmd+클릭으로 선택 · DM과 중복 불가</div>
                         <button id="new-game-autopick-btn" class="inline-toggle" type="button">4인 자동선택</button>
                     </label>
+
+                    <div class="new-game-field new-game-field-wide manual-map-panel">
+                        <span>플레이어 수동 매핑 (Slot → Keeper)</span>
+                        <div id="new-game-manual-map-help" class="new-game-inline-hint">
+                            선택한 플레이어 keeper 순서를 actor slot(P01,P02,...)에 수동 고정할 수 있습니다.
+                        </div>
+                        <div class="manual-map-actions">
+                            <button id="new-game-manual-reset" class="inline-toggle" type="button">선택순으로 리셋</button>
+                        </div>
+                        <div id="new-game-manual-table" class="manual-map-table">
+                            <div class="room-chip-empty">플레이어 keeper를 먼저 선택하세요.</div>
+                        </div>
+                    </div>
 
                     <label class="new-game-field">
                         <span>AI 모델 (쉼표로 구분)</span>
@@ -281,6 +294,7 @@
                     <button id="new-game-refresh" class="inline-toggle" type="button">Keeper 새로고침</button>
                     <button id="new-game-start" class="inline-toggle primary" type="button">세션 시작</button>
                 </div>
+                <div id="new-game-ready-hint" class="new-game-inline-hint">세션 시작 조건을 확인하세요.</div>
                 <div id="new-game-status" class="new-game-status">버튼을 눌러 준비하세요.</div>
                 <div id="new-game-preflight" class="new-game-preflight">사전 점검 대기 중</div>
                 <div id="new-game-assignment" class="new-game-assignment">세션 정보를 준비 중입니다.</div>

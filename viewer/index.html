@@ -149,7 +149,7 @@
     </div>
 
     <!-- ═══ Dashboard (Active Mode View) ═══ -->
-    <div id="dashboard" style="display: none;">
+    <div id="dashboard" style="display: none;" data-auto-round="1">
         <!-- Top Bar -->
         <header id="top-bar">
             <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
@@ -166,6 +166,7 @@
                     <span id="room-status" class="widget-pill">현재 방: default</span>
                 </div>
                 <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
+                <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="true" title="AI 턴 자동 진행을 멈춥니다">자동 진행: ON</button>
                 <select id="theme-selector-inline" class="inline-select">
                     <option value="dark-fantasy">Dark Fantasy</option>
                     <option value="cyberpunk">Cyberpunk</option>

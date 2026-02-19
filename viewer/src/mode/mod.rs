@@ -235,6 +235,8 @@ fn enter_trpg() {
         let room = crate::config::current_room_id();
         set_current_room_id(&doc, &room);
         bind_room_controls(&doc);
+        bind_auto_round_toggle(&doc);
+        crate::game::round_runner::set_auto_round_running(auto_round_enabled_from_dom(&doc));
 
         if let Some(pill) = doc.get_element_by_id("room-status") {
             pill.set_text_content(Some(&format!("현재 방: {} · 목록 불러오는 중...", room)));
@@ -261,6 +263,73 @@ fn enter_trpg() {
                 }
             }
         });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_auto_round_toggle(doc: &web_sys::Document) {
+    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        if dashboard.get_attribute("data-auto-round").is_none() {
+            let _ = dashboard.set_attribute("data-auto-round", "1");
+        }
+    }
+    render_auto_round_toggle(doc);
+
+    let Some(button) = doc.get_element_by_id("auto-round-toggle") else {
+        return;
+    };
+    if button.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = button.set_attribute("data-bound", "1");
+
+    let doc_clone = doc.clone();
+    let cb = Closure::wrap(Box::new(move || {
+        let next = !auto_round_enabled_from_dom(&doc_clone);
+        if let Some(dashboard) = doc_clone.get_element_by_id("dashboard") {
+            let _ = dashboard.set_attribute("data-auto-round", if next { "1" } else { "0" });
+        }
+        render_auto_round_toggle(&doc_clone);
+        crate::game::round_runner::set_auto_round_running(next);
+    }) as Box<dyn FnMut()>);
+
+    let _ = button
+        .dyn_ref::<web_sys::EventTarget>()
+        .map(|target| target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
+    cb.forget();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn auto_round_enabled_from_dom(doc: &web_sys::Document) -> bool {
+    let value = doc
+        .get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-auto-round"))
+        .unwrap_or_else(|| "1".to_string())
+        .to_ascii_lowercase();
+    matches!(value.as_str(), "1" | "true" | "on")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_auto_round_toggle(doc: &web_sys::Document) {
+    let enabled = auto_round_enabled_from_dom(doc);
+    if let Some(button) = doc.get_element_by_id("auto-round-toggle") {
+        button.set_text_content(Some(if enabled {
+            "자동 진행: ON"
+        } else {
+            "자동 진행: OFF"
+        }));
+        let _ = button.set_attribute("aria-pressed", if enabled { "true" } else { "false" });
+        let _ = button.set_attribute(
+            "title",
+            if enabled {
+                "AI 턴 자동 진행을 멈춥니다"
+            } else {
+                "AI 턴 자동 진행을 시작합니다"
+            },
+        );
+    }
+    if let Some(ops) = doc.get_element_by_id("ops-control-state") {
+        ops.set_text_content(Some(if enabled { "auto-run" } else { "manual" }));
     }
 }
 

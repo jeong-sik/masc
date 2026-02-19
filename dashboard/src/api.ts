@@ -37,33 +37,62 @@ function jsonHeaders(): Record<string, string> {
   }
 }
 
+const DEFAULT_GET_TIMEOUT_MS = 15_000
+const DEFAULT_POST_TIMEOUT_MS = 30_000
+const DEFAULT_MCP_TIMEOUT_MS = 60_000
+
+async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(path, {
+      ...init,
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
+      throw new Error(`${method} ${path}: timeout after ${timeoutMs}ms`)
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // --- Generic fetcher ---
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: authHeaders() })
+  const res = await fetchWithTimeout(path, { headers: authHeaders() }, DEFAULT_GET_TIMEOUT_MS)
   if (!res.ok) throw new Error(`GET ${path}: ${res.status} ${res.statusText}`)
   return res.json() as Promise<T>
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetchWithTimeout(path, {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify(body),
-  })
+  }, DEFAULT_POST_TIMEOUT_MS)
   if (!res.ok) throw new Error(`POST ${path}: ${res.status} ${res.statusText}`)
   return res.json() as Promise<T>
 }
 
-async function postRaw(path: string, body: unknown, extraHeaders?: Record<string, string>): Promise<string> {
-  const res = await fetch(path, {
+async function postRaw(
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+  timeoutMs = DEFAULT_POST_TIMEOUT_MS,
+): Promise<string> {
+  const res = await fetchWithTimeout(path, {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
       ...(extraHeaders ?? {}),
     },
     body: JSON.stringify(body),
-  })
+  }, timeoutMs)
   if (!res.ok) throw new Error(`POST ${path}: ${res.status} ${res.statusText}`)
   return res.text()
 }
@@ -105,7 +134,7 @@ async function callMcpTool(toolName: string, args: Record<string, unknown>): Pro
     id: Math.floor(Date.now() % 1000000),
   }, {
     Accept: 'application/json, text/event-stream',
-  })
+  }, DEFAULT_MCP_TIMEOUT_MS)
   const parsed = parseMcpHttpResponse(text)
   return extractMcpText(parsed)
 }

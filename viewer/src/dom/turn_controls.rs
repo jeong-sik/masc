@@ -66,6 +66,65 @@ fn control_status_to_ops_class(css_class: &str) -> &'static str {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn set_round_readiness_rows(doc: &web_sys::Document, rows: &[RoundReadinessRow]) {
+    let Some(container) = doc.get_element_by_id("round-readiness-checklist") else {
+        return;
+    };
+
+    let snapshot = rows
+        .iter()
+        .map(|row| {
+            format!(
+                "{}:{}:{}",
+                row.label,
+                if row.ok { "1" } else { "0" },
+                row.detail
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    if container.get_attribute("data-snapshot").as_deref() == Some(snapshot.as_str()) {
+        return;
+    }
+    let _ = container.set_attribute("data-snapshot", &snapshot);
+
+    container.set_text_content(None);
+    for row in rows {
+        let Ok(item) = doc.create_element("div") else {
+            continue;
+        };
+        item.set_class_name(if row.ok {
+            "round-readiness-item is-ok"
+        } else {
+            "round-readiness-item is-fail"
+        });
+
+        let Ok(state) = doc.create_element("span") else {
+            continue;
+        };
+        state.set_class_name("round-readiness-state");
+        state.set_text_content(Some(if row.ok { "OK" } else { "WAIT" }));
+        let _ = item.append_child(&state);
+
+        let Ok(label) = doc.create_element("span") else {
+            continue;
+        };
+        label.set_class_name("round-readiness-label");
+        label.set_text_content(Some(row.label));
+        let _ = item.append_child(&label);
+
+        let Ok(detail) = doc.create_element("span") else {
+            continue;
+        };
+        detail.set_class_name("round-readiness-detail");
+        detail.set_text_content(Some(&row.detail));
+        let _ = item.append_child(&detail);
+
+        let _ = container.append_child(&item);
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn round_advanced(turn_before: u64, turn_after: u64, summary_advanced: Option<bool>) -> bool {
     summary_advanced.unwrap_or(turn_after > turn_before)
@@ -80,6 +139,63 @@ struct RoundStallSummary {
     timeouts: u64,
     unavailable: u64,
     first_issue: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RoundReadinessRow {
+    label: &'static str,
+    ok: bool,
+    detail: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn derive_round_readiness_rows(
+    connection_ok: bool,
+    lifecycle: TrpgLifecycleState,
+    dm_ready: bool,
+    player_count: usize,
+    lock_reason: Option<&str>,
+) -> Vec<RoundReadinessRow> {
+    vec![
+        RoundReadinessRow {
+            label: "엔진 연결",
+            ok: connection_ok,
+            detail: if connection_ok {
+                "connected".to_string()
+            } else {
+                "연결 필요".to_string()
+            },
+        },
+        RoundReadinessRow {
+            label: "세션 상태",
+            ok: lifecycle.allows_round_control(),
+            detail: lifecycle.label_ko().to_string(),
+        },
+        RoundReadinessRow {
+            label: "DM 배정",
+            ok: dm_ready,
+            detail: if dm_ready {
+                "DM keeper 준비됨".to_string()
+            } else {
+                "DM keeper 없음".to_string()
+            },
+        },
+        RoundReadinessRow {
+            label: "플레이어 배정",
+            ok: player_count > 0,
+            detail: if player_count > 0 {
+                format!("{}명 keeper 매핑", player_count)
+            } else {
+                "player keeper 없음".to_string()
+            },
+        },
+        RoundReadinessRow {
+            label: "실행 락",
+            ok: lock_reason.is_none(),
+            detail: lock_reason.unwrap_or("락 없음").to_string(),
+        },
+    ]
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -278,8 +394,9 @@ pub fn sync_turn_controls_visibility(
         let runner_active = auto_round_runner_active(&doc);
         if runner_active {
             can_run = false;
-            reason = "실행 대기: 자동 라운드 실행 중입니다. 관전 모드에서는 수동 실행이 잠금됩니다."
-                .to_string();
+            reason =
+                "실행 대기: 자동 라운드 실행 중입니다. 관전 모드에서는 수동 실행이 잠금됩니다."
+                    .to_string();
             reason_class = "status-info";
         } else if let Some(owner) = lock_owner.as_deref() {
             if owner != "manual" {
@@ -296,6 +413,37 @@ pub fn sync_turn_controls_visibility(
             .is_some_and(|v| v == "1");
         let locked = lock_owner.is_some() || runner_active;
         set_round_run_controls_locked(&doc, locked);
+
+        let dm_ready = read_dom_input(&doc, "round-run-dm")
+            .or_else(|| read_dom_input(&doc, "claimed-keeper"))
+            .or_else(|| read_dom_input(&doc, "new-game-dm-select"))
+            .is_some();
+        let player_pairs_raw = read_dom_text_value(&doc, "round-run-players").unwrap_or_default();
+        let mut player_count = parse_player_keeper_pairs(&player_pairs_raw).len();
+        if player_count == 0 {
+            let claimed_actor = read_dom_input(&doc, "claimed-actor-id").unwrap_or_default();
+            let claimed_keeper = read_dom_input(&doc, "claimed-keeper").unwrap_or_default();
+            if !claimed_actor.is_empty() && !claimed_keeper.is_empty() {
+                player_count = 1;
+            }
+        }
+        let lock_reason = if busy {
+            Some("수동 라운드 요청 처리 중".to_string())
+        } else if runner_active {
+            Some("자동 라운드 실행 중".to_string())
+        } else {
+            lock_owner
+                .as_deref()
+                .map(|owner| format!("{} 요청 처리 중", owner))
+        };
+        let readiness_rows = derive_round_readiness_rows(
+            connection_ok,
+            lifecycle,
+            dm_ready,
+            player_count,
+            lock_reason.as_deref(),
+        );
+        set_round_readiness_rows(&doc, &readiness_rows);
 
         if let Some(btn) = doc
             .get_element_by_id("advance-turn-btn")
@@ -394,12 +542,13 @@ fn on_advance_click() {
             }) => {
                 clear_round_recovery();
                 set_round_stall_badges(None);
-                let css_class = if has_warning { "status-warn" } else { "status-ok" };
+                let css_class = if has_warning {
+                    "status-warn"
+                } else {
+                    "status-ok"
+                };
                 set_turn_status(&status, css_class);
-                set_turn_gate_reason(
-                    "실행 완료: 다음 라운드 조건을 다시 계산합니다.",
-                    css_class,
-                );
+                set_turn_gate_reason("실행 완료: 다음 라운드 조건을 다시 계산합니다.", css_class);
             }
             Ok(RoundRunOutcome::Stalled {
                 status,
@@ -432,7 +581,10 @@ fn on_advance_click() {
 
 #[cfg(target_arch = "wasm32")]
 enum RoundRunOutcome {
-    Advanced { status: String, has_warning: bool },
+    Advanced {
+        status: String,
+        has_warning: bool,
+    },
     Stalled {
         status: String,
         guide: String,
@@ -570,7 +722,11 @@ fn extract_stalled_round_summary(json: &Value) -> RoundStallSummary {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn build_stalled_round_guide(summary: &RoundStallSummary, turn_before: u64, turn_after: u64) -> String {
+fn build_stalled_round_guide(
+    summary: &RoundStallSummary,
+    turn_before: u64,
+    turn_after: u64,
+) -> String {
     let successes = summary.successes;
     let player_successes = summary.player_successes;
     let dm_success = summary.dm_success;
@@ -809,7 +965,11 @@ fn set_round_stall_badges(summary: Option<&RoundStallSummary>) {
         &container,
         "SUCCESS",
         &summary.successes.to_string(),
-        if summary.successes > 0 { "is-ok" } else { "is-warn" },
+        if summary.successes > 0 {
+            "is-ok"
+        } else {
+            "is-warn"
+        },
         Some("이번 라운드 전체 성공 응답 수"),
     );
     append_round_stall_badge(
@@ -829,7 +989,11 @@ fn set_round_stall_badges(summary: Option<&RoundStallSummary>) {
         &container,
         "DM",
         if summary.dm_success { "ok" } else { "fail" },
-        if summary.dm_success { "is-ok" } else { "is-error" },
+        if summary.dm_success {
+            "is-ok"
+        } else {
+            "is-error"
+        },
         Some("DM 내레이션/판정 성공 여부"),
     );
     append_round_stall_badge(
@@ -1372,5 +1536,31 @@ mod tests {
     fn round_advanced_falls_back_to_turn_delta() {
         assert!(round_advanced(2, 3, None));
         assert!(!round_advanced(2, 2, None));
+    }
+
+    #[test]
+    fn round_readiness_rows_all_ok_when_ready() {
+        let rows = derive_round_readiness_rows(true, TrpgLifecycleState::Running, true, 4, None);
+        assert_eq!(rows.len(), 5);
+        assert!(rows.iter().all(|row| row.ok));
+    }
+
+    #[test]
+    fn round_readiness_rows_report_missing_requirements() {
+        let rows = derive_round_readiness_rows(
+            false,
+            TrpgLifecycleState::Lobby,
+            false,
+            0,
+            Some("자동 라운드 실행 중"),
+        );
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[0].label, "엔진 연결");
+        assert!(!rows[0].ok);
+        assert_eq!(rows[1].label, "세션 상태");
+        assert!(!rows[1].ok);
+        assert_eq!(rows[4].label, "실행 락");
+        assert!(!rows[4].ok);
+        assert!(rows[4].detail.contains("자동"));
     }
 }

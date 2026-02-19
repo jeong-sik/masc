@@ -727,6 +727,10 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
         el.set_text_content(Some("실행 조건 점검 중..."));
         let _ = el.set_attribute("class", "turn-control-gate status-info");
     }
+    if let Some(el) = doc.get_element_by_id("round-readiness-checklist") {
+        el.set_text_content(Some(""));
+        let _ = el.remove_attribute("data-snapshot");
+    }
     if let Some(el) = doc.get_element_by_id("action-panel") {
         let _ = el.set_attribute("style", "display:none");
     }

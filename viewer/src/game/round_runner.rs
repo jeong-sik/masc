@@ -57,10 +57,7 @@ const STARTUP_DELAY_MS: i32 = 3000;
 // ─── OnEnter System ────────────────────────────
 
 /// Spawns the async round-run loop when entering TRPG mode.
-pub fn start_round_loop(
-    mut commands: Commands,
-    progress: Res<TurnProgressState>,
-) {
+pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>) {
     let runner = RoundRunner::default();
 
     #[cfg(target_arch = "wasm32")]
@@ -137,9 +134,7 @@ pub fn start_round_loop(
                         }
                     }
                     Err(e) => {
-                        let detail = e
-                            .as_string()
-                            .unwrap_or_else(|| format!("{:?}", e));
+                        let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                         log::warn!("RoundRunner: POST failed — {}", detail);
 
                         // Stop on non-retriable client errors to prevent runaway loops.
@@ -305,8 +300,7 @@ fn read_dom_value(id: &str) -> Option<String> {
 
     let doc = web_sys::window()?.document()?;
     let el = doc.get_element_by_id(id)?;
-    el
-        .dyn_ref::<web_sys::HtmlInputElement>()
+    el.dyn_ref::<web_sys::HtmlInputElement>()
         .map(|i| i.value())
         .or_else(|| {
             el.dyn_ref::<web_sys::HtmlSelectElement>()

@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -8,8 +8,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::config;
-use crate::game::events::*;
 use crate::game::components::{Actor, Condition, Equipment, Skill, Stats};
+use crate::game::events::*;
 use crate::game::state::{ConnectionStatus, MapState, RoomState, TurnPhase, TurnProgressState};
 
 // ─── Expected API Response Types ─────────────
@@ -560,7 +560,8 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         .unwrap_or("")
         .trim()
         .to_string();
-    let dice_log = parse_dice_log(root).unwrap_or_else(|| parse_dice_log(state).unwrap_or_default());
+    let dice_log =
+        parse_dice_log(root).unwrap_or_else(|| parse_dice_log(state).unwrap_or_default());
 
     GameStateResponse {
         room: Some(RoomResponse {
@@ -704,14 +705,19 @@ fn parse_dice_log_entry(
         total,
         dc,
         result,
-        note: entry.get("note").and_then(Value::as_str).map(str::to_string),
+        note: entry
+            .get("note")
+            .and_then(Value::as_str)
+            .map(str::to_string),
     })
 }
 
 fn map_dice_result_label(raw: &str) -> String {
     let raw = raw.trim().to_ascii_lowercase();
     match raw.as_str() {
-        "critical_fail" | "critical failure" | "fumble" | "대실패" => "critical_fail".to_string(),
+        "critical_fail" | "critical failure" | "fumble" | "대실패" => {
+            "critical_fail".to_string()
+        }
         "fail" | "failure" | "실패" => "fail".to_string(),
         "partial" | "partial_success" | "부분성공" => "partial_success".to_string(),
         "success" | "성공" => "success".to_string(),
@@ -722,12 +728,7 @@ fn map_dice_result_label(raw: &str) -> String {
         "false" | "0" => "fail".to_string(),
         _ => {
             let passed = entry_passed_marker(&raw);
-            if passed {
-                "success"
-            } else {
-                "fail"
-            }
-            .to_string()
+            if passed { "success" } else { "fail" }.to_string()
         }
     }
 }
@@ -737,9 +738,7 @@ fn entry_passed_marker(raw: &str) -> bool {
     compact
         .split_whitespace()
         .find(|token| !token.is_empty())
-        .is_some_and(|token| {
-            matches!(token, "pass" | "passed" | "success" | "성공" | "true" | "1")
-        })
+        .is_some_and(|token| matches!(token, "pass" | "passed" | "success" | "성공" | "true" | "1"))
 }
 
 fn parse_party_characters(
@@ -833,10 +832,12 @@ fn parse_party_characters(
                         .filter_map(|skill| {
                             if let Ok(parsed) = serde_json::from_value::<SkillData>(skill.clone()) {
                                 Some(parsed)
-                            } else { skill.as_str().map(|name| SkillData {
+                            } else {
+                                skill.as_str().map(|name| SkillData {
                                     name: name.to_string(),
                                     level: 10,
-                                }) }
+                                })
+                            }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -847,12 +848,16 @@ fn parse_party_characters(
                 .map(|rows| {
                     rows.iter()
                         .filter_map(|cond| {
-                            if let Ok(parsed) = serde_json::from_value::<ConditionData>(cond.clone()) {
+                            if let Ok(parsed) =
+                                serde_json::from_value::<ConditionData>(cond.clone())
+                            {
                                 Some(parsed)
-                            } else { cond.as_str().map(|name| ConditionData {
+                            } else {
+                                cond.as_str().map(|name| ConditionData {
                                     name: name.to_string(),
                                     remaining_turns: None,
-                                }) }
+                                })
+                            }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -863,20 +868,21 @@ fn parse_party_characters(
                 .map(|rows| {
                     rows.iter()
                         .filter_map(|slot| {
-                            if let Ok(parsed) = serde_json::from_value::<EquipmentData>(slot.clone()) {
+                            if let Ok(parsed) =
+                                serde_json::from_value::<EquipmentData>(slot.clone())
+                            {
                                 Some(parsed)
-                            } else { slot.as_str().map(|name| EquipmentData {
+                            } else {
+                                slot.as_str().map(|name| EquipmentData {
                                     slot: "item".to_string(),
                                     name: name.to_string(),
-                                }) }
+                                })
+                            }
                         })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let keeper = actor_control
-                .get(actor_id)
-                .cloned()
-                .unwrap_or_default();
+            let keeper = actor_control.get(actor_id).cloned().unwrap_or_default();
 
             CharacterData {
                 id: actor_id.to_string(),

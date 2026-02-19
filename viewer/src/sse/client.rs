@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 #[cfg(any(target_arch = "wasm32", test))]
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -148,7 +148,7 @@ fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
         .and_then(Value::as_str)
         .or(actor_id)
         .unwrap_or("")
-    .to_string()
+        .to_string()
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -157,7 +157,12 @@ fn snapshot_fingerprint(snapshot: &Value) -> String {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn stream_event_fingerprint(event_type: &str, seq: i64, actor_id: Option<&str>, payload: &Value) -> String {
+fn stream_event_fingerprint(
+    event_type: &str,
+    seq: i64,
+    actor_id: Option<&str>,
+    payload: &Value,
+) -> String {
     let actor = actor_id.unwrap_or("").trim();
     format!("{seq}|{event_type}|{actor}|{payload}")
 }
@@ -211,9 +216,12 @@ fn snapshot_phase(root: &Value, fallback: &str) -> String {
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
-    let source = root.get("dice_log").or_else(|| snapshot_root(root).get("dice_log"));
+    let source = root
+        .get("dice_log")
+        .or_else(|| snapshot_root(root).get("dice_log"));
     source
-        .and_then(Value::as_array).cloned()
+        .and_then(Value::as_array)
+        .cloned()
         .unwrap_or_default()
 }
 
@@ -236,7 +244,10 @@ fn map_snapshot_result(result: &Value) -> String {
         "miracle" | "기적" => "miracle",
         "success!" => "success",
         _ => {
-            let passed = result.get("passed").and_then(Value::as_bool).unwrap_or(false);
+            let passed = result
+                .get("passed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             if passed {
                 "success"
             } else {
@@ -248,7 +259,11 @@ fn map_snapshot_result(result: &Value) -> String {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn map_snapshot_dice_roll(entry: &Value, fallback_turn: u32, _fallback_phase: &str) -> Option<(String, String)> {
+fn map_snapshot_dice_roll(
+    entry: &Value,
+    fallback_turn: u32,
+    _fallback_phase: &str,
+) -> Option<(String, String)> {
     if !entry.is_object() {
         return None;
     }
@@ -698,7 +713,9 @@ fn map_trpg_event(
         }
         // -- game.ended / quest.completed → narrative with endgame phase --
         "game.ended" | "quest.completed" => {
-            let text = payload.get("summary").and_then(Value::as_str)
+            let text = payload
+                .get("summary")
+                .and_then(Value::as_str)
                 .or_else(|| payload.get("text").and_then(Value::as_str))
                 .unwrap_or("The adventure has ended.");
             let mapped = json!({ "text": text, "phase": "endgame", "speaker": "DM" });
@@ -724,10 +741,7 @@ fn map_trpg_event(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn decode_snapshot_events(
-    body: &Value,
-    state: &mut TrpgMapperState,
-) -> Vec<(String, String)> {
+fn decode_snapshot_events(body: &Value, state: &mut TrpgMapperState) -> Vec<(String, String)> {
     let status = snapshot_status(body);
     let signature = snapshot_fingerprint(body);
     if state.snapshot_signature.as_deref() == Some(signature.as_str()) {
@@ -752,10 +766,7 @@ fn decode_snapshot_events(
     let mut out = Vec::new();
 
     out.push(snapshot_room_status_progress_payload(
-        body,
-        &status,
-        turn,
-        &phase,
+        body, &status, turn, &phase,
     ));
 
     if turn > 0 {
@@ -1375,8 +1386,7 @@ mod tests {
             .iter()
             .find(|(event_type, _)| event_type == "narrative")
             .expect("narrative should exist");
-        let n_payload: Value =
-            serde_json::from_str(&narrative.1).expect("narrative payload json");
+        let n_payload: Value = serde_json::from_str(&narrative.1).expect("narrative payload json");
         assert_eq!(n_payload["text"], "Victory!");
         assert_eq!(n_payload["phase"], "endgame");
 
@@ -1384,16 +1394,14 @@ mod tests {
             .iter()
             .find(|(event_type, _)| event_type == "party.selected")
             .expect("party.selected should exist");
-        let p_payload: Value =
-            serde_json::from_str(&party.1).expect("party.selected payload json");
+        let p_payload: Value = serde_json::from_str(&party.1).expect("party.selected payload json");
         assert_eq!(p_payload["player_ids"], json!(["p1", "p2"]));
 
         let room = mapped
             .iter()
             .find(|(event_type, _)| event_type == "room.created")
             .expect("room.created should exist");
-        let r_payload: Value =
-            serde_json::from_str(&room.1).expect("room.created payload json");
+        let r_payload: Value = serde_json::from_str(&room.1).expect("room.created payload json");
         assert_eq!(r_payload["room_id"], "r1");
     }
 }

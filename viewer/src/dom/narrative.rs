@@ -94,10 +94,7 @@ fn bump_dedup_narrative(document: &web_sys::Document, sample: &str) {
     let _ = dashboard.set_attribute("data-dedup-samples-narrative", &lines.join("\n"));
 }
 
-fn is_duplicate_narrative_entry(
-    log_el: &web_sys::Element,
-    dedup_key: &str,
-) -> bool {
+fn is_duplicate_narrative_entry(log_el: &web_sys::Element, dedup_key: &str) -> bool {
     let mut scanned = 0_u32;
     let mut cursor = log_el.last_element_child();
     while scanned < 40 {

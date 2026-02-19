@@ -360,7 +360,7 @@ body.mode-lobby #dashboard {
 
 #dashboard {
     display: grid;
-    grid-template-rows: 44px 1fr 120px;
+    grid-template-rows: 44px auto 1fr 120px;
     grid-template-columns: 1fr;
     height: 100vh;
     position: relative;
@@ -369,7 +369,7 @@ body.mode-lobby #dashboard {
 }
 
 #dashboard[data-debug="off"] {
-    grid-template-rows: 44px 1fr;
+    grid-template-rows: 44px auto 1fr;
 }
 
 #dashboard[data-debug="off"] #bottom-zone {
@@ -377,6 +377,64 @@ body.mode-lobby #dashboard {
 }
 #dashboard[data-debug="off"] .debug-only {
     display: none !important;
+}
+
+body:not(.mode-trpg) #ops-hud {
+    display: none !important;
+}
+
+#ops-hud {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-main);
+    padding: 5px 12px;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(110px, 1fr));
+    gap: 8px;
+    align-items: center;
+}
+
+.ops-hud-item {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ops-k {
+    font-size: 9px;
+    letter-spacing: 0.65px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.ops-v {
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ops-v.status-active {
+    color: var(--status-connected);
+}
+
+.ops-v.status-loading {
+    color: var(--status-connecting);
+}
+
+.ops-v.status-warn {
+    color: #c4a265;
+}
+
+.ops-v.status-error,
+.ops-v.status-ended,
+.ops-v.status-unavailable {
+    color: var(--status-disconnected);
+}
+
+.ops-v.status-idle {
+    color: var(--text-dim);
 }
 
 /* ─── Top Bar ──────────────────────────── */
@@ -533,6 +591,49 @@ body.mode-lobby #dashboard {
     color: var(--text-primary);
 }
 
+.new-game-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.new-game-steps span {
+    font-size: 10px;
+    border: 1px solid rgba(109, 122, 164, 0.35);
+    border-radius: 999px;
+    padding: 2px 8px;
+    color: var(--text-dim);
+    background: rgba(20, 26, 44, 0.6);
+}
+
+.new-game-step {
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.new-game-step.is-active {
+    border-color: rgba(196, 162, 101, 0.58);
+    color: #e4c895;
+    background: rgba(70, 52, 23, 0.28);
+}
+
+.new-game-step.is-done {
+    border-color: rgba(122, 206, 155, 0.55);
+    color: #96d8b3;
+    background: rgba(23, 56, 44, 0.32);
+}
+
+.new-game-step.is-error {
+    border-color: rgba(215, 118, 118, 0.58);
+    color: #dfa1a1;
+    background: rgba(80, 29, 29, 0.35);
+}
+
+.new-game-step-hint {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.35px;
+}
+
 .new-game-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -578,6 +679,7 @@ body.mode-lobby #dashboard {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .new-game-status {
@@ -586,6 +688,18 @@ body.mode-lobby #dashboard {
     border: 1px dashed var(--border-main);
     border-radius: var(--panel-radius);
     padding: 6px 8px;
+}
+
+.new-game-inline-hint {
+    margin-top: 2px;
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+#new-game-autopick-btn {
+    align-self: flex-start;
 }
 
 .room-hub {
@@ -726,6 +840,9 @@ body.mode-lobby #dashboard {
 }
 
 @media (max-width: 1280px) {
+    #ops-hud {
+        grid-template-columns: repeat(3, minmax(120px, 1fr));
+    }
     .new-game-grid {
         grid-template-columns: 1fr;
     }
@@ -741,6 +858,12 @@ body.mode-lobby #dashboard {
     .bottom-pane + .bottom-pane {
         border-left: none;
         border-top: 1px solid var(--border-main);
+    }
+}
+
+@media (max-width: 820px) {
+    #ops-hud {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
     }
 }
 
@@ -1769,13 +1892,101 @@ body.mode-lobby #dashboard {
     text-transform: uppercase;
 }
 
+.lifecycle-diagram {
+    border: 1px solid rgba(109, 122, 164, 0.24);
+    border-radius: var(--panel-radius);
+    background: rgba(12, 16, 30, 0.64);
+    padding: 6px 8px;
+    margin: 0 0 8px;
+    display: grid;
+    gap: 5px;
+}
+
+.lifecycle-track {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.lifecycle-track-alt {
+    opacity: 0.85;
+}
+
+.lifecycle-node {
+    border: 1px solid rgba(109, 122, 164, 0.34);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 9px;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    background: rgba(20, 26, 44, 0.58);
+    text-transform: uppercase;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.lifecycle-node.is-done {
+    border-color: rgba(124, 209, 161, 0.45);
+    color: #95d9b2;
+}
+
+.lifecycle-node.is-active {
+    border-color: rgba(196, 162, 101, 0.62);
+    color: #e4c895;
+    background: rgba(70, 52, 23, 0.32);
+}
+
+.lifecycle-node.is-error {
+    border-color: rgba(215, 118, 118, 0.62);
+    color: #dfa1a1;
+    background: rgba(80, 29, 29, 0.34);
+}
+
+.lifecycle-edge {
+    color: rgba(160, 170, 198, 0.75);
+    font-size: 10px;
+}
+
+.lifecycle-diagram-hint {
+    margin: -2px 0 8px;
+    color: var(--text-dim);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
 /* ─── Turn Controls (advance turn button) ─── */
 
 #turn-controls {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 8px;
+}
+
+.turn-recovery-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: -2px 0 8px;
+}
+
+.turn-recovery-actions button {
+    background: rgba(16, 20, 34, 0.86);
+    border: 1px solid rgba(109, 122, 164, 0.42);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.66rem;
+    letter-spacing: 0.28px;
+    padding: 3px 9px;
+}
+
+.turn-recovery-actions button:hover {
+    border-color: rgba(196, 162, 101, 0.52);
+    color: #e4c895;
 }
 
 #session-history {
@@ -1922,6 +2133,75 @@ body.mode-lobby #dashboard {
     line-height: 1.4;
 }
 
+.round-sync-debug {
+    margin: 0 0 8px;
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    background: rgba(15, 20, 36, 0.62);
+    overflow: hidden;
+}
+
+.round-sync-debug summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 6px 8px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    border-bottom: 1px solid rgba(109, 122, 164, 0.2);
+}
+
+.round-sync-debug summary::-webkit-details-marker {
+    display: none;
+}
+
+.round-sync-debug-body {
+    display: grid;
+    gap: 4px;
+    padding: 8px;
+    font-size: 10px;
+    color: var(--text-dim);
+}
+
+.round-sync-row {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.round-sync-label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.round-sync-value {
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.round-sync-value.sync-ok {
+    color: var(--status-connected);
+}
+
+.round-sync-value.sync-error {
+    color: var(--status-disconnected);
+}
+
+.round-sync-value.status-active {
+    color: var(--status-connected);
+}
+
+.round-sync-value.status-loading {
+    color: var(--status-connecting);
+}
+
+.round-sync-value.status-error {
+    color: var(--status-disconnected);
+}
+
 #advance-turn-btn {
     background: var(--bg-card);
     border: 1px solid var(--border-highlight, rgba(196, 162, 101, 0.2));
@@ -1966,6 +2246,35 @@ body.mode-lobby #dashboard {
 
 #turn-control-status.status-error {
     color: #d44;
+}
+
+#round-recovery-btn {
+    background: transparent;
+    border: 1px solid rgba(196, 162, 101, 0.4);
+    border-radius: 999px;
+    color: #c4a265;
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 0.68rem;
+    letter-spacing: 0.3px;
+    padding: 3px 10px;
+}
+
+#round-recovery-btn:hover {
+    background: rgba(196, 162, 101, 0.12);
+    color: var(--text-bright);
+}
+
+.turn-recovery-note {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border: 1px solid rgba(196, 162, 101, 0.25);
+    border-radius: 8px;
+    background: rgba(80, 56, 20, 0.2);
+    color: #e3d1aa;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    white-space: pre-line;
 }
 
 #dice-log {

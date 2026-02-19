@@ -22,11 +22,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::JsFuture;
+use crate::dom::escape::html_escape;
 #[cfg(target_arch = "wasm32")]
 use crate::game::lifecycle::TrpgLifecycleState;
 #[cfg(target_arch = "wasm32")]
-use crate::dom::escape::html_escape;
+use wasm_bindgen_futures::JsFuture;
 
 /// Top-level viewer mode. Determines which plugins/systems are active
 /// and which SSE endpoint the viewer connects to.
@@ -564,7 +564,10 @@ pub(super) fn set_new_game_preflight_status(doc: &web_sys::Document, message: &s
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn set_new_game_preflight_rows(doc: &web_sys::Document, rows: &[(bool, String, String)]) {
+pub(super) fn set_new_game_preflight_rows(
+    doc: &web_sys::Document,
+    rows: &[(bool, String, String)],
+) {
     if let Some(el) = doc.get_element_by_id("new-game-preflight") {
         let html = rows
             .iter()
@@ -840,7 +843,6 @@ pub(super) fn set_round_run_fields(
         let _ = summary.set_attribute("style", "display:block");
     }
 }
-
 
 #[cfg(target_arch = "wasm32")]
 fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_room: &str) {
@@ -1161,7 +1163,11 @@ fn set_room_hub_visible(doc: &web_sys::Document, visible: bool) {
     set_element_display(doc, "room-hub", if visible { "grid" } else { "none" });
     if let Some(toggle) = doc.get_element_by_id("room-hub-toggle") {
         let _ = toggle.set_attribute("aria-pressed", if visible { "true" } else { "false" });
-        toggle.set_text_content(Some(if visible { "방 목록 닫기" } else { "방 목록" }));
+        toggle.set_text_content(Some(if visible {
+            "방 목록 닫기"
+        } else {
+            "방 목록"
+        }));
     }
 }
 
@@ -1481,8 +1487,7 @@ use room_hub::{
 mod trpg_controls;
 #[cfg(target_arch = "wasm32")]
 use trpg_controls::{
-    actor_admin_room_id, actor_admin_set_status, bind_new_game_controls,
-    refresh_actor_admin_list,
+    actor_admin_room_id, actor_admin_set_status, bind_new_game_controls, refresh_actor_admin_list,
 };
 
 /// Refresh TRPG widget status counters (narrative, party, history, dedup).
@@ -1491,7 +1496,6 @@ fn refresh_trpg_widget_status() {
     #[cfg(target_arch = "wasm32")]
     trpg_controls::refresh_trpg_widget_status();
 }
-
 
 // ─── Generic MASC Panel Enter/Exit ───────────
 

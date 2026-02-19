@@ -373,7 +373,11 @@ fn set_room_hub_visible(doc: &web_sys::Document, visible: bool) {
     set_element_display(doc, "room-hub", if visible { "grid" } else { "none" });
     if let Some(toggle) = doc.get_element_by_id("room-hub-toggle") {
         let _ = toggle.set_attribute("aria-pressed", if visible { "true" } else { "false" });
-        toggle.set_text_content(Some(if visible { "방 목록 닫기" } else { "방 목록" }));
+        toggle.set_text_content(Some(if visible {
+            "방 목록 닫기"
+        } else {
+            "방 목록"
+        }));
     }
 }
 
@@ -459,7 +463,9 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
     log::info!("Viewer room switched to {}", room);
 }
 
-pub(super) async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<RoomSnapshot>, String> {
+pub(super) async fn refresh_rooms_from_server(
+    doc: &web_sys::Document,
+) -> Result<Vec<RoomSnapshot>, String> {
     let payload = mcp_tool_call("masc_rooms_list", json!({})).await?;
 
     let mut snapshots = payload

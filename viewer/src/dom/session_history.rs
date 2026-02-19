@@ -123,7 +123,9 @@ fn append_event(
     true
 }
 
-fn label_progress_event(payload: &crate::game::events::TurnProgressPayload) -> (&'static str, String, String) {
+fn label_progress_event(
+    payload: &crate::game::events::TurnProgressPayload,
+) -> (&'static str, String, String) {
     let actor = payload.actor_id.trim();
     let label = match payload.event_type.as_str() {
         "turn.started" => "턴 시작",
@@ -177,7 +179,8 @@ fn label_progress_event(payload: &crate::game::events::TurnProgressPayload) -> (
 #[cfg(target_arch = "wasm32")]
 fn render_session_history_html(turns: &[TurnHistory]) -> String {
     if turns.is_empty() {
-        return "<div class=\"session-history-empty\">아직 세션 히스토리가 없습니다.</div>".to_string();
+        return "<div class=\"session-history-empty\">아직 세션 히스토리가 없습니다.</div>"
+            .to_string();
     }
 
     let turn_chips = turns
@@ -404,7 +407,9 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
             continue;
         };
         for idx in 0..nodes.length() {
-            let Some(node) = nodes.item(idx) else { continue };
+            let Some(node) = nodes.item(idx) else {
+                continue;
+            };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
@@ -431,7 +436,9 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
 
     if let Ok(chips) = document.query_selector_all("#session-history .history-turn-chip") {
         for idx in 0..chips.length() {
-            let Some(node) = chips.item(idx) else { continue };
+            let Some(node) = chips.item(idx) else {
+                continue;
+            };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
@@ -450,7 +457,9 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
 
     if let Ok(chips) = document.query_selector_all("#session-history .history-kind-chip") {
         for idx in 0..chips.length() {
-            let Some(node) = chips.item(idx) else { continue };
+            let Some(node) = chips.item(idx) else {
+                continue;
+            };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
@@ -473,7 +482,9 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
 
     if let Ok(nodes) = document.query_selector_all("#session-history .history-event") {
         for idx in 0..nodes.length() {
-            let Some(node) = nodes.item(idx) else { continue };
+            let Some(node) = nodes.item(idx) else {
+                continue;
+            };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
@@ -496,7 +507,9 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
 
     if let Ok(nodes) = document.query_selector_all("#session-history .history-turn") {
         for idx in 0..nodes.length() {
-            let Some(node) = nodes.item(idx) else { continue };
+            let Some(node) = nodes.item(idx) else {
+                continue;
+            };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
@@ -520,7 +533,9 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
 fn bind_history_focus_controls(document: &web_sys::Document) {
     if let Ok(chips) = document.query_selector_all("#session-history .history-turn-chip") {
         for idx in 0..chips.length() {
-            let Some(node) = chips.item(idx) else { continue };
+            let Some(node) = chips.item(idx) else {
+                continue;
+            };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
@@ -548,7 +563,9 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
 
     if let Ok(chips) = document.query_selector_all("#session-history .history-kind-chip") {
         for idx in 0..chips.length() {
-            let Some(node) = chips.item(idx) else { continue };
+            let Some(node) = chips.item(idx) else {
+                continue;
+            };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
@@ -677,7 +694,15 @@ pub fn update_session_history_dom(
                 "turn",
                 "",
                 "턴 진행",
-                &format!("Turn {} ({})", current_turn, if current_phase.is_empty() { "-" } else { &current_phase }),
+                &format!(
+                    "Turn {} ({})",
+                    current_turn,
+                    if current_phase.is_empty() {
+                        "-"
+                    } else {
+                        &current_phase
+                    }
+                ),
             );
             if !appended {
                 bump_dedup_history(
@@ -701,18 +726,18 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!(
-                        "t{} | narrative | {}",
-                        current_turn,
-                        event.text.trim()
-                    ),
+                    &format!("t{} | narrative | {}", current_turn, event.text.trim()),
                 );
             }
             changed = true;
         }
 
         for DiceRolled(payload) in dice_events.read() {
-            let turn = if payload.turn > 0 { payload.turn } else { current_turn };
+            let turn = if payload.turn > 0 {
+                payload.turn
+            } else {
+                current_turn
+            };
             if turn > 0 {
                 current_turn = turn;
             }
@@ -738,9 +763,7 @@ pub fn update_session_history_dom(
                     &document,
                     &format!(
                         "t{} | dice | {}:{}",
-                        current_turn,
-                        payload.character,
-                        payload.action
+                        current_turn, payload.character, payload.action
                     ),
                 );
             }
@@ -761,17 +784,17 @@ pub fn update_session_history_dom(
                 &current_phase,
                 kind,
                 &actor,
-                if summary.is_empty() { "turn progress" } else { &summary },
+                if summary.is_empty() {
+                    "turn progress"
+                } else {
+                    &summary
+                },
                 &event.event_type,
             );
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!(
-                        "t{} | progress | {}",
-                        current_turn,
-                        event.event_type
-                    ),
+                    &format!("t{} | progress | {}", current_turn, event.event_type),
                 );
             }
             changed = true;

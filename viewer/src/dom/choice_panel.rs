@@ -24,7 +24,9 @@ pub fn update_choice_dom(
         };
 
         for ChoiceAvailable(p) in choices.read() {
-            let Ok(div) = doc.create_element("div") else { continue };
+            let Ok(div) = doc.create_element("div") else {
+                continue;
+            };
             div.set_class_name("narrative-entry choice-block");
             let opts: String = p
                 .options
@@ -45,7 +47,9 @@ pub fn update_choice_dom(
         }
 
         for ChoiceResolved(p) in resolutions.read() {
-            let Ok(div) = doc.create_element("div") else { continue };
+            let Ok(div) = doc.create_element("div") else {
+                continue;
+            };
             div.set_class_name("narrative-entry choice-resolved");
             let text = format!("{} chose: {}", &p.character, &p.description);
             div.set_text_content(Some(&text));
@@ -55,7 +59,9 @@ pub fn update_choice_dom(
         }
 
         for CombatStarted(p) in combats.read() {
-            let Ok(div) = doc.create_element("div") else { continue };
+            let Ok(div) = doc.create_element("div") else {
+                continue;
+            };
             div.set_class_name("narrative-entry combat-block");
             let enemies = if p.enemies.is_empty() {
                 "???".to_string()
@@ -76,4 +82,3 @@ pub fn update_choice_dom(
     // Suppress unused-variable warnings on non-wasm targets
     let _ = (&mut choices, &mut resolutions, &mut combats);
 }
-

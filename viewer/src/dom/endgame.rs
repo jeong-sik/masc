@@ -86,7 +86,11 @@ fn show_endgame_overlay(message: &str, is_victory: bool) {
         };
         overlay.set_class_name(class);
 
-        let title = if is_victory { "임무 완료" } else { "전멸" };
+        let title = if is_victory {
+            "임무 완료"
+        } else {
+            "전멸"
+        };
 
         // Build inner HTML with safe text insertion for the message.
         // Title is a fixed Korean string (safe). Message uses set_text_content below.

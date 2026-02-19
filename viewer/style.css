@@ -2520,6 +2520,67 @@ body:not(.mode-trpg) #ops-hud {
     background: rgba(80, 29, 29, 0.28);
 }
 
+.round-readiness-checklist {
+    width: 100%;
+    display: grid;
+    gap: 4px;
+    margin: 1px 0 4px;
+}
+
+.round-readiness-item {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 7px;
+    align-items: center;
+    border: 1px solid rgba(109, 122, 164, 0.28);
+    border-radius: 6px;
+    padding: 3px 6px;
+    background: rgba(12, 18, 33, 0.52);
+    font-family: var(--font-ui);
+    font-size: 10px;
+    line-height: 1.3;
+}
+
+.round-readiness-item .round-readiness-state {
+    border: 1px solid rgba(109, 122, 164, 0.34);
+    border-radius: 999px;
+    padding: 1px 6px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.round-readiness-item .round-readiness-label {
+    color: var(--text-primary);
+    letter-spacing: 0.22px;
+}
+
+.round-readiness-item .round-readiness-detail {
+    color: var(--text-dim);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.round-readiness-item.is-ok {
+    border-color: rgba(122, 206, 155, 0.35);
+}
+
+.round-readiness-item.is-ok .round-readiness-state {
+    border-color: rgba(122, 206, 155, 0.44);
+    color: #96d8b3;
+}
+
+.round-readiness-item.is-fail {
+    border-color: rgba(196, 162, 101, 0.38);
+}
+
+.round-readiness-item.is-fail .round-readiness-state {
+    border-color: rgba(196, 162, 101, 0.48);
+    color: #d9b06c;
+}
+
 .round-run-badges {
     width: 100%;
     display: flex;

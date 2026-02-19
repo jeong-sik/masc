@@ -1,11 +1,12 @@
 //! TRPG session timeline.
 //!
-//! Captures narrative, dice, and turn-progress events into per-turn history
-//! and renders them as a compact expandable timeline in the bottom panel.
+//! Captures narrative, dice, and turn-progress events into per-room,
+//! per-turn history and renders them as a compact browser.
 
 #![allow(dead_code)] // Many helpers used only in wasm32 cfg blocks.
 
 use bevy::prelude::*;
+use std::cmp::Ordering;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::closure::Closure;
 #[cfg(target_arch = "wasm32")]
@@ -14,6 +15,7 @@ use wasm_bindgen::JsCast;
 use crate::game::events::{DiceRolled, NarrativeReceived, TurnAdvanced, TurnProgressUpdated};
 use crate::game::state::{RoomState, TurnProgressState};
 
+const MAX_ROOMS_TO_KEEP: usize = 24;
 const MAX_TURNS_TO_KEEP: usize = 24;
 const MAX_EVENTS_PER_TURN: usize = 80;
 
@@ -32,10 +34,17 @@ struct TurnHistory {
     events: Vec<HistoryEvent>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct RoomHistory {
+    room_id: String,
+    status: String,
+    turns: Vec<TurnHistory>,
+    updated_turn: u32,
+}
+
 #[derive(Resource, Default)]
 pub struct SessionHistoryCache {
-    last_room_id: String,
-    turns: Vec<TurnHistory>,
+    rooms: Vec<RoomHistory>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -45,16 +54,62 @@ fn sanitize_key(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
-#[cfg(target_arch = "wasm32")]
-fn normalize_focus_kind(raw: &str) -> Option<String> {
-    let key = sanitize_key(raw);
-    match key.as_str() {
-        "narrative" | "dice" | "turn" | "progress" | "system" => Some(key),
-        _ => None,
+fn normalize_room_id(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        "room-unknown".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+fn normalize_room_status(raw: &str) -> String {
+    let key = sanitize_key(raw);
+    match key.as_str() {
+        "active" | "running" | "started" | "in_progress" | "in-progress" | "playing"
+        | "open" => "active",
+        "paused" | "pause" | "stopped" | "idle" | "on_hold" | "on-hold" => "paused",
+        "ended" | "finished" | "completed" | "closed" | "done" | "archived"
+        | "terminated" => "ended",
+        _ => "unknown",
+    }
+    .to_string()
+}
+
+fn room_status_bucket(status: &str) -> u8 {
+    match normalize_room_status(status).as_str() {
+        "active" => 0,
+        "paused" => 1,
+        "ended" => 2,
+        _ => 3,
+    }
+}
+
+fn room_status_label_ko(status: &str) -> &'static str {
+    match normalize_room_status(status).as_str() {
+        "active" => "진행중",
+        "paused" => "멈춤",
+        "ended" => "종료",
+        _ => "기타",
+    }
+}
+
+fn room_status_class(status: &str) -> &'static str {
+    match normalize_room_status(status).as_str() {
+        "active" => "active",
+        "paused" => "paused",
+        "ended" => "ended",
+        _ => "unknown",
+    }
+}
+
+fn compare_room_priority(a: &RoomHistory, b: &RoomHistory) -> Ordering {
+    room_status_bucket(&a.status)
+        .cmp(&room_status_bucket(&b.status))
+        .then_with(|| b.updated_turn.cmp(&a.updated_turn))
+        .then_with(|| a.room_id.cmp(&b.room_id))
+}
+
 fn history_kind_class(kind: &str) -> &'static str {
     match kind {
         "dice" => "kind-dice",
@@ -66,17 +121,20 @@ fn history_kind_class(kind: &str) -> &'static str {
     }
 }
 
-fn ensure_turn_entry(turns: &mut Vec<TurnHistory>, turn: u32, phase: &str) -> usize {
+fn ensure_turn_entry(turns: &mut Vec<TurnHistory>, turn: u32, phase: &str) -> (usize, bool) {
+    let normalized_turn = turn.max(1);
     for (idx, row) in turns.iter_mut().enumerate() {
-        if row.turn == turn {
-            if !phase.trim().is_empty() {
+        if row.turn == normalized_turn {
+            let mut changed = false;
+            if !phase.trim().is_empty() && row.phase != phase {
                 row.phase = phase.to_string();
+                changed = true;
             }
-            return idx;
+            return (idx, changed);
         }
     }
     turns.push(TurnHistory {
-        turn,
+        turn: normalized_turn,
         phase: phase.to_string(),
         events: Vec::new(),
     });
@@ -84,28 +142,103 @@ fn ensure_turn_entry(turns: &mut Vec<TurnHistory>, turn: u32, phase: &str) -> us
     while turns.len() > MAX_TURNS_TO_KEEP {
         let _ = turns.remove(0);
     }
-    turns.iter().position(|row| row.turn == turn).unwrap_or(0)
+    let idx = turns
+        .iter()
+        .position(|row| row.turn == normalized_turn)
+        .unwrap_or(0);
+    (idx, true)
+}
+
+fn ensure_room_entry(
+    rooms: &mut Vec<RoomHistory>,
+    room_id: &str,
+    status: &str,
+    updated_turn: u32,
+) -> (usize, bool) {
+    let normalized_room_id = normalize_room_id(room_id);
+    let normalized_status = normalize_room_status(status);
+    for (idx, room) in rooms.iter_mut().enumerate() {
+        if room.room_id == normalized_room_id {
+            let mut changed = false;
+            if normalized_status != "unknown" && room.status != normalized_status {
+                room.status = normalized_status.clone();
+                changed = true;
+            }
+            if updated_turn > room.updated_turn {
+                room.updated_turn = updated_turn;
+                changed = true;
+            }
+            return (idx, changed);
+        }
+    }
+
+    rooms.push(RoomHistory {
+        room_id: normalized_room_id.clone(),
+        status: if normalized_status == "unknown" {
+            "active".to_string()
+        } else {
+            normalized_status
+        },
+        turns: Vec::new(),
+        updated_turn,
+    });
+
+    while rooms.len() > MAX_ROOMS_TO_KEEP {
+        let remove_idx = rooms
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                a.updated_turn
+                    .cmp(&b.updated_turn)
+                    .then_with(|| room_status_bucket(&b.status).cmp(&room_status_bucket(&a.status)))
+                    .then_with(|| b.room_id.cmp(&a.room_id))
+            })
+            .map(|(idx, _)| idx)
+            .unwrap_or(0);
+        let _ = rooms.remove(remove_idx);
+    }
+
+    let idx = rooms
+        .iter()
+        .position(|room| room.room_id == normalized_room_id)
+        .unwrap_or(0);
+    (idx, true)
 }
 
 fn append_event(
-    turns: &mut Vec<TurnHistory>,
+    rooms: &mut Vec<RoomHistory>,
+    room_id: &str,
+    room_status: &str,
     turn: u32,
     phase: &str,
     kind: &str,
     actor: &str,
     title: &str,
     detail: &str,
-) -> bool {
-    let idx = ensure_turn_entry(turns, turn, phase);
-    let Some(row) = turns.get_mut(idx) else {
-        return false;
+) -> (bool, bool) {
+    let normalized_turn = turn.max(1);
+    let (room_idx, mut changed) =
+        ensure_room_entry(rooms, room_id, room_status, normalized_turn);
+    let Some(room) = rooms.get_mut(room_idx) else {
+        return (false, changed);
     };
+    if normalized_turn > room.updated_turn {
+        room.updated_turn = normalized_turn;
+        changed = true;
+    }
+    let (turn_idx, turn_changed) = ensure_turn_entry(&mut room.turns, normalized_turn, phase);
+    changed = changed || turn_changed;
+    let Some(row) = room.turns.get_mut(turn_idx) else {
+        return (false, changed);
+    };
+
     let candidate = HistoryEvent {
         kind: kind.to_string(),
         actor: actor.to_string(),
         title: title.to_string(),
         detail: detail.to_string(),
     };
+
     if row
         .events
         .iter()
@@ -113,14 +246,16 @@ fn append_event(
         .take(48)
         .any(|existing| existing == &candidate)
     {
-        return false;
+        return (false, changed);
     }
+
     row.events.push(candidate);
     if row.events.len() > MAX_EVENTS_PER_TURN {
         let overflow = row.events.len() - MAX_EVENTS_PER_TURN;
         row.events.drain(0..overflow);
     }
-    true
+
+    (true, true)
 }
 
 fn label_progress_event(
@@ -177,86 +312,241 @@ fn label_progress_event(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_session_history_html(turns: &[TurnHistory]) -> String {
-    if turns.is_empty() {
-        return "<div class=\"session-history-empty\">아직 세션 히스토리가 없습니다.</div>"
-            .to_string();
+fn sorted_room_refs(rooms: &[RoomHistory]) -> Vec<&RoomHistory> {
+    let mut refs = rooms.iter().collect::<Vec<_>>();
+    refs.sort_by(|a, b| compare_room_priority(a, b));
+    refs
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_room_bucket_html(title: &str, rooms: &[&RoomHistory]) -> String {
+    if rooms.is_empty() {
+        return String::new();
     }
 
-    let turn_chips = turns
+    let chips = rooms
         .iter()
-        .rev()
-        .map(|row| {
+        .map(|room| {
+            let room_attr = html_escape(&sanitize_text(&room.room_id));
+            let room_label = html_escape(&sanitize_text(&room.room_id));
+            let status = normalize_room_status(&room.status);
+            let status_label = room_status_label_ko(&status);
+            let status_class = room_status_class(&status);
+            let latest_turn = room
+                .turns
+                .iter()
+                .map(|row| row.turn)
+                .max()
+                .or_else(|| {
+                    if room.updated_turn > 0 {
+                        Some(room.updated_turn)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1);
             format!(
-                r#"<button class="history-turn-chip" data-turn="{turn}" type="button">T{turn}</button>"#,
-                turn = row.turn
+                r#"<button class="history-room-chip status-{status_class}" data-room="{room_attr}" data-latest-turn="{latest_turn}" title="{room_label}" type="button"><span class="history-room-id">{room_label}</span><span class="history-room-meta">{status_label} · T{latest_turn}</span></button>"#
             )
         })
         .collect::<Vec<_>>()
         .join("");
-    let kind_chips = concat!(
-        r#"<button class="history-kind-chip" data-kind="" type="button">ALL</button>"#,
-        r#"<button class="history-kind-chip" data-kind="narrative" type="button">NARRATIVE</button>"#,
-        r#"<button class="history-kind-chip" data-kind="dice" type="button">DICE</button>"#,
-        r#"<button class="history-kind-chip" data-kind="turn" type="button">TURN</button>"#,
-        r#"<button class="history-kind-chip" data-kind="progress" type="button">PROGRESS</button>"#,
-        r#"<button class="history-kind-chip" data-kind="system" type="button">SYSTEM</button>"#
-    );
-    let mut html = format!(
-        "<div class=\"history-turn-toolbar\"><button class=\"history-turn-chip\" data-turn=\"\" type=\"button\">ALL</button>{}</div><div class=\"history-kind-toolbar\">{}</div>",
-        turn_chips,
-        kind_chips
-    );
-    for (idx, row) in turns.iter().rev().enumerate() {
-        let open = if idx == 0 { " open" } else { "" };
-        let phase = if row.phase.is_empty() {
-            "unknown".to_string()
+
+    format!(
+        r#"<section class="history-room-bucket"><h4 class="history-room-bucket-title">{title}</h4><div class="history-room-list">{chips}</div></section>"#,
+        title = html_escape(&sanitize_text(title)),
+        chips = chips
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_turn_event_html(ev: &HistoryEvent) -> String {
+    let actor = html_escape(&sanitize_text(&ev.actor));
+    let title = html_escape(&sanitize_text(&ev.title));
+    let detail = html_escape(&sanitize_text(&ev.detail));
+    let kind_key = sanitize_key(&ev.kind);
+    let class = history_kind_class(&kind_key);
+
+    if actor.is_empty() {
+        if detail.is_empty() {
+            format!(
+                r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-detail">-</span></li>"#,
+                kind = kind_key
+            )
         } else {
-            row.phase.clone()
-        };
-        let row_events = if row.events.is_empty() {
-            "<li class=\"history-event-none\">이 턴에는 기록이 없습니다.</li>".to_string()
-        } else {
-            row.events
-                .iter()
-                .map(|ev| {
-                    let actor = html_escape(&sanitize_text(&ev.actor));
-                    let title = html_escape(&sanitize_text(&ev.title));
-                    let detail = html_escape(&sanitize_text(&ev.detail));
-                    let kind_key = sanitize_key(&ev.kind);
-                    let class = history_kind_class(&kind_key);
-                    if actor.is_empty() {
-                        if detail.is_empty() {
-                            format!(
-                                r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-detail">-</span></li>"#,
-                                kind = kind_key
-                            )
+            format!(
+                r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-detail">{detail}</span></li>"#,
+                kind = kind_key
+            )
+        }
+    } else {
+        format!(
+            r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-actor">{actor}</span><span class="history-detail">{detail}</span></li>"#,
+            kind = kind_key
+        )
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_turn_panel_html(room: &RoomHistory, row: &TurnHistory) -> String {
+    let room_attr = html_escape(&sanitize_text(&room.room_id));
+    let phase_raw = if row.phase.trim().is_empty() {
+        "unknown".to_string()
+    } else {
+        row.phase.trim().to_string()
+    };
+    let phase = html_escape(&sanitize_text(&phase_raw));
+    let events = if row.events.is_empty() {
+        "<li class=\"history-detail-empty\">이 턴에는 기록이 없습니다.</li>".to_string()
+    } else {
+        row.events
+            .iter()
+            .map(render_turn_event_html)
+            .collect::<Vec<_>>()
+            .join("")
+    };
+
+    format!(
+        r#"<section class="history-detail-panel" data-room="{room_attr}" data-turn="{turn}"><header class="history-detail-header"><span class="history-detail-title">TURN {turn} · {phase}</span><span class="history-event-count">{count}</span></header><ul class="history-event-list">{events}</ul></section>"#,
+        turn = row.turn,
+        phase = phase,
+        count = row.events.len(),
+        events = events
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_session_history_html(rooms: &[RoomHistory]) -> String {
+    if rooms.is_empty() {
+        return "<div class=\"session-history-empty\">아직 세션 히스토리가 없습니다.</div>"
+            .to_string();
+    }
+
+    let sorted = sorted_room_refs(rooms);
+    let mut active_rooms = Vec::new();
+    let mut paused_rooms = Vec::new();
+    let mut ended_rooms = Vec::new();
+    let mut other_rooms = Vec::new();
+
+    for room in &sorted {
+        match room_status_bucket(&room.status) {
+            0 => active_rooms.push(*room),
+            1 => paused_rooms.push(*room),
+            2 => ended_rooms.push(*room),
+            _ => other_rooms.push(*room),
+        }
+    }
+
+    let room_column = format!(
+        r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">게임</h3>{active}{paused}{ended}{other}</section>"#,
+        active = render_room_bucket_html("진행중", &active_rooms),
+        paused = render_room_bucket_html("멈춤", &paused_rooms),
+        ended = render_room_bucket_html("종료", &ended_rooms),
+        other = render_room_bucket_html("기타", &other_rooms)
+    );
+
+    let turn_groups = sorted
+        .iter()
+        .map(|room| {
+            let room_attr = html_escape(&sanitize_text(&room.room_id));
+            let room_label = html_escape(&sanitize_text(&room.room_id));
+            let chips = if room.turns.is_empty() {
+                "<p class=\"history-turn-empty\">턴 기록이 없습니다.</p>".to_string()
+            } else {
+                room.turns
+                    .iter()
+                    .rev()
+                    .map(|row| {
+                        let phase = if row.phase.trim().is_empty() {
+                            "-".to_string()
                         } else {
-                            format!(
-                                r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-detail">{detail}</span></li>"#,
-                                kind = kind_key
-                            )
-                        }
-                    } else {
+                            row.phase.trim().to_string()
+                        };
                         format!(
-                            r#"<li class="history-event {class}" data-kind="{kind}"><span class="history-kind">{title}</span><span class="history-actor">{actor}</span><span class="history-detail">{detail}</span></li>"#,
-                            kind = kind_key
+                            r#"<button class="history-turn-chip" data-room="{room_attr}" data-turn="{turn}" type="button"><span class="history-turn-chip-main">T{turn}</span><span class="history-turn-chip-phase">{phase}</span><span class="history-turn-chip-count">{count}</span></button>"#,
+                            turn = row.turn,
+                            phase = html_escape(&sanitize_text(&phase)),
+                            count = row.events.len()
                         )
-                    }
-                })
+                    })
+                    .collect::<Vec<_>>()
+                    .join("")
+            };
+
+            format!(
+                r#"<section class="history-turn-group" data-room="{room_attr}"><h4 class="history-turn-group-title">{room_label}</h4><div class="history-turn-toolbar">{chips}</div></section>"#,
+                chips = chips
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    let turn_column = format!(
+        r#"<section class="history-browser-column history-turn-column"><h3 class="history-column-title">턴</h3>{groups}</section>"#,
+        groups = turn_groups
+    );
+
+    let detail_panels = sorted
+        .iter()
+        .map(|room| {
+            if room.turns.is_empty() {
+                let room_attr = html_escape(&sanitize_text(&room.room_id));
+                return format!(
+                    r#"<section class="history-detail-panel" data-room="{room_attr}" data-turn=""><div class="history-detail-empty">선택된 턴 기록이 없습니다.</div></section>"#
+                );
+            }
+
+            room.turns
+                .iter()
+                .rev()
+                .map(|row| render_turn_panel_html(room, row))
                 .collect::<Vec<_>>()
                 .join("")
-        };
-        html.push_str(&format!(
-            "<details class=\"history-turn\" data-turn=\"{turn}\"{open}><summary><span class=\"history-turn-header\">TURN {turn} · {phase}</span><span class=\"history-event-count\">{count}</span></summary><ul class=\"history-event-list\">{events}</ul></details>",
-            open = open,
-            turn = row.turn,
-            phase = sanitize_text(&phase),
-            count = row.events.len(),
-            events = row_events
-        ));
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    let detail_column = format!(
+        r#"<section class="history-browser-column history-detail-column"><h3 class="history-column-title">상세</h3>{panels}</section>"#,
+        panels = detail_panels
+    );
+
+    format!(
+        r#"<div class="history-browser">{room_column}{turn_column}{detail_column}</div>"#,
+        room_column = room_column,
+        turn_column = turn_column,
+        detail_column = detail_column
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_focus_room(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
-    html
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_focus_room(document: &web_sys::Document) -> Option<String> {
+    document
+        .get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-focus-room"))
+        .and_then(|raw| normalize_focus_room(&raw))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn write_focus_room(document: &web_sys::Document, room: Option<&str>) {
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    if let Some(room) = room.and_then(normalize_focus_room) {
+        let _ = dashboard.set_attribute("data-focus-room", &room);
+    } else {
+        let _ = dashboard.remove_attribute("data-focus-room");
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -265,6 +555,7 @@ fn read_focus_turn(document: &web_sys::Document) -> Option<u32> {
         .get_element_by_id("dashboard")
         .and_then(|el| el.get_attribute("data-focus-turn"))
         .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .filter(|turn| *turn > 0)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -272,7 +563,7 @@ fn write_focus_turn(document: &web_sys::Document, turn: Option<u32>) {
     let Some(dashboard) = document.get_element_by_id("dashboard") else {
         return;
     };
-    if let Some(turn) = turn {
+    if let Some(turn) = turn.filter(|value| *value > 0) {
         let _ = dashboard.set_attribute("data-focus-turn", &turn.to_string());
     } else {
         let _ = dashboard.remove_attribute("data-focus-turn");
@@ -280,30 +571,7 @@ fn write_focus_turn(document: &web_sys::Document, turn: Option<u32>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_focus_kind(document: &web_sys::Document) -> Option<String> {
-    document
-        .get_element_by_id("dashboard")
-        .and_then(|el| el.get_attribute("data-focus-kind"))
-        .and_then(|raw| normalize_focus_kind(&raw))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn write_focus_kind(document: &web_sys::Document, kind: Option<&str>) {
-    let Some(dashboard) = document.get_element_by_id("dashboard") else {
-        return;
-    };
-    match kind.and_then(normalize_focus_kind) {
-        Some(value) => {
-            let _ = dashboard.set_attribute("data-focus-kind", &value);
-        }
-        _ => {
-            let _ = dashboard.remove_attribute("data-focus-kind");
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn read_focus_from_hash() -> (Option<u32>, Option<String>) {
+fn read_focus_from_hash() -> (Option<String>, Option<u32>) {
     let Some(window) = web_sys::window() else {
         return (None, None);
     };
@@ -318,8 +586,9 @@ fn read_focus_from_hash() -> (Option<u32>, Option<String>) {
         return (None, None);
     };
 
+    let mut room = None;
     let mut turn = None;
-    let mut kind = None;
+
     for pair in params.split('&') {
         if pair.is_empty() {
             continue;
@@ -328,6 +597,9 @@ fn read_focus_from_hash() -> (Option<u32>, Option<String>) {
         let key = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
         let value = parts.next().unwrap_or_default().trim();
         match key.as_str() {
+            "room" if room.is_none() => {
+                room = normalize_focus_room(value);
+            }
             "turn" if turn.is_none() => {
                 if let Ok(parsed) = value.parse::<u32>() {
                     if parsed > 0 {
@@ -335,17 +607,15 @@ fn read_focus_from_hash() -> (Option<u32>, Option<String>) {
                     }
                 }
             }
-            "kind" if kind.is_none() => {
-                kind = normalize_focus_kind(value);
-            }
             _ => {}
         }
     }
-    (turn, kind)
+
+    (room, turn)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn write_focus_hash(turn: Option<u32>, kind: Option<&str>) {
+fn write_focus_hash(room: Option<&str>, turn: Option<u32>) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -359,11 +629,11 @@ fn write_focus_hash(turn: Option<u32>, kind: Option<&str>) {
         .unwrap_or("trpg");
 
     let mut params = Vec::new();
+    if let Some(room) = room.and_then(normalize_focus_room) {
+        params.push(format!("room={}", room));
+    }
     if let Some(turn) = turn.filter(|value| *value > 0) {
         params.push(format!("turn={}", turn));
-    }
-    if let Some(kind) = kind.and_then(normalize_focus_kind) {
-        params.push(format!("kind={}", kind));
     }
 
     let next_fragment = if params.is_empty() {
@@ -371,6 +641,7 @@ fn write_focus_hash(turn: Option<u32>, kind: Option<&str>) {
     } else {
         format!("{}&{}", base, params.join("&"))
     };
+
     if fragment == next_fragment {
         return;
     }
@@ -387,22 +658,62 @@ fn write_focus_hash(turn: Option<u32>, kind: Option<&str>) {
 
 #[cfg(target_arch = "wasm32")]
 fn sync_focus_state_to_hash(document: &web_sys::Document) {
+    let room = read_focus_room(document);
     let turn = read_focus_turn(document);
-    let kind = read_focus_kind(document);
-    write_focus_hash(turn, kind.as_deref());
+    write_focus_hash(room.as_deref(), turn);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Option<&str>) {
-    let turn_key = turn.map(|value| value.to_string());
-    let kind_key = kind
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty());
+fn resolve_focus_room(rooms: &[RoomHistory], preferred: Option<&str>) -> Option<String> {
+    if rooms.is_empty() {
+        return None;
+    }
 
-    for (selector, event_kind) in [
-        ("#narrative-log .narrative-entry", "narrative"),
-        ("#dice-log .dice-entry", "dice"),
-    ] {
+    if let Some(room_id) = preferred.and_then(normalize_focus_room) {
+        if rooms.iter().any(|room| room.room_id == room_id) {
+            return Some(room_id);
+        }
+    }
+
+    let mut refs = rooms.iter().collect::<Vec<_>>();
+    refs.sort_by(|a, b| compare_room_priority(a, b));
+    refs.first().map(|room| room.room_id.clone())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_focus_turn(
+    rooms: &[RoomHistory],
+    room_id: Option<&str>,
+    preferred: Option<u32>,
+) -> Option<u32> {
+    let target_room = room_id.and_then(|room| rooms.iter().find(|entry| entry.room_id == room))?;
+
+    if let Some(turn) = preferred.filter(|value| *value > 0) {
+        if target_room.turns.iter().any(|row| row.turn == turn) {
+            return Some(turn);
+        }
+    }
+
+    target_room
+        .turns
+        .iter()
+        .map(|row| row.turn)
+        .max()
+        .or_else(|| {
+            if target_room.updated_turn > 0 {
+                Some(target_room.updated_turn)
+            } else {
+                None
+            }
+        })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: Option<u32>) {
+    let room_key = room.and_then(normalize_focus_room);
+    let turn_key = turn.filter(|value| *value > 0).map(|value| value.to_string());
+
+    for selector in ["#narrative-log .narrative-entry", "#dice-log .dice-entry"] {
         let Ok(nodes) = document.query_selector_all(selector) else {
             continue;
         };
@@ -420,11 +731,7 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
                     .unwrap_or(false),
                 None => true,
             };
-            let kind_ok = match kind_key.as_deref() {
-                Some(target) => target == event_kind,
-                None => true,
-            };
-            if turn_ok && kind_ok {
+            if turn_ok {
                 let _ = el.class_list().remove_1("turn-dim");
                 let _ = el.class_list().add_1("turn-match");
             } else {
@@ -434,6 +741,48 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
         }
     }
 
+    if let Ok(chips) = document.query_selector_all("#session-history .history-room-chip") {
+        for idx in 0..chips.length() {
+            let Some(node) = chips.item(idx) else {
+                continue;
+            };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let chip_room = el.get_attribute("data-room").unwrap_or_default();
+            let active = room_key
+                .as_deref()
+                .map(|target| chip_room == target)
+                .unwrap_or(false);
+            if active {
+                let _ = el.class_list().add_1("is-active");
+            } else {
+                let _ = el.class_list().remove_1("is-active");
+            }
+        }
+    }
+
+    if let Ok(groups) = document.query_selector_all("#session-history .history-turn-group") {
+        for idx in 0..groups.length() {
+            let Some(node) = groups.item(idx) else {
+                continue;
+            };
+            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            let group_room = el.get_attribute("data-room").unwrap_or_default();
+            let visible = room_key
+                .as_deref()
+                .map(|target| group_room == target)
+                .unwrap_or(false);
+            if visible {
+                let _ = el.class_list().remove_1("history-room-hidden");
+            } else {
+                let _ = el.class_list().add_1("history-room-hidden");
+            }
+        }
+    }
+
     if let Ok(chips) = document.query_selector_all("#session-history .history-turn-chip") {
         for idx in 0..chips.length() {
             let Some(node) = chips.item(idx) else {
@@ -442,12 +791,17 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
+            let chip_room = el.get_attribute("data-room").unwrap_or_default();
             let chip_turn = el.get_attribute("data-turn").unwrap_or_default();
-            let active = match turn_key.as_deref() {
-                Some(target) => chip_turn == target,
-                None => chip_turn.trim().is_empty(),
-            };
-            if active {
+            let room_ok = room_key
+                .as_deref()
+                .map(|target| chip_room == target)
+                .unwrap_or(false);
+            let turn_ok = turn_key
+                .as_deref()
+                .map(|target| chip_turn == target)
+                .unwrap_or(false);
+            if room_ok && turn_ok {
                 let _ = el.class_list().add_1("is-active");
             } else {
                 let _ = el.class_list().remove_1("is-active");
@@ -455,75 +809,28 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
         }
     }
 
-    if let Ok(chips) = document.query_selector_all("#session-history .history-kind-chip") {
-        for idx in 0..chips.length() {
-            let Some(node) = chips.item(idx) else {
+    if let Ok(panels) = document.query_selector_all("#session-history .history-detail-panel") {
+        for idx in 0..panels.length() {
+            let Some(node) = panels.item(idx) else {
                 continue;
             };
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
-            let chip_kind = el
-                .get_attribute("data-kind")
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase();
-            let active = match kind_key.as_deref() {
-                Some(target) => chip_kind == target,
-                None => chip_kind.is_empty(),
+            let panel_room = el.get_attribute("data-room").unwrap_or_default();
+            let panel_turn = el.get_attribute("data-turn").unwrap_or_default();
+            let room_ok = room_key
+                .as_deref()
+                .map(|target| panel_room == target)
+                .unwrap_or(false);
+            let turn_ok = match turn_key.as_deref() {
+                Some(target) => panel_turn == target,
+                None => panel_turn.trim().is_empty(),
             };
-            if active {
-                let _ = el.class_list().add_1("is-active");
+            if room_ok && turn_ok {
+                let _ = el.class_list().remove_1("history-panel-hidden");
             } else {
-                let _ = el.class_list().remove_1("is-active");
-            }
-        }
-    }
-
-    if let Ok(nodes) = document.query_selector_all("#session-history .history-event") {
-        for idx in 0..nodes.length() {
-            let Some(node) = nodes.item(idx) else {
-                continue;
-            };
-            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
-                continue;
-            };
-            let row_kind = el
-                .get_attribute("data-kind")
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase();
-            let visible = match kind_key.as_deref() {
-                Some(target) => row_kind == target,
-                None => true,
-            };
-            if visible {
-                let _ = el.class_list().remove_1("history-event-hidden");
-            } else {
-                let _ = el.class_list().add_1("history-event-hidden");
-            }
-        }
-    }
-
-    if let Ok(nodes) = document.query_selector_all("#session-history .history-turn") {
-        for idx in 0..nodes.length() {
-            let Some(node) = nodes.item(idx) else {
-                continue;
-            };
-            let Some(el) = node.dyn_ref::<web_sys::Element>() else {
-                continue;
-            };
-            let active = match turn_key.as_deref() {
-                Some(target) => el
-                    .get_attribute("data-turn")
-                    .map(|value| value == target)
-                    .unwrap_or(false),
-                None => false,
-            };
-            if active {
-                let _ = el.class_list().add_1("is-active");
-            } else {
-                let _ = el.class_list().remove_1("is-active");
+                let _ = el.class_list().add_1("history-panel-hidden");
             }
         }
     }
@@ -531,7 +838,7 @@ fn apply_history_focus(document: &web_sys::Document, turn: Option<u32>, kind: Op
 
 #[cfg(target_arch = "wasm32")]
 fn bind_history_focus_controls(document: &web_sys::Document) {
-    if let Ok(chips) = document.query_selector_all("#session-history .history-turn-chip") {
+    if let Ok(chips) = document.query_selector_all("#session-history .history-room-chip") {
         for idx in 0..chips.length() {
             let Some(node) = chips.item(idx) else {
                 continue;
@@ -543,15 +850,21 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
                 continue;
             }
             let _ = el.set_attribute("data-bound", "1");
-            let turn_raw = el.get_attribute("data-turn").unwrap_or_default();
+            let room_raw = el.get_attribute("data-room").unwrap_or_default();
+            let latest_turn_raw = el.get_attribute("data-latest-turn").unwrap_or_default();
             let cb = Closure::wrap(Box::new(move || {
                 let Some(document) = web_sys::window().and_then(|w| w.document()) else {
                     return;
                 };
-                let turn = turn_raw.trim().parse::<u32>().ok();
+                let room = normalize_focus_room(&room_raw);
+                let turn = latest_turn_raw
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|value| *value > 0);
+                write_focus_room(&document, room.as_deref());
                 write_focus_turn(&document, turn);
-                let kind = read_focus_kind(&document);
-                apply_history_focus(&document, turn, kind.as_deref());
+                apply_history_focus(&document, room.as_deref(), turn);
                 sync_focus_state_to_hash(&document);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -561,7 +874,7 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
         }
     }
 
-    if let Ok(chips) = document.query_selector_all("#session-history .history-kind-chip") {
+    if let Ok(chips) = document.query_selector_all("#session-history .history-turn-chip") {
         for idx in 0..chips.length() {
             let Some(node) = chips.item(idx) else {
                 continue;
@@ -573,21 +886,21 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
                 continue;
             }
             let _ = el.set_attribute("data-bound", "1");
-            let kind_raw = el.get_attribute("data-kind").unwrap_or_default();
+            let room_raw = el.get_attribute("data-room").unwrap_or_default();
+            let turn_raw = el.get_attribute("data-turn").unwrap_or_default();
             let cb = Closure::wrap(Box::new(move || {
                 let Some(document) = web_sys::window().and_then(|w| w.document()) else {
                     return;
                 };
-                let kind_trimmed = kind_raw.trim().to_ascii_lowercase();
-                let kind = if kind_trimmed.is_empty() {
-                    None
-                } else {
-                    Some(kind_trimmed.as_str())
-                };
-                write_focus_kind(&document, kind);
-                let turn = read_focus_turn(&document);
-                let focus_kind = read_focus_kind(&document);
-                apply_history_focus(&document, turn, focus_kind.as_deref());
+                let room = normalize_focus_room(&room_raw);
+                let turn = turn_raw
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|value| *value > 0);
+                write_focus_room(&document, room.as_deref());
+                write_focus_turn(&document, turn);
+                apply_history_focus(&document, room.as_deref(), turn);
                 sync_focus_state_to_hash(&document);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -629,7 +942,7 @@ fn bump_dedup_history(document: &web_sys::Document, sample: &str) {
     let _ = dashboard.set_attribute("data-dedup-samples-history", &lines.join("\n"));
 }
 
-/// Render a compact per-turn timeline from TRPG stream events.
+/// Render a per-room, per-turn timeline from TRPG stream events.
 #[allow(unused_variables, unused_mut)]
 pub fn update_session_history_dom(
     room_state: Res<RoomState>,
@@ -659,14 +972,17 @@ pub fn update_session_history_dom(
         };
 
         let mut changed = false;
-        if cache.last_room_id != room_state.id {
-            cache.last_room_id = room_state.id.clone();
-            cache.turns.clear();
-            write_focus_turn(&document, None);
-            write_focus_kind(&document, None);
-            apply_history_focus(&document, None, None);
-            sync_focus_state_to_hash(&document);
-            changed = true;
+        let room_id = normalize_room_id(&room_state.id);
+        let mut room_status = {
+            let from_progress = normalize_room_status(&progress.room_status);
+            if from_progress == "unknown" {
+                normalize_room_status(&room_state.status)
+            } else {
+                from_progress
+            }
+        };
+        if room_status == "unknown" {
+            room_status = "active".to_string();
         }
 
         let mut current_turn = if progress.turn > 0 {
@@ -680,6 +996,14 @@ pub fn update_session_history_dom(
             room_state.phase.as_str().to_string()
         };
 
+        let (room_idx, room_changed) =
+            ensure_room_entry(&mut cache.rooms, &room_id, &room_status, current_turn);
+        changed = changed || room_changed;
+        if let Some(room) = cache.rooms.get_mut(room_idx) {
+            let (_, turn_changed) = ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
+            changed = changed || turn_changed;
+        }
+
         for TurnAdvanced(event) in turn_events.read() {
             if event.turn > 0 {
                 current_turn = event.turn;
@@ -687,8 +1011,10 @@ pub fn update_session_history_dom(
             if !event.phase.is_empty() {
                 current_phase = event.phase.clone();
             }
-            let appended = append_event(
-                &mut cache.turns,
+            let (appended, updated) = append_event(
+                &mut cache.rooms,
+                &room_id,
+                &room_status,
                 current_turn,
                 &current_phase,
                 "turn",
@@ -707,15 +1033,30 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!("t{} | turn | {}", current_turn, current_phase),
+                    &format!("{} | t{} | turn | {}", room_id, current_turn, current_phase),
                 );
             }
-            changed = true;
+            changed = changed || updated;
         }
 
         for NarrativeReceived(event) in narratives.read() {
-            let appended = append_event(
-                &mut cache.turns,
+            let turn = if event.turn > 0 {
+                event.turn
+            } else {
+                current_turn
+            };
+            let phase = if !event.phase.trim().is_empty() {
+                event.phase.clone()
+            } else {
+                current_phase.clone()
+            };
+            current_turn = turn.max(1);
+            current_phase = phase.clone();
+
+            let (appended, updated) = append_event(
+                &mut cache.rooms,
+                &room_id,
+                &room_status,
                 current_turn,
                 &current_phase,
                 "narrative",
@@ -726,10 +1067,10 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!("t{} | narrative | {}", current_turn, event.text.trim()),
+                    &format!("{} | t{} | narrative | {}", room_id, current_turn, event.text.trim()),
                 );
             }
-            changed = true;
+            changed = changed || updated;
         }
 
         for DiceRolled(payload) in dice_events.read() {
@@ -738,11 +1079,12 @@ pub fn update_session_history_dom(
             } else {
                 current_turn
             };
-            if turn > 0 {
-                current_turn = turn;
-            }
-            let appended = append_event(
-                &mut cache.turns,
+            current_turn = turn.max(1);
+
+            let (appended, updated) = append_event(
+                &mut cache.rooms,
+                &room_id,
+                &room_status,
                 current_turn,
                 &current_phase,
                 "dice",
@@ -762,12 +1104,12 @@ pub fn update_session_history_dom(
                 bump_dedup_history(
                     &document,
                     &format!(
-                        "t{} | dice | {}:{}",
-                        current_turn, payload.character, payload.action
+                        "{} | t{} | dice | {}:{}",
+                        room_id, current_turn, payload.character, payload.action
                     ),
                 );
             }
-            changed = true;
+            changed = changed || updated;
         }
 
         for TurnProgressUpdated(event) in progress_events.read() {
@@ -777,9 +1119,16 @@ pub fn update_session_history_dom(
             if !event.phase.is_empty() {
                 current_phase = event.phase.clone();
             }
+            let event_status = normalize_room_status(&event.room_status);
+            if event_status != "unknown" && event_status != room_status {
+                room_status = event_status;
+            }
+
             let (kind, actor, summary) = label_progress_event(event);
-            let appended = append_event(
-                &mut cache.turns,
+            let (appended, updated) = append_event(
+                &mut cache.rooms,
+                &room_id,
+                &room_status,
                 current_turn,
                 &current_phase,
                 kind,
@@ -794,24 +1143,40 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!("t{} | progress | {}", current_turn, event.event_type),
+                    &format!("{} | t{} | progress | {}", room_id, current_turn, event.event_type),
                 );
             }
-            changed = true;
+            changed = changed || updated;
+        }
+
+        let (room_idx, room_changed) =
+            ensure_room_entry(&mut cache.rooms, &room_id, &room_status, current_turn);
+        changed = changed || room_changed;
+        if let Some(room) = cache.rooms.get_mut(room_idx) {
+            let (_, turn_changed) = ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
+            changed = changed || turn_changed;
         }
 
         if !changed {
             return;
         }
 
-        history.set_inner_html(&render_session_history_html(&cache.turns));
+        history.set_inner_html(&render_session_history_html(&cache.rooms));
         bind_history_focus_controls(&document);
-        let (hash_turn, hash_kind) = read_focus_from_hash();
-        let turn = read_focus_turn(&document).or(hash_turn);
-        let kind = read_focus_kind(&document).or(hash_kind);
-        write_focus_turn(&document, turn);
-        write_focus_kind(&document, kind.as_deref());
-        apply_history_focus(&document, turn, kind.as_deref());
+
+        let (hash_room, hash_turn) = read_focus_from_hash();
+        let preferred_room = read_focus_room(&document)
+            .or(hash_room)
+            .or_else(|| Some(room_id.clone()));
+        let preferred_turn = read_focus_turn(&document)
+            .or(hash_turn)
+            .or(Some(current_turn.max(1)));
+        let focus_room = resolve_focus_room(&cache.rooms, preferred_room.as_deref());
+        let focus_turn = resolve_focus_turn(&cache.rooms, focus_room.as_deref(), preferred_turn);
+
+        write_focus_room(&document, focus_room.as_deref());
+        write_focus_turn(&document, focus_turn);
+        apply_history_focus(&document, focus_room.as_deref(), focus_turn);
         sync_focus_state_to_hash(&document);
     }
 }

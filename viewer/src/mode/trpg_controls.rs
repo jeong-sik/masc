@@ -192,6 +192,120 @@ fn summarize_names(names: &[String], max_preview: usize) -> String {
     format!("{} 외 {}명", preview, names.len() - max_preview)
 }
 
+fn wizard_state_badge(label: &str, state: &str) -> String {
+    let class = match state {
+        "ok" => "is-ok",
+        "warn" => "is-warn",
+        "error" => "is-error",
+        _ => "is-pending",
+    };
+    format!(
+        "<span class=\"new-game-badge {class}\">{label}</span>",
+        class = class,
+        label = html_escape(label)
+    )
+}
+
+fn render_new_game_assignment_preview(
+    doc: &web_sys::Document,
+    preflight_state: &str,
+    dm_keeper: &str,
+    players: &[String],
+    has_conflict: bool,
+    ready: bool,
+) {
+    let Some(el) = doc.get_element_by_id("new-game-assignment") else {
+        return;
+    };
+
+    let world_preset = doc
+        .get_element_by_id("new-game-world-select")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let dm_preset = doc
+        .get_element_by_id("new-game-dm-preset-select")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    let preflight_badge = match preflight_state {
+        "ok" => wizard_state_badge("사전 점검 통과", "ok"),
+        "fail" => wizard_state_badge("사전 점검 실패", "error"),
+        _ => wizard_state_badge("사전 점검 대기", "warn"),
+    };
+    let ready_badge = if ready {
+        wizard_state_badge("세션 시작 가능", "ok")
+    } else {
+        wizard_state_badge("세션 시작 준비 중", "warn")
+    };
+
+    let dm_line = if dm_keeper.trim().is_empty() {
+        "<li><strong>DM:</strong> (미선택)</li>".to_string()
+    } else {
+        format!("<li><strong>DM:</strong> {}</li>", html_escape(dm_keeper))
+    };
+
+    let player_lines = if players.is_empty() {
+        "<li>플레이어 keeper가 아직 선택되지 않았습니다.</li>".to_string()
+    } else {
+        players
+            .iter()
+            .enumerate()
+            .map(|(idx, keeper)| {
+                if has_conflict && keeper == dm_keeper {
+                    format!(
+                        "<li>P{:02}: {} <span class=\"assign-conflict\">(DM 중복)</span></li>",
+                        idx + 1,
+                        html_escape(keeper)
+                    )
+                } else {
+                    format!("<li>P{:02}: {}</li>", idx + 1, html_escape(keeper))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    };
+
+    let html = format!(
+        concat!(
+            "<div class=\"new-game-assignment-preview\">",
+            "<div class=\"new-game-assignment-badges\">{preflight_badge}{ready_badge}</div>",
+            "<div class=\"new-game-assignment-meta\">",
+            "<span>world: <code>{world}</code></span>",
+            "<span>dm preset: <code>{dm_preset}</code></span>",
+            "</div>",
+            "<ul class=\"new-game-assignment-list\">",
+            "{dm_line}",
+            "{player_lines}",
+            "</ul>",
+            "<div class=\"new-game-assignment-note\">",
+            "참고: 세션 시작 후 actor_id ↔ keeper 매핑이 확정됩니다.",
+            "</div>",
+            "</div>"
+        ),
+        preflight_badge = preflight_badge,
+        ready_badge = ready_badge,
+        world = html_escape(if world_preset.is_empty() {
+            "(none)"
+        } else {
+            &world_preset
+        }),
+        dm_preset = html_escape(if dm_preset.is_empty() {
+            "(none)"
+        } else {
+            &dm_preset
+        }),
+        dm_line = dm_line,
+        player_lines = player_lines,
+    );
+    el.set_inner_html(&html);
+}
+
 fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     let preflight_state = new_game_preflight_state(doc);
     let dm_keeper = selected_dm_keeper(doc);
@@ -333,6 +447,15 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         } else {
             "ok"
         },
+    );
+
+    render_new_game_assignment_preview(
+        doc,
+        &preflight_state,
+        &dm_keeper,
+        &players,
+        has_conflict,
+        ready && !busy,
     );
 }
 
@@ -1252,6 +1375,8 @@ async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, Str
 }
 
 async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> {
+    set_new_game_status(doc, "세션 준비 1/6: 입력값/keeper 선택을 검증 중...");
+
     let room_input = doc
         .get_element_by_id("new-game-room-id")
         .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
@@ -1423,6 +1548,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         ));
     }
 
+    set_new_game_status(doc, "세션 준비 2/6: 플레이어 풀 생성 중...");
     let party_size = players.len() as i64;
     let pool_size = std::cmp::max(8_i64, party_size);
     let session_id = format!("viewer-{}-{}", room_id, js_sys::Date::now() as i64);
@@ -1483,6 +1609,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         return Err("선택 가능한 actor_id를 찾지 못했습니다.".to_string());
     }
 
+    set_new_game_status(doc, "세션 준비 3/6: 파티 구성/액터 선택 중...");
     let party_result = mcp_tool_call(
         "trpg.party.select",
         json!({
@@ -1502,6 +1629,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         return Err("party.select 결과가 비어 있습니다.".to_string());
     }
 
+    set_new_game_status(doc, "세션 준비 4/6: 세션 시작 이벤트 기록 중...");
     let _start_result = mcp_tool_call(
         "trpg.session.start",
         json!({
@@ -1530,6 +1658,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     let assignments = assign_keepers_to_actor_ids(&actor_ids, &dm_keeper, &players)?;
     let player_map: std::collections::HashMap<String, String> = assignments.into_iter().collect();
 
+    set_new_game_status(doc, "세션 준비 5/6: actor ↔ keeper 점유 동기화 중...");
     for (actor_id, keeper_name) in &player_map {
         mcp_tool_call(
             "trpg.actor.claim",
@@ -1553,6 +1682,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         ))
     };
 
+    set_new_game_status(doc, "세션 준비 6/6: DM/플레이어 keeper 부팅 중...");
     let mut dm_keeper_up_args = json!({
         "name": dm_keeper,
         "goal": format!("TRPG room {}의 세계관 주민 DM keeper로 장면을 진행하세요.", room_id),
@@ -1630,12 +1760,21 @@ fn set_new_game_assignment(
         return;
     };
 
-    let mut html = String::from("<strong>배정 확인</strong><ul>");
-    html.push_str(&format!("<li>DM: {}</li>", html_escape(dm_keeper)));
+    let mut html = String::from(
+        "<div class=\"new-game-assignment-preview\"><div class=\"new-game-assignment-badges\">",
+    );
+    html.push_str(&wizard_state_badge("세션 시작 완료", "ok"));
+    html.push_str(&wizard_state_badge("할당 확정", "ok"));
+    html.push_str("</div>");
     html.push_str(&format!(
-        "<li>Preset: world={} / dm={}</li>",
+        "<div class=\"new-game-assignment-meta\"><span>world: <code>{}</code></span><span>dm preset: <code>{}</code></span></div>",
         html_escape(world_preset_id),
-        html_escape(dm_preset_id)
+        html_escape(dm_preset_id),
+    ));
+    html.push_str("<ul class=\"new-game-assignment-list\">");
+    html.push_str(&format!(
+        "<li><strong>DM:</strong> {}</li>",
+        html_escape(dm_keeper)
     ));
     for actor_id in actor_ids {
         let keeper = player_map
@@ -1648,7 +1787,7 @@ fn set_new_game_assignment(
             html_escape(keeper)
         ));
     }
-    html.push_str("</ul>");
+    html.push_str("</ul><div class=\"new-game-assignment-note\">라운드 실행 버튼으로 TURN 루프를 시작하세요.</div></div>");
     el.set_inner_html(&html);
 }
 

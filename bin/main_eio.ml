@@ -3523,6 +3523,12 @@ let asset_content_type name =
     "text/html; charset=utf-8"
   else if Filename.check_suffix name ".svg" then
     "image/svg+xml"
+  else if Filename.check_suffix name ".png" then
+    "image/png"
+  else if Filename.check_suffix name ".jpg" || Filename.check_suffix name ".jpeg" then
+    "image/jpeg"
+  else if Filename.check_suffix name ".webp" then
+    "image/webp"
   else if Filename.check_suffix name ".json" then
     "application/json"
   else if Filename.check_suffix name ".woff2" then

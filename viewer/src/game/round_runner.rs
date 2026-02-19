@@ -367,17 +367,9 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
     let lang = read_dom_input("round-run-lang").unwrap_or_else(|| "ko".to_string());
 
     // 2) Player keeper mapping from hidden round plan (`actor=keeper,actor=keeper,...`).
-    let mut player_pairs = read_dom_value("round-run-players")
+    let player_pairs = read_dom_value("round-run-players")
         .map(|raw| parse_player_keeper_pairs(&raw))
         .unwrap_or_default();
-    if player_pairs.is_empty() {
-        if let (Some(actor_id), Some(keeper_name)) = (
-            read_dom_input("claimed-actor-id"),
-            read_dom_input("claimed-keeper"),
-        ) {
-            player_pairs.push((actor_id, keeper_name));
-        }
-    }
     if player_pairs.is_empty() {
         return Err("player keeper 매핑이 비어 있습니다.".to_string());
     }

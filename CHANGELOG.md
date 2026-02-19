@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.70.0] - 2026-02-19
+
+### Added
+- **Preact + HTM SPA Dashboard** — Replace OCaml string-literal HTML with a client-side Preact + HTM single-page app (#278)
+- **Local Viewer E2E Checklist Runner** — Harness tool for running viewer end-to-end validation locally (#271)
+- **Ops HUD** — Viewer quick-start round diagnostics and operational heads-up display (#264)
+- **Entropy-based Preset Selection** — TRPG preset picker uses entropy scoring; viewer focus hash sync (#259)
+- **Goal Phase 1 Tools** — Goal dispatch runtime and phase-1 goal MCP tools (#261)
+- **New-Game Preflight Diagnostics Panel** — Viewer panel showing precondition checks before game start (#256)
+- **TRPG Round Controls and New-Game Bootstrap** — Stabilized round control flow and initial game setup (#249)
+- **TRPG Phase Tracking and Staleness Detection** — `dnd5e-lite` phase state machine with stale-turn detection (#251)
+- **Mitosis P2-4 odoc Documentation** — API documentation for mitosis modules (#246)
+
+### Changed
+- **web_dashboard.ml decomposed into 4 modules** — Extracted dashboard logic into separate compilation units (#275)
+- **Viewer God Module decomposed** — `mode.rs` split into 4 files; quality audit applied (#266)
+- **Makefile CI worktree support** — `make ci` now works from git worktrees (#276)
+- **Viewer Korean user-facing labels** — Developer jargon replaced with Korean UI strings (#247)
+- **TRPG round-run stabilization** — Keeper gating, claim enforcement, reply sanitation (#245)
+- **Room lifecycle and timeout observability** — Timeout handling for viewer and TRPG rooms (#244)
+
+### Fixed
+- Harness smoke runs isolated with auto-generated room IDs (#280)
+- Viewer manual and auto round execution serialized to prevent race conditions (#279)
+- Viewer round gate and keeper selection UX (#277)
+- MCP RPC response parsing hardened against malformed envelopes (#274)
+- Council decision SSE events emitted from game-view decisions (#272)
+- SSE storm E2E test skipped when bind is not permitted (#270)
+- MCP message envelopes unwrapped for MASC viewer panels (#269)
+- Emoji replaced with ASCII in Bevy UI text rendering (#268)
+- Non-TRPG SSE modes routed to `/sse` endpoint (#267)
+- Viewer bootstraps new-game data for inactive rooms (#263)
+- Auto-round gating and keeper bootstrap enforced in viewer (#262)
+- Game-view precondition session ID isolated in harness (#258)
+- All 25 clippy warnings resolved in viewer (#260)
+- Coverage push for `json_util`, `safe_ops`, `resilience`; `is_benign_error` bug fixed (#257)
+- 52 semantic merge conflicts in viewer resolved (#255)
+- Viewer build errors: mod reconnect, overlay mut, missing func (#255 follow-up)
+- 53 wasm32 compilation errors resolved (#254)
+- Broken symbols restored after viewer cleanup refactor (#252)
+- Board search scans all posts instead of limited subset (#253)
+- Production cleanup: dedup `html_escape`/`sanitize_text`, zero warnings, XSS audit (#250)
+- 19 dead code warnings removed from viewer (#248)
+- Viewer compilation errors in `action_panel` and `http` modules (#244 follow-up)
+- Viewer `cfg` gates added to wasm32-only functions (#273)
+
 ## [2.68.0] - 2026-02-16
 
 ### Added

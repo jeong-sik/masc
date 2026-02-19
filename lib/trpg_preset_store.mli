@@ -7,12 +7,22 @@ type dm_preset = {
   tags : string list;
 }
 
+type end_rules = {
+  max_turn : int;
+  defeat_if_all_players_dead : bool;
+  victory_flags : string list;
+  defeat_flags : string list;
+  draw_flags : string list;
+  allow_dm_end_signal : bool;
+}
+
 type world_preset = {
   id : string;
   title : string;
   description : string;
   intro : string;
   initial_flags : string list;
+  end_rules : end_rules;
 }
 
 type character_preset = {
@@ -49,6 +59,7 @@ val find_world_preset : catalog -> id:string -> world_preset option
 val find_skill : catalog -> id:string -> skill option
 
 val dm_preset_to_yojson : dm_preset -> Yojson.Safe.t
+val end_rules_to_yojson : end_rules -> Yojson.Safe.t
 val world_preset_to_yojson : world_preset -> Yojson.Safe.t
 val character_preset_to_yojson : character_preset -> Yojson.Safe.t
 val skill_to_yojson : skill -> Yojson.Safe.t

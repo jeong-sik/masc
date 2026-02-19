@@ -25,6 +25,7 @@ use wasm_bindgen::JsCast;
 use crate::dom::escape::html_escape;
 #[cfg(target_arch = "wasm32")]
 use crate::game::lifecycle::TrpgLifecycleState;
+use crate::game::state::ConnectionStatus;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::JsFuture;
 
@@ -82,6 +83,17 @@ impl ViewerMode {
             Self::Council => Some("council-panel"),
             Self::Social => Some("social-panel"),
             Self::Experiment => Some("experiment-panel"),
+            _ => None,
+        }
+    }
+
+    /// DOM status badge element ID for MASC mode panels.
+    pub fn status_badge_id(&self) -> Option<&'static str> {
+        match self {
+            Self::Monitor => Some("monitor-status"),
+            Self::Council => Some("council-status"),
+            Self::Social => Some("social-status"),
+            Self::Experiment => Some("experiment-status"),
             _ => None,
         }
     }
@@ -161,7 +173,8 @@ impl Plugin for ModePlugin {
                 Update,
                 refresh_trpg_widget_status.run_if(in_state(ViewerMode::Trpg)),
             )
-            .add_systems(Update, poll_mode_transition);
+            .add_systems(Update, poll_mode_transition)
+            .add_systems(Update, sync_masc_panel_connection_status);
     }
 }
 
@@ -1561,6 +1574,84 @@ use trpg_controls::{
 fn refresh_trpg_widget_status() {
     #[cfg(target_arch = "wasm32")]
     trpg_controls::refresh_trpg_widget_status();
+}
+
+fn count_mode_events(mode: ViewerMode, event_log: &crate::sse::masc_bridge::MascEventLog) -> usize {
+    match mode {
+        ViewerMode::Monitor => event_log.entries.len(),
+        ViewerMode::Council => event_log
+            .entries
+            .iter()
+            .filter(|entry| entry.event_type.starts_with("decision_"))
+            .count(),
+        ViewerMode::Experiment => event_log
+            .entries
+            .iter()
+            .filter(|entry| entry.event_type.starts_with("experiment_"))
+            .count(),
+        ViewerMode::Social => event_log
+            .entries
+            .iter()
+            .filter(|entry| entry.event_type == "broadcast")
+            .count(),
+        _ => 0,
+    }
+}
+
+fn sync_masc_panel_connection_status(
+    mode: Res<State<ViewerMode>>,
+    connection: Res<ConnectionStatus>,
+    event_log: Option<Res<crate::sse::masc_bridge::MascEventLog>>,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let current_mode = *mode.get();
+        let Some(status_badge_id) = current_mode.status_badge_id() else {
+            return;
+        };
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let Some(el) = doc.get_element_by_id(status_badge_id) else {
+            return;
+        };
+
+        let mode_event_count = event_log
+            .as_ref()
+            .map(|log| count_mode_events(current_mode, log))
+            .unwrap_or(0);
+
+        let (status_class, text) = match &*connection {
+            ConnectionStatus::Connected => match current_mode {
+                ViewerMode::Social if mode_event_count == 0 => {
+                    ("status-connected", "연결됨 · 게시글 폴링 중".to_string())
+                }
+                ViewerMode::Social => (
+                    "status-connected",
+                    format!("연결됨 · 게시글 폴링 + 알림 {}건", mode_event_count),
+                ),
+                _ if mode_event_count == 0 => {
+                    ("status-connected", "연결됨 · 이벤트 대기 중".to_string())
+                }
+                _ => (
+                    "status-connected",
+                    format!("연결됨 · 이벤트 {}건 수신", mode_event_count),
+                ),
+            },
+            ConnectionStatus::Connecting => ("status-connecting", "연결 중...".to_string()),
+            ConnectionStatus::Reconnecting(attempt, max) => (
+                "status-connecting",
+                format!("재연결 중 ({}/{})", attempt, max),
+            ),
+            ConnectionStatus::Disconnected => ("status-disconnected", "연결 대기 중".to_string()),
+            ConnectionStatus::Failed => ("status-disconnected", "연결 실패".to_string()),
+        };
+
+        el.set_class_name(&format!("mode-status {}", status_class));
+        el.set_text_content(Some(&text));
+    }
+
+    let _ = (&mode, &connection, &event_log);
 }
 
 // ─── Generic MASC Panel Enter/Exit ───────────

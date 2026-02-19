@@ -3048,6 +3048,7 @@ body:not(.mode-trpg) #ops-hud {
 
 /* ─── Status Badges ──────────────────────── */
 
+.mode-status,
 .council-status,
 .experiment-status {
     font-family: var(--font-ui);
@@ -3058,6 +3059,21 @@ body:not(.mode-trpg) #ops-hud {
     border-radius: var(--panel-radius);
     padding: 4px 10px;
     letter-spacing: 1px;
+}
+
+.mode-status.status-connected {
+    color: var(--status-connected);
+    border-color: var(--status-connected);
+}
+
+.mode-status.status-connecting {
+    color: var(--status-connecting);
+    border-color: var(--status-connecting);
+}
+
+.mode-status.status-disconnected {
+    color: var(--status-disconnected);
+    border-color: var(--status-disconnected);
 }
 
 /* ─── Feed Containers (scrollable) ───────── */

@@ -217,8 +217,16 @@ let test_round_run_timeout_policy () =
   let summary = Yojson.Safe.Util.member "summary" json in
   Alcotest.(check int) "timeouts" 1 (Yojson.Safe.Util.member "timeouts" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "unavailable" 1 (Yojson.Safe.Util.member "unavailable" summary |> Yojson.Safe.Util.to_int);
-  (* DM is gated on player success; with 0 player successes, DM is skipped *)
-  Alcotest.(check int) "successes" 0 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
+  (* Player timeout does not block DM execution; DM response can still advance. *)
+  Alcotest.(check int) "successes" 1 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool)
+    "dm success"
+    true
+    (Yojson.Safe.Util.member "dm_success" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check bool)
+    "round advanced"
+    true
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
   let events = json |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list in
   let timeout_event =
     List.find_opt
@@ -288,7 +296,7 @@ let test_round_run_timeout_policy () =
     (count_from_json (parse_json_exn unavailable_stream));
   cleanup_dir base_dir
 
-let test_round_run_requires_full_player_quorum () =
+let test_round_run_allows_dm_without_full_player_quorum () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -301,7 +309,7 @@ let test_round_run_requires_full_player_quorum () =
     match name with
     | "dm-keeper" ->
         dm_called := true;
-        `Ok (`Assoc [ ("reply", `String "DM should be gated when quorum fails.") ])
+        `Ok (`Assoc [ ("reply", `String "DM still responds with partial quorum.") ])
     | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I move to flank.") ])
     | "pk-timeout" -> `Timeout
     | _ -> `Error "unknown keeper"
@@ -320,7 +328,7 @@ let test_round_run_requires_full_player_quorum () =
   in
   let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
   Alcotest.(check bool) "round_run returns payload" true ok;
-  Alcotest.(check bool) "dm call is skipped when quorum fails" false !dm_called;
+  Alcotest.(check bool) "dm call executes with partial quorum" true !dm_called;
 
   let json = parse_json_exn body in
   let summary = Yojson.Safe.Util.member "summary" json in
@@ -338,15 +346,15 @@ let test_round_run_requires_full_player_quorum () =
     (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check bool)
     "dm success"
-    false
+    true
     (Yojson.Safe.Util.member "dm_success" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check bool)
     "round advanced"
-    false
+    true
     (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check int)
-    "turn_after unchanged"
-    1
+    "turn_after advanced"
+    2
     (Yojson.Safe.Util.member "turn_after" json |> Yojson.Safe.Util.to_int);
 
   let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
@@ -359,15 +367,9 @@ let test_round_run_requires_full_player_quorum () =
   (match dm_status with
   | Some status_json ->
       Alcotest.(check string)
-        "dm status is skipped"
-        "skipped"
-        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
-      Alcotest.(check bool)
-        "dm skip reason mentions quorum"
-        true
-        (contains_substring
-           (status_json |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string)
-           "player quorum not met")
+        "dm status is ok"
+        "ok"
+        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string)
   | None -> Alcotest.fail "dm status is missing");
   cleanup_dir base_dir
 
@@ -394,7 +396,7 @@ let test_round_run_requires_keeper_runtime () =
     (contains_substring msg "keeper_call is not available");
   cleanup_dir base_dir
 
-let test_round_run_preflight_blocks_unready_keeper () =
+let test_round_run_preflight_warning_is_non_blocking () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -405,7 +407,7 @@ let test_round_run_preflight_blocks_unready_keeper () =
   let keeper_called = ref false in
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     keeper_called := true;
-    `Ok (`Assoc [ ("reply", `String "should not execute") ])
+    `Ok (`Assoc [ ("reply", `String "execution proceeds with warning") ])
   in
   let keeper_probe ~name : Tool_trpg.keeper_probe_result =
     match name with
@@ -429,17 +431,30 @@ let test_round_run_preflight_blocks_unready_keeper () =
         ("player_keepers", `Assoc [ ("p1", `String "pk-down") ]);
       ]
   in
-  let ok, msg = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
-  Alcotest.(check bool) "round_run should fail on preflight" false ok;
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run continues despite preflight warning" true ok;
+  Alcotest.(check bool) "keeper_call executes even with preflight warning" true !keeper_called;
+  let json = parse_json_exn body in
+  let preflight_warning =
+    json |> Yojson.Safe.Util.member "preflight_warning" |> Yojson.Safe.Util.to_string
+  in
   Alcotest.(check bool)
-    "error includes preflight marker"
+    "warning includes preflight marker"
     true
-    (contains_substring msg "keeper preflight failed");
+    (contains_substring preflight_warning "keeper preflight failed");
   Alcotest.(check bool)
-    "error includes failing keeper"
+    "warning includes failing keeper"
     true
-    (contains_substring msg "pk-down=");
-  Alcotest.(check bool) "keeper_call not executed when preflight fails" false !keeper_called;
+    (contains_substring preflight_warning "pk-down=");
+  let summary = Yojson.Safe.Util.member "summary" json in
+  Alcotest.(check int)
+    "successes"
+    2
+    (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool)
+    "round advanced"
+    true
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
   cleanup_dir base_dir
 
 let test_round_run_lang_english_prompt () =
@@ -1124,17 +1139,17 @@ let () =
             `Quick
             test_round_run_timeout_policy;
           Alcotest.test_case
-            "requires full player quorum before dm/advance"
+            "allows dm execution with partial player quorum"
             `Quick
-            test_round_run_requires_full_player_quorum;
+            test_round_run_allows_dm_without_full_player_quorum;
           Alcotest.test_case
             "requires keeper runtime"
             `Quick
             test_round_run_requires_keeper_runtime;
           Alcotest.test_case
-            "preflight blocks unready keeper"
+            "preflight warning is non-blocking"
             `Quick
-            test_round_run_preflight_blocks_unready_keeper;
+            test_round_run_preflight_warning_is_non_blocking;
           Alcotest.test_case
             "supports lang=en prompt"
             `Quick

@@ -754,6 +754,10 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
         summary.set_text_content(Some(""));
         let _ = summary.set_attribute("style", "display:none");
     }
+    if let Some(badges) = doc.get_element_by_id("round-run-badges") {
+        badges.set_text_content(Some(""));
+        let _ = badges.set_attribute("style", "display:none");
+    }
     if let Some(dashboard) = doc.get_element_by_id("dashboard") {
         let _ = dashboard.set_attribute("data-history-focus", "latest");
         let _ = dashboard.set_attribute("data-dedup-stream", "0");

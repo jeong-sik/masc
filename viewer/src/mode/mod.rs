@@ -252,7 +252,7 @@ fn enter_trpg() {
         crate::game::round_runner::set_auto_round_running(auto_round_enabled_from_dom(&doc));
 
         if let Some(pill) = doc.get_element_by_id("room-status") {
-            pill.set_text_content(Some(&format!("현재 방: {} · 목록 불러오는 중...", room)));
+            pill.set_text_content(Some(&format!("현재 게임: {} · 목록 불러오는 중...", room)));
         }
         let doc_for_rooms = doc.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -261,7 +261,7 @@ fn enter_trpg() {
                     let room_now = crate::config::current_room_id();
                     if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
                         pill.set_text_content(Some(&format!(
-                            "현재 방: {} · {}개 방",
+                            "현재 게임: {} · {}개 방",
                             room_now,
                             rooms.len()
                         )));
@@ -271,7 +271,7 @@ fn enter_trpg() {
                     log::warn!("room 목록 로딩 실패: {}", e);
                     let room_now = crate::config::current_room_id();
                     if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
-                        pill.set_text_content(Some(&format!("현재 방: {} · 목록 실패", room_now)));
+                        pill.set_text_content(Some(&format!("현재 게임: {} · 목록 실패", room_now)));
                     }
                 }
             }
@@ -943,6 +943,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         return;
     };
     let running_only = load_room_hub_running_only();
+    let mut current = Vec::new();
     let mut running = Vec::new();
     let mut stopped = Vec::new();
     let mut lobby = Vec::new();
@@ -951,7 +952,8 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
 
     for room in rooms {
         let lane = room_lane_label(&room.status);
-        let current_attr = if room.id == selected_room {
+        let is_current = room.id == selected_room;
+        let current_attr = if is_current {
             " data-current=\"1\""
         } else {
             " data-current=\"0\""
@@ -979,6 +981,10 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
             agents = room.agent_count,
             tasks = room.task_count
         );
+        if is_current {
+            current.push(card);
+            continue;
+        }
         match lane {
             "running" => running.push(card),
             "stopped" => stopped.push(card),
@@ -1002,27 +1008,38 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         )
     };
 
+    let previous_count = running.len() + stopped.len() + lobby.len() + unavailable.len() + ended.len();
     let lanes_html = if running_only {
-        lane_html("진행 중", running, "running")
+        format!(
+            "{}{}",
+            lane_html("현재 게임", current, "current"),
+            lane_html("이전 세션 · 진행 중", running, "running")
+        )
     } else {
         format!(
-            "{}{}{}{}{}",
-            lane_html("진행 중", running, "running"),
-            lane_html("멈춤", stopped, "stopped"),
-            lane_html("로비", lobby, "lobby"),
-            lane_html("오류", unavailable, "unavailable"),
-            lane_html("종료", ended, "ended")
+            "{}{}{}{}{}{}",
+            lane_html("현재 게임", current, "current"),
+            lane_html("이전 세션 · 진행 중", running, "running"),
+            lane_html("이전 세션 · 멈춤", stopped, "stopped"),
+            lane_html("이전 세션 · 로비", lobby, "lobby"),
+            lane_html("이전 세션 · 오류", unavailable, "unavailable"),
+            lane_html("이전 세션 · 종료", ended, "ended")
         )
     };
+    let current_text = crate::config::sanitize_room_id(selected_room)
+        .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
     let html = format!(
         concat!(
             "<div class=\"room-hub-tools\">",
+            "<span class=\"room-hub-summary\">현재 게임: <code>{current}</code> · 이전 세션 {previous_count}개</span>",
             "<button id=\"room-hub-running-toggle\" class=\"room-hub-filter\" type=\"button\" aria-pressed=\"{pressed}\">",
             "진행 중만",
             "</button>",
             "</div>",
             "{lanes}"
         ),
+        current = html_escape(&current_text),
+        previous_count = previous_count,
         pressed = if running_only { "true" } else { "false" },
         lanes = lanes_html
     );
@@ -1316,7 +1333,7 @@ fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     if let Some(pill) = doc.get_element_by_id("room-status") {
         let lifecycle = TrpgLifecycleState::Loading;
         pill.set_text_content(Some(&format!(
-            "현재 방: {} · {}",
+            "현재 게임: {} · {}",
             selected,
             lifecycle.label_ko()
         )));
@@ -1508,7 +1525,7 @@ fn bind_room_controls(doc: &web_sys::Document) {
             };
             if let Some(pill) = doc.get_element_by_id("room-status") {
                 let current = crate::config::current_room_id();
-                pill.set_text_content(Some(&format!("현재 방: {} · 목록 불러오는 중...", current)));
+                pill.set_text_content(Some(&format!("현재 게임: {} · 목록 불러오는 중...", current)));
             }
             let doc_for_fetch = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
@@ -1517,7 +1534,7 @@ fn bind_room_controls(doc: &web_sys::Document) {
                         let current = crate::config::current_room_id();
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
                             pill.set_text_content(Some(&format!(
-                                "현재 방: {} · {}개 방",
+                                "현재 게임: {} · {}개 방",
                                 current,
                                 rooms.len()
                             )));
@@ -1528,7 +1545,7 @@ fn bind_room_controls(doc: &web_sys::Document) {
                         let current = crate::config::current_room_id();
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
                             pill.set_text_content(Some(&format!(
-                                "현재 방: {} · 목록 실패",
+                                "현재 게임: {} · 목록 실패",
                                 current
                             )));
                         }

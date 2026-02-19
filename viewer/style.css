@@ -747,7 +747,7 @@ body:not(.mode-trpg) #ops-hud {
     border-radius: var(--panel-radius);
     background: rgba(10, 14, 28, 0.86);
     display: grid;
-    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 8px;
     max-height: 192px;
     overflow: hidden;
@@ -762,8 +762,26 @@ body:not(.mode-trpg) #ops-hud {
 .room-hub-tools {
     grid-column: 1 / -1;
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 2px;
+    gap: 8px;
+}
+
+.room-hub-summary {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.2px;
+}
+
+.room-hub-summary code {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-primary);
+    border: 1px solid rgba(109, 122, 164, 0.35);
+    border-radius: 6px;
+    padding: 1px 5px;
+    background: rgba(13, 18, 32, 0.78);
 }
 
 .room-hub-filter {
@@ -792,6 +810,11 @@ body:not(.mode-trpg) #ops-hud {
 
 .room-lane[data-lane="running"] {
     border-color: rgba(88, 184, 116, 0.42);
+}
+
+.room-lane[data-lane="current"] {
+    border-color: rgba(196, 162, 101, 0.55);
+    background: rgba(42, 33, 18, 0.28);
 }
 
 .room-lane[data-lane="stopped"] {

@@ -565,7 +565,7 @@ fn on_advance_click() {
                 log::warn!("Advance turn failed: {}", detail);
                 clear_round_recovery();
                 set_round_stall_badges(None);
-                set_turn_status(&format!("Failed: {}", detail), "status-error");
+                set_turn_status(&format!("실패: {}", detail), "status-error");
                 set_turn_gate_reason(
                     &format!("실행 실패: {}", shorten_reason(&detail, 180)),
                     "status-error",
@@ -739,10 +739,10 @@ fn build_stalled_round_guide(
             turn_before, turn_after
         ),
         format!(
-            "요약: success {} / player {} / dm {} / timeout {} / unavailable {}",
+            "요약: 성공 {} / 플레이어 성공 {} / DM {} / timeout {} / unavailable {}",
             successes,
             player_successes,
-            if dm_success { "ok" } else { "fail" },
+            if dm_success { "성공" } else { "실패" },
             timeouts,
             unavailable
         ),
@@ -832,11 +832,11 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
             .and_then(|summary| summary.get("advanced"))
             .and_then(Value::as_bool);
         if round_advanced(turn_before, turn_after, summary_advanced) {
-            let mut status = format!("Round progressed: turn {} → {}", turn_before, turn_after);
+            let mut status = format!("라운드 진행: 턴 {} → {}", turn_before, turn_after);
             let mut warnings = Vec::new();
             if let Some(preflight_warning) = preflight_warning_text(&json) {
                 warnings.push(format!(
-                    "preflight {}",
+                    "사전 점검 {}",
                     shorten_reason(&preflight_warning, 90)
                 ));
             }
@@ -867,7 +867,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
     }
 
     Ok(RoundRunOutcome::Advanced {
-        status: "Turn advanced.".to_string(),
+        status: "라운드가 진행되었습니다.".to_string(),
         has_warning: false,
     })
 }

@@ -227,11 +227,7 @@ fn sync_room_hub_selection(doc: &web_sys::Document, selected_room: &str) {
 }
 
 async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), String> {
-    let url = format!(
-        "{}/api/v1/trpg/state?room_id={}",
-        crate::config::MASC_MCP_URL,
-        room_id
-    );
+    let url = crate::config::build_masc_url(&format!("api/v1/trpg/state?room_id={}", room_id));
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(web_sys::RequestMode::Cors);

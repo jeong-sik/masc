@@ -526,7 +526,7 @@ fn set_session_control_busy(doc: &web_sys::Document, busy: bool) {
 
 #[cfg(target_arch = "wasm32")]
 async fn post_tool_action(tool_name: &str, args: Value) -> Result<String, String> {
-    let url = format!("{}/mcp", crate::config::MASC_MCP_URL);
+    let url = crate::config::build_masc_url("mcp");
     let body = json!({
         "jsonrpc": "2.0",
         "id": (js_sys::Date::now() as i64),
@@ -1740,11 +1740,7 @@ fn sync_room_hub_selection(doc: &web_sys::Document, selected_room: &str) {
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), String> {
-    let url = format!(
-        "{}/api/v1/trpg/state?room_id={}",
-        crate::config::MASC_MCP_URL,
-        room_id
-    );
+    let url = crate::config::build_masc_url(&format!("api/v1/trpg/state?room_id={}", room_id));
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(web_sys::RequestMode::Cors);

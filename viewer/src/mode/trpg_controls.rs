@@ -1725,11 +1725,7 @@ fn actor_admin_input_i64(doc: &web_sys::Document, id: &str) -> Option<i64> {
 }
 
 async fn fetch_room_state_payload(room_id: &str) -> Result<Value, String> {
-    let url = format!(
-        "{}/api/v1/trpg/state?room_id={}",
-        crate::config::MASC_MCP_URL,
-        room_id
-    );
+    let url = crate::config::build_masc_url(&format!("api/v1/trpg/state?room_id={}", room_id));
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(web_sys::RequestMode::Cors);

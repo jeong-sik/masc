@@ -9,7 +9,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
-    let url = format!("{}/mcp", crate::config::MASC_MCP_URL);
+    let url = crate::config::build_masc_url("mcp");
     let body = json!({
         "jsonrpc": "2.0",
         "id": (js_sys::Date::now() as i64),

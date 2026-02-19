@@ -288,6 +288,89 @@ let test_round_run_timeout_policy () =
     (count_from_json (parse_json_exn unavailable_stream));
   cleanup_dir base_dir
 
+let test_round_run_requires_full_player_quorum () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors
+    ~base_dir
+    ~room_id:"room-round-quorum"
+    ~actor_ids:["p1"; "p2"];
+  let dm_called = ref false in
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        dm_called := true;
+        `Ok (`Assoc [ ("reply", `String "DM should be gated when quorum fails.") ])
+    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I move to flank.") ])
+    | "pk-timeout" -> `Timeout
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-quorum");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1"); ("p2", `String "pk-timeout") ]);
+        ("timeout_sec", `Float 0.2);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run returns payload" true ok;
+  Alcotest.(check bool) "dm call is skipped when quorum fails" false !dm_called;
+
+  let json = parse_json_exn body in
+  let summary = Yojson.Safe.Util.member "summary" json in
+  Alcotest.(check int)
+    "player_successes"
+    1
+    (Yojson.Safe.Util.member "player_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int)
+    "player_required_successes"
+    2
+    (Yojson.Safe.Util.member "player_required_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool)
+    "player quorum met"
+    false
+    (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check bool)
+    "dm success"
+    false
+    (Yojson.Safe.Util.member "dm_success" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check bool)
+    "round advanced"
+    false
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check int)
+    "turn_after unchanged"
+    1
+    (Yojson.Safe.Util.member "turn_after" json |> Yojson.Safe.Util.to_int);
+
+  let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
+  let dm_status =
+    List.find_opt
+      (fun s ->
+        s |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string = "dm")
+      statuses
+  in
+  (match dm_status with
+  | Some status_json ->
+      Alcotest.(check string)
+        "dm status is skipped"
+        "skipped"
+        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool)
+        "dm skip reason mentions quorum"
+        true
+        (contains_substring
+           (status_json |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string)
+           "player quorum not met")
+  | None -> Alcotest.fail "dm status is missing");
+  cleanup_dir base_dir
+
 let test_round_run_requires_keeper_runtime () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -1040,6 +1123,10 @@ let () =
             "timeout policy emits events"
             `Quick
             test_round_run_timeout_policy;
+          Alcotest.test_case
+            "requires full player quorum before dm/advance"
+            `Quick
+            test_round_run_requires_full_player_quorum;
           Alcotest.test_case
             "requires keeper runtime"
             `Quick

@@ -2663,8 +2663,10 @@ let handle_round_run ctx args : result =
           (Ok ())
           player_keepers
       in
+      let player_required_successes = List.length player_keepers in
+      let player_quorum_met = !player_success_count = player_required_successes in
       let state_for_dm_prompt =
-        if !player_success_count > 0 then
+        if player_quorum_met then
           match derive_state ~base_dir ~room_id ~rule_module with
           | Ok derived_after_players ->
               inject_interventions_into_state
@@ -2675,7 +2677,7 @@ let handle_round_run ctx args : result =
         else base_state_for_prompt
       in
       let* () =
-        if !player_success_count > 0 then
+        if player_quorum_met then
           process_one
             ~state_json:state_for_dm_prompt
             ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
@@ -2689,12 +2691,15 @@ let handle_round_run ctx args : result =
                 ("status", `String "skipped");
                 ( "reason",
                   `String
-                    "no successful player response; dm execution skipped" );
+                    (Printf.sprintf
+                       "player quorum not met: success=%d required=%d; dm execution skipped"
+                       !player_success_count
+                       player_required_successes) );
               ]
             :: !statuses;
           Ok () )
       in
-      let advanced = !player_success_count > 0 && !dm_success in
+      let advanced = player_quorum_met && !dm_success in
       let turn_after = if advanced then next_turn else turn_before in
       let* () =
         if advanced then
@@ -2730,6 +2735,8 @@ let handle_round_run ctx args : result =
                   ("participants", `Int (1 + List.length player_keepers));
                   ("successes", `Int !success_count);
                   ("player_successes", `Int !player_success_count);
+                  ("player_required_successes", `Int player_required_successes);
+                  ("player_quorum_met", `Bool player_quorum_met);
                   ("dm_success", `Bool !dm_success);
                   ("advanced", `Bool advanced);
                   ("timeouts", `Int !timeout_count);

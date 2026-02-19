@@ -125,14 +125,28 @@ fn reset_trpg_dom_state(
         if let Some(el) = document.get_element_by_id("weather-indicator") {
             el.set_text_content(None);
         }
+        if let Some(el) = document.get_element_by_id("weather-icon") {
+            let _ = el.set_attribute("src", "");
+            let _ = el.set_attribute("alt", "");
+        }
         if let Some(el) = document.get_element_by_id("mood-indicator") {
             el.set_text_content(None);
         }
+        if let Some(el) = document.get_element_by_id("mood-icon") {
+            let _ = el.set_attribute("src", "");
+            let _ = el.set_attribute("alt", "");
+        }
         if let Some(el) = document.get_element_by_id("choice-overlay") {
             el.set_inner_html("");
+            let _ = el.set_attribute("style", "display:none");
         }
         if let Some(el) = document.get_element_by_id("combat-overlay") {
             el.set_inner_html("");
+            let _ = el.set_attribute("style", "display:none");
+        }
+        if let Some(el) = document.get_element_by_id("event-beacon") {
+            el.set_inner_html("");
+            el.set_class_name("event-beacon");
         }
     }
 }

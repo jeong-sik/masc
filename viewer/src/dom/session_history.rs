@@ -55,11 +55,14 @@ fn sanitize_key(raw: &str) -> String {
 }
 
 fn normalize_room_id(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    let normalized = crate::config::sanitize_room_id(raw)
+        .unwrap_or_else(|| raw.trim().to_string())
+        .trim()
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
         "room-unknown".to_string()
     } else {
-        trimmed.to_string()
+        normalized
     }
 }
 
@@ -69,7 +72,8 @@ fn normalize_room_status(raw: &str) -> String {
         "active" | "running" | "started" | "in_progress" | "in-progress" | "playing" | "open" => {
             "active"
         }
-        "paused" | "pause" | "stopped" | "idle" | "on_hold" | "on-hold" => "paused",
+        "paused" | "pause" | "stopped" | "on_hold" | "on-hold" => "paused",
+        "idle" | "lobby" | "created" | "ready" => "unknown",
         "ended" | "finished" | "completed" | "closed" | "done" | "archived" | "terminated" => {
             "ended"
         }
@@ -276,6 +280,9 @@ fn label_progress_event(
         "turn.action.proposed" => "행동 제안",
         "turn.timeout" => "턴 타임아웃",
         "keeper.unavailable" => "Keeper 사용 불가",
+        "combat.attack" => "공격",
+        "combat.defense" => "방어",
+        "session.outcome" => "세션 결과",
         "room.started" => "룸 시작",
         "room.ended" => "룸 종료",
         "world.event" => "월드 이벤트",
@@ -305,6 +312,11 @@ fn label_progress_event(
         || payload.event_type == "turn.started"
     {
         "turn"
+    } else if matches!(
+        payload.event_type.as_str(),
+        "combat.attack" | "combat.defense" | "session.outcome"
+    ) {
+        "system"
     } else if matches!(payload.event_type.as_str(), "room.started" | "room.ended") {
         "system"
     } else {

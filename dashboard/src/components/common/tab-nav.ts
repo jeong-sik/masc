@@ -12,6 +12,7 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: 'overview', label: 'Overview', icon: '\uD83C\uDFE0' },
+  { id: 'council', label: 'Council', icon: '\uD83C\uDFDB\uFE0F' },
   { id: 'board', label: 'Board', icon: '\uD83D\uDCAC' },
   { id: 'activity', label: 'Activity', icon: '\uD83D\uDCCA' },
   { id: 'agents', label: 'Agents', icon: '\uD83E\uDD16' },

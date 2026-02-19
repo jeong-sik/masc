@@ -174,6 +174,23 @@ export interface PerpetualStatus {
   cost_usd?: number
 }
 
+// --- Council ---
+
+export interface CouncilDebate {
+  id: string
+  topic: string
+  status: string
+  argument_count: number
+}
+
+export interface CouncilSession {
+  id: string
+  topic: string
+  initiator: string
+  votes: number
+  quorum: number
+}
+
 // --- Dashboard batch response ---
 
 export interface DashboardData {
@@ -241,6 +258,23 @@ export interface RouteState {
   postId: string | null
 }
 
-export type TabId = 'overview' | 'board' | 'activity' | 'agents' | 'tasks' | 'journal' | 'trpg'
+export type TabId =
+  | 'overview'
+  | 'board'
+  | 'activity'
+  | 'agents'
+  | 'tasks'
+  | 'journal'
+  | 'trpg'
+  | 'council'
 
-export const VALID_TABS: TabId[] = ['overview', 'board', 'activity', 'agents', 'tasks', 'journal', 'trpg']
+export const VALID_TABS: TabId[] = [
+  'overview',
+  'board',
+  'activity',
+  'agents',
+  'tasks',
+  'journal',
+  'trpg',
+  'council',
+]

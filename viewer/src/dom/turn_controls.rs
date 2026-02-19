@@ -97,6 +97,10 @@ pub fn bind_turn_controls(mut commands: Commands) {
 pub fn unbind_turn_controls(mut commands: Commands) {
     #[cfg(target_arch = "wasm32")]
     {
+        release_round_flight("manual");
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            set_round_run_controls_locked(&doc, false);
+        }
         clear_turn_status();
         clear_round_recovery();
         set_turn_gate_reason("", "");
@@ -133,14 +137,30 @@ pub fn sync_turn_controls_visibility(
         let _ = panel.set_attribute("data-lifecycle", lifecycle.css_class());
 
         let plan_error = read_round_run_plan(&doc).err();
-        let (can_run, reason, reason_class) =
+        let (mut can_run, mut reason, mut reason_class) =
             derive_round_control_state(lifecycle, connection_ok, plan_error.as_deref());
+        let lock_owner = current_round_flight_owner(&doc);
+        let runner_active = auto_round_runner_active(&doc);
+        if runner_active {
+            can_run = false;
+            reason = "실행 대기: 자동 라운드 실행 중입니다. 관전 모드에서는 수동 실행이 잠금됩니다."
+                .to_string();
+            reason_class = "status-info";
+        } else if let Some(owner) = lock_owner.as_deref() {
+            if owner != "manual" {
+                can_run = false;
+                reason = format!("실행 대기: {} 라운드 요청 처리 중입니다.", owner);
+                reason_class = "status-info";
+            }
+        }
 
         let busy = doc
             .get_element_by_id("advance-turn-btn")
             .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
             .and_then(|btn| btn.get_attribute("data-busy"))
             .is_some_and(|v| v == "1");
+        let locked = lock_owner.is_some() || runner_active;
+        set_round_run_controls_locked(&doc, locked);
 
         if let Some(btn) = doc
             .get_element_by_id("advance-turn-btn")
@@ -152,11 +172,15 @@ pub fn sync_turn_controls_visibility(
         }
 
         if !busy {
-            set_advance_disabled(!can_run);
+            set_advance_disabled(!can_run || locked);
             set_turn_status(&reason, reason_class);
         }
         let gate_message = if busy {
             "라운드 실행 중입니다. 완료 후 조건을 다시 계산합니다.".to_string()
+        } else if runner_active {
+            "실행 대기: 자동 라운드 실행 중입니다. 수동 실행은 잠겨 있습니다.".to_string()
+        } else if let Some(owner) = lock_owner {
+            format!("실행 대기: {} 라운드 요청 처리 중입니다.", owner)
         } else if can_run {
             "실행 가능: DM/플레이어 keeper 배정이 준비되었습니다.".to_string()
         } else {
@@ -207,6 +231,19 @@ fn on_advance_click() {
         set_turn_gate_reason(&format!("실행 대기: {}", reason), "status-warn");
         return;
     }
+    if auto_round_runner_active(&doc) {
+        set_turn_status("실행 불가: 자동 라운드 실행 중입니다.", "status-warn");
+        set_turn_gate_reason(
+            "실행 대기: 자동 라운드 실행이 끝난 뒤 수동 실행이 가능합니다.",
+            "status-info",
+        );
+        return;
+    }
+    if let Err(reason) = acquire_round_flight(&doc, "manual") {
+        set_turn_status(&format!("실행 대기: {}", reason), "status-info");
+        set_turn_gate_reason(&format!("실행 대기: {}", reason), "status-info");
+        return;
+    }
 
     clear_round_recovery();
     set_turn_status("라운드 실행 중...", "status-info");
@@ -240,6 +277,7 @@ fn on_advance_click() {
             }
         }
         set_advance_busy(false);
+        release_round_flight("manual");
     });
 }
 
@@ -503,6 +541,94 @@ fn clear_turn_status() {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn auto_round_runner_active(doc: &web_sys::Document) -> bool {
+    doc.get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-round-runner-active"))
+        .is_some_and(|value| value == "1")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_round_flight_owner(doc: &web_sys::Document) -> Option<String> {
+    doc.get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-round-flight-owner"))
+        .map(|owner| owner.trim().to_string())
+        .filter(|owner| !owner.is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn acquire_round_flight(doc: &web_sys::Document, owner: &str) -> Result<(), String> {
+    let Some(dashboard) = doc.get_element_by_id("dashboard") else {
+        return Ok(());
+    };
+    let existing = dashboard
+        .get_attribute("data-round-flight-owner")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if existing.is_empty() {
+        let _ = dashboard.set_attribute("data-round-flight-owner", owner);
+        return Ok(());
+    }
+    if existing == owner {
+        return Err("이미 수동 라운드 실행 중입니다.".to_string());
+    }
+    Err(format!("{} 라운드 실행이 진행 중입니다.", existing))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn release_round_flight(owner: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(dashboard) = doc.get_element_by_id("dashboard") else {
+        return;
+    };
+    let existing = dashboard
+        .get_attribute("data-round-flight-owner")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if existing == owner {
+        let _ = dashboard.remove_attribute("data-round-flight-owner");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_round_run_controls_locked(doc: &web_sys::Document, locked: bool) {
+    if let Some(panel) = doc.get_element_by_id("turn-controls") {
+        let _ = panel.set_attribute("data-round-controls-locked", if locked { "1" } else { "0" });
+    }
+    for id in [
+        "round-recovery-refresh",
+        "round-recovery-timeout",
+        "round-recovery-retry",
+    ] {
+        if let Some(btn) = doc
+            .get_element_by_id(id)
+            .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
+        {
+            btn.set_disabled(locked);
+        }
+    }
+    for id in ["round-run-dm", "round-run-players", "round-run-timeout"] {
+        if let Some(input) = doc
+            .get_element_by_id(id)
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+        {
+            input.set_disabled(locked);
+        }
+    }
+    for id in ["round-run-phase", "round-run-lang"] {
+        if let Some(select) = doc
+            .get_element_by_id(id)
+            .and_then(|el| el.dyn_into::<HtmlSelectElement>().ok())
+        {
+            select.set_disabled(locked);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn bind_recovery_button() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
@@ -717,6 +843,8 @@ fn set_advance_busy(busy: bool) {
             }
         }
     }
+    let lock_active = current_round_flight_owner(&doc).is_some();
+    set_round_run_controls_locked(&doc, busy || lock_active);
 }
 
 #[cfg(target_arch = "wasm32")]

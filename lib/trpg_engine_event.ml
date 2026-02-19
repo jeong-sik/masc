@@ -5,10 +5,13 @@ type event_type =
   | Turn_started
   | Turn_action_proposed
   | Turn_action_resolved
+  | Combat_attack
+  | Combat_defense
   | Turn_timeout
   | Keeper_unavailable
   | Metric_updated
   | Room_ended
+  | Session_outcome
   | Dice_rolled
   | Hp_changed
   | Inventory_changed
@@ -44,10 +47,13 @@ let string_of_event_type = function
   | Turn_started -> "turn.started"
   | Turn_action_proposed -> "turn.action.proposed"
   | Turn_action_resolved -> "turn.action.resolved"
+  | Combat_attack -> "combat.attack"
+  | Combat_defense -> "combat.defense"
   | Turn_timeout -> "turn.timeout"
   | Keeper_unavailable -> "keeper.unavailable"
   | Metric_updated -> "metric.updated"
   | Room_ended -> "room.ended"
+  | Session_outcome -> "session.outcome"
   | Dice_rolled -> "dice.rolled"
   | Hp_changed -> "hp.changed"
   | Inventory_changed -> "inventory.changed"
@@ -74,10 +80,13 @@ let event_type_of_string = function
   | "turn.started" -> Ok Turn_started
   | "turn.action.proposed" -> Ok Turn_action_proposed
   | "turn.action.resolved" -> Ok Turn_action_resolved
+  | "combat.attack" -> Ok Combat_attack
+  | "combat.defense" -> Ok Combat_defense
   | "turn.timeout" -> Ok Turn_timeout
   | "keeper.unavailable" -> Ok Keeper_unavailable
   | "metric.updated" -> Ok Metric_updated
   | "room.ended" -> Ok Room_ended
+  | "session.outcome" -> Ok Session_outcome
   | "dice.rolled" -> Ok Dice_rolled
   | "hp.changed" -> Ok Hp_changed
   | "inventory.changed" -> Ok Inventory_changed

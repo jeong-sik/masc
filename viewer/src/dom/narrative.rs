@@ -7,6 +7,100 @@ use crate::game::events::NarrativeReceived;
 use super::escape::{sanitize_text, scroll_to_bottom, trim_log};
 use super::session_history::sync_history_focus_from_dashboard;
 
+fn truncate_before_meta_markers(raw: &str) -> &str {
+    const MARKERS: [&str; 4] = [
+        "visible_state_json:",
+        "\n[STATE]",
+        "\n[/STATE]",
+        "반드시 한국어로 응답하세요",
+    ];
+    let mut cut = raw.len();
+    for marker in MARKERS {
+        if let Some(idx) = raw.find(marker) {
+            cut = cut.min(idx);
+        }
+    }
+    &raw[..cut]
+}
+
+fn strip_fenced_code_blocks(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_fence = false;
+    for line in raw.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn strip_state_block(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_state = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.eq_ignore_ascii_case("[STATE]") {
+            in_state = true;
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("[/STATE]") {
+            in_state = false;
+            continue;
+        }
+        if !in_state {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn is_meta_line(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    lower.starts_with("skill:")
+        || lower.starts_with("skill_reason:")
+        || lower.starts_with("goal:")
+        || lower.starts_with("progress:")
+        || lower.starts_with("next:")
+        || lower.starts_with("decisions:")
+        || lower.starts_with("openquestions:")
+        || lower.starts_with("constraints:")
+        || lower.contains("structured_action")
+}
+
+fn normalize_narrative_text(raw: &str) -> String {
+    let truncated = truncate_before_meta_markers(raw);
+    let no_code = strip_fenced_code_blocks(truncated);
+    let no_state = strip_state_block(&no_code);
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut pending_blank = false;
+    for line in no_state.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !lines.is_empty() {
+                pending_blank = true;
+            }
+            continue;
+        }
+        if is_meta_line(trimmed) {
+            continue;
+        }
+        if pending_blank {
+            lines.push(String::new());
+            pending_blank = false;
+        }
+        lines.push(trimmed.to_string());
+    }
+
+    lines.join("\n").trim().to_string()
+}
+
 fn normalize_phase_suffix(phase: &str) -> String {
     let mut out = String::with_capacity(phase.len());
     for ch in phase.chars() {
@@ -135,7 +229,7 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         let _ = entry.set_attribute("role", "button");
         let _ = entry.set_attribute("tabindex", "0");
         let _ = entry.set_attribute("title", "클릭하면 이 내러티브를 강조합니다.");
-        let clean_text = sanitize_text(&payload.text);
+        let clean_text = sanitize_text(&normalize_narrative_text(&payload.text));
         if clean_text.trim().is_empty() {
             continue;
         }
@@ -246,7 +340,7 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_phase_suffix;
+    use super::{normalize_narrative_text, normalize_phase_suffix};
 
     #[test]
     fn normalize_phase_suffix_handles_untrusted_input() {
@@ -260,5 +354,37 @@ mod tests {
     fn normalize_phase_suffix_fallbacks_to_unknown() {
         assert_eq!(normalize_phase_suffix("   "), "unknown");
         assert_eq!(normalize_phase_suffix("<<<>>>"), "unknown");
+    }
+
+    #[test]
+    fn normalize_narrative_text_removes_meta_sections() {
+        let raw = r#"SKILL: masc-keeper-autonomy
+SKILL_REASON: test
+
+비가 내리는 강가에 적들이 접근한다.
+
+```json
+{"structured_action":{"action_type":"narrative_setup"}}
+```
+
+[STATE]
+Goal: test
+Progress: test
+[/STATE]
+"#;
+
+        assert_eq!(
+            normalize_narrative_text(raw),
+            "비가 내리는 강가에 적들이 접근한다."
+        );
+    }
+
+    #[test]
+    fn normalize_narrative_text_truncates_prompt_echo_suffix() {
+        let raw = r#"장면은 유지된다.
+visible_state_json:
+{"turn":8}
+"#;
+        assert_eq!(normalize_narrative_text(raw), "장면은 유지된다.");
     }
 }

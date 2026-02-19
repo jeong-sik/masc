@@ -12,7 +12,9 @@ use wasm_bindgen::closure::Closure;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
-use crate::game::events::{DiceRolled, NarrativeReceived, TurnAdvanced, TurnProgressUpdated};
+use crate::game::events::{
+    DiceRolled, NarrativeReceived, SessionStarted, TurnAdvanced, TurnProgressUpdated,
+};
 use crate::game::state::{RoomState, TurnProgressState};
 
 const MAX_ROOMS_TO_KEEP: usize = 24;
@@ -40,6 +42,7 @@ struct RoomHistory {
     status: String,
     turns: Vec<TurnHistory>,
     updated_turn: u32,
+    session_id: String,
 }
 
 #[derive(Resource, Default)]
@@ -191,6 +194,7 @@ fn ensure_room_entry(
         },
         turns: Vec::new(),
         updated_turn,
+        session_id: String::new(),
     });
 
     while rooms.len() > MAX_ROOMS_TO_KEEP {
@@ -1025,6 +1029,7 @@ pub fn update_session_history_dom(
     mut dice_events: MessageReader<DiceRolled>,
     mut turn_events: MessageReader<TurnAdvanced>,
     mut progress_events: MessageReader<TurnProgressUpdated>,
+    mut session_started: MessageReader<SessionStarted>,
     mut cache: ResMut<SessionHistoryCache>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -1033,6 +1038,7 @@ pub fn update_session_history_dom(
         for _ in narratives.read() {}
         for _ in dice_events.read() {}
         for _ in progress_events.read() {}
+        for _ in session_started.read() {}
         return;
     }
 
@@ -1081,6 +1087,66 @@ pub fn update_session_history_dom(
             let (_, turn_changed) =
                 ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
             changed = changed || turn_changed;
+        }
+
+        for SessionStarted(event) in session_started.read() {
+            let event_room_id = if event.room_id.trim().is_empty() {
+                base_room_id.clone()
+            } else {
+                normalize_room_id(&event.room_id)
+            };
+            let incoming_session_id = event.session_id.trim().to_string();
+            let event_phase = if current_phase.trim().is_empty() {
+                "briefing".to_string()
+            } else {
+                current_phase.clone()
+            };
+
+            let (room_idx, room_changed) =
+                ensure_room_entry(&mut cache.rooms, &event_room_id, "active", 1);
+            changed = changed || room_changed;
+
+            let mut room_reset = false;
+            if let Some(room) = cache.rooms.get_mut(room_idx) {
+                if !incoming_session_id.is_empty() && room.session_id != incoming_session_id {
+                    room.session_id = incoming_session_id.clone();
+                    room.turns.clear();
+                    room.updated_turn = 1;
+                    room.status = "active".to_string();
+                    room_reset = true;
+                } else if room.session_id.is_empty() && !incoming_session_id.is_empty() {
+                    room.session_id = incoming_session_id.clone();
+                    room_reset = true;
+                }
+            }
+            changed = changed || room_reset;
+
+            let detail = if incoming_session_id.is_empty() {
+                "session started".to_string()
+            } else {
+                format!("session_id={}", incoming_session_id)
+            };
+            let (appended, updated) = append_event(
+                &mut cache.rooms,
+                &event_room_id,
+                "active",
+                1,
+                &event_phase,
+                "system",
+                "",
+                "세션 시작",
+                &detail,
+            );
+            if !appended {
+                bump_dedup_history(
+                    &document,
+                    &format!("{} | t1 | session.started | {}", event_room_id, detail),
+                );
+            }
+            changed = changed || updated;
+            current_turn = 1;
+            current_phase = event_phase;
+            base_room_status = "active".to_string();
         }
 
         for TurnAdvanced(event) in turn_events.read() {

@@ -249,6 +249,7 @@ fn enter_trpg() {
         set_current_room_id(&doc, &room);
         bind_room_controls(&doc);
         bind_auto_round_toggle(&doc);
+        bind_session_pause_controls(&doc);
         crate::game::round_runner::set_auto_round_running(auto_round_enabled_from_dom(&doc));
 
         if let Some(pill) = doc.get_element_by_id("room-status") {
@@ -310,6 +311,274 @@ fn bind_auto_round_toggle(doc: &web_sys::Document) {
         target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
     });
     cb.forget();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_session_control_status(doc: &web_sys::Document, text: &str, tone: &str) {
+    let Some(el) = doc.get_element_by_id("session-control-status") else {
+        return;
+    };
+    let class_name = if tone.trim().is_empty() {
+        "widget-pill".to_string()
+    } else {
+        format!("widget-pill {}", tone.trim())
+    };
+    el.set_text_content(Some(text));
+    let _ = el.set_attribute("class", &class_name);
+    let _ = el.set_attribute("title", text);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_session_control_busy(doc: &web_sys::Document, busy: bool) {
+    for id in ["session-pause-btn", "session-resume-btn"] {
+        let Some(btn) = doc
+            .get_element_by_id(id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+        else {
+            continue;
+        };
+        btn.set_disabled(busy);
+        if busy {
+            let _ = btn.set_attribute("aria-busy", "true");
+        } else {
+            let _ = btn.remove_attribute("aria-busy");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn post_tool_action(tool_name: &str, args: Value) -> Result<String, String> {
+    let url = format!("{}/mcp", crate::config::MASC_MCP_URL);
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": (js_sys::Date::now() as i64),
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": args,
+        }
+    })
+    .to_string();
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_mode(web_sys::RequestMode::Cors);
+    opts.set_body(&JsValue::from_str(&body));
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
+        .map_err(|e| format!("request 생성 실패: {:?}", e))?;
+    request
+        .headers()
+        .set("Content-Type", "application/json")
+        .map_err(|e| format!("헤더 설정 실패: {:?}", e))?;
+    request
+        .headers()
+        .set("Accept", "application/json, text/event-stream")
+        .map_err(|e| format!("헤더 설정 실패: {:?}", e))?;
+
+    let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("fetch 실패: {:?}", e))?;
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| "response 변환 실패".to_string())?;
+
+    let body_js = JsFuture::from(
+        resp.text()
+            .map_err(|e| format!("response.text() 실패: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("본문 읽기 실패: {:?}", e))?;
+    let text = body_js.as_string().unwrap_or_default();
+
+    if !resp.ok() {
+        if text.trim().is_empty() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        return Err(format!("HTTP {}: {}", resp.status(), text.trim()));
+    }
+
+    let parsed = parse_embedded_tool_payload(&text)
+        .or_else(|_| serde_json::from_str::<Value>(text.trim()).map_err(|e| e.to_string()))
+        .map_err(|e| format!("{} 응답 파싱 실패: {}", tool_name, e))?;
+
+    if let Some(err_msg) = parsed
+        .get("error")
+        .and_then(|err| err.get("message"))
+        .and_then(Value::as_str)
+    {
+        return Err(err_msg.to_string());
+    }
+
+    let result = parsed.get("result").cloned().unwrap_or_else(|| json!({}));
+    if result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let err_text = result
+            .get("content")
+            .and_then(Value::as_array)
+            .and_then(|rows| {
+                rows.iter().find_map(|row| {
+                    if row.get("type").and_then(Value::as_str) == Some("text") {
+                        row.get("text").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or("tool call failed");
+        return Err(err_text.to_string());
+    }
+
+    if let Some(ok_text) = result
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter().find_map(|row| {
+                if row.get("type").and_then(Value::as_str) == Some("text") {
+                    row.get("text").and_then(Value::as_str)
+                } else {
+                    None
+                }
+            })
+        })
+    {
+        return Ok(ok_text.trim().to_string());
+    }
+
+    Ok(String::new())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_session_pause_controls(doc: &web_sys::Document) {
+    set_session_control_status(doc, "세션 제어 대기", "");
+
+    if let Some(pause_btn) = doc.get_element_by_id("session-pause-btn") {
+        if pause_btn.get_attribute("data-bound").as_deref() != Some("1") {
+            let _ = pause_btn.set_attribute("data-bound", "1");
+            let doc_for_pause = doc.clone();
+            let cb = Closure::wrap(Box::new(move || {
+                set_session_control_busy(&doc_for_pause, true);
+                set_session_control_status(&doc_for_pause, "세션 멈춤 요청 중...", "status-info");
+
+                let doc_async = doc_for_pause.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    match post_tool_action(
+                        "masc_pause",
+                        json!({ "reason": "viewer trpg manual pause" }),
+                    )
+                    .await
+                    {
+                        Ok(raw) => {
+                            if let Some(dashboard) = doc_async.get_element_by_id("dashboard") {
+                                let _ = dashboard.set_attribute("data-auto-round", "0");
+                            }
+                            render_auto_round_toggle(&doc_async);
+                            crate::game::round_runner::set_auto_round_running(false);
+                            let status = if raw.is_empty() {
+                                "세션 멈춤 완료".to_string()
+                            } else {
+                                format!("세션 멈춤 완료: {}", raw)
+                            };
+                            set_session_control_status(&doc_async, &status, "status-warn");
+                            let doc_for_refresh = doc_async.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let _ = refresh_rooms_from_server(&doc_for_refresh).await;
+                            });
+                        }
+                        Err(err) => {
+                            set_session_control_status(
+                                &doc_async,
+                                &format!("세션 멈춤 실패: {}", err),
+                                "status-error",
+                            );
+                        }
+                    }
+                    set_session_control_busy(&doc_async, false);
+                });
+            }) as Box<dyn FnMut()>);
+            let _ = pause_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+            cb.forget();
+        }
+    }
+
+    if let Some(resume_btn) = doc.get_element_by_id("session-resume-btn") {
+        if resume_btn.get_attribute("data-bound").as_deref() != Some("1") {
+            let _ = resume_btn.set_attribute("data-bound", "1");
+            let doc_for_resume = doc.clone();
+            let cb = Closure::wrap(Box::new(move || {
+                set_session_control_busy(&doc_for_resume, true);
+                set_session_control_status(&doc_for_resume, "세션 재개 요청 중...", "status-info");
+
+                let doc_async = doc_for_resume.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    match post_tool_action("masc_resume", json!({})).await {
+                        Ok(raw) => {
+                            let status = if raw.is_empty() {
+                                "세션 재개 완료".to_string()
+                            } else {
+                                format!("세션 재개 완료: {}", raw)
+                            };
+                            set_session_control_status(&doc_async, &status, "status-ok");
+                            let doc_for_refresh = doc_async.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let _ = refresh_rooms_from_server(&doc_for_refresh).await;
+                            });
+                        }
+                        Err(err) => {
+                            set_session_control_status(
+                                &doc_async,
+                                &format!("세션 재개 실패: {}", err),
+                                "status-error",
+                            );
+                        }
+                    }
+                    set_session_control_busy(&doc_async, false);
+                });
+            }) as Box<dyn FnMut()>);
+            let _ = resume_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
+                target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+            });
+            cb.forget();
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_session_pause_buttons(doc: &web_sys::Document, room_status: &str) {
+    let lifecycle = TrpgLifecycleState::from_status(room_status);
+    let (pause_disabled, resume_disabled, title) = match lifecycle {
+        TrpgLifecycleState::Running => (false, true, "세션이 진행 중입니다."),
+        TrpgLifecycleState::Lobby => (false, true, "세션이 로비 상태입니다. 필요 시 멈춤 가능합니다."),
+        TrpgLifecycleState::Stopped => (true, false, "세션이 멈춤 상태입니다."),
+        TrpgLifecycleState::Ended => (true, true, "종료된 세션은 재개할 수 없습니다."),
+        TrpgLifecycleState::Unavailable => (true, true, "엔진 연결 오류 상태입니다."),
+        _ => (true, true, "세션 시작 후 제어할 수 있습니다."),
+    };
+
+    if let Some(btn) = doc
+        .get_element_by_id("session-pause-btn")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        if btn.get_attribute("aria-busy").as_deref() != Some("true") {
+            btn.set_disabled(pause_disabled);
+        }
+        btn.set_title(title);
+    }
+    if let Some(btn) = doc
+        .get_element_by_id("session-resume-btn")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        if btn.get_attribute("aria-busy").as_deref() != Some("true") {
+            btn.set_disabled(resume_disabled);
+        }
+        btn.set_title(title);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1160,22 +1429,14 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
         .unwrap_or("-")
         .to_string();
 
-    // Staleness detection: override "active" to "paused" when last event is old
-    if status == "active" {
-        let last_event_ts = state
-            .get("last_event_ts")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if !last_event_ts.is_empty() {
-            let event_ms = js_sys::Date::parse(last_event_ts);
-            if event_ms.is_finite() {
-                let now_ms = js_sys::Date::now();
-                let elapsed_sec = (now_ms - event_ms) / 1000.0;
-                // 30 minutes without any event → stale game
-                if elapsed_sec > 1800.0 {
-                    status = "paused".to_string();
-                }
-            }
+    if let Ok(pause_status) = mcp_tool_call("masc_pause_status", json!({ "room_id": room_id })).await
+    {
+        if pause_status
+            .get("paused")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            status = "paused".to_string();
         }
     }
 
@@ -1287,10 +1548,9 @@ fn remember_known_rooms(extra_rooms: &[String]) {
 fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     let selected = crate::config::sanitize_room_id(selected_room)
         .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
-    let mut rooms = vec![selected.clone(), crate::config::DEFAULT_ROOM_ID.to_string()];
-    rooms.extend(load_known_rooms());
-    rooms.extend(load_recent_rooms());
-    let rooms = unique_non_empty(rooms);
+    // Keep inline selector deterministic to avoid stale/duplicated room IDs from
+    // local storage history. Full room browsing is handled by the room-hub lanes.
+    let rooms = unique_non_empty(vec![selected.clone(), crate::config::DEFAULT_ROOM_ID.to_string()]);
 
     if let Some(select) = doc
         .get_element_by_id("room-selector-inline")
@@ -1396,6 +1656,7 @@ async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<RoomSn
             });
         }
     }
+    snapshots = dedup_room_snapshots(snapshots);
 
     let room_ids = unique_non_empty(
         snapshots
@@ -1426,7 +1687,64 @@ async fn refresh_rooms_from_server(doc: &web_sys::Document) -> Result<Vec<RoomSn
     sync_room_controls(doc, &current);
     render_room_hub(doc, &snapshots, &current);
     bind_room_hub_buttons(doc);
+    let current_status = snapshots
+        .iter()
+        .find(|row| row.id == current)
+        .map(|row| row.status.as_str())
+        .unwrap_or("idle");
+    sync_session_pause_buttons(doc, current_status);
     Ok(snapshots)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn merge_room_snapshot(existing: &mut RoomSnapshot, incoming: RoomSnapshot) {
+    if existing.status.trim().is_empty()
+        || existing.status.eq_ignore_ascii_case("idle")
+        || existing.status.eq_ignore_ascii_case("unknown")
+    {
+        if !incoming.status.trim().is_empty() {
+            existing.status = incoming.status.clone();
+        }
+    }
+    if incoming.turn >= existing.turn {
+        existing.turn = incoming.turn;
+        if !incoming.phase.trim().is_empty() {
+            existing.phase = incoming.phase.clone();
+        }
+    } else if (existing.phase.trim().is_empty() || existing.phase.trim() == "-")
+        && !incoming.phase.trim().is_empty()
+    {
+        existing.phase = incoming.phase.clone();
+    }
+    existing.agent_count = existing.agent_count.max(incoming.agent_count);
+    existing.task_count = existing.task_count.max(incoming.task_count);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dedup_room_snapshots(rows: Vec<RoomSnapshot>) -> Vec<RoomSnapshot> {
+    use std::collections::HashMap;
+
+    let mut out: Vec<RoomSnapshot> = Vec::new();
+    let mut index_by_id: HashMap<String, usize> = HashMap::new();
+
+    for mut row in rows {
+        row.id = crate::config::sanitize_room_id(&row.id).unwrap_or_else(|| row.id.trim().to_string());
+        if row.id.is_empty() {
+            continue;
+        }
+        let key = row.id.to_ascii_lowercase();
+        if let Some(idx) = index_by_id.get(&key).copied() {
+            if let Some(existing) = out.get_mut(idx) {
+                merge_room_snapshot(existing, row);
+            }
+            continue;
+        }
+        let idx = out.len();
+        index_by_id.insert(key, idx);
+        out.push(row);
+    }
+
+    out
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1572,7 +1890,7 @@ use mcp_rpc::{mcp_tool_call, parse_embedded_tool_payload};
 mod room_hub;
 #[cfg(target_arch = "wasm32")]
 use room_hub::{
-    load_recent_rooms, remember_recent_room, room_lane_label, RoomSnapshot,
+    remember_recent_room, room_lane_label, RoomSnapshot,
     KNOWN_ROOMS_STORAGE_KEY, ROOM_HUB_RUNNING_ONLY_STORAGE_KEY, ROOM_HUB_VISIBLE_STORAGE_KEY,
 };
 

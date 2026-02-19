@@ -30,15 +30,41 @@ let handle_resume ctx _args =
   | `Resumed -> (true, Printf.sprintf "▶️ Room resumed by %s" ctx.agent_name)
   | `Already_running -> (true, "Room is not paused")
 
-let handle_pause_status ctx _args =
-  match Room.pause_info ctx.config with
-  | Some (by, reason, at) ->
-      let by_str = Option.value by ~default:"unknown" in
-      let reason_str = Option.value reason ~default:"no reason" in
-      let at_str = Option.value at ~default:"unknown" in
-      (true, Printf.sprintf "⏸️ PAUSED\n  By: %s\n  Reason: %s\n  Since: %s" by_str reason_str at_str)
-  | None ->
-      (true, "▶️ Room is running (not paused)")
+let handle_pause_status ctx args =
+  let requested_room = get_string args "room_id" "" |> String.trim in
+  let current_room =
+    Room.read_current_room ctx.config |> Option.value ~default:"default"
+  in
+  let room_id = if requested_room = "" then current_room else requested_room in
+  let payload =
+    match Room.pause_info ctx.config with
+    | Some (by, reason, at) ->
+        `Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("status", `String "paused");
+            ("paused", `Bool true);
+            ("paused_by", (match by with Some s -> `String s | None -> `Null));
+            ( "pause_reason",
+              match reason with Some s -> `String s | None -> `Null );
+            ("paused_at", (match at with Some s -> `String s | None -> `Null));
+            ("message", `String "⏸️ Room is paused");
+          ]
+    | None ->
+        `Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("status", `String "running");
+            ("paused", `Bool false);
+            ("paused_by", `Null);
+            ("pause_reason", `Null);
+            ("paused_at", `Null);
+            ("message", `String "▶️ Room is running (not paused)");
+          ]
+  in
+  (true, Yojson.Safe.to_string payload)
 
 let handle_switch_mode ctx args =
   let mode = get_string args "mode" "autonomous" in

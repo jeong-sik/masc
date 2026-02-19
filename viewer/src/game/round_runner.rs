@@ -13,6 +13,8 @@ use std::sync::{
 
 #[cfg(target_arch = "wasm32")]
 use crate::config;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use crate::game::state::TurnProgressState;
 
 // ─── Resource ──────────────────────────────────
@@ -29,6 +31,21 @@ pub struct RoundRunner {
     pub last_result: Arc<Mutex<Option<String>>>,
     /// How many rounds have been executed so far.
     pub rounds_completed: Arc<Mutex<u32>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+struct RoundRunnerControl {
+    running: Arc<AtomicBool>,
+    game_ended: Arc<AtomicBool>,
+    last_result: Arc<Mutex<Option<String>>>,
+    rounds_completed: Arc<Mutex<u32>>,
+    dm_keeper_snapshot: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static ROUND_RUNNER_CONTROL: RefCell<Option<RoundRunnerControl>> = const { RefCell::new(None) };
 }
 
 impl Default for RoundRunner {
@@ -83,135 +100,30 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
     let runner = RoundRunner::default();
 
     #[cfg(target_arch = "wasm32")]
-    if !auto_round_enabled() {
-        runner.running.store(false, Ordering::SeqCst);
-        set_dom_runner_active(false);
-        log::info!("RoundRunner: auto round loop disabled (manual Run Round only)");
-        commands.insert_resource(runner);
-        return;
-    }
-
-    runner.running.store(true, Ordering::SeqCst);
-    #[cfg(target_arch = "wasm32")]
-    set_dom_runner_active(true);
-
-    #[cfg(target_arch = "wasm32")]
     {
-        let running = runner.running.clone();
-        let game_ended = runner.game_ended.clone();
-        let last_result = runner.last_result.clone();
-        let rounds_completed = runner.rounds_completed.clone();
-
-        // Snapshot keeper info available at entry time.
-        // The async loop will re-read from DOM on each iteration for freshness.
-        let dm_keeper_snapshot = progress.dm_keeper.clone();
-
-        wasm_bindgen_futures::spawn_local(async move {
-            // Wait for SSE connection + initial state fetch.
-            sleep_ms(STARTUP_DELAY_MS).await;
-
-            let mut round_num = 0u32;
-            let mut stalled_retries = 0u32;
-
-            while running.load(Ordering::SeqCst)
-                && !game_ended.load(Ordering::SeqCst)
-                && round_num < MAX_ROUNDS
-            {
-                let body = match build_round_body(&dm_keeper_snapshot) {
-                    Ok(body) => body,
-                    Err(reason) => {
-                        log::warn!(
-                            "RoundRunner: missing/invalid round plan, stopping auto loop — {}",
-                            reason
-                        );
-                        break;
-                    }
-                };
-                if !try_acquire_round_flight("auto") {
-                    log::info!("RoundRunner: round flight locked by another request; waiting");
-                    sleep_ms(750).await;
-                    continue;
-                }
-                round_num += 1;
-                log::info!("RoundRunner: triggering round {}", round_num);
-
-                let url = format!("{}/api/v1/trpg/rounds/run", config::MASC_MCP_URL);
-                let post_result = fetch_json_post(&url, &body).await;
-                release_round_flight("auto");
-                match post_result {
-                    Ok(resp) => {
-                        log::info!(
-                            "RoundRunner: round {} done — {}",
-                            round_num,
-                            &resp[..resp.len().min(200)]
-                        );
-                        if let Ok(mut guard) = last_result.lock() {
-                            *guard = Some(resp.clone());
-                        }
-                        if let Ok(mut guard) = rounds_completed.lock() {
-                            *guard = round_num;
-                        }
-                        // Detect game-ended signals in response JSON.
-                        if resp.contains("\"status\":\"ended\"")
-                            || resp.contains("\"status\":\"completed\"")
-                            || resp.contains("\"game_over\":true")
-                        {
-                            game_ended.store(true, Ordering::SeqCst);
-                            log::info!("RoundRunner: game ended signal in response");
-                        } else if matches!(round_response_advanced(&resp), Some(false)) {
-                            stalled_retries = stalled_retries.saturating_add(1);
-                            if stalled_retries > MAX_STALL_RETRIES {
-                                log::warn!(
-                                    "RoundRunner: round still stalled after {} retries. Stopping auto loop.",
-                                    MAX_STALL_RETRIES
-                                );
-                                break;
-                            }
-                            let delay_ms = stall_retry_delay_ms(stalled_retries);
-                            log::warn!(
-                                "RoundRunner: round did not advance (player failure/claim mismatch). Retry {}/{} in {}ms.",
-                                stalled_retries,
-                                MAX_STALL_RETRIES,
-                                delay_ms
-                            );
-                            sleep_ms(delay_ms).await;
-                            continue;
-                        } else {
-                            stalled_retries = 0;
-                        }
-                    }
-                    Err(e) => {
-                        let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
-                        log::warn!("RoundRunner: POST failed — {}", detail);
-
-                        // Stop on non-retriable client errors to prevent runaway loops.
-                        if let Some(status) = parse_http_status(&detail) {
-                            if (400..500).contains(&status) && status != 429 {
-                                log::warn!(
-                                    "RoundRunner: stopping due to non-retriable HTTP {}",
-                                    status
-                                );
-                                break;
-                            }
-                        } else if detail.contains("404") || detail.contains("422") {
-                            log::warn!("RoundRunner: stopping due to fatal HTTP error");
-                            break;
-                        }
-                    }
-                }
-
-                // Pause between rounds for events to stream back via SSE.
-                sleep_ms(INTER_ROUND_DELAY_MS).await;
-            }
-
-            running.store(false, Ordering::SeqCst);
+        let auto_enabled = auto_round_enabled();
+        runner.running.store(auto_enabled, Ordering::SeqCst);
+        if !auto_enabled {
             set_dom_runner_active(false);
-            log::info!(
-                "RoundRunner: loop finished (rounds={}, ended={})",
-                round_num,
-                game_ended.load(Ordering::SeqCst)
-            );
+            log::info!("RoundRunner: auto round loop disabled (manual Run Round only)");
+        }
+
+        let control = RoundRunnerControl {
+            running: runner.running.clone(),
+            game_ended: runner.game_ended.clone(),
+            last_result: runner.last_result.clone(),
+            rounds_completed: runner.rounds_completed.clone(),
+            // Snapshot keeper info available at entry time.
+            // The async loop will re-read from DOM on each iteration for freshness.
+            dm_keeper_snapshot: progress.dm_keeper.clone(),
+        };
+        ROUND_RUNNER_CONTROL.with(|slot| {
+            *slot.borrow_mut() = Some(control.clone());
         });
+        if auto_enabled {
+            set_dom_runner_active(true);
+            spawn_round_loop(control);
+        }
     }
 
     let _ = &progress; // suppress unused on native
@@ -231,6 +143,148 @@ pub fn stop_round_loop(runner: Option<Res<RoundRunner>>) {
         set_dom_runner_active(false);
         release_round_flight("auto");
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn set_auto_round_running(enabled: bool) {
+    ROUND_RUNNER_CONTROL.with(|slot| {
+        let Some(control) = slot.borrow().clone() else {
+            log::warn!("RoundRunner: control handle not initialized");
+            return;
+        };
+
+        if enabled {
+            if control.running.swap(true, Ordering::SeqCst) {
+                set_dom_runner_active(true);
+                return;
+            }
+            control.game_ended.store(false, Ordering::SeqCst);
+            set_dom_runner_active(true);
+            spawn_round_loop(control);
+        } else {
+            control.running.store(false, Ordering::SeqCst);
+            set_dom_runner_active(false);
+            release_round_flight("auto");
+            log::info!("RoundRunner: auto round loop stopped by UI");
+        }
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn set_auto_round_running(_enabled: bool) {}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_round_loop(control: RoundRunnerControl) {
+    let running = control.running.clone();
+    let game_ended = control.game_ended.clone();
+    let last_result = control.last_result.clone();
+    let rounds_completed = control.rounds_completed.clone();
+    let dm_keeper_snapshot = control.dm_keeper_snapshot.clone();
+
+    wasm_bindgen_futures::spawn_local(async move {
+        // Wait for SSE connection + initial state fetch.
+        sleep_ms(STARTUP_DELAY_MS).await;
+
+        let mut round_num = 0u32;
+        let mut stalled_retries = 0u32;
+
+        while running.load(Ordering::SeqCst)
+            && !game_ended.load(Ordering::SeqCst)
+            && round_num < MAX_ROUNDS
+        {
+            let body = match build_round_body(&dm_keeper_snapshot) {
+                Ok(body) => body,
+                Err(reason) => {
+                    log::warn!(
+                        "RoundRunner: missing/invalid round plan, stopping auto loop — {}",
+                        reason
+                    );
+                    break;
+                }
+            };
+            if !try_acquire_round_flight("auto") {
+                log::info!("RoundRunner: round flight locked by another request; waiting");
+                sleep_ms(750).await;
+                continue;
+            }
+            round_num += 1;
+            log::info!("RoundRunner: triggering round {}", round_num);
+
+            let url = format!("{}/api/v1/trpg/rounds/run", config::MASC_MCP_URL);
+            let post_result = fetch_json_post(&url, &body).await;
+            release_round_flight("auto");
+            match post_result {
+                Ok(resp) => {
+                    log::info!(
+                        "RoundRunner: round {} done — {}",
+                        round_num,
+                        &resp[..resp.len().min(200)]
+                    );
+                    if let Ok(mut guard) = last_result.lock() {
+                        *guard = Some(resp.clone());
+                    }
+                    if let Ok(mut guard) = rounds_completed.lock() {
+                        *guard = round_num;
+                    }
+                    if resp.contains("\"status\":\"ended\"")
+                        || resp.contains("\"status\":\"completed\"")
+                        || resp.contains("\"game_over\":true")
+                    {
+                        game_ended.store(true, Ordering::SeqCst);
+                        log::info!("RoundRunner: game ended signal in response");
+                    } else if matches!(round_response_advanced(&resp), Some(false)) {
+                        stalled_retries = stalled_retries.saturating_add(1);
+                        if stalled_retries > MAX_STALL_RETRIES {
+                            log::warn!(
+                                "RoundRunner: round still stalled after {} retries. Stopping auto loop.",
+                                MAX_STALL_RETRIES
+                            );
+                            break;
+                        }
+                        let delay_ms = stall_retry_delay_ms(stalled_retries);
+                        log::warn!(
+                            "RoundRunner: round did not advance (player failure/claim mismatch). Retry {}/{} in {}ms.",
+                            stalled_retries,
+                            MAX_STALL_RETRIES,
+                            delay_ms
+                        );
+                        sleep_ms(delay_ms).await;
+                        continue;
+                    } else {
+                        stalled_retries = 0;
+                    }
+                }
+                Err(e) => {
+                    let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
+                    log::warn!("RoundRunner: POST failed — {}", detail);
+
+                    if let Some(status) = parse_http_status(&detail) {
+                        if (400..500).contains(&status) && status != 429 {
+                            log::warn!(
+                                "RoundRunner: stopping due to non-retriable HTTP {}",
+                                status
+                            );
+                            break;
+                        }
+                    } else if detail.contains("404") || detail.contains("422") {
+                        log::warn!("RoundRunner: stopping due to fatal HTTP error");
+                        break;
+                    }
+                }
+            }
+
+            sleep_ms(INTER_ROUND_DELAY_MS).await;
+        }
+
+        running.store(false, Ordering::SeqCst);
+        set_dom_runner_active(false);
+        log::info!(
+            "RoundRunner: loop finished (rounds={}, ended={})",
+            round_num,
+            game_ended.load(Ordering::SeqCst)
+        );
+    });
 }
 
 // ─── HTTP POST ─────────────────────────────────

@@ -31,6 +31,9 @@
    context_router
    dashboard
    web_dashboard
+   web_dashboard_css
+   web_dashboard_keepers
+   web_dashboard_trpg
    credits_dashboard
    lodge_dashboard
    datachannel

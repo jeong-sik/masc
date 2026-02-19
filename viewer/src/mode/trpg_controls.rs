@@ -44,6 +44,90 @@ pub(super) struct ActorAdminRow {
     keeper: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NewGameFlowStage {
+    Idle,
+    Bootstrap,
+    Preflight,
+    ValidatingInput,
+    ResolvingPreset,
+    GeneratingPool,
+    SelectingParty,
+    StartingSession,
+    ClaimingActors,
+    BootingKeepers,
+    Finalizing,
+    Done,
+    Failed,
+}
+
+impl NewGameFlowStage {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Bootstrap => "bootstrap",
+            Self::Preflight => "preflight",
+            Self::ValidatingInput => "validating-input",
+            Self::ResolvingPreset => "resolving-preset",
+            Self::GeneratingPool => "generating-pool",
+            Self::SelectingParty => "selecting-party",
+            Self::StartingSession => "starting-session",
+            Self::ClaimingActors => "claiming-actors",
+            Self::BootingKeepers => "booting-keepers",
+            Self::Finalizing => "finalizing",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
+
+    fn label_ko(self) -> &'static str {
+        match self {
+            Self::Idle => "대기",
+            Self::Bootstrap => "초기 동기화",
+            Self::Preflight => "사전 점검",
+            Self::ValidatingInput => "입력 검증",
+            Self::ResolvingPreset => "프리셋 확인",
+            Self::GeneratingPool => "플레이어 풀 생성",
+            Self::SelectingParty => "파티 구성",
+            Self::StartingSession => "세션 시작",
+            Self::ClaimingActors => "액터 점유",
+            Self::BootingKeepers => "키퍼 부팅",
+            Self::Finalizing => "최종 동기화",
+            Self::Done => "완료",
+            Self::Failed => "실패",
+        }
+    }
+
+    fn css_class(self) -> &'static str {
+        match self {
+            Self::Done => "is-ok",
+            Self::Failed => "is-error",
+            Self::Idle => "is-pending",
+            _ => "is-active",
+        }
+    }
+}
+
+impl From<&str> for NewGameFlowStage {
+    fn from(raw: &str) -> Self {
+        match raw.trim() {
+            "bootstrap" => Self::Bootstrap,
+            "preflight" => Self::Preflight,
+            "validating-input" => Self::ValidatingInput,
+            "resolving-preset" => Self::ResolvingPreset,
+            "generating-pool" => Self::GeneratingPool,
+            "selecting-party" => Self::SelectingParty,
+            "starting-session" => Self::StartingSession,
+            "claiming-actors" => Self::ClaimingActors,
+            "booting-keepers" => Self::BootingKeepers,
+            "finalizing" => Self::Finalizing,
+            "done" => Self::Done,
+            "failed" => Self::Failed,
+            _ => Self::Idle,
+        }
+    }
+}
+
 // ─── Helpers (moved from mod.rs, only used here) ────────────────
 
 fn parse_keeper_models(raw: &str) -> Vec<String> {
@@ -113,6 +197,37 @@ fn set_new_game_preflight_state(doc: &web_sys::Document, state: &str) {
             if normalized == "ok" { "1" } else { "0" },
         );
     }
+}
+
+fn set_new_game_flow_stage(doc: &web_sys::Document, stage: NewGameFlowStage, detail: Option<&str>) {
+    let Some(panel) = doc.get_element_by_id("new-game-panel") else {
+        return;
+    };
+    let _ = panel.set_attribute("data-flow-stage", stage.code());
+    let normalized_detail = detail.unwrap_or("").trim();
+    if normalized_detail.is_empty() {
+        let _ = panel.remove_attribute("data-flow-detail");
+    } else {
+        let _ = panel.set_attribute("data-flow-detail", normalized_detail);
+    }
+}
+
+fn new_game_flow_stage(doc: &web_sys::Document) -> NewGameFlowStage {
+    doc.get_element_by_id("new-game-panel")
+        .and_then(|panel| panel.get_attribute("data-flow-stage"))
+        .map(|raw| NewGameFlowStage::from(raw.as_str()))
+        .unwrap_or(NewGameFlowStage::Idle)
+}
+
+fn new_game_flow_detail(doc: &web_sys::Document) -> String {
+    doc.get_element_by_id("new-game-panel")
+        .and_then(|panel| panel.get_attribute("data-flow-detail"))
+        .unwrap_or_default()
+}
+
+fn set_new_game_progress(doc: &web_sys::Document, stage: NewGameFlowStage, message: &str) {
+    set_new_game_flow_stage(doc, stage, Some(message));
+    set_new_game_status(doc, message);
 }
 
 fn new_game_preflight_state(doc: &web_sys::Document) -> String {
@@ -308,6 +423,8 @@ fn render_new_game_assignment_preview(
 
 fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     let preflight_state = new_game_preflight_state(doc);
+    let flow_stage = new_game_flow_stage(doc);
+    let flow_detail = new_game_flow_detail(doc);
     let dm_keeper = selected_dm_keeper(doc);
     let players = selected_player_keepers(doc);
     let ui_state = read_dashboard_ui_state(doc);
@@ -318,6 +435,21 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     let runtime_locked = ui_state_blocks_new_session_start(ui_state);
     let ready = preflight_state == "ok" && assignment_ok && !runtime_locked;
     let busy = new_game_wizard_busy(doc);
+    let flow_running = busy
+        || matches!(
+            flow_stage,
+            NewGameFlowStage::Bootstrap
+                | NewGameFlowStage::Preflight
+                | NewGameFlowStage::ValidatingInput
+                | NewGameFlowStage::ResolvingPreset
+                | NewGameFlowStage::GeneratingPool
+                | NewGameFlowStage::SelectingParty
+                | NewGameFlowStage::StartingSession
+                | NewGameFlowStage::ClaimingActors
+                | NewGameFlowStage::BootingKeepers
+                | NewGameFlowStage::Finalizing
+        );
+    let flow_failed = flow_stage == NewGameFlowStage::Failed;
 
     let step1_state = match preflight_state.as_str() {
         "ok" => "done",
@@ -337,9 +469,11 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     } else {
         "pending"
     };
-    let step3_state = if busy {
+    let step3_state = if flow_failed {
+        "error"
+    } else if flow_running {
         "active"
-    } else if runtime_locked || ready {
+    } else if runtime_locked || ready || flow_stage == NewGameFlowStage::Done {
         "active"
     } else {
         "pending"
@@ -349,8 +483,16 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     set_step_state(doc, "new-game-step-2", step2_state);
     set_step_state(doc, "new-game-step-3", step3_state);
 
-    let start_gate_reason = if busy {
-        "세션 시작 작업 실행 중입니다. 완료까지 기다려주세요.".to_string()
+    let start_gate_reason = if flow_running {
+        let mut reason = format!(
+            "세션 시작 작업 실행 중입니다. 현재 단계: {}",
+            flow_stage.label_ko()
+        );
+        if !flow_detail.trim().is_empty() {
+            reason.push_str(" · ");
+            reason.push_str(flow_detail.trim());
+        }
+        reason
     } else if runtime_locked {
         format!(
             "현재 {} 상태입니다. 진행 중 라운드/세션이 멈춘 뒤 시작하세요.",
@@ -376,8 +518,13 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         .get_element_by_id("new-game-start")
         .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
     {
-        start_btn.set_disabled(!ready || busy);
+        start_btn.set_disabled(!ready || flow_running);
         start_btn.set_title(&start_gate_reason);
+        start_btn.set_text_content(Some(if flow_running {
+            "세션 시작 중..."
+        } else {
+            "세션 시작"
+        }));
     }
 
     for id in [
@@ -389,8 +536,19 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
             .get_element_by_id(id)
             .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
         {
-            btn.set_disabled(busy || runtime_locked);
+            btn.set_disabled(flow_running || runtime_locked);
         }
+    }
+
+    if let Some(btn) = doc
+        .get_element_by_id("new-game-quick-start")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+    {
+        btn.set_text_content(Some(if flow_running {
+            "빠른 시작 중..."
+        } else {
+            "빠른 시작"
+        }));
     }
 
     if let Some(hint) = doc.get_element_by_id("new-game-step-hint") {
@@ -407,6 +565,19 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
             format!("{} 진행 가이드: {}", state_badge, start_gate_reason)
         };
         hint.set_text_content(Some(&text));
+    }
+
+    if let Some(flow_state) = doc.get_element_by_id("new-game-flow-state") {
+        let detail = if flow_detail.trim().is_empty() {
+            flow_stage.label_ko().to_string()
+        } else {
+            format!("{} · {}", flow_stage.label_ko(), flow_detail.trim())
+        };
+        flow_state.set_text_content(Some(&format!("진행 단계: {}", detail)));
+        let _ = flow_state.set_attribute(
+            "class",
+            &format!("new-game-flow-state {}", flow_stage.css_class()),
+        );
     }
 
     let dm_hint = if dm_selected {
@@ -455,11 +626,30 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         &dm_keeper,
         &players,
         has_conflict,
-        ready && !busy,
+        ready && !flow_running,
     );
 }
 
 fn ensure_new_game_ready(doc: &web_sys::Document) -> Result<(), String> {
+    let flow_stage = new_game_flow_stage(doc);
+    if matches!(
+        flow_stage,
+        NewGameFlowStage::Bootstrap
+            | NewGameFlowStage::Preflight
+            | NewGameFlowStage::ValidatingInput
+            | NewGameFlowStage::ResolvingPreset
+            | NewGameFlowStage::GeneratingPool
+            | NewGameFlowStage::SelectingParty
+            | NewGameFlowStage::StartingSession
+            | NewGameFlowStage::ClaimingActors
+            | NewGameFlowStage::BootingKeepers
+            | NewGameFlowStage::Finalizing
+    ) {
+        return Err(format!(
+            "세션 시작 작업이 이미 진행 중입니다. 현재 단계: {}",
+            flow_stage.label_ko()
+        ));
+    }
     if new_game_preflight_state(doc) != "ok" {
         return Err("사전 점검이 완료되지 않았습니다. 1) 사전 점검을 먼저 실행하세요.".to_string());
     }
@@ -1139,30 +1329,20 @@ async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBo
 async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
     let mut rows: Vec<(bool, String, String)> = Vec::new();
 
-    let preset_row = match mcp_tool_call(
-        "trpg.preset.list",
-        json!({
-            "include_characters": false,
-            "include_skills": false
-        }),
-    )
-    .await
-    {
-        Ok(raw_catalog) => {
-            let catalog = normalize_preset_catalog(&raw_catalog);
-            let world = collect_preset_options_from_catalog(
-                &catalog,
-                &["world_presets", "world", "world_preset", "worlds"],
-            );
-            let dm = collect_preset_options_from_catalog(
-                &catalog,
-                &["dm_presets", "dm", "dm_preset", "dms"],
-            );
+    let preset_row = match fetch_preset_catalog().await {
+        Ok(catalog) => {
+            let world = collect_world_preset_options(&catalog);
+            let dm = collect_dm_preset_options(&catalog);
             let ok = !world.is_empty() && !dm.is_empty();
             let detail = if ok {
                 format!("월드 {}개 · DM {}개", world.len(), dm.len())
             } else {
-                format!("프리셋 부족 (월드 {} / DM {})", world.len(), dm.len())
+                format!(
+                    "프리셋 부족 (월드 {} / DM {}) {}",
+                    world.len(),
+                    dm.len(),
+                    preset_catalog_keys_preview_from_value(&catalog)
+                )
             };
             (ok, "프리셋".to_string(), detail)
         }
@@ -1172,39 +1352,43 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
 
     let (available_keepers, keeper_pool_row) =
         match mcp_tool_call("masc_keeper_list", json!({ "limit": 200 })).await {
-        Ok(payload) => {
-            let keepers = payload
-                .get("keepers")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(extract_keeper_name_from_value)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let keepers = unique_non_empty(keepers);
-            let count = keepers.len();
-            if count > 0 {
-                (keepers,
-                 (
-                    true,
-                    "키퍼 풀".to_string(),
-                    format!("{}명 사용 가능", count),
-                ))
-            } else {
-                (Vec::new(),
-                 (
-                    false,
-                    "키퍼 풀".to_string(),
-                    "사용 가능한 keeper가 없습니다".to_string(),
-                ))
+            Ok(payload) => {
+                let keepers = payload
+                    .get("keepers")
+                    .and_then(Value::as_array)
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(extract_keeper_name_from_value)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let keepers = unique_non_empty(keepers);
+                let count = keepers.len();
+                if count > 0 {
+                    (
+                        keepers,
+                        (
+                            true,
+                            "키퍼 풀".to_string(),
+                            format!("{}명 사용 가능", count),
+                        ),
+                    )
+                } else {
+                    (
+                        Vec::new(),
+                        (
+                            false,
+                            "키퍼 풀".to_string(),
+                            "사용 가능한 keeper가 없습니다".to_string(),
+                        ),
+                    )
+                }
             }
-        }
-        Err(e) => (
-            Vec::new(),
-            (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e)),
-        ),
-    };
+            Err(e) => (
+                Vec::new(),
+                (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e)),
+            ),
+        };
     rows.push(keeper_pool_row);
 
     let mut selected_keepers = Vec::new();
@@ -1348,6 +1532,15 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
     set_new_game_preflight_rows(doc, &rows);
     let all_ok = rows.iter().all(|(ok, _, _)| *ok);
     set_new_game_preflight_state(doc, if all_ok { "ok" } else { "fail" });
+    if all_ok {
+        set_new_game_flow_stage(doc, NewGameFlowStage::Idle, Some("사전 점검 통과"));
+    } else {
+        set_new_game_flow_stage(
+            doc,
+            NewGameFlowStage::Failed,
+            Some("사전 점검 실패 항목 존재"),
+        );
+    }
     sync_new_game_wizard_ui(doc);
     if all_ok {
         Ok(())
@@ -1502,13 +1695,18 @@ async fn rollback_claimed_actors(room_id: &str, claims: &[(String, String)]) {
 }
 
 async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, String> {
-    set_new_game_status(doc, "빠른 시작: keeper/preset 동기화 중...");
+    set_new_game_progress(
+        doc,
+        NewGameFlowStage::Bootstrap,
+        "빠른 시작: keeper/preset 동기화 중...",
+    );
     set_new_game_preflight_state(doc, "pending");
     sync_new_game_wizard_ui(doc);
 
     let bootstrap = refresh_new_game_bootstrap(doc).await?;
-    set_new_game_status(
+    set_new_game_progress(
         doc,
+        NewGameFlowStage::Bootstrap,
         &format!(
             "빠른 시작: Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
             bootstrap.keepers.len(),
@@ -1517,6 +1715,7 @@ async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, Str
         ),
     );
 
+    set_new_game_flow_stage(doc, NewGameFlowStage::Preflight, Some("사전 점검 실행"));
     set_new_game_preflight_status(doc, "사전 점검 실행 중...");
     run_new_game_preflight(doc).await?;
 
@@ -1534,11 +1733,20 @@ async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, Str
     }
     update_new_game_player_hint(doc);
     ensure_new_game_ready(doc)?;
+    set_new_game_flow_stage(
+        doc,
+        NewGameFlowStage::ValidatingInput,
+        Some("빠른 시작에서 세션 시작으로 전환"),
+    );
     start_new_game_flow(doc).await
 }
 
 async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> {
-    set_new_game_status(doc, "세션 준비 1/6: 입력값/keeper 선택을 검증 중...");
+    set_new_game_progress(
+        doc,
+        NewGameFlowStage::ValidatingInput,
+        "세션 준비 1/6: 입력값/keeper 선택을 검증 중...",
+    );
 
     let room_input = doc
         .get_element_by_id("new-game-room-id")
@@ -1649,8 +1857,14 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .unwrap_or_default()
         .trim()
         .to_string();
+    let mut preset_keys_hint = "[]".to_string();
 
     if world_preset_id.is_empty() || dm_preset_id.is_empty() {
+        set_new_game_flow_stage(
+            doc,
+            NewGameFlowStage::ResolvingPreset,
+            Some("프리셋 선택값을 보강 중"),
+        );
         if let Ok((world_options, dm_options)) = refresh_preset_selectors(doc).await {
             if world_preset_id.is_empty() {
                 world_preset_id = world_options
@@ -1668,20 +1882,15 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     }
 
     if world_preset_id.is_empty() || dm_preset_id.is_empty() {
-        let preset_catalog = mcp_tool_call(
-            "trpg.preset.list",
-            json!({
-                "include_characters": false,
-                "include_skills": false
-            }),
-        )
-        .await?;
-        let preset_catalog = normalize_preset_catalog(&preset_catalog);
+        set_new_game_flow_stage(
+            doc,
+            NewGameFlowStage::ResolvingPreset,
+            Some("프리셋 목록 API를 조회 중"),
+        );
+        let preset_catalog = fetch_preset_catalog().await?;
+        preset_keys_hint = preset_catalog_keys_preview_from_value(&preset_catalog);
         if world_preset_id.is_empty() {
-            let world_options = collect_preset_options_from_catalog(
-                &preset_catalog,
-                &["world_presets", "world", "world_preset", "worlds"],
-            );
+            let world_options = collect_world_preset_options(&preset_catalog);
             world_preset_id = world_options
                 .first()
                 .map(|row| row.id.clone())
@@ -1691,10 +1900,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
                 .unwrap_or_default();
         }
         if dm_preset_id.is_empty() {
-            let dm_options = collect_preset_options_from_catalog(
-                &preset_catalog,
-                &["dm_presets", "dm", "dm_preset", "dms"],
-            );
+            let dm_options = collect_dm_preset_options(&preset_catalog);
             dm_preset_id = dm_options
                 .first()
                 .map(|row| row.id.clone())
@@ -1706,12 +1912,16 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     }
     if world_preset_id.is_empty() || dm_preset_id.is_empty() {
         return Err(format!(
-            "trpg preset 목록 파싱 실패: world_preset_id={}, dm_preset_id={}",
-            world_preset_id, dm_preset_id
+            "trpg preset 목록 파싱 실패: world_preset_id={}, dm_preset_id={}, known_keys={}",
+            world_preset_id, dm_preset_id, preset_keys_hint
         ));
     }
 
-    set_new_game_status(doc, "세션 준비 2/6: 플레이어 풀 생성 중...");
+    set_new_game_progress(
+        doc,
+        NewGameFlowStage::GeneratingPool,
+        "세션 준비 2/6: 플레이어 풀 생성 중...",
+    );
     let party_size = players.len() as i64;
     let pool_size = std::cmp::max(8_i64, party_size);
     let session_id = format!("viewer-{}-{}", room_id, js_sys::Date::now() as i64);
@@ -1772,7 +1982,11 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         return Err("선택 가능한 actor_id를 찾지 못했습니다.".to_string());
     }
 
-    set_new_game_status(doc, "세션 준비 3/6: 파티 구성/액터 선택 중...");
+    set_new_game_progress(
+        doc,
+        NewGameFlowStage::SelectingParty,
+        "세션 준비 3/6: 파티 구성/액터 선택 중...",
+    );
     let party_result = mcp_tool_call(
         "trpg.party.select",
         json!({
@@ -1792,7 +2006,11 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         return Err("party.select 결과가 비어 있습니다.".to_string());
     }
 
-    set_new_game_status(doc, "세션 준비 4/6: 세션 시작 이벤트 기록 중...");
+    set_new_game_progress(
+        doc,
+        NewGameFlowStage::StartingSession,
+        "세션 준비 4/6: 세션 시작 이벤트 기록 중...",
+    );
     let _start_result = mcp_tool_call(
         "trpg.session.start",
         json!({
@@ -1821,7 +2039,11 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
     let assignments = assign_keepers_to_actor_ids(&actor_ids, &dm_keeper, &players)?;
     let player_map: std::collections::HashMap<String, String> = assignments.into_iter().collect();
 
-    set_new_game_status(doc, "세션 준비 5/6: actor ↔ keeper 점유 동기화 중...");
+    set_new_game_progress(
+        doc,
+        NewGameFlowStage::ClaimingActors,
+        "세션 준비 5/6: actor ↔ keeper 점유 동기화 중...",
+    );
     let mut claimed_pairs = Vec::new();
     for (actor_id, keeper_name) in &player_map {
         if let Err(err) = mcp_tool_call(
@@ -1854,7 +2076,11 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         ))
     };
 
-    set_new_game_status(doc, "세션 준비 6/6: DM/플레이어 keeper 부팅 중...");
+    set_new_game_progress(
+        doc,
+        NewGameFlowStage::BootingKeepers,
+        "세션 준비 6/6: DM/플레이어 keeper 부팅 중...",
+    );
     let mut dm_keeper_up_args = json!({
         "name": dm_keeper,
         "goal": format!("TRPG room {}의 세계관 주민 DM keeper로 장면을 진행하세요.", room_id),
@@ -1895,6 +2121,11 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
 
     set_current_room_id(doc, &room_id);
     clear_trpg_dom(doc);
+    set_new_game_flow_stage(
+        doc,
+        NewGameFlowStage::Finalizing,
+        Some("라운드 실행 필드/할당 요약 동기화"),
+    );
     set_round_run_fields(doc, &dm_keeper, &actor_ids, &player_map);
     set_new_game_assignment(
         doc,
@@ -1963,9 +2194,60 @@ fn set_new_game_assignment(
 
 // ─── Preset System ──────────────────────────────────────────────
 
+async fn fetch_preset_catalog() -> Result<Value, String> {
+    let args = json!({
+        "include_characters": false,
+        "include_skills": false
+    });
+
+    let primary = mcp_tool_call("trpg.preset.list", args.clone()).await;
+    let payload = match primary {
+        Ok(value) => value,
+        Err(primary_err) => {
+            log::warn!(
+                "trpg.preset.list failed; trying legacy fallback: {}",
+                primary_err
+            );
+            match mcp_tool_call("masc_trpg_preset_list", args.clone()).await {
+                Ok(value) => value,
+                Err(legacy_err) => {
+                    log::warn!(
+                        "masc_trpg_preset_list fallback failed; retrying primary once: {}",
+                        legacy_err
+                    );
+                    match mcp_tool_call("trpg.preset.list", args).await {
+                        Ok(value) => value,
+                        Err(retry_err) => {
+                            return Err(format!(
+                                "trpg.preset.list 실패: {} / fallback 실패: {} / retry 실패: {}",
+                                primary_err, legacy_err, retry_err
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    };
+    Ok(normalize_preset_catalog(&payload))
+}
+
+fn parse_json_string_value(value: &Value) -> Option<Value> {
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    parse_embedded_tool_payload(raw)
+        .ok()
+        .or_else(|| serde_json::from_str::<Value>(raw).ok())
+}
+
 fn normalize_preset_catalog(raw: &Value) -> Value {
     let mut value = raw.clone();
-    for _ in 0..6 {
+    for _ in 0..8 {
+        if let Some(parsed) = parse_json_string_value(&value) {
+            value = parsed;
+            continue;
+        }
         if let Some(next_value) = preset_unwrap_payload(&value) {
             value = next_value;
             continue;
@@ -1977,13 +2259,24 @@ fn normalize_preset_catalog(raw: &Value) -> Value {
         break;
     }
 
+    if let Some(parsed) = parse_json_string_value(&value) {
+        value = parsed;
+    }
+
     if value.is_array() {
         let mut obj = serde_json::Map::new();
         obj.insert("items".to_string(), value);
         return Value::Object(obj);
     }
     if let Some(presets) = value.get("presets") {
-        presets.clone()
+        let normalized = parse_json_string_value(presets).unwrap_or_else(|| presets.clone());
+        if normalized.is_array() {
+            let mut obj = serde_json::Map::new();
+            obj.insert("items".to_string(), normalized);
+            Value::Object(obj)
+        } else {
+            normalized
+        }
     } else {
         value
     }
@@ -1995,9 +2288,8 @@ fn preset_unwrap_payload(value: &Value) -> Option<Value> {
         .or_else(|| value.get("result"))
         .or_else(|| value.get("data"))
         .or_else(|| value.get("structuredContent"))
-        .filter(|v| v.is_object())
         .cloned()
-        .or_else(|| value.get("presets").filter(|v| v.is_object()).cloned())
+        .or_else(|| value.get("presets").cloned())
 }
 
 fn preset_unwrap_content(value: &Value) -> Option<Value> {
@@ -2161,6 +2453,82 @@ fn collect_preset_options_from_catalog(catalog: &Value, keys: &[&str]) -> Vec<Pr
     out
 }
 
+fn collect_preset_options_by_key_fragment(catalog: &Value, fragment: &str) -> Vec<PresetOption> {
+    let mut out = Vec::new();
+    let needle = fragment.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return out;
+    }
+    let Some(obj) = catalog.as_object() else {
+        return out;
+    };
+    for (key, value) in obj {
+        if key.to_ascii_lowercase().contains(&needle) {
+            collect_preset_options_from_node(value, &mut out, 0);
+        }
+    }
+    out
+}
+
+fn collect_world_preset_options(catalog: &Value) -> Vec<PresetOption> {
+    let mut out = collect_preset_options_from_catalog(
+        catalog,
+        &[
+            "world_presets",
+            "world",
+            "world_preset",
+            "worlds",
+            "worldPresets",
+            "worldPreset",
+            "world_options",
+            "world_preset_options",
+        ],
+    );
+    if out.is_empty() {
+        out = collect_preset_options_by_key_fragment(catalog, "world");
+    }
+    out
+}
+
+fn collect_dm_preset_options(catalog: &Value) -> Vec<PresetOption> {
+    let mut out = collect_preset_options_from_catalog(
+        catalog,
+        &[
+            "dm_presets",
+            "dm",
+            "dm_preset",
+            "dms",
+            "dmPresets",
+            "dmPreset",
+            "dm_options",
+            "dm_preset_options",
+        ],
+    );
+    if out.is_empty() {
+        out = collect_preset_options_by_key_fragment(catalog, "dm");
+    }
+    out
+}
+
+fn preset_catalog_keys_preview_from_value(catalog: &Value) -> String {
+    let Some(obj) = catalog.as_object() else {
+        return "(non-object)".to_string();
+    };
+    let mut keys = obj.keys().map(|k| k.trim().to_string()).collect::<Vec<_>>();
+    keys.retain(|k| !k.is_empty());
+    keys.sort();
+    keys.dedup();
+    if keys.is_empty() {
+        return "[]".to_string();
+    }
+    let preview = keys.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
+    if keys.len() > 8 {
+        format!("[{} ... +{}]", preview, keys.len() - 8)
+    } else {
+        format!("[{}]", preview)
+    }
+}
+
 fn select_options_set(
     doc: &web_sys::Document,
     select_id: &str,
@@ -2203,22 +2571,9 @@ fn select_options_set(
 async fn refresh_preset_selectors(
     doc: &web_sys::Document,
 ) -> Result<(Vec<PresetOption>, Vec<PresetOption>), String> {
-    let raw_catalog = mcp_tool_call(
-        "trpg.preset.list",
-        json!({
-            "include_characters": false,
-            "include_skills": false
-        }),
-    )
-    .await?;
-    let catalog = normalize_preset_catalog(&raw_catalog);
-
-    let world_presets = collect_preset_options_from_catalog(
-        &catalog,
-        &["world_presets", "world", "world_preset", "worlds"],
-    );
-    let dm_presets =
-        collect_preset_options_from_catalog(&catalog, &["dm_presets", "dm", "dm_preset", "dms"]);
+    let catalog = fetch_preset_catalog().await?;
+    let world_presets = collect_world_preset_options(&catalog);
+    let dm_presets = collect_dm_preset_options(&catalog);
 
     let _ = select_options_set(doc, "new-game-world-select", &world_presets);
     let _ = select_options_set(doc, "new-game-dm-preset-select", &dm_presets);
@@ -2252,6 +2607,11 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
         }
         set_new_game_wizard_busy(&doc, false);
         set_new_game_preflight_state(&doc, "pending");
+        set_new_game_flow_stage(
+            &doc,
+            NewGameFlowStage::Bootstrap,
+            Some("초기 데이터를 불러오는 중"),
+        );
         sync_new_game_wizard_ui(&doc);
         set_new_game_status(&doc, "Keeper 목록을 불러오는 중...");
         set_new_game_preflight_status(&doc, "사전 점검 준비 중...");
@@ -2269,6 +2629,11 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                             bootstrap.dm_presets.len()
                         ),
                     );
+                    set_new_game_flow_stage(
+                        &doc_for_fetch,
+                        NewGameFlowStage::Preflight,
+                        Some("사전 점검 자동 실행"),
+                    );
                     actor_admin_set_status(&doc_for_fetch, "액터 목록 로드 완료", "status-ok");
                     set_new_game_preflight_status(&doc_for_fetch, "사전 점검 실행 중...");
                     let _ = run_new_game_preflight(&doc_for_fetch).await;
@@ -2284,6 +2649,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                         "status-error",
                     );
                     set_new_game_preflight_state(&doc_for_fetch, "fail");
+                    set_new_game_flow_stage(&doc_for_fetch, NewGameFlowStage::Failed, Some(&e));
                     set_new_game_preflight_status(
                         &doc_for_fetch,
                         &format!("사전 점검 불가: {}", e),
@@ -2303,6 +2669,8 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                 return;
             };
+            set_new_game_wizard_busy(&doc, false);
+            set_new_game_flow_stage(&doc, NewGameFlowStage::Idle, Some("패널 닫힘"));
             set_element_display(&doc, "new-game-panel", "none");
         }) as Box<dyn FnMut()>);
         let _ = close_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -2362,6 +2730,11 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                 return;
             }
             set_new_game_preflight_state(&doc, "pending");
+            set_new_game_flow_stage(
+                &doc,
+                NewGameFlowStage::Bootstrap,
+                Some("수동 새로고침 실행"),
+            );
             sync_new_game_wizard_ui(&doc);
             set_new_game_status(&doc, "세션/프리셋/keeper 정보를 새로고침 중...");
             set_new_game_preflight_status(&doc, "사전 점검 실행 중...");
@@ -2379,6 +2752,11 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                                 bootstrap.dm_presets.len()
                             ),
                         );
+                        set_new_game_flow_stage(
+                            &doc_for_fetch,
+                            NewGameFlowStage::Preflight,
+                            Some("새로고침 후 사전 점검"),
+                        );
                         actor_admin_set_status(
                             &doc_for_fetch,
                             "액터 목록 새로고침 완료",
@@ -2394,6 +2772,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                             "status-error",
                         );
                         set_new_game_preflight_state(&doc_for_fetch, "fail");
+                        set_new_game_flow_stage(&doc_for_fetch, NewGameFlowStage::Failed, Some(&e));
                         set_new_game_preflight_status(
                             &doc_for_fetch,
                             &format!("사전 점검 실패: {}", e),
@@ -2418,12 +2797,14 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                 return;
             }
             set_new_game_preflight_state(&doc, "pending");
+            set_new_game_flow_stage(&doc, NewGameFlowStage::Preflight, Some("수동 점검 실행"));
             sync_new_game_wizard_ui(&doc);
             set_new_game_preflight_status(&doc, "사전 점검 실행 중...");
             let doc_for_task = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 if let Err(err) = run_new_game_preflight(&doc_for_task).await {
                     log::warn!("new-game preflight failed: {}", err);
+                    set_new_game_flow_stage(&doc_for_task, NewGameFlowStage::Failed, Some(&err));
                 }
             });
         }) as Box<dyn FnMut()>);
@@ -2447,16 +2828,27 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                 return;
             }
             set_new_game_wizard_busy(&doc, true);
+            set_new_game_flow_stage(
+                &doc,
+                NewGameFlowStage::Bootstrap,
+                Some("빠른 시작 파이프라인 실행"),
+            );
             sync_new_game_wizard_ui(&doc);
             let doc_for_start = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let result = run_new_game_quick_start(&doc_for_start).await;
                 match result {
                     Ok(message) => {
+                        set_new_game_flow_stage(
+                            &doc_for_start,
+                            NewGameFlowStage::Done,
+                            Some("빠른 시작 완료"),
+                        );
                         set_new_game_status(&doc_for_start, &message);
                         set_element_display(&doc_for_start, "new-game-panel", "none");
                     }
                     Err(e) => {
+                        set_new_game_flow_stage(&doc_for_start, NewGameFlowStage::Failed, Some(&e));
                         set_new_game_status(&doc_for_start, &format!("빠른 시작 실패: {}", e));
                     }
                 }
@@ -2490,16 +2882,27 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             }
             set_new_game_status(&doc, "새 게임 시작 중...");
             set_new_game_wizard_busy(&doc, true);
+            set_new_game_flow_stage(
+                &doc,
+                NewGameFlowStage::ValidatingInput,
+                Some("세션 시작 입력 검증"),
+            );
             sync_new_game_wizard_ui(&doc);
             let doc_for_start = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let result = start_new_game_flow(&doc_for_start).await;
                 match result {
                     Ok(message) => {
+                        set_new_game_flow_stage(
+                            &doc_for_start,
+                            NewGameFlowStage::Done,
+                            Some("세션 시작 완료"),
+                        );
                         set_new_game_status(&doc_for_start, &message);
                         set_element_display(&doc_for_start, "new-game-panel", "none");
                     }
                     Err(e) => {
+                        set_new_game_flow_stage(&doc_for_start, NewGameFlowStage::Failed, Some(&e));
                         set_new_game_status(&doc_for_start, &format!("시작 실패: {}", e));
                     }
                 }
@@ -2514,6 +2917,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
     }
 
     bind_new_game_selection_watchers(doc);
+    set_new_game_flow_stage(doc, NewGameFlowStage::Idle, Some("대기"));
     sync_new_game_wizard_ui(doc);
     bind_actor_admin_controls(doc);
 }

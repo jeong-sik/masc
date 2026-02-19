@@ -228,37 +228,59 @@ fn parse_embedded_json(raw: &str) -> Option<Value> {
 
 fn collect_json_candidates(raw: &str) -> Vec<String> {
     let mut candidates = Vec::new();
-    let src = raw.trim();
+    let src = raw.trim_start_matches('\u{feff}').trim();
     if src.is_empty() {
         return candidates;
     }
 
     // 1) Strict full-text parse
-    candidates.push(src.to_string());
+    push_candidate(&mut candidates, src);
 
     // 2) SSE payload-only lines
-    candidates.extend(
-        src.lines()
-            .filter_map(|line| line.strip_prefix("data:"))
-            .map(str::trim_start)
-            .filter(|line| !line.is_empty() && *line != "[DONE]")
-            .map(ToString::to_string),
-    );
+    for line in src.lines() {
+        if let Some(payload) = line.strip_prefix("data:") {
+            let payload = payload.trim_start();
+            if !payload.is_empty() && payload != "[DONE]" {
+                push_candidate(&mut candidates, payload);
+            }
+        }
+    }
 
-    // 3) Event-frame chunks
-    candidates.extend(
-        src.split("\n\n")
-            .map(str::trim)
-            .filter(|piece| !piece.is_empty() && *piece != "[DONE]")
-            .map(ToString::to_string),
-    );
+    // 3) Plain per-line JSON candidates (when logs and JSON are mixed).
+    for line in src.lines() {
+        let piece = line.trim();
+        if piece.is_empty() || piece == "[DONE]" {
+            continue;
+        }
+        if matches!(piece.chars().next(), Some('{') | Some('[') | Some('"')) {
+            push_candidate(&mut candidates, piece);
+        }
+    }
 
-    // 4) Top-level embedded JSON span
-    if let Some((start, end)) = extract_top_level_json_span(src) {
-        candidates.push(src[start..end].to_string());
+    // 4) Event-frame chunks
+    for piece in src.split("\n\n").map(str::trim) {
+        if !piece.is_empty() && piece != "[DONE]" {
+            push_candidate(&mut candidates, piece);
+        }
+    }
+
+    // 5) Top-level embedded JSON spans (can be multiple objects in one body).
+    for (start, end) in extract_top_level_json_spans(src) {
+        push_candidate(&mut candidates, &src[start..end]);
     }
 
     candidates
+}
+
+fn push_candidate(out: &mut Vec<String>, raw: &str) {
+    let piece = raw.trim();
+    if piece.is_empty() {
+        return;
+    }
+    if out.iter().any(|existing| existing == piece) {
+        return;
+    }
+    out.push(piece.to_string());
 }
 
 fn preview_text(raw: &str, max_chars: usize) -> String {
@@ -326,11 +348,12 @@ fn score_json_candidate(value: &Value) -> u8 {
     30
 }
 
-fn extract_top_level_json_span(raw: &str) -> Option<(usize, usize)> {
+fn extract_top_level_json_spans(raw: &str) -> Vec<(usize, usize)> {
     let mut stack: Vec<u8> = Vec::new();
     let mut in_string = false;
     let mut escape = false;
     let mut start: Option<usize> = None;
+    let mut spans = Vec::new();
 
     for (idx, byte) in raw.bytes().enumerate() {
         if in_string {
@@ -363,22 +386,25 @@ fn extract_top_level_json_span(raw: &str) -> Option<(usize, usize)> {
             b'}' | b']' => {
                 if let Some(expected) = stack.pop() {
                     if expected != byte {
-                        return None;
+                        stack.clear();
+                        start = None;
+                        continue;
                     }
                     if stack.is_empty() {
                         if let Some(begin) = start {
-                            return Some((begin, idx + 1));
+                            spans.push((begin, idx + 1));
+                            start = None;
                         }
                     }
                 } else {
-                    return None;
+                    continue;
                 }
             }
             _ => {}
         }
     }
 
-    None
+    spans
 }
 
 #[cfg(test)]
@@ -436,6 +462,37 @@ data: {"jsonrpc":"2.0","id":1,"result":{"payload":{"ok":true}}}"#;
             parsed
                 .get("result")
                 .and_then(|row| row.get("payload"))
+                .and_then(|row| row.get("dm_presets"))
+                .and_then(Value::as_array)
+                .map(|arr| arr.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn parse_mcp_rpc_response_handles_log_noise_then_plain_json_line() {
+        let raw = r#"[MCP] tools/call: trpg.preset.list
+INFO warmup done
+{"jsonrpc":"2.0","id":11,"result":{"payload":{"world_presets":[{"id":"grimland"}],"dm_presets":[{"id":"grimland-dm"}]}}}"#;
+        let parsed = parse_mcp_rpc_response(raw).expect("should parse plain json line");
+        assert_eq!(
+            parsed
+                .get("result")
+                .and_then(|row| row.get("payload"))
+                .and_then(|row| row.get("world_presets"))
+                .and_then(Value::as_array)
+                .map(|arr| arr.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn parse_embedded_tool_payload_handles_bom_prefixed_json() {
+        let raw = "\u{feff}{\"payload\":{\"world_presets\":[{\"id\":\"grimland\"}],\"dm_presets\":[{\"id\":\"grimland-dm\"}]}}";
+        let parsed = parse_embedded_tool_payload(raw).expect("bom json should parse");
+        assert_eq!(
+            parsed
+                .get("payload")
                 .and_then(|row| row.get("dm_presets"))
                 .and_then(Value::as_array)
                 .map(|arr| arr.len()),

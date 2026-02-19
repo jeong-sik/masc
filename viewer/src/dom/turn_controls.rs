@@ -22,7 +22,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::config;
 #[cfg(any(target_arch = "wasm32", test))]
-use crate::game::lifecycle::{TrpgLifecycleState, TrpgUiState};
+use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -69,129 +69,6 @@ fn control_status_to_ops_class(css_class: &str) -> &'static str {
 #[cfg(any(target_arch = "wasm32", test))]
 fn round_advanced(turn_before: u64, turn_after: u64, summary_advanced: Option<bool>) -> bool {
     summary_advanced.unwrap_or(turn_after > turn_before)
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn derive_trpg_ui_state(
-    lifecycle: TrpgLifecycleState,
-    connection_ok: bool,
-    wizard_busy: bool,
-    preflight_ok: bool,
-    wizard_ready: bool,
-    round_running: bool,
-) -> TrpgUiState {
-    if !connection_ok || matches!(lifecycle, TrpgLifecycleState::Unavailable) {
-        return TrpgUiState::Error;
-    }
-    if round_running {
-        return TrpgUiState::RoundRunning;
-    }
-    if wizard_busy || matches!(lifecycle, TrpgLifecycleState::Loading) {
-        return TrpgUiState::SessionStarting;
-    }
-    match lifecycle {
-        TrpgLifecycleState::Running => TrpgUiState::SessionRunning,
-        TrpgLifecycleState::Stopped => TrpgUiState::Paused,
-        TrpgLifecycleState::Ended => TrpgUiState::Ended,
-        TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => {
-            if preflight_ok && wizard_ready {
-                TrpgUiState::ConfigReady
-            } else {
-                TrpgUiState::Lobby
-            }
-        }
-        TrpgLifecycleState::Loading => TrpgUiState::SessionStarting,
-        TrpgLifecycleState::Unavailable => TrpgUiState::Error,
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn read_new_game_wizard_busy(doc: &web_sys::Document) -> bool {
-    doc.get_element_by_id("new-game-panel")
-        .and_then(|panel| panel.get_attribute("data-wizard-busy"))
-        .is_some_and(|flag| flag == "1")
-}
-
-#[cfg(target_arch = "wasm32")]
-fn read_new_game_preflight_ok(doc: &web_sys::Document) -> bool {
-    doc.get_element_by_id("new-game-panel")
-        .and_then(|panel| panel.get_attribute("data-preflight-state"))
-        .is_some_and(|state| state == "ok")
-}
-
-#[cfg(target_arch = "wasm32")]
-fn read_new_game_assignment_ready(doc: &web_sys::Document) -> bool {
-    let dm = doc
-        .get_element_by_id("new-game-dm-select")
-        .and_then(|el| el.dyn_into::<HtmlSelectElement>().ok())
-        .map(|select| select.value().trim().to_string())
-        .unwrap_or_default();
-    if dm.is_empty() {
-        return false;
-    }
-
-    let Ok(nodes) = doc.query_selector_all("#new-game-player-select option:checked") else {
-        return false;
-    };
-    let mut selected_count = 0_u32;
-    let mut has_conflict = false;
-    for idx in 0..nodes.length() {
-        let Some(node) = nodes.item(idx) else {
-            continue;
-        };
-        let Some(option) = node.dyn_ref::<web_sys::HtmlOptionElement>() else {
-            continue;
-        };
-        let value = option.value().trim().to_string();
-        if value.is_empty() {
-            continue;
-        }
-        if value == dm {
-            has_conflict = true;
-            continue;
-        }
-        selected_count += 1;
-    }
-    selected_count > 0 && !has_conflict
-}
-
-#[cfg(target_arch = "wasm32")]
-fn summarize_ops_detail(detail: &str, max_chars: usize) -> String {
-    let compact = detail.trim().replace('\n', " ");
-    if compact.chars().count() <= max_chars {
-        return compact;
-    }
-    let mut shortened = compact
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    shortened.push('…');
-    shortened
-}
-
-#[cfg(target_arch = "wasm32")]
-fn sync_dashboard_ui_state(doc: &web_sys::Document, state: TrpgUiState, detail: &str) {
-    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
-        let _ = dashboard.set_attribute("data-trpg-ui-state", state.code());
-        let _ = dashboard.set_attribute("data-trpg-ui-label", state.label_ko());
-        let _ = dashboard.set_attribute("data-trpg-ui-help", state.help_text());
-    }
-
-    if let Some(el) = doc.get_element_by_id("ops-control-state") {
-        let summary = summarize_ops_detail(detail, 96);
-        let text = if summary.is_empty() {
-            state.label_ko().to_string()
-        } else {
-            format!("{} · {}", state.label_ko(), summary)
-        };
-        let class_name = format!("ops-v {}", state.ops_class());
-        el.set_text_content(Some(&text));
-        let _ = el.set_attribute("class", &class_name);
-        let _ = el.set_attribute(
-            "title",
-            &format!("{} | {}", state.help_text(), detail.trim()),
-        );
-    }
 }
 
 // ─── Marker Resource ────────────────────────
@@ -266,9 +143,8 @@ pub fn sync_turn_controls_visibility(
         let runner_active = auto_round_runner_active(&doc);
         if runner_active {
             can_run = false;
-            reason =
-                "실행 대기: 자동 라운드 실행 중입니다. 관전 모드에서는 수동 실행이 잠금됩니다."
-                    .to_string();
+            reason = "실행 대기: 자동 라운드 실행 중입니다. 관전 모드에서는 수동 실행이 잠금됩니다."
+                .to_string();
             reason_class = "status-info";
         } else if let Some(owner) = lock_owner.as_deref() {
             if owner != "manual" {
@@ -311,16 +187,6 @@ pub fn sync_turn_controls_visibility(
             format!("실행 대기: {}", reason)
         };
         set_turn_gate_reason(&gate_message, reason_class);
-
-        let ui_state = derive_trpg_ui_state(
-            lifecycle,
-            connection_ok,
-            read_new_game_wizard_busy(&doc),
-            read_new_game_preflight_ok(&doc),
-            read_new_game_assignment_ready(&doc),
-            busy || locked,
-        );
-        sync_dashboard_ui_state(&doc, ui_state, &gate_message);
     }
 }
 
@@ -1066,7 +932,10 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
         .or_else(|| read_dom_input(doc, "new-game-dm-select"))
         .unwrap_or_default();
     if dm_keeper.is_empty() {
-        return Err("DM keeper가 설정되지 않았습니다. 새 게임을 먼저 시작하세요.".to_string());
+        return Err(
+            "DM keeper가 설정되지 않았습니다. `새 게임`에서 DM을 선택하거나 현재 방에서 DM claim을 먼저 완료하세요."
+                .to_string(),
+        );
     }
 
     let phase = read_dom_input(doc, "round-run-phase").unwrap_or_else(|| "round".to_string());
@@ -1086,7 +955,10 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
         }
     }
     if player_keepers.is_empty() {
-        return Err("player keepers가 없습니다. 새 게임에서 참가자 할당을 확인하세요.".to_string());
+        return Err(
+            "player keepers가 없습니다. `새 게임`에서 AI PLAYER 선택 후 `파티 자동 할당`으로 actor→keeper를 채우세요."
+                .to_string(),
+        );
     }
 
     Ok(RoundRunPlan {
@@ -1167,35 +1039,5 @@ mod tests {
     fn round_advanced_falls_back_to_turn_delta() {
         assert!(round_advanced(2, 3, None));
         assert!(!round_advanced(2, 2, None));
-    }
-
-    #[test]
-    fn derive_trpg_ui_state_prioritizes_round_running() {
-        let state =
-            derive_trpg_ui_state(TrpgLifecycleState::Running, true, false, true, true, true);
-        assert_eq!(state, TrpgUiState::RoundRunning);
-    }
-
-    #[test]
-    fn derive_trpg_ui_state_detects_config_ready_before_start() {
-        let state = derive_trpg_ui_state(TrpgLifecycleState::Lobby, true, false, true, true, false);
-        assert_eq!(state, TrpgUiState::ConfigReady);
-    }
-
-    #[test]
-    fn derive_trpg_ui_state_maps_paused_and_error() {
-        let paused = derive_trpg_ui_state(
-            TrpgLifecycleState::Stopped,
-            true,
-            false,
-            false,
-            false,
-            false,
-        );
-        assert_eq!(paused, TrpgUiState::Paused);
-
-        let error =
-            derive_trpg_ui_state(TrpgLifecycleState::Running, false, false, true, true, false);
-        assert_eq!(error, TrpgUiState::Error);
     }
 }

@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { StatusBadge } from './common/status-badge'
+import { openKeeperDetail } from './keeper-detail'
 import { agents, keepers } from '../store'
 import type { Agent, Keeper } from '../types'
 
@@ -33,7 +34,7 @@ function KeeperCard({ keeper }: { keeper: Keeper }) {
   const ctxClass = ctxPct != null ? (ctxPct > 80 ? 'bad' : ctxPct > 60 ? 'warn' : '') : ''
 
   return html`
-    <div class="live-agent keeper-card">
+    <div class="live-agent keeper-card" onClick=${() => openKeeperDetail(keeper)} style="cursor:pointer;">
       <div class="live-agent-main">
         <div class="live-agent-title">
           <span class="live-agent-name">${keeper.emoji ?? ''} ${keeper.name}</span>

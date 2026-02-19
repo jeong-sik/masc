@@ -2450,7 +2450,15 @@ let handle_round_run ctx args : result =
       in
       let* () = validate_unique_keeper_assignments ~dm_keeper ~player_keepers in
       let assigned_keepers = dm_keeper :: List.map snd player_keepers in
-      let* () = keeper_preflight ctx ~keepers:assigned_keepers in
+      let preflight_warning =
+        match keeper_preflight ctx ~keepers:assigned_keepers with
+        | Ok () -> None
+        | Error e ->
+            Some
+              (Printf.sprintf
+                 "non-blocking preflight warning (snapshot): %s"
+                 e)
+      in
       with_keeper_reservation
         ~keepers:assigned_keepers
         (fun () ->
@@ -2677,29 +2685,11 @@ let handle_round_run ctx args : result =
         else base_state_for_prompt
       in
       let* () =
-        if player_quorum_met then
-          process_one
-            ~state_json:state_for_dm_prompt
-            ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
-        else (
-          statuses :=
-            `Assoc
-              [
-                ("actor_id", `String "dm");
-                ("role", `String "dm");
-                ("keeper", `String dm_keeper);
-                ("status", `String "skipped");
-                ( "reason",
-                  `String
-                    (Printf.sprintf
-                       "player quorum not met: success=%d required=%d; dm execution skipped"
-                       !player_success_count
-                       player_required_successes) );
-              ]
-            :: !statuses;
-          Ok () )
+        process_one
+          ~state_json:state_for_dm_prompt
+          ~role:`Dm ~actor_id:"dm" ~keeper_name:dm_keeper
       in
-      let advanced = player_quorum_met && !dm_success in
+      let advanced = !dm_success in
       let turn_after = if advanced then next_turn else turn_before in
       let* () =
         if advanced then
@@ -2727,6 +2717,10 @@ let handle_round_run ctx args : result =
             ("turn_before", `Int turn_before);
             ("turn_after", `Int turn_after);
             ("timeout_sec", `Float timeout_sec);
+            ( "preflight_warning",
+              match preflight_warning with
+              | Some warning -> `String warning
+              | None -> `Null );
             ("statuses", `List statuses);
             ("interventions_applied", `List interventions_applied);
             ( "summary",

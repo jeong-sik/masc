@@ -430,31 +430,37 @@ let trpg_parse_event_type_filter event_type_filter =
 
 let trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter
   : (Masc_mcp.Trpg_engine_event.t list, trpg_api_error_kind * string) result =
-  let room_id = String.trim room_id in
-  if room_id = "" then
-    Error (`Bad_request, "room_id is required")
-  else
-    match trpg_parse_event_type_filter event_type_filter with
-    | Error _ as e -> e
-    | Ok event_type_opt ->
-        let read_result =
-          if after_seq > 0 then
-            Masc_mcp.Trpg_engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq
-          else
-            Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
-        in
-        (match read_result with
-        | Error e -> Error (`Internal_server_error, e)
-        | Ok events ->
-            let events =
-              match event_type_opt with
-              | None -> events
-              | Some et ->
-                  List.filter
-                    (fun (ev : Masc_mcp.Trpg_engine_event.t) -> ev.event_type = et)
-                    events
-            in
-            Ok events)
+  try
+    let room_id = String.trim room_id in
+    if room_id = "" then
+      Error (`Bad_request, "room_id is required")
+    else
+      match trpg_parse_event_type_filter event_type_filter with
+      | Error _ as e -> e
+      | Ok event_type_opt ->
+          let read_result =
+            if after_seq > 0 then
+              Masc_mcp.Trpg_engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq
+            else
+              Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+          in
+          (match read_result with
+          | Error e -> Error (`Internal_server_error, e)
+          | Ok events ->
+              let events =
+                match event_type_opt with
+                | None -> events
+                | Some et ->
+                    List.filter
+                      (fun (ev : Masc_mcp.Trpg_engine_event.t) -> ev.event_type = et)
+                      events
+              in
+              Ok events)
+  with exn ->
+    Error
+      ( `Internal_server_error,
+        Printf.sprintf "trpg_read_events_list failed: %s"
+          (Printexc.to_string exn) )
 
 let trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter : trpg_api_result =
   let room_id = String.trim room_id in
@@ -553,30 +559,36 @@ let trpg_append_event_json ~base_dir ~body_str : trpg_api_result =
   with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
 
 let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
-  let room_id = String.trim room_id in
-  if room_id = "" then
-    Error (`Bad_request, "room_id is required")
-  else
-    match trpg_rule_by_id rule_module with
-    | Error _ as e -> e
-    | Ok rule -> (
-        match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
-        | Error e -> Error (`Internal_server_error, e)
-        | Ok events ->
-            let config = trpg_extract_config_from_events events in
-            let state =
-              Masc_mcp.Trpg_engine_replay.derive_state ~rule ~config ~events
-            in
-            let module R = (val rule : Masc_mcp.Trpg_rule.S) in
-            Ok
-              (`Assoc
-                [
-                  ("ok", `Bool true);
-                  ("room_id", `String room_id);
-                  ("rule_module", `String R.id);
-                  ("event_count", `Int (List.length events));
-                  ("state", state);
-                ]))
+  try
+    let room_id = String.trim room_id in
+    if room_id = "" then
+      Error (`Bad_request, "room_id is required")
+    else
+      match trpg_rule_by_id rule_module with
+      | Error _ as e -> e
+      | Ok rule -> (
+          match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+          | Error e -> Error (`Internal_server_error, e)
+          | Ok events ->
+              let config = trpg_extract_config_from_events events in
+              let state =
+                Masc_mcp.Trpg_engine_replay.derive_state ~rule ~config ~events
+              in
+              let module R = (val rule : Masc_mcp.Trpg_rule.S) in
+              Ok
+                (`Assoc
+                  [
+                    ("ok", `Bool true);
+                    ("room_id", `String room_id);
+                    ("rule_module", `String R.id);
+                    ("event_count", `Int (List.length events));
+                    ("state", state);
+                  ]))
+  with exn ->
+    Error
+      ( `Internal_server_error,
+        Printf.sprintf "trpg_derive_state_json failed: %s"
+          (Printexc.to_string exn) )
 
 let trpg_state_from_derived derived_json =
   try

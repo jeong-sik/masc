@@ -10,6 +10,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::dom::escape::html_escape;
+use crate::game::lifecycle::TrpgUiState;
 
 use super::{
     assign_keepers_to_actor_ids, clear_trpg_dom, generate_room_id, mcp_tool_call,
@@ -84,6 +85,20 @@ fn selected_dm_keeper(doc: &web_sys::Document) -> String {
         .unwrap_or_default()
         .trim()
         .to_string()
+}
+
+fn read_dashboard_ui_state(doc: &web_sys::Document) -> TrpgUiState {
+    doc.get_element_by_id("dashboard")
+        .and_then(|dashboard| dashboard.get_attribute("data-trpg-ui-state"))
+        .map(|raw| TrpgUiState::from_code(&raw))
+        .unwrap_or(TrpgUiState::Lobby)
+}
+
+fn ui_state_blocks_new_session_start(state: TrpgUiState) -> bool {
+    matches!(
+        state,
+        TrpgUiState::SessionStarting | TrpgUiState::SessionRunning | TrpgUiState::RoundRunning
+    )
 }
 
 fn set_new_game_preflight_state(doc: &web_sys::Document, state: &str) {
@@ -181,11 +196,13 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     let preflight_state = new_game_preflight_state(doc);
     let dm_keeper = selected_dm_keeper(doc);
     let players = selected_player_keepers(doc);
+    let ui_state = read_dashboard_ui_state(doc);
     let dm_selected = !dm_keeper.is_empty();
     let has_conflict = dm_selected && players.iter().any(|player| player == &dm_keeper);
     let players_ok = !players.is_empty() && !has_conflict;
     let assignment_ok = dm_selected && players_ok;
-    let ready = preflight_state == "ok" && assignment_ok;
+    let runtime_locked = ui_state_blocks_new_session_start(ui_state);
+    let ready = preflight_state == "ok" && assignment_ok && !runtime_locked;
     let busy = new_game_wizard_busy(doc);
 
     let step1_state = match preflight_state.as_str() {
@@ -208,7 +225,7 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
     };
     let step3_state = if busy {
         "active"
-    } else if ready {
+    } else if runtime_locked || ready {
         "active"
     } else {
         "pending"
@@ -220,6 +237,11 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
 
     let start_gate_reason = if busy {
         "세션 시작 작업 실행 중입니다. 완료까지 기다려주세요.".to_string()
+    } else if runtime_locked {
+        format!(
+            "현재 {} 상태입니다. 진행 중 라운드/세션이 멈춘 뒤 시작하세요.",
+            ui_state.label_ko()
+        )
     } else if preflight_state != "ok" {
         "사전 점검을 먼저 통과해야 세션 시작이 가능합니다.".to_string()
     } else if !dm_selected {
@@ -244,16 +266,31 @@ fn sync_new_game_wizard_ui(doc: &web_sys::Document) {
         start_btn.set_title(&start_gate_reason);
     }
 
+    for id in [
+        "new-game-quick-start",
+        "new-game-preflight-btn",
+        "new-game-refresh",
+    ] {
+        if let Some(btn) = doc
+            .get_element_by_id(id)
+            .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
+        {
+            btn.set_disabled(busy || runtime_locked);
+        }
+    }
+
     if let Some(hint) = doc.get_element_by_id("new-game-step-hint") {
+        let state_badge = format!("[상태: {}]", ui_state.label_ko());
         let text = if ready {
             format!(
-                "3단계 준비 완료: DM {} · 플레이어 {}명({}). 세션 시작 버튼을 누르세요.",
+                "{} 3단계 준비 완료: DM {} · 플레이어 {}명({}). 세션 시작 버튼을 누르세요.",
+                state_badge,
                 dm_keeper,
                 players.len(),
                 summarize_names(&players, 3)
             )
         } else {
-            format!("진행 가이드: {}", start_gate_reason)
+            format!("{} 진행 가이드: {}", state_badge, start_gate_reason)
         };
         hint.set_text_content(Some(&text));
     }

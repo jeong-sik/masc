@@ -9,6 +9,19 @@ pub enum TrpgLifecycleState {
     Unknown,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrpgUiState {
+    Lobby,
+    ConfigReady,
+    SessionStarting,
+    SessionRunning,
+    RoundRunning,
+    Paused,
+    Ended,
+    Error,
+}
+
 pub fn normalize_status(raw: &str) -> String {
     let normalized = raw.trim().to_ascii_lowercase();
     if normalized.is_empty() {
@@ -113,5 +126,114 @@ impl TrpgLifecycleState {
 
     pub fn accepts_player_input(self) -> bool {
         matches!(self, Self::Running)
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl TrpgUiState {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Lobby => "lobby",
+            Self::ConfigReady => "config_ready",
+            Self::SessionStarting => "session_starting",
+            Self::SessionRunning => "session_running",
+            Self::RoundRunning => "round_running",
+            Self::Paused => "paused",
+            Self::Ended => "ended",
+            Self::Error => "error",
+        }
+    }
+
+    pub fn from_code(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "config_ready" => Self::ConfigReady,
+            "session_starting" => Self::SessionStarting,
+            "session_running" => Self::SessionRunning,
+            "round_running" => Self::RoundRunning,
+            "paused" => Self::Paused,
+            "ended" => Self::Ended,
+            "error" => Self::Error,
+            _ => Self::Lobby,
+        }
+    }
+
+    pub fn label_ko(self) -> &'static str {
+        match self {
+            Self::Lobby => "로비",
+            Self::ConfigReady => "설정 완료",
+            Self::SessionStarting => "세션 시작 중",
+            Self::SessionRunning => "세션 진행 중",
+            Self::RoundRunning => "라운드 실행 중",
+            Self::Paused => "일시정지",
+            Self::Ended => "종료",
+            Self::Error => "오류",
+        }
+    }
+
+    pub fn help_text(self) -> &'static str {
+        match self {
+            Self::Lobby => "새 세션 시작 전 대기 상태",
+            Self::ConfigReady => "사전 점검과 keeper 할당이 완료되어 시작 가능한 상태",
+            Self::SessionStarting => "세션 생성/부트스트랩이 진행 중인 상태",
+            Self::SessionRunning => "세션이 실행 중이며 라운드 실행 가능 상태",
+            Self::RoundRunning => "라운드 요청이 실행 중인 상태",
+            Self::Paused => "세션이 멈춰 있으며 재개 또는 종료 판단 필요",
+            Self::Ended => "세션이 종료된 상태",
+            Self::Error => "연결 또는 실행 오류로 진행할 수 없는 상태",
+        }
+    }
+
+    pub fn ops_class(self) -> &'static str {
+        match self {
+            Self::ConfigReady | Self::SessionRunning => "status-active",
+            Self::SessionStarting | Self::RoundRunning => "status-info",
+            Self::Paused => "status-warn",
+            Self::Ended | Self::Lobby => "status-idle",
+            Self::Error => "status-error",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TrpgUiState;
+
+    #[test]
+    fn trpg_ui_state_code_roundtrip() {
+        let cases = [
+            TrpgUiState::Lobby,
+            TrpgUiState::ConfigReady,
+            TrpgUiState::SessionStarting,
+            TrpgUiState::SessionRunning,
+            TrpgUiState::RoundRunning,
+            TrpgUiState::Paused,
+            TrpgUiState::Ended,
+            TrpgUiState::Error,
+        ];
+
+        for state in cases {
+            assert_eq!(TrpgUiState::from_code(state.code()), state);
+        }
+        assert_eq!(TrpgUiState::from_code("unknown-state"), TrpgUiState::Lobby);
+    }
+
+    #[test]
+    fn trpg_ui_state_labels_and_classes_are_defined() {
+        let cases = [
+            TrpgUiState::Lobby,
+            TrpgUiState::ConfigReady,
+            TrpgUiState::SessionStarting,
+            TrpgUiState::SessionRunning,
+            TrpgUiState::RoundRunning,
+            TrpgUiState::Paused,
+            TrpgUiState::Ended,
+            TrpgUiState::Error,
+        ];
+
+        for state in cases {
+            assert!(!state.label_ko().trim().is_empty());
+            assert!(!state.help_text().trim().is_empty());
+            assert!(!state.ops_class().trim().is_empty());
+        }
     }
 }

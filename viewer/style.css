@@ -360,7 +360,7 @@ body.mode-lobby #dashboard {
 
 #dashboard {
     display: grid;
-    grid-template-rows: 44px auto 1fr 120px;
+    grid-template-rows: minmax(44px, auto) auto 1fr 120px;
     grid-template-columns: 1fr;
     height: 100vh;
     position: relative;
@@ -370,7 +370,7 @@ body.mode-lobby #dashboard {
 }
 
 #dashboard[data-debug="off"] {
-    grid-template-rows: 44px auto 1fr;
+    grid-template-rows: minmax(44px, auto) auto 1fr;
 }
 
 #dashboard[data-debug="off"] #bottom-zone {
@@ -444,7 +444,8 @@ body:not(.mode-trpg) #ops-hud {
     background: var(--bg-panel);
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    flex-wrap: wrap;
+    padding: 6px 12px;
     gap: 12px;
     border-bottom: 1px solid var(--border-main);
 }
@@ -472,12 +473,19 @@ body:not(.mode-trpg) #ops-hud {
     letter-spacing: 3px;
     text-transform: uppercase;
     flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .top-bar-right {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
+    justify-content: flex-end;
+    flex: 1 1 520px;
+    min-width: 0;
     gap: 12px;
     position: relative;
 }

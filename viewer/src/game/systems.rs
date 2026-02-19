@@ -202,17 +202,15 @@ pub fn apply_turn_progress(
 
         match payload.event_type.as_str() {
             "phase.changed" => {
-                if progress.phase == "round" {
-                    reset_round_progress(&mut progress);
-                }
+                // Phase change is handled by inference below or TurnStarted
             }
             "turn.started" => {
                 if payload.turn > 0 {
                     progress.turn = payload.turn;
                 }
-                progress.current_actor.clear();
-                progress.next_actor.clear();
                 progress.actor_reasons.clear();
+                // Start with the first actor in the order
+                mark_current_and_next(&mut progress, 0);
             }
             "narration.posted" => {
                 let actor_id = if payload.actor_id.is_empty() {

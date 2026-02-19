@@ -84,8 +84,6 @@ struct TrpgStreamEvent {
     #[serde(default)]
     actor_id: Option<String>,
     #[serde(default)]
-    room_id: Option<String>,
-    #[serde(default)]
     payload: Value,
 }
 
@@ -154,34 +152,6 @@ fn resolve_actor_id(payload: &Value, actor_id: Option<&str>) -> String {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn resolve_room_id(payload: &Value, stream_room_id: Option<&str>) -> String {
-    payload
-        .get("room_id")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            payload
-                .get("room")
-                .and_then(Value::as_object)
-                .and_then(|room| room.get("id"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| payload.get("session_id").and_then(Value::as_str))
-        .or(stream_room_id)
-        .unwrap_or("")
-        .trim()
-        .to_string()
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn attach_room_id(mut mapped: Value, payload: &Value, stream_room_id: Option<&str>) -> Value {
-    let room_id = resolve_room_id(payload, stream_room_id);
-    if !room_id.is_empty() {
-        mapped["room_id"] = json!(room_id);
-    }
-    mapped
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_fingerprint(snapshot: &Value) -> String {
     serde_json::to_string(snapshot).unwrap_or_else(|_| snapshot.to_string())
 }
@@ -245,18 +215,6 @@ fn snapshot_phase(root: &Value, fallback: &str) -> String {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn snapshot_room_id(root: &Value) -> String {
-    snapshot_root(root)
-        .get("room_id")
-        .or_else(|| snapshot_root(root).get("id"))
-        .or_else(|| root.get("room_id"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string()
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
 fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
     let source = root
         .get("dice_log")
@@ -304,7 +262,6 @@ fn map_snapshot_result(result: &Value) -> String {
 fn map_snapshot_dice_roll(
     entry: &Value,
     fallback_turn: u32,
-    fallback_room_id: &str,
     _fallback_phase: &str,
 ) -> Option<(String, String)> {
     if !entry.is_object() {
@@ -322,15 +279,8 @@ fn map_snapshot_dice_roll(
         .and_then(Value::as_str)
         .unwrap_or("manual_roll")
         .to_string();
-    let room_id = entry
-        .get("room_id")
-        .and_then(Value::as_str)
-        .unwrap_or(fallback_room_id)
-        .trim()
-        .to_string();
     let mapped = json!({
         "turn": value_to_u32(entry.get("turn"), fallback_turn),
-        "room_id": room_id,
         "character": character,
         "action": action,
         "d20": value_to_i32(entry.get("raw_d20"), value_to_i32(entry.get("d20"), 0)),
@@ -352,7 +302,6 @@ fn snapshot_room_status_progress_payload(
 ) -> (String, String) {
     let turn = snapshot_turn(root, fallback_turn);
     let phase = snapshot_phase(root, fallback_phase);
-    let room_id = snapshot_room_id(root);
     let event_type = match status {
         "ended" | "completed" | "done" | "retired" | "closed" => "room.ended",
         _ => "room.started",
@@ -361,7 +310,6 @@ fn snapshot_room_status_progress_payload(
         "event_type": event_type,
         "turn": turn,
         "phase": phase,
-        "room_id": room_id,
         "room_status": status,
         "actor_id": "",
         "keeper": "",
@@ -376,7 +324,6 @@ fn snapshot_room_status_progress_payload(
 fn map_turn_progress_event(
     event_type: &str,
     actor_id: Option<&str>,
-    stream_room_id: Option<&str>,
     payload: &Value,
     state: &TrpgMapperState,
 ) -> Option<(String, String)> {
@@ -479,7 +426,6 @@ fn map_turn_progress_event(
         _ => return None,
     };
 
-    let mapped = attach_room_id(mapped, payload, stream_room_id);
     Some(("turn_progress".to_string(), mapped.to_string()))
 }
 
@@ -487,7 +433,6 @@ fn map_turn_progress_event(
 fn map_trpg_event(
     event_type: &str,
     actor_id: Option<&str>,
-    stream_room_id: Option<&str>,
     payload: &Value,
     state: &mut TrpgMapperState,
 ) -> Vec<(String, String)> {
@@ -495,7 +440,8 @@ fn map_trpg_event(
 
     match event_type {
         "dice.rolled" => {
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "turn": value_to_u32(payload.get("turn"), state.last_turn),
                 "character": payload.get("actor_id").and_then(Value::as_str).or(actor_id).unwrap_or("unknown"),
                 "action": payload.get("action").and_then(Value::as_str).unwrap_or("action"),
@@ -504,7 +450,10 @@ fn map_trpg_event(
                 "total": value_to_i32(payload.get("total"), 0),
                 "dc": value_to_i32(payload.get("dc"), 0),
                 "result": payload.get("label").and_then(Value::as_str).unwrap_or("unknown")
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("dice_roll".to_string(), mapped.to_string()));
         }
         "hp.changed" => {
@@ -522,7 +471,8 @@ fn map_trpg_event(
                 .and_then(Value::as_str)
                 .or_else(|| payload.get("reply").and_then(Value::as_str))
                 .unwrap_or("");
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "text": text,
                 "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
                 "speaker": payload
@@ -531,7 +481,10 @@ fn map_trpg_event(
                     .or_else(|| payload.get("actor_id").and_then(Value::as_str))
                     .or(actor_id)
                     .or_else(|| payload.get("keeper").and_then(Value::as_str))
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         "turn.action.proposed" => {
@@ -540,14 +493,18 @@ fn map_trpg_event(
                 .and_then(Value::as_str)
                 .or_else(|| payload.get("reply").and_then(Value::as_str))
                 .unwrap_or("action proposed");
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "text": proposed,
                 "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
                 "speaker": payload
                     .get("actor_id")
                     .and_then(Value::as_str)
                     .or(actor_id)
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         "turn.timeout" => {
@@ -561,11 +518,15 @@ fn map_trpg_event(
                 Some(sec) => format!("[timeout] {} ({}s)", actor, sec.round()),
                 None => format!("[timeout] {}", actor),
             };
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "text": text,
                 "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
                 "speaker": payload.get("keeper").and_then(Value::as_str)
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         "keeper.unavailable" => {
@@ -578,11 +539,15 @@ fn map_trpg_event(
                 .get("reason")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown");
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "text": format!("[unavailable] {}: {}", actor, reason),
                 "phase": payload.get("phase").and_then(Value::as_str).unwrap_or(&state.last_phase),
                 "speaker": payload.get("keeper").and_then(Value::as_str)
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         "turn.started" => {
@@ -598,10 +563,14 @@ fn map_trpg_event(
             if !phase.is_empty() {
                 state.last_phase = phase.clone();
             }
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "turn": state.last_turn,
                 "phase": state.last_phase
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("turn_advance".to_string(), mapped.to_string()));
         }
         "phase.changed" => {
@@ -617,10 +586,14 @@ fn map_trpg_event(
             if turn > 0 {
                 state.last_turn = turn;
             }
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "turn": state.last_turn,
                 "phase": state.last_phase
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("turn_advance".to_string(), mapped.to_string()));
         }
         "node.advanced" => {
@@ -646,11 +619,15 @@ fn map_trpg_event(
                 .and_then(Value::as_str)
                 .or_else(|| payload.get("result").and_then(Value::as_str))
                 .unwrap_or("action resolved");
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "text": narrative,
                 "phase": state.last_phase,
                 "speaker": actor_id
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         // -- world.event: dispatch to weather/mood/death based on subtype --
@@ -677,10 +654,14 @@ fn map_trpg_event(
                 });
                 out.push(("character_death".to_string(), mapped.to_string()));
             } else {
-                let mapped = json!({
+                let mapped = attach_room_id(
+                    json!({
                     "text": format!("[world] {}", desc),
                     "phase": state.last_phase,
-                });
+                }),
+                    payload,
+                    stream_room_id,
+                );
                 out.push(("narrative".to_string(), mapped.to_string()));
             }
         }
@@ -712,10 +693,14 @@ fn map_trpg_event(
                 .get("status")
                 .and_then(Value::as_str)
                 .unwrap_or("updated");
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "text": format!("[quest] {} \u{2014} {}", title, status),
                 "phase": state.last_phase,
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         // -- intervention.submitted / applied → narrative --
@@ -730,10 +715,14 @@ fn map_trpg_event(
             } else {
                 "pending"
             };
-            let mapped = json!({
+            let mapped = attach_room_id(
+                json!({
                 "text": format!("[intervention:{}] {} \u{2014} {}", status_label, itype, reason),
                 "phase": state.last_phase,
-            });
+            }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         // -- choice.available → choice_available --
@@ -773,7 +762,11 @@ fn map_trpg_event(
                 .and_then(Value::as_str)
                 .or_else(|| payload.get("text").and_then(Value::as_str))
                 .unwrap_or("The adventure has ended.");
-            let mapped = json!({ "text": text, "phase": "endgame", "speaker": "DM" });
+            let mapped = attach_room_id(
+                json!({ "text": text, "phase": "endgame", "speaker": "DM" }),
+                payload,
+                stream_room_id,
+            );
             out.push(("narrative".to_string(), mapped.to_string()));
         }
         // -- actor lifecycle → turn_progress only (handled below) --
@@ -788,7 +781,9 @@ fn map_trpg_event(
         _ => {}
     }
 
-    if let Some(progress) = map_turn_progress_event(event_type, actor_id, stream_room_id, payload, state) {
+    if let Some(progress) =
+        map_turn_progress_event(event_type, actor_id, stream_room_id, payload, state)
+    {
         out.push(progress);
     }
 
@@ -798,6 +793,7 @@ fn map_trpg_event(
 #[cfg(any(target_arch = "wasm32", test))]
 fn decode_snapshot_events(body: &Value, state: &mut TrpgMapperState) -> Vec<(String, String)> {
     let status = snapshot_status(body);
+    let room_id = snapshot_room_id(body);
     let signature = snapshot_fingerprint(body);
     if state.snapshot_signature.as_deref() == Some(signature.as_str()) {
         return Vec::new();
@@ -823,8 +819,6 @@ fn decode_snapshot_events(body: &Value, state: &mut TrpgMapperState) -> Vec<(Str
     out.push(snapshot_room_status_progress_payload(
         body, &status, turn, &phase,
     ));
-
-    let room_id = snapshot_room_id(body);
 
     if turn > 0 {
         out.push((

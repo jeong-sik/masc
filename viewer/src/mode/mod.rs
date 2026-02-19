@@ -733,12 +733,6 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
         input.set_value("");
     }
     if let Some(input) = doc
-        .get_element_by_id("round-run-dm")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    {
-        input.set_value("");
-    }
-    if let Some(input) = doc
         .get_element_by_id("round-run-phase")
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
@@ -755,12 +749,6 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
         input.set_value("ko");
-    }
-    if let Some(input) = doc
-        .get_element_by_id("round-run-players")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    {
-        input.set_value("");
     }
     if let Some(summary) = doc.get_element_by_id("round-run-summary") {
         summary.set_text_content(Some(""));

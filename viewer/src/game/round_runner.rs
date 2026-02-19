@@ -40,7 +40,7 @@ struct RoundRunnerControl {
     game_ended: Arc<AtomicBool>,
     last_result: Arc<Mutex<Option<String>>>,
     rounds_completed: Arc<Mutex<u32>>,
-    dm_keeper_snapshot: Option<String>,
+    dm_keeper_snapshot: String,
 }
 
 #[cfg(target_arch = "wasm32")]

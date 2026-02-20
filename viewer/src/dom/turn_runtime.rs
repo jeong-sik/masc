@@ -69,7 +69,20 @@ fn connection_status_label(status: &ConnectionStatus) -> &'static str {
 }
 
 fn normalize_phase_for_sync(phase: &str) -> String {
-    phase.trim().to_ascii_lowercase().replace('-', "_")
+    let normalized = phase.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "briefing" | "dm" | "narration" | "dm_narration" => "dm_narration".to_string(),
+        "discuss"
+        | "discussion"
+        | "player_discuss"
+        | "party_discussion"
+        | "action"
+        | "player_action"
+        | "dice"
+        | "roll"
+        | "dice_resolution" => "round".to_string(),
+        _ => normalized,
+    }
 }
 
 fn phase_is_aggregate_round(phase: &str) -> bool {

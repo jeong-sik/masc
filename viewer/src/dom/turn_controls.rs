@@ -488,6 +488,26 @@ pub fn sync_turn_controls_visibility(
             format!("실행 대기: {}", reason)
         };
         set_turn_gate_reason(&gate_message, reason_class);
+
+        let wizard_busy = read_new_game_wizard_busy(&doc);
+        let preflight_ok = read_new_game_preflight_ok(&doc);
+        let wizard_ready = read_new_game_assignment_ready(&doc);
+        let ui_state = derive_trpg_ui_state(
+            lifecycle,
+            connection_ok,
+            wizard_busy,
+            preflight_ok,
+            wizard_ready,
+            busy || runner_active,
+        );
+        let mut ui_detail = vec![gate_message];
+        if let Some(err) = plan_error.as_deref() {
+            ui_detail.push(format!("plan: {}", err));
+        }
+        if let Some(lock) = lock_reason {
+            ui_detail.push(format!("lock: {}", lock));
+        }
+        sync_dashboard_ui_state(&doc, ui_state, &ui_detail.join(" | "));
     }
 }
 
@@ -1561,8 +1581,9 @@ fn normalize_round_phase_input(raw: &str) -> String {
     let normalized = raw.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "" => "round".to_string(),
-        "discussion" | "discuss" | "party_discussion" | "player_discussion" | "action"
-        | "dice" => "round".to_string(),
+        "discussion" | "discuss" | "party_discussion" | "player_discussion" | "action" | "dice" => {
+            "round".to_string()
+        }
         "ended" => "end".to_string(),
         other => other.to_string(),
     }
@@ -1708,6 +1729,20 @@ mod tests {
     }
 
     #[test]
+    fn derive_trpg_ui_state_tracks_round_running_priority() {
+        let state =
+            derive_trpg_ui_state(TrpgLifecycleState::Running, true, false, true, true, true);
+        assert_eq!(state, TrpgUiState::RoundRunning);
+    }
+
+    #[test]
+    fn derive_trpg_ui_state_requires_preflight_before_ready() {
+        let state =
+            derive_trpg_ui_state(TrpgLifecycleState::Lobby, true, false, false, true, false);
+        assert_eq!(state, TrpgUiState::Lobby);
+    }
+
+    #[test]
     fn transient_round_conflict_detection_by_status_and_message() {
         assert!(is_transient_round_conflict(
             Some(400),
@@ -1730,5 +1765,4 @@ mod tests {
             Some("round run already in progress for room_id=abc".to_string())
         );
     }
-
 }

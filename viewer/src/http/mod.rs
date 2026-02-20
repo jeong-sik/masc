@@ -17,11 +17,6 @@ pub enum RpcResult {
 }
 
 impl RpcResult {
-    /// Returns `true` when the call succeeded.
-    pub fn is_ok(&self) -> bool {
-        matches!(self, RpcResult::Ok(_))
-    }
-
     /// Human-readable one-liner for status display.
     pub fn display_error(&self) -> String {
         match self {

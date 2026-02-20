@@ -22,6 +22,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::shaders::post_process::PostProcessSettings;
 
 /// Active visual theme. Stored as a Bevy Resource for change detection.
@@ -70,6 +71,7 @@ impl ViewerTheme {
     }
 
     /// PostProcessSettings preset for this theme's GPU shader parameters.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn shader_settings(&self) -> PostProcessSettings {
         match self {
             Self::DarkFantasy => PostProcessSettings {
@@ -116,6 +118,7 @@ impl ViewerTheme {
     }
 
     /// Background clear color for the Bevy canvas in this theme.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn clear_color(&self) -> Color {
         match self {
             Self::DarkFantasy => Color::srgb(0.04, 0.04, 0.07), // #0a0a12
@@ -261,10 +264,11 @@ fn sync_theme_selectors(doc: &web_sys::Document, css_value: &str) {
 
 // ─── Theme Application ──────────────────────
 
-/// Reacts to theme changes by updating shader settings, clear color, and DOM attributes.
+/// Reacts to theme changes by updating shader settings and clear color.
+#[cfg(not(target_arch = "wasm32"))]
 fn apply_theme_changes(
     theme: Res<ViewerTheme>,
-    clear_color: Option<ResMut<ClearColor>>,
+    mut clear_color: ResMut<ClearColor>,
     mut cameras: Query<&mut PostProcessSettings>,
 ) {
     if !theme.is_changed() {
@@ -280,18 +284,19 @@ fn apply_theme_changes(
         cam_settings.time = current_time;
     }
 
-    // Update Bevy clear color when renderer resources exist.
-    if let Some(mut clear_color) = clear_color {
-        clear_color.0 = theme.clear_color();
+    clear_color.0 = theme.clear_color();
+}
+
+/// Reacts to theme changes by updating DOM theme attributes in wasm fallback mode.
+#[cfg(target_arch = "wasm32")]
+fn apply_theme_changes(theme: Res<ViewerTheme>) {
+    if !theme.is_changed() {
+        return;
     }
 
-    // Update DOM theme attribute
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            if let Some(html) = doc.document_element() {
-                let _ = html.set_attribute("data-theme", theme.css_value());
-            }
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(html) = doc.document_element() {
+            let _ = html.set_attribute("data-theme", theme.css_value());
         }
     }
 }

@@ -87,7 +87,7 @@ const STALL_RETRY_BASE_DELAY_MS: i32 = 2000;
 const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
 
 /// Retry delay for transient round-run conflicts (ms).
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(target_arch = "wasm32")]
 const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 1200;
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -335,7 +335,9 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                         log::warn!("RoundRunner: stopping due to fatal HTTP error");
                         break;
                     } else if is_transient_round_conflict(None, &detail) {
-                        log::info!("RoundRunner: transient in-progress conflict. Waiting before retry.");
+                        log::info!(
+                            "RoundRunner: transient in-progress conflict. Waiting before retry."
+                        );
                         round_num = round_num.saturating_sub(1);
                         sleep_ms(900).await;
                         continue;
@@ -494,8 +496,9 @@ fn normalize_round_phase_input(raw: &str) -> String {
     let normalized = raw.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "" => "round".to_string(),
-        "discussion" | "discuss" | "party_discussion" | "player_discussion" | "action"
-        | "dice" => "round".to_string(),
+        "discussion" | "discuss" | "party_discussion" | "player_discussion" | "action" | "dice" => {
+            "round".to_string()
+        }
         "ended" => "end".to_string(),
         other => other.to_string(),
     }
@@ -743,8 +746,7 @@ async fn sleep_ms(ms: i32) {
 mod tests {
     use super::{
         is_transient_round_conflict, parse_http_status, round_response_api_error,
-        round_response_has_prompt_meta_artifact_failures,
-        stall_retry_delay_ms,
+        round_response_has_prompt_meta_artifact_failures, stall_retry_delay_ms,
     };
 
     #[test]
@@ -763,7 +765,9 @@ mod tests {
     #[test]
     fn parse_http_status_from_prefixed_error_line() {
         assert_eq!(
-            parse_http_status("HTTP 400: {\"ok\":false,\"error\":\"round run already in progress\"}"),
+            parse_http_status(
+                "HTTP 400: {\"ok\":false,\"error\":\"round run already in progress\"}"
+            ),
             Some(400)
         );
     }

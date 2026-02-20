@@ -4791,6 +4791,48 @@ let memory_check_default_json () : Yojson.Safe.t =
     ("recall_fallback_applied", `Bool false);
   ]
 
+(* Phase D2: last health alert timestamp per keeper for throttling. *)
+let last_health_alert_ts : (string, float) Hashtbl.t = Hashtbl.create 8
+
+(* Phase D2: Broadcast health alert when no successful proactive cycle for 30min
+   during KST work hours (09:00-22:00). Throttled to at most once per 30min per keeper. *)
+let maybe_emit_health_alert (ctx : _ context) (meta : keeper_meta) : unit =
+  let stale_threshold = 1800.0 in (* 30 minutes *)
+  let now_ts = Time_compat.now () in
+  (* KST = UTC+9. Check work hours 09:00-22:00 KST *)
+  let kst_offset = 9 * 3600 in
+  let unix_day_sec = int_of_float now_ts mod 86400 in
+  let kst_sec = (unix_day_sec + kst_offset) mod 86400 in
+  let kst_hour = kst_sec / 3600 in
+  let in_work_hours = kst_hour >= 9 && kst_hour < 22 in
+  if not in_work_hours then ()
+  else
+    let stale_sec = now_ts -. meta.last_proactive_ts in
+    if stale_sec < stale_threshold then ()
+    else
+      (* Throttle: at most once per stale_threshold per keeper *)
+      let last_alert =
+        match Hashtbl.find_opt last_health_alert_ts meta.name with
+        | Some ts -> ts
+        | None -> 0.0
+      in
+      let since_last_alert = now_ts -. last_alert in
+      if since_last_alert < stale_threshold then ()
+      else begin
+        Hashtbl.replace last_health_alert_ts meta.name now_ts;
+        let stale_min = int_of_float (stale_sec /. 60.0) in
+        let msg =
+          Printf.sprintf
+            "health-alert: keeper %s — no successful proactive cycle for %dmin. \
+             last_proactive_ts=%.0f, now=%.0f"
+            meta.name stale_min meta.last_proactive_ts now_ts
+        in
+        (try
+           ignore
+             (Room.broadcast ctx.config ~from_agent:meta.agent_name ~content:msg)
+         with _ -> ())
+      end
+
 let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
   if not meta.proactive_enabled then meta
   else
@@ -5163,6 +5205,8 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
           let meta_after_proactive =
             try maybe_emit_proactive ctx meta_current with _ -> meta_current
           in
+          (* Phase D2: health alert if proactive cycle stale during work hours *)
+          (try maybe_emit_health_alert ctx meta_after_proactive with _ -> ());
           let base = float_of_int (max 30 (min 300 meta_after_proactive.presence_keepalive_sec)) in
           let jitter = base *. 0.2 *. Random.float 1.0 in
           Eio.Time.sleep ctx.clock (base +. jitter);

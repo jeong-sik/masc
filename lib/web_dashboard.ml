@@ -9,7 +9,15 @@
 *)
 
 let assets_root () =
-  match Sys.getenv_opt "MASC_ASSETS_ROOT" with
+  let env_assets =
+    match Sys.getenv_opt "MASC_ASSETS_ROOT" with
+    | Some d when String.trim d <> "" -> Some d
+    | _ ->
+        (match Sys.getenv_opt "MASC_ASSETS_DIR" with
+         | Some d when String.trim d <> "" -> Some d
+         | _ -> None)
+  in
+  match env_assets with
   | Some d -> d
   | None ->
       let cwd_assets = Filename.concat (Sys.getcwd ()) "assets" in

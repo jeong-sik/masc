@@ -1189,6 +1189,10 @@ body.wasm-dom-fallback #bevy-canvas {
     overflow: hidden;
 }
 
+#secondary-content {
+    scroll-padding-bottom: 140px;
+}
+
 /* ─── Tertiary Zone ────────────────────── */
 
 #tertiary-zone {
@@ -1355,6 +1359,7 @@ body.wasm-dom-fallback #bevy-canvas {
 
 #narrative-log {
     margin-top: 12px;
+    padding-bottom: 12px;
 }
 
 .atmosphere-strip {
@@ -4157,6 +4162,10 @@ body.wasm-dom-fallback #bevy-canvas {
     background: var(--bg-panel-alt);
     border-top: 1px solid var(--border-main, rgba(196, 162, 101, 0.12));
     border-radius: 0 0 var(--card-radius, 6px) var(--card-radius, 6px);
+    position: sticky;
+    bottom: 0;
+    z-index: 18;
+    box-shadow: 0 -10px 20px rgba(0, 0, 0, 0.28);
 }
 
 #action-input-row {
@@ -4272,6 +4281,10 @@ body.wasm-dom-fallback #bevy-canvas {
     padding: 8px 10px;
     border-top: 1px solid var(--border-main);
     background: var(--bg-panel-alt);
+    position: sticky;
+    bottom: 0;
+    z-index: 18;
+    box-shadow: 0 -10px 20px rgba(0, 0, 0, 0.28);
 }
 
 #join-help {

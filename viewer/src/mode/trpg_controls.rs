@@ -2519,6 +2519,21 @@ async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, Str
     start_new_game_flow(doc).await
 }
 
+fn resolve_new_game_room_id(raw_input: &str) -> String {
+    let trimmed = raw_input.trim();
+    if trimmed.is_empty() {
+        return generate_room_id();
+    }
+    let sanitized =
+        crate::config::sanitize_room_id(trimmed).unwrap_or_else(|| generate_room_id());
+    let lower = sanitized.to_ascii_lowercase();
+    if lower == crate::config::DEFAULT_ROOM_ID || lower == "room-unknown" {
+        generate_room_id()
+    } else {
+        sanitized
+    }
+}
+
 async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> {
     set_new_game_progress(
         doc,
@@ -2530,11 +2545,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
         .get_element_by_id("new-game-room-id")
         .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
         .unwrap_or_default();
-    let room_id = if room_input.trim().is_empty() {
-        actor_admin_room_id()
-    } else {
-        room_input.trim().to_string()
-    };
+    let room_id = resolve_new_game_room_id(&room_input);
     if let Some(input) = doc
         .get_element_by_id("new-game-room-id")
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
@@ -3425,12 +3436,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
         {
             if room_input.value().trim().is_empty() {
-                let current_room = crate::config::current_room_id();
-                if current_room.trim().is_empty() {
-                    room_input.set_value(&generate_room_id());
-                } else {
-                    room_input.set_value(current_room.trim());
-                }
+                room_input.set_value(&resolve_new_game_room_id(&crate::config::current_room_id()));
             }
         }
         set_new_game_wizard_busy(&doc, false);

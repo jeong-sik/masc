@@ -96,9 +96,11 @@ pub fn update_overlay_dom(
                 if let Some(path) = weather_icon_path(overlay.weather.trim()) {
                     img.set_src(path);
                     img.set_alt(&pretty_label(&overlay.weather));
+                    let _ = img.set_attribute("data-empty", "0");
                 } else {
-                    img.set_src("");
+                    let _ = img.remove_attribute("src");
                     img.set_alt("");
+                    let _ = img.set_attribute("data-empty", "1");
                 }
             }
             cache.last_weather = overlay.weather.clone();
@@ -119,9 +121,11 @@ pub fn update_overlay_dom(
                 if let Some(path) = mood_icon_path(overlay.mood.trim()) {
                     img.set_src(path);
                     img.set_alt(&pretty_label(&overlay.mood));
+                    let _ = img.set_attribute("data-empty", "0");
                 } else {
-                    img.set_src("");
+                    let _ = img.remove_attribute("src");
                     img.set_alt("");
+                    let _ = img.set_attribute("data-empty", "1");
                 }
             }
             cache.last_mood = overlay.mood.clone();

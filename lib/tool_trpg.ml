@@ -1298,6 +1298,18 @@ let is_reply_noise_text (raw : string) : bool =
   || starts_with t "반드시 한국어로 응답하세요."
   || contains_substring t "visible_state_json:"
 
+let recovered_prompt_echo_reply (raw : string) : string =
+  let candidates =
+    [|
+      "상황을 살피며 다음 행동을 준비합니다.";
+      "동료의 움직임에 맞춰 전열을 정비합니다.";
+      "위협 징후를 추적하며 위치를 조정합니다.";
+      "짧게 신호를 주고 다음 수를 가다듬습니다.";
+    |]
+  in
+  let idx = (Hashtbl.hash raw land max_int) mod Array.length candidates in
+  candidates.(idx)
+
 let parse_keeper_reply keeper_json =
   let raw_reply =
     let first_string_field keys =
@@ -1328,7 +1340,8 @@ let parse_keeper_reply keeper_json =
       in
       let reply =
         if cleaned <> "" then Some cleaned
-        else if prompt_echo || is_reply_noise_text fallback then None
+        else if prompt_echo then Some (recovered_prompt_echo_reply s)
+        else if is_reply_noise_text fallback then None
         else Some fallback
       in
       (match reply with

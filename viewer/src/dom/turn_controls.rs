@@ -816,6 +816,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         .and_then(|w| w.document())
         .ok_or_else(|| JsValue::from_str("No document"))?;
     let plan = read_round_run_plan(&doc).map_err(|err| JsValue::from_str(&err))?;
+    let require_claim = should_require_claim_for_round(&doc);
 
     let mut player_keepers = serde_json::Map::new();
     for (actor_id, keeper_name) in &plan.player_keepers {
@@ -830,7 +831,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         "phase": plan.phase,
         "timeout_sec": plan.timeout_sec,
         "lang": plan.lang,
-        "require_claim": true
+        "require_claim": require_claim
     })
     .to_string();
 
@@ -1496,6 +1497,26 @@ fn read_claimed_actor_keeper_for_current_room(doc: &web_sys::Document) -> Option
     } else {
         Some((claimed_actor, claimed_keeper))
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn should_require_claim_for_round(doc: &web_sys::Document) -> bool {
+    read_claimed_keeper_for_current_room(doc).is_some()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_round_dm_keeper(doc: &web_sys::Document) -> Option<String> {
+    read_dom_input(doc, "round-run-dm")
+        .or_else(|| read_claimed_keeper_for_current_room(doc))
+        .or_else(|| read_dom_input(doc, "new-game-dm-select"))
+        .or_else(|| {
+            let fallback = config::DEFAULT_TRPG_DM_KEEPER.trim();
+            if fallback.is_empty() {
+                None
+            } else {
+                Some(fallback.to_string())
+            }
+        })
 }
 
 #[cfg(target_arch = "wasm32")]

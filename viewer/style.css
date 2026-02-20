@@ -537,6 +537,15 @@ body:not(.mode-trpg) #ops-hud {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+}
+
+#session-control-status {
+    flex: 0 1 min(44vw, 520px);
+    max-width: min(44vw, 520px);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .inline-select {
@@ -2505,6 +2514,8 @@ body.wasm-dom-fallback #bevy-canvas {
     line-height: 1.45;
     color: var(--text-primary);
     letter-spacing: 0.2px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .turn-flow-banner.is-running {

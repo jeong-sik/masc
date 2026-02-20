@@ -4266,10 +4266,143 @@ body.wasm-dom-fallback #bevy-canvas {
 #dice-roll-btn {
     border-color: var(--accent-tertiary, #4a3f8a);
     color: var(--accent-tertiary, #4a3f8a);
+    position: relative;
+    overflow: hidden;
+    transform: translateZ(0);
+    transition:
+        background 0.22s ease,
+        color 0.22s ease,
+        box-shadow 0.22s ease,
+        transform 0.2s ease;
 }
 
 #dice-roll-btn:hover {
     background: rgba(74, 63, 138, 0.15);
+}
+
+#dice-roll-btn.is-rolling {
+    border-color: color-mix(in srgb, var(--accent-tertiary, #4a3f8a) 65%, #eecb7f 35%);
+    color: #f6d793;
+    background: linear-gradient(135deg, rgba(74, 63, 138, 0.5), rgba(238, 203, 127, 0.22));
+    box-shadow: 0 0 0 1px rgba(238, 203, 127, 0.2), 0 0 14px rgba(74, 63, 138, 0.35);
+    padding-left: 36px;
+    animation: dice-roll-pulse 0.72s ease-in-out infinite alternate;
+}
+
+#dice-roll-btn.is-rolling::before {
+    content: "";
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-radius: 3px;
+    transform: translateY(-50%);
+    background:
+        radial-gradient(circle at 30% 30%, currentColor 0 1.2px, transparent 1.3px),
+        radial-gradient(circle at 70% 30%, currentColor 0 1.2px, transparent 1.3px),
+        radial-gradient(circle at 50% 50%, currentColor 0 1.2px, transparent 1.3px),
+        radial-gradient(circle at 30% 70%, currentColor 0 1.2px, transparent 1.3px),
+        radial-gradient(circle at 70% 70%, currentColor 0 1.2px, transparent 1.3px);
+    animation: dice-roll-spin 0.58s linear infinite, dice-roll-hop 0.34s ease-in-out infinite;
+}
+
+#dice-roll-btn.is-rolling::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+        115deg,
+        transparent 0%,
+        transparent 35%,
+        rgba(255, 255, 255, 0.28) 50%,
+        transparent 65%,
+        transparent 100%
+    );
+    animation: dice-roll-sheen 0.9s ease-in-out infinite;
+}
+
+#dice-roll-btn.is-rolling[data-roll-intensity="high"] {
+    box-shadow: 0 0 0 1px rgba(238, 203, 127, 0.28), 0 0 20px rgba(74, 63, 138, 0.45);
+    animation: dice-roll-pulse 0.42s ease-in-out infinite alternate, dice-roll-shake 0.84s ease-in-out infinite;
+}
+
+#dice-roll-btn.is-rolling[data-roll-intensity="high"]::before {
+    animation: dice-roll-spin 0.4s linear infinite, dice-roll-hop 0.24s ease-in-out infinite;
+}
+
+#dice-roll-btn.is-rolling[data-roll-intensity="high"]::after {
+    animation: dice-roll-sheen 0.62s ease-in-out infinite;
+}
+
+@keyframes dice-roll-pulse {
+    from {
+        transform: translateY(0) scale(1);
+    }
+    to {
+        transform: translateY(-1px) scale(1.03);
+    }
+}
+
+@keyframes dice-roll-shake {
+    0% {
+        transform: translateX(0) scale(1.01);
+    }
+    25% {
+        transform: translateX(1px) scale(1.02);
+    }
+    50% {
+        transform: translateX(-1px) scale(1.01);
+    }
+    75% {
+        transform: translateX(1px) scale(1.02);
+    }
+    100% {
+        transform: translateX(0) scale(1.01);
+    }
+}
+
+@keyframes dice-roll-spin {
+    from {
+        transform: translateY(-50%) rotate(0deg);
+    }
+    to {
+        transform: translateY(-50%) rotate(360deg);
+    }
+}
+
+@keyframes dice-roll-hop {
+    0% {
+        margin-top: -2px;
+    }
+    100% {
+        margin-top: 2px;
+    }
+}
+
+@keyframes dice-roll-sheen {
+    0% {
+        transform: translateX(-55%);
+        opacity: 0;
+    }
+    35% {
+        opacity: 0.8;
+    }
+    100% {
+        transform: translateX(60%);
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #dice-roll-btn.is-rolling,
+    #dice-roll-btn.is-rolling::before,
+    #dice-roll-btn.is-rolling::after {
+        animation: none !important;
+        transform: none !important;
+    }
 }
 
 #action-status {
@@ -4298,6 +4431,14 @@ body.wasm-dom-fallback #bevy-canvas {
     font-size: 0.72rem;
     color: var(--text-dim);
     line-height: 1.35;
+}
+
+.dice-skill-reco {
+    margin-top: 4px;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: color-mix(in srgb, var(--accent-primary, #b58f5a) 78%, var(--text-primary) 22%);
+    text-wrap: pretty;
 }
 
 .action-history {

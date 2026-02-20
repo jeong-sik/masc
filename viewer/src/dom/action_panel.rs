@@ -110,9 +110,11 @@ pub fn bind_action_panel(mut commands: Commands) {
         log::info!("ActionPanel: Binding listeners (Intervention Mode)...");
         bind_submit_button();
         bind_enter_key();
+        bind_action_input_recommendation();
         bind_escape_key();
         bind_dice_roll_button();
         clear_action_status();
+        update_dice_skill_recommendation();
 
         log::info!("ActionPanel: bound complete");
     }
@@ -125,6 +127,7 @@ pub fn unbind_action_panel(mut commands: Commands) {
     {
         clear_action_status();
         clear_action_input();
+        set_dice_roll_busy(false);
         log::info!("ActionPanel: unbound");
     }
 
@@ -225,6 +228,7 @@ fn bind_escape_key() {
                 if let Some(el) = doc.get_element_by_id("action-input") {
                     if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
                         input.set_value("");
+                        update_dice_skill_recommendation();
                         let _ = input.blur();
                     }
                 }
@@ -235,6 +239,29 @@ fn bind_escape_key() {
     let _ = input
         .dyn_ref::<web_sys::EventTarget>()
         .map(|t| t.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref()));
+    cb.forget();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_action_input_recommendation() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(input) = doc.get_element_by_id("action-input") else {
+        return;
+    };
+    if input.get_attribute("data-reco-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = input.set_attribute("data-reco-bound", "1");
+
+    let cb = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+        update_dice_skill_recommendation();
+    }) as Box<dyn FnMut(web_sys::Event)>);
+
+    let _ = input
+        .dyn_ref::<web_sys::EventTarget>()
+        .map(|t| t.add_event_listener_with_callback("input", cb.as_ref().unchecked_ref()));
     cb.forget();
 }
 
@@ -264,11 +291,13 @@ fn bind_dice_roll_button() {
         log::info!("ActionPanel: Manual Dice Roll (Divine Intervention)");
         set_action_status("Rolling destiny...", "status-pending");
         disable_buttons(true);
+        set_dice_roll_busy(true);
 
         wasm_bindgen_futures::spawn_local(async move {
             let result = roll_dice_intervention().await;
 
             // Always re-enable buttons and release flight lock
+            set_dice_roll_busy(false);
             disable_buttons(false);
             if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
                 release_flight(&doc);
@@ -327,6 +356,7 @@ fn submit_intervention_from_input() {
     }
 
     input.set_value("");
+    update_dice_skill_recommendation();
     set_action_status("Whispering to agent...", "status-pending");
     disable_buttons(true);
 
@@ -472,12 +502,20 @@ pub(crate) fn friendly_js_error(val: &JsValue) -> String {
 #[cfg(target_arch = "wasm32")]
 fn get_active_actor_from_dom() -> Option<String> {
     let doc = web_sys::window().and_then(|w| w.document())?;
+    get_current_actor_from_doc(&doc)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn get_current_actor_from_doc(doc: &web_sys::Document) -> Option<String> {
     let panel = doc.get_element_by_id("action-panel")?;
     let actor_id = panel.get_attribute("data-active-actor").unwrap_or_default();
     if actor_id.is_empty() {
-        None
+        doc.get_element_by_id("player-actor-id")
+            .and_then(|el| el.text_content())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
     } else {
-        Some(actor_id)
+        Some(actor_id.trim().to_string())
     }
 }
 
@@ -500,6 +538,449 @@ fn disable_buttons(disabled: bool) {
         } else {
             let _ = btn.remove_attribute("disabled");
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_dice_roll_busy(busy: bool) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(btn) = doc.get_element_by_id("dice-roll-btn") else {
+        return;
+    };
+    if busy {
+        let _ = btn.class_list().add_1("is-rolling");
+        let _ = btn.set_attribute("aria-busy", "true");
+        let _ = btn.set_attribute("data-roll-intensity", "high");
+    } else {
+        let _ = btn.class_list().remove_1("is-rolling");
+        let _ = btn.remove_attribute("aria-busy");
+        let _ = btn.remove_attribute("data-roll-intensity");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_skill_modifier(text: &str) -> Option<i32> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed
+        .parse::<i32>()
+        .ok()
+        .or_else(|| trimmed.trim_start_matches('+').parse::<i32>().ok())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_skill_level(text: &str) -> Option<i32> {
+    text.trim().parse::<i32>().ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_hp_ratio(text: &str) -> Option<f32> {
+    let mut values = text
+        .split('/')
+        .filter_map(|part| {
+            let token = part
+                .chars()
+                .filter(|ch| ch.is_ascii_digit() || *ch == '-')
+                .collect::<String>();
+            if token.is_empty() {
+                None
+            } else {
+                token.parse::<f32>().ok()
+            }
+        })
+        .take(2);
+    let current = values.next()?;
+    let max = values.next()?;
+    if max <= 0.0 {
+        return None;
+    }
+    Some((current / max).clamp(0.0, 1.0))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Copy)]
+enum ActionIntent {
+    Combat,
+    Exploration,
+    Social,
+    Mobility,
+    Support,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl ActionIntent {
+    fn label(self) -> &'static str {
+        match self {
+            ActionIntent::Combat => "전투",
+            ActionIntent::Exploration => "탐색",
+            ActionIntent::Social => "대화",
+            ActionIntent::Mobility => "기동",
+            ActionIntent::Support => "지원",
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+struct SkillEntry {
+    name: String,
+    level: i32,
+    modifier: i32,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+struct RankedSkill {
+    name: String,
+    modifier: i32,
+    score: i32,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn contains_any_keyword(haystack: &str, keywords: &[&str]) -> bool {
+    keywords.iter().any(|keyword| haystack.contains(keyword))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn detect_action_intents(text: &str) -> Vec<ActionIntent> {
+    let normalized = text.trim().to_lowercase();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+
+    let mut intents = Vec::new();
+    if contains_any_keyword(
+        &normalized,
+        &[
+            "attack", "strike", "slash", "shoot", "cast", "smite", "combat", "fight", "hit",
+            "공격", "전투", "베기", "찌르", "강타", "타격", "주문", "마법", "사격",
+        ],
+    ) {
+        intents.push(ActionIntent::Combat);
+    }
+    if contains_any_keyword(
+        &normalized,
+        &[
+            "search",
+            "scout",
+            "track",
+            "investigate",
+            "explore",
+            "perception",
+            "trap",
+            "lockpick",
+            "탐색",
+            "정찰",
+            "추적",
+            "조사",
+            "함정",
+            "잠금",
+            "탐지",
+        ],
+    ) {
+        intents.push(ActionIntent::Exploration);
+    }
+    if contains_any_keyword(
+        &normalized,
+        &[
+            "talk",
+            "speak",
+            "persuade",
+            "negotiate",
+            "intimidate",
+            "deceive",
+            "charisma",
+            "대화",
+            "설득",
+            "협상",
+            "협박",
+            "기만",
+            "교섭",
+            "말을",
+        ],
+    ) {
+        intents.push(ActionIntent::Social);
+    }
+    if contains_any_keyword(
+        &normalized,
+        &[
+            "move", "dash", "dodge", "escape", "run", "jump", "climb", "stealth", "sneak", "이동",
+            "질주", "회피", "도주", "점프", "등반", "은신", "숨",
+        ],
+    ) {
+        intents.push(ActionIntent::Mobility);
+    }
+    if contains_any_keyword(
+        &normalized,
+        &[
+            "heal", "cure", "recover", "support", "guard", "protect", "aid", "buff", "치유",
+            "회복", "지원", "보호", "방어", "수호", "버프",
+        ],
+    ) {
+        intents.push(ActionIntent::Support);
+    }
+
+    intents
+}
+
+#[cfg(target_arch = "wasm32")]
+fn intent_skill_bonus(skill_name: &str, intents: &[ActionIntent], hp_ratio: Option<f32>) -> i32 {
+    let normalized = skill_name.to_lowercase();
+    let mut bonus = 0;
+
+    for intent in intents {
+        let matched = match intent {
+            ActionIntent::Combat => contains_any_keyword(
+                &normalized,
+                &[
+                    "attack", "slash", "strike", "smite", "weapon", "fire", "arcane", "blast",
+                    "assault", "공격", "강타", "베기", "찌르", "타격", "마법", "주문",
+                ],
+            ),
+            ActionIntent::Exploration => contains_any_keyword(
+                &normalized,
+                &[
+                    "search",
+                    "scout",
+                    "track",
+                    "investigate",
+                    "perception",
+                    "insight",
+                    "trap",
+                    "lock",
+                    "탐색",
+                    "정찰",
+                    "추적",
+                    "조사",
+                    "탐지",
+                    "함정",
+                    "잠금",
+                ],
+            ),
+            ActionIntent::Social => contains_any_keyword(
+                &normalized,
+                &[
+                    "talk",
+                    "speech",
+                    "persuade",
+                    "charm",
+                    "intimidate",
+                    "deception",
+                    "perform",
+                    "대화",
+                    "설득",
+                    "협상",
+                    "협박",
+                    "기만",
+                    "교섭",
+                    "매혹",
+                ],
+            ),
+            ActionIntent::Mobility => contains_any_keyword(
+                &normalized,
+                &[
+                    "dodge", "dash", "jump", "climb", "evade", "stealth", "sneak", "agile", "회피",
+                    "질주", "도주", "은신", "점프", "등반", "기동",
+                ],
+            ),
+            ActionIntent::Support => contains_any_keyword(
+                &normalized,
+                &[
+                    "heal", "cure", "recover", "protect", "guard", "barrier", "bless", "aid",
+                    "ward", "치유", "회복", "방어", "보호", "수호", "가호", "지원",
+                ],
+            ),
+        };
+        if matched {
+            bonus += 45;
+        }
+    }
+
+    if hp_ratio.is_some_and(|ratio| ratio <= 0.35)
+        && contains_any_keyword(
+            &normalized,
+            &[
+                "guard", "protect", "barrier", "heal", "recover", "ward", "회피", "방어", "보호",
+                "치유", "회복", "저항", "수호",
+            ],
+        )
+    {
+        bonus += 30;
+    }
+
+    bonus
+}
+
+#[cfg(target_arch = "wasm32")]
+fn format_reco_context(
+    action_text: &str,
+    intents: &[ActionIntent],
+    hp_ratio: Option<f32>,
+) -> String {
+    let mut labels = if action_text.trim().is_empty() {
+        vec!["기본".to_string()]
+    } else if intents.is_empty() {
+        vec!["행동문맥".to_string()]
+    } else {
+        intents
+            .iter()
+            .take(2)
+            .map(|intent| intent.label().to_string())
+            .collect::<Vec<_>>()
+    };
+
+    if hp_ratio.is_some_and(|ratio| ratio <= 0.35) {
+        labels.push("저체력".to_string());
+    }
+    labels.join("·")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_dice_skill_recommendation() {
+    const MAX_RECOMMENDED_SKILLS: usize = 3;
+
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(reco) = doc.get_element_by_id("dice-skill-reco") else {
+        return;
+    };
+    let action_text = doc
+        .get_element_by_id("action-input")
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlInputElement>()
+                .map(|input| input.value())
+        })
+        .unwrap_or_default();
+    let intents = detect_action_intents(&action_text);
+
+    let Some(actor_id) = get_current_actor_from_doc(&doc) else {
+        reco.set_text_content(Some(
+            "추천 스킬: 액터 턴이 시작되면 상위 Modifier 스킬을 보여줍니다.",
+        ));
+        return;
+    };
+
+    let Ok(cards) = doc.query_selector_all(".character-card") else {
+        reco.set_text_content(Some("추천 스킬: 캐릭터 데이터를 불러오는 중입니다."));
+        return;
+    };
+
+    let mut rendered = false;
+    for i in 0..cards.length() {
+        let Some(node) = cards.item(i) else {
+            continue;
+        };
+        let Some(card) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let Some(card_actor_id) = card.get_attribute("data-actor-id") else {
+            continue;
+        };
+        if card_actor_id.trim() != actor_id {
+            continue;
+        }
+        let hp_ratio = card
+            .query_selector(".hp-text")
+            .ok()
+            .flatten()
+            .and_then(|el| el.text_content())
+            .and_then(|text| parse_hp_ratio(&text));
+
+        let Ok(rows) = card.query_selector_all(".skills-list .skill-row") else {
+            break;
+        };
+        let mut skills = Vec::<SkillEntry>::new();
+        for row_idx in 0..rows.length() {
+            let Some(row_node) = rows.item(row_idx) else {
+                continue;
+            };
+            let Some(row) = row_node.dyn_ref::<web_sys::Element>() else {
+                continue;
+            };
+            if row.class_list().contains("skill-row-head") {
+                continue;
+            }
+
+            let skill_name = row
+                .query_selector(".skill-name")
+                .ok()
+                .flatten()
+                .and_then(|el| el.text_content())
+                .map(|text| text.trim().to_string())
+                .unwrap_or_default();
+            if skill_name.is_empty() {
+                continue;
+            }
+
+            let modifier = row
+                .query_selector(".skill-mod")
+                .ok()
+                .flatten()
+                .and_then(|el| el.text_content())
+                .and_then(|text| parse_skill_modifier(&text));
+            let level = row
+                .query_selector(".skill-level")
+                .ok()
+                .flatten()
+                .and_then(|el| el.text_content())
+                .and_then(|text| parse_skill_level(&text))
+                .unwrap_or(0);
+            if let Some(modifier) = modifier {
+                skills.push(SkillEntry {
+                    name: skill_name,
+                    level,
+                    modifier,
+                });
+            }
+        }
+
+        let ranked = skills
+            .into_iter()
+            .map(|skill| {
+                let score = skill.modifier * 100
+                    + skill.level
+                    + intent_skill_bonus(&skill.name, &intents, hp_ratio);
+                RankedSkill {
+                    name: skill.name,
+                    modifier: skill.modifier,
+                    score,
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut ranked = ranked;
+        ranked.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.name.cmp(&b.name)));
+        ranked.truncate(MAX_RECOMMENDED_SKILLS);
+        let summary = ranked
+            .into_iter()
+            .map(|skill| format!("{} ({:+})", skill.name, skill.modifier))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let context = format_reco_context(&action_text, &intents, hp_ratio);
+        if summary.is_empty() {
+            reco.set_text_content(Some(&format!(
+                "추천 스킬 [{}]: 표시 가능한 스킬이 없습니다.",
+                actor_id
+            )));
+        } else {
+            reco.set_text_content(Some(&format!(
+                "추천 스킬 [{} · {}]: {}",
+                actor_id, context, summary
+            )));
+        }
+        rendered = true;
+        break;
+    }
+
+    if !rendered {
+        reco.set_text_content(Some(&format!(
+            "추천 스킬 [{}]: 표시 가능한 스킬이 없습니다.",
+            actor_id
+        )));
     }
 }
 
@@ -565,8 +1046,20 @@ pub fn sync_action_panel_interaction_state(
             && connected;
 
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let mut reco_refresh_needed = true;
             if let Some(panel) = doc.get_element_by_id("action-panel") {
+                reco_refresh_needed = panel
+                    .get_attribute("data-reco-actor")
+                    .as_deref()
+                    .map(|prev| prev != active_actor)
+                    .unwrap_or(true);
                 let _ = panel.set_attribute("data-active-actor", active_actor);
+                if reco_refresh_needed {
+                    let _ = panel.set_attribute("data-reco-actor", active_actor);
+                }
+            }
+            if reco_refresh_needed {
+                update_dice_skill_recommendation();
             }
 
             // Only disable from system sync if no flight is in progress
@@ -657,5 +1150,18 @@ mod tests {
         assert!(!connection_ready(&ConnectionStatus::Disconnected));
         assert!(!connection_ready(&ConnectionStatus::Connecting));
         assert!(!connection_ready(&ConnectionStatus::Failed));
+    }
+
+    #[test]
+    fn detect_action_intents_combat_and_support() {
+        let intents = detect_action_intents("공격하고 회복 마법 준비");
+        assert_eq!(intents.len(), 2);
+        assert!(matches!(intents[0], ActionIntent::Combat));
+        assert!(matches!(intents[1], ActionIntent::Support));
+    }
+
+    #[test]
+    fn detect_action_intents_empty() {
+        assert!(detect_action_intents("   ").is_empty());
     }
 }

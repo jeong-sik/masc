@@ -7451,6 +7451,121 @@ let handle_keeper_list ctx args : tool_result =
       ] in
       (true, Yojson.Safe.pretty_to_string json)
 
+(* ---------- HTTP endpoint: /api/v1/keeper-metrics ---------- *)
+
+let count_actions_in_window lines ~since_ts =
+  List.fold_left (fun (p1, p2, p3) line ->
+    try
+      let j = Yojson.Safe.from_string line in
+      let ts_str = Safe_ops.json_string "ts" j in
+      let ts = Resilience.Time.parse_iso8601_opt ts_str |> Option.value ~default:0.0 in
+      if ts < since_ts then (p1, p2, p3)
+      else
+        match Safe_ops.json_string_opt "severity" j with
+        | Some "P1" -> (p1 + 1, p2, p3)
+        | Some "P2" -> (p1, p2 + 1, p3)
+        | Some "P3" -> (p1, p2, p3 + 1)
+        | _ -> (p1, p2, p3)
+    with _ -> (p1, p2, p3)
+  ) (0, 0, 0) lines
+
+let keeper_metrics_json (config : Room.config) : Yojson.Safe.t =
+  let dir = keeper_dir config in
+  match Safe_ops.list_dir_safe dir with
+  | Error e -> `Assoc [("error", `String e)]
+  | Ok files ->
+    let now_ts = Time_compat.now () in
+    let since_24h = now_ts -. 86400.0 in
+    let since_7d = now_ts -. (7.0 *. 86400.0) in
+    let keeper_names =
+      files
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.map Filename.remove_extension
+      |> List.filter validate_name
+      |> List.sort String.compare
+    in
+    let keepers =
+      List.filter_map (fun name ->
+        match read_meta config name with
+        | Error _ | Ok None -> None
+        | Ok (Some m) ->
+          let status =
+            if m.last_turn_ts <= 0.0 then "unknown"
+            else if now_ts -. m.last_turn_ts < 600.0 then "active"
+            else if now_ts -. m.last_turn_ts < 3600.0 then "idle"
+            else "stale"
+          in
+          let last_turn_ago_s =
+            if m.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.last_turn_ts
+          in
+          (* Read review-watcher sidecar for repos_watched *)
+          let watcher_path =
+            Filename.concat dir (name ^ ".review-watcher.json")
+          in
+          let repos_watched =
+            if not (Sys.file_exists watcher_path) then 0
+            else
+              match Safe_ops.read_json_file_safe watcher_path with
+              | Error _ -> 0
+              | Ok json ->
+                let open Yojson.Safe.Util in
+                (try json |> member "allowed_repo_globs" |> to_list |> List.length
+                 with _ -> 0)
+          in
+          (* Read actions.jsonl for severity counts *)
+          let actions_path =
+            Filename.concat dir (name ^ ".actions.jsonl")
+          in
+          let action_lines =
+            read_file_tail_lines actions_path ~max_bytes:60000 ~max_lines:500
+          in
+          let (p1_24h, p2_24h, p3_24h) =
+            count_actions_in_window action_lines ~since_ts:since_24h
+          in
+          let (p1_7d, p2_7d, p3_7d) =
+            count_actions_in_window action_lines ~since_ts:since_7d
+          in
+          (* Cost per day *)
+          let created_ts =
+            Resilience.Time.parse_iso8601_opt m.created_at
+            |> Option.value ~default:0.0
+          in
+          let age_days =
+            if created_ts <= 0.0 then 1.0
+            else max 1.0 ((now_ts -. created_ts) /. 86400.0)
+          in
+          let cost_per_day = m.total_cost_usd /. age_days in
+          Some (`Assoc [
+            ("name", `String m.name);
+            ("status", `String status);
+            ("total_turns", `Int m.total_turns);
+            ("total_cost_usd", `Float m.total_cost_usd);
+            ("cost_per_day", `Float (Float.round (cost_per_day *. 100.0) /. 100.0));
+            ("last_model_used", `String m.last_model_used);
+            ("last_turn_ago_s", `Float last_turn_ago_s);
+            ("proactive_count_total", `Int m.proactive_count_total);
+            ("repos_watched", `Int repos_watched);
+            ("generation", `Int m.generation);
+            ("actions_24h", `Assoc [
+              ("P1", `Int p1_24h); ("P2", `Int p2_24h); ("P3", `Int p3_24h);
+            ]);
+            ("actions_7d", `Assoc [
+              ("P1", `Int p1_7d); ("P2", `Int p2_7d); ("P3", `Int p3_7d);
+            ]);
+            ("goal", `String m.short_goal);
+          ])
+      ) keeper_names
+    in
+    let tm = Unix.gmtime now_ts in
+    let ts_str = Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
+    `Assoc [
+      ("timestamp", `String ts_str);
+      ("count", `Int (List.length keepers));
+      ("keepers", `List keepers);
+    ]
+
 (* Start keepalive fibers for existing keepers (best-effort). *)
 let start_existing_keepalives ctx =
   let dir = keeper_dir ctx.config in

@@ -1048,9 +1048,15 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* Update activity for any tool call - TODO: migrate to Session_eio when ready *)
   if agent_name <> "unknown" then begin
     Session.update_activity registry ~agent_name ();
-    (* Also update disk-based heartbeat for zombie detection across restarts *)
-    if Room.is_initialized config then
-      ignore (Room.heartbeat config ~agent_name)
+    (* Keep read-only/fast tools non-blocking; heartbeat is best-effort. *)
+    let skip_heartbeat = is_read_only || String.equal name "masc_archive_save" in
+    if (not skip_heartbeat) && Room.is_initialized config then
+      try
+        ignore (Room.heartbeat config ~agent_name)
+      with
+      | exn ->
+          Printf.eprintf "[WARN] heartbeat update skipped for %s on %s: %s\n%!"
+            agent_name name (Printexc.to_string exn)
   end;
 
   (* Check if agent must join first *)

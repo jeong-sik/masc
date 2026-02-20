@@ -510,6 +510,16 @@ let parse_iso_time iso_str =
 let is_zombie_agent last_seen_iso =
   Resilience.Zombie.is_zombie last_seen_iso
 
+let take n xs =
+  if n <= 0 then []
+  else
+    let rec loop i acc = function
+      | [] -> List.rev acc
+      | _ when i <= 0 -> List.rev acc
+      | x :: rest -> loop (i - 1) (x :: acc) rest
+    in
+    loop n [] xs
+
 (** Get room status *)
 let status config =
   ensure_initialized config;
@@ -517,6 +527,8 @@ let status config =
   let state = read_state config in
   let backlog = read_backlog config in
   let current_room = read_current_room config |> Option.value ~default:"default" in
+  let max_agents_display = 40 in
+  let max_active_tasks_display = 30 in
 
   let buf = Buffer.create 256 in
   let cluster_name =
@@ -532,35 +544,62 @@ let status config =
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf "📌 Players:\n";
 
-  (* List agents *)
+  (* List agents (bounded for responsiveness) *)
   let agents_path = agents_dir config in
   if Sys.file_exists agents_path then begin
-    Sys.readdir agents_path |> Array.iter (fun name ->
-      if Filename.check_suffix name ".json" then
-        let path = Filename.concat agents_path name in
-        let json = read_json config path in
-        match agent_of_yojson json with
-        | Ok agent ->
-            (* Check zombie status first - overrides normal status *)
-            let is_zombie = is_zombie_agent agent.last_seen in
-            let icon = if is_zombie then "💀"
-              else match agent.status with
-                | Busy -> "🔴"
-                | Active -> "🟢"
-                | Listening -> "🎧"
-                | Inactive -> "⚫"
-            in
-            let task = if is_zombie then "zombie"
-              else Option.value agent.current_task ~default:"idle"
-            in
-            Buffer.add_string buf (Printf.sprintf "  %s %s → %s\n" icon agent.name task)
-        | Error _ -> ()
-    )
+    let agents =
+      Sys.readdir agents_path
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.filter_map (fun name ->
+          let path = Filename.concat agents_path name in
+          let json = read_json config path in
+          match agent_of_yojson json with
+          | Ok agent ->
+              let is_zombie = is_zombie_agent agent.last_seen in
+              let icon =
+                if is_zombie then "💀"
+                else
+                  match agent.status with
+                  | Busy -> "🔴"
+                  | Active -> "🟢"
+                  | Listening -> "🎧"
+                  | Inactive -> "⚫"
+              in
+              let task =
+                if is_zombie then "zombie"
+                else Option.value agent.current_task ~default:"idle"
+              in
+              Some (agent.name, icon, task)
+          | Error _ -> None)
+      |> List.sort (fun (a, _, _) (b, _, _) -> String.compare a b)
+    in
+    let total_agents = List.length agents in
+    let shown_agents = take max_agents_display agents in
+    List.iter (fun (name, icon, task) ->
+      Buffer.add_string buf (Printf.sprintf "  %s %s → %s\n" icon name task)
+    ) shown_agents;
+    if total_agents > max_agents_display then
+      Buffer.add_string buf
+        (Printf.sprintf
+           "  … and %d more agents (use masc_who for full list)\n"
+           (total_agents - max_agents_display))
   end;
 
   Buffer.add_string buf "\n📋 Quest Board:\n";
 
-  (* List tasks *)
+  let sorted_tasks = List.sort (fun a b -> compare a.priority b.priority) backlog.tasks in
+  let active_tasks, done_count, cancelled_count =
+    List.fold_left
+      (fun (active, done_cnt, cancelled_cnt) task ->
+        match task.task_status with
+        | Done _ -> (active, done_cnt + 1, cancelled_cnt)
+        | Cancelled _ -> (active, done_cnt, cancelled_cnt + 1)
+        | _ -> (task :: active, done_cnt, cancelled_cnt))
+      ([], 0, 0) sorted_tasks
+  in
+  let active_tasks = List.rev active_tasks in
+  let shown_active_tasks = take max_active_tasks_display active_tasks in
   List.iter (fun task ->
     let status_icon = match task.task_status with
       | Done _ -> "✅"
@@ -574,35 +613,25 @@ let status config =
       | Todo -> "unclaimed"
     in
     Buffer.add_string buf (Printf.sprintf "  %s %s: %s (%s)\n" status_icon task.id task.title assignee)
-  ) backlog.tasks;
+  ) shown_active_tasks;
 
-  if backlog.tasks = [] then
-    Buffer.add_string buf "  (no tasks)\n";
+  if active_tasks = [] then
+    Buffer.add_string buf "  (no active tasks)\n";
+  if List.length active_tasks > max_active_tasks_display then
+    Buffer.add_string buf
+      (Printf.sprintf
+         "  … and %d more active tasks (use masc_tasks for full list)\n"
+         (List.length active_tasks - max_active_tasks_display));
+  Buffer.add_string buf
+    (Printf.sprintf
+       "  Summary: active=%d, done=%d, cancelled=%d, total=%d\n"
+       (List.length active_tasks) done_count cancelled_count (List.length backlog.tasks));
 
-  (* Message summary - count only to save tokens *)
-  let msgs_path = messages_dir config in
-  if Sys.file_exists msgs_path then begin
-    let files = Sys.readdir msgs_path |> Array.to_list in
-    let total = List.length files in
-    if total > 0 then begin
-      (* Count by agent from filename pattern: {seq}_{agent}_broadcast.json *)
-      let agent_counts = Hashtbl.create 8 in
-      List.iter (fun name ->
-        (* Extract agent name from filename *)
-        let parts = String.split_on_char '_' name in
-        if List.length parts >= 2 then begin
-          let agent = List.nth parts 1 in
-          let current = try Hashtbl.find agent_counts agent with Not_found -> 0 in
-          Hashtbl.replace agent_counts agent (current + 1)
-        end
-      ) files;
-      (* Format agent counts *)
-      let counts_list = Hashtbl.fold (fun k v acc -> (k, v) :: acc) agent_counts [] in
-      let counts_str = String.concat ", " (List.map (fun (a, c) -> Printf.sprintf "%s:%d" a c) counts_list) in
-      Buffer.add_string buf (Printf.sprintf "\n💬 Messages: %d (%s)\n" total counts_str);
-      Buffer.add_string buf "   Use masc_messages for details\n"
-    end else
-      Buffer.add_string buf "\n💬 Messages: 0\n"
+  (* Message summary: use cumulative sequence to avoid heavy directory scans *)
+  let total_messages = max 0 state.message_seq in
+  if total_messages > 0 then begin
+    Buffer.add_string buf (Printf.sprintf "\n💬 Messages: %d (cumulative)\n" total_messages);
+    Buffer.add_string buf "   Use masc_messages for recent details\n"
   end else
     Buffer.add_string buf "\n💬 Messages: 0\n";
 

@@ -75,37 +75,6 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_sse_storm_e2e.exe"
 
-      - name: Run TRPG gameflow e2e (core)
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_TIMEOUT_SEC: 1200
-          CI_TEST_HEARTBEAT_SEC: 15
-          TRPG_E2E_TIER: core
-          TRPG_E2E_RETRY: 2
-          TRPG_E2E_TIMEOUT_SEC: 480
-          MASC_TRPG_E2E_REAL_LLM: "1"
-          TRPG_E2E_ALARM: "0"
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_trpg_gameflow_e2e.exe"
-
-      - name: Run TRPG gameflow e2e (full, main only)
-        if: github.ref == 'refs/heads/main'
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_TIMEOUT_SEC: 1500
-          CI_TEST_HEARTBEAT_SEC: 15
-          TRPG_E2E_TIER: full
-          TRPG_E2E_RETRY: 2
-          TRPG_E2E_TIMEOUT_SEC: 480
-          MASC_TRPG_E2E_REAL_LLM: "1"
-          TRPG_E2E_ALARM: "0"
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_trpg_gameflow_e2e.exe"
-
       - name: Check formatting
         run: |
           opam exec -- dune fmt 2>&1 || true

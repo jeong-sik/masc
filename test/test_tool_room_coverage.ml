@@ -6,6 +6,18 @@ let () = Random.self_init ()
 
 let () = Printf.printf "\n=== Tool_room Coverage Tests ===\n"
 
+let str_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  if len_sub > len_s then false
+  else
+    let rec loop i =
+      if i > len_s - len_sub then false
+      else if String.sub s i len_sub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
 (* Test helper *)
 let test name f =
   try
@@ -48,6 +60,38 @@ let () = test "dispatch_status" (fun () ->
   let args = `Assoc [] in
   match Tool_room.dispatch ctx ~name:"masc_status" ~args with
   | Some (success, _result) -> assert success
+  | None -> failwith "dispatch returned None"
+)
+
+(* Test status summary and active task cap *)
+let () = test "dispatch_status_summary_and_cap" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  for i = 1 to 35 do
+    ignore (Room.add_task ctx.config ~title:(Printf.sprintf "Task %d" i) ~priority:3 ~description:"")
+  done;
+  let args = `Assoc [] in
+  match Tool_room.dispatch ctx ~name:"masc_status" ~args with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "Summary: active=35, done=0, cancelled=0, total=35");
+      assert (str_contains result "and 5 more active tasks")
+  | None -> failwith "dispatch returned None"
+)
+
+(* Test done task aggregation in summary *)
+let () = test "dispatch_status_done_summary" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Room.add_task ctx.config ~title:"Done Task" ~priority:2 ~description:"" in
+  ignore (Room.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  ignore (Room.complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok");
+  let args = `Assoc [] in
+  match Tool_room.dispatch ctx ~name:"masc_status" ~args with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "Summary: active=0, done=1, cancelled=0, total=1");
+      assert (str_contains result "(no active tasks)")
   | None -> failwith "dispatch returned None"
 )
 

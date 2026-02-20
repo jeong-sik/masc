@@ -537,6 +537,15 @@ body:not(.mode-trpg) #ops-hud {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+}
+
+#session-control-status {
+    flex: 0 1 min(44vw, 520px);
+    max-width: min(44vw, 520px);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .inline-select {
@@ -1189,6 +1198,10 @@ body.wasm-dom-fallback #bevy-canvas {
     overflow: hidden;
 }
 
+#secondary-content {
+    scroll-padding-bottom: 140px;
+}
+
 /* ─── Tertiary Zone ────────────────────── */
 
 #tertiary-zone {
@@ -1355,6 +1368,22 @@ body.wasm-dom-fallback #bevy-canvas {
 
 #narrative-log {
     margin-top: 12px;
+    padding-bottom: 12px;
+}
+
+#narrative-log:empty::before {
+    content: attr(data-empty-hint);
+    display: block;
+    margin: 6px 0 10px;
+    padding: 10px 12px;
+    border: 1px dashed rgba(90, 126, 176, 0.45);
+    border-radius: 4px;
+    background: rgba(19, 31, 52, 0.35);
+    color: rgba(188, 202, 228, 0.9);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    line-height: 1.45;
+    letter-spacing: 0.2px;
 }
 
 .atmosphere-strip {
@@ -1383,6 +1412,12 @@ body.wasm-dom-fallback #bevy-canvas {
     object-fit: cover;
     border-radius: 3px;
     opacity: 0.88;
+}
+
+.atmo-icon:not([src]),
+.atmo-icon[src=""],
+.atmo-icon[data-empty="1"] {
+    opacity: 0;
 }
 
 .atmo-label {
@@ -1523,11 +1558,16 @@ body.wasm-dom-fallback #bevy-canvas {
     padding: 10px 10px 8px;
     margin-bottom: 6px;
     transition: background 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
 }
 
 .character-card:hover {
     background: rgba(255, 255, 255, 0.03);
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.character-card.join-pick-selected {
+    box-shadow: 0 0 0 1px rgba(196, 162, 101, 0.55), 0 2px 14px rgba(0, 0, 0, 0.32);
 }
 
 /* Class-specific left border colors */
@@ -1638,6 +1678,32 @@ body.wasm-dom-fallback #bevy-canvas {
     display: flex;
     align-items: center;
     gap: 2px;
+}
+
+.char-lore {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 1px;
+}
+
+.char-archetype {
+    font-family: var(--font-ui);
+    font-size: 9px;
+    color: #9ab0d8;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.char-persona {
+    font-family: var(--font-ui);
+    font-size: 9px;
+    color: #8fa2bf;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 210px;
 }
 
 .class-icon {
@@ -1916,19 +1982,69 @@ body.wasm-dom-fallback #bevy-canvas {
     padding: 0 2px;
 }
 
-.skill-row {
-    display: grid;
-    grid-template-columns: 1fr 28px 32px;
-    gap: 4px;
-    padding: 2px 4px;
+.traits-list {
+    padding: 0 2px;
+}
+
+.trait-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.trait-row:last-child {
+    border-bottom: none;
+}
+
+.trait-main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.trait-icon {
+    font-size: 11px;
+    line-height: 1;
+    width: 14px;
+    text-align: center;
+}
+
+.trait-name {
     font-family: var(--font-ui);
     font-size: 10px;
-    align-items: center;
+    color: var(--text-primary);
+    letter-spacing: 0.2px;
+}
+
+.trait-desc {
+    font-family: var(--font-ui);
+    font-size: 9px;
+    color: var(--text-dim);
+    line-height: 1.35;
+}
+
+.skill-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 4px;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    align-items: stretch;
     border-bottom: 1px solid rgba(255, 255, 255, 0.02);
 }
 
 .skill-row:last-child {
     border-bottom: none;
+}
+
+.skill-main {
+    display: grid;
+    grid-template-columns: 1fr 36px 32px;
+    gap: 4px;
+    align-items: center;
 }
 
 .skill-name {
@@ -1949,6 +2065,13 @@ body.wasm-dom-fallback #bevy-canvas {
     font-family: 'JetBrains Mono', var(--font-ui);
     font-weight: 700;
     font-size: 9px;
+}
+
+.skill-desc {
+    color: var(--text-dim);
+    font-size: 9px;
+    line-height: 1.35;
+    white-space: normal;
 }
 
 .mod-positive { color: #66cc66; }
@@ -2406,6 +2529,8 @@ body.wasm-dom-fallback #bevy-canvas {
     line-height: 1.45;
     color: var(--text-primary);
     letter-spacing: 0.2px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .turn-flow-banner.is-running {
@@ -4207,6 +4332,10 @@ body.wasm-dom-fallback #bevy-canvas {
     background: var(--bg-panel-alt);
     border-top: 1px solid var(--border-main, rgba(196, 162, 101, 0.12));
     border-radius: 0 0 var(--card-radius, 6px) var(--card-radius, 6px);
+    position: sticky;
+    bottom: 0;
+    z-index: 18;
+    box-shadow: 0 -10px 20px rgba(0, 0, 0, 0.28);
 }
 
 #action-input-row {
@@ -4463,6 +4592,10 @@ body.wasm-dom-fallback #bevy-canvas {
     padding: 8px 10px;
     border-top: 1px solid var(--border-main);
     background: var(--bg-panel-alt);
+    position: sticky;
+    bottom: 0;
+    z-index: 18;
+    box-shadow: 0 -10px 20px rgba(0, 0, 0, 0.28);
 }
 
 #join-help {

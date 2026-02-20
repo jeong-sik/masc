@@ -23,6 +23,7 @@ type result = bool * string
 
 type keeper_call_result = [ `Ok of Yojson.Safe.t | `Timeout | `Error of string ]
 type keeper_probe_result = [ `Ok | `Error of string ]
+type dm_voice_emit_result = (Yojson.Safe.t, string) Stdlib.result
 
 type context = {
   config : Room.config;
@@ -31,6 +32,12 @@ type context = {
     (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
     option;
   keeper_probe : (name:string -> keeper_probe_result) option;
+  dm_voice_emit :
+    (agent_id:string ->
+     message:string ->
+     provider:string option ->
+     dm_voice_emit_result)
+      option;
 }
 
 type trpg_role = [ `Dm | `Player ]
@@ -251,7 +258,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean), dm_voice_enabled(boolean), dm_voice_provider(auto|voicemode|elevenlabs).";
       input_schema =
         `Assoc
           [
@@ -271,6 +278,8 @@ let schemas : Types.tool_schema list =
                   ("rule_module", `Assoc [ ("type", `String "string") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "number") ]);
                   ("require_claim", `Assoc [ ("type", `String "boolean") ]);
+                  ("dm_voice_enabled", `Assoc [ ("type", `String "boolean") ]);
+                  ("dm_voice_provider", `Assoc [ ("type", `String "string") ]);
                   ("lang", `Assoc [ ("type", `String "string") ]);
                 ] );
             ( "required",
@@ -1336,6 +1345,16 @@ let prompt_language_of_string_opt = function
       | _ -> `Ko)
   | None -> `Ko
 
+let normalize_dm_voice_provider raw =
+  let normalized = raw |> String.trim |> String.lowercase_ascii in
+  match normalized with
+  | "auto" | "voicemode" | "elevenlabs" -> Ok normalized
+  | _ ->
+      Error
+        (Printf.sprintf
+           "dm_voice_provider must be one of: auto, voicemode, elevenlabs (got %s)"
+           raw)
+
 let take_last n xs =
   if n <= 0 then []
   else
@@ -1616,7 +1635,97 @@ let call_keeper ctx ~name ~message ~timeout_sec =
   | None -> `Error "keeper_call is not available in this runtime"
   | Some f -> f ~name ~message ~timeout_sec
 
-let append_timeout_and_unavailable_events
+let keeper_unavailable_max_per_turn_default = 8
+
+let keeper_unavailable_max_per_turn_env =
+  "MASC_TRPG_KEEPER_UNAVAILABLE_MAX_PER_TURN"
+
+let keeper_unavailable_max_per_turn () =
+  match Sys.getenv_opt keeper_unavailable_max_per_turn_env with
+  | None -> keeper_unavailable_max_per_turn_default
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some value when value >= 0 -> value
+      | _ -> keeper_unavailable_max_per_turn_default)
+
+type unavailable_sampling_state = {
+  max_per_turn : int;
+  mutable count_in_turn : int;
+  seen_keys : (string, unit) Hashtbl.t;
+}
+
+type unavailable_append_result =
+  [ `Appended of Trpg_engine_event.t | `Sampled of string ]
+
+let unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage ~reason =
+  Printf.sprintf "%d|%s|%s|%s|%s" turn actor_id
+    (normalize_keeper_name keeper_name)
+    (String.lowercase_ascii (String.trim stage))
+    (String.lowercase_ascii (String.trim reason))
+
+let make_unavailable_sampling_state ~(events : Trpg_engine_event.t list) ~turn :
+    unavailable_sampling_state =
+  let seen_keys = Hashtbl.create 64 in
+  let count_in_turn = ref 0 in
+  List.iter
+    (fun (event : Trpg_engine_event.t) ->
+      if event.event_type = Trpg_engine_event.Keeper_unavailable then
+        let payload_turn =
+          match event.payload |> member "turn" with
+          | `Int i -> Some i
+          | _ -> None
+        in
+        match payload_turn with
+        | Some payload_turn when payload_turn = turn ->
+            count_in_turn := !count_in_turn + 1;
+            let actor_id =
+              match event.payload |> member "actor_id" with
+              | `String v -> v
+              | _ ->
+                  Option.value ~default:"" event.actor_id |> String.trim
+            in
+            let keeper_name =
+              match event.payload |> member "keeper" with
+              | `String v -> v
+              | _ -> ""
+            in
+            let stage =
+              match event.payload |> member "stage" with
+              | `String v -> v
+              | _ -> ""
+            in
+            let reason =
+              match event.payload |> member "reason" with
+              | `String v -> v
+              | _ -> ""
+            in
+            if actor_id <> "" && keeper_name <> "" && stage <> "" then
+              let key =
+                unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage
+                  ~reason
+              in
+              Hashtbl.replace seen_keys key ()
+        | _ -> ())
+    events;
+  {
+    max_per_turn = keeper_unavailable_max_per_turn ();
+    count_in_turn = !count_in_turn;
+    seen_keys;
+  }
+
+let decide_unavailable_append ~sampling_state ~turn ~actor_id ~keeper_name ~stage
+    ~reason : [ `Append | `Sampled of string ] =
+  let key = unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage ~reason in
+  if Hashtbl.mem sampling_state.seen_keys key then `Sampled "duplicate"
+  else if sampling_state.count_in_turn >= sampling_state.max_per_turn then
+    `Sampled
+      (Printf.sprintf "cap:%d" (max 0 sampling_state.max_per_turn))
+  else (
+    Hashtbl.replace sampling_state.seen_keys key ();
+    sampling_state.count_in_turn <- sampling_state.count_in_turn + 1;
+    `Append)
+
+let rec append_timeout_and_unavailable_events
     ~base_dir
     ~room_id
     ~phase
@@ -1625,6 +1734,7 @@ let append_timeout_and_unavailable_events
     ~actor_id
     ~keeper_name
     ~timeout_sec
+    ~sampling_state
     =
   let ( let* ) = Result.bind in
   let timeout_reason = "timeout" in
@@ -1651,52 +1761,64 @@ let append_timeout_and_unavailable_events
       ~payload:timeout_payload
       ()
   in
-  let unavailable_payload =
-    `Assoc
-      [
-        ("phase", `String phase);
-        ("turn", `Int turn);
-        ("role", `String (role_to_string role));
-        ("actor_id", `String actor_id);
-        ("keeper", `String keeper_name);
-        ("reason", `String timeout_reason);
-        ("timeout_sec", `Float timeout_sec);
-        ("stage", `String timeout_stage);
-      ]
-  in
-  let* unavailable_event =
-    append_event
+  let* unavailable_result =
+    append_unavailable_event
       ~base_dir
       ~room_id
-      ~event_type:Trpg_engine_event.Keeper_unavailable
+      ~phase
+      ~turn
+      ~role
       ~actor_id
-      ~payload:unavailable_payload
+      ~keeper_name
+      ~reason:timeout_reason
+      ~stage:timeout_stage
+      ~sampling_state
+      ~extra_payload_fields:[ ("timeout_sec", `Float timeout_sec) ]
       ()
   in
-  Ok [ timeout_event; unavailable_event ]
+  Ok (timeout_event, unavailable_result)
 
-let append_unavailable_event
-    ~base_dir ~room_id ~phase ~turn ~role ~actor_id ~keeper_name ~reason ~stage ()
-    =
-  let payload =
-    `Assoc
-      [
-        ("phase", `String phase);
-        ("turn", `Int turn);
-        ("role", `String (role_to_string role));
-        ("actor_id", `String actor_id);
-        ("keeper", `String keeper_name);
-        ("reason", `String reason);
-        ("stage", `String stage);
-      ]
-  in
-  append_event
+and append_unavailable_event
     ~base_dir
     ~room_id
-    ~event_type:Trpg_engine_event.Keeper_unavailable
+    ~phase
+    ~turn
+    ~role
     ~actor_id
-    ~payload
+    ~keeper_name
+    ~reason
+    ~stage
+    ~sampling_state
+    ?(extra_payload_fields = [])
     ()
+    =
+  match
+    decide_unavailable_append ~sampling_state ~turn ~actor_id ~keeper_name
+      ~stage ~reason
+  with
+  | `Sampled sampled_reason -> Ok (`Sampled sampled_reason)
+  | `Append ->
+      let payload =
+        `Assoc
+          ([
+             ("phase", `String phase);
+             ("turn", `Int turn);
+             ("role", `String (role_to_string role));
+             ("actor_id", `String actor_id);
+             ("keeper", `String keeper_name);
+             ("reason", `String reason);
+             ("stage", `String stage);
+           ]
+          @ extra_payload_fields)
+      in
+      append_event
+        ~base_dir
+        ~room_id
+        ~event_type:Trpg_engine_event.Keeper_unavailable
+        ~actor_id
+        ~payload
+        ()
+      |> Result.map (fun event -> `Appended event)
 
 let append_keeper_reply_event
     ~base_dir
@@ -2774,6 +2896,21 @@ let handle_round_run ctx args : result =
       let* phase_opt = get_optional_string args "phase" in
       let* lang_opt = get_optional_string args "lang" in
       let* require_claim = get_optional_bool args "require_claim" ~default:false in
+      let* dm_voice_enabled =
+        get_optional_bool args "dm_voice_enabled" ~default:false
+      in
+      let* dm_voice_provider =
+        match args |> member "dm_voice_provider" with
+        | `Null -> Ok None
+        | `String raw when String.trim raw = "" ->
+            Error "dm_voice_provider cannot be empty"
+        | `String raw -> (
+            match normalize_dm_voice_provider raw with
+            | Ok "auto" -> Ok None
+            | Ok provider -> Ok (Some provider)
+            | Error e -> Error e)
+        | _ -> Error "dm_voice_provider must be a string"
+      in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
@@ -2820,6 +2957,10 @@ let handle_round_run ctx args : result =
         ref (latest_session_outcome_payload existing_events_before)
       in
       let* turn_before = read_state_turn derived in
+      let unavailable_sampling =
+        make_unavailable_sampling_state ~events:existing_events_before
+          ~turn:turn_before
+      in
       let next_turn = max 1 (turn_before + 1) in
       let* () =
         if player_keepers = [] then
@@ -2883,7 +3024,7 @@ let handle_round_run ctx args : result =
 
       let process_one ~state_json ~role ~actor_id ~keeper_name =
         let record_unavailable_status ~status ~error ~stage =
-          let* unavailable_event =
+          let* unavailable_result =
             append_unavailable_event
               ~base_dir
               ~room_id
@@ -2894,10 +3035,17 @@ let handle_round_run ctx args : result =
               ~keeper_name
               ~reason:error
               ~stage
+              ~sampling_state:unavailable_sampling
               ()
           in
-          unavailable_count := !unavailable_count + 1;
-          appended_events := !appended_events @ [ unavailable_event ];
+          let sampled, sampled_reason =
+            match unavailable_result with
+            | `Appended unavailable_event ->
+                unavailable_count := !unavailable_count + 1;
+                appended_events := !appended_events @ [ unavailable_event ];
+                (false, None)
+            | `Sampled reason -> (true, Some reason)
+          in
           statuses :=
             `Assoc
               [
@@ -2908,6 +3056,10 @@ let handle_round_run ctx args : result =
                 ("reason", `String error);
                 ("stage", `String stage);
                 ("error", `String error);
+                ("sampled", `Bool sampled);
+                ( "sampled_reason",
+                  Option.fold ~none:`Null ~some:(fun v -> `String v)
+                    sampled_reason );
               ]
             :: !statuses;
           Ok ()
@@ -2948,7 +3100,7 @@ let handle_round_run ctx args : result =
         in
         match call_keeper ctx ~name:keeper_name ~message:prompt ~timeout_sec with
         | `Timeout ->
-            let* timeout_events =
+            let* timeout_event, unavailable_result =
               append_timeout_and_unavailable_events
                 ~base_dir
                 ~room_id
@@ -2958,10 +3110,18 @@ let handle_round_run ctx args : result =
                 ~actor_id
                 ~keeper_name
                 ~timeout_sec
+                ~sampling_state:unavailable_sampling
             in
             timeout_count := !timeout_count + 1;
-            unavailable_count := !unavailable_count + 1;
-            appended_events := !appended_events @ timeout_events;
+            appended_events := !appended_events @ [ timeout_event ];
+            let sampled, sampled_reason =
+              match unavailable_result with
+              | `Appended unavailable_event ->
+                  unavailable_count := !unavailable_count + 1;
+                  appended_events := !appended_events @ [ unavailable_event ];
+                  (false, None)
+              | `Sampled reason -> (true, Some reason)
+            in
             statuses :=
               `Assoc
                 [
@@ -2972,6 +3132,10 @@ let handle_round_run ctx args : result =
                   ("reason", `String "timeout");
                   ("stage", `String "masc_keeper_msg");
                   ("timeout_sec", `Float timeout_sec);
+                  ("sampled", `Bool sampled);
+                  ( "sampled_reason",
+                    Option.fold ~none:`Null ~some:(fun v -> `String v)
+                      sampled_reason );
                 ]
               :: !statuses;
             Ok ()
@@ -3154,6 +3318,83 @@ let handle_round_run ctx args : result =
       let final_state = state_of_derived final_derived in
       let statuses = List.rev !statuses in
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
+      let room_status =
+        match final_state |> member "status" with
+        | `String status when String.trim status <> "" -> status
+        | _ -> "active"
+      in
+      let room_in_progress =
+        String.equal (String.lowercase_ascii room_status) "active"
+      in
+      let dm_reply =
+        match !dm_reply_ref |> Option.map String.trim with
+        | Some s when s <> "" -> Some s
+        | _ -> None
+      in
+      let provider_label = Option.value ~default:"auto" dm_voice_provider in
+      let dm_voice_result =
+        if not dm_voice_enabled then
+          `Assoc
+            [
+              ("enabled", `Bool false);
+              ("status", `String "disabled");
+            ]
+        else if not room_in_progress then
+          `Assoc
+            [
+              ("enabled", `Bool true);
+              ("status", `String "skipped");
+              ("reason", `String "room_not_in_progress");
+              ("room_status", `String room_status);
+              ("provider", `String provider_label);
+            ]
+        else
+          match dm_reply with
+          | None ->
+              `Assoc
+                [
+                  ("enabled", `Bool true);
+                  ("status", `String "skipped");
+                  ( "reason",
+                    `String
+                      (if !dm_success then "dm_reply_missing"
+                       else "dm_not_success") );
+                  ("provider", `String provider_label);
+                ]
+          | Some reply -> (
+              match ctx.dm_voice_emit with
+              | None ->
+                  `Assoc
+                    [
+                      ("enabled", `Bool true);
+                      ("status", `String "skipped");
+                      ("reason", `String "dm_voice_emit_unavailable");
+                      ("provider", `String provider_label);
+                      ("message_preview", `String (compact_text ~max_len:120 reply));
+                    ]
+              | Some emit -> (
+                  match
+                    emit ~agent_id:"dm" ~message:reply ~provider:dm_voice_provider
+                  with
+                  | Ok payload ->
+                      `Assoc
+                        [
+                          ("enabled", `Bool true);
+                          ("status", `String "requested");
+                          ("provider", `String provider_label);
+                          ("message_preview", `String (compact_text ~max_len:120 reply));
+                          ("result", payload);
+                        ]
+                  | Error e ->
+                      `Assoc
+                        [
+                          ("enabled", `Bool true);
+                          ("status", `String "error");
+                          ("provider", `String provider_label);
+                          ("error", `String e);
+                          ("message_preview", `String (compact_text ~max_len:120 reply));
+                        ]))
+      in
       Ok
         (`Assoc
           [
@@ -3188,10 +3429,9 @@ let handle_round_run ctx args : result =
               | Some payload -> payload
               | None -> `Null );
             ("events", `List events_json);
+            ("dm_voice", dm_voice_result);
             ( "room_status",
-              match final_state |> member "status" with
-              | `String status -> `String status
-              | _ -> `String "active" );
+              `String room_status );
             ("state", final_state);
           ]))
   in

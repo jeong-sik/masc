@@ -169,7 +169,7 @@ pub fn apply_turn_advance(
 pub fn apply_turn_progress(
     mut events: MessageReader<TurnProgressUpdated>,
     mut progress: ResMut<TurnProgressState>,
-    room_state: Res<RoomState>,
+    mut room_state: ResMut<RoomState>,
 ) {
     for TurnProgressUpdated(payload) in events.read() {
         if payload.turn > 0 {
@@ -202,17 +202,15 @@ pub fn apply_turn_progress(
 
         match payload.event_type.as_str() {
             "phase.changed" => {
-                if progress.phase == "round" {
-                    reset_round_progress(&mut progress);
-                }
+                // Phase change is handled by inference below or TurnStarted
             }
             "turn.started" => {
                 if payload.turn > 0 {
                     progress.turn = payload.turn;
                 }
-                progress.current_actor.clear();
-                progress.next_actor.clear();
                 progress.actor_reasons.clear();
+                // Start with the first actor in the order
+                mark_current_and_next(&mut progress, 0);
             }
             "narration.posted" => {
                 let actor_id = if payload.actor_id.is_empty() {
@@ -261,6 +259,19 @@ pub fn apply_turn_progress(
                 progress.actor_reasons.clear();
             }
             _ => {}
+        }
+
+        // Infer UI Phase from event type
+        let inferred_phase = match payload.event_type.as_str() {
+            "turn.started" => Some(TurnPhase::ActionDeclaration),
+            "turn.action.proposed" | "intervention.submitted" => Some(TurnPhase::DiceResolution),
+            "dice.rolled" => Some(TurnPhase::OutcomeNarration),
+            "narration.posted" => Some(TurnPhase::DmNarration),
+            _ => None,
+        };
+
+        if let Some(p) = inferred_phase {
+            room_state.phase = p;
         }
     }
 
@@ -377,6 +388,9 @@ pub fn apply_actor_spawned(
                 payload.name.clone()
             },
             class: payload.class.clone(),
+            archetype: payload.class.clone(),
+            persona: String::new(),
+            traits: Vec::new(),
             hp: 100,
             max_hp: 100,
             mp: 50,

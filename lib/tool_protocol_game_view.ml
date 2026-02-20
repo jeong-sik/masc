@@ -23,6 +23,12 @@ type context = {
   trpg_keeper_probe :
     (name:string -> Tool_trpg.keeper_probe_result)
       option;
+  trpg_dm_voice_emit :
+    (agent_id:string ->
+     message:string ->
+     provider:string option ->
+     Tool_trpg.dm_voice_emit_result)
+      option;
 }
 
 let ( let* ) = Result.bind
@@ -313,6 +319,7 @@ let trpg_context_of (ctx : context) : Tool_trpg.context =
     agent_name = ctx.agent_name;
     keeper_call = ctx.trpg_keeper_call;
     keeper_probe = ctx.trpg_keeper_probe;
+    dm_voice_emit = ctx.trpg_dm_voice_emit;
   }
 
 let experiment_context_of (ctx : context) : Tool_experiment.context =

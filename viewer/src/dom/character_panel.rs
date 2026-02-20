@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::assets;
 use crate::dom::escape::html_escape;
-use crate::game::components::Actor;
+use crate::game::components::{Actor, Skill};
 
 /// Snapshot of actor state used for change detection.
 /// Re-render only fires when this changes.
@@ -110,6 +110,190 @@ fn fmt_modifier(m: i32) -> String {
     } else {
         format!("{}", m)
     }
+}
+
+fn normalize_lore_key(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .replace(' ', "_")
+}
+
+fn known_skill_lore(skill_name: &str) -> Option<(&'static str, &'static str)> {
+    match normalize_lore_key(skill_name).as_str() {
+        "mark_prey" => Some((
+            "적 한 명을 추적 표식으로 지정해 파티의 집중 화력을 유도합니다.",
+            "라운드 초반에 위협도가 높은 목표를 먼저 지정하면 효율이 큽니다.",
+        )),
+        "silent_route" => Some((
+            "소음과 시야 노출을 줄여 우회/잠입 루트를 확보합니다.",
+            "정면 충돌 전에 위치를 바꾸거나 기습 각도를 만들 때 사용하세요.",
+        )),
+        "finisher_strike" => Some((
+            "체력이 깎인 목표를 마무리하는 처형형 기술입니다.",
+            "아군의 선행 피해 후 연계하면 성공 판정이 잘 나옵니다.",
+        )),
+        "field_mend" => Some((
+            "현장에서 빠르게 상처를 봉합해 전열 붕괴를 막습니다.",
+            "집중 공격받는 아군에게 먼저 써서 다운을 방지하세요.",
+        )),
+        "truce_window" => Some((
+            "짧은 휴전 창을 만들어 협상/재정비 턴을 확보합니다.",
+            "적이 강하거나 정보가 부족할 때 시간을 벌기 좋습니다.",
+        )),
+        "resolve_hymn" => Some((
+            "파티의 동요를 진정시키고 의지를 끌어올리는 결의 기술입니다.",
+            "연속 실패 뒤 사기 회복용으로 쓰면 흐름 복구에 유리합니다.",
+        )),
+        "deception_feint" => Some((
+            "거짓 동작으로 적 판단을 흔들어 빈틈을 만듭니다.",
+            "정면 돌파보다 교란이 필요한 국면에서 효과적입니다.",
+        )),
+        "favor_broker" => Some((
+            "관계/빚을 거래해 협력이나 정보 제공을 이끌어냅니다.",
+            "NPC 또는 파티 설득 상황에서 선택지를 늘릴 때 사용하세요.",
+        )),
+        "shadow_entry" => Some((
+            "그림자 동선을 타고 경계망 안쪽으로 침투합니다.",
+            "탐지 리스크가 높은 구간을 넘어야 할 때 가장 안정적입니다.",
+        )),
+        "supply_scan" => Some((
+            "보급/자원 상태를 점검해 부족 항목을 조기에 찾습니다.",
+            "장기전 직전이나 이벤트 전환 전에 사용하면 손실을 줄입니다.",
+        )),
+        "ration_shift" => Some((
+            "자원 배분을 재조정해 생존 시간을 늘립니다.",
+            "당장 화력보다 지속력이 중요한 턴에 우선 사용하세요.",
+        )),
+        "logistics_patch" => Some((
+            "끊긴 보급 동선을 임시 복구해 팀 운영을 안정화합니다.",
+            "연속 이벤트로 소모가 누적될 때 유지력 확보에 핵심입니다.",
+        )),
+        _ => None,
+    }
+}
+
+fn trait_icon(name: &str) -> &'static str {
+    match normalize_lore_key(name).as_str() {
+        "suspicious" => "\u{1F575}\u{FE0F}",
+        "precise" => "\u{1F3AF}",
+        "vengeful" => "\u{1F525}",
+        "calm" => "\u{1F9D8}",
+        "self_sacrificing" => "\u{1FA79}",
+        "idealistic" => "\u{2728}",
+        "calculating" => "\u{1F9E0}",
+        "charming" => "\u{1F48E}",
+        "risk_seeking" => "\u{1F3B2}",
+        "pragmatic" => "\u{2699}\u{FE0F}",
+        "frugal" => "\u{1F4B0}",
+        "impatient" => "\u{23F1}\u{FE0F}",
+        _ => "\u{1F4CC}",
+    }
+}
+
+fn trait_description(name: &str) -> String {
+    match normalize_lore_key(name).as_str() {
+        "suspicious" => "배신 가능성을 먼저 계산해 위험 징후 탐지에 강합니다.".to_string(),
+        "precise" => "정확도 중심으로 행동해 단일 목표 처리 성공률이 높습니다.".to_string(),
+        "vengeful" => "피해를 입은 뒤 반격 의지가 강해 추격/마무리에 유리합니다.".to_string(),
+        "calm" => "혼전에서도 판단이 흔들리지 않아 안정적인 선택을 유지합니다.".to_string(),
+        "self_sacrificing" => "팀 보호를 우선해 방어/치유 선택을 자주 성공시킵니다.".to_string(),
+        "idealistic" => "가치 기반 선택을 선호해 협상/중재 상황에서 힘을 발휘합니다.".to_string(),
+        "calculating" => "확률과 대가를 계산해 손익이 좋은 경로를 찾아냅니다.".to_string(),
+        "charming" => "대화 압박을 완화하고 설득/관계 형성 판정에 유리합니다.".to_string(),
+        "risk_seeking" => "높은 위험의 대가를 노려 큰 전환점을 만드는 성향입니다.".to_string(),
+        "pragmatic" => "당장 생존과 효율을 우선해 자원 운용 판단이 빠릅니다.".to_string(),
+        "frugal" => "소모를 줄여 장기전에서 팀 유지력을 끌어올립니다.".to_string(),
+        "impatient" => "결단은 빠르지만 장기 설정보다 즉시 행동을 선호합니다.".to_string(),
+        _ => "상황 선택에 성향 보정을 주는 캐릭터 특성입니다.".to_string(),
+    }
+}
+
+fn fallback_skill_description(_actor: &Actor, skill_name: &str, modifier: i32) -> String {
+    if let Some((description, _hint)) = known_skill_lore(skill_name) {
+        return description.to_string();
+    }
+    let key = skill_name.trim().to_ascii_lowercase();
+    if key.contains("heal") || key.contains("cure") || key.contains("치유") {
+        "아군 체력을 회복하거나 상태를 안정화합니다.".to_string()
+    } else if key.contains("guard")
+        || key.contains("defend")
+        || key.contains("block")
+        || key.contains("방어")
+    {
+        "피해를 줄이거나 아군을 보호하는 방어 기술입니다.".to_string()
+    } else if key.contains("slash")
+        || key.contains("strike")
+        || key.contains("attack")
+        || key.contains("베기")
+    {
+        "근접 중심 단일 대상 공격에 유리한 기술입니다.".to_string()
+    } else if key.contains("fire")
+        || key.contains("ice")
+        || key.contains("bolt")
+        || key.contains("blast")
+        || key.contains("마법")
+    {
+        "원거리/속성 기반 공격 판정에 유리한 기술입니다.".to_string()
+    } else if key.contains("stealth")
+        || key.contains("hide")
+        || key.contains("sneak")
+        || key.contains("은신")
+    {
+        "탐지 회피, 기습, 잠입 상황에서 효율이 높습니다.".to_string()
+    } else if key.contains("charm")
+        || key.contains("taunt")
+        || key.contains("persuade")
+        || key.contains("협상")
+    {
+        "대화/심리전/주의 분산 계열 행동에 유리합니다.".to_string()
+    } else {
+        format!("관련 행동 판정 보정: {}", fmt_modifier(modifier))
+    }
+}
+
+fn fallback_skill_hint(actor: &Actor, skill_name: &str) -> String {
+    if let Some((_description, hint)) = known_skill_lore(skill_name) {
+        return hint.to_string();
+    }
+    let key = skill_name.trim().to_ascii_lowercase();
+    let base = if key.contains("heal") || key.contains("cure") || key.contains("치유") {
+        "전열 유지가 급할 때 우선 사용하면 안정적입니다.".to_string()
+    } else if key.contains("guard")
+        || key.contains("defend")
+        || key.contains("block")
+        || key.contains("방어")
+    {
+        "적의 강한 차례 직전에 사용하면 생존력이 크게 오릅니다.".to_string()
+    } else if key.contains("stealth")
+        || key.contains("hide")
+        || key.contains("sneak")
+        || key.contains("은신")
+    {
+        "정면 교전보다 선제/우회 루트 선택 시 효과가 큽니다.".to_string()
+    } else {
+        "행동 탭에서 스킬 성격에 맞는 키워드를 고르면 성공률이 올라갑니다.".to_string()
+    };
+    if actor.persona.trim().is_empty() {
+        base
+    } else {
+        format!("{base} 페르소나: {}", actor.persona.trim())
+    }
+}
+
+fn skill_copy(skill: &Skill, actor: &Actor) -> (String, String) {
+    let modifier = skill.modifier();
+    let description = if skill.description.trim().is_empty() {
+        fallback_skill_description(actor, &skill.name, modifier)
+    } else {
+        skill.description.trim().to_string()
+    };
+    let usage_hint = if skill.usage_hint.trim().is_empty() {
+        fallback_skill_hint(actor, &skill.name)
+    } else {
+        skill.usage_hint.trim().to_string()
+    };
+    (description, usage_hint)
 }
 
 fn actor_initials(name: &str, id: &str) -> String {
@@ -275,6 +459,28 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 actor.keeper
             )
         };
+        let archetype_line = if actor.archetype.trim().is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<span class=\"char-archetype\">{}</span>",
+                html_escape(actor.archetype.trim())
+            )
+        };
+        let persona_line = if actor.persona.trim().is_empty() {
+            String::new()
+        } else {
+            let persona = html_escape(actor.persona.trim());
+            format!(
+                "<span class=\"char-persona\" title=\"{}\">{}</span>",
+                persona, persona
+            )
+        };
+        let lore_line = if archetype_line.is_empty() && persona_line.is_empty() {
+            String::new()
+        } else {
+            format!("<div class=\"char-lore\">{}{}</div>", archetype_line, persona_line)
+        };
 
         // Buffs / debuffs
         let buffs_html = actor
@@ -315,9 +521,15 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
         };
 
         // Collapsible section IDs
+        let traits_id = format!("toggle-traits-{}", actor.id);
         let skills_id = format!("toggle-skills-{}", actor.id);
         let equip_id = format!("toggle-equip-{}", actor.id);
 
+        let traits_checked = if expanded.contains(&traits_id) {
+            " checked"
+        } else {
+            ""
+        };
         let skills_checked = if expanded.contains(&skills_id) {
             " checked"
         } else {
@@ -329,6 +541,46 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             ""
         };
 
+        // Traits section
+        let traits_section = if actor.traits.is_empty() {
+            String::new()
+        } else {
+            let rows: String = actor
+                .traits
+                .iter()
+                .map(|trait_name| {
+                    let escaped_name = html_escape(trait_name);
+                    let description = trait_description(trait_name);
+                    format!(
+                        concat!(
+                            "<div class=\"trait-row\">",
+                            "<div class=\"trait-main\">",
+                            "<span class=\"trait-icon\">{}</span>",
+                            "<span class=\"trait-name\">{}</span>",
+                            "</div>",
+                            "<div class=\"trait-desc\">{}</div>",
+                            "</div>",
+                        ),
+                        trait_icon(trait_name),
+                        escaped_name,
+                        html_escape(&description),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            format!(
+                concat!(
+                    "<input type=\"checkbox\" class=\"section-toggle\" id=\"{}\"{}/>",
+                    "<label class=\"section-header\" for=\"{}\">Traits <span class=\"section-count\">({})</span></label>",
+                    "<div class=\"section-body traits-list\">{}</div>",
+                ),
+                traits_id, traits_checked,
+                traits_id,
+                actor.traits.len(),
+                rows,
+            )
+        };
+
         // Skills section
         let skills_section = if actor.skills.is_empty() {
             String::new()
@@ -338,6 +590,9 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 .iter()
                 .map(|s| {
                     let m = s.modifier();
+                    let (description, usage_hint) = skill_copy(s, actor);
+                    let escaped_name = html_escape(&s.name);
+                    let escaped_desc = html_escape(&description);
                     let mod_class = if m > 0 {
                         "mod-positive"
                     } else if m < 0 {
@@ -345,9 +600,28 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                     } else {
                         "mod-neutral"
                     };
+                    let hint_attr = if usage_hint.trim().is_empty() {
+                        String::new()
+                    } else {
+                        format!(" title=\"{}\"", html_escape(&usage_hint))
+                    };
                     format!(
-                        "<div class=\"skill-row\"><span class=\"skill-name\">{}</span><span class=\"skill-level\">{}</span><span class=\"skill-mod {}\">{}</span></div>",
-                        s.name, s.level, mod_class, fmt_modifier(m),
+                        concat!(
+                            "<div class=\"skill-row\">",
+                            "<div class=\"skill-main\">",
+                            "<span class=\"skill-name\">{}</span>",
+                            "<span class=\"skill-level\">Lv{}</span>",
+                            "<span class=\"skill-mod {}\">{}</span>",
+                            "</div>",
+                            "<div class=\"skill-desc\"{}>{}</div>",
+                            "</div>"
+                        ),
+                        escaped_name,
+                        s.level,
+                        mod_class,
+                        fmt_modifier(m),
+                        hint_attr,
+                        escaped_desc,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -419,6 +693,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 "<div class=\"char-identity\">",
                 "<span class=\"char-name\">{}</span>",
                 "<span class=\"char-class\"><span class=\"class-icon\">{}</span> {}</span>",
+                "{}",
                 "</div>",
                 "</div>",
                 "{}",
@@ -439,6 +714,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 "<div class=\"char-effects\">{}{}</div>",
                 "{}",
                 "{}",
+                "{}",
                 "</div>",
             ),
             dead_class,
@@ -448,6 +724,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             actor.name,
             icon,
             actor.class,
+            lore_line,
             keeper_line,
             bar_class,
             hp_pct,
@@ -461,6 +738,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             conditions_html,
             buffs_html,
             debuffs_html,
+            traits_section,
             skills_section,
             equip_section,
         ));

@@ -2,7 +2,14 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { addTaskFromDashboard, sendBroadcast } from '../api'
+import { useEffect } from 'preact/hooks'
+import {
+  addTaskFromDashboard,
+  joinDashboardAgent,
+  leaveDashboardAgent,
+  sendAgentHeartbeat,
+  sendBroadcast,
+} from '../api'
 import { showToast } from './common/toast'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
@@ -20,11 +27,86 @@ const taskTitle = signal('')
 const taskDesc = signal('')
 const sending = signal(false)
 const creatingTask = signal(false)
+const joining = signal(false)
+const leaving = signal(false)
+const pinging = signal(false)
+const joined = signal(false)
 
 function persistAgentName(value: string): void {
   const v = value.trim()
   agentName.value = v
   if (v) localStorage.setItem(AGENT_NAME_KEY, v)
+}
+
+function parseJoinedAgentName(text: string): string | null {
+  const line = text.split('\n').find(l => l.includes(' joined')) ?? text
+  const m = line.match(/✅\s+(\S+)\s+joined/i)
+  return m?.[1] ?? null
+}
+
+async function joinRoom() {
+  const agent = agentName.value.trim()
+  if (!agent) return
+  joining.value = true
+  try {
+    const resText = await joinDashboardAgent(agent)
+    const joinedName = parseJoinedAgentName(resText)
+    if (joinedName) persistAgentName(joinedName)
+    joined.value = true
+    showToast(`Joined as ${joinedName ?? agent}`, 'success')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to join room'
+    showToast(msg, 'error')
+  } finally {
+    joining.value = false
+  }
+}
+
+async function leaveRoom() {
+  const agent = agentName.value.trim()
+  if (!agent) return
+  leaving.value = true
+  try {
+    await leaveDashboardAgent(agent)
+    joined.value = false
+    showToast(`Left room (${agent})`, 'success')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to leave room'
+    showToast(msg, 'error')
+  } finally {
+    leaving.value = false
+  }
+}
+
+async function resetIdentity() {
+  const prev = agentName.value.trim()
+  if (prev) {
+    try {
+      await leaveDashboardAgent(prev)
+    } catch {
+      // Ignore leave failure while resetting identity.
+    }
+  }
+
+  localStorage.removeItem(AGENT_NAME_KEY)
+  persistAgentName('dashboard')
+  joined.value = false
+  await joinRoom()
+}
+
+async function pingHeartbeat() {
+  const agent = agentName.value.trim()
+  if (!agent) return
+  pinging.value = true
+  try {
+    await sendAgentHeartbeat(agent)
+    showToast('Heartbeat sent', 'success')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to send heartbeat'
+    showToast(msg, 'error')
+  } finally {
+    pinging.value = false
+  }
 }
 
 async function submitBroadcast() {
@@ -63,6 +145,10 @@ async function submitTask() {
 }
 
 export function ControlDock() {
+  useEffect(() => {
+    void joinRoom()
+  }, [])
+
   return html`
     <section class="rail-card control-dock">
       <h3>Control Dock</h3>
@@ -94,6 +180,37 @@ export function ControlDock() {
           disabled=${sending.value || message.value.trim() === '' || agentName.value.trim() === ''}
         >
           ${sending.value ? 'Sending...' : 'Send'}
+        </button>
+      </div>
+
+      <div class="control-row">
+        <button
+          class="control-btn ghost"
+          onClick=${() => { void joinRoom() }}
+          disabled=${joining.value || agentName.value.trim() === ''}
+        >
+          ${joining.value ? 'Joining...' : joined.value ? 'Rejoin' : 'Join'}
+        </button>
+        <button
+          class="control-btn ghost"
+          onClick=${() => { void leaveRoom() }}
+          disabled=${leaving.value || agentName.value.trim() === ''}
+        >
+          ${leaving.value ? 'Leaving...' : 'Leave'}
+        </button>
+        <button
+          class="control-btn ghost"
+          onClick=${() => { void resetIdentity() }}
+          disabled=${joining.value || leaving.value}
+        >
+          Reset ID
+        </button>
+        <button
+          class="control-btn ghost"
+          onClick=${() => { void pingHeartbeat() }}
+          disabled=${pinging.value || agentName.value.trim() === ''}
+        >
+          ${pinging.value ? 'Pinging...' : 'Heartbeat'}
         </button>
       </div>
 

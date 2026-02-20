@@ -48,26 +48,6 @@ fn set_actor_reason(progress: &mut TurnProgressState, actor_id: &str, reason: &s
     }
 }
 
-fn reset_round_progress(progress: &mut TurnProgressState) {
-    if progress.actor_order.is_empty() {
-        rebuild_actor_order(progress);
-    }
-    progress.actor_states.clear();
-    progress.actor_reasons.clear();
-    for actor_id in &progress.actor_order {
-        progress
-            .actor_states
-            .insert(actor_id.clone(), "pending".to_string());
-    }
-    progress.last_actor.clear();
-    progress.last_result.clear();
-    progress.current_actor.clear();
-    progress.next_actor.clear();
-    if !progress.actor_order.is_empty() {
-        mark_current_and_next(progress, 0);
-    }
-}
-
 fn complete_actor(progress: &mut TurnProgressState, actor_id: &str, result: &str) {
     let actor_id = actor_id.trim();
     if actor_id.is_empty() {
@@ -125,10 +105,11 @@ pub fn apply_hp_change(mut events: MessageReader<HpChanged>, mut actors: Query<&
     for HpChanged(payload) in events.read() {
         for mut actor in &mut actors {
             if actor.id == payload.target {
-                actor.hp = payload.remaining_hp;
-                if actor.hp <= 0 {
-                    actor.is_dead = true;
+                if payload.amount == 0 && actor.hp == payload.remaining_hp {
+                    continue;
                 }
+                actor.hp = payload.remaining_hp.clamp(0, actor.max_hp);
+                actor.is_dead = actor.hp <= 0;
             }
         }
     }
@@ -565,15 +546,53 @@ pub fn apply_turn_action_resolved(mut events: MessageReader<TurnActionResolved>)
     }
 }
 
-pub fn apply_combat_attack(mut events: MessageReader<CombatAttack>) {
-    for CombatAttack(_p) in events.read() {
-        // Log-only: semantic combat event rendered by DOM systems
+pub fn apply_combat_attack(
+    mut events: MessageReader<CombatAttack>,
+    mut room_state: ResMut<RoomState>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for CombatAttack(payload) in events.read() {
+        if payload.turn > 0 {
+            room_state.turn = payload.turn;
+            progress.turn = payload.turn;
+        }
+        let actor_id = payload.actor_id.trim();
+        if !actor_id.is_empty() {
+            progress.current_actor = actor_id.to_string();
+            progress
+                .actor_states
+                .insert(actor_id.to_string(), "combat".to_string());
+            if !payload.action.trim().is_empty() {
+                set_actor_reason(&mut progress, actor_id, &payload.action);
+            }
+        }
     }
 }
 
-pub fn apply_combat_defense(mut events: MessageReader<CombatDefense>) {
-    for CombatDefense(_p) in events.read() {
-        // Log-only: semantic combat event rendered by DOM systems
+pub fn apply_combat_defense(
+    mut events: MessageReader<CombatDefense>,
+    mut room_state: ResMut<RoomState>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for CombatDefense(payload) in events.read() {
+        if payload.turn > 0 {
+            room_state.turn = payload.turn;
+            progress.turn = payload.turn;
+        }
+        let actor_id = payload.actor_id.trim();
+        if !actor_id.is_empty() {
+            progress.current_actor = actor_id.to_string();
+            progress
+                .actor_states
+                .insert(actor_id.to_string(), "defending".to_string());
+            if !payload.method.trim().is_empty() {
+                set_actor_reason(
+                    &mut progress,
+                    actor_id,
+                    &format!("defense: {}", payload.method.trim()),
+                );
+            }
+        }
     }
 }
 
@@ -589,6 +608,12 @@ pub fn apply_session_outcome(
             progress.turn = payload.turn;
         }
         progress.room_status = "ended".to_string();
+        let reason = payload.reason.trim();
+        progress.last_result = if reason.is_empty() {
+            payload.outcome.clone()
+        } else {
+            format!("{} ({})", payload.outcome, reason)
+        };
     }
 }
 

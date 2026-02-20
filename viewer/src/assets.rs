@@ -33,20 +33,31 @@ pub mod paths {
     pub const MAP_COUNCIL_CHAMBER: &str = "maps/council_chamber.jpg";
 
     // Weather overlays (1920x1080, PNG with alpha)
+    #[cfg(not(target_arch = "wasm32"))]
     pub const WEATHER_DRIZZLE: &str = "weather/weather_drizzle.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const WEATHER_HEAVY_RAIN: &str = "weather/weather_heavy_rain.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const WEATHER_FOG: &str = "weather/weather_fog.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const WEATHER_SILENCE: &str = "weather/weather_silence.png";
 
     // Mood overlays (1920x1080, PNG with alpha)
+    #[cfg(not(target_arch = "wasm32"))]
     pub const MOOD_QUIET_UNEASE: &str = "moods/mood_quiet_unease.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const MOOD_TENSION_RISING: &str = "moods/mood_tension_rising.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const MOOD_AMBIGUOUS_CALM: &str = "moods/mood_ambiguous_calm.png";
 
     // Props — The Room scenario (512x512, PNG, transparent background)
+    #[cfg(not(target_arch = "wasm32"))]
     pub const PROP_COMPASS: &str = "props/compass_broken.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const PROP_SEXTANT: &str = "props/sextant_mirror.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const PROP_JOURNAL: &str = "props/journal_open.png";
+    #[cfg(not(target_arch = "wasm32"))]
     pub const PROP_MAPS: &str = "props/maps_recursive.png";
 }
 
@@ -92,6 +103,7 @@ pub fn map_for(area: &str) -> Option<&'static str> {
 }
 
 /// Returns the weather overlay asset path for a given weather ID.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn weather_for(id: &str) -> Option<&'static str> {
     match id {
         "drizzle" => Some(paths::WEATHER_DRIZZLE),
@@ -103,6 +115,7 @@ pub fn weather_for(id: &str) -> Option<&'static str> {
 }
 
 /// Returns the mood overlay asset path for a given mood ID.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn mood_for(id: &str) -> Option<&'static str> {
     match id {
         "quiet_unease" => Some(paths::MOOD_QUIET_UNEASE),
@@ -113,6 +126,7 @@ pub fn mood_for(id: &str) -> Option<&'static str> {
 }
 
 /// Returns the prop asset path for a given prop ID.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn prop_for(id: &str) -> Option<&'static str> {
     match id {
         "compass" => Some(paths::PROP_COMPASS),

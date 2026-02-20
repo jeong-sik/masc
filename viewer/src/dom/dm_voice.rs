@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use bevy::prelude::DetectChanges;
 use bevy::prelude::Res;
 
 use crate::game::events::NarrativePayload;
@@ -78,6 +80,12 @@ const DM_VOICE_ID_PRESETS: &[(&str, &str)] = &[
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_PREVIEW_TEXT: &str = "지금은 DM 음성 미리듣기 테스트 중입니다.";
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static ACTIVE_DM_VOICE_AUDIO: std::cell::RefCell<Vec<web_sys::HtmlAudioElement>> =
+        std::cell::RefCell::new(Vec::new());
+}
+
 fn normalize_phase(raw: &str) -> String {
     raw.trim().to_ascii_lowercase().replace('-', "_")
 }
@@ -154,9 +162,16 @@ pub fn unbind_dm_voice_controls() {
     }
 }
 
-pub fn sync_dm_voice_controls(_room_state: Res<RoomState>, _progress: Res<TurnProgressState>) {
+pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProgressState>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (&room_state, &progress);
+
     #[cfg(target_arch = "wasm32")]
     {
+        if !room_state.is_changed() && !progress.is_changed() {
+            return;
+        }
+
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
@@ -165,7 +180,7 @@ pub fn sync_dm_voice_controls(_room_state: Res<RoomState>, _progress: Res<TurnPr
         }
 
         let mode = resolve_dm_voice_mode();
-        let running = is_room_running(&_room_state, &_progress);
+        let running = is_room_running(&room_state, &progress);
         match (running, mode) {
             (false, _) => {
                 set_dm_voice_status(
@@ -1002,7 +1017,7 @@ async fn speak_with_proxy_inner(
         .await
         .map_err(|_| "json parse failed".to_string())?;
         if let Some(src) = extract_audio_source_from_json(&json) {
-            play_audio_source(&src)?;
+            play_audio_source(&src, None)?;
             return Ok(());
         }
         return Err("json response has no playable audio source".to_string());
@@ -1021,7 +1036,7 @@ async fn speak_with_proxy_inner(
             .map_err(|_| "blob cast failed".to_string())?;
         let object_url = web_sys::Url::create_object_url_with_blob(&blob)
             .map_err(|_| "failed to create blob object url".to_string())?;
-        play_audio_source(&object_url)?;
+        play_audio_source(&object_url, Some(object_url.clone()))?;
         return Ok(());
     }
 
@@ -1034,7 +1049,7 @@ async fn speak_with_proxy_inner(
     .map_err(|_| "text parse failed".to_string())?;
     if let Some(raw) = text_resp.as_string() {
         if let Some(src) = normalize_audio_source_candidate(&raw) {
-            play_audio_source(&src)?;
+            play_audio_source(&src, None)?;
             return Ok(());
         }
     }
@@ -1100,12 +1115,63 @@ fn normalize_audio_source_candidate(raw: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn play_audio_source(source: &str) -> Result<(), String> {
+fn track_active_audio(audio: &web_sys::HtmlAudioElement) {
+    ACTIVE_DM_VOICE_AUDIO.with(|pool| {
+        pool.borrow_mut().push(audio.clone());
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn untrack_active_audio(audio: &web_sys::HtmlAudioElement) {
+    ACTIVE_DM_VOICE_AUDIO.with(|pool| {
+        pool.borrow_mut()
+            .retain(|item| !js_sys::Object::is(item.as_ref(), audio.as_ref()));
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn cleanup_audio_now(audio: &web_sys::HtmlAudioElement, cleanup_object_url: Option<&str>) {
+    audio.set_onended(None);
+    audio.set_onerror(None);
+    audio.set_src("");
+    if let Some(url) = cleanup_object_url {
+        let _ = web_sys::Url::revoke_object_url(url);
+    }
+    untrack_active_audio(audio);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_audio_cleanup_handlers(
+    audio: &web_sys::HtmlAudioElement,
+    cleanup_object_url: Option<String>,
+) {
+    use wasm_bindgen::JsCast;
+
+    let on_end_audio = audio.clone();
+    let on_end_cleanup = cleanup_object_url.clone();
+    let on_end = wasm_bindgen::closure::Closure::once_into_js(move || {
+        cleanup_audio_now(&on_end_audio, on_end_cleanup.as_deref());
+    });
+    audio.set_onended(Some(on_end.unchecked_ref::<js_sys::Function>()));
+
+    let on_error_audio = audio.clone();
+    let on_error = wasm_bindgen::closure::Closure::once_into_js(move || {
+        cleanup_audio_now(&on_error_audio, cleanup_object_url.as_deref());
+    });
+    audio.set_onerror(Some(on_error.unchecked_ref::<js_sys::Function>()));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn play_audio_source(source: &str, cleanup_object_url: Option<String>) -> Result<(), String> {
     let audio = web_sys::HtmlAudioElement::new_with_src(source)
         .map_err(|_| "failed to create HtmlAudioElement".to_string())?;
     audio.set_preload("auto");
-    let _ = audio.play().map_err(|_| "audio play failed".to_string())?;
-    std::mem::forget(audio);
+    track_active_audio(&audio);
+    bind_audio_cleanup_handlers(&audio, cleanup_object_url.clone());
+    if audio.play().is_err() {
+        cleanup_audio_now(&audio, cleanup_object_url.as_deref());
+        return Err("audio play failed".to_string());
+    }
     Ok(())
 }
 

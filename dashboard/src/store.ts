@@ -68,10 +68,175 @@ export function invalidateDashboardCache(): void {
 
 // --- Data fetchers ---
 
-function normalizeKeepers(raw: Keeper[] | { keepers: Keeper[] }): Keeper[] {
-  if (Array.isArray(raw)) return raw
-  if (raw && Array.isArray(raw.keepers)) return raw.keepers
-  return []
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const rows = value.filter((v): v is string => typeof v === 'string' && v.trim() !== '')
+  return rows.length > 0 ? rows : undefined
+}
+
+function normalizeAgentStatus(value: unknown): Agent['status'] {
+  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  if (raw === 'active' || raw === 'idle' || raw === 'inactive' || raw === 'offline') return raw
+  if (raw === 'busy' || raw === 'in_progress' || raw === 'claimed') return 'active'
+  if (raw === 'dead' || raw === 'left') return 'offline'
+  return 'offline'
+}
+
+function normalizeTaskStatus(value: unknown): Task['status'] {
+  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  if (raw === 'todo' || raw === 'in_progress' || raw === 'claimed' || raw === 'done' || raw === 'cancelled') {
+    return raw
+  }
+  if (raw === 'inprogress') return 'in_progress'
+  return 'todo'
+}
+
+function normalizeAgent(raw: unknown): Agent | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  if (!name) return null
+  return {
+    name,
+    status: normalizeAgentStatus(raw.status),
+    current_task: asString(raw.current_task) ?? null,
+    last_seen: asString(raw.last_seen),
+    emoji: asString(raw.emoji),
+    koreanName: asString(raw.koreanName) ?? asString(raw.korean_name),
+    model: asString(raw.model),
+    traits: asStringArray(raw.traits),
+    interests: asStringArray(raw.interests),
+    activityLevel: asNumber(raw.activityLevel) ?? asNumber(raw.activity_level),
+    primaryValue: asString(raw.primaryValue) ?? asString(raw.primary_value),
+  }
+}
+
+function normalizeTask(raw: unknown): Task | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const title = asString(raw.title)
+  if (!id || !title) return null
+  return {
+    id,
+    title,
+    status: normalizeTaskStatus(raw.status),
+    priority: asNumber(raw.priority),
+    assignee: asString(raw.assignee),
+    description: asString(raw.description),
+    created_at: asString(raw.created_at),
+    updated_at: asString(raw.updated_at),
+  }
+}
+
+function normalizeMessage(raw: unknown): Message | null {
+  if (!isRecord(raw)) return null
+  const from = asString(raw.from) ?? asString(raw.from_agent) ?? 'system'
+  const content = asString(raw.content) ?? ''
+  const timestamp = asString(raw.timestamp) ?? new Date().toISOString()
+  return {
+    id: asString(raw.id),
+    seq: asNumber(raw.seq),
+    from,
+    content,
+    timestamp,
+    type: asString(raw.type),
+  }
+}
+
+function normalizeKeepers(raw: unknown): Keeper[] {
+  const rows =
+    Array.isArray(raw)
+      ? raw
+      : isRecord(raw) && Array.isArray(raw.keepers)
+        ? raw.keepers
+        : []
+
+  return rows
+    .map((row): Keeper | null => {
+      if (!isRecord(row)) return null
+      const agentRaw = isRecord(row.agent) ? row.agent : null
+      const contextRaw = isRecord(row.context) ? row.context : null
+      const metricsWindowRaw = isRecord(row.metrics_window) ? row.metrics_window : undefined
+
+      const name = asString(row.name)
+      if (!name) return null
+
+      const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio)
+      const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
+      const status = normalizeAgentStatus(statusRaw)
+      const model = asString(row.model) ?? asString(row.active_model) ?? asString(row.primary_model)
+      const skillSecondary = asStringArray(row.skill_secondary)
+
+      const normalizedContext =
+        contextRaw
+          ? {
+              source: asString(contextRaw.source),
+              context_ratio: asNumber(contextRaw.context_ratio),
+              context_tokens: asNumber(contextRaw.context_tokens),
+              context_max: asNumber(contextRaw.context_max),
+              message_count: asNumber(contextRaw.message_count),
+              has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
+            }
+          : undefined
+
+      const normalizedAgent =
+        agentRaw
+          ? {
+              name: asString(agentRaw.name),
+              status: asString(agentRaw.status),
+              current_task: asString(agentRaw.current_task) ?? null,
+              last_seen: asString(agentRaw.last_seen),
+            }
+          : undefined
+
+      return {
+        name,
+        emoji: asString(row.emoji),
+        koreanName: asString(row.koreanName) ?? asString(row.korean_name),
+        agent_name: asString(row.agent_name),
+        trace_id: asString(row.trace_id),
+        model,
+        primary_model: asString(row.primary_model),
+        active_model: asString(row.active_model),
+        next_model_hint: asString(row.next_model_hint) ?? null,
+        status,
+        last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
+        generation: asNumber(row.generation),
+        turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
+        context_ratio: contextRatio,
+        context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
+        context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),
+        context_source: asString(row.context_source) ?? asString(contextRaw?.source),
+        context: normalizedContext,
+        traits: asStringArray(row.traits),
+        interests: asStringArray(row.interests),
+        primaryValue: asString(row.primaryValue) ?? asString(row.primary_value),
+        activityLevel: asNumber(row.activityLevel) ?? asNumber(row.activity_level),
+        memory_recent_note: asString(row.memory_recent_note) ?? null,
+        conversation_tail_count: asNumber(row.conversation_tail_count),
+        k2k_count: asNumber(row.k2k_count),
+        handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
+        compaction_count: asNumber(row.compaction_count),
+        last_compaction_saved_tokens: asNumber(row.last_compaction_saved_tokens),
+        skill_primary: asString(row.skill_primary) ?? null,
+        skill_secondary: skillSecondary,
+        skill_reason: asString(row.skill_reason) ?? null,
+        metrics_window: metricsWindowRaw as Keeper['metrics_window'],
+        agent: normalizedAgent,
+      }
+    })
+    .filter((row): row is Keeper => row !== null)
 }
 
 export async function refreshDashboard(): Promise<void> {
@@ -85,11 +250,17 @@ export async function refreshDashboard(): Promise<void> {
     const data = await fetchDashboard()
     _dashboardCache = { data, time: now }
 
-    agents.value = data.agents?.agents ?? []
-    tasks.value = data.tasks?.tasks ?? []
-    messages.value = data.messages?.messages ?? []
+    agents.value = (Array.isArray(data.agents?.agents) ? data.agents.agents : [])
+      .map(normalizeAgent)
+      .filter((row): row is Agent => row !== null)
+    tasks.value = (Array.isArray(data.tasks?.tasks) ? data.tasks.tasks : [])
+      .map(normalizeTask)
+      .filter((row): row is Task => row !== null)
+    messages.value = (Array.isArray(data.messages?.messages) ? data.messages.messages : [])
+      .map(normalizeMessage)
+      .filter((row): row is Message => row !== null)
     keepers.value = normalizeKeepers(data.keepers)
-    serverStatus.value = data.status ?? null
+    serverStatus.value = isRecord(data.status) ? (data.status as ServerStatus) : null
     perpetualStatus.value = data.perpetual ?? null
   } catch (err) {
     console.error('Dashboard fetch error:', err)

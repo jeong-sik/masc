@@ -3,6 +3,8 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
+import { openKeeperDetail } from './keeper-detail'
+import { openAgentDetail } from './agent-detail'
 import {
   agents,
   tasks,
@@ -25,7 +27,7 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
 
 function AgentRow({ agent }: { agent: Agent }) {
   return html`
-    <div class="agent">
+    <button class="agent" onClick=${() => openAgentDetail(agent.name)}>
       <span class="agent-emoji">${agent.emoji ?? ''}</span>
       <span class="agent-status ${agent.status}"></span>
       <span class="agent-name">${agent.name}</span>
@@ -33,13 +35,14 @@ function AgentRow({ agent }: { agent: Agent }) {
       ${agent.current_task
         ? html`<span class="agent-task">${agent.current_task}</span>`
         : null}
-    </div>
+    </button>
   `
 }
 
 function KeeperRow({ keeper }: { keeper: Keeper }) {
+  const contextRatio = keeper.context_ratio ?? keeper.context?.context_ratio
   return html`
-    <div class="live-agent keeper-card">
+    <button class="live-agent keeper-card" onClick=${() => openKeeperDetail(keeper)}>
       <div class="live-agent-main">
         <div class="live-agent-title">
           <span class="live-agent-name">${keeper.emoji ?? ''} ${keeper.name}</span>
@@ -51,15 +54,15 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
           ? html`<div class="live-agent-meta">
               <span>Gen ${keeper.generation}</span>
               <span>Turn ${keeper.turn_count ?? 0}</span>
-              ${keeper.context_ratio != null
-                ? html`<span class=${keeper.context_ratio > 0.7 ? 'warn-metric' : ''}>
-                    Ctx ${Math.round(keeper.context_ratio * 100)}%
+              ${contextRatio != null
+                ? html`<span class=${contextRatio > 0.7 ? 'warn-metric' : ''}>
+                    Ctx ${Math.round(contextRatio * 100)}%
                   </span>`
                 : null}
             </div>`
           : null}
       </div>
-    </div>
+    </button>
   `
 }
 
@@ -115,8 +118,35 @@ export function Overview() {
         <${Card} title="Room" class="section">
           <div class="live-agent-meta">
             <span>Room: ${status.room}</span>
-            <span>Uptime: ${formatUptime(status.uptime_seconds)}</span>
+            <span>Uptime: ${formatUptime(status.uptime_seconds ?? 0)}</span>
           </div>
+        <//>
+      `
+      : null}
+
+    ${status
+      ? html`
+        <${Card} title="Runtime Health" class="section">
+          <div class="live-agent-meta">
+            ${status.cluster ? html`<span>Cluster: ${status.cluster}</span>` : null}
+            ${status.project ? html`<span>Project: ${status.project}</span>` : null}
+            ${status.tempo_interval_s != null ? html`<span>Tempo: ${status.tempo_interval_s}s</span>` : null}
+            ${status.paused != null ? html`<span>Paused: ${status.paused ? 'Yes' : 'No'}</span>` : null}
+          </div>
+          ${status.tool_call_health
+            ? html`
+              <div class="live-agent-meta" style="margin-top:8px;">
+                <span>Tool timeouts: ${status.tool_call_health.timeouts}</span>
+                <span>
+                  Tool p95:
+                  ${status.tool_call_health.p95_duration_ms != null
+                    ? `${Math.round(status.tool_call_health.p95_duration_ms)}ms`
+                    : 'N/A'}
+                </span>
+                <span>Window: ${status.tool_call_health.window_hours}h</span>
+              </div>
+            `
+            : null}
         <//>
       `
       : null}

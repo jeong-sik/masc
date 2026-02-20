@@ -14,6 +14,16 @@ enum DmVoiceMode {
     ElevenLabs,
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DmVoiceTone {
+    Auto,
+    Excited,
+    Dramatic,
+    Calm,
+    Neutral,
+}
+
 #[cfg(target_arch = "wasm32")]
 const STORAGE_DM_VOICE_MODE: &str = "trpg_dm_voice_mode";
 #[cfg(target_arch = "wasm32")]
@@ -22,11 +32,15 @@ const STORAGE_DM_VOICE_PROXY_URL: &str = "trpg_dm_voice_proxy_url";
 const STORAGE_DM_VOICE_MODEL: &str = "trpg_dm_voice_model";
 #[cfg(target_arch = "wasm32")]
 const STORAGE_DM_VOICE_ID: &str = "trpg_dm_voice_id";
+#[cfg(target_arch = "wasm32")]
+const STORAGE_DM_VOICE_TONE: &str = "trpg_dm_voice_tone";
 
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_PANEL_ID: &str = "dm-voice-config";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_MODE_SELECT_ID: &str = "dm-voice-mode-select";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_TONE_SELECT_ID: &str = "dm-voice-tone-select";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_PROXY_SELECT_ID: &str = "dm-voice-proxy-select";
 #[cfg(target_arch = "wasm32")]
@@ -99,6 +113,18 @@ struct ActiveDmVoiceAudio {
 thread_local! {
     static ACTIVE_DM_VOICE_AUDIO: std::cell::RefCell<Vec<ActiveDmVoiceAudio>> =
         std::cell::RefCell::new(Vec::new());
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Copy)]
+struct DmVoiceStyleProfile {
+    rate: f32,
+    pitch: f32,
+    energy: f32,
+    stability: f32,
+    similarity_boost: f32,
+    style: f32,
+    tone_tag: &'static str,
 }
 
 fn normalize_phase(raw: &str) -> String {
@@ -196,6 +222,7 @@ pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProg
         }
 
         let mode = resolve_dm_voice_mode();
+        let tone = resolve_dm_voice_tone();
         let running = is_room_running(&room_state, &progress);
         match (running, mode) {
             (false, _) => {
@@ -216,7 +243,10 @@ pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProg
                 set_dm_voice_status(
                     &doc,
                     "status-ok",
-                    "진행 중: Browser TTS로 DM 내레이션을 재생합니다.",
+                    &format!(
+                        "진행 중: Browser TTS로 DM 내레이션 재생 (tone: {}).",
+                        dm_voice_tone_label(tone)
+                    ),
                 );
             }
             (true, DmVoiceMode::ElevenLabs) => {
@@ -226,8 +256,10 @@ pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProg
                     &doc,
                     "status-ok",
                     &format!(
-                        "진행 중: ElevenLabs proxy 사용 (model: {}, voice_id: {})",
-                        model, voice_id
+                        "진행 중: ElevenLabs proxy 사용 (model: {}, voice_id: {}, tone: {})",
+                        model,
+                        voice_id,
+                        dm_voice_tone_label(tone)
                     ),
                 );
             }
@@ -248,17 +280,31 @@ fn dispatch_voice(payload: &NarrativePayload, clean_text: &str, room_state: &Roo
     };
     let phase = payload.phase.trim().to_string();
     let turn = payload.turn;
+    let speaker = payload.speaker.clone();
+    let tone = resolve_dm_voice_tone();
     let voice_model = resolve_dm_voice_model();
     let voice_id = resolve_dm_voice_id();
 
     match resolve_dm_voice_mode() {
         DmVoiceMode::Off => {}
-        DmVoiceMode::Browser => speak_with_browser(&text),
+        DmVoiceMode::Browser => {
+            speak_with_browser(&text, &phase, speaker.as_deref(), tone);
+        }
         DmVoiceMode::ElevenLabs => {
             if let Some(proxy_url) = resolve_dm_voice_proxy_url() {
-                speak_with_proxy(proxy_url, text, room_id, phase, turn, voice_model, voice_id);
+                speak_with_proxy(
+                    proxy_url,
+                    text,
+                    room_id,
+                    phase,
+                    turn,
+                    speaker,
+                    tone,
+                    voice_model,
+                    voice_id,
+                );
             } else {
-                speak_with_browser(&text);
+                speak_with_browser(&text, &phase, speaker.as_deref(), tone);
             }
         }
     }
@@ -283,6 +329,39 @@ fn dm_voice_mode_value(mode: DmVoiceMode) -> &'static str {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn parse_dm_voice_tone(raw: &str) -> DmVoiceTone {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "excited" | "hyped" | "energetic" => DmVoiceTone::Excited,
+        "dramatic" | "cinematic" => DmVoiceTone::Dramatic,
+        "calm" | "soft" => DmVoiceTone::Calm,
+        "neutral" | "normal" => DmVoiceTone::Neutral,
+        _ => DmVoiceTone::Auto,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dm_voice_tone_value(tone: DmVoiceTone) -> &'static str {
+    match tone {
+        DmVoiceTone::Auto => "auto",
+        DmVoiceTone::Excited => "excited",
+        DmVoiceTone::Dramatic => "dramatic",
+        DmVoiceTone::Calm => "calm",
+        DmVoiceTone::Neutral => "neutral",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dm_voice_tone_label(tone: DmVoiceTone) -> &'static str {
+    match tone {
+        DmVoiceTone::Auto => "auto",
+        DmVoiceTone::Excited => "excited",
+        DmVoiceTone::Dramatic => "dramatic",
+        DmVoiceTone::Calm => "calm",
+        DmVoiceTone::Neutral => "neutral",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn resolve_dm_voice_mode() -> DmVoiceMode {
     resolve_string_setting(
         &["__TRPG_DM_VOICE_MODE", "__DM_VOICE_MODE"],
@@ -298,6 +377,101 @@ fn resolve_dm_voice_mode() -> DmVoiceMode {
             DmVoiceMode::Browser
         }
     })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_dm_voice_tone() -> DmVoiceTone {
+    resolve_string_setting(
+        &["__TRPG_DM_VOICE_TONE", "__DM_VOICE_TONE"],
+        &["dm_voice_tone"],
+        STORAGE_DM_VOICE_TONE,
+        "meta[name='trpg-dm-voice-tone']",
+    )
+    .map(|raw| parse_dm_voice_tone(&raw))
+    .unwrap_or(DmVoiceTone::Auto)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn speaker_variation(speaker: Option<&str>) -> f32 {
+    let Some(raw) = speaker else {
+        return 0.0;
+    };
+    let s = raw.trim();
+    if s.is_empty() {
+        return 0.0;
+    }
+    let mut hash: u32 = 2166136261;
+    for b in s.as_bytes() {
+        hash ^= *b as u32;
+        hash = hash.wrapping_mul(16777619);
+    }
+    let bucket = (hash % 21) as i32 - 10;
+    bucket as f32 * 0.006
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolved_auto_tone(phase: &str, speaker: Option<&str>) -> DmVoiceTone {
+    let normalized_phase = normalize_phase(phase);
+    if normalized_phase.contains("combat")
+        || normalized_phase.contains("action")
+        || normalized_phase.contains("dice")
+    {
+        return DmVoiceTone::Excited;
+    }
+    if is_dm_speaker(speaker) || normalized_phase.contains("briefing") {
+        return DmVoiceTone::Dramatic;
+    }
+    DmVoiceTone::Neutral
+}
+
+#[cfg(target_arch = "wasm32")]
+fn style_profile_for(phase: &str, speaker: Option<&str>, tone: DmVoiceTone) -> DmVoiceStyleProfile {
+    let effective = match tone {
+        DmVoiceTone::Auto => resolved_auto_tone(phase, speaker),
+        other => other,
+    };
+    let mut profile = match effective {
+        DmVoiceTone::Excited => DmVoiceStyleProfile {
+            rate: 1.12,
+            pitch: 1.18,
+            energy: 0.96,
+            stability: 0.38,
+            similarity_boost: 0.72,
+            style: 0.86,
+            tone_tag: "excited",
+        },
+        DmVoiceTone::Dramatic => DmVoiceStyleProfile {
+            rate: 1.03,
+            pitch: 1.10,
+            energy: 0.80,
+            stability: 0.44,
+            similarity_boost: 0.76,
+            style: 0.70,
+            tone_tag: "dramatic",
+        },
+        DmVoiceTone::Calm => DmVoiceStyleProfile {
+            rate: 0.94,
+            pitch: 0.96,
+            energy: 0.52,
+            stability: 0.62,
+            similarity_boost: 0.68,
+            style: 0.35,
+            tone_tag: "calm",
+        },
+        DmVoiceTone::Neutral | DmVoiceTone::Auto => DmVoiceStyleProfile {
+            rate: 1.0,
+            pitch: 1.0,
+            energy: 0.65,
+            stability: 0.50,
+            similarity_boost: 0.75,
+            style: 0.50,
+            tone_tag: "neutral",
+        },
+    };
+    let delta = speaker_variation(speaker);
+    profile.rate = (profile.rate + delta * 0.8).clamp(0.85, 1.28);
+    profile.pitch = (profile.pitch + delta).clamp(0.82, 1.35);
+    profile
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -634,6 +808,11 @@ fn hydrate_dm_voice_controls(doc: &web_sys::Document) {
         DM_VOICE_MODE_SELECT_ID,
         dm_voice_mode_value(resolve_dm_voice_mode()),
     );
+    set_select_value(
+        doc,
+        DM_VOICE_TONE_SELECT_ID,
+        dm_voice_tone_value(resolve_dm_voice_tone()),
+    );
     hydrate_proxy_select(doc, resolve_dm_voice_proxy_url());
     hydrate_preset_select(
         doc,
@@ -723,6 +902,9 @@ fn bind_dm_voice_save_button(doc: &web_sys::Document) {
         let mode = get_select_value(&doc, DM_VOICE_MODE_SELECT_ID)
             .map(|raw| parse_dm_voice_mode(&raw))
             .unwrap_or(DmVoiceMode::Browser);
+        let tone = get_select_value(&doc, DM_VOICE_TONE_SELECT_ID)
+            .map(|raw| parse_dm_voice_tone(&raw))
+            .unwrap_or(DmVoiceTone::Auto);
         let proxy_url = select_proxy_storage_value(&doc);
         let voice_model = select_storage_value(
             &doc,
@@ -740,6 +922,10 @@ fn bind_dm_voice_save_button(doc: &web_sys::Document) {
         persist_storage_value(
             STORAGE_DM_VOICE_MODE,
             Some(dm_voice_mode_value(mode).to_string()),
+        );
+        persist_storage_value(
+            STORAGE_DM_VOICE_TONE,
+            Some(dm_voice_tone_value(tone).to_string()),
         );
         persist_storage_value(STORAGE_DM_VOICE_PROXY_URL, proxy_url);
         persist_storage_value(STORAGE_DM_VOICE_MODEL, voice_model);
@@ -791,6 +977,9 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
         let mode = get_select_value(&doc, DM_VOICE_MODE_SELECT_ID)
             .map(|raw| parse_dm_voice_mode(&raw))
             .unwrap_or(DmVoiceMode::Browser);
+        let tone = get_select_value(&doc, DM_VOICE_TONE_SELECT_ID)
+            .map(|raw| parse_dm_voice_tone(&raw))
+            .unwrap_or(DmVoiceTone::Auto);
         let proxy_url = select_proxy_storage_value(&doc);
         let voice_model = select_storage_value(
             &doc,
@@ -814,7 +1003,7 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                 );
             }
             DmVoiceMode::Browser => {
-                speak_with_browser(DM_VOICE_PREVIEW_TEXT);
+                speak_with_browser(DM_VOICE_PREVIEW_TEXT, "dm_narration", Some("dm"), tone);
                 set_dm_voice_status(&doc, "status-ok", "Browser TTS 미리듣기를 재생했습니다.");
             }
             DmVoiceMode::ElevenLabs => {
@@ -832,6 +1021,8 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                     crate::config::current_room_id(),
                     "dm_narration".to_string(),
                     0,
+                    Some("dm".to_string()),
+                    tone,
                     voice_model.clone(),
                     voice_id.clone(),
                 );
@@ -842,8 +1033,10 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                     &doc,
                     "status-info",
                     &format!(
-                        "ElevenLabs 미리듣기 요청 전송 (model: {}, voice_id: {})",
-                        model_label, voice_label
+                        "ElevenLabs 미리듣기 요청 전송 (model: {}, voice_id: {}, tone: {})",
+                        model_label,
+                        voice_label,
+                        dm_voice_tone_label(tone)
                     ),
                 );
             }
@@ -936,7 +1129,7 @@ fn global_string(win: &web_sys::Window, key: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn speak_with_browser(text: &str) {
+fn speak_with_browser(text: &str, phase: &str, speaker: Option<&str>, tone: DmVoiceTone) {
     let Some(win) = web_sys::window() else {
         return;
     };
@@ -946,9 +1139,10 @@ fn speak_with_browser(text: &str) {
     let Ok(utterance) = web_sys::SpeechSynthesisUtterance::new_with_text(text) else {
         return;
     };
+    let profile = style_profile_for(phase, speaker, tone);
     utterance.set_lang("ko-KR");
-    utterance.set_rate(1.0);
-    utterance.set_pitch(1.0);
+    utterance.set_rate(profile.rate);
+    utterance.set_pitch(profile.pitch);
     synth.cancel();
     synth.speak(&utterance);
 }
@@ -960,6 +1154,8 @@ fn speak_with_proxy(
     room_id: String,
     phase: String,
     turn: u32,
+    speaker: Option<String>,
+    tone: DmVoiceTone,
     voice_model: Option<String>,
     voice_id: Option<String>,
 ) {
@@ -968,15 +1164,17 @@ fn speak_with_proxy(
             proxy_url,
             text.clone(),
             room_id,
-            phase,
+            phase.clone(),
             turn,
+            speaker.clone(),
+            tone,
             voice_model,
             voice_id,
         )
         .await
         {
             log::warn!("dm voice proxy failed, fallback to browser speech: {}", err);
-            speak_with_browser(&text);
+            speak_with_browser(&text, &phase, speaker.as_deref(), tone);
         }
     });
 }
@@ -988,6 +1186,8 @@ async fn speak_with_proxy_inner(
     room_id: String,
     phase: String,
     turn: u32,
+    speaker: Option<String>,
+    tone: DmVoiceTone,
     voice_model: Option<String>,
     voice_id: Option<String>,
 ) -> Result<(), String> {
@@ -998,6 +1198,11 @@ async fn speak_with_proxy_inner(
         return Err("window unavailable".to_string());
     };
 
+    let speaker_label = speaker
+        .as_deref()
+        .and_then(normalize_optional)
+        .unwrap_or_else(|| "dm".to_string());
+    let profile = style_profile_for(&phase, Some(&speaker_label), tone);
     let is_openai_proxy = is_openai_tts_proxy_url(&proxy_url);
     let mut body_json = if is_openai_proxy {
         let model = voice_model
@@ -1013,14 +1218,26 @@ async fn speak_with_proxy_inner(
             "voice": voice,
             "model": model,
             "response_format": "mp3",
+            "tone": profile.tone_tag,
+            "energy": profile.energy,
+            "pace": profile.rate,
+            "pitch": profile.pitch,
+            "speaker": speaker_label,
+            "voice_settings": {
+                "stability": profile.stability,
+                "similarity_boost": profile.similarity_boost,
+                "style": profile.style,
+                "use_speaker_boost": true
+            },
         })
     } else {
         serde_json::json!({
             "text": text,
-            "speaker": "dm",
+            "speaker": speaker_label,
             "phase": phase,
             "room_id": room_id,
             "turn": turn,
+            "tone": profile.tone_tag,
         })
     };
     if !is_openai_proxy {

@@ -65,11 +65,11 @@ const MAX_ROUNDS: u32 = 50;
 
 /// Delay between rounds (ms) — gives SSE events time to stream + user to read.
 #[cfg(target_arch = "wasm32")]
-const INTER_ROUND_DELAY_MS: i32 = 5000;
+const INTER_ROUND_DELAY_MS: i32 = 2500;
 
 /// Initial delay before first round (ms) — wait for SSE + initial state.
 #[cfg(target_arch = "wasm32")]
-const STARTUP_DELAY_MS: i32 = 3000;
+const STARTUP_DELAY_MS: i32 = 1200;
 
 /// Retry budget when a round response is successful but does not advance turn.
 #[cfg(any(target_arch = "wasm32", test))]
@@ -88,7 +88,11 @@ const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
 
 /// Retry delay for transient round-run conflicts (ms).
 #[cfg(any(target_arch = "wasm32", test))]
-const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 1200;
+const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 700;
+
+/// Delay before retrying when another owner holds the round-flight lock.
+#[cfg(target_arch = "wasm32")]
+const ROUND_FLIGHT_LOCK_WAIT_MS: i32 = 350;
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn stall_retry_delay_ms(retry_count: u32) -> i32 {
@@ -215,7 +219,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
             };
             if !try_acquire_round_flight("auto") {
                 log::info!("RoundRunner: round flight locked by another request; waiting");
-                sleep_ms(750).await;
+                sleep_ms(ROUND_FLIGHT_LOCK_WAIT_MS).await;
                 continue;
             }
             round_num += 1;
@@ -436,7 +440,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         "phase": phase,
         "timeout_sec": timeout_sec,
         "lang": lang,
-        "require_claim": true
+        "require_claim": false
     });
 
     Ok(body.to_string())

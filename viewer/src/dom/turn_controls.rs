@@ -830,7 +830,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         "phase": plan.phase,
         "timeout_sec": plan.timeout_sec,
         "lang": plan.lang,
-        "require_claim": true
+        "require_claim": false
     })
     .to_string();
 

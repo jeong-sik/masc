@@ -153,15 +153,17 @@ fn reset_trpg_dom_state(
             el.set_text_content(None);
         }
         if let Some(el) = document.get_element_by_id("weather-icon") {
-            let _ = el.set_attribute("src", "");
+            let _ = el.remove_attribute("src");
             let _ = el.set_attribute("alt", "");
+            let _ = el.set_attribute("data-empty", "1");
         }
         if let Some(el) = document.get_element_by_id("mood-indicator") {
             el.set_text_content(None);
         }
         if let Some(el) = document.get_element_by_id("mood-icon") {
-            let _ = el.set_attribute("src", "");
+            let _ = el.remove_attribute("src");
             let _ = el.set_attribute("alt", "");
+            let _ = el.set_attribute("data-empty", "1");
         }
         if let Some(el) = document.get_element_by_id("choice-overlay") {
             el.set_inner_html("");

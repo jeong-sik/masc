@@ -11,7 +11,9 @@
 use bevy::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use serde_json::{json, Value};
+use serde_json::json;
+#[cfg(any(target_arch = "wasm32", test))]
+use serde_json::Value;
 
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Element, HtmlButtonElement, HtmlInputElement, HtmlSelectElement};
@@ -395,14 +397,17 @@ pub fn sync_turn_controls_visibility(
         if runner_active {
             can_run = false;
             reason =
-                "실행 대기: 자동 라운드 실행 중입니다. 관전 모드에서는 수동 실행이 잠금됩니다."
+                "실행 잠금: 자동 라운드 실행(관전 모드) 중입니다. 자동 진행을 멈춘 뒤 수동 실행하세요."
                     .to_string();
-            reason_class = "status-info";
+            reason_class = "status-warn";
         } else if let Some(owner) = lock_owner.as_deref() {
             if owner != "manual" {
                 can_run = false;
-                reason = format!("실행 대기: {} 라운드 요청 처리 중입니다.", owner);
-                reason_class = "status-info";
+                reason = format!(
+                    "실행 잠금: {} 요청 처리 중입니다.",
+                    describe_round_flight_owner(owner)
+                );
+                reason_class = "status-warn";
             }
         }
 
@@ -443,7 +448,7 @@ pub fn sync_turn_controls_visibility(
         } else {
             lock_owner
                 .as_deref()
-                .map(|owner| format!("{} 요청 처리 중", owner))
+                .map(|owner| format!("{} 요청 처리 중", describe_round_flight_owner(owner)))
         };
         let readiness_rows = derive_round_readiness_rows(
             connection_ok,
@@ -470,9 +475,13 @@ pub fn sync_turn_controls_visibility(
         let gate_message = if busy {
             "라운드 실행 중입니다. 완료 후 조건을 다시 계산합니다.".to_string()
         } else if runner_active {
-            "실행 대기: 자동 라운드 실행 중입니다. 수동 실행은 잠겨 있습니다.".to_string()
+            "실행 잠금: 자동 라운드 실행(관전 모드) 중입니다. 자동 진행을 멈춘 뒤 수동 실행하세요."
+                .to_string()
         } else if let Some(owner) = lock_owner {
-            format!("실행 대기: {} 라운드 요청 처리 중입니다.", owner)
+            format!(
+                "실행 잠금: {} 요청 처리 중입니다.",
+                describe_round_flight_owner(&owner)
+            )
         } else if can_run {
             "실행 가능: DM/플레이어 keeper 배정이 준비되었습니다.".to_string()
         } else {
@@ -526,14 +535,14 @@ fn on_advance_click() {
     if auto_round_runner_active(&doc) {
         set_turn_status("실행 불가: 자동 라운드 실행 중입니다.", "status-warn");
         set_turn_gate_reason(
-            "실행 대기: 자동 라운드 실행이 끝난 뒤 수동 실행이 가능합니다.",
-            "status-info",
+            "실행 잠금: 자동 라운드 실행(관전 모드)이 끝난 뒤 수동 실행이 가능합니다.",
+            "status-warn",
         );
         return;
     }
     if let Err(reason) = acquire_round_flight(&doc, "manual") {
-        set_turn_status(&format!("실행 대기: {}", reason), "status-info");
-        set_turn_gate_reason(&format!("실행 대기: {}", reason), "status-info");
+        set_turn_status(&format!("실행 잠금: {}", reason), "status-warn");
+        set_turn_gate_reason(&format!("실행 잠금: {}", reason), "status-warn");
         return;
     }
 
@@ -569,14 +578,11 @@ fn on_advance_click() {
                 set_turn_status(&status, "status-warn");
                 set_turn_gate_reason(&format!("실행 보류: {}", status), "status-warn");
             }
-            Ok(RoundRunOutcome::InFlight { status }) => {
+            Ok(RoundRunOutcome::InFlight { status, detail }) => {
                 clear_round_recovery();
                 set_round_stall_badges(None);
                 set_turn_status(&status, "status-info");
-                set_turn_gate_reason(
-                    "실행 대기: 현재 라운드가 처리 중입니다. 완료 이벤트를 기다리세요.",
-                    "status-info",
-                );
+                set_turn_gate_reason(&format!("진행 중: {}", detail), "status-info");
             }
             Err(e) => {
                 let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
@@ -603,13 +609,14 @@ enum RoundRunOutcome {
         status: String,
         has_warning: bool,
     },
-    InFlight {
-        status: String,
-    },
     Stalled {
         status: String,
         guide: String,
         summary: RoundStallSummary,
+    },
+    InFlight {
+        status: String,
+        detail: String,
     },
 }
 
@@ -625,31 +632,6 @@ fn shorten_reason(raw: &str, max_chars: usize) -> String {
         .collect::<String>();
     truncated.push('…');
     truncated
-}
-
-#[cfg(target_arch = "wasm32")]
-fn is_round_in_flight_error(raw: &str) -> bool {
-    let lowered = raw.trim().to_ascii_lowercase();
-    lowered.contains("round run already in progress") || lowered.contains("single-flight")
-}
-
-#[cfg(target_arch = "wasm32")]
-fn is_keeper_busy_error(raw: &str) -> bool {
-    let lowered = raw.trim().to_ascii_lowercase();
-    lowered.contains("keeper busy")
-        || lowered.contains("can handle only one round at a time")
-        || lowered.contains("each spawned keeper can handle only one round")
-}
-
-#[cfg(target_arch = "wasm32")]
-fn transient_round_wait_message(raw: &str) -> Option<String> {
-    if is_round_in_flight_error(raw) {
-        return Some("이미 라운드 실행 중입니다. 이전 요청 완료를 기다리는 중입니다.".to_string());
-    }
-    if is_keeper_busy_error(raw) {
-        return Some("키퍼가 이전 라운드를 처리 중입니다. 잠시 후 자동으로 다시 진행됩니다.".to_string());
-    }
-    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -801,10 +783,22 @@ fn build_stalled_round_guide(
     if !reasons.is_empty() {
         lines.push(format!("차단 원인: {}", reasons.join(" | ")));
     }
-    lines.push(
-        "권장 조치: 1) keeper 상태 확인 2) actor=keeper 할당/중복 확인 3) timeout 늘려 재실행"
-            .to_string(),
-    );
+    let prompt_meta_artifact = reasons.iter().any(|reason| {
+        reason
+            .to_ascii_lowercase()
+            .contains("prompt/meta artifacts")
+    });
+    if prompt_meta_artifact {
+        lines.push(
+            "권장 조치: keeper 응답이 메타 텍스트만 반환되었습니다. 1) 해당 actor keeper를 교체 2) 모델/프롬프트 설정에서 실제 행동 문장 출력 확인 3) 재실행"
+                .to_string(),
+        );
+    } else {
+        lines.push(
+            "권장 조치: 1) keeper 상태 확인 2) actor=keeper 할당/중복 확인 3) timeout 늘려 재실행"
+                .to_string(),
+        );
+    }
     lines.join("\n")
 }
 
@@ -816,7 +810,6 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         .and_then(|w| w.document())
         .ok_or_else(|| JsValue::from_str("No document"))?;
     let plan = read_round_run_plan(&doc).map_err(|err| JsValue::from_str(&err))?;
-    let require_claim = should_require_claim_for_round(&doc);
 
     let mut player_keepers = serde_json::Map::new();
     for (actor_id, keeper_name) in &plan.player_keepers {
@@ -831,7 +824,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         "phase": plan.phase,
         "timeout_sec": plan.timeout_sec,
         "lang": plan.lang,
-        "require_claim": require_claim
+        "require_claim": false
     })
     .to_string();
 
@@ -854,9 +847,12 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
             .and_then(|v| v.as_string())
             .unwrap_or_default();
         let err_body = err_body.trim();
-        if let Some(wait_message) = transient_round_wait_message(err_body) {
+        if is_transient_round_conflict(Some(resp.status()), err_body) {
             return Ok(RoundRunOutcome::InFlight {
-                status: wait_message,
+                status: "라운드 실행이 이미 진행 중입니다.".to_string(),
+                detail:
+                    "같은 room에서 이미 라운드 실행 중입니다. 다른 탭/자동 진행 결과를 기다린 뒤 자동으로 상태가 갱신됩니다."
+                        .to_string(),
             });
         }
         if err_body.is_empty() {
@@ -877,21 +873,17 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
     log::info!("TurnControls: round run response — {}", resp_text);
 
     if let Ok(json) = serde_json::from_str::<Value>(&resp_text) {
-        if json.get("ok").and_then(Value::as_bool) == Some(false) {
-            let detail = json
-                .get("error")
-                .or_else(|| json.get("message"))
-                .or_else(|| json.get("detail"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or("라운드 실행이 거절되었습니다.");
-            if let Some(wait_message) = transient_round_wait_message(detail) {
+        if let Some(api_error) = round_response_api_error(&json) {
+            if is_transient_round_conflict(None, &api_error) {
                 return Ok(RoundRunOutcome::InFlight {
-                    status: wait_message,
+                    status: "라운드 실행이 이미 진행 중입니다.".to_string(),
+                    detail: format!(
+                        "같은 room 라운드가 이미 처리 중입니다. {}",
+                        shorten_reason(&api_error, 100)
+                    ),
                 });
             }
-            return Err(JsValue::from_str(detail));
+            return Err(JsValue::from_str(&api_error));
         }
         let turn_before = json.get("turn_before").and_then(Value::as_u64).unwrap_or(0);
         let turn_after = json.get("turn_after").and_then(Value::as_u64).unwrap_or(0);
@@ -938,6 +930,37 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         status: "라운드가 진행되었습니다.".to_string(),
         has_warning: false,
     })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_api_error(json: &Value) -> Option<String> {
+    let ok_field = json.get("ok").and_then(Value::as_bool);
+    if ok_field != Some(false) {
+        return None;
+    }
+    let message = json
+        .get("error")
+        .or_else(|| json.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if message.is_empty() {
+        None
+    } else {
+        Some(message.to_string())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn is_transient_round_conflict(status: Option<u16>, detail: &str) -> bool {
+    let lowered = detail.to_ascii_lowercase();
+    let has_conflict_phrase = lowered.contains("round run already in progress")
+        || lowered.contains("already in progress for room")
+        || lowered.contains("single-flight")
+        || lowered.contains("already running")
+        || lowered.contains("in progress");
+    let is_conflict_status = matches!(status, Some(400 | 409 | 423 | 429));
+    has_conflict_phrase || (is_conflict_status && lowered.contains("round"))
 }
 
 // ─── DOM Helpers ─────────────────────────────
@@ -1121,6 +1144,17 @@ fn current_round_flight_owner(doc: &web_sys::Document) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn describe_round_flight_owner(owner: &str) -> String {
+    let normalized = owner.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "manual" => "이 탭 수동 실행".to_string(),
+        "auto" => "자동 라운드 실행".to_string(),
+        _ if normalized.is_empty() => "알 수 없는 실행 주체".to_string(),
+        _ => shorten_reason(owner.trim(), 36),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn acquire_round_flight(doc: &web_sys::Document, owner: &str) -> Result<(), String> {
     let Some(dashboard) = doc.get_element_by_id("dashboard") else {
         return Ok(());
@@ -1137,7 +1171,10 @@ fn acquire_round_flight(doc: &web_sys::Document, owner: &str) -> Result<(), Stri
     if existing == owner {
         return Err("이미 수동 라운드 실행 중입니다.".to_string());
     }
-    Err(format!("{} 라운드 실행이 진행 중입니다.", existing))
+    Err(format!(
+        "{} 요청이 진행 중입니다.",
+        describe_round_flight_owner(&existing)
+    ))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1500,19 +1537,6 @@ fn read_claimed_actor_keeper_for_current_room(doc: &web_sys::Document) -> Option
 }
 
 #[cfg(target_arch = "wasm32")]
-fn should_require_claim_for_round(doc: &web_sys::Document) -> bool {
-    read_claimed_keeper_for_current_room(doc).is_some()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn resolve_round_dm_keeper(doc: &web_sys::Document) -> Option<String> {
-    read_dom_input(doc, "round-run-dm")
-        .or_else(|| read_claimed_keeper_for_current_room(doc))
-        .or_else(|| read_dom_input(doc, "new-game-dm-select"))
-        .or_else(|| Some("dm-keeper".to_string()))
-}
-
-#[cfg(target_arch = "wasm32")]
 fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
         .filter_map(|part| {
@@ -1533,6 +1557,18 @@ fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn normalize_round_phase_input(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => "round".to_string(),
+        "discussion" | "discuss" | "party_discussion" | "player_discussion" | "action"
+        | "dice" => "round".to_string(),
+        "ended" => "end".to_string(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> {
     let dm_keeper = read_dom_input(doc, "round-run-dm")
         .or_else(|| read_claimed_keeper_for_current_room(doc))
@@ -1545,7 +1581,8 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
         );
     }
 
-    let phase = read_dom_input(doc, "round-run-phase").unwrap_or_else(|| "round".to_string());
+    let phase_raw = read_dom_input(doc, "round-run-phase").unwrap_or_else(|| "round".to_string());
+    let phase = normalize_round_phase_input(&phase_raw);
     let lang = read_dom_input(doc, "round-run-lang").unwrap_or_else(|| "ko".to_string());
     let timeout_sec = read_dom_input(doc, "round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
@@ -1570,11 +1607,7 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
 
     Ok(RoundRunPlan {
         dm_keeper,
-        phase: if phase.is_empty() {
-            "round".to_string()
-        } else {
-            phase
-        },
+        phase,
         timeout_sec,
         lang: if lang.is_empty() {
             "ko".to_string()
@@ -1673,4 +1706,29 @@ mod tests {
         assert!(!rows[4].ok);
         assert!(rows[4].detail.contains("자동"));
     }
+
+    #[test]
+    fn transient_round_conflict_detection_by_status_and_message() {
+        assert!(is_transient_round_conflict(
+            Some(400),
+            "HTTP 400: round run already in progress for room_id=test",
+        ));
+        assert!(!is_transient_round_conflict(
+            Some(400),
+            "HTTP 400: dm keeper missing",
+        ));
+    }
+
+    #[test]
+    fn round_response_api_error_extracts_error_when_ok_false() {
+        let payload = serde_json::json!({
+            "ok": false,
+            "error": "round run already in progress for room_id=abc"
+        });
+        assert_eq!(
+            round_response_api_error(&payload),
+            Some("round run already in progress for room_id=abc".to_string())
+        );
+    }
+
 }

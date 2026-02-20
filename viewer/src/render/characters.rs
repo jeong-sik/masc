@@ -84,6 +84,23 @@ pub fn spawn_character_sprites(
             .id();
 
         commands.entity(entity).add_child(hp_bar);
+
+        // MP bar as child entity (positioned below HP bar, only for casters)
+        if actor.max_mp > 0 {
+            let mp_bar = commands
+                .spawn((
+                    Sprite {
+                        color: Color::srgb(0.2, 0.4, 0.8),
+                        custom_size: Some(Vec2::new(36.0, 2.0)),
+                        ..default()
+                    },
+                    Transform::from_xyz(0.0, -42.0, 0.1),
+                    MpBarSprite { max_width: 36.0 },
+                ))
+                .id();
+
+            commands.entity(entity).add_child(mp_bar);
+        }
     }
 }
 
@@ -122,6 +139,35 @@ pub fn update_hp_bars(
                     Color::srgb(0.8, 0.7, 0.1)
                 } else {
                     Color::srgb(0.8, 0.2, 0.1)
+                };
+            }
+        }
+    }
+}
+
+/// Updates MP bar width based on current MP.
+pub fn update_mp_bars(
+    actors: Query<(&Actor, &Children), With<MapToken>>,
+    mut mp_bars: Query<(&mut Sprite, &MpBarSprite)>,
+) {
+    for (actor, children) in &actors {
+        for child in children.iter() {
+            if let Ok((mut sprite, mp_bar)) = mp_bars.get_mut(child) {
+                let ratio = if actor.max_mp > 0 {
+                    (actor.mp as f32 / actor.max_mp as f32).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+
+                sprite.custom_size = Some(Vec2::new(mp_bar.max_width * ratio, 2.0));
+
+                // Color based on MP ratio
+                sprite.color = if ratio > 0.6 {
+                    Color::srgb(0.2, 0.4, 0.8) // deep blue
+                } else if ratio > 0.25 {
+                    Color::srgb(0.4, 0.5, 0.9) // lighter blue
+                } else {
+                    Color::srgb(0.5, 0.3, 0.7) // purple-ish
                 };
             }
         }

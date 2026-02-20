@@ -78,6 +78,12 @@ pub struct HpBarSprite {
     pub max_width: f32,
 }
 
+/// MP bar sprite attached as a child entity of each Actor.
+#[derive(Component, Debug)]
+pub struct MpBarSprite {
+    pub max_width: f32,
+}
+
 /// Floating damage/heal text that drifts upward and fades.
 #[derive(Component, Debug)]
 pub struct FloatingText {

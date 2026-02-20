@@ -28,13 +28,45 @@ const DM_VOICE_MODE_SELECT_ID: &str = "dm-voice-mode-select";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_PROXY_INPUT_ID: &str = "dm-voice-proxy-url";
 #[cfg(target_arch = "wasm32")]
-const DM_VOICE_MODEL_INPUT_ID: &str = "dm-voice-model";
+const DM_VOICE_MODEL_SELECT_ID: &str = "dm-voice-model-select";
 #[cfg(target_arch = "wasm32")]
-const DM_VOICE_ID_INPUT_ID: &str = "dm-voice-id";
+const DM_VOICE_MODEL_CUSTOM_WRAP_ID: &str = "dm-voice-model-custom-wrap";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_MODEL_CUSTOM_INPUT_ID: &str = "dm-voice-model-custom";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_ID_SELECT_ID: &str = "dm-voice-id-select";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_ID_CUSTOM_WRAP_ID: &str = "dm-voice-id-custom-wrap";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_ID_CUSTOM_INPUT_ID: &str = "dm-voice-id-custom";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_SAVE_BUTTON_ID: &str = "dm-voice-save-btn";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_STATUS_ID: &str = "dm-voice-status";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_CUSTOM_VALUE: &str = "custom";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_RANDOM_PRESET_VALUE: &str = "random_preset";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_RANDOM_PRESET_LABEL: &str = "랜덤 (추천 Voice 중 선택)";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_MODEL_PRESETS: &[&str] = &[
+    "eleven_turbo_v2_5",
+    "eleven_flash_v2_5",
+    "eleven_multilingual_v2",
+];
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_ID_PRESETS: &[(&str, &str)] = &[
+    ("21m00Tcm4TlvDq8ikWAM", "Rachel"),
+    ("AZnzlk1XvdvUeBnXmlld", "Domi"),
+    ("EXAVITQu4vr4xnSDxMaL", "Bella"),
+    ("ErXwobaYiN019PkySvjV", "Antoni"),
+    ("MF3mGyEYCl7XYWbV9V6O", "Elli"),
+    ("TxGEqnHWrfWFTfGW9XjX", "Josh"),
+    ("VR6AewLTigWG4xSOukaG", "Arnold"),
+    ("pNInz6obpgDQGcFmaJgB", "Adam"),
+    ("yoZ06aMxZJJ28mfd3POQ", "Sam"),
+];
 
 fn normalize_phase(raw: &str) -> String {
     raw.trim().to_ascii_lowercase().replace('-', "_")
@@ -351,6 +383,87 @@ fn set_select_value(doc: &web_sys::Document, id: &str, value: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn set_hidden(doc: &web_sys::Document, id: &str, hidden: bool) {
+    let Some(el) = doc.get_element_by_id(id) else {
+        return;
+    };
+    if hidden {
+        let _ = el.set_attribute("hidden", "");
+    } else {
+        let _ = el.remove_attribute("hidden");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn hydrate_preset_select(
+    doc: &web_sys::Document,
+    select_id: &str,
+    custom_wrap_id: &str,
+    custom_input_id: &str,
+    current_value: Option<String>,
+    is_known_preset: fn(&str) -> bool,
+) {
+    match current_value.and_then(|v| normalize_optional(&v)) {
+        None => {
+            set_select_value(doc, select_id, "");
+            set_hidden(doc, custom_wrap_id, true);
+            set_input_value(doc, custom_input_id, "");
+        }
+        Some(value) if is_known_preset(&value) => {
+            set_select_value(doc, select_id, &value);
+            set_hidden(doc, custom_wrap_id, true);
+            set_input_value(doc, custom_input_id, "");
+        }
+        Some(value) => {
+            set_select_value(doc, select_id, DM_VOICE_CUSTOM_VALUE);
+            set_hidden(doc, custom_wrap_id, false);
+            set_input_value(doc, custom_input_id, &value);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn select_storage_value(
+    doc: &web_sys::Document,
+    select_id: &str,
+    custom_wrap_id: &str,
+    custom_input_id: &str,
+) -> Option<String> {
+    let selected = get_select_value(doc, select_id).unwrap_or_default();
+    if selected == DM_VOICE_CUSTOM_VALUE {
+        set_hidden(doc, custom_wrap_id, false);
+        return get_input_value(doc, custom_input_id);
+    }
+    set_hidden(doc, custom_wrap_id, true);
+    if selected == DM_VOICE_RANDOM_PRESET_VALUE && select_id == DM_VOICE_ID_SELECT_ID {
+        return pick_random_voice_id();
+    }
+    Some(selected)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_model_preset(value: &str) -> bool {
+    DM_VOICE_MODEL_PRESETS.iter().any(|preset| *preset == value)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_voice_id_preset(value: &str) -> bool {
+    DM_VOICE_ID_PRESETS
+        .iter()
+        .any(|(preset, _name)| *preset == value)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pick_random_voice_id() -> Option<String> {
+    if DM_VOICE_ID_PRESETS.is_empty() {
+        return None;
+    }
+    let index = (js_sys::Math::random() * DM_VOICE_ID_PRESETS.len() as f64).floor() as usize;
+    let bounded = index.min(DM_VOICE_ID_PRESETS.len().saturating_sub(1));
+    Some(DM_VOICE_ID_PRESETS[bounded].0.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
 fn persist_storage_value(key: &str, value: Option<String>) {
     let Some(win) = web_sys::window() else {
         return;
@@ -388,16 +501,72 @@ fn hydrate_dm_voice_controls(doc: &web_sys::Document) {
         DM_VOICE_PROXY_INPUT_ID,
         &resolve_dm_voice_proxy_url().unwrap_or_default(),
     );
-    set_input_value(
+    hydrate_preset_select(
         doc,
-        DM_VOICE_MODEL_INPUT_ID,
-        &resolve_dm_voice_model().unwrap_or_default(),
+        DM_VOICE_MODEL_SELECT_ID,
+        DM_VOICE_MODEL_CUSTOM_WRAP_ID,
+        DM_VOICE_MODEL_CUSTOM_INPUT_ID,
+        resolve_dm_voice_model(),
+        is_model_preset,
     );
-    set_input_value(
+    hydrate_preset_select(
         doc,
-        DM_VOICE_ID_INPUT_ID,
-        &resolve_dm_voice_id().unwrap_or_default(),
+        DM_VOICE_ID_SELECT_ID,
+        DM_VOICE_ID_CUSTOM_WRAP_ID,
+        DM_VOICE_ID_CUSTOM_INPUT_ID,
+        resolve_dm_voice_id(),
+        is_voice_id_preset,
     );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_custom_field_visibility(
+    doc: &web_sys::Document,
+    select_id: &str,
+    custom_wrap_id: &str,
+    custom_input_id: &str,
+) {
+    let is_custom = get_select_value(doc, select_id).as_deref() == Some(DM_VOICE_CUSTOM_VALUE);
+    set_hidden(doc, custom_wrap_id, !is_custom);
+    if !is_custom {
+        set_input_value(doc, custom_input_id, "");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_custom_field_toggle(
+    doc: &web_sys::Document,
+    select_id: &str,
+    custom_wrap_id: &str,
+    custom_input_id: &str,
+) {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+
+    let Some(select) = doc.get_element_by_id(select_id) else {
+        return;
+    };
+    let attr = format!("data-toggle-bound-{}", select_id);
+    if select.get_attribute(&attr).as_deref() == Some("1") {
+        return;
+    }
+    let _ = select.set_attribute(&attr, "1");
+
+    let select_id = select_id.to_string();
+    let custom_wrap_id = custom_wrap_id.to_string();
+    let custom_input_id = custom_input_id.to_string();
+
+    let cb = Closure::wrap(Box::new(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        sync_custom_field_visibility(&doc, &select_id, &custom_wrap_id, &custom_input_id);
+    }) as Box<dyn FnMut()>);
+
+    let _ = select.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref())
+    });
+    cb.forget();
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -421,18 +590,45 @@ fn bind_dm_voice_save_button(doc: &web_sys::Document) {
             .map(|raw| parse_dm_voice_mode(&raw))
             .unwrap_or(DmVoiceMode::Browser);
         let proxy_url = get_input_value(&doc, DM_VOICE_PROXY_INPUT_ID).unwrap_or_default();
-        let voice_model = get_input_value(&doc, DM_VOICE_MODEL_INPUT_ID).unwrap_or_default();
-        let voice_id = get_input_value(&doc, DM_VOICE_ID_INPUT_ID).unwrap_or_default();
+        let voice_model = select_storage_value(
+            &doc,
+            DM_VOICE_MODEL_SELECT_ID,
+            DM_VOICE_MODEL_CUSTOM_WRAP_ID,
+            DM_VOICE_MODEL_CUSTOM_INPUT_ID,
+        );
+        let voice_id = select_storage_value(
+            &doc,
+            DM_VOICE_ID_SELECT_ID,
+            DM_VOICE_ID_CUSTOM_WRAP_ID,
+            DM_VOICE_ID_CUSTOM_INPUT_ID,
+        );
 
         persist_storage_value(
             STORAGE_DM_VOICE_MODE,
             Some(dm_voice_mode_value(mode).to_string()),
         );
         persist_storage_value(STORAGE_DM_VOICE_PROXY_URL, Some(proxy_url));
-        persist_storage_value(STORAGE_DM_VOICE_MODEL, Some(voice_model));
-        persist_storage_value(STORAGE_DM_VOICE_ID, Some(voice_id));
+        persist_storage_value(STORAGE_DM_VOICE_MODEL, voice_model);
+        persist_storage_value(STORAGE_DM_VOICE_ID, voice_id.clone());
 
-        set_dm_voice_status(&doc, "status-ok", "DM 음성 설정을 저장했습니다.");
+        if get_select_value(&doc, DM_VOICE_ID_SELECT_ID).as_deref()
+            == Some(DM_VOICE_RANDOM_PRESET_VALUE)
+        {
+            if let Some(selected_id) = voice_id.and_then(|v| normalize_optional(&v)) {
+                set_dm_voice_status(
+                    &doc,
+                    "status-ok",
+                    &format!(
+                        "DM 음성 설정 저장 완료. {}: {}",
+                        DM_VOICE_RANDOM_PRESET_LABEL, selected_id
+                    ),
+                );
+            } else {
+                set_dm_voice_status(&doc, "status-ok", "DM 음성 설정을 저장했습니다.");
+            }
+        } else {
+            set_dm_voice_status(&doc, "status-ok", "DM 음성 설정을 저장했습니다.");
+        }
     }) as Box<dyn FnMut()>);
 
     let _ = button.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -455,6 +651,30 @@ fn bind_dm_voice_controls_impl() {
     let _ = panel.set_attribute("data-bound", "1");
 
     hydrate_dm_voice_controls(&doc);
+    bind_custom_field_toggle(
+        &doc,
+        DM_VOICE_MODEL_SELECT_ID,
+        DM_VOICE_MODEL_CUSTOM_WRAP_ID,
+        DM_VOICE_MODEL_CUSTOM_INPUT_ID,
+    );
+    bind_custom_field_toggle(
+        &doc,
+        DM_VOICE_ID_SELECT_ID,
+        DM_VOICE_ID_CUSTOM_WRAP_ID,
+        DM_VOICE_ID_CUSTOM_INPUT_ID,
+    );
+    sync_custom_field_visibility(
+        &doc,
+        DM_VOICE_MODEL_SELECT_ID,
+        DM_VOICE_MODEL_CUSTOM_WRAP_ID,
+        DM_VOICE_MODEL_CUSTOM_INPUT_ID,
+    );
+    sync_custom_field_visibility(
+        &doc,
+        DM_VOICE_ID_SELECT_ID,
+        DM_VOICE_ID_CUSTOM_WRAP_ID,
+        DM_VOICE_ID_CUSTOM_INPUT_ID,
+    );
     bind_dm_voice_save_button(&doc);
     set_dm_voice_status(
         &doc,

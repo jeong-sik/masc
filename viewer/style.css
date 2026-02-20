@@ -2591,6 +2591,10 @@ body.wasm-dom-fallback #bevy-canvas {
     grid-column: 1 / -1;
 }
 
+.dm-voice-custom[hidden] {
+    display: none !important;
+}
+
 .dm-voice-actions {
     display: flex;
     align-items: center;

@@ -461,11 +461,38 @@
                             </label>
                             <label class="new-game-field">
                                 <span>응답 음성 모델</span>
-                                <input id="dm-voice-model" type="text" maxlength="120" placeholder="eleven_turbo_v2_5" />
+                                <select id="dm-voice-model-select" title="응답 음성 모델을 선택합니다">
+                                    <option value="">자동 (프록시 기본값)</option>
+                                    <option value="eleven_turbo_v2_5">Eleven Turbo v2.5</option>
+                                    <option value="eleven_flash_v2_5">Eleven Flash v2.5</option>
+                                    <option value="eleven_multilingual_v2">Eleven Multilingual v2</option>
+                                    <option value="custom">직접 입력</option>
+                                </select>
+                            </label>
+                            <label id="dm-voice-model-custom-wrap" class="new-game-field dm-voice-custom" hidden>
+                                <span>모델 직접 입력</span>
+                                <input id="dm-voice-model-custom" type="text" maxlength="120" placeholder="eleven_turbo_v2_5" />
                             </label>
                             <label class="new-game-field">
                                 <span>응답 Voice ID</span>
-                                <input id="dm-voice-id" type="text" maxlength="120" placeholder="21m00Tcm4TlvDq8ikWAM" />
+                                <select id="dm-voice-id-select" title="응답 Voice ID를 선택합니다">
+                                    <option value="">자동 (프록시 기본값)</option>
+                                    <option value="random_preset">랜덤 (추천 Voice 중 선택)</option>
+                                    <option value="21m00Tcm4TlvDq8ikWAM">Rachel</option>
+                                    <option value="AZnzlk1XvdvUeBnXmlld">Domi</option>
+                                    <option value="EXAVITQu4vr4xnSDxMaL">Bella</option>
+                                    <option value="ErXwobaYiN019PkySvjV">Antoni</option>
+                                    <option value="MF3mGyEYCl7XYWbV9V6O">Elli</option>
+                                    <option value="TxGEqnHWrfWFTfGW9XjX">Josh</option>
+                                    <option value="VR6AewLTigWG4xSOukaG">Arnold</option>
+                                    <option value="pNInz6obpgDQGcFmaJgB">Adam</option>
+                                    <option value="yoZ06aMxZJJ28mfd3POQ">Sam</option>
+                                    <option value="custom">직접 입력</option>
+                                </select>
+                            </label>
+                            <label id="dm-voice-id-custom-wrap" class="new-game-field dm-voice-custom" hidden>
+                                <span>Voice ID 직접 입력</span>
+                                <input id="dm-voice-id-custom" type="text" maxlength="120" placeholder="21m00Tcm4TlvDq8ikWAM" />
                             </label>
                         </div>
                         <div class="dm-voice-actions">

@@ -1,3 +1,5 @@
+use bevy::prelude::Res;
+
 use crate::game::events::NarrativePayload;
 use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::state::{RoomState, TurnProgressState};
@@ -9,6 +11,30 @@ enum DmVoiceMode {
     Browser,
     ElevenLabs,
 }
+
+#[cfg(target_arch = "wasm32")]
+const STORAGE_DM_VOICE_MODE: &str = "trpg_dm_voice_mode";
+#[cfg(target_arch = "wasm32")]
+const STORAGE_DM_VOICE_PROXY_URL: &str = "trpg_dm_voice_proxy_url";
+#[cfg(target_arch = "wasm32")]
+const STORAGE_DM_VOICE_MODEL: &str = "trpg_dm_voice_model";
+#[cfg(target_arch = "wasm32")]
+const STORAGE_DM_VOICE_ID: &str = "trpg_dm_voice_id";
+
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_PANEL_ID: &str = "dm-voice-config";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_MODE_SELECT_ID: &str = "dm-voice-mode-select";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_PROXY_INPUT_ID: &str = "dm-voice-proxy-url";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_MODEL_INPUT_ID: &str = "dm-voice-model";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_ID_INPUT_ID: &str = "dm-voice-id";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_SAVE_BUTTON_ID: &str = "dm-voice-save-btn";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_STATUS_ID: &str = "dm-voice-status";
 
 fn normalize_phase(raw: &str) -> String {
     raw.trim().to_ascii_lowercase().replace('-', "_")
@@ -66,6 +92,76 @@ pub fn maybe_play_dm_voice(
     }
 }
 
+pub fn bind_dm_voice_controls() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        bind_dm_voice_controls_impl();
+    }
+}
+
+pub fn unbind_dm_voice_controls() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            set_dm_voice_status(
+                &doc,
+                "status-info",
+                "DM 음성은 세션 진행 중일 때만 재생됩니다.",
+            );
+        }
+    }
+}
+
+pub fn sync_dm_voice_controls(_room_state: Res<RoomState>, _progress: Res<TurnProgressState>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        if doc.get_element_by_id(DM_VOICE_STATUS_ID).is_none() {
+            return;
+        }
+
+        let mode = resolve_dm_voice_mode();
+        let running = is_room_running(&_room_state, &_progress);
+        match (running, mode) {
+            (false, _) => {
+                set_dm_voice_status(
+                    &doc,
+                    "status-info",
+                    "대기 상태: 세션이 진행 중일 때만 DM 음성이 재생됩니다.",
+                );
+            }
+            (true, DmVoiceMode::Off) => {
+                set_dm_voice_status(
+                    &doc,
+                    "status-warn",
+                    "진행 중이지만 DM 음성 모드가 OFF 입니다.",
+                );
+            }
+            (true, DmVoiceMode::Browser) => {
+                set_dm_voice_status(
+                    &doc,
+                    "status-ok",
+                    "진행 중: Browser TTS로 DM 내레이션을 재생합니다.",
+                );
+            }
+            (true, DmVoiceMode::ElevenLabs) => {
+                let model = resolve_dm_voice_model().unwrap_or_else(|| "-".to_string());
+                let voice_id = resolve_dm_voice_id().unwrap_or_else(|| "-".to_string());
+                set_dm_voice_status(
+                    &doc,
+                    "status-ok",
+                    &format!(
+                        "진행 중: ElevenLabs proxy 사용 (model: {}, voice_id: {})",
+                        model, voice_id
+                    ),
+                );
+            }
+        }
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn dispatch_voice(payload: &NarrativePayload, clean_text: &str, room_state: &RoomState) {
     let text = clean_text.trim().to_string();
@@ -79,13 +175,15 @@ fn dispatch_voice(payload: &NarrativePayload, clean_text: &str, room_state: &Roo
     };
     let phase = payload.phase.trim().to_string();
     let turn = payload.turn;
+    let voice_model = resolve_dm_voice_model();
+    let voice_id = resolve_dm_voice_id();
 
     match resolve_dm_voice_mode() {
         DmVoiceMode::Off => {}
         DmVoiceMode::Browser => speak_with_browser(&text),
         DmVoiceMode::ElevenLabs => {
             if let Some(proxy_url) = resolve_dm_voice_proxy_url() {
-                speak_with_proxy(proxy_url, text, room_id, phase, turn);
+                speak_with_proxy(proxy_url, text, room_id, phase, turn, voice_model, voice_id);
             } else {
                 speak_with_browser(&text);
             }
@@ -103,97 +201,266 @@ fn parse_dm_voice_mode(raw: &str) -> DmVoiceMode {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn dm_voice_mode_value(mode: DmVoiceMode) -> &'static str {
+    match mode {
+        DmVoiceMode::Off => "off",
+        DmVoiceMode::Browser => "browser",
+        DmVoiceMode::ElevenLabs => "elevenlabs",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn resolve_dm_voice_mode() -> DmVoiceMode {
-    let Some(win) = web_sys::window() else {
-        return DmVoiceMode::Browser;
-    };
-
-    if let Some(raw) = global_string(&win, "__TRPG_DM_VOICE_MODE")
-        .or_else(|| global_string(&win, "__DM_VOICE_MODE"))
-    {
-        return parse_dm_voice_mode(&raw);
-    }
-
-    if let Ok(search) = win.location().search() {
-        if let Some(raw) = parse_query_param(&search, "dm_voice")
-            .or_else(|| parse_query_param(&search, "dm_voice_mode"))
-        {
-            if let Ok(Some(storage)) = win.local_storage() {
-                let _ = storage.set_item("trpg_dm_voice_mode", raw.trim());
-            }
-            return parse_dm_voice_mode(&raw);
-        }
-    }
-
-    if let Ok(Some(storage)) = win.local_storage() {
-        if let Ok(Some(raw)) = storage.get_item("trpg_dm_voice_mode") {
-            return parse_dm_voice_mode(&raw);
-        }
-    }
-
-    if let Some(doc) = win.document() {
-        if let Ok(Some(meta)) = doc.query_selector("meta[name='trpg-dm-voice-mode']") {
-            if let Some(raw) = meta.get_attribute("content") {
-                return parse_dm_voice_mode(&raw);
-            }
-        }
-    }
-
-    DmVoiceMode::Browser
+    resolve_string_setting(
+        &["__TRPG_DM_VOICE_MODE", "__DM_VOICE_MODE"],
+        &["dm_voice", "dm_voice_mode"],
+        STORAGE_DM_VOICE_MODE,
+        "meta[name='trpg-dm-voice-mode']",
+    )
+    .map(|raw| parse_dm_voice_mode(&raw))
+    .unwrap_or(DmVoiceMode::Browser)
 }
 
 #[cfg(target_arch = "wasm32")]
 fn resolve_dm_voice_proxy_url() -> Option<String> {
-    let win = web_sys::window()?;
-    let normalize = |raw: &str| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    };
+    resolve_string_setting(
+        &["__TRPG_DM_VOICE_PROXY_URL", "__ELEVENLABS_PROXY_URL"],
+        &["dm_voice_proxy_url", "elevenlabs_proxy_url"],
+        STORAGE_DM_VOICE_PROXY_URL,
+        "meta[name='trpg-dm-voice-proxy-url']",
+    )
+}
 
-    if let Some(raw) = global_string(&win, "__TRPG_DM_VOICE_PROXY_URL")
-        .or_else(|| global_string(&win, "__ELEVENLABS_PROXY_URL"))
-    {
-        if let Some(url) = normalize(&raw) {
-            return Some(url);
+#[cfg(target_arch = "wasm32")]
+fn resolve_dm_voice_model() -> Option<String> {
+    resolve_string_setting(
+        &["__TRPG_DM_VOICE_MODEL", "__ELEVENLABS_MODEL"],
+        &["dm_voice_model", "elevenlabs_model"],
+        STORAGE_DM_VOICE_MODEL,
+        "meta[name='trpg-dm-voice-model']",
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_dm_voice_id() -> Option<String> {
+    resolve_string_setting(
+        &["__TRPG_DM_VOICE_ID", "__ELEVENLABS_VOICE_ID"],
+        &["dm_voice_id", "dm_voice_voice_id", "elevenlabs_voice_id"],
+        STORAGE_DM_VOICE_ID,
+        "meta[name='trpg-dm-voice-id']",
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_optional(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_string_setting(
+    global_keys: &[&str],
+    query_keys: &[&str],
+    storage_key: &str,
+    meta_selector: &str,
+) -> Option<String> {
+    let win = web_sys::window()?;
+
+    for key in global_keys {
+        if let Some(raw) = global_string(&win, key) {
+            if let Some(value) = normalize_optional(&raw) {
+                return Some(value);
+            }
         }
     }
 
     if let Ok(search) = win.location().search() {
-        if let Some(raw) = parse_query_param(&search, "dm_voice_proxy_url")
-            .or_else(|| parse_query_param(&search, "elevenlabs_proxy_url"))
-        {
-            if let Ok(Some(storage)) = win.local_storage() {
-                let _ = storage.set_item("trpg_dm_voice_proxy_url", raw.trim());
-            }
-            if let Some(url) = normalize(&raw) {
-                return Some(url);
+        for key in query_keys {
+            if let Some(raw) = parse_query_param(&search, key) {
+                if let Some(value) = normalize_optional(&raw) {
+                    if let Ok(Some(storage)) = win.local_storage() {
+                        let _ = storage.set_item(storage_key, &value);
+                    }
+                    return Some(value);
+                }
             }
         }
     }
 
     if let Ok(Some(storage)) = win.local_storage() {
-        if let Ok(Some(raw)) = storage.get_item("trpg_dm_voice_proxy_url") {
-            if let Some(url) = normalize(&raw) {
-                return Some(url);
+        if let Ok(Some(raw)) = storage.get_item(storage_key) {
+            if let Some(value) = normalize_optional(&raw) {
+                return Some(value);
             }
         }
     }
 
     if let Some(doc) = win.document() {
-        if let Ok(Some(meta)) = doc.query_selector("meta[name='trpg-dm-voice-proxy-url']") {
+        if let Ok(Some(meta)) = doc.query_selector(meta_selector) {
             if let Some(raw) = meta.get_attribute("content") {
-                if let Some(url) = normalize(&raw) {
-                    return Some(url);
+                if let Some(value) = normalize_optional(&raw) {
+                    return Some(value);
                 }
             }
         }
     }
 
     None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn get_input_value(doc: &web_sys::Document, id: &str) -> Option<String> {
+    use wasm_bindgen::JsCast;
+    doc.get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .map(|input| input.value())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_input_value(doc: &web_sys::Document, id: &str, value: &str) {
+    use wasm_bindgen::JsCast;
+    if let Some(input) = doc
+        .get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value(value);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn get_select_value(doc: &web_sys::Document, id: &str) -> Option<String> {
+    use wasm_bindgen::JsCast;
+    doc.get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_select_value(doc: &web_sys::Document, id: &str, value: &str) {
+    use wasm_bindgen::JsCast;
+    if let Some(select) = doc
+        .get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    {
+        select.set_value(value);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_storage_value(key: &str, value: Option<String>) {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let Ok(Some(storage)) = win.local_storage() else {
+        return;
+    };
+    match value.and_then(|v| normalize_optional(&v)) {
+        Some(v) => {
+            let _ = storage.set_item(key, &v);
+        }
+        None => {
+            let _ = storage.remove_item(key);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_dm_voice_status(doc: &web_sys::Document, level_class: &str, message: &str) {
+    if let Some(el) = doc.get_element_by_id(DM_VOICE_STATUS_ID) {
+        el.set_class_name(&format!("turn-control-gate {}", level_class));
+        el.set_text_content(Some(message));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn hydrate_dm_voice_controls(doc: &web_sys::Document) {
+    set_select_value(
+        doc,
+        DM_VOICE_MODE_SELECT_ID,
+        dm_voice_mode_value(resolve_dm_voice_mode()),
+    );
+    set_input_value(
+        doc,
+        DM_VOICE_PROXY_INPUT_ID,
+        &resolve_dm_voice_proxy_url().unwrap_or_default(),
+    );
+    set_input_value(
+        doc,
+        DM_VOICE_MODEL_INPUT_ID,
+        &resolve_dm_voice_model().unwrap_or_default(),
+    );
+    set_input_value(
+        doc,
+        DM_VOICE_ID_INPUT_ID,
+        &resolve_dm_voice_id().unwrap_or_default(),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_dm_voice_save_button(doc: &web_sys::Document) {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+
+    let Some(button) = doc.get_element_by_id(DM_VOICE_SAVE_BUTTON_ID) else {
+        return;
+    };
+    if button.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = button.set_attribute("data-bound", "1");
+
+    let cb = Closure::wrap(Box::new(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let mode = get_select_value(&doc, DM_VOICE_MODE_SELECT_ID)
+            .map(|raw| parse_dm_voice_mode(&raw))
+            .unwrap_or(DmVoiceMode::Browser);
+        let proxy_url = get_input_value(&doc, DM_VOICE_PROXY_INPUT_ID).unwrap_or_default();
+        let voice_model = get_input_value(&doc, DM_VOICE_MODEL_INPUT_ID).unwrap_or_default();
+        let voice_id = get_input_value(&doc, DM_VOICE_ID_INPUT_ID).unwrap_or_default();
+
+        persist_storage_value(
+            STORAGE_DM_VOICE_MODE,
+            Some(dm_voice_mode_value(mode).to_string()),
+        );
+        persist_storage_value(STORAGE_DM_VOICE_PROXY_URL, Some(proxy_url));
+        persist_storage_value(STORAGE_DM_VOICE_MODEL, Some(voice_model));
+        persist_storage_value(STORAGE_DM_VOICE_ID, Some(voice_id));
+
+        set_dm_voice_status(&doc, "status-ok", "DM 음성 설정을 저장했습니다.");
+    }) as Box<dyn FnMut()>);
+
+    let _ = button.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+    });
+    cb.forget();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_dm_voice_controls_impl() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(panel) = doc.get_element_by_id(DM_VOICE_PANEL_ID) else {
+        return;
+    };
+    if panel.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = panel.set_attribute("data-bound", "1");
+
+    hydrate_dm_voice_controls(&doc);
+    bind_dm_voice_save_button(&doc);
+    set_dm_voice_status(
+        &doc,
+        "status-info",
+        "DM 음성은 세션 진행 중일 때만 재생됩니다.",
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -235,10 +502,26 @@ fn speak_with_browser(text: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn speak_with_proxy(proxy_url: String, text: String, room_id: String, phase: String, turn: u32) {
+fn speak_with_proxy(
+    proxy_url: String,
+    text: String,
+    room_id: String,
+    phase: String,
+    turn: u32,
+    voice_model: Option<String>,
+    voice_id: Option<String>,
+) {
     wasm_bindgen_futures::spawn_local(async move {
-        if let Err(err) =
-            speak_with_proxy_inner(proxy_url, text.clone(), room_id, phase, turn).await
+        if let Err(err) = speak_with_proxy_inner(
+            proxy_url,
+            text.clone(),
+            room_id,
+            phase,
+            turn,
+            voice_model,
+            voice_id,
+        )
+        .await
         {
             log::warn!("dm voice proxy failed, fallback to browser speech: {}", err);
             speak_with_browser(&text);
@@ -253,6 +536,8 @@ async fn speak_with_proxy_inner(
     room_id: String,
     phase: String,
     turn: u32,
+    voice_model: Option<String>,
+    voice_id: Option<String>,
 ) -> Result<(), String> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
@@ -261,14 +546,20 @@ async fn speak_with_proxy_inner(
         return Err("window unavailable".to_string());
     };
 
-    let body = serde_json::json!({
+    let mut body_json = serde_json::json!({
         "text": text,
         "speaker": "dm",
         "phase": phase,
         "room_id": room_id,
         "turn": turn,
-    })
-    .to_string();
+    });
+    if let Some(model) = voice_model.and_then(|v| normalize_optional(&v)) {
+        body_json["voice_model"] = serde_json::Value::String(model);
+    }
+    if let Some(id) = voice_id.and_then(|v| normalize_optional(&v)) {
+        body_json["voice_id"] = serde_json::Value::String(id);
+    }
+    let body = body_json.to_string();
 
     let init = web_sys::RequestInit::new();
     init.set_method("POST");

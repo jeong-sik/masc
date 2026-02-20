@@ -444,6 +444,37 @@
                     <input type="hidden" id="round-run-timeout" value="" />
                     <input type="hidden" id="round-run-lang" value="" />
                     <input type="hidden" id="round-run-players" value="" />
+                    <details id="dm-voice-config" class="dm-voice-config">
+                        <summary>DM 음성 설정</summary>
+                        <div class="dm-voice-grid">
+                            <label class="new-game-field">
+                                <span>음성 모드</span>
+                                <select id="dm-voice-mode-select" title="DM 내레이션 음성 모드를 선택합니다">
+                                    <option value="browser">Browser TTS</option>
+                                    <option value="elevenlabs">ElevenLabs Proxy</option>
+                                    <option value="off">Off</option>
+                                </select>
+                            </label>
+                            <label class="new-game-field dm-voice-field-wide">
+                                <span>Proxy URL</span>
+                                <input id="dm-voice-proxy-url" type="text" maxlength="500" placeholder="https://.../tts" />
+                            </label>
+                            <label class="new-game-field">
+                                <span>응답 음성 모델</span>
+                                <input id="dm-voice-model" type="text" maxlength="120" placeholder="eleven_turbo_v2_5" />
+                            </label>
+                            <label class="new-game-field">
+                                <span>응답 Voice ID</span>
+                                <input id="dm-voice-id" type="text" maxlength="120" placeholder="21m00Tcm4TlvDq8ikWAM" />
+                            </label>
+                        </div>
+                        <div class="dm-voice-actions">
+                            <button id="dm-voice-save-btn" class="inline-toggle" type="button">음성 설정 저장</button>
+                        </div>
+                        <div id="dm-voice-status" class="turn-control-gate status-info">
+                            DM 음성은 세션 진행 중일 때만 재생됩니다.
+                        </div>
+                    </details>
                     <div id="atmosphere-strip" class="atmosphere-strip" aria-live="polite">
                         <div id="weather-chip" class="atmo-chip">
                             <img id="weather-icon" class="atmo-icon" alt="" />

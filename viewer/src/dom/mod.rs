@@ -65,6 +65,10 @@ impl Plugin for DomBridgePlugin {
                 )
                     .run_if(in_state(ViewerMode::Trpg)),
             )
+            .add_systems(
+                Update,
+                dm_voice::sync_dm_voice_controls.run_if(in_state(ViewerMode::Trpg)),
+            )
             // Action panel lifecycle: bind listeners on enter, unbind on exit
             .add_systems(
                 OnEnter(ViewerMode::Trpg),
@@ -73,6 +77,7 @@ impl Plugin for DomBridgePlugin {
                     action_panel::sync_action_panel_interaction_state,
                     actor_join::bind_actor_join,
                     turn_controls::bind_turn_controls,
+                    dm_voice::bind_dm_voice_controls,
                 ),
             )
             .add_systems(
@@ -81,6 +86,7 @@ impl Plugin for DomBridgePlugin {
                     action_panel::unbind_action_panel,
                     actor_join::unbind_actor_join,
                     turn_controls::unbind_turn_controls,
+                    dm_voice::unbind_dm_voice_controls,
                 ),
             );
     }

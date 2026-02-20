@@ -2557,6 +2557,52 @@ body.wasm-dom-fallback #bevy-canvas {
     margin-bottom: 8px;
 }
 
+.dm-voice-config {
+    margin: 0 0 8px;
+    border: 1px solid var(--border-main);
+    border-radius: var(--panel-radius);
+    background: rgba(15, 20, 36, 0.6);
+    overflow: hidden;
+}
+
+.dm-voice-config summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 6px 8px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(109, 122, 164, 0.2);
+}
+
+.dm-voice-config summary::-webkit-details-marker {
+    display: none;
+}
+
+.dm-voice-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px 10px;
+    padding: 8px;
+}
+
+.dm-voice-field-wide {
+    grid-column: 1 / -1;
+}
+
+.dm-voice-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 0 8px 8px;
+}
+
+#dm-voice-status {
+    margin: 0 8px 8px;
+}
+
 .turn-recovery-actions {
     display: flex;
     align-items: center;

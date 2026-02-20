@@ -806,20 +806,9 @@ fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: O
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
-            let turn_ok = match turn_key.as_deref() {
-                Some(target) => el
-                    .get_attribute("data-turn")
-                    .map(|value| value == target)
-                    .unwrap_or(false),
-                None => true,
-            };
-            if turn_ok {
-                let _ = el.class_list().remove_1("turn-dim");
-                let _ = el.class_list().add_1("turn-match");
-            } else {
-                let _ = el.class_list().remove_1("turn-match");
-                let _ = el.class_list().add_1("turn-dim");
-            }
+            // Keep main logs fully readable; focus state is reflected in history chips/panels.
+            let _ = el.class_list().remove_1("turn-dim");
+            let _ = el.class_list().remove_1("turn-match");
         }
     }
 

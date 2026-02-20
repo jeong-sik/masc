@@ -5,6 +5,7 @@ pub mod character_panel;
 pub mod choice_panel;
 pub mod connection;
 pub mod dice_log;
+pub mod dm_voice;
 pub mod endgame;
 pub mod escape;
 pub mod gameplay_events;

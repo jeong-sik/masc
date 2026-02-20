@@ -3,7 +3,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::game::events::NarrativeReceived;
+use crate::game::state::{RoomState, TurnProgressState};
 
+use super::dm_voice;
 use super::escape::{sanitize_text, scroll_to_bottom, trim_log};
 use super::session_history::sync_history_focus_from_dashboard;
 
@@ -229,7 +231,11 @@ fn is_duplicate_narrative_entry(log_el: &web_sys::Element, dedup_key: &str) -> b
 }
 
 /// Appends narrative entries to the #narrative-log DOM element.
-pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
+pub fn update_narrative_dom(
+    mut events: MessageReader<NarrativeReceived>,
+    room_state: Res<RoomState>,
+    progress: Res<TurnProgressState>,
+) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -316,9 +322,9 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         if let Ok(text_el) = document.create_element("span") {
             text_el.set_class_name("narrative-text");
             let text = if speaker.is_some() {
-                format!(" {}", clean_text.clone())
+                format!(" {}", clean_text)
             } else {
-                clean_text
+                clean_text.clone()
             };
             text_el.set_text_content(Some(&text));
             let _ = entry.append_child(&text_el);
@@ -354,6 +360,9 @@ pub fn update_narrative_dom(mut events: MessageReader<NarrativeReceived>) {
         apply_debug_visibility(&entry, debug_enabled, is_debug_entry);
         scroll_to_bottom(&log_el);
         trim_log(&log_el, 200);
+        if !is_debug_entry {
+            dm_voice::maybe_play_dm_voice(&payload, &clean_text, &room_state, &progress);
+        }
     }
 }
 

@@ -42,7 +42,11 @@ web-sys = { version = "0.3", features = [
     "RequestMode",
     "Response",
     "Headers",
+    "Blob",
+    "Url",
     "HtmlAudioElement",
+    "SpeechSynthesis",
+    "SpeechSynthesisUtterance",
 ] }
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }

@@ -445,7 +445,11 @@ let trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter
               Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
           in
           (match read_result with
-          | Error e -> Error (`Internal_server_error, e)
+          | Error e ->
+              Printf.eprintf
+                "[trpg] read_events failed room=%s after_seq=%d: %s; returning empty list\n%!"
+                room_id after_seq e;
+              Ok []
           | Ok events ->
               let events =
                 match event_type_opt with
@@ -566,24 +570,41 @@ let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
     else
       match trpg_rule_by_id rule_module with
       | Error _ as e -> e
-      | Ok rule -> (
-          match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
-          | Error e -> Error (`Internal_server_error, e)
-          | Ok events ->
-              let config = trpg_extract_config_from_events events in
-              let state =
-                Masc_mcp.Trpg_engine_replay.derive_state ~rule ~config ~events
-              in
-              let module R = (val rule : Masc_mcp.Trpg_rule.S) in
-              Ok
-                (`Assoc
-                  [
-                    ("ok", `Bool true);
-                    ("room_id", `String room_id);
-                    ("rule_module", `String R.id);
-                    ("event_count", `Int (List.length events));
-                    ("state", state);
-                  ]))
+      | Ok rule ->
+          let events, read_failed =
+            match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+            | Ok events -> (events, false)
+            | Error e ->
+                Printf.eprintf
+                  "[trpg] derive_state read_events failed room=%s: %s; deriving from empty events\n%!"
+                  room_id e;
+                ([], true)
+          in
+          let config = trpg_extract_config_from_events events in
+          let state =
+            Masc_mcp.Trpg_engine_replay.derive_state ~rule ~config ~events
+          in
+          let module R = (val rule : Masc_mcp.Trpg_rule.S) in
+          let warning_fields =
+            if read_failed then
+              [
+                ( "warning",
+                  `String
+                    "event_store_unavailable: derived from empty event stream"
+                );
+              ]
+            else []
+          in
+          Ok
+            (`Assoc
+              ([
+                 ("ok", `Bool true);
+                 ("room_id", `String room_id);
+                 ("rule_module", `String R.id);
+                 ("event_count", `Int (List.length events));
+                 ("state", state);
+               ]
+              @ warning_fields))
   with exn ->
     Error
       ( `Internal_server_error,
@@ -903,13 +924,14 @@ let trpg_turn_advance_json ~base_dir ~body_str : trpg_api_result =
     let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
     let* _rule = trpg_rule_by_id rule_module in
-    let* phase_opt = trpg_parse_optional_string "phase" json in
-    let* () =
-      match phase_opt with
-      | None -> Ok ()
+    let* phase_opt_raw = trpg_parse_optional_string "phase" json in
+    let* phase_opt =
+      match phase_opt_raw with
+      | None -> Ok None
       | Some p -> (
           match Masc_mcp.Trpg_engine_types.phase_of_string p with
-          | Ok _ -> Ok ()
+          | Ok phase ->
+              Ok (Some (Masc_mcp.Trpg_engine_types.string_of_phase phase))
           | Error e -> Error (`Bad_request, e))
     in
     let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
@@ -1967,6 +1989,29 @@ let top_count_name_and_count
   | (k, v) :: _ -> Some (k, v)
   | [] -> None
 
+let get_agent_identity (name : string) =
+  let contains s sub =
+    let len = String.length s in
+    let sub_len = String.length sub in
+    if sub_len > len then false
+    else
+      let rec loop i =
+        if i + sub_len > len then false
+        else if String.sub s i sub_len = sub then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  let name = String.lowercase_ascii name in
+  if contains name "claude" then ("🧠", "클로드")
+  else if contains name "gemini" then ("💎", "제미나이")
+  else if contains name "codex" then ("🤖", "코덱스")
+  else if contains name "lodge" then ("🏠", "롯지 키퍼")
+  else if contains name "gardener" then ("🌿", "정원사")
+  else if contains name "review" then ("🔍", "리뷰어")
+  else if contains name "test" then ("🧪", "테스터")
+  else ("🤖", name)
+
 let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
   let history_fragment_filter_enabled =
@@ -2948,6 +2993,8 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
 	            `Assoc [
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
+              ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
+              ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
               ("trace_id", `String m.trace_id);
               ("generation", `Int m.generation);
               ("created_at", `String m.created_at);
@@ -3126,6 +3173,7 @@ let dashboard_batch_json (config : Room.config) : Yojson.Safe.t =
   let tasks = Room.get_tasks_raw config in
   let agents = Room.get_agents_raw config in
   let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+
   let proactive_fallback_warn =
     float_of_env_default
       "MASC_DASHBOARD_PROACTIVE_FALLBACK_WARN"
@@ -3198,10 +3246,16 @@ let dashboard_batch_json (config : Room.config) : Yojson.Safe.t =
   in
   let agents_json =
     List.map (fun (a : Types.agent) ->
+      let (emoji, korean_name) = get_agent_identity a.name in
       `Assoc [
         ("name", `String a.name);
         ("status", `String (Types.string_of_agent_status a.status));
         ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+        ("emoji", `String emoji);
+        ("koreanName", `String korean_name);
+        ("generation", `Int 0);
+        ("context_ratio", `Float 0.0);
+        ("turn_count", `Int 0);
       ]
     ) agents
   in

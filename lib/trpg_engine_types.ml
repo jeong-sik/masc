@@ -41,6 +41,10 @@ let phase_of_string = function
   | "lobby" -> Ok Lobby
   | "briefing" -> Ok Briefing
   | "round" -> Ok Round
+  | "discussion" -> Ok Round
+  | "discuss" -> Ok Round
+  | "action" -> Ok Round
+  | "dice" -> Ok Round
   | "resolution" -> Ok Resolution
   | "end" | "ended" -> Ok Ended
   | s -> Error (Printf.sprintf "unknown phase: %s" s)

@@ -90,7 +90,7 @@ function FieldDictionary({ keeper }: { keeper: Keeper }) {
 
   const fields: { title: string; key: string; value: string }[] = [
     { title: 'Name', key: 'name', value: keeper.name },
-    { title: 'Emoji', key: 'emoji', value: keeper.emoji },
+    { title: 'Emoji', key: 'emoji', value: keeper.emoji ?? '-' },
     { title: 'Korean', key: 'koreanName', value: keeper.koreanName ?? '-' },
     { title: 'Model', key: 'model', value: keeper.model ?? '-' },
     { title: 'Status', key: 'status', value: keeper.status },
@@ -214,6 +214,37 @@ function TraitsList({ traits, label }: { traits: string[]; label: string }) {
   `
 }
 
+function formatPct(value: number | undefined): string {
+  if (value == null || Number.isNaN(value)) return '-'
+  return `${Math.round(value * 100)}%`
+}
+
+function RuntimeSignals({ keeper }: { keeper: Keeper }) {
+  const mw = keeper.metrics_window
+
+  const rows: Array<{ label: string; value: string | number }> = [
+    { label: 'Model fallback', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
+    { label: 'Proactive fallback', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
+    { label: 'Memory pass rate', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
+    { label: 'Handoffs', value: typeof mw?.handoff_count === 'number' ? mw.handoff_count : keeper.handoff_count_total ?? '-' },
+    { label: 'Compactions', value: typeof mw?.compaction_events === 'number' ? mw.compaction_events : keeper.compaction_count ?? '-' },
+    { label: 'Saved tokens', value: typeof mw?.compaction_saved_tokens === 'number' ? mw.compaction_saved_tokens : keeper.last_compaction_saved_tokens ?? '-' },
+    { label: 'K2K events', value: keeper.k2k_count ?? '-' },
+    { label: 'Conversation tail', value: keeper.conversation_tail_count ?? '-' },
+  ]
+
+  return html`
+    <div class="keeper-signal-list">
+      ${rows.map(r => html`
+        <div class="keeper-signal-row">
+          <span>${r.label}</span>
+          <strong>${r.value}</strong>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 // ── Main Detail Overlay ───────────────────────────────────
 
 export function KeeperDetailOverlay() {
@@ -269,6 +300,14 @@ export function KeeperDetailOverlay() {
             ${keeper.primaryValue
               ? html`<div style="font-size:12px; color:#888;">Primary value: <span style="color:#4ade80;">${keeper.primaryValue}</span></div>`
               : null}
+            ${keeper.skill_primary
+              ? html`<div style="font-size:12px; color:#888; margin-top:6px;">
+                  Skill route: <span style="color:#22d3ee;">${keeper.skill_primary}</span>
+                </div>`
+              : null}
+            ${keeper.skill_reason
+              ? html`<div style="font-size:12px; color:#888; margin-top:4px;">${keeper.skill_reason}</div>`
+              : null}
             ${keeper.last_heartbeat
               ? html`<div style="font-size:12px; color:#888; margin-top:6px;">
                   Last heartbeat: <${TimeAgo} timestamp=${keeper.last_heartbeat} />
@@ -302,6 +341,34 @@ export function KeeperDetailOverlay() {
               <//>
             `
             : null}
+
+          <${Card} title="Runtime Signals">
+            <${RuntimeSignals} keeper=${keeper} />
+          <//>
+
+          <${Card} title="Memory & Context">
+            <div class="keeper-signal-list">
+              <div class="keeper-signal-row">
+                <span>Context source</span>
+                <strong>${keeper.context_source ?? keeper.context?.source ?? '-'}</strong>
+              </div>
+              <div class="keeper-signal-row">
+                <span>Context tokens</span>
+                <strong>
+                  ${keeper.context_tokens ?? keeper.context?.context_tokens ?? '-'}
+                  /
+                  ${keeper.context_max ?? keeper.context?.context_max ?? '-'}
+                </strong>
+              </div>
+              ${keeper.memory_recent_note
+                ? html`
+                  <div class="keeper-memory-note">
+                    ${keeper.memory_recent_note}
+                  </div>
+                `
+                : html`<div class="empty-state" style="font-size:12px;">No recent memory note</div>`}
+            </div>
+          <//>
         </div>
       </div>
     </div>

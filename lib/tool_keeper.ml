@@ -2846,6 +2846,59 @@ let keeper_llm_tools : Llm_client.tool_def list = [
       ("required", `List [`String "post_id"; `String "content"]);
     ];
   };
+  {
+    tool_name = "keeper_fs_read";
+    tool_description =
+      "Read a file under current project root. Use for source inspection before edits.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
+        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes to return (default: 20000)")]);
+      ]);
+      ("required", `List [`String "path"]);
+    ];
+  };
+  {
+    tool_name = "keeper_fs_edit";
+    tool_description =
+      "Write/append a file under current project root. Use for concrete code changes.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
+        ("content", `Assoc [("type", `String "string"); ("description", `String "New file content or append payload")]);
+        ("mode", `Assoc [("type", `String "string"); ("description", `String "overwrite (default) or append")]);
+      ]);
+      ("required", `List [`String "path"; `String "content"]);
+    ];
+  };
+  {
+    tool_name = "keeper_bash";
+    tool_description =
+      "Run a shell command from project root. Use for build/test/check commands.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Shell command string to run via zsh -lc")]);
+        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
+      ]);
+      ("required", `List [`String "cmd"]);
+    ];
+  };
+  {
+    tool_name = "keeper_github";
+    tool_description =
+      "Run gh CLI commands from project root. Use for PR/review/comment operations.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'pr view 123 --comments'")]);
+        ("args", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Optional argv list for gh (without leading gh)")]);
+        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
+      ]);
+    ];
+  };
 ]
 
 let merge_usage
@@ -3151,7 +3204,62 @@ let extract_user_messages (ctx_work : Context_manager.working_context) : string 
        else
          None)
 
+let project_root_of_config (config : Room.config) : string =
+  let base = config.base_path in
+  if Filename.basename base = ".masc" then Filename.dirname base else base
+
+let starts_with ~(prefix : string) (s : string) : bool =
+  let lp = String.length prefix in
+  String.length s >= lp && String.sub s 0 lp = prefix
+
+let normalize_path_for_check (path : string) : string =
+  try Unix.realpath path
+  with _ ->
+    let parent = Filename.dirname path in
+    let parent_norm =
+      try Unix.realpath parent
+      with _ -> parent
+    in
+    Filename.concat parent_norm (Filename.basename path)
+
+let resolve_keeper_target_path ~(config : Room.config) ~(raw_path : string)
+    : (string, string) result =
+  let raw = String.trim raw_path in
+  if raw = "" then Error "path_required"
+  else
+    let root = project_root_of_config config in
+    let candidate =
+      if Filename.is_relative raw then Filename.concat root raw else raw
+    in
+    let root_norm = normalize_path_for_check root in
+    let target_norm = normalize_path_for_check candidate in
+    let allowed =
+      target_norm = root_norm
+      || starts_with ~prefix:(root_norm ^ "/") target_norm
+    in
+    if allowed then Ok candidate
+    else
+      Error
+        (Printf.sprintf
+           "path_outside_project_root: %s (root=%s)"
+           target_norm
+           root_norm)
+
+let truncate_tool_output ?(max_len = 12000) (s : string) : string =
+  if String.length s <= max_len then s
+  else String.sub s 0 max_len ^ "\n...[truncated]"
+
+let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
+  match st with
+  | Unix.WEXITED code ->
+      `Assoc [("kind", `String "exit"); ("code", `Int code)]
+  | Unix.WSIGNALED sig_num ->
+      `Assoc [("kind", `String "signaled"); ("signal", `Int sig_num)]
+  | Unix.WSTOPPED sig_num ->
+      `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
+
 let execute_keeper_tool_call
+    ~(config : Room.config)
     ~(meta : keeper_meta)
     ~(ctx_work : Context_manager.working_context)
     (tc : Llm_client.tool_call) : string =
@@ -3253,6 +3361,138 @@ let execute_keeper_tool_call
       in
       let (ok, msg) = Tool_board.handle_tool "masc_board_comment" board_args in
       if ok then msg else Yojson.Safe.to_string (`Assoc [("error", `String msg)])
+  | "keeper_fs_read" | "keeper_read" ->
+      let path = Safe_ops.json_string ~default:"" "path" args in
+      let max_bytes =
+        Safe_ops.json_int ~default:20000 "max_bytes" args
+        |> fun n -> max 512 (min 200000 n)
+      in
+      (match resolve_keeper_target_path ~config ~raw_path:path with
+       | Error e ->
+           Yojson.Safe.to_string (`Assoc [("error", `String e)])
+       | Ok target ->
+           (match Safe_ops.read_file_safe target with
+            | Error e ->
+                Yojson.Safe.to_string (`Assoc [("error", `String e); ("path", `String target)])
+            | Ok content ->
+                let total = String.length content in
+                let truncated = total > max_bytes in
+                let body =
+                  if truncated then String.sub content 0 max_bytes else content
+                in
+                Yojson.Safe.to_string
+                  (`Assoc [
+                    ("ok", `Bool true);
+                    ("path", `String target);
+                    ("bytes", `Int total);
+                    ("truncated", `Bool truncated);
+                    ("content", `String body);
+                  ])))
+  | "keeper_fs_edit" | "keeper_edit" ->
+      let path = Safe_ops.json_string ~default:"" "path" args in
+      let content = Safe_ops.json_string ~default:"" "content" args in
+      let mode =
+        Safe_ops.json_string ~default:"overwrite" "mode" args
+        |> String.lowercase_ascii
+      in
+      (match resolve_keeper_target_path ~config ~raw_path:path with
+       | Error e ->
+           Yojson.Safe.to_string (`Assoc [("error", `String e)])
+       | Ok target ->
+           (try
+              let parent = Filename.dirname target in
+              if not (Sys.file_exists parent) then Unix.mkdir parent 0o755;
+              (match mode with
+               | "append" ->
+                   let oc =
+                     open_out_gen [Open_wronly; Open_creat; Open_append] 0o644 target
+                   in
+                   Common.protect
+                     ~module_name:"tool_keeper"
+                     ~finally_label:"keeper_fs_edit_append_close"
+                     ~finally:(fun () -> close_out_noerr oc)
+                     (fun () -> output_string oc content)
+               | "overwrite" | "" ->
+                   let oc = open_out target in
+                   Common.protect
+                     ~module_name:"tool_keeper"
+                     ~finally_label:"keeper_fs_edit_overwrite_close"
+                     ~finally:(fun () -> close_out_noerr oc)
+                     (fun () -> output_string oc content)
+               | other ->
+                   raise (Invalid_argument ("unsupported_mode:" ^ other)));
+              Yojson.Safe.to_string
+                (`Assoc [
+                  ("ok", `Bool true);
+                  ("path", `String target);
+                  ("mode", `String (if mode = "" then "overwrite" else mode));
+                  ("bytes_written", `Int (String.length content));
+                ])
+            with
+            | Invalid_argument e ->
+                Yojson.Safe.to_string (`Assoc [("error", `String e); ("path", `String target)])
+            | Sys_error e ->
+                Yojson.Safe.to_string (`Assoc [("error", `String e); ("path", `String target)])
+            | Unix.Unix_error (err, _, _) ->
+                Yojson.Safe.to_string
+                  (`Assoc [
+                    ("error", `String (Unix.error_message err));
+                    ("path", `String target);
+                  ])))
+  | "keeper_bash" ->
+      let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+      let timeout_sec =
+        Safe_ops.json_float ~default:30.0 "timeout_sec" args
+        |> fun n -> max 1.0 (min 180.0 n)
+      in
+      if cmd = "" then Yojson.Safe.to_string (`Assoc [("error", `String "cmd_required")])
+      else
+        let root = project_root_of_config config in
+        let shell_cmd =
+          Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd
+        in
+        let (st, out) =
+          Process_eio.run_argv_with_status
+            ~timeout_sec
+            ["/bin/zsh"; "-lc"; shell_cmd]
+        in
+        Yojson.Safe.to_string
+          (`Assoc [
+            ("ok", `Bool (st = Unix.WEXITED 0));
+            ("status", process_status_to_json st);
+            ("output", `String (truncate_tool_output out));
+          ])
+  | "keeper_github" ->
+      let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+      let gh_args = Safe_ops.json_string_list "args" args in
+      let timeout_sec =
+        Safe_ops.json_float ~default:30.0 "timeout_sec" args
+        |> fun n -> max 1.0 (min 180.0 n)
+      in
+      let gh_cmd =
+        if cmd <> "" then "gh " ^ cmd
+        else if gh_args <> [] then
+          "gh " ^ String.concat " " (List.map Filename.quote gh_args)
+        else
+          ""
+      in
+      if gh_cmd = "" then Yojson.Safe.to_string (`Assoc [("error", `String "cmd_or_args_required")])
+      else
+        let root = project_root_of_config config in
+        let shell_cmd =
+          Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd
+        in
+        let (st, out) =
+          Process_eio.run_argv_with_status
+            ~timeout_sec
+            ["/bin/zsh"; "-lc"; shell_cmd]
+        in
+        Yojson.Safe.to_string
+          (`Assoc [
+            ("ok", `Bool (st = Unix.WEXITED 0));
+            ("status", process_status_to_json st);
+            ("output", `String (truncate_tool_output out));
+          ])
   | other ->
       Yojson.Safe.to_string (`Assoc [
         ("error", `String "unknown_tool");
@@ -3287,10 +3527,13 @@ let keeper_tool_followup_prompt
            output)
     |> String.concat "\n"
   in
+  let is_write_tool (name : string) : bool =
+    List.mem
+      name
+      [ "keeper_board_post"; "keeper_board_comment"; "keeper_fs_edit"; "keeper_edit" ]
+  in
   let has_write =
-    List.exists (fun name ->
-      name = "keeper_board_post"
-    ) already_executed
+    List.exists is_write_tool already_executed
   in
   let rules =
     if has_write then
@@ -4531,6 +4774,7 @@ let looks_fragmentary_history_text (raw : string) : bool =
 let run_proactive_generation
     ~(specs : Llm_client.model_spec list)
     ~(primary : Llm_client.model_spec)
+    ~(config : Room.config)
     ~(ctx_work : Context_manager.working_context)
     ~(meta : keeper_meta)
     ~(continuity_snapshot : keeper_state_snapshot option)
@@ -4574,7 +4818,7 @@ let run_proactive_generation
     List.map
       (fun (tc : Llm_client.tool_call) ->
          let output =
-           try execute_keeper_tool_call ~meta ~ctx_work tc
+           try execute_keeper_tool_call ~config ~meta ~ctx_work tc
            with exn ->
              Yojson.Safe.to_string
                (`Assoc [
@@ -4661,7 +4905,16 @@ let run_proactive_generation
                   ~already_executed:all_tools_so_far
               in
               let write_done =
-                List.exists (fun n -> n = "keeper_board_post") all_tools_so_far
+                List.exists
+                  (fun n ->
+                     List.mem n
+                       [
+                         "keeper_board_post";
+                         "keeper_board_comment";
+                         "keeper_fs_edit";
+                         "keeper_edit";
+                       ])
+                  all_tools_so_far
               in
               let next_tools =
                 if write_done then [] else keeper_llm_tools
@@ -4791,48 +5044,6 @@ let memory_check_default_json () : Yojson.Safe.t =
     ("recall_fallback_applied", `Bool false);
   ]
 
-(* Phase D2: last health alert timestamp per keeper for throttling. *)
-let last_health_alert_ts : (string, float) Hashtbl.t = Hashtbl.create 8
-
-(* Phase D2: Broadcast health alert when no successful proactive cycle for 30min
-   during KST work hours (09:00-22:00). Throttled to at most once per 30min per keeper. *)
-let maybe_emit_health_alert (ctx : _ context) (meta : keeper_meta) : unit =
-  let stale_threshold = 1800.0 in (* 30 minutes *)
-  let now_ts = Time_compat.now () in
-  (* KST = UTC+9. Check work hours 09:00-22:00 KST *)
-  let kst_offset = 9 * 3600 in
-  let unix_day_sec = int_of_float now_ts mod 86400 in
-  let kst_sec = (unix_day_sec + kst_offset) mod 86400 in
-  let kst_hour = kst_sec / 3600 in
-  let in_work_hours = kst_hour >= 9 && kst_hour < 22 in
-  if not in_work_hours then ()
-  else
-    let stale_sec = now_ts -. meta.last_proactive_ts in
-    if stale_sec < stale_threshold then ()
-    else
-      (* Throttle: at most once per stale_threshold per keeper *)
-      let last_alert =
-        match Hashtbl.find_opt last_health_alert_ts meta.name with
-        | Some ts -> ts
-        | None -> 0.0
-      in
-      let since_last_alert = now_ts -. last_alert in
-      if since_last_alert < stale_threshold then ()
-      else begin
-        Hashtbl.replace last_health_alert_ts meta.name now_ts;
-        let stale_min = int_of_float (stale_sec /. 60.0) in
-        let msg =
-          Printf.sprintf
-            "health-alert: keeper %s — no successful proactive cycle for %dmin. \
-             last_proactive_ts=%.0f, now=%.0f"
-            meta.name stale_min meta.last_proactive_ts now_ts
-        in
-        (try
-           ignore
-             (Room.broadcast ctx.config ~from_agent:meta.agent_name ~content:msg)
-         with _ -> ())
-      end
-
 let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
   if not meta.proactive_enabled then meta
   else
@@ -4904,6 +5115,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                      run_proactive_generation
                        ~specs
                        ~primary
+                       ~config:ctx.config
                        ~ctx_work
                        ~meta
                        ~continuity_snapshot
@@ -5205,8 +5417,6 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
           let meta_after_proactive =
             try maybe_emit_proactive ctx meta_current with _ -> meta_current
           in
-          (* Phase D2: health alert if proactive cycle stale during work hours *)
-          (try maybe_emit_health_alert ctx meta_after_proactive with _ -> ());
           let base = float_of_int (max 30 (min 300 meta_after_proactive.presence_keepalive_sec)) in
           let jitter = base *. 0.2 *. Random.float 1.0 in
           Eio.Time.sleep ctx.clock (base +. jitter);
@@ -5543,24 +5753,6 @@ let handle_keeper_up ctx args : tool_result =
          stop_keepalive updated.name;
          start_keepalive ctx updated;
          (true, Yojson.Safe.pretty_to_string (meta_to_json updated)))
-
-(* Count P1/P2/P3 severity actions within a time window from JSONL lines.
-   Shared by handle_keeper_status (D1) and keeper_metrics_json (D3). *)
-let count_actions_in_window lines ~since_ts =
-  List.fold_left (fun (p1, p2, p3) line ->
-    try
-      let j = Yojson.Safe.from_string line in
-      let ts_str = Safe_ops.json_string "ts" j in
-      let ts = Resilience.Time.parse_iso8601_opt ts_str |> Option.value ~default:0.0 in
-      if ts < since_ts then (p1, p2, p3)
-      else
-        match Safe_ops.json_string_opt "severity" j with
-        | Some "P1" -> (p1 + 1, p2, p3)
-        | Some "P2" -> (p1, p2 + 1, p3)
-        | Some "P3" -> (p1, p2, p3 + 1)
-        | _ -> (p1, p2, p3)
-    with _ -> (p1, p2, p3)
-  ) (0, 0, 0) lines
 
 let handle_keeper_status ctx args : tool_result =
   let name = get_string args "name" "" in
@@ -5999,61 +6191,6 @@ let handle_keeper_status ctx args : tool_result =
            ("history_fragment_filter_enabled", `Bool history_filter_fragments);
            ("compaction_history_tail", fst compaction_history_tail);
            ("compaction_history_count", `Int (snd compaction_history_tail));
-           (* Phase D1: review dashboard — repos watched, action severity counts, cost/day *)
-           ("review_dashboard",
-             let dir = keeper_dir ctx.config in
-             let watcher_path = Filename.concat dir (m.name ^ ".review-watcher.json") in
-             let repos_watched =
-               if not (Sys.file_exists watcher_path) then `Int 0
-               else
-                 match Safe_ops.read_json_file_safe watcher_path with
-                 | Error _ -> `Int 0
-                 | Ok json ->
-                   let open Yojson.Safe.Util in
-                   (try `Int (json |> member "allowed_repo_globs" |> to_list |> List.length)
-                    with _ -> `Int 0)
-             in
-             let actions_path = Filename.concat dir (m.name ^ ".actions.jsonl") in
-             let action_lines =
-               read_file_tail_lines actions_path ~max_bytes:60000 ~max_lines:500
-             in
-             let since_24h = now_ts -. 86400.0 in
-             let since_7d = now_ts -. (7.0 *. 86400.0) in
-             let (p1_24h, p2_24h, p3_24h) =
-               count_actions_in_window action_lines ~since_ts:since_24h
-             in
-             let (p1_7d, p2_7d, p3_7d) =
-               count_actions_in_window action_lines ~since_ts:since_7d
-             in
-             let age_days =
-               if keeper_age_s <= 0.0 then 1.0
-               else max 1.0 (keeper_age_s /. 86400.0)
-             in
-             let cost_per_day =
-               Float.round (m.total_cost_usd /. age_days *. 100.0) /. 100.0
-             in
-             (* Extract last action timestamp from most recent JSONL line *)
-             let last_action_ts =
-               match List.rev action_lines with
-               | [] -> `Null
-               | last :: _ ->
-                 (try
-                    let j = Yojson.Safe.from_string last in
-                    `String (Safe_ops.json_string "ts" j)
-                  with _ -> `Null)
-             in
-             `Assoc [
-               ("repos_watched", repos_watched);
-               ("actions_24h", `Assoc [
-                 ("P1", `Int p1_24h); ("P2", `Int p2_24h); ("P3", `Int p3_24h);
-               ]);
-               ("actions_7d", `Assoc [
-                 ("P1", `Int p1_7d); ("P2", `Int p2_7d); ("P3", `Int p3_7d);
-               ]);
-               ("cost_per_day", `Float cost_per_day);
-               ("last_action_ts", last_action_ts);
-               ("actions_jsonl_lines", `Int (List.length action_lines));
-             ]);
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
              ("metrics", `String metrics_path);
@@ -6471,7 +6608,7 @@ let handle_keeper_msg ctx args : tool_result =
                     tc.call_name (_trunc tc.call_arguments 200);
                   let output =
                     try
-                      let r = execute_keeper_tool_call ~meta ~ctx_work tc in
+                      let r = execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc in
                       Printf.eprintf "[TRPG-TRACE] Tool %s OK: %s\n%!" tc.call_name (_trunc r 200);
                       r
                     with exn ->
@@ -6518,7 +6655,16 @@ let handle_keeper_msg ctx args : tool_result =
                   (* Once a write tool has been executed, strip tools from the
                      next request to force the model to produce a text answer. *)
                   let write_done =
-                    List.exists (fun n -> n = "keeper_board_post") all_tools_so_far
+                    List.exists
+                      (fun n ->
+                         List.mem n
+                           [
+                             "keeper_board_post";
+                             "keeper_board_comment";
+                             "keeper_fs_edit";
+                             "keeper_edit";
+                           ])
+                      all_tools_so_far
                   in
                   let next_tools =
                     if write_done then [] else keeper_llm_tools
@@ -7567,105 +7713,6 @@ let handle_keeper_list ctx args : tool_result =
         ("keepers", `List keepers);
       ] in
       (true, Yojson.Safe.pretty_to_string json)
-
-(* ---------- HTTP endpoint: /api/v1/keeper-metrics ---------- *)
-
-let keeper_metrics_json (config : Room.config) : Yojson.Safe.t =
-  let dir = keeper_dir config in
-  match Safe_ops.list_dir_safe dir with
-  | Error e -> `Assoc [("error", `String e)]
-  | Ok files ->
-    let now_ts = Time_compat.now () in
-    let since_24h = now_ts -. 86400.0 in
-    let since_7d = now_ts -. (7.0 *. 86400.0) in
-    let keeper_names =
-      files
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter validate_name
-      |> List.sort String.compare
-    in
-    let keepers =
-      List.filter_map (fun name ->
-        match read_meta config name with
-        | Error _ | Ok None -> None
-        | Ok (Some m) ->
-          let status =
-            if m.last_turn_ts <= 0.0 then "unknown"
-            else if now_ts -. m.last_turn_ts < 600.0 then "active"
-            else if now_ts -. m.last_turn_ts < 3600.0 then "idle"
-            else "stale"
-          in
-          let last_turn_ago_s =
-            if m.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.last_turn_ts
-          in
-          (* Read review-watcher sidecar for repos_watched *)
-          let watcher_path =
-            Filename.concat dir (name ^ ".review-watcher.json")
-          in
-          let repos_watched =
-            if not (Sys.file_exists watcher_path) then 0
-            else
-              match Safe_ops.read_json_file_safe watcher_path with
-              | Error _ -> 0
-              | Ok json ->
-                let open Yojson.Safe.Util in
-                (try json |> member "allowed_repo_globs" |> to_list |> List.length
-                 with _ -> 0)
-          in
-          (* Read actions.jsonl for severity counts *)
-          let actions_path =
-            Filename.concat dir (name ^ ".actions.jsonl")
-          in
-          let action_lines =
-            read_file_tail_lines actions_path ~max_bytes:60000 ~max_lines:500
-          in
-          let (p1_24h, p2_24h, p3_24h) =
-            count_actions_in_window action_lines ~since_ts:since_24h
-          in
-          let (p1_7d, p2_7d, p3_7d) =
-            count_actions_in_window action_lines ~since_ts:since_7d
-          in
-          (* Cost per day *)
-          let created_ts =
-            Resilience.Time.parse_iso8601_opt m.created_at
-            |> Option.value ~default:0.0
-          in
-          let age_days =
-            if created_ts <= 0.0 then 1.0
-            else max 1.0 ((now_ts -. created_ts) /. 86400.0)
-          in
-          let cost_per_day = m.total_cost_usd /. age_days in
-          Some (`Assoc [
-            ("name", `String m.name);
-            ("status", `String status);
-            ("total_turns", `Int m.total_turns);
-            ("total_cost_usd", `Float m.total_cost_usd);
-            ("cost_per_day", `Float (Float.round (cost_per_day *. 100.0) /. 100.0));
-            ("last_model_used", `String m.last_model_used);
-            ("last_turn_ago_s", `Float last_turn_ago_s);
-            ("proactive_count_total", `Int m.proactive_count_total);
-            ("repos_watched", `Int repos_watched);
-            ("generation", `Int m.generation);
-            ("actions_24h", `Assoc [
-              ("P1", `Int p1_24h); ("P2", `Int p2_24h); ("P3", `Int p3_24h);
-            ]);
-            ("actions_7d", `Assoc [
-              ("P1", `Int p1_7d); ("P2", `Int p2_7d); ("P3", `Int p3_7d);
-            ]);
-            ("goal", `String m.short_goal);
-          ])
-      ) keeper_names
-    in
-    let tm = Unix.gmtime now_ts in
-    let ts_str = Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
-    `Assoc [
-      ("timestamp", `String ts_str);
-      ("count", `Int (List.length keepers));
-      ("keepers", `List keepers);
-    ]
 
 (* Start keepalive fibers for existing keepers (best-effort). *)
 let start_existing_keepalives ctx =

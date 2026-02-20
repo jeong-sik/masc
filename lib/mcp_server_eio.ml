@@ -1180,8 +1180,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ("ollama_timeout_sec", `Float timeout_sec);
         ]
     in
+    (* Eio outer timeout includes LLM time + protocol overhead (serialization,
+       network). Add 10s grace to avoid racing the LLM timeout. *)
+    let eio_timeout = timeout_sec +. 10.0 in
     try
-      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+      Eio.Time.with_timeout_exn clock eio_timeout (fun () ->
           match
             Tool_keeper.dispatch simple_ctx_keeper ~name:"masc_keeper_msg"
               ~args:keeper_args

@@ -1316,11 +1316,14 @@ let extract_skill_hint_from_text (raw : string) : string option =
 let fallback_reply_from_keeper_json keeper_json =
   let is_meta_skill_hint skill =
     let lowered = String.lowercase_ascii (String.trim skill) in
-    starts_with lowered "masc-"
-    || starts_with lowered "lodge-"
-    || starts_with lowered "heartbeat"
-    || contains_substring lowered "keeper"
-    || contains_substring lowered "autonomy"
+    (* TRPG skills are never meta-skills — they produce in-game content *)
+    if starts_with lowered "trpg-" then false
+    else
+      starts_with lowered "masc-"
+      || starts_with lowered "lodge-"
+      || starts_with lowered "heartbeat"
+      || contains_substring lowered "keeper"
+      || contains_substring lowered "autonomy"
   in
   let skill_from_meta =
     match keeper_json |> member "skill_primary" with

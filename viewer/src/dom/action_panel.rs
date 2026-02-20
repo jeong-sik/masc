@@ -727,7 +727,7 @@ fn detect_action_intents(text: &str) -> Vec<ActionIntent> {
     intents
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn intent_skill_bonus(skill_name: &str, intents: &[ActionIntent], hp_ratio: Option<f32>) -> i32 {
     let normalized = skill_name.to_lowercase();
     let mut bonus = 0;
@@ -815,7 +815,7 @@ fn intent_skill_bonus(skill_name: &str, intents: &[ActionIntent], hp_ratio: Opti
     bonus
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn format_reco_context(
     action_text: &str,
     intents: &[ActionIntent],
@@ -1163,5 +1163,29 @@ mod tests {
     #[test]
     fn detect_action_intents_empty() {
         assert!(detect_action_intents("   ").is_empty());
+    }
+
+    #[test]
+    fn intent_skill_bonus_prefers_matching_domain() {
+        let intents = detect_action_intents("공격");
+        let combat_bonus = intent_skill_bonus("강타", &intents, Some(1.0));
+        let social_bonus = intent_skill_bonus("설득", &intents, Some(1.0));
+        assert!(combat_bonus > social_bonus);
+    }
+
+    #[test]
+    fn intent_skill_bonus_adds_low_hp_survival_weight() {
+        let intents = detect_action_intents("공격");
+        let low_hp_bonus = intent_skill_bonus("방어 태세", &intents, Some(0.2));
+        let normal_hp_bonus = intent_skill_bonus("방어 태세", &intents, Some(0.9));
+        assert!(low_hp_bonus > normal_hp_bonus);
+    }
+
+    #[test]
+    fn format_reco_context_includes_intent_and_low_hp() {
+        let intents = detect_action_intents("은신 이동");
+        let label = format_reco_context("은신 이동", &intents, Some(0.3));
+        assert!(label.contains("기동"));
+        assert!(label.contains("저체력"));
     }
 }

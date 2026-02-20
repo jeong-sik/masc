@@ -444,6 +444,74 @@
                     <input type="hidden" id="round-run-timeout" value="" />
                     <input type="hidden" id="round-run-lang" value="" />
                     <input type="hidden" id="round-run-players" value="" />
+                    <details id="dm-voice-config" class="dm-voice-config">
+                        <summary>DM 음성 설정</summary>
+                        <div class="dm-voice-grid">
+                            <label class="new-game-field">
+                                <span>음성 모드</span>
+                                <select id="dm-voice-mode-select" title="DM 내레이션 음성 모드를 선택합니다">
+                                    <option value="browser">Browser TTS</option>
+                                    <option value="elevenlabs">ElevenLabs Proxy</option>
+                                    <option value="off">Off</option>
+                                </select>
+                            </label>
+                            <label class="new-game-field">
+                                <span>Proxy URL</span>
+                                <select id="dm-voice-proxy-select" title="ElevenLabs 프록시 URL 템플릿을 선택합니다">
+                                    <option value="custom">직접 입력</option>
+                                    <option value="origin:/api/v1/trpg/tts">현재 서버 /api/v1/trpg/tts</option>
+                                    <option value="origin:/api/v1/tts">현재 서버 /api/v1/tts</option>
+                                    <option value="origin:/tts">현재 서버 /tts</option>
+                                </select>
+                            </label>
+                            <label id="dm-voice-proxy-custom-wrap" class="new-game-field dm-voice-field-wide dm-voice-custom" hidden>
+                                <span>Proxy URL 직접 입력</span>
+                                <input id="dm-voice-proxy-url" type="text" maxlength="500" placeholder="https://.../tts" />
+                            </label>
+                            <label class="new-game-field">
+                                <span>응답 음성 모델</span>
+                                <select id="dm-voice-model-select" title="응답 음성 모델을 선택합니다">
+                                    <option value="">자동 (프록시 기본값)</option>
+                                    <option value="eleven_turbo_v2_5">Eleven Turbo v2.5</option>
+                                    <option value="eleven_flash_v2_5">Eleven Flash v2.5</option>
+                                    <option value="eleven_multilingual_v2">Eleven Multilingual v2</option>
+                                    <option value="custom">직접 입력</option>
+                                </select>
+                            </label>
+                            <label id="dm-voice-model-custom-wrap" class="new-game-field dm-voice-custom" hidden>
+                                <span>모델 직접 입력</span>
+                                <input id="dm-voice-model-custom" type="text" maxlength="120" placeholder="eleven_turbo_v2_5" />
+                            </label>
+                            <label class="new-game-field">
+                                <span>응답 Voice ID</span>
+                                <select id="dm-voice-id-select" title="응답 Voice ID를 선택합니다">
+                                    <option value="">자동 (프록시 기본값)</option>
+                                    <option value="random_preset">랜덤 (추천 Voice 중 선택)</option>
+                                    <option value="21m00Tcm4TlvDq8ikWAM">Rachel</option>
+                                    <option value="AZnzlk1XvdvUeBnXmlld">Domi</option>
+                                    <option value="EXAVITQu4vr4xnSDxMaL">Bella</option>
+                                    <option value="ErXwobaYiN019PkySvjV">Antoni</option>
+                                    <option value="MF3mGyEYCl7XYWbV9V6O">Elli</option>
+                                    <option value="TxGEqnHWrfWFTfGW9XjX">Josh</option>
+                                    <option value="VR6AewLTigWG4xSOukaG">Arnold</option>
+                                    <option value="pNInz6obpgDQGcFmaJgB">Adam</option>
+                                    <option value="yoZ06aMxZJJ28mfd3POQ">Sam</option>
+                                    <option value="custom">직접 입력</option>
+                                </select>
+                            </label>
+                            <label id="dm-voice-id-custom-wrap" class="new-game-field dm-voice-custom" hidden>
+                                <span>Voice ID 직접 입력</span>
+                                <input id="dm-voice-id-custom" type="text" maxlength="120" placeholder="21m00Tcm4TlvDq8ikWAM" />
+                            </label>
+                        </div>
+                        <div class="dm-voice-actions">
+                            <button id="dm-voice-preview-btn" class="inline-toggle" type="button">미리듣기</button>
+                            <button id="dm-voice-save-btn" class="inline-toggle" type="button">음성 설정 저장</button>
+                        </div>
+                        <div id="dm-voice-status" class="turn-control-gate status-info">
+                            DM 음성은 세션 진행 중일 때만 재생됩니다.
+                        </div>
+                    </details>
                     <div id="atmosphere-strip" class="atmosphere-strip" aria-live="polite">
                         <div id="weather-chip" class="atmo-chip">
                             <img id="weather-icon" class="atmo-icon" alt="" />

@@ -1528,11 +1528,16 @@ body.wasm-dom-fallback #bevy-canvas {
     padding: 10px 10px 8px;
     margin-bottom: 6px;
     transition: background 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
 }
 
 .character-card:hover {
     background: rgba(255, 255, 255, 0.03);
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.character-card.join-pick-selected {
+    box-shadow: 0 0 0 1px rgba(196, 162, 101, 0.55), 0 2px 14px rgba(0, 0, 0, 0.32);
 }
 
 /* Class-specific left border colors */

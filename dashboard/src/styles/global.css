@@ -42,11 +42,7 @@ body {
   font-family: "IBM Plex Sans KR", "IBM Plex Sans", "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   color: var(--text-body);
   line-height: 1.5;
-  background:
-    linear-gradient(145deg, rgba(9, 15, 28, 0.56) 0%, rgba(17, 26, 46, 0.72) 52%, rgba(22, 33, 60, 0.8) 100%),
-    radial-gradient(900px 520px at -10% -20%, rgba(71, 184, 255, 0.2), transparent 58%),
-    radial-gradient(800px 480px at 115% -5%, rgba(74, 222, 128, 0.16), transparent 60%),
-    url("../assets/bg-twisted-woods.jpg") center center / cover no-repeat;
+  background: var(--bg-0);
 }
 
 a {

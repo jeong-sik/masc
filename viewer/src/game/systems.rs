@@ -388,6 +388,9 @@ pub fn apply_actor_spawned(
                 payload.name.clone()
             },
             class: payload.class.clone(),
+            archetype: payload.class.clone(),
+            persona: String::new(),
+            traits: Vec::new(),
             hp: 100,
             max_hp: 100,
             mp: 50,

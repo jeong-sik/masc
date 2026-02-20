@@ -10,11 +10,15 @@ pub struct Stats {
     pub luck: i32,
 }
 
-/// A single skill with name and proficiency level (1-20).
+/// A single skill with level and optional UI-facing copy.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Skill {
     pub name: String,
     pub level: i32,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub usage_hint: String,
 }
 
 impl Skill {
@@ -45,6 +49,9 @@ pub struct Actor {
     pub id: String,
     pub name: String,
     pub class: String,
+    pub archetype: String,
+    pub persona: String,
+    pub traits: Vec<String>,
     pub hp: i32,
     pub max_hp: i32,
     pub mp: i32,

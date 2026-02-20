@@ -1388,7 +1388,12 @@ let parse_keeper_reply keeper_json =
       | _ -> (
           match fallback_reply with
           | Some reply when String.trim reply <> "" -> Ok reply
-          | _ -> Ok default_fallback_reply))
+          | _ ->
+              if is_reply_noise_text fallback then
+                Error
+                  "meta-only reply: response contained only state/noise \
+                   markers"
+              else Ok default_fallback_reply))
 
 type prompt_language = [ `Ko | `En ]
 
@@ -1507,16 +1512,21 @@ let empty_prompt_context =
   }
 
 let get_string_field json key =
-  match json |> member key with `String s -> s | _ -> ""
+  match json with
+  | `Null -> ""
+  | _ -> ( match json |> member key with `String s -> s | _ -> "")
 
 let get_string_list_field json key =
-  match json |> member key with
-  | `List xs ->
-      xs
-      |> List.filter_map (function
-           | `String s when String.trim s <> "" -> Some s
-           | _ -> None)
-  | _ -> []
+  match json with
+  | `Null -> []
+  | _ -> (
+      match json |> member key with
+      | `List xs ->
+          xs
+          |> List.filter_map (function
+               | `String s when String.trim s <> "" -> Some s
+               | _ -> None)
+      | _ -> [])
 
 let extract_narrative_recent (state : Yojson.Safe.t) : string list =
   match state |> member "narration_log" with

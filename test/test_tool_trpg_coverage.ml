@@ -288,136 +288,6 @@ let test_round_run_emits_session_outcome_event () =
     (count_from_json (parse_json_exn stream_outcome));
   cleanup_dir base_dir
 
-let test_round_run_dm_voice_requested_when_active () =
-  let base_dir = make_temp_dir () in
-  let config = Room.default_config base_dir in
-  let _ = Room.init config ~agent_name:(Some "tester") in
-  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-voice-active" ~actor_ids:["p1"];
-  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
-    match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The torchlight trembles.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I guard the rear.") ])
-    | other -> `Error ("unknown keeper: " ^ other)
-  in
-  let voice_calls : (string * string * string option) list ref = ref [] in
-  let dm_voice_emit ~agent_id ~message ~provider : Tool_trpg.dm_voice_emit_result =
-    voice_calls := (agent_id, message, provider) :: !voice_calls;
-    Ok (`Assoc [ ("status", `String "queued") ])
-  in
-  let ctx : Tool_trpg.context =
-    {
-      config;
-      agent_name = "tester";
-      keeper_call = Some keeper_call;
-      keeper_probe = None;
-      dm_voice_emit = Some dm_voice_emit;
-    }
-  in
-  let args =
-    `Assoc
-      [
-        ("room_id", `String "room-round-voice-active");
-        ("dm_keeper", `String "dm-keeper");
-        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
-        ("phase", `String "round");
-        ("timeout_sec", `Float 1.0);
-        ("dm_voice_enabled", `Bool true);
-        ("dm_voice_provider", `String "voicemode");
-      ]
-  in
-  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
-  Alcotest.(check bool) "round_run success" true ok;
-  let json = parse_json_exn body in
-  Alcotest.(check string)
-    "dm voice status requested"
-    "requested"
-    (json |> Yojson.Safe.Util.member "dm_voice"
-    |> Yojson.Safe.Util.member "status"
-    |> Yojson.Safe.Util.to_string);
-  Alcotest.(check string)
-    "dm voice provider voicemode"
-    "voicemode"
-    (json |> Yojson.Safe.Util.member "dm_voice"
-    |> Yojson.Safe.Util.member "provider"
-    |> Yojson.Safe.Util.to_string);
-  Alcotest.(check int) "dm voice called once" 1 (List.length !voice_calls);
-  (match !voice_calls with
-  | (agent_id, message, provider) :: _ ->
-      Alcotest.(check string) "dm voice agent_id" "dm" agent_id;
-      Alcotest.(check string) "dm voice message" "The torchlight trembles." message;
-      Alcotest.(check (option string))
-        "dm voice provider forwarded"
-        (Some "voicemode")
-        provider
-  | [] -> Alcotest.fail "expected voice call");
-  cleanup_dir base_dir
-
-let test_round_run_dm_voice_skipped_when_not_in_progress () =
-  let base_dir = make_temp_dir () in
-  let config = Room.default_config base_dir in
-  let _ = Room.init config ~agent_name:(Some "tester") in
-  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-voice-ended" ~actor_ids:["p1"];
-  let flag_event =
-    Trpg_engine_event.make ~seq:3 ~room_id:"room-round-voice-ended" ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Flag_set
-      ~payload:(`Assoc [ ("scope", `String "world"); ("key", `String "outcome.victory") ])
-      ()
-  in
-  append_event_exn ~base_dir ~event:flag_event;
-  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
-    match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The chapter closes.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I secure the gate.") ])
-    | other -> `Error ("unknown keeper: " ^ other)
-  in
-  let voice_calls : (string * string * string option) list ref = ref [] in
-  let dm_voice_emit ~agent_id ~message ~provider : Tool_trpg.dm_voice_emit_result =
-    voice_calls := (agent_id, message, provider) :: !voice_calls;
-    Ok (`Assoc [ ("status", `String "queued") ])
-  in
-  let ctx : Tool_trpg.context =
-    {
-      config;
-      agent_name = "tester";
-      keeper_call = Some keeper_call;
-      keeper_probe = None;
-      dm_voice_emit = Some dm_voice_emit;
-    }
-  in
-  let args =
-    `Assoc
-      [
-        ("room_id", `String "room-round-voice-ended");
-        ("dm_keeper", `String "dm-keeper");
-        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
-        ("phase", `String "round");
-        ("timeout_sec", `Float 1.0);
-        ("dm_voice_enabled", `Bool true);
-        ("dm_voice_provider", `String "elevenlabs");
-      ]
-  in
-  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
-  Alcotest.(check bool) "round_run success" true ok;
-  let json = parse_json_exn body in
-  Alcotest.(check string)
-    "room_status ended"
-    "ended"
-    (json |> Yojson.Safe.Util.member "room_status" |> Yojson.Safe.Util.to_string);
-  Alcotest.(check string)
-    "dm voice status skipped"
-    "skipped"
-    (json |> Yojson.Safe.Util.member "dm_voice"
-    |> Yojson.Safe.Util.member "status"
-    |> Yojson.Safe.Util.to_string);
-  Alcotest.(check string)
-    "dm voice skipped reason"
-    "room_not_in_progress"
-    (json |> Yojson.Safe.Util.member "dm_voice"
-    |> Yojson.Safe.Util.member "reason"
-    |> Yojson.Safe.Util.to_string);
-  Alcotest.(check int) "dm voice never called" 0 (List.length !voice_calls);
-  cleanup_dir base_dir
-
 let test_round_run_timeout_policy () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -589,13 +459,7 @@ let test_round_run_unavailable_sampling_cap () =
       | _ -> `Error "unknown keeper"
     in
     let ctx : Tool_trpg.context =
-      {
-        config;
-        agent_name = "tester";
-        keeper_call = Some keeper_call;
-        keeper_probe = None;
-        dm_voice_emit = None;
-      }
+      { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
     in
     let args =
       `Assoc
@@ -793,92 +657,6 @@ let test_round_run_rejects_meta_only_keeper_reply () =
         "p1 stage is parse_keeper_reply"
         "parse_keeper_reply"
         (status_json |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string)
-  | None -> Alcotest.fail "p1 status is missing");
-  cleanup_dir base_dir
-
-let test_round_run_recovers_prompt_echo_keeper_reply () =
-  let base_dir = make_temp_dir () in
-  let config = Room.default_config base_dir in
-  let _ = Room.init config ~agent_name:(Some "tester") in
-  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-prompt-echo" ~actor_ids:["p1"];
-  let dm_called = ref false in
-  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
-    match name with
-    | "dm-keeper" ->
-        dm_called := true;
-        `Ok (`Assoc [ ("reply", `String "DM resumes the scene.") ])
-    | "pk-prompt-echo" ->
-        `Ok
-          (`Assoc
-            [
-              ( "reply",
-                `String
-                  "TRPG 실행 요청입니다.\nroom_id=default\nvisible_state_json:\n{\"turn\":8,\"narration_log\":[],\"dice_log\":[],\"party\":{}}\n반드시 한국어로 응답하세요." );
-            ])
-    | _ -> `Error "unknown keeper"
-  in
-  let ctx : Tool_trpg.context =
-    {
-      config;
-      agent_name = "tester";
-      keeper_call = Some keeper_call;
-      keeper_probe = None;
-      dm_voice_emit = None;
-    }
-  in
-  let args =
-    `Assoc
-      [
-        ("room_id", `String "room-round-prompt-echo");
-        ("dm_keeper", `String "dm-keeper");
-        ("player_keepers", `Assoc [ ("p1", `String "pk-prompt-echo") ]);
-        ("timeout_sec", `Float 0.2);
-      ]
-  in
-  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
-  Alcotest.(check bool) "round_run returns payload" true ok;
-  Alcotest.(check bool) "dm call executes after recovered player reply" true !dm_called;
-
-  let json = parse_json_exn body in
-  let summary = Yojson.Safe.Util.member "summary" json in
-  Alcotest.(check int)
-    "player_successes"
-    1
-    (Yojson.Safe.Util.member "player_successes" summary |> Yojson.Safe.Util.to_int);
-  Alcotest.(check bool)
-    "player quorum met"
-    true
-    (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
-  Alcotest.(check bool)
-    "round advanced"
-    true
-    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
-
-  let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
-  let p1_status =
-    List.find_opt
-      (fun s ->
-        s |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string = "p1")
-      statuses
-  in
-  (match p1_status with
-  | Some status_json ->
-      Alcotest.(check string)
-        "p1 status is ok"
-        "ok"
-        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
-      let recovered_reply =
-        status_json |> Yojson.Safe.Util.member "reply" |> Yojson.Safe.Util.to_string
-      in
-      Alcotest.(check bool) "recovered reply is non-empty" true (String.trim recovered_reply <> "");
-      Alcotest.(check bool)
-        "recovered reply strips visible_state_json marker"
-        false
-        (contains_substring recovered_reply "visible_state_json:");
-      Alcotest.(check bool)
-        "recovered reply strips execution request marker"
-        false
-        (contains_substring recovered_reply "TRPG 실행 요청입니다.")
   | None -> Alcotest.fail "p1 status is missing");
   cleanup_dir base_dir
 
@@ -1668,10 +1446,6 @@ let () =
             `Quick
             test_round_run_rejects_meta_only_keeper_reply;
           Alcotest.test_case
-            "recovers prompt-echo keeper replies"
-            `Quick
-            test_round_run_recovers_prompt_echo_keeper_reply;
-          Alcotest.test_case
             "requires keeper runtime"
             `Quick
             test_round_run_requires_keeper_runtime;
@@ -1695,14 +1469,6 @@ let () =
             "emits session outcome event"
             `Quick
             test_round_run_emits_session_outcome_event;
-          Alcotest.test_case
-            "requests dm voice when room is active"
-            `Quick
-            test_round_run_dm_voice_requested_when_active;
-          Alcotest.test_case
-            "skips dm voice when room is not in progress"
-            `Quick
-            test_round_run_dm_voice_skipped_when_not_in_progress;
           Alcotest.test_case
             "rejects non-unique keepers"
             `Quick

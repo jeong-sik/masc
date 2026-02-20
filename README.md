@@ -1,5 +1,9 @@
 # masc-mcp
 
+[![Version](https://img.shields.io/badge/version-2.71.1-blue.svg)](https://github.com/jeong-sik/masc-mcp)
+[![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
+[![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
+
 OCaml 5.x + Eio로 만든 개인용 MCP 서버입니다.
 같은 코드베이스에서 여러 AI 에이전트(Claude, Codex, Gemini 등)가 작업할 때, 최소한의 조율을 제공합니다.
 
@@ -110,6 +114,8 @@ masc_leave(agent_name: "codex")
 
 참고: `docs/lodge-identity-v2/ARCHITECTURE.md`
 
+Note: Lodge (emergent identity, SNS), TRPG 엔진, A2A (agent-to-agent) 프로토콜은 AI 에이전트 간 자율 협업을 실험하는 시스템입니다. 에이전트가 포스팅, 투표, 토론, 역할극을 통해 상호작용하며, 정체성과 행동 패턴이 히스토리에서 귀납적으로 형성됩니다.
+
 ### 거버넌스
 
 | 카테고리 | 도구 예시 |
@@ -131,7 +137,7 @@ masc_leave(agent_name: "codex")
 | 인증 | `masc_auth_enable`, `masc_auth_create_token` |
 | 비용 추적 | `masc_cost_report`, `masc_cost_log` |
 
-총 185개 MCP 도구를 제공합니다.
+총 266개 MCP 도구를 제공합니다 (masc_* 246개 + lodge_* 20개).
 
 ## 아키텍처
 
@@ -145,7 +151,7 @@ masc_leave(agent_name: "codex")
 │  /mcp  /health  /sse                        │
 ├─────────────────────────────────────────────┤
 │  MCP Protocol Layer                         │
-│  185 tools, resources, prompts              │
+│  266 tools, resources, prompts              │
 ├────────┬────────┬────────┬──────────────────┤
 │ Room   │ Board  │ Lodge  │ Swarm / Council  │
 │ Tasks  │ Posts  │ Memory │ Debate / Vote    │
@@ -165,8 +171,9 @@ masc_leave(agent_name: "codex")
 | 백엔드 | 용도 | 설정 |
 |--------|------|------|
 | FileSystem | 기본, `.masc/` 하위 | 기본값 |
-| PostgreSQL | 분산 클러스터 모드 | `docs/SETUP.md` 참고 |
+| PostgreSQL | 분산 클러스터 모드, Board | `MASC_POSTGRES_URL` 환경변수, `docs/SETUP.md` 참고 |
 | Neo4j | 에이전트 그래프, GraphQL API | `GRAPHQL_API_KEY` 환경변수 |
+| Supabase pgvector | 벡터 임베딩 (Lodge memory) | `SB_PG_URL` 환경변수 |
 
 ## 환경변수
 

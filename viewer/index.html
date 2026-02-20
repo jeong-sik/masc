@@ -411,8 +411,9 @@
                     </div>
                     <div id="lifecycle-diagram-hint" class="lifecycle-diagram-hint">현재 상태를 불러오는 중...</div>
                     <div id="turn-flow-banner" class="turn-flow-banner is-idle" aria-live="polite">
-                        <span class="flow-state">대기</span>
-                        <span class="flow-text">세션 상태를 불러오는 중입니다.</span>
+                        <span id="turn-flow-state" class="flow-state">대기</span>
+                        <span id="turn-flow-text" class="flow-text">세션 상태를 불러오는 중입니다.</span>
+                        <span id="turn-flow-actions" class="flow-actions" aria-label="추천 작업"></span>
                     </div>
                     <div id="agent-round-flow" class="agent-round-flow" aria-live="polite">
                         <div class="agent-flow-empty">에이전트 라운드 흐름을 불러오는 중입니다.</div>

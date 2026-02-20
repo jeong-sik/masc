@@ -26,6 +26,10 @@ const DM_VOICE_PANEL_ID: &str = "dm-voice-config";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_MODE_SELECT_ID: &str = "dm-voice-mode-select";
 #[cfg(target_arch = "wasm32")]
+const DM_VOICE_PROXY_SELECT_ID: &str = "dm-voice-proxy-select";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_PROXY_CUSTOM_WRAP_ID: &str = "dm-voice-proxy-custom-wrap";
+#[cfg(target_arch = "wasm32")]
 const DM_VOICE_PROXY_INPUT_ID: &str = "dm-voice-proxy-url";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_MODEL_SELECT_ID: &str = "dm-voice-model-select";
@@ -39,6 +43,8 @@ const DM_VOICE_ID_SELECT_ID: &str = "dm-voice-id-select";
 const DM_VOICE_ID_CUSTOM_WRAP_ID: &str = "dm-voice-id-custom-wrap";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_ID_CUSTOM_INPUT_ID: &str = "dm-voice-id-custom";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_PREVIEW_BUTTON_ID: &str = "dm-voice-preview-btn";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_SAVE_BUTTON_ID: &str = "dm-voice-save-btn";
 #[cfg(target_arch = "wasm32")]
@@ -56,6 +62,8 @@ const DM_VOICE_MODEL_PRESETS: &[&str] = &[
     "eleven_multilingual_v2",
 ];
 #[cfg(target_arch = "wasm32")]
+const DM_VOICE_PROXY_ORIGIN_PRESETS: &[&str] = &["/api/v1/trpg/tts", "/api/v1/tts", "/tts"];
+#[cfg(target_arch = "wasm32")]
 const DM_VOICE_ID_PRESETS: &[(&str, &str)] = &[
     ("21m00Tcm4TlvDq8ikWAM", "Rachel"),
     ("AZnzlk1XvdvUeBnXmlld", "Domi"),
@@ -67,6 +75,8 @@ const DM_VOICE_ID_PRESETS: &[(&str, &str)] = &[
     ("pNInz6obpgDQGcFmaJgB", "Adam"),
     ("yoZ06aMxZJJ28mfd3POQ", "Sam"),
 ];
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_PREVIEW_TEXT: &str = "지금은 DM 음성 미리듣기 테스트 중입니다.";
 
 fn normalize_phase(raw: &str) -> String {
     raw.trim().to_ascii_lowercase().replace('-', "_")
@@ -284,6 +294,50 @@ fn resolve_dm_voice_id() -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn window_origin() -> Option<String> {
+    let win = web_sys::window()?;
+    let origin = win.location().origin().ok()?;
+    normalize_optional(&origin)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn proxy_origin_value(path: &str) -> String {
+    format!("origin:{}", path)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_proxy_url_from_select(raw: &str) -> Option<String> {
+    let selected = normalize_optional(raw)?;
+    if selected == DM_VOICE_CUSTOM_VALUE {
+        return None;
+    }
+    if let Some(path) = selected.strip_prefix("origin:") {
+        let origin = window_origin()?;
+        return Some(format!("{}{}", origin, path));
+    }
+    Some(selected)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn detect_proxy_select_value(current_url: &str) -> Option<String> {
+    let current = normalize_optional(current_url)?;
+    if let Some(origin) = window_origin() {
+        for path in DM_VOICE_PROXY_ORIGIN_PRESETS {
+            let preset = format!("{}{}", origin, path);
+            if current == preset {
+                return Some(proxy_origin_value(path));
+            }
+        }
+    }
+    for path in DM_VOICE_PROXY_ORIGIN_PRESETS {
+        if current == *path {
+            return Some(proxy_origin_value(path));
+        }
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
 fn normalize_optional(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -423,6 +477,39 @@ fn hydrate_preset_select(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn hydrate_proxy_select(doc: &web_sys::Document, current_url: Option<String>) {
+    match current_url.and_then(|v| normalize_optional(&v)) {
+        None => {
+            set_select_value(doc, DM_VOICE_PROXY_SELECT_ID, DM_VOICE_CUSTOM_VALUE);
+            set_hidden(doc, DM_VOICE_PROXY_CUSTOM_WRAP_ID, false);
+            set_input_value(doc, DM_VOICE_PROXY_INPUT_ID, "");
+        }
+        Some(value) => {
+            if let Some(preset) = detect_proxy_select_value(&value) {
+                set_select_value(doc, DM_VOICE_PROXY_SELECT_ID, &preset);
+                set_hidden(doc, DM_VOICE_PROXY_CUSTOM_WRAP_ID, true);
+                set_input_value(doc, DM_VOICE_PROXY_INPUT_ID, "");
+            } else {
+                set_select_value(doc, DM_VOICE_PROXY_SELECT_ID, DM_VOICE_CUSTOM_VALUE);
+                set_hidden(doc, DM_VOICE_PROXY_CUSTOM_WRAP_ID, false);
+                set_input_value(doc, DM_VOICE_PROXY_INPUT_ID, &value);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn select_proxy_storage_value(doc: &web_sys::Document) -> Option<String> {
+    let selected = get_select_value(doc, DM_VOICE_PROXY_SELECT_ID).unwrap_or_default();
+    if selected == DM_VOICE_CUSTOM_VALUE {
+        set_hidden(doc, DM_VOICE_PROXY_CUSTOM_WRAP_ID, false);
+        return get_input_value(doc, DM_VOICE_PROXY_INPUT_ID);
+    }
+    set_hidden(doc, DM_VOICE_PROXY_CUSTOM_WRAP_ID, true);
+    resolve_proxy_url_from_select(&selected)
+}
+
+#[cfg(target_arch = "wasm32")]
 fn select_storage_value(
     doc: &web_sys::Document,
     select_id: &str,
@@ -496,11 +583,7 @@ fn hydrate_dm_voice_controls(doc: &web_sys::Document) {
         DM_VOICE_MODE_SELECT_ID,
         dm_voice_mode_value(resolve_dm_voice_mode()),
     );
-    set_input_value(
-        doc,
-        DM_VOICE_PROXY_INPUT_ID,
-        &resolve_dm_voice_proxy_url().unwrap_or_default(),
-    );
+    hydrate_proxy_select(doc, resolve_dm_voice_proxy_url());
     hydrate_preset_select(
         doc,
         DM_VOICE_MODEL_SELECT_ID,
@@ -589,7 +672,7 @@ fn bind_dm_voice_save_button(doc: &web_sys::Document) {
         let mode = get_select_value(&doc, DM_VOICE_MODE_SELECT_ID)
             .map(|raw| parse_dm_voice_mode(&raw))
             .unwrap_or(DmVoiceMode::Browser);
-        let proxy_url = get_input_value(&doc, DM_VOICE_PROXY_INPUT_ID).unwrap_or_default();
+        let proxy_url = select_proxy_storage_value(&doc);
         let voice_model = select_storage_value(
             &doc,
             DM_VOICE_MODEL_SELECT_ID,
@@ -607,7 +690,7 @@ fn bind_dm_voice_save_button(doc: &web_sys::Document) {
             STORAGE_DM_VOICE_MODE,
             Some(dm_voice_mode_value(mode).to_string()),
         );
-        persist_storage_value(STORAGE_DM_VOICE_PROXY_URL, Some(proxy_url));
+        persist_storage_value(STORAGE_DM_VOICE_PROXY_URL, proxy_url);
         persist_storage_value(STORAGE_DM_VOICE_MODEL, voice_model);
         persist_storage_value(STORAGE_DM_VOICE_ID, voice_id.clone());
 
@@ -638,6 +721,91 @@ fn bind_dm_voice_save_button(doc: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+
+    let Some(button) = doc.get_element_by_id(DM_VOICE_PREVIEW_BUTTON_ID) else {
+        return;
+    };
+    if button.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let _ = button.set_attribute("data-bound", "1");
+
+    let cb = Closure::wrap(Box::new(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let mode = get_select_value(&doc, DM_VOICE_MODE_SELECT_ID)
+            .map(|raw| parse_dm_voice_mode(&raw))
+            .unwrap_or(DmVoiceMode::Browser);
+        let proxy_url = select_proxy_storage_value(&doc);
+        let voice_model = select_storage_value(
+            &doc,
+            DM_VOICE_MODEL_SELECT_ID,
+            DM_VOICE_MODEL_CUSTOM_WRAP_ID,
+            DM_VOICE_MODEL_CUSTOM_INPUT_ID,
+        );
+        let voice_id = select_storage_value(
+            &doc,
+            DM_VOICE_ID_SELECT_ID,
+            DM_VOICE_ID_CUSTOM_WRAP_ID,
+            DM_VOICE_ID_CUSTOM_INPUT_ID,
+        );
+
+        match mode {
+            DmVoiceMode::Off => {
+                set_dm_voice_status(
+                    &doc,
+                    "status-warn",
+                    "미리듣기는 OFF 모드에서 동작하지 않습니다. Browser 또는 ElevenLabs를 선택하세요.",
+                );
+            }
+            DmVoiceMode::Browser => {
+                speak_with_browser(DM_VOICE_PREVIEW_TEXT);
+                set_dm_voice_status(&doc, "status-ok", "Browser TTS 미리듣기를 재생했습니다.");
+            }
+            DmVoiceMode::ElevenLabs => {
+                let Some(proxy_url) = proxy_url else {
+                    set_dm_voice_status(
+                        &doc,
+                        "status-warn",
+                        "ElevenLabs 미리듣기에는 Proxy URL이 필요합니다.",
+                    );
+                    return;
+                };
+                speak_with_proxy(
+                    proxy_url,
+                    DM_VOICE_PREVIEW_TEXT.to_string(),
+                    crate::config::current_room_id(),
+                    "dm_narration".to_string(),
+                    0,
+                    voice_model.clone(),
+                    voice_id.clone(),
+                );
+
+                let model_label = voice_model.unwrap_or_else(|| "auto".to_string());
+                let voice_label = voice_id.unwrap_or_else(|| "auto".to_string());
+                set_dm_voice_status(
+                    &doc,
+                    "status-info",
+                    &format!(
+                        "ElevenLabs 미리듣기 요청 전송 (model: {}, voice_id: {})",
+                        model_label, voice_label
+                    ),
+                );
+            }
+        }
+    }) as Box<dyn FnMut()>);
+
+    let _ = button.dyn_ref::<web_sys::EventTarget>().map(|target| {
+        target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+    });
+    cb.forget();
+}
+
+#[cfg(target_arch = "wasm32")]
 fn bind_dm_voice_controls_impl() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
@@ -653,6 +821,12 @@ fn bind_dm_voice_controls_impl() {
     hydrate_dm_voice_controls(&doc);
     bind_custom_field_toggle(
         &doc,
+        DM_VOICE_PROXY_SELECT_ID,
+        DM_VOICE_PROXY_CUSTOM_WRAP_ID,
+        DM_VOICE_PROXY_INPUT_ID,
+    );
+    bind_custom_field_toggle(
+        &doc,
         DM_VOICE_MODEL_SELECT_ID,
         DM_VOICE_MODEL_CUSTOM_WRAP_ID,
         DM_VOICE_MODEL_CUSTOM_INPUT_ID,
@@ -662,6 +836,12 @@ fn bind_dm_voice_controls_impl() {
         DM_VOICE_ID_SELECT_ID,
         DM_VOICE_ID_CUSTOM_WRAP_ID,
         DM_VOICE_ID_CUSTOM_INPUT_ID,
+    );
+    sync_custom_field_visibility(
+        &doc,
+        DM_VOICE_PROXY_SELECT_ID,
+        DM_VOICE_PROXY_CUSTOM_WRAP_ID,
+        DM_VOICE_PROXY_INPUT_ID,
     );
     sync_custom_field_visibility(
         &doc,
@@ -676,6 +856,7 @@ fn bind_dm_voice_controls_impl() {
         DM_VOICE_ID_CUSTOM_INPUT_ID,
     );
     bind_dm_voice_save_button(&doc);
+    bind_dm_voice_preview_button(&doc);
     set_dm_voice_status(
         &doc,
         "status-info",

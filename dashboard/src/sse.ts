@@ -129,6 +129,18 @@ function handleEvent(event: SSEEvent): void {
     case 'board_comment':
       addJournalEntry(agent, 'New comment')
       break
+    case 'keeper_heartbeat':
+      addJournalEntry(event.name ?? agent, `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`)
+      break
+    case 'keeper_handoff':
+      addJournalEntry(event.name ?? agent, `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (${event.to_model ?? '?'})`)
+      break
+    case 'keeper_compaction':
+      addJournalEntry(event.name ?? agent, `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`)
+      break
+    case 'keeper_guardrail':
+      addJournalEntry(event.name ?? agent, `Guardrail: ${event.reason ?? 'stopped'}`)
+      break
     default:
       addJournalEntry(agent, type)
   }

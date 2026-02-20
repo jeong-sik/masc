@@ -77,6 +77,73 @@ export interface BoardFlair {
   color: string
 }
 
+// --- Keeper Metrics ---
+
+export interface KeeperMetricPoint {
+  ts: number
+  context_ratio: number
+  context_tokens: number
+  context_max: number
+  latency_ms: number
+  generation: number
+  channel: string
+  is_handoff: boolean
+  is_compaction: boolean
+  compaction_saved_tokens: number
+  compaction_trigger: string | null
+  model_used: string
+  cost_usd: number
+  handoff_to_model: string | null
+  handoff_new_generation: number | null
+}
+
+export type KeeperLifecycleState =
+  | 'active'
+  | 'compacting'
+  | 'preparing'
+  | 'handoff-imminent'
+  | 'idle'
+  | 'offline'
+
+// --- Keeper SSE Events ---
+
+export interface KeeperHeartbeatEvent {
+  type: 'keeper_heartbeat'
+  name: string
+  generation: number
+  context_ratio: number
+  ts_unix: number
+}
+
+export interface KeeperHandoffEvent {
+  type: 'keeper_handoff'
+  name: string
+  from_generation: number
+  to_generation: number
+  from_model: string
+  to_model: string
+  ts_unix: number
+}
+
+export interface KeeperCompactionEvent {
+  type: 'keeper_compaction'
+  name: string
+  generation: number
+  before_tokens: number
+  after_tokens: number
+  saved_tokens: number
+  trigger: string
+  ts_unix: number
+}
+
+export interface KeeperGuardrailEvent {
+  type: 'keeper_guardrail'
+  name: string
+  generation: number
+  reason: string
+  ts_unix: number
+}
+
 // --- Keeper / Lodge ---
 
 export interface Keeper {
@@ -138,6 +205,8 @@ export interface Keeper {
     last_seen?: string
     [key: string]: unknown
   }
+  // Metrics time-series (from backend metrics_series)
+  metrics_series?: KeeperMetricPoint[]
   // TRPG-specific keeper fields
   trpg_stats?: TrpgCharacterStats
   inventory?: string[]
@@ -283,6 +352,10 @@ export type SSEEventType =
   | 'board_post'
   | 'board_comment'
   | 'heartbeat'
+  | 'keeper_heartbeat'
+  | 'keeper_handoff'
+  | 'keeper_compaction'
+  | 'keeper_guardrail'
 
 export interface SSEEvent {
   type: SSEEventType
@@ -294,6 +367,20 @@ export interface SSEEvent {
   task_id?: string
   status?: string
   post_id?: string
+  // Keeper event fields
+  name?: string
+  generation?: number
+  context_ratio?: number
+  ts_unix?: number
+  from_generation?: number
+  to_generation?: number
+  from_model?: string
+  to_model?: string
+  before_tokens?: number
+  after_tokens?: number
+  saved_tokens?: number
+  trigger?: string
+  reason?: string
 }
 
 // --- Journal ---

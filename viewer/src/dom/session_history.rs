@@ -485,6 +485,11 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
         }
     }
 
+    let has_previous_sessions = !active_rooms.is_empty()
+        || !paused_rooms.is_empty()
+        || !ended_rooms.is_empty()
+        || !other_rooms.is_empty();
+
     let current_bucket = if current_rooms.is_empty() {
         format!(
             r#"<section class="history-room-bucket history-room-bucket-current"><h4 class="history-room-bucket-title">현재 게임 (실시간)</h4><p class="history-room-empty">현재 game room({room})의 기록이 없습니다. 새 게임을 시작하거나 라운드를 실행하세요.</p></section>"#,
@@ -503,24 +508,40 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
     } else {
         "history-session-summary"
     };
-    let summary_html = format!(
-        r#"<div class="{summary_class}"><span>현재 게임 room: <strong>{room}</strong></span><span>이전 세션 진행 {active} · 멈춤 {paused} · 종료 {ended}</span></div>"#,
-        summary_class = summary_class,
-        room = html_escape(&sanitize_text(&current_room)),
-        active = active_count,
-        paused = paused_count,
-        ended = ended_count
-    );
+    let summary_html = if has_previous_sessions {
+        format!(
+            r#"<div class="{summary_class}"><span>현재 게임 room: <strong>{room}</strong></span><span>이전 세션 진행 {active} · 멈춤 {paused} · 종료 {ended}</span></div>"#,
+            summary_class = summary_class,
+            room = html_escape(&sanitize_text(&current_room)),
+            active = active_count,
+            paused = paused_count,
+            ended = ended_count
+        )
+    } else {
+        format!(
+            r#"<div class="{summary_class}"><span>현재 게임 room: <strong>{room}</strong></span><span>이전 세션이 없습니다.</span></div>"#,
+            summary_class = summary_class,
+            room = html_escape(&sanitize_text(&current_room))
+        )
+    };
 
-    let room_column = format!(
-        r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">현재 게임 / 이전 세션</h3>{summary}{current}{active}{paused}{ended}{other}</section>"#,
-        summary = summary_html,
-        current = current_bucket,
-        active = render_room_bucket_html("이전 세션 · 진행 중", &active_rooms, ""),
-        paused = render_room_bucket_html("이전 세션 · 멈춤", &paused_rooms, ""),
-        ended = render_room_bucket_html("이전 세션 · 종료", &ended_rooms, ""),
-        other = render_room_bucket_html("이전 세션 · 기타", &other_rooms, "")
-    );
+    let room_column = if has_previous_sessions {
+        format!(
+            r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">현재 게임 / 이전 세션</h3>{summary}{current}{active}{paused}{ended}{other}</section>"#,
+            summary = summary_html,
+            current = current_bucket,
+            active = render_room_bucket_html("이전 세션 · 진행 중", &active_rooms, ""),
+            paused = render_room_bucket_html("이전 세션 · 멈춤", &paused_rooms, ""),
+            ended = render_room_bucket_html("이전 세션 · 종료", &ended_rooms, ""),
+            other = render_room_bucket_html("이전 세션 · 기타", &other_rooms, "")
+        )
+    } else {
+        format!(
+            r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">현재 게임</h3>{summary}{current}</section>"#,
+            summary = summary_html,
+            current = current_bucket
+        )
+    };
 
     let turn_groups = sorted
         .iter()
@@ -732,9 +753,7 @@ fn write_focus_hash(room: Option<&str>, turn: Option<u32>) {
 
 #[cfg(target_arch = "wasm32")]
 fn sync_focus_state_to_hash(document: &web_sys::Document) {
-    let room = read_focus_room(document);
-    let turn = read_focus_turn(document);
-    write_focus_hash(room.as_deref(), turn);
+    let _ = document;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1370,13 +1389,9 @@ pub fn update_session_history_dom(
         history.set_inner_html(&render_session_history_html(&cache.rooms, &current_room_id));
         bind_history_focus_controls(&document);
 
-        let (hash_room, hash_turn) = read_focus_from_hash();
         let preferred_room = read_focus_room(&document)
-            .or(hash_room)
             .or_else(|| Some(base_room_id.clone()));
-        let preferred_turn = read_focus_turn(&document)
-            .or(hash_turn)
-            .or(Some(current_turn.max(1)));
+        let preferred_turn = read_focus_turn(&document).or(Some(current_turn.max(1)));
 
         let focus_room = resolve_focus_room(&cache.rooms, preferred_room.as_deref());
         let focus_turn = resolve_focus_turn(&cache.rooms, focus_room.as_deref(), preferred_turn);

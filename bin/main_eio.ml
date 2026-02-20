@@ -229,6 +229,11 @@ let bool_query_param request key ~default =
       else if v = "0" || v = "false" || v = "no" || v = "n" then false
       else default
 
+let dashboard_compact_mode request =
+  match query_param request "mode" with
+  | Some s -> String.equal "compact" (String.lowercase_ascii (String.trim s))
+  | None -> false
+
 type trpg_api_error_kind = [ `Bad_request | `Internal_server_error ]
 type trpg_api_result = (Yojson.Safe.t, trpg_api_error_kind * string) result
 
@@ -1967,7 +1972,7 @@ let top_count_name_and_count
   | (k, v) :: _ -> Some (k, v)
   | [] -> None
 
-let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
+let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
@@ -2041,7 +2046,8 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
 
           let metrics_path = Tool_keeper.keeper_metrics_path config m.name in
           let (metrics_24h, metrics_24h_summary) =
-            keeper_metrics_24h_json ~metrics_path ~now_ts
+            if compact then (`Null, `Null)
+            else keeper_metrics_24h_json ~metrics_path ~now_ts
           in
             let metrics_window_max_bytes = 200000 in
             let metrics_lines =
@@ -2485,96 +2491,98 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
                   List.iter (count_table_incr gen_stats.tools) tools_used;
                 end;
                 if is_heartbeat then incr heartbeat_points;
-                Some (`Assoc [
-                  ("ts_unix", `Float ts_unix);
-                  ("trace_id", `String trace_id);
-                  ("channel", `String channel);
-                  ("context_ratio", `Float ratio);
-                  ("context_tokens", `Int tokens);
-                  ("context_max", `Int context_max);
-                  ("message_count", `Int message_count);
-                  ("compacted", `Bool compacted);
-                  ("handoff", `Bool handoff_performed);
-                  ("handoff_to_model",
-                    match handoff_to_model with
-                    | Some s when s <> "" -> `String s
-                    | _ -> `Null);
-                  ("handoff_prev_trace_id",
-                    match handoff_prev_trace_id with
-                    | Some s when s <> "" -> `String s
-                    | _ -> `Null);
-                  ("handoff_new_trace_id",
-                    match handoff_new_trace_id with
-                    | Some s when s <> "" -> `String s
-                    | _ -> `Null);
-                  ("handoff_new_generation",
-                    match handoff_new_generation with
-                    | Some g -> `Int g
-                    | None -> `Null);
-                  ("generation", `Int gen);
-                  ("input_tokens", `Int input_tokens);
-                  ("output_tokens", `Int output_tokens);
-                  ("total_tokens", `Int total_tokens);
-                  ("latency_ms", `Int latency_ms);
-                  ("cost_usd", `Float cost_usd);
-                  ("model_used", `String model_used);
-                  ("compaction_before_tokens", `Int before_tokens);
-                  ("compaction_after_tokens", `Int after_tokens);
-                  ("compaction_saved_tokens", `Int saved_tokens);
-                  ("compaction_trigger",
-                    match compaction_trigger_now with
-                    | Some reason -> `String reason
-                    | None -> `Null);
-                  ("work_kind", `String work_kind);
-                  ("tool_call_count", `Int tool_call_count_now);
-                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-                  ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
-                  ("proactive_preview",
-                    match proactive_preview_now with
-                    | Some s -> `String s
-                    | None -> `Null);
-                  ("drift_applied", `Bool drift_applied_now);
-                  ("drift_reason",
-                    match drift_reason_now with
-                    | Some s -> `String s
-                    | None -> `Null);
-                  ("auto_reflect", `Bool auto_reflect_now);
-                  ("auto_plan", `Bool auto_plan_now);
-                  ("auto_compact", `Bool auto_compact_now);
-                  ("auto_handoff", `Bool auto_handoff_now);
-                  ("guardrail_stop", `Bool guardrail_stop_now);
-                  ("repetition_risk",
-                    match repetition_risk_opt with Some v -> `Float v | None -> `Null);
-                  ("goal_alignment",
-                    match goal_alignment_opt with Some v -> `Float v | None -> `Null);
-                  ("response_alignment",
-                    match response_alignment_opt with Some v -> `Float v | None -> `Null);
-                  ("goal_drift",
-                    match goal_drift_opt with Some v -> `Float v | None -> `Null);
-                  ("reflection", j |> member "reflection");
-                  ("memory_performed", `Bool memory_performed);
-                  ("memory_query_kind", `String memory_query_kind);
-                  ("memory_passed", `Bool memory_passed_now);
-                  ("memory_final_score", `Float memory_final_score);
-                  ("memory_threshold", `Float memory_threshold_now);
-                  ("memory_correction_applied", `Bool memory_correction_applied_now);
-                  ("memory_correction_success", `Bool memory_correction_success_now);
-                  ("memory_notes_added", `Int memory_notes_added_now);
-                  ("memory_top_kind",
-                    match memory_top_kind_now with
-                    | Some s when String.trim s <> "" -> `String s
-                    | _ -> `Null);
-                  ("memory_note_kinds",
-                    `List (List.map (fun s -> `String s) memory_note_kinds));
-                  ("memory_compaction_performed", `Bool memory_compaction_performed_now);
-                  ("memory_compaction_before_notes", `Int memory_compaction_before_notes_now);
-                  ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
-                  ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
-                  ("memory_expected_topic",
-                    match memory_expected_topic with
-                    | Some s -> `String s
-                    | None -> `Null);
-                ])
+                if compact then None
+                else
+                  Some (`Assoc [
+                    ("ts_unix", `Float ts_unix);
+                    ("trace_id", `String trace_id);
+                    ("channel", `String channel);
+                    ("context_ratio", `Float ratio);
+                    ("context_tokens", `Int tokens);
+                    ("context_max", `Int context_max);
+                    ("message_count", `Int message_count);
+                    ("compacted", `Bool compacted);
+                    ("handoff", `Bool handoff_performed);
+                    ("handoff_to_model",
+                      match handoff_to_model with
+                      | Some s when s <> "" -> `String s
+                      | _ -> `Null);
+                    ("handoff_prev_trace_id",
+                      match handoff_prev_trace_id with
+                      | Some s when s <> "" -> `String s
+                      | _ -> `Null);
+                    ("handoff_new_trace_id",
+                      match handoff_new_trace_id with
+                      | Some s when s <> "" -> `String s
+                      | _ -> `Null);
+                    ("handoff_new_generation",
+                      match handoff_new_generation with
+                      | Some g -> `Int g
+                      | None -> `Null);
+                    ("generation", `Int gen);
+                    ("input_tokens", `Int input_tokens);
+                    ("output_tokens", `Int output_tokens);
+                    ("total_tokens", `Int total_tokens);
+                    ("latency_ms", `Int latency_ms);
+                    ("cost_usd", `Float cost_usd);
+                    ("model_used", `String model_used);
+                    ("compaction_before_tokens", `Int before_tokens);
+                    ("compaction_after_tokens", `Int after_tokens);
+                    ("compaction_saved_tokens", `Int saved_tokens);
+                    ("compaction_trigger",
+                      match compaction_trigger_now with
+                      | Some reason -> `String reason
+                      | None -> `Null);
+                    ("work_kind", `String work_kind);
+                    ("tool_call_count", `Int tool_call_count_now);
+                    ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+                    ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
+                    ("proactive_preview",
+                      match proactive_preview_now with
+                      | Some s -> `String s
+                      | None -> `Null);
+                    ("drift_applied", `Bool drift_applied_now);
+                    ("drift_reason",
+                      match drift_reason_now with
+                      | Some s -> `String s
+                      | None -> `Null);
+                    ("auto_reflect", `Bool auto_reflect_now);
+                    ("auto_plan", `Bool auto_plan_now);
+                    ("auto_compact", `Bool auto_compact_now);
+                    ("auto_handoff", `Bool auto_handoff_now);
+                    ("guardrail_stop", `Bool guardrail_stop_now);
+                    ("repetition_risk",
+                      match repetition_risk_opt with Some v -> `Float v | None -> `Null);
+                    ("goal_alignment",
+                      match goal_alignment_opt with Some v -> `Float v | None -> `Null);
+                    ("response_alignment",
+                      match response_alignment_opt with Some v -> `Float v | None -> `Null);
+                    ("goal_drift",
+                      match goal_drift_opt with Some v -> `Float v | None -> `Null);
+                    ("reflection", j |> member "reflection");
+                    ("memory_performed", `Bool memory_performed);
+                    ("memory_query_kind", `String memory_query_kind);
+                    ("memory_passed", `Bool memory_passed_now);
+                    ("memory_final_score", `Float memory_final_score);
+                    ("memory_threshold", `Float memory_threshold_now);
+                    ("memory_correction_applied", `Bool memory_correction_applied_now);
+                    ("memory_correction_success", `Bool memory_correction_success_now);
+                    ("memory_notes_added", `Int memory_notes_added_now);
+                    ("memory_top_kind",
+                      match memory_top_kind_now with
+                      | Some s when String.trim s <> "" -> `String s
+                      | _ -> `Null);
+                    ("memory_note_kinds",
+                      `List (List.map (fun s -> `String s) memory_note_kinds));
+                    ("memory_compaction_performed", `Bool memory_compaction_performed_now);
+                    ("memory_compaction_before_notes", `Int memory_compaction_before_notes_now);
+                    ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
+                    ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
+                    ("memory_expected_topic",
+                      match memory_expected_topic with
+                      | Some s -> `String s
+                      | None -> `Null);
+                  ])
               with _ -> None
             ) parsed_metrics in
             let sample_points = List.length items in
@@ -2945,7 +2953,18 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
 	            let compact_ratio_gate = m.compaction_ratio_gate in
 	            let compact_message_gate = m.compaction_message_gate in
 	            let compact_token_gate = m.compaction_token_gate in
-	            `Assoc [
+              let detail_fields =
+                if compact then []
+                else [
+                  ("last_metrics", match last_metrics with None -> `Null | Some j -> j);
+                  ("metrics_series", metrics_series);
+                  ("metrics_24h", metrics_24h);
+                  ("memory_bank", memory_bank_json);
+                  ("conversation_tail", conversation_tail);
+                  ("k2k_recent", k2k_recent);
+                ]
+              in
+	            `Assoc ([
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
               ("trace_id", `String m.trace_id);
@@ -3042,10 +3061,7 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
 	                match last_skill_reason with
 	                | Some s -> `String s
 	                | None -> `Null);
-	              ("last_metrics", match last_metrics with None -> `Null | Some j -> j);
-	              ("metrics_series", metrics_series);
               ("metrics_window", metrics_window_summary);
-              ("metrics_24h", metrics_24h);
               ("metrics_24h_summary", metrics_24h_summary);
               ("memory_note_count", `Int memory_bank_summary.Tool_keeper.total_notes);
               ("memory_top_kind",
@@ -3056,21 +3072,18 @@ let keepers_dashboard_json (config : Room.config) : Yojson.Safe.t =
                 match memory_recent_note with
                 | Some text -> `String text
                 | None -> `Null);
-              ("memory_bank", memory_bank_json);
-              ("conversation_tail", conversation_tail);
               ("conversation_tail_count", `Int conversation_tail_count);
               ("conversation_raw_count", `Int conversation_raw_count);
               ("conversation_fragment_count", `Int conversation_fragment_count);
               ("conversation_fragment_filtered_count", `Int conversation_fragment_filtered_count);
               ("conversation_fragment_filter_enabled", `Bool history_fragment_filter_enabled);
-              ("k2k_recent", k2k_recent);
               ("k2k_count", `Int k2k_count);
               ("k2k_mentions", k2k_mentions);
               ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);
               ("last_compaction_event", match last_compaction_event with Some j -> j | None -> `Null);
               ("context", context);
               ("context_source", context_source);
-            ]
+            ] @ detail_fields)
           in
           Some summary
     ) names
@@ -3120,7 +3133,7 @@ let perpetual_dashboard_json () : Yojson.Safe.t =
     ("total", `Int (List.length items));
   ]
 
-let dashboard_batch_json (config : Room.config) : Yojson.Safe.t =
+let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
   let tasks = Room.get_tasks_raw config in
@@ -3221,7 +3234,7 @@ let dashboard_batch_json (config : Room.config) : Yojson.Safe.t =
     ("tasks", `Assoc [ ("tasks", `List tasks_json); ("total", `Int (List.length tasks_json)) ]);
     ("agents", `Assoc [ ("agents", `List agents_json); ("total", `Int (List.length agents_json)) ]);
     ("messages", `Assoc [ ("messages", `List msgs_json); ("total", `Int (List.length msgs_json)) ]);
-    ("keepers", keepers_dashboard_json config);
+    ("keepers", keepers_dashboard_json ~compact config);
     ("perpetual", perpetual_dashboard_json ());
   ]
 
@@ -3513,7 +3526,12 @@ let assets_root () =
     let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
     Filename.concat root "assets"
   in
-  match Sys.getenv_opt "MASC_ASSETS_DIR" with
+  let env_assets =
+    match Sys.getenv_opt "MASC_ASSETS_ROOT" with
+    | Some path when String.trim path <> "" -> Some path
+    | _ -> Sys.getenv_opt "MASC_ASSETS_DIR"
+  in
+  match env_assets with
   | Some path when is_dir path -> path
   | _ when is_dir (Filename.concat (Sys.getcwd ()) "assets") ->
       Filename.concat (Sys.getcwd ()) "assets"
@@ -4901,7 +4919,8 @@ let make_routes ~port ~host =
   |> Http.Router.get "/api/v1/dashboard" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
-         let json = dashboard_batch_json config in
+         let compact = dashboard_compact_mode req in
+         let json = dashboard_batch_json ~compact config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
@@ -5580,7 +5599,8 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/dashboard" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
-          let json = dashboard_batch_json config in
+          let compact = dashboard_compact_mode httpun_request in
+          let json = dashboard_batch_json ~compact config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/status" ->

@@ -58,6 +58,13 @@ const DM_VOICE_RANDOM_PRESET_VALUE: &str = "random_preset";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_RANDOM_PRESET_LABEL: &str = "랜덤 (추천 Voice 중 선택)";
 #[cfg(target_arch = "wasm32")]
+const DM_VOICE_DEFAULT_PROXY_URL: &str =
+    "https://elevenlabs-proxy-production-443b.up.railway.app/v1/audio/speech";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_DEFAULT_MODEL: &str = "eleven_multilingual_v2";
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
+#[cfg(target_arch = "wasm32")]
 const DM_VOICE_MODEL_PRESETS: &[&str] = &[
     "eleven_turbo_v2_5",
     "eleven_flash_v2_5",
@@ -65,6 +72,8 @@ const DM_VOICE_MODEL_PRESETS: &[&str] = &[
 ];
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_PROXY_ORIGIN_PRESETS: &[&str] = &["/api/v1/trpg/tts", "/api/v1/tts", "/tts"];
+#[cfg(target_arch = "wasm32")]
+const DM_VOICE_PROXY_REMOTE_PRESETS: &[&str] = &[DM_VOICE_DEFAULT_PROXY_URL];
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_ID_PRESETS: &[(&str, &str)] = &[
     ("21m00Tcm4TlvDq8ikWAM", "Rachel"),
@@ -282,7 +291,13 @@ fn resolve_dm_voice_mode() -> DmVoiceMode {
         "meta[name='trpg-dm-voice-mode']",
     )
     .map(|raw| parse_dm_voice_mode(&raw))
-    .unwrap_or(DmVoiceMode::Browser)
+    .unwrap_or_else(|| {
+        if resolve_dm_voice_proxy_url().is_some() {
+            DmVoiceMode::ElevenLabs
+        } else {
+            DmVoiceMode::Browser
+        }
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -293,6 +308,7 @@ fn resolve_dm_voice_proxy_url() -> Option<String> {
         STORAGE_DM_VOICE_PROXY_URL,
         "meta[name='trpg-dm-voice-proxy-url']",
     )
+    .or_else(|| Some(DM_VOICE_DEFAULT_PROXY_URL.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -303,6 +319,7 @@ fn resolve_dm_voice_model() -> Option<String> {
         STORAGE_DM_VOICE_MODEL,
         "meta[name='trpg-dm-voice-model']",
     )
+    .or_else(|| Some(DM_VOICE_DEFAULT_MODEL.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -313,6 +330,7 @@ fn resolve_dm_voice_id() -> Option<String> {
         STORAGE_DM_VOICE_ID,
         "meta[name='trpg-dm-voice-id']",
     )
+    .or_else(|| Some(DM_VOICE_DEFAULT_VOICE_ID.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -349,6 +367,11 @@ fn is_openai_tts_proxy_url(proxy_url: &str) -> bool {
 #[cfg(target_arch = "wasm32")]
 fn detect_proxy_select_value(current_url: &str) -> Option<String> {
     let current = normalize_optional(current_url)?;
+    for preset in DM_VOICE_PROXY_REMOTE_PRESETS {
+        if current == *preset {
+            return Some((*preset).to_string());
+        }
+    }
     if let Some(origin) = window_origin() {
         for path in DM_VOICE_PROXY_ORIGIN_PRESETS {
             let preset = format!("{}{}", origin, path);

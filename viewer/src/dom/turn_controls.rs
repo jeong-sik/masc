@@ -569,6 +569,15 @@ fn on_advance_click() {
                 set_turn_status(&status, "status-warn");
                 set_turn_gate_reason(&format!("실행 보류: {}", status), "status-warn");
             }
+            Ok(RoundRunOutcome::InFlight { status }) => {
+                clear_round_recovery();
+                set_round_stall_badges(None);
+                set_turn_status(&status, "status-info");
+                set_turn_gate_reason(
+                    "실행 대기: 현재 라운드가 처리 중입니다. 완료 이벤트를 기다리세요.",
+                    "status-info",
+                );
+            }
             Err(e) => {
                 let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                 log::warn!("Advance turn failed: {}", detail);
@@ -594,6 +603,9 @@ enum RoundRunOutcome {
         status: String,
         has_warning: bool,
     },
+    InFlight {
+        status: String,
+    },
     Stalled {
         status: String,
         guide: String,
@@ -613,6 +625,31 @@ fn shorten_reason(raw: &str, max_chars: usize) -> String {
         .collect::<String>();
     truncated.push('…');
     truncated
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_round_in_flight_error(raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    lowered.contains("round run already in progress") || lowered.contains("single-flight")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_keeper_busy_error(raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    lowered.contains("keeper busy")
+        || lowered.contains("can handle only one round at a time")
+        || lowered.contains("each spawned keeper can handle only one round")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn transient_round_wait_message(raw: &str) -> Option<String> {
+    if is_round_in_flight_error(raw) {
+        return Some("이미 라운드 실행 중입니다. 이전 요청 완료를 기다리는 중입니다.".to_string());
+    }
+    if is_keeper_busy_error(raw) {
+        return Some("키퍼가 이전 라운드를 처리 중입니다. 잠시 후 자동으로 다시 진행됩니다.".to_string());
+    }
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -816,6 +853,11 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
             .and_then(|v| v.as_string())
             .unwrap_or_default();
         let err_body = err_body.trim();
+        if let Some(wait_message) = transient_round_wait_message(err_body) {
+            return Ok(RoundRunOutcome::InFlight {
+                status: wait_message,
+            });
+        }
         if err_body.is_empty() {
             return Err(JsValue::from_str(&format!("HTTP {}", resp.status())));
         }
@@ -834,6 +876,22 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
     log::info!("TurnControls: round run response — {}", resp_text);
 
     if let Ok(json) = serde_json::from_str::<Value>(&resp_text) {
+        if json.get("ok").and_then(Value::as_bool) == Some(false) {
+            let detail = json
+                .get("error")
+                .or_else(|| json.get("message"))
+                .or_else(|| json.get("detail"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("라운드 실행이 거절되었습니다.");
+            if let Some(wait_message) = transient_round_wait_message(detail) {
+                return Ok(RoundRunOutcome::InFlight {
+                    status: wait_message,
+                });
+            }
+            return Err(JsValue::from_str(detail));
+        }
         let turn_before = json.get("turn_before").and_then(Value::as_u64).unwrap_or(0);
         let turn_after = json.get("turn_after").and_then(Value::as_u64).unwrap_or(0);
         let summary_advanced = json
@@ -1195,7 +1253,7 @@ fn bind_recovery_action_buttons() {
                 let current = read_dom_input(&doc, "round-run-timeout")
                     .and_then(|raw| raw.parse::<f64>().ok())
                     .filter(|value| *value > 0.0)
-                    .unwrap_or(90.0);
+                    .unwrap_or(30.0);
                 let next = (current + 30.0).min(600.0);
                 if let Some(input) = doc
                     .get_element_by_id("round-run-timeout")
@@ -1480,7 +1538,7 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
     let timeout_sec = read_dom_input(doc, "round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
-        .unwrap_or(90.0);
+        .unwrap_or(30.0);
 
     let player_pairs_raw = read_dom_text_value(doc, "round-run-players").unwrap_or_default();
     let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);

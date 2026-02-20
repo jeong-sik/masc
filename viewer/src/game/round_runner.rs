@@ -86,6 +86,10 @@ const STALL_RETRY_BASE_DELAY_MS: i32 = 2000;
 #[allow(dead_code)] // Used by stall_retry_delay_ms in wasm/runtime builds.
 const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
 
+/// Retry delay for transient round-run conflicts (ms).
+#[cfg(any(target_arch = "wasm32", test))]
+const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 1200;
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn stall_retry_delay_ms(retry_count: u32) -> i32 {
     let exponent = retry_count.saturating_sub(1).min(6);
@@ -219,6 +223,28 @@ fn spawn_round_loop(control: RoundRunnerControl) {
             release_round_flight("auto");
             match post_result {
                 Ok(resp) => {
+                    if let Some(api_error) = round_response_api_error(&resp) {
+                        if is_transient_round_conflict(&api_error) {
+                            round_num = round_num.saturating_sub(1);
+                            stalled_retries = 0;
+                            log::info!(
+                                "RoundRunner: transient conflict from API; retrying in {}ms — {}",
+                                TRANSIENT_CONFLICT_RETRY_DELAY_MS,
+                                api_error
+                            );
+                            if let Ok(mut guard) = last_result.lock() {
+                                *guard = Some(format!("WAIT: {}", api_error));
+                            }
+                            sleep_ms(TRANSIENT_CONFLICT_RETRY_DELAY_MS).await;
+                            continue;
+                        }
+                        log::warn!("RoundRunner: API rejected round run — {}", api_error);
+                        if let Ok(mut guard) = last_result.lock() {
+                            *guard = Some(format!("ERROR: {}", api_error));
+                        }
+                        break;
+                    }
+
                     log::info!(
                         "RoundRunner: round {} done — {}",
                         round_num,
@@ -261,6 +287,17 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                 Err(e) => {
                     let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                     log::warn!("RoundRunner: POST failed — {}", detail);
+
+                    if is_transient_round_conflict(&detail) {
+                        round_num = round_num.saturating_sub(1);
+                        stalled_retries = 0;
+                        log::info!(
+                            "RoundRunner: transient in-flight/busy conflict; retrying in {}ms",
+                            TRANSIENT_CONFLICT_RETRY_DELAY_MS
+                        );
+                        sleep_ms(TRANSIENT_CONFLICT_RETRY_DELAY_MS).await;
+                        continue;
+                    }
 
                     if let Some(status) = parse_http_status(&detail) {
                         if (400..500).contains(&status) && status != 429 {
@@ -367,7 +404,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
     let timeout_sec = read_dom_input("round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
-        .unwrap_or(90.0);
+        .unwrap_or(30.0);
     let lang = read_dom_input("round-run-lang").unwrap_or_else(|| "ko".to_string());
 
     // 2) Player keeper mapping from hidden round plan (`actor=keeper,actor=keeper,...`).
@@ -446,6 +483,25 @@ fn round_response_advanced(resp: &str) -> Option<bool> {
         .and_then(serde_json::Value::as_bool)
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_api_error(resp: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<serde_json::Value>(resp).ok()?;
+    if parsed.get("ok").and_then(serde_json::Value::as_bool) != Some(false) {
+        return None;
+    }
+    Some(
+        parsed
+            .get("error")
+            .or_else(|| parsed.get("message"))
+            .or_else(|| parsed.get("detail"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("round run request was rejected")
+            .to_string(),
+    )
+}
+
 #[cfg(target_arch = "wasm32")]
 fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
@@ -475,6 +531,27 @@ fn parse_http_status(detail: &str) -> Option<u16> {
     } else {
         code_text.parse::<u16>().ok()
     }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn is_round_in_flight_error(raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    lowered.contains("round run already in progress")
+        || lowered.contains("single-flight")
+        || lowered.contains("already in progress for room")
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn is_keeper_busy_error(raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    lowered.contains("keeper busy")
+        || lowered.contains("can handle only one round at a time")
+        || lowered.contains("each spawned keeper can handle only one round")
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn is_transient_round_conflict(raw: &str) -> bool {
+    is_round_in_flight_error(raw) || is_keeper_busy_error(raw)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -580,7 +657,7 @@ async fn sleep_ms(ms: i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::stall_retry_delay_ms;
+    use super::{is_transient_round_conflict, round_response_api_error, stall_retry_delay_ms};
 
     #[test]
     fn stall_retry_delay_scales_and_caps() {
@@ -594,5 +671,26 @@ mod tests {
     #[test]
     fn stall_retry_delay_handles_zero_retry_input() {
         assert_eq!(stall_retry_delay_ms(0), 2000);
+    }
+
+    #[test]
+    fn transient_round_conflicts_detected() {
+        assert!(is_transient_round_conflict(
+            "HTTP 400: round run already in progress for room adventure-123"
+        ));
+        assert!(is_transient_round_conflict(
+            "keeper busy: each spawned keeper can handle only one round at a time"
+        ));
+        assert!(!is_transient_round_conflict("HTTP 404: not found"));
+    }
+
+    #[test]
+    fn round_response_api_error_extracts_ok_false_payload() {
+        assert_eq!(
+            round_response_api_error(r#"{"ok":false,"error":"keeper busy: p01"}"#).as_deref(),
+            Some("keeper busy: p01")
+        );
+        assert_eq!(round_response_api_error(r#"{"ok":true}"#), None);
+        assert_eq!(round_response_api_error(r#"{"turn_after":5}"#), None);
     }
 }

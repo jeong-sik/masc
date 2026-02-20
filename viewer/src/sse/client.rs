@@ -225,6 +225,29 @@ fn stream_event_fingerprint(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+fn canonical_trpg_event_type(raw: &str) -> String {
+    match raw.trim() {
+        "turn_started" => "turn.started".to_string(),
+        "phase_changed" => "phase.changed".to_string(),
+        "narration_posted" | "narrative.posted" => "narration.posted".to_string(),
+        "turn_action_proposed" => "turn.action.proposed".to_string(),
+        "turn_action_resolved" => "turn.action.resolved".to_string(),
+        "keeper_unavailable" => "keeper.unavailable".to_string(),
+        "turn_timeout" => "turn.timeout".to_string(),
+        "scene_transition" => "scene.transition".to_string(),
+        "quest_update" => "quest.update".to_string(),
+        "world_event" => "world.event".to_string(),
+        "session_outcome" => "session.outcome".to_string(),
+        "actor_spawned" => "actor.spawned".to_string(),
+        "actor_updated" => "actor.updated".to_string(),
+        "actor_deleted" => "actor.deleted".to_string(),
+        "actor_claimed" => "actor.claimed".to_string(),
+        "actor_released" => "actor.released".to_string(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 fn seen_stream_fingerprint(state: &TrpgMapperState, fingerprint: &str) -> bool {
     state
         .recent_stream_fingerprints
@@ -308,6 +331,64 @@ fn snapshot_dice_entries(root: &Value) -> Vec<Value> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn snapshot_narration_entries(root: &Value) -> Vec<Value> {
+    let source = root
+        .get("narration_log")
+        .or_else(|| root.get("narrative_log"))
+        .or_else(|| snapshot_root(root).get("narration_log"))
+        .or_else(|| snapshot_root(root).get("narrative_log"));
+    source
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn snapshot_narration_text(entry: &Value) -> Option<String> {
+    let text = entry
+        .get("text")
+        .and_then(Value::as_str)
+        .or_else(|| entry.get("reply").and_then(Value::as_str))
+        .or_else(|| entry.get("proposed_action").and_then(Value::as_str))
+        .or_else(|| entry.get("action").and_then(Value::as_str))
+        .or_else(|| entry.get("description").and_then(Value::as_str))
+        .or_else(|| entry.get("result").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn map_snapshot_narration(
+    entry: &Value,
+    fallback_turn: u32,
+    stream_room_id: &str,
+    fallback_phase: &str,
+) -> Option<(String, String)> {
+    let text = snapshot_narration_text(entry)?;
+    let phase = entry
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or(fallback_phase);
+    let mapped = attach_room_id(
+        json!({
+            "text": text,
+            "phase": phase,
+            "turn": value_to_u32(entry.get("turn"), fallback_turn),
+            "speaker": entry
+                .get("speaker")
+                .and_then(Value::as_str)
+                .or_else(|| entry.get("actor_id").and_then(Value::as_str))
+                .or_else(|| entry.get("keeper").and_then(Value::as_str))
+        }),
+        entry,
+        Some(stream_room_id),
+    );
+    Some(("narrative".to_string(), mapped.to_string()))
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -1082,6 +1163,27 @@ fn decode_snapshot_events(body: &Value, state: &mut TrpgMapperState) -> Vec<(Str
         ));
     }
 
+    let mut narration_mapped = 0_u32;
+    for entry in snapshot_narration_entries(body).into_iter().rev().take(40).rev() {
+        if let Some(mapped) = map_snapshot_narration(&entry, turn, &room_id, &phase) {
+            narration_mapped += 1;
+            out.push(mapped);
+        }
+    }
+    if narration_mapped == 0 && turn <= 1 {
+        let opening = attach_room_id(
+            json!({
+                "text": "모험이 시작되었습니다. DM 오프닝 또는 플레이어 행동 입력을 기다립니다.",
+                "phase": phase,
+                "turn": turn,
+                "speaker": "system"
+            }),
+            snapshot_root(body),
+            Some(&room_id),
+        );
+        out.push(("narrative".to_string(), opening.to_string()));
+    }
+
     for entry in snapshot_dice_entries(body) {
         if let Some(mapped) = map_snapshot_dice_roll(&entry, turn, &room_id, &phase) {
             out.push(mapped);
@@ -1105,31 +1207,35 @@ fn decode_stream_events(
         let mut out = Vec::new();
 
         for ev in parsed.events {
+            let event_type = canonical_trpg_event_type(&ev.event_type);
             if ev.seq > max_seq {
                 max_seq = ev.seq;
             }
             let fingerprint = stream_event_fingerprint(
-                &ev.event_type,
+                &event_type,
                 ev.seq,
                 ev.actor_id.as_deref(),
                 &ev.payload,
             );
             if ev.seq > 0 && ev.seq <= state.last_stream_seq {
                 #[cfg(target_arch = "wasm32")]
-                bump_dedup_stream(&format!("seq {} <= {}", ev.seq, state.last_stream_seq));
+                bump_dedup_stream(&format!(
+                    "seq {} <= {} ({})",
+                    ev.seq, state.last_stream_seq, event_type
+                ));
                 remember_stream_fingerprint(state, fingerprint);
                 continue;
             }
             if seen_stream_fingerprint(state, &fingerprint) {
                 #[cfg(target_arch = "wasm32")]
-                bump_dedup_stream(&format!("fp | {} | seq {}", ev.event_type, ev.seq));
+                bump_dedup_stream(&format!("fp | {} | seq {}", event_type, ev.seq));
                 continue;
             }
             if ev.seq > 0 {
                 state.last_stream_seq = state.last_stream_seq.max(ev.seq);
             }
             out.extend(map_trpg_event(
-                &ev.event_type,
+                &event_type,
                 ev.actor_id.as_deref(),
                 ev.room_id.as_deref(),
                 &ev.payload,
@@ -1780,5 +1886,69 @@ mod tests {
             .expect("room.created should exist");
         let r_payload: Value = serde_json::from_str(&room.1).expect("room.created payload json");
         assert_eq!(r_payload["room_id"], "r1");
+    }
+
+    #[test]
+    fn decode_snapshot_restores_narration_log() {
+        let body = r#"{
+            "state": {
+                "room_id": "adventure-1",
+                "status": "running",
+                "turn": 3,
+                "phase": "dm_narration",
+                "narration_log": [
+                    {"turn": 1, "phase": "dm_narration", "actor_id": "dm", "reply": "짙은 안개가 길을 덮습니다."},
+                    {"turn": 2, "phase": "action_declaration", "actor_id": "p01", "proposed_action": "횃불을 밝히고 앞을 살핀다."}
+                ]
+            }
+        }"#;
+
+        let mut state = TrpgMapperState::default();
+        let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
+
+        let narrative_events: Vec<&(String, String)> = mapped
+            .iter()
+            .filter(|(event_type, _)| event_type == "narrative")
+            .collect();
+        assert_eq!(narrative_events.len(), 2);
+
+        let first: Value =
+            serde_json::from_str(&narrative_events[0].1).expect("first narrative payload");
+        assert_eq!(first["text"], "짙은 안개가 길을 덮습니다.");
+        assert_eq!(first["speaker"], "dm");
+
+        let second: Value =
+            serde_json::from_str(&narrative_events[1].1).expect("second narrative payload");
+        assert_eq!(second["text"], "횃불을 밝히고 앞을 살핀다.");
+        assert_eq!(second["speaker"], "p01");
+    }
+
+    #[test]
+    fn decode_stream_accepts_snake_case_event_aliases() {
+        let body = r#"{
+            "events": [
+                {"seq": 1, "type": "turn_started", "payload": {"turn": 2, "phase": "briefing"}},
+                {"seq": 2, "type": "phase_changed", "payload": {"turn": 2, "phase": "action_declaration"}},
+                {"seq": 3, "type": "scene_transition", "payload": {"from_scene": "forest", "to_scene": "ruins", "trigger": "party"}}
+            ]
+        }"#;
+
+        let mut state = TrpgMapperState::default();
+        let (_, mapped) = decode_stream_events(body, &mut state).expect("decode should succeed");
+
+        let turn_advances = mapped
+            .iter()
+            .filter(|(event_type, _)| event_type == "turn_advance")
+            .count();
+        assert_eq!(turn_advances, 2);
+
+        let area_move = mapped
+            .iter()
+            .find(|(event_type, _)| event_type == "area_move")
+            .expect("area_move should exist");
+        let move_payload: Value =
+            serde_json::from_str(&area_move.1).expect("area_move payload json");
+        assert_eq!(move_payload["from_area"], "forest");
+        assert_eq!(move_payload["to_area"], "ruins");
     }
 }

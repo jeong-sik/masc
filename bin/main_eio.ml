@@ -1205,6 +1205,7 @@ let trpg_round_run_json
           agent_name;
           keeper_call = Some keeper_call;
           keeper_probe = Some keeper_probe;
+          dm_voice_emit = None;
         }
       in
       match Masc_mcp.Tool_trpg.dispatch trpg_ctx ~name:"masc_trpg_round_run" ~args with

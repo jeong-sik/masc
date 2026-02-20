@@ -545,6 +545,39 @@ export async function addTaskFromDashboard(
   })
 }
 
+export async function joinDashboardAgent(agentName: string): Promise<string> {
+  return callMcpTool('masc_join', {
+    agent_name: agentName,
+  })
+}
+
+export async function leaveDashboardAgent(agentName: string): Promise<void> {
+  await callMcpTool('masc_leave', {
+    agent_name: agentName,
+  })
+}
+
+export async function sendAgentHeartbeat(agentName: string): Promise<void> {
+  await callMcpTool('masc_heartbeat', {
+    agent_name: agentName,
+  })
+}
+
+export async function fetchRoomMessages(limit = 40): Promise<string[]> {
+  const text = await callMcpTool('masc_messages', { limit })
+  return text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '')
+}
+
+export async function fetchTaskHistory(taskId: string, limit = 20): Promise<string> {
+  return callMcpTool('masc_task_history', {
+    task_id: taskId,
+    limit,
+  })
+}
+
 export async function fetchDebates(): Promise<CouncilDebate[]> {
   const text = await callMcpTool('masc_debates', {})
   return parseJsonList<CouncilDebate>(text)

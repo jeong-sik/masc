@@ -542,7 +542,8 @@
                     <!-- Join Panel: claim an actor before playing -->
                     <div id="join-panel">
                         <div id="join-help" class="join-help">
-                            참여를 누르면 선택한 캐릭터를 점유(Claim)하고, 해당 캐릭터 행동을 직접 입력할 수 있습니다.
+                            참여를 누르면 선택한 캐릭터를 점유(Claim)하고, 해당 캐릭터 행동을 직접 입력할 수 있습니다. 오른쪽 PARTY 카드의 Skills에서
+                            스킬 레벨/Modifier를 확인한 뒤 판정에 활용하세요.
                         </div>
                         <div id="join-input-row">
                             <input type="text" id="actor-id-input"
@@ -576,7 +577,7 @@
                             <button id="action-submit-btn" title="행동을 제출합니다">제출</button>
                             <button id="dice-roll-btn" title="1d20 주사위를 굴립니다">주사위</button>
                         </div>
-                        <div id="action-help" class="action-help">예: 주변 탐색, 파티 이동, NPC와 대화, 함정 해제, 공격 시도</div>
+                        <div id="action-help" class="action-help">예: 주변 탐색, 파티 이동, NPC와 대화, 함정 해제, 공격 시도 · 주사위는 기본 1d20 판정이며 스킬 Modifier는 Skills의 Lv 기준으로 계산됩니다.</div>
                         <div id="action-status"></div>
                         <div id="action-history" class="action-history"></div>
                         <input type="hidden" id="claimed-actor-id" value="" />

@@ -96,7 +96,7 @@ pub fn sync_join_panel_interaction_state(
         if join_visible {
             if let Some(help) = doc.get_element_by_id("join-help") {
                 let text = if can_join {
-                    "참여를 누르면 선택한 캐릭터를 점유(Claim)하고, 해당 캐릭터 행동을 직접 입력할 수 있습니다."
+                    "참여를 누르면 선택한 캐릭터를 점유(Claim)하고, 해당 캐릭터 행동을 직접 입력할 수 있습니다. 오른쪽 PARTY 카드 Skills의 Lv/Mod를 보고 액션·주사위 판정을 진행하세요."
                 } else {
                     lifecycle.help_text()
                 };

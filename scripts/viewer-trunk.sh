@@ -38,6 +38,57 @@ resolve_serve_port() {
   printf '%s' "$port"
 }
 
+resolve_dist_dir() {
+  local dist="dist"
+  local i=0
+
+  while (( i < ${#TRUNK_ARGS[@]} )); do
+    local arg="${TRUNK_ARGS[$i]}"
+    case "$arg" in
+      --dist=*)
+        dist="${arg#--dist=}"
+        ;;
+      --dist|-d)
+        if (( i + 1 < ${#TRUNK_ARGS[@]} )); then
+          dist="${TRUNK_ARGS[$((i + 1))]}"
+          ((i++))
+        fi
+        ;;
+    esac
+    ((i++))
+  done
+
+  printf '%s' "$dist"
+}
+
+has_dist_arg() {
+  local i=0
+  while (( i < ${#TRUNK_ARGS[@]} )); do
+    local arg="${TRUNK_ARGS[$i]}"
+    case "$arg" in
+      --dist=*|--dist|-d)
+        return 0
+        ;;
+    esac
+    ((i++))
+  done
+  return 1
+}
+
+maybe_isolate_build_dist() {
+  if [[ "${TRUNK_ARGS[0]:-}" != "build" ]]; then
+    return
+  fi
+  if has_dist_arg; then
+    return
+  fi
+  if [[ "${MASC_BUILD_MAIN_DIST:-}" == "1" ]]; then
+    return
+  fi
+  echo "viewer-trunk: defaulting build output to 'dist-build' (set MASC_BUILD_MAIN_DIST=1 for 'dist')." >&2
+  TRUNK_ARGS+=("--dist" "dist-build")
+}
+
 check_serve_port_available() {
   if [[ "${TRUNK_ARGS[0]:-}" != "serve" ]]; then
     return
@@ -66,6 +117,40 @@ check_serve_port_available() {
   exit 1
 }
 
+maybe_prune_trpg_room() {
+  if [[ "${TRUNK_ARGS[0]:-}" != "serve" ]]; then
+    return
+  fi
+
+  if [[ "${MASC_TRPG_PRUNE_DEFAULT_ROOM:-0}" != "1" ]]; then
+    return
+  fi
+
+  local prune_script="$SCRIPT_DIR/trpg-room-prune.sh"
+  if [[ ! -x "$prune_script" ]]; then
+    echo "viewer-trunk: skip TRPG prune (script not executable): $prune_script" >&2
+    return
+  fi
+
+  local room_id="${MASC_TRPG_PRUNE_ROOM_ID:-default}"
+  local base_path="${MASC_TRPG_PRUNE_BASE_PATH:-/Users/dancer/me}"
+  local keep_sessions="${MASC_TRPG_PRUNE_KEEP_SESSIONS:-1}"
+  local -a prune_args=(
+    --room-id "$room_id"
+    --base-path "$base_path"
+    --keep-sessions "$keep_sessions"
+    --apply
+  )
+  if [[ "${MASC_TRPG_PRUNE_VACUUM:-0}" == "1" ]]; then
+    prune_args+=(--vacuum)
+  fi
+
+  echo "viewer-trunk: running TRPG prune for room '$room_id' (keep=$keep_sessions)" >&2
+  if ! "$prune_script" "${prune_args[@]}"; then
+    echo "viewer-trunk: TRPG prune failed; continue serving" >&2
+  fi
+}
+
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     echo "$$" > "$LOCK_DIR/pid"
@@ -92,11 +177,14 @@ release_lock() {
 
 acquire_lock
 trap release_lock EXIT INT TERM
+maybe_isolate_build_dist
 check_serve_port_available
+maybe_prune_trpg_room
 
 # Mitigate intermittent trunk stage-dir creation races.
-mkdir -p "$VIEWER_DIR/dist/.stage"
+DIST_DIR="$(resolve_dist_dir)"
+mkdir -p "$VIEWER_DIR/$DIST_DIR/.stage"
 mkdir -p "$VIEWER_DIR/target/wasm-bindgen/release"
 
 cd "$VIEWER_DIR"
-trunk "$@"
+trunk "${TRUNK_ARGS[@]}"

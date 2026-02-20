@@ -1,10 +1,16 @@
 use bevy::prelude::*;
 
-use crate::game::components::FloatingText;
+use crate::game::components::{Actor, FloatingText, MapToken};
 use crate::game::events::HpChanged;
 
 /// Spawns a floating damage/heal number above the affected character.
-pub fn spawn_damage_text(mut commands: Commands, mut hp_events: MessageReader<HpChanged>) {
+/// Looks up the actor's current Transform so the text appears on the token,
+/// falling back to world origin if the actor is not found.
+pub fn spawn_damage_text(
+    mut commands: Commands,
+    mut hp_events: MessageReader<HpChanged>,
+    actors: Query<(&Actor, &Transform), With<MapToken>>,
+) {
     for HpChanged(payload) in hp_events.read() {
         let color = if payload.amount < 0 {
             Color::srgb(0.9, 0.2, 0.1) // damage = red
@@ -18,8 +24,13 @@ pub fn spawn_damage_text(mut commands: Commands, mut hp_events: MessageReader<Hp
             format!("+{}", payload.amount)
         };
 
-        // Spawn at a position that will be overridden if we find the actor
-        // For now, spawn at origin — Phase D will position relative to actor
+        // Find the actor's position on the map; fall back to world origin
+        let pos = actors
+            .iter()
+            .find(|(a, _)| a.id == payload.target)
+            .map(|(_, t)| t.translation)
+            .unwrap_or(Vec3::ZERO);
+
         commands.spawn((
             Text2d::new(text),
             TextFont {
@@ -27,7 +38,7 @@ pub fn spawn_damage_text(mut commands: Commands, mut hp_events: MessageReader<Hp
                 ..default()
             },
             TextColor(color),
-            Transform::from_xyz(0.0, 40.0, 10.0),
+            Transform::from_xyz(pos.x, pos.y + 40.0, 10.0),
             FloatingText {
                 timer: Timer::from_seconds(1.5, TimerMode::Once),
                 velocity: Vec2::new(0.0, 30.0),

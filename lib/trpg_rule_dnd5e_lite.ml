@@ -90,6 +90,19 @@ let init_state ~config =
       ("narration_log", `List []);
     ]
 
+let config_from_room_created_payload payload =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt "config" fields with
+      | Some (`Assoc _ as cfg) -> cfg
+      | Some _ -> `Assoc []
+      | None ->
+          if List.mem_assoc "party" fields || List.mem_assoc "world" fields then
+            payload
+          else
+            `Assoc [])
+  | _ -> `Assoc []
+
 let append_to_list key value state =
   match state with
   | `Assoc fields ->
@@ -423,18 +436,27 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   in
   match event.event_type with
   | Trpg_engine_event.Room_created ->
-      (match state with
-      | `Assoc fields ->
-          `Assoc (fields
-            |> assoc_put "status" (`String "lobby")
-            |> assoc_put "phase" (`String "lobby"))
-      | _ -> state)
+      let config = config_from_room_created_payload event.payload in
+      let fields =
+        init_state ~config
+        |> assoc_fields_or_empty
+      in
+      `Assoc
+        (fields
+        |> assoc_put "status" (`String "lobby")
+        |> assoc_put "phase" (`String "lobby")
+        |> assoc_put "session_outcome" `Null)
   | Trpg_engine_event.Room_started ->
       (match state with
       | `Assoc fields ->
           `Assoc (fields
             |> assoc_put "status" (`String "active")
-            |> assoc_put "phase" (`String "briefing"))
+            |> assoc_put "phase" (`String "briefing")
+            |> assoc_put "session_outcome" `Null
+            |> assoc_put "dice_log" (`List [])
+            |> assoc_put "narration_log" (`List [])
+            |> assoc_put "actor_control" (`Assoc [])
+            |> assoc_put "current_node" `Null)
       | _ -> state)
   | Trpg_engine_event.Room_ended ->
       (match state with

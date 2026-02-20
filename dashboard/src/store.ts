@@ -8,11 +8,13 @@ import type {
   Task,
   Message,
   Keeper,
+  KeeperMetricPoint,
   BoardPost,
   ServerStatus,
   PerpetualStatus,
   TrpgState,
   BoardSortMode,
+  KeeperLifecycleState,
 } from './types'
 import { fetchDashboard, fetchBoard, fetchTrpgState, type DashboardMode } from './api'
 import { lastEvent } from './sse'
@@ -25,6 +27,10 @@ export const messages = signal<Message[]>([])
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 export const perpetualStatus = signal<PerpetualStatus | null>(null)
+
+// --- Keeper heartbeat tracking (name -> last heartbeat timestamp ms) ---
+
+export const keeperHeartbeats = signal<Map<string, number>>(new Map())
 
 // --- Board state ---
 
@@ -55,6 +61,50 @@ export const tasksByStatus = computed(() => {
     inProgress: all.filter(t => t.status === 'in_progress' || t.status === 'claimed'),
     done: all.filter(t => t.status === 'done'),
   }
+})
+
+// --- Keeper lifecycle derivation ---
+
+export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
+  const series = keeper.metrics_series
+  if (!series || series.length === 0) {
+    const status = keeper.status?.toLowerCase() ?? ''
+    if (status === 'offline' || status === 'inactive') return 'offline'
+    return 'idle'
+  }
+  const latest = series[series.length - 1]
+  if (!latest) return 'idle'
+  if (latest.is_handoff) return 'handoff-imminent'
+  if (latest.is_compaction) return 'compacting'
+  const ratio = latest.context_ratio
+  if (ratio > 0.85) return 'handoff-imminent'
+  if (ratio > 0.70) return 'preparing'
+  if (ratio > 0.50) return 'compacting'
+  return 'active'
+}
+
+export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>> = computed(() => {
+  const map = new Map<string, KeeperLifecycleState>()
+  for (const k of keepers.value) {
+    map.set(k.name, deriveLifecycleState(k))
+  }
+  return map
+})
+
+// Heartbeat staleness threshold (120 seconds)
+const HEARTBEAT_STALE_MS = 120_000
+
+export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
+  const now = Date.now()
+  const stale = new Set<string>()
+  const hb = keeperHeartbeats.value
+  for (const k of keepers.value) {
+    const lastTs = hb.get(k.name)
+    if (lastTs != null && (now - lastTs) > HEARTBEAT_STALE_MS) {
+      stale.add(k.name)
+    }
+  }
+  return stale
 })
 
 // --- Cache for dashboard batch ---
@@ -155,6 +205,35 @@ function normalizeMessage(raw: unknown): Message | null {
   }
 }
 
+function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item): KeeperMetricPoint | null => {
+      if (!isRecord(item)) return null
+      const ts = asNumber(item.ts_unix)
+      if (ts == null) return null
+      const handoffObj = isRecord(item.handoff) ? item.handoff : null
+      return {
+        ts,
+        context_ratio: asNumber(item.context_ratio) ?? 0,
+        context_tokens: asNumber(item.context_tokens) ?? 0,
+        context_max: asNumber(item.context_max) ?? 0,
+        latency_ms: asNumber(item.latency_ms) ?? 0,
+        generation: asNumber(item.generation) ?? 0,
+        channel: typeof item.channel === 'string' ? item.channel : 'turn',
+        is_handoff: handoffObj != null && item.handoff_performed === true,
+        is_compaction: item.compacted === true,
+        compaction_saved_tokens: asNumber(item.compaction_saved_tokens) ?? 0,
+        compaction_trigger: typeof item.compaction_trigger === 'string' ? item.compaction_trigger : null,
+        model_used: typeof item.model_used === 'string' ? item.model_used : '',
+        cost_usd: asNumber(item.cost_usd) ?? 0,
+        handoff_to_model: handoffObj ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null) : null,
+        handoff_new_generation: handoffObj ? (asNumber(handoffObj.new_generation) ?? null) : null,
+      }
+    })
+    .filter((item): item is KeeperMetricPoint => item !== null)
+}
+
 function normalizeKeepers(raw: unknown): Keeper[] {
   const rows =
     Array.isArray(raw)
@@ -201,6 +280,8 @@ function normalizeKeepers(raw: unknown): Keeper[] {
             }
           : undefined
 
+      const metricsSeries = normalizeMetricsSeries(row.metrics_series)
+
       return {
         name,
         emoji: asString(row.emoji),
@@ -233,6 +314,7 @@ function normalizeKeepers(raw: unknown): Keeper[] {
         skill_primary: asString(row.skill_primary) ?? null,
         skill_secondary: skillSecondary,
         skill_reason: asString(row.skill_reason) ?? null,
+        metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindowRaw as Keeper['metrics_window'],
         agent: normalizedAgent,
       }
@@ -308,6 +390,13 @@ export function setupSSEReaction(): () => void {
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
+    // Handle keeper heartbeat events — update heartbeat map without full refresh
+    if (event.type === 'keeper_heartbeat' && event.name) {
+      const next = new Map(keeperHeartbeats.value)
+      next.set(event.name, event.ts_unix ? event.ts_unix * 1000 : Date.now())
+      keeperHeartbeats.value = next
+    }
+
     invalidateDashboardCache()
 
     // Debounced dashboard refresh
@@ -326,6 +415,11 @@ export function setupSSEReaction(): () => void {
           _boardDebounce = null
         }, 500)
       }
+    }
+
+    // Keeper events trigger dashboard refresh for up-to-date metrics
+    if (event.type === 'keeper_handoff' || event.type === 'keeper_compaction' || event.type === 'keeper_guardrail') {
+      invalidateDashboardCache()
     }
   })
 

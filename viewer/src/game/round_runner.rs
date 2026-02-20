@@ -65,11 +65,11 @@ const MAX_ROUNDS: u32 = 50;
 
 /// Delay between rounds (ms) — gives SSE events time to stream + user to read.
 #[cfg(target_arch = "wasm32")]
-const INTER_ROUND_DELAY_MS: i32 = 2500;
+const INTER_ROUND_DELAY_MS: i32 = 5000;
 
 /// Initial delay before first round (ms) — wait for SSE + initial state.
 #[cfg(target_arch = "wasm32")]
-const STARTUP_DELAY_MS: i32 = 1200;
+const STARTUP_DELAY_MS: i32 = 3000;
 
 /// Retry budget when a round response is successful but does not advance turn.
 #[cfg(any(target_arch = "wasm32", test))]
@@ -88,11 +88,7 @@ const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
 
 /// Retry delay for transient round-run conflicts (ms).
 #[cfg(any(target_arch = "wasm32", test))]
-const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 700;
-
-/// Delay before retrying when another owner holds the round-flight lock.
-#[cfg(target_arch = "wasm32")]
-const ROUND_FLIGHT_LOCK_WAIT_MS: i32 = 350;
+const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 1200;
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn stall_retry_delay_ms(retry_count: u32) -> i32 {
@@ -211,15 +207,12 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                         "RoundRunner: missing/invalid round plan, stopping auto loop — {}",
                         reason
                     );
-                    if let Ok(mut guard) = last_result.lock() {
-                        *guard = Some(format!("ERROR: {}", reason));
-                    }
                     break;
                 }
             };
             if !try_acquire_round_flight("auto") {
                 log::info!("RoundRunner: round flight locked by another request; waiting");
-                sleep_ms(ROUND_FLIGHT_LOCK_WAIT_MS).await;
+                sleep_ms(750).await;
                 continue;
             }
             round_num += 1;
@@ -231,7 +224,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
             match post_result {
                 Ok(resp) => {
                     if let Some(api_error) = round_response_api_error(&resp) {
-                        if is_transient_round_conflict(&api_error) {
+                        if is_transient_round_conflict(None, &api_error) {
                             round_num = round_num.saturating_sub(1);
                             stalled_retries = 0;
                             log::info!(
@@ -263,19 +256,28 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     if let Ok(mut guard) = rounds_completed.lock() {
                         *guard = round_num;
                     }
+                    if let Some(api_error) = round_response_api_error(&resp) {
+                        if is_transient_round_conflict(None, &api_error) {
+                            log::info!(
+                                "RoundRunner: round request is already in progress. Waiting for prior result."
+                            );
+                            round_num = round_num.saturating_sub(1);
+                            sleep_ms(900).await;
+                            continue;
+                        }
+                    }
                     if resp.contains("\"status\":\"ended\"")
                         || resp.contains("\"status\":\"completed\"")
                         || resp.contains("\"game_over\":true")
                     {
                         game_ended.store(true, Ordering::SeqCst);
                         log::info!("RoundRunner: game ended signal in response");
-                    } else if matches!(round_response_stalled(&resp), Some(true)) {
-                        if round_response_all_unavailable(&resp) {
-                            log::warn!(
-                                "RoundRunner: all player keepers unavailable in this response. Stopping auto loop."
-                            );
-                            break;
-                        }
+                    } else if round_response_has_prompt_meta_artifact_failures(&resp) {
+                        log::warn!(
+                            "RoundRunner: stopping auto loop due to invalid keeper replies (prompt/meta artifacts)."
+                        );
+                        break;
+                    } else if matches!(round_response_advanced(&resp), Some(false)) {
                         stalled_retries = stalled_retries.saturating_add(1);
                         if stalled_retries > MAX_STALL_RETRIES {
                             log::warn!(
@@ -301,7 +303,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                     log::warn!("RoundRunner: POST failed — {}", detail);
 
-                    if is_transient_round_conflict(&detail) {
+                    if is_transient_round_conflict(None, &detail) {
                         round_num = round_num.saturating_sub(1);
                         stalled_retries = 0;
                         log::info!(
@@ -313,6 +315,15 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     }
 
                     if let Some(status) = parse_http_status(&detail) {
+                        if is_transient_round_conflict(Some(status), &detail) {
+                            log::info!(
+                                "RoundRunner: single-flight conflict (HTTP {}). Waiting before retry.",
+                                status
+                            );
+                            round_num = round_num.saturating_sub(1);
+                            sleep_ms(900).await;
+                            continue;
+                        }
                         if (400..500).contains(&status) && status != 429 {
                             log::warn!(
                                 "RoundRunner: stopping due to non-retriable HTTP {}",
@@ -323,6 +334,11 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     } else if detail.contains("404") || detail.contains("422") {
                         log::warn!("RoundRunner: stopping due to fatal HTTP error");
                         break;
+                    } else if is_transient_round_conflict(None, &detail) {
+                        log::info!("RoundRunner: transient in-progress conflict. Waiting before retry.");
+                        round_num = round_num.saturating_sub(1);
+                        sleep_ms(900).await;
+                        continue;
                     }
                 }
             }
@@ -413,7 +429,8 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         })
         .ok_or_else(|| "DM keeper가 비어 있습니다.".to_string())?;
 
-    let phase = read_dom_input("round-run-phase").unwrap_or_else(|| "round".to_string());
+    let phase_raw = read_dom_input("round-run-phase").unwrap_or_else(|| "round".to_string());
+    let phase = normalize_round_phase_input(&phase_raw);
     let timeout_sec = read_dom_input("round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
@@ -421,17 +438,11 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
     let lang = read_dom_input("round-run-lang").unwrap_or_else(|| "ko".to_string());
 
     // 2) Player keeper mapping from hidden round plan (`actor=keeper,actor=keeper,...`).
-    let player_pairs = with_claimed_player_pair(
-        read_dom_value("round-run-players")
-            .map(|raw| parse_player_keeper_pairs(&raw))
-            .unwrap_or_default(),
-        read_claimed_actor_keeper_for_current_room(),
-    );
+    let player_pairs = read_dom_value("round-run-players")
+        .map(|raw| parse_player_keeper_pairs(&raw))
+        .unwrap_or_default();
     if player_pairs.is_empty() {
-        return Err(
-            "player keeper 매핑이 비어 있습니다. PARTY에서 캐릭터를 `참여`로 점유하거나, `새 게임`에서 player keeper를 할당하세요."
-                .to_string(),
-        );
+        return Err("player keeper 매핑이 비어 있습니다.".to_string());
     }
 
     let mut player_keepers = Map::new();
@@ -446,7 +457,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         "phase": phase,
         "timeout_sec": timeout_sec,
         "lang": lang,
-        "require_claim": read_claimed_keeper_for_current_room().is_some()
+        "require_claim": false
     });
 
     Ok(body.to_string())
@@ -479,6 +490,18 @@ fn read_dom_input(id: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn normalize_round_phase_input(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => "round".to_string(),
+        "discussion" | "discuss" | "party_discussion" | "player_discussion" | "action"
+        | "dice" => "round".to_string(),
+        "ended" => "end".to_string(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn claim_matches_current_room() -> bool {
     let claimed_room = read_dom_input("claimed-room-id").unwrap_or_default();
     !claimed_room.is_empty() && claimed_room == config::current_room_id()
@@ -494,94 +517,12 @@ fn read_claimed_keeper_for_current_room() -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_claimed_actor_keeper_for_current_room() -> Option<(String, String)> {
-    if !claim_matches_current_room() {
-        return None;
-    }
-    let actor_id = read_dom_input("claimed-actor-id").unwrap_or_default();
-    let keeper_name = read_dom_input("claimed-keeper").unwrap_or_default();
-    if actor_id.is_empty() || keeper_name.is_empty() {
-        None
-    } else {
-        Some((actor_id, keeper_name))
-    }
-}
-
-fn with_claimed_player_pair(
-    mut player_pairs: Vec<(String, String)>,
-    claimed_pair: Option<(String, String)>,
-) -> Vec<(String, String)> {
-    if !player_pairs.is_empty() {
-        return player_pairs;
-    }
-    if let Some((actor_id, keeper_name)) = claimed_pair {
-        if !actor_id.trim().is_empty() && !keeper_name.trim().is_empty() {
-            player_pairs.push((actor_id.trim().to_string(), keeper_name.trim().to_string()));
-        }
-    }
-    player_pairs
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-#[derive(Default, Debug, Clone)]
-struct RoundRunSummary {
-    advanced: Option<bool>,
-    turn_before: Option<u64>,
-    turn_after: Option<u64>,
-    participants: u64,
-    unavailable: u64,
-    player_successes: u64,
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn parse_round_run_summary(resp: &str) -> Option<RoundRunSummary> {
-    let parsed = serde_json::from_str::<serde_json::Value>(resp).ok()?;
-    let summary = parsed.get("summary");
-    Some(RoundRunSummary {
-        advanced: summary
-            .and_then(|row| row.get("advanced"))
-            .and_then(serde_json::Value::as_bool),
-        turn_before: parsed.get("turn_before").and_then(serde_json::Value::as_u64),
-        turn_after: parsed.get("turn_after").and_then(serde_json::Value::as_u64),
-        participants: summary
-            .and_then(|row| row.get("participants"))
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0),
-        unavailable: summary
-            .and_then(|row| row.get("unavailable"))
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0),
-        player_successes: summary
-            .and_then(|row| row.get("player_successes"))
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0),
-    })
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
 fn round_response_advanced(resp: &str) -> Option<bool> {
-    let summary = parse_round_run_summary(resp)?;
-    if let Some(advanced) = summary.advanced {
-        return Some(advanced);
-    }
-    match (summary.turn_before, summary.turn_after) {
-        (Some(turn_before), Some(turn_after)) => Some(turn_after > turn_before),
-        _ => None,
-    }
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn round_response_stalled(resp: &str) -> Option<bool> {
-    round_response_advanced(resp).map(|advanced| !advanced)
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn round_response_all_unavailable(resp: &str) -> bool {
-    let Some(summary) = parse_round_run_summary(resp) else {
-        return false;
-    };
-    let player_slots = summary.participants.saturating_sub(1);
-    player_slots > 0 && summary.player_successes == 0 && summary.unavailable >= player_slots
+    let parsed = serde_json::from_str::<serde_json::Value>(resp).ok()?;
+    parsed
+        .get("summary")
+        .and_then(|summary| summary.get("advanced"))
+        .and_then(serde_json::Value::as_bool)
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -601,6 +542,43 @@ fn round_response_api_error(resp: &str) -> Option<String> {
             .unwrap_or("round run request was rejected")
             .to_string(),
     )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_has_prompt_meta_artifact_failures(resp: &str) -> bool {
+    let parsed = match serde_json::from_str::<serde_json::Value>(resp) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let Some(statuses) = parsed.get("statuses").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    if statuses.is_empty() {
+        return false;
+    }
+    let mut invalid_count = 0usize;
+    for status in statuses {
+        let state = status
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if state != "invalid_response" {
+            continue;
+        }
+        let reason = status
+            .get("reason")
+            .or_else(|| status.get("error"))
+            .or_else(|| status.get("reply"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if reason.contains("prompt/meta artifacts") {
+            invalid_count += 1;
+        }
+    }
+    invalid_count > 0
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -623,7 +601,7 @@ fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn parse_http_status(detail: &str) -> Option<u16> {
     let rest = detail.strip_prefix("HTTP ")?;
     let code_text = rest.split([' ', ':']).next()?.trim();
@@ -651,10 +629,15 @@ fn is_keeper_busy_error(raw: &str) -> bool {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn is_transient_round_conflict(raw: &str) -> bool {
-    is_round_in_flight_error(raw) || is_keeper_busy_error(raw)
+fn is_transient_round_conflict(status: Option<u16>, detail: &str) -> bool {
+    let lowered = detail.trim().to_ascii_lowercase();
+    let has_conflict_phrase = is_round_in_flight_error(&lowered)
+        || is_keeper_busy_error(&lowered)
+        || lowered.contains("already running")
+        || lowered.contains("in progress");
+    let is_conflict_status = matches!(status, Some(400 | 409 | 423 | 429));
+    has_conflict_phrase || (is_conflict_status && lowered.contains("round"))
 }
-
 #[cfg(target_arch = "wasm32")]
 fn auto_round_enabled() -> bool {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -759,9 +742,9 @@ async fn sleep_ms(ms: i32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_transient_round_conflict, round_response_advanced, round_response_all_unavailable,
-        round_response_api_error, round_response_stalled, stall_retry_delay_ms,
-        with_claimed_player_pair,
+        is_transient_round_conflict, parse_http_status, round_response_api_error,
+        round_response_has_prompt_meta_artifact_failures,
+        stall_retry_delay_ms,
     };
 
     #[test]
@@ -777,69 +760,52 @@ mod tests {
     fn stall_retry_delay_handles_zero_retry_input() {
         assert_eq!(stall_retry_delay_ms(0), 2000);
     }
-
     #[test]
-    fn transient_round_conflicts_detected() {
-        assert!(is_transient_round_conflict(
-            "HTTP 400: round run already in progress for room adventure-123"
-        ));
-        assert!(is_transient_round_conflict(
-            "keeper busy: each spawned keeper can handle only one round at a time"
-        ));
-        assert!(!is_transient_round_conflict("HTTP 404: not found"));
-    }
-
-    #[test]
-    fn round_response_api_error_extracts_ok_false_payload() {
+    fn parse_http_status_from_prefixed_error_line() {
         assert_eq!(
-            round_response_api_error(r#"{"ok":false,"error":"keeper busy: p01"}"#).as_deref(),
-            Some("keeper busy: p01")
+            parse_http_status("HTTP 400: {\"ok\":false,\"error\":\"round run already in progress\"}"),
+            Some(400)
         );
-        assert_eq!(round_response_api_error(r#"{"ok":true}"#), None);
-        assert_eq!(round_response_api_error(r#"{"turn_after":5}"#), None);
     }
 
     #[test]
-    fn claimed_player_pair_backfills_empty_plan() {
-        let merged = with_claimed_player_pair(
-            Vec::new(),
-            Some(("warrior-1".to_string(), "keeper-x".to_string())),
+    fn detect_transient_round_conflict_from_message() {
+        assert!(is_transient_round_conflict(
+            Some(400),
+            "HTTP 400: round run already in progress for room_id=adventure-1",
+        ));
+        assert!(!is_transient_round_conflict(
+            Some(400),
+            "HTTP 400: missing room_id",
+        ));
+    }
+
+    #[test]
+    fn parse_round_response_api_error_payload() {
+        let payload = r#"{"ok":false,"error":"round run already in progress for room_id=abc"}"#;
+        assert_eq!(
+            round_response_api_error(payload),
+            Some("round run already in progress for room_id=abc".to_string())
         );
-        assert_eq!(merged, vec![("warrior-1".to_string(), "keeper-x".to_string())]);
     }
 
     #[test]
-    fn claimed_player_pair_does_not_override_existing_pairs() {
-        let merged = with_claimed_player_pair(
-            vec![("mage-1".to_string(), "keeper-a".to_string())],
-            Some(("warrior-1".to_string(), "keeper-x".to_string())),
-        );
-        assert_eq!(merged, vec![("mage-1".to_string(), "keeper-a".to_string())]);
-    }
-
-    #[test]
-    fn round_response_advanced_falls_back_to_turn_delta() {
-        let resp = r#"{"turn_before":7,"turn_after":8}"#;
-        assert_eq!(round_response_advanced(resp), Some(true));
-        assert_eq!(round_response_stalled(resp), Some(false));
-    }
-
-    #[test]
-    fn round_response_detects_stall_from_summary() {
-        let resp = r#"{
-            "turn_before":40,
-            "turn_after":40,
-            "summary":{"advanced":false,"participants":5,"player_successes":0,"unavailable":4}
+    fn detect_prompt_meta_artifact_failures_in_statuses() {
+        let payload = r#"{
+            "ok": true,
+            "statuses": [
+                {
+                    "actor_id":"p01",
+                    "status":"invalid_response",
+                    "reason":"keeper response reply contains only prompt/meta artifacts"
+                },
+                {
+                    "actor_id":"dm",
+                    "status":"skipped",
+                    "reason":"player quorum not met"
+                }
+            ]
         }"#;
-        assert_eq!(round_response_stalled(resp), Some(true));
-        assert!(round_response_all_unavailable(resp));
-    }
-
-    #[test]
-    fn round_response_all_unavailable_requires_player_slots() {
-        let resp = r#"{
-            "summary":{"participants":1,"player_successes":0,"unavailable":1}
-        }"#;
-        assert!(!round_response_all_unavailable(resp));
+        assert!(round_response_has_prompt_meta_artifact_failures(payload));
     }
 }

@@ -207,6 +207,9 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                         "RoundRunner: missing/invalid round plan, stopping auto loop — {}",
                         reason
                     );
+                    if let Ok(mut guard) = last_result.lock() {
+                        *guard = Some(format!("ERROR: {}", reason));
+                    }
                     break;
                 }
             };
@@ -408,11 +411,17 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
     let lang = read_dom_input("round-run-lang").unwrap_or_else(|| "ko".to_string());
 
     // 2) Player keeper mapping from hidden round plan (`actor=keeper,actor=keeper,...`).
-    let player_pairs = read_dom_value("round-run-players")
-        .map(|raw| parse_player_keeper_pairs(&raw))
-        .unwrap_or_default();
+    let player_pairs = with_claimed_player_pair(
+        read_dom_value("round-run-players")
+            .map(|raw| parse_player_keeper_pairs(&raw))
+            .unwrap_or_default(),
+        read_claimed_actor_keeper_for_current_room(),
+    );
     if player_pairs.is_empty() {
-        return Err("player keeper 매핑이 비어 있습니다.".to_string());
+        return Err(
+            "player keeper 매핑이 비어 있습니다. PARTY에서 캐릭터를 `참여`로 점유하거나, `새 게임`에서 player keeper를 할당하세요."
+                .to_string(),
+        );
     }
 
     let mut player_keepers = Map::new();
@@ -472,6 +481,35 @@ fn read_claimed_keeper_for_current_room() -> Option<String> {
     } else {
         None
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_claimed_actor_keeper_for_current_room() -> Option<(String, String)> {
+    if !claim_matches_current_room() {
+        return None;
+    }
+    let actor_id = read_dom_input("claimed-actor-id").unwrap_or_default();
+    let keeper_name = read_dom_input("claimed-keeper").unwrap_or_default();
+    if actor_id.is_empty() || keeper_name.is_empty() {
+        None
+    } else {
+        Some((actor_id, keeper_name))
+    }
+}
+
+fn with_claimed_player_pair(
+    mut player_pairs: Vec<(String, String)>,
+    claimed_pair: Option<(String, String)>,
+) -> Vec<(String, String)> {
+    if !player_pairs.is_empty() {
+        return player_pairs;
+    }
+    if let Some((actor_id, keeper_name)) = claimed_pair {
+        if !actor_id.trim().is_empty() && !keeper_name.trim().is_empty() {
+            player_pairs.push((actor_id.trim().to_string(), keeper_name.trim().to_string()));
+        }
+    }
+    player_pairs
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -657,7 +695,10 @@ async fn sleep_ms(ms: i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_transient_round_conflict, round_response_api_error, stall_retry_delay_ms};
+    use super::{
+        is_transient_round_conflict, round_response_api_error, stall_retry_delay_ms,
+        with_claimed_player_pair,
+    };
 
     #[test]
     fn stall_retry_delay_scales_and_caps() {
@@ -692,5 +733,23 @@ mod tests {
         );
         assert_eq!(round_response_api_error(r#"{"ok":true}"#), None);
         assert_eq!(round_response_api_error(r#"{"turn_after":5}"#), None);
+    }
+
+    #[test]
+    fn claimed_player_pair_backfills_empty_plan() {
+        let merged = with_claimed_player_pair(
+            Vec::new(),
+            Some(("warrior-1".to_string(), "keeper-x".to_string())),
+        );
+        assert_eq!(merged, vec![("warrior-1".to_string(), "keeper-x".to_string())]);
+    }
+
+    #[test]
+    fn claimed_player_pair_does_not_override_existing_pairs() {
+        let merged = with_claimed_player_pair(
+            vec![("mage-1".to_string(), "keeper-a".to_string())],
+            Some(("warrior-1".to_string(), "keeper-x".to_string())),
+        );
+        assert_eq!(merged, vec![("mage-1".to_string(), "keeper-a".to_string())]);
     }
 }

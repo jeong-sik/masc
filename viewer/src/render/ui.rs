@@ -1,9 +1,12 @@
 //! UI widgets and interaction systems for TRPG viewer.
 
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
 use crate::audio::AudioSettings;
+use crate::game::state::{RoomState, TurnProgressState};
 
 /// Marker component for UI entities spawned by the TRPG viewer.
 #[derive(Component)]
@@ -45,6 +48,9 @@ pub struct MenuItem(pub MenuAction);
 pub struct UiState {
     pub settings_menu_open: bool,
     pub dev_menu_open: bool,
+    pub auto_save_enabled: bool,
+    pub show_fps: bool,
+    pub debug_overlay: bool,
 }
 
 /// Spawns lightweight in-canvas UI controls.
@@ -487,6 +493,7 @@ pub fn handle_menu_item_clicks(
     children_query: Query<&Children>,
     mut text_query: Query<&mut Text>,
     mut audio: ResMut<AudioSettings>,
+    mut runtime: MenuActionRuntime,
 ) {
     for (entity, interaction, menu_item) in &interactions {
         if *interaction != Interaction::Pressed {
@@ -515,28 +522,70 @@ pub fn handle_menu_item_clicks(
                 log::info!("Music toggled: {}", audio.music_enabled);
             }
             MenuAction::AutoSaveToggle => {
-                log::info!("Menu action: Auto-save toggled");
-                // TODO: Connect to save system
+                runtime.ui_state.auto_save_enabled = !runtime.ui_state.auto_save_enabled;
+                let label = if runtime.ui_state.auto_save_enabled {
+                    "Auto-save: ON"
+                } else {
+                    "Auto-save: OFF"
+                };
+                update_button_text(entity, label, &children_query, &mut text_query);
+                log::info!("Auto-save toggled: {}", runtime.ui_state.auto_save_enabled);
             }
             MenuAction::Fullscreen => {
-                log::info!("Menu action: Toggle fullscreen");
-                // TODO: Switch to fullscreen mode
+                if let Ok(mut window) = runtime.primary_window.single_mut() {
+                    let fullscreen = matches!(window.mode, WindowMode::Windowed);
+                    window.mode = if fullscreen {
+                        WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
+                    } else {
+                        WindowMode::Windowed
+                    };
+                    let label = if fullscreen {
+                        "Fullscreen: ON"
+                    } else {
+                        "Fullscreen: OFF"
+                    };
+                    update_button_text(entity, label, &children_query, &mut text_query);
+                    log::info!("Fullscreen toggled: {}", fullscreen);
+                }
             }
             MenuAction::ShowFps => {
-                log::info!("Menu action: Toggle FPS display");
-                // TODO: Enable/disable FPS counter
+                runtime.ui_state.show_fps = !runtime.ui_state.show_fps;
+                let label = if runtime.ui_state.show_fps {
+                    "FPS: ON"
+                } else {
+                    "FPS: OFF"
+                };
+                update_button_text(entity, label, &children_query, &mut text_query);
+                log::info!("FPS display toggled: {}", runtime.ui_state.show_fps);
             }
             MenuAction::DebugOverlay => {
-                log::info!("Menu action: Toggle debug overlay");
-                // TODO: Show/hide debug info
+                runtime.ui_state.debug_overlay = !runtime.ui_state.debug_overlay;
+                let label = if runtime.ui_state.debug_overlay {
+                    "Debug: ON"
+                } else {
+                    "Debug: OFF"
+                };
+                update_button_text(entity, label, &children_query, &mut text_query);
+                log::info!("Debug overlay toggled: {}", runtime.ui_state.debug_overlay);
             }
             MenuAction::ReloadAssets => {
-                log::info!("Menu action: Reload assets");
-                // TODO: Trigger asset hot-reload
+                let _ = runtime.asset_server.load_untyped("maps/area_a.jpg");
+                let _ = runtime.asset_server.load_untyped("portraits/grimja.png");
+                log::info!("Asset reload hint requested (maps/area_a.jpg, portraits/grimja.png)");
             }
             MenuAction::DumpState => {
-                log::info!("Menu action: Dump game state");
-                // TODO: Serialize and log current state
+                log::info!(
+                    "State dump | room={} status={} turn={} phase={} current_actor={} next_actor={} auto_save={} fps={} debug={}",
+                    runtime.room_state.id,
+                    runtime.room_state.status,
+                    runtime.room_state.turn,
+                    runtime.progress.phase,
+                    runtime.progress.current_actor,
+                    runtime.progress.next_actor,
+                    runtime.ui_state.auto_save_enabled,
+                    runtime.ui_state.show_fps,
+                    runtime.ui_state.debug_overlay
+                );
             }
         }
     }
@@ -557,6 +606,15 @@ fn update_button_text(
             }
         }
     }
+}
+
+#[derive(SystemParam)]
+pub struct MenuActionRuntime<'w, 's> {
+    pub ui_state: ResMut<'w, UiState>,
+    pub primary_window: Query<'w, 's, &'static mut Window, With<PrimaryWindow>>,
+    pub asset_server: Res<'w, AssetServer>,
+    pub room_state: Res<'w, RoomState>,
+    pub progress: Res<'w, TurnProgressState>,
 }
 
 // ============================================================================

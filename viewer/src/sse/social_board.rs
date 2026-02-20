@@ -109,6 +109,13 @@ pub enum BoardFetchResult {
 pub fn fetch_board_on_enter(mut commands: Commands) {
     let buffer: Arc<Mutex<Option<BoardFetchResult>>> = Arc::new(Mutex::new(None));
 
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Ok(mut slot) = buffer.lock() {
+            *slot = Some(BoardFetchResult::Posts(Vec::new()));
+        }
+    }
+
     fire_board_fetch(buffer.clone());
 
     commands.insert_resource(BoardBuffer { data: buffer });
@@ -186,7 +193,11 @@ fn fire_board_fetch(shared: Arc<Mutex<Option<BoardFetchResult>>>) {
     // Native no-op: suppress unused warning
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = shared;
+        if let Ok(mut buf) = shared.lock() {
+            *buf = Some(BoardFetchResult::Error(
+                "Lodge board fetch is only available in wasm viewer mode.".to_string(),
+            ));
+        }
     }
 }
 

@@ -4,11 +4,15 @@ mod theme;
 
 // Domain modules — compiled unconditionally, but systems are gated on ViewerMode.
 mod assets;
+#[cfg(not(target_arch = "wasm32"))]
 mod audio;
 mod dom;
 mod game;
+#[cfg(any(target_arch = "wasm32", test))]
 mod http;
+#[cfg(not(target_arch = "wasm32"))]
 mod render;
+#[cfg(not(target_arch = "wasm32"))]
 mod shaders;
 mod sse;
 

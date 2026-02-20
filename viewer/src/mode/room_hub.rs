@@ -11,7 +11,8 @@ use crate::game::lifecycle::TrpgLifecycleState;
 use super::mcp_rpc::mcp_tool_call;
 use super::{
     actor_admin_room_id, actor_admin_set_status, clear_trpg_dom, refresh_actor_admin_list,
-    set_current_room_id, set_element_display, unique_non_empty,
+    render_auto_round_toggle, set_current_room_id, set_element_display, sync_session_pause_buttons,
+    unique_non_empty,
 };
 
 const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
@@ -70,6 +71,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         return;
     };
     let running_only = load_room_hub_running_only();
+    let mut current = Vec::new();
     let mut running = Vec::new();
     let mut stopped = Vec::new();
     let mut lobby = Vec::new();
@@ -78,7 +80,8 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
 
     for room in rooms {
         let lane = room_lane_label(&room.status);
-        let current_attr = if room.id == selected_room {
+        let is_current = room.id == selected_room;
+        let current_attr = if is_current {
             " data-current=\"1\""
         } else {
             " data-current=\"0\""
@@ -106,6 +109,11 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
             agents = room.agent_count,
             tasks = room.task_count
         );
+        if is_current {
+            current.push(card);
+            continue;
+        }
+
         match lane {
             "running" => running.push(card),
             "stopped" => stopped.push(card),
@@ -129,27 +137,39 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         )
     };
 
+    let previous_count =
+        running.len() + stopped.len() + lobby.len() + unavailable.len() + ended.len();
     let lanes_html = if running_only {
-        lane_html("진행 중", running, "running")
+        format!(
+            "{}{}",
+            lane_html("현재 게임", current, "current"),
+            lane_html("이전 세션 · 진행 중", running, "running")
+        )
     } else {
         format!(
-            "{}{}{}{}{}",
-            lane_html("진행 중", running, "running"),
-            lane_html("멈춤", stopped, "stopped"),
-            lane_html("로비", lobby, "lobby"),
-            lane_html("오류", unavailable, "unavailable"),
-            lane_html("종료", ended, "ended")
+            "{}{}{}{}{}{}",
+            lane_html("현재 게임", current, "current"),
+            lane_html("이전 세션 · 진행 중", running, "running"),
+            lane_html("이전 세션 · 멈춤", stopped, "stopped"),
+            lane_html("이전 세션 · 로비", lobby, "lobby"),
+            lane_html("이전 세션 · 오류", unavailable, "unavailable"),
+            lane_html("이전 세션 · 종료", ended, "ended")
         )
     };
+    let current_text = crate::config::sanitize_room_id(selected_room)
+        .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
     let html = format!(
         concat!(
             "<div class=\"room-hub-tools\">",
+            "<span class=\"room-hub-summary\">현재 게임: <code>{current}</code> · 이전 세션 {previous_count}개</span>",
             "<button id=\"room-hub-running-toggle\" class=\"room-hub-filter\" type=\"button\" aria-pressed=\"{pressed}\">",
             "진행 중만",
             "</button>",
             "</div>",
             "{lanes}"
         ),
+        current = html_escape(&current_text),
+        previous_count = previous_count,
         pressed = if running_only { "true" } else { "false" },
         lanes = lanes_html
     );
@@ -280,7 +300,19 @@ async fn fetch_room_runtime(room_id: &str) -> Result<(String, u32, String), Stri
         .unwrap_or("-")
         .to_string();
 
-    // Staleness detection: override "active" to "paused" when last event is old
+    if let Ok(pause_status) =
+        mcp_tool_call("masc_pause_status", json!({ "room_id": room_id })).await
+    {
+        if pause_status
+            .get("paused")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            status = "paused".to_string();
+        }
+    }
+
+    // Staleness detection: fallback override when state stream is stale.
     if status == "active" {
         let last_event_ts = state
             .get("last_event_ts")
@@ -331,7 +363,7 @@ fn load_room_hub_visible() -> bool {
                 .flatten()
         })
         .map(|value| matches!(value.trim(), "1" | "true" | "on"))
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 fn save_room_hub_visible(visible: bool) {
@@ -398,10 +430,12 @@ fn remember_known_rooms(extra_rooms: &[String]) {
 pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     let selected = crate::config::sanitize_room_id(selected_room)
         .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
-    let mut rooms = vec![selected.clone(), crate::config::DEFAULT_ROOM_ID.to_string()];
-    rooms.extend(load_known_rooms());
-    rooms.extend(load_recent_rooms());
-    let rooms = unique_non_empty(rooms);
+    // Keep inline selector deterministic to avoid stale/duplicated room IDs from
+    // local storage history. Full room browsing is handled by the room-hub lanes.
+    let rooms = unique_non_empty(vec![
+        selected.clone(),
+        crate::config::DEFAULT_ROOM_ID.to_string(),
+    ]);
 
     if let Some(select) = doc
         .get_element_by_id("room-selector-inline")
@@ -425,9 +459,9 @@ pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
         input.set_value(&selected);
     }
     if let Some(pill) = doc.get_element_by_id("room-status") {
-        let lifecycle = TrpgLifecycleState::Lobby;
+        let lifecycle = TrpgLifecycleState::Loading;
         pill.set_text_content(Some(&format!(
-            "현재 방: {} · {}",
+            "현재 게임: {} · {}",
             selected,
             lifecycle.label_ko()
         )));
@@ -444,6 +478,11 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
     };
     remember_known_rooms(std::slice::from_ref(&room));
     set_current_room_id(doc, &room);
+    if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+        let _ = dashboard.set_attribute("data-auto-round", "0");
+    }
+    render_auto_round_toggle(doc);
+    crate::game::round_runner::set_auto_round_running(false);
     clear_trpg_dom(doc);
     sync_room_hub_selection(doc, &room);
     let doc_for_refresh = doc.clone();
@@ -507,6 +546,7 @@ pub(super) async fn refresh_rooms_from_server(
             });
         }
     }
+    snapshots = dedup_room_snapshots(snapshots);
 
     let room_ids = unique_non_empty(
         snapshots
@@ -537,7 +577,63 @@ pub(super) async fn refresh_rooms_from_server(
     sync_room_controls(doc, &current);
     render_room_hub(doc, &snapshots, &current);
     bind_room_hub_buttons(doc);
+    let current_status = snapshots
+        .iter()
+        .find(|row| row.id == current)
+        .map(|row| row.status.as_str())
+        .unwrap_or("idle");
+    sync_session_pause_buttons(doc, current_status);
     Ok(snapshots)
+}
+
+fn merge_room_snapshot(existing: &mut RoomSnapshot, incoming: RoomSnapshot) {
+    if existing.status.trim().is_empty()
+        || existing.status.eq_ignore_ascii_case("idle")
+        || existing.status.eq_ignore_ascii_case("unknown")
+    {
+        if !incoming.status.trim().is_empty() {
+            existing.status = incoming.status.clone();
+        }
+    }
+    if incoming.turn >= existing.turn {
+        existing.turn = incoming.turn;
+        if !incoming.phase.trim().is_empty() {
+            existing.phase = incoming.phase.clone();
+        }
+    } else if (existing.phase.trim().is_empty() || existing.phase.trim() == "-")
+        && !incoming.phase.trim().is_empty()
+    {
+        existing.phase = incoming.phase.clone();
+    }
+    existing.agent_count = existing.agent_count.max(incoming.agent_count);
+    existing.task_count = existing.task_count.max(incoming.task_count);
+}
+
+fn dedup_room_snapshots(rows: Vec<RoomSnapshot>) -> Vec<RoomSnapshot> {
+    use std::collections::HashMap;
+
+    let mut out: Vec<RoomSnapshot> = Vec::new();
+    let mut index_by_id: HashMap<String, usize> = HashMap::new();
+
+    for mut row in rows {
+        row.id =
+            crate::config::sanitize_room_id(&row.id).unwrap_or_else(|| row.id.trim().to_string());
+        if row.id.is_empty() {
+            continue;
+        }
+        let key = row.id.to_ascii_lowercase();
+        if let Some(idx) = index_by_id.get(&key).copied() {
+            if let Some(existing) = out.get_mut(idx) {
+                merge_room_snapshot(existing, row);
+            }
+            continue;
+        }
+        let idx = out.len();
+        index_by_id.insert(key, idx);
+        out.push(row);
+    }
+
+    out
 }
 
 pub(super) fn bind_room_controls(doc: &web_sys::Document) {
@@ -618,7 +714,10 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
             };
             if let Some(pill) = doc.get_element_by_id("room-status") {
                 let current = crate::config::current_room_id();
-                pill.set_text_content(Some(&format!("현재 방: {} · 목록 불러오는 중...", current)));
+                pill.set_text_content(Some(&format!(
+                    "현재 게임: {} · 목록 불러오는 중...",
+                    current
+                )));
             }
             let doc_for_fetch = doc.clone();
             wasm_bindgen_futures::spawn_local(async move {
@@ -627,7 +726,7 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                         let current = crate::config::current_room_id();
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
                             pill.set_text_content(Some(&format!(
-                                "현재 방: {} · {}개 방",
+                                "현재 게임: {} · {}개 방",
                                 current,
                                 rooms.len()
                             )));
@@ -638,7 +737,7 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                         let current = crate::config::current_room_id();
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
                             pill.set_text_content(Some(&format!(
-                                "현재 방: {} · 목록 실패",
+                                "현재 게임: {} · 목록 실패",
                                 current
                             )));
                         }
@@ -671,34 +770,4 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
         });
         hub_cb.forget();
     }
-}
-
-pub(super) fn parse_keeper_models(raw: &str) -> Vec<String> {
-    unique_non_empty(
-        raw.split(',')
-            .map(|part| part.trim().to_string())
-            .collect::<Vec<_>>(),
-    )
-}
-
-pub(super) fn selected_player_keepers(doc: &web_sys::Document) -> Vec<String> {
-    let Ok(nodes) = doc.query_selector_all("#new-game-player-select option:checked") else {
-        return Vec::new();
-    };
-    let mut keepers = Vec::new();
-    for i in 0..nodes.length() {
-        let Some(node) = nodes.item(i) else { continue };
-        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
-            continue;
-        };
-        let Some(value) = el.get_attribute("value") else {
-            continue;
-        };
-        let value = value.trim();
-        if value.is_empty() {
-            continue;
-        }
-        keepers.push(value.to_string());
-    }
-    unique_non_empty(keepers)
 }

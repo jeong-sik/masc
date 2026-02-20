@@ -73,18 +73,21 @@ pub struct Actor {
 pub struct MapToken;
 
 /// HP bar sprite attached as a child entity of each Actor.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct HpBarSprite {
     pub max_width: f32,
 }
 
 /// MP bar sprite attached as a child entity of each Actor.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct MpBarSprite {
     pub max_width: f32,
 }
 
 /// Floating damage/heal text that drifts upward and fades.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct FloatingText {
     pub timer: Timer,
@@ -92,17 +95,21 @@ pub struct FloatingText {
 }
 
 /// Marker for the 2D camera.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct GameCamera;
 
 /// Marker for the map background sprite (needed for OnExit despawn).
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct MapBackground;
 
 /// Marker for the full-screen weather overlay sprite (z = -9.0).
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct WeatherOverlay;
 
 /// Marker for the full-screen mood overlay sprite (z = -8.0).
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct MoodOverlay;

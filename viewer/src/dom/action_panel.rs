@@ -36,9 +36,11 @@ use crate::http::{self, RpcResult};
 // ─── Constants ──────────────────────────────
 
 /// Maximum length for action input text.
+#[cfg(any(target_arch = "wasm32", test))]
 const MAX_ACTION_LEN: usize = 500;
 
 /// Maximum number of entries in the action history panel.
+#[cfg(target_arch = "wasm32")]
 const MAX_HISTORY_ENTRIES: u32 = 5;
 
 /// Milliseconds before auto-clearing a success status message.

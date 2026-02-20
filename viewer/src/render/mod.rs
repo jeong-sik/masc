@@ -8,7 +8,8 @@ pub mod ui;
 use bevy::prelude::*;
 
 use crate::game::components::{
-    FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken, MoodOverlay, WeatherOverlay,
+    FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken, MoodOverlay, MpBarSprite,
+    WeatherOverlay,
 };
 use crate::mode::ViewerMode;
 use crate::render::characters::DragState;
@@ -46,6 +47,7 @@ impl Plugin for MapRenderPlugin {
                     characters::spawn_character_sprites,
                     characters::update_character_positions,
                     characters::update_hp_bars,
+                    characters::update_mp_bars,
                     characters::apply_death_visuals,
                     characters::handle_drag_start,
                     characters::handle_drag,
@@ -97,6 +99,7 @@ fn cleanup_trpg_scene(
             With<FadeOverlay>,
             With<FloatingText>,
             With<HpBarSprite>,
+            With<MpBarSprite>,
             With<WeatherOverlay>,
             With<MoodOverlay>,
             With<UiMarker>,

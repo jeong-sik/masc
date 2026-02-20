@@ -97,6 +97,45 @@ fn compact_reason_text(raw: &str) -> String {
     }
 }
 
+fn compact_runner_result(raw: &str) -> String {
+    let compact = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_PREVIEW_CHARS: usize = 96;
+    if compact.chars().count() <= MAX_PREVIEW_CHARS {
+        compact
+    } else {
+        let mut short = compact.chars().take(MAX_PREVIEW_CHARS).collect::<String>();
+        short.push_str("...");
+        short
+    }
+}
+
+fn runner_result_has_issue(raw: &str) -> bool {
+    if raw.trim().is_empty() {
+        return false;
+    }
+
+    let lowered = raw.to_ascii_lowercase();
+    [
+        "error",
+        "failed",
+        "timeout",
+        "unavailable",
+        "stall",
+        "stuck",
+        "invalid",
+        "missing",
+        "busy",
+        "retry",
+        "conflict",
+        "lock",
+        "429",
+        "500",
+        "503",
+    ]
+    .iter()
+    .any(|keyword| lowered.contains(keyword))
+}
+
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Copy)]
 enum FlowStepState {
@@ -401,7 +440,16 @@ fn build_next_action_hint(
     runner_running: bool,
     current_actor: &str,
     has_actor_issues: bool,
+    has_runner_issue: bool,
 ) -> String {
+    if runner_running && has_runner_issue {
+        return "자동 진행 응답에 이슈가 있습니다. 멈춤 후 재개 또는 라운드 실행을 다시 누르세요."
+            .to_string();
+    }
+    if !runner_running && has_runner_issue {
+        return "직전 자동 진행에서 이슈가 있었습니다. 원인 확인 후 재개 또는 라운드 실행을 누르세요."
+            .to_string();
+    }
     if runner_running {
         return "자동 진행 중입니다. 이벤트 수신을 기다리세요.".to_string();
     }
@@ -441,8 +489,10 @@ fn build_flow_banner(
     connection: &ConnectionStatus,
     runner_running: bool,
     has_actor_issues: bool,
+    has_runner_issue: bool,
     current_actor: &str,
     next_action: &str,
+    runner_preview: &str,
 ) -> (&'static str, &'static str, String) {
     match connection {
         ConnectionStatus::Failed | ConnectionStatus::Disconnected => (
@@ -482,7 +532,14 @@ fn build_flow_banner(
                 "새 게임을 시작하거나 실행 가능한 방으로 이동하세요.".to_string(),
             ),
             TrpgLifecycleState::Running => {
-                if runner_running {
+                if has_runner_issue {
+                    let detail = if runner_preview.trim().is_empty() || runner_preview == "-" {
+                        format!("자동 진행 이슈 감지 · {}", next_action)
+                    } else {
+                        format!("자동 진행 이슈 감지 ({}) · {}", runner_preview, next_action)
+                    };
+                    ("주의", "is-alert", detail)
+                } else if runner_running {
                     (
                         "자동 진행",
                         "is-running",
@@ -790,20 +847,39 @@ pub fn update_turn_runtime_dom(
         (false, 0, String::new())
     };
 
+    let runner_preview = if runner_last_result.trim().is_empty() {
+        "-".to_string()
+    } else {
+        compact_runner_result(&runner_last_result)
+    };
+    let has_runner_issue = runner_result_has_issue(&runner_last_result);
     let runner_state = if runner_running {
-        format!("자동 진행 {} 라운드", runner_rounds)
+        if has_runner_issue {
+            format!("자동 진행 {} 라운드 · 이슈 감지", runner_rounds)
+        } else {
+            format!("자동 진행 {} 라운드", runner_rounds)
+        }
+    } else if has_runner_issue {
+        "대기 · 이전 실행 이슈".to_string()
     } else {
         "대기".to_string()
     };
-    let next_action =
-        build_next_action_hint(lifecycle, runner_running, &current_actor, has_actor_issues);
+    let next_action = build_next_action_hint(
+        lifecycle,
+        runner_running,
+        &current_actor,
+        has_actor_issues,
+        has_runner_issue,
+    );
     let (flow_state, flow_class, flow_detail) = build_flow_banner(
         lifecycle,
         &connection,
         runner_running,
         has_actor_issues,
+        has_runner_issue,
         &current_actor,
         &next_action,
+        &runner_preview,
     );
 
     let connection_label = connection_status_label(&connection);
@@ -814,13 +890,15 @@ pub fn update_turn_runtime_dom(
         &sync_class,
         &control_state,
         &runner_last_result,
+        &runner_preview,
+        &has_runner_issue,
         &flow_state,
         &flow_class,
         &flow_detail,
     );
 
     let snapshot = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         room_status_key,
         turn,
         phase,
@@ -834,6 +912,7 @@ pub fn update_turn_runtime_dom(
         connection_class,
         sync_state,
         runner_state,
+        runner_preview,
         progress.last_event,
         issues_summary,
         next_action,
@@ -862,6 +941,18 @@ pub fn update_turn_runtime_dom(
             "status-active"
         };
         let issues_class = if has_actor_issues {
+            "status-error"
+        } else {
+            "status-idle"
+        };
+        let runner_state_class = if has_runner_issue {
+            "status-error"
+        } else if runner_running {
+            "status-active"
+        } else {
+            "status-idle"
+        };
+        let runner_preview_class = if has_runner_issue {
             "status-error"
         } else {
             "status-idle"
@@ -1052,12 +1143,6 @@ pub fn update_turn_runtime_dom(
         persist_round_plan_inputs(&document, &room_id);
 
         if let Some(debug_el) = document.get_element_by_id("round-sync-debug-body") {
-            let runner_preview = if runner_last_result.trim().is_empty() {
-                "-".to_string()
-            } else {
-                let compact = runner_last_result.trim().replace('\n', " ");
-                compact.chars().take(180).collect::<String>()
-            };
             let phase_sync_class = if phase_mismatch {
                 "sync-error"
             } else {
@@ -1119,7 +1204,9 @@ pub fn update_turn_runtime_dom(
   <div class="turn-runtime-item"><span class="k">현재</span><span class="v">{current} · {current_status}</span></div>
   <div class="turn-runtime-item"><span class="k">다음</span><span class="v">{next}</span></div>
   <div class="turn-runtime-item"><span class="k">직전</span><span class="v">{last}</span></div>
+  <div class="turn-runtime-item"><span class="k">자동 진행</span><span class="v {runner_state_class}">{runner_state}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">이슈</span><span class="v {issues_class}">{issues}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">자동 진행 응답</span><span class="v {runner_preview_class}">{runner_preview}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">다음 행동</span><span class="v">{next_action}</span></div>
   <div class="turn-runtime-item"><span class="k">파티</span><span class="v {party_class}">{party}</span></div>
 </div>
@@ -1135,8 +1222,12 @@ pub fn update_turn_runtime_dom(
             current_status = html_escape(current_status),
             next = html_escape(&next_actor),
             last = html_escape(&last_result),
+            runner_state_class = runner_state_class,
+            runner_state = html_escape(&runner_state),
             issues_class = issues_class,
             issues = html_escape(&issues_summary),
+            runner_preview_class = runner_preview_class,
+            runner_preview = html_escape(&runner_preview),
             next_action = html_escape(&next_action),
             party_class = party_class,
             party = html_escape(&party_status),
@@ -1177,14 +1268,20 @@ mod tests {
 
     #[test]
     fn next_action_prefers_issue_recovery_when_running() {
-        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "-", true);
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "-", true, false);
         assert_eq!(hint, "keeper 상태를 확인한 뒤 라운드 실행을 다시 누르세요.");
     }
 
     #[test]
     fn next_action_waits_for_current_actor_when_running() {
-        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "p03", false);
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "p03", false, false);
         assert_eq!(hint, "p03 응답을 기다리는 중입니다.");
+    }
+
+    #[test]
+    fn next_action_warns_on_runner_issue() {
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, true, "-", false, true);
+        assert!(hint.contains("자동 진행 응답"));
     }
 
     #[test]
@@ -1194,8 +1291,10 @@ mod tests {
             &ConnectionStatus::Failed,
             false,
             false,
+            false,
             "-",
             "라운드 실행을 누르세요.",
+            "-",
         );
         assert_eq!(state, "연결 오류");
         assert_eq!(class_name, "is-error");
@@ -1209,11 +1308,39 @@ mod tests {
             &ConnectionStatus::Connected,
             true,
             false,
+            false,
             "p01",
             "자동 진행 중입니다.",
+            "-",
         );
         assert_eq!(state, "자동 진행");
         assert_eq!(class_name, "is-running");
         assert!(detail.contains("자동"));
+    }
+
+    #[test]
+    fn flow_banner_prioritizes_runner_issue() {
+        let (state, class_name, detail) = build_flow_banner(
+            TrpgLifecycleState::Running,
+            &ConnectionStatus::Connected,
+            true,
+            false,
+            true,
+            "p01",
+            "자동 진행 응답에 이슈가 있습니다.",
+            "keeper busy detected",
+        );
+        assert_eq!(state, "주의");
+        assert_eq!(class_name, "is-alert");
+        assert!(detail.contains("이슈"));
+    }
+
+    #[test]
+    fn runner_issue_detector_flags_common_errors() {
+        assert!(runner_result_has_issue(
+            "RoundRunner: round still stalled after 3 retries"
+        ));
+        assert!(runner_result_has_issue("HTTP 503 from engine"));
+        assert!(!runner_result_has_issue("round completed successfully"));
     }
 }

@@ -2846,6 +2846,59 @@ let keeper_llm_tools : Llm_client.tool_def list = [
       ("required", `List [`String "post_id"; `String "content"]);
     ];
   };
+  {
+    tool_name = "keeper_fs_read";
+    tool_description =
+      "Read a file under current project root. Use for source inspection before edits.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
+        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes to return (default: 20000)")]);
+      ]);
+      ("required", `List [`String "path"]);
+    ];
+  };
+  {
+    tool_name = "keeper_fs_edit";
+    tool_description =
+      "Write/append a file under current project root. Use for concrete code changes.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
+        ("content", `Assoc [("type", `String "string"); ("description", `String "New file content or append payload")]);
+        ("mode", `Assoc [("type", `String "string"); ("description", `String "overwrite (default) or append")]);
+      ]);
+      ("required", `List [`String "path"; `String "content"]);
+    ];
+  };
+  {
+    tool_name = "keeper_bash";
+    tool_description =
+      "Run a shell command from project root. Use for build/test/check commands.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Shell command string to run via zsh -lc")]);
+        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
+      ]);
+      ("required", `List [`String "cmd"]);
+    ];
+  };
+  {
+    tool_name = "keeper_github";
+    tool_description =
+      "Run gh CLI commands from project root. Use for PR/review/comment operations.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'pr view 123 --comments'")]);
+        ("args", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Optional argv list for gh (without leading gh)")]);
+        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
+      ]);
+    ];
+  };
 ]
 
 let merge_usage
@@ -3151,7 +3204,62 @@ let extract_user_messages (ctx_work : Context_manager.working_context) : string 
        else
          None)
 
+let project_root_of_config (config : Room.config) : string =
+  let base = config.base_path in
+  if Filename.basename base = ".masc" then Filename.dirname base else base
+
+let starts_with ~(prefix : string) (s : string) : bool =
+  let lp = String.length prefix in
+  String.length s >= lp && String.sub s 0 lp = prefix
+
+let normalize_path_for_check (path : string) : string =
+  try Unix.realpath path
+  with _ ->
+    let parent = Filename.dirname path in
+    let parent_norm =
+      try Unix.realpath parent
+      with _ -> parent
+    in
+    Filename.concat parent_norm (Filename.basename path)
+
+let resolve_keeper_target_path ~(config : Room.config) ~(raw_path : string)
+    : (string, string) result =
+  let raw = String.trim raw_path in
+  if raw = "" then Error "path_required"
+  else
+    let root = project_root_of_config config in
+    let candidate =
+      if Filename.is_relative raw then Filename.concat root raw else raw
+    in
+    let root_norm = normalize_path_for_check root in
+    let target_norm = normalize_path_for_check candidate in
+    let allowed =
+      target_norm = root_norm
+      || starts_with ~prefix:(root_norm ^ "/") target_norm
+    in
+    if allowed then Ok candidate
+    else
+      Error
+        (Printf.sprintf
+           "path_outside_project_root: %s (root=%s)"
+           target_norm
+           root_norm)
+
+let truncate_tool_output ?(max_len = 12000) (s : string) : string =
+  if String.length s <= max_len then s
+  else String.sub s 0 max_len ^ "\n...[truncated]"
+
+let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
+  match st with
+  | Unix.WEXITED code ->
+      `Assoc [("kind", `String "exit"); ("code", `Int code)]
+  | Unix.WSIGNALED sig_num ->
+      `Assoc [("kind", `String "signaled"); ("signal", `Int sig_num)]
+  | Unix.WSTOPPED sig_num ->
+      `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
+
 let execute_keeper_tool_call
+    ~(config : Room.config)
     ~(meta : keeper_meta)
     ~(ctx_work : Context_manager.working_context)
     (tc : Llm_client.tool_call) : string =
@@ -3253,6 +3361,138 @@ let execute_keeper_tool_call
       in
       let (ok, msg) = Tool_board.handle_tool "masc_board_comment" board_args in
       if ok then msg else Yojson.Safe.to_string (`Assoc [("error", `String msg)])
+  | "keeper_fs_read" | "keeper_read" ->
+      let path = Safe_ops.json_string ~default:"" "path" args in
+      let max_bytes =
+        Safe_ops.json_int ~default:20000 "max_bytes" args
+        |> fun n -> max 512 (min 200000 n)
+      in
+      (match resolve_keeper_target_path ~config ~raw_path:path with
+       | Error e ->
+           Yojson.Safe.to_string (`Assoc [("error", `String e)])
+       | Ok target ->
+           (match Safe_ops.read_file_safe target with
+            | Error e ->
+                Yojson.Safe.to_string (`Assoc [("error", `String e); ("path", `String target)])
+            | Ok content ->
+                let total = String.length content in
+                let truncated = total > max_bytes in
+                let body =
+                  if truncated then String.sub content 0 max_bytes else content
+                in
+                Yojson.Safe.to_string
+                  (`Assoc [
+                    ("ok", `Bool true);
+                    ("path", `String target);
+                    ("bytes", `Int total);
+                    ("truncated", `Bool truncated);
+                    ("content", `String body);
+                  ])))
+  | "keeper_fs_edit" | "keeper_edit" ->
+      let path = Safe_ops.json_string ~default:"" "path" args in
+      let content = Safe_ops.json_string ~default:"" "content" args in
+      let mode =
+        Safe_ops.json_string ~default:"overwrite" "mode" args
+        |> String.lowercase_ascii
+      in
+      (match resolve_keeper_target_path ~config ~raw_path:path with
+       | Error e ->
+           Yojson.Safe.to_string (`Assoc [("error", `String e)])
+       | Ok target ->
+           (try
+              let parent = Filename.dirname target in
+              if not (Sys.file_exists parent) then Unix.mkdir parent 0o755;
+              (match mode with
+               | "append" ->
+                   let oc =
+                     open_out_gen [Open_wronly; Open_creat; Open_append] 0o644 target
+                   in
+                   Common.protect
+                     ~module_name:"tool_keeper"
+                     ~finally_label:"keeper_fs_edit_append_close"
+                     ~finally:(fun () -> close_out_noerr oc)
+                     (fun () -> output_string oc content)
+               | "overwrite" | "" ->
+                   let oc = open_out target in
+                   Common.protect
+                     ~module_name:"tool_keeper"
+                     ~finally_label:"keeper_fs_edit_overwrite_close"
+                     ~finally:(fun () -> close_out_noerr oc)
+                     (fun () -> output_string oc content)
+               | other ->
+                   raise (Invalid_argument ("unsupported_mode:" ^ other)));
+              Yojson.Safe.to_string
+                (`Assoc [
+                  ("ok", `Bool true);
+                  ("path", `String target);
+                  ("mode", `String (if mode = "" then "overwrite" else mode));
+                  ("bytes_written", `Int (String.length content));
+                ])
+            with
+            | Invalid_argument e ->
+                Yojson.Safe.to_string (`Assoc [("error", `String e); ("path", `String target)])
+            | Sys_error e ->
+                Yojson.Safe.to_string (`Assoc [("error", `String e); ("path", `String target)])
+            | Unix.Unix_error (err, _, _) ->
+                Yojson.Safe.to_string
+                  (`Assoc [
+                    ("error", `String (Unix.error_message err));
+                    ("path", `String target);
+                  ])))
+  | "keeper_bash" ->
+      let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+      let timeout_sec =
+        Safe_ops.json_float ~default:30.0 "timeout_sec" args
+        |> fun n -> max 1.0 (min 180.0 n)
+      in
+      if cmd = "" then Yojson.Safe.to_string (`Assoc [("error", `String "cmd_required")])
+      else
+        let root = project_root_of_config config in
+        let shell_cmd =
+          Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd
+        in
+        let (st, out) =
+          Process_eio.run_argv_with_status
+            ~timeout_sec
+            ["/bin/zsh"; "-lc"; shell_cmd]
+        in
+        Yojson.Safe.to_string
+          (`Assoc [
+            ("ok", `Bool (st = Unix.WEXITED 0));
+            ("status", process_status_to_json st);
+            ("output", `String (truncate_tool_output out));
+          ])
+  | "keeper_github" ->
+      let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+      let gh_args = Safe_ops.json_string_list "args" args in
+      let timeout_sec =
+        Safe_ops.json_float ~default:30.0 "timeout_sec" args
+        |> fun n -> max 1.0 (min 180.0 n)
+      in
+      let gh_cmd =
+        if cmd <> "" then "gh " ^ cmd
+        else if gh_args <> [] then
+          "gh " ^ String.concat " " (List.map Filename.quote gh_args)
+        else
+          ""
+      in
+      if gh_cmd = "" then Yojson.Safe.to_string (`Assoc [("error", `String "cmd_or_args_required")])
+      else
+        let root = project_root_of_config config in
+        let shell_cmd =
+          Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd
+        in
+        let (st, out) =
+          Process_eio.run_argv_with_status
+            ~timeout_sec
+            ["/bin/zsh"; "-lc"; shell_cmd]
+        in
+        Yojson.Safe.to_string
+          (`Assoc [
+            ("ok", `Bool (st = Unix.WEXITED 0));
+            ("status", process_status_to_json st);
+            ("output", `String (truncate_tool_output out));
+          ])
   | other ->
       Yojson.Safe.to_string (`Assoc [
         ("error", `String "unknown_tool");
@@ -3287,10 +3527,13 @@ let keeper_tool_followup_prompt
            output)
     |> String.concat "\n"
   in
+  let is_write_tool (name : string) : bool =
+    List.mem
+      name
+      [ "keeper_board_post"; "keeper_board_comment"; "keeper_fs_edit"; "keeper_edit" ]
+  in
   let has_write =
-    List.exists (fun name ->
-      name = "keeper_board_post"
-    ) already_executed
+    List.exists is_write_tool already_executed
   in
   let rules =
     if has_write then
@@ -4531,6 +4774,7 @@ let looks_fragmentary_history_text (raw : string) : bool =
 let run_proactive_generation
     ~(specs : Llm_client.model_spec list)
     ~(primary : Llm_client.model_spec)
+    ~(config : Room.config)
     ~(ctx_work : Context_manager.working_context)
     ~(meta : keeper_meta)
     ~(continuity_snapshot : keeper_state_snapshot option)
@@ -4574,7 +4818,7 @@ let run_proactive_generation
     List.map
       (fun (tc : Llm_client.tool_call) ->
          let output =
-           try execute_keeper_tool_call ~meta ~ctx_work tc
+           try execute_keeper_tool_call ~config ~meta ~ctx_work tc
            with exn ->
              Yojson.Safe.to_string
                (`Assoc [
@@ -4661,7 +4905,16 @@ let run_proactive_generation
                   ~already_executed:all_tools_so_far
               in
               let write_done =
-                List.exists (fun n -> n = "keeper_board_post") all_tools_so_far
+                List.exists
+                  (fun n ->
+                     List.mem n
+                       [
+                         "keeper_board_post";
+                         "keeper_board_comment";
+                         "keeper_fs_edit";
+                         "keeper_edit";
+                       ])
+                  all_tools_so_far
               in
               let next_tools =
                 if write_done then [] else keeper_llm_tools
@@ -4862,6 +5115,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                      run_proactive_generation
                        ~specs
                        ~primary
+                       ~config:ctx.config
                        ~ctx_work
                        ~meta
                        ~continuity_snapshot
@@ -6354,7 +6608,7 @@ let handle_keeper_msg ctx args : tool_result =
                     tc.call_name (_trunc tc.call_arguments 200);
                   let output =
                     try
-                      let r = execute_keeper_tool_call ~meta ~ctx_work tc in
+                      let r = execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc in
                       Printf.eprintf "[TRPG-TRACE] Tool %s OK: %s\n%!" tc.call_name (_trunc r 200);
                       r
                     with exn ->
@@ -6401,7 +6655,16 @@ let handle_keeper_msg ctx args : tool_result =
                   (* Once a write tool has been executed, strip tools from the
                      next request to force the model to produce a text answer. *)
                   let write_done =
-                    List.exists (fun n -> n = "keeper_board_post") all_tools_so_far
+                    List.exists
+                      (fun n ->
+                         List.mem n
+                           [
+                             "keeper_board_post";
+                             "keeper_board_comment";
+                             "keeper_fs_edit";
+                             "keeper_edit";
+                           ])
+                      all_tools_so_far
                   in
                   let next_tools =
                     if write_done then [] else keeper_llm_tools

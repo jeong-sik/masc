@@ -157,8 +157,10 @@ function parseJsonList<T>(text: string): T[] {
 
 // --- Dashboard (batch) ---
 
-export function fetchDashboard(): Promise<DashboardData> {
-  return get('/api/v1/dashboard')
+export type DashboardMode = 'compact' | 'full'
+
+export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<DashboardData> {
+  return get(`/api/v1/dashboard?mode=${mode}`)
 }
 
 // --- Board ---

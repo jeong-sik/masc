@@ -16,7 +16,7 @@ import type {
   BoardSortMode,
   KeeperLifecycleState,
 } from './types'
-import { fetchDashboard, fetchBoard, fetchTrpgState } from './api'
+import { fetchDashboard, fetchBoard, fetchTrpgState, type DashboardMode } from './api'
 import { lastEvent } from './sse'
 
 // --- Core state signals ---
@@ -109,11 +109,12 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 
 // --- Cache for dashboard batch ---
 
-let _dashboardCache: { data: unknown; time: number } | null = null
+const _dashboardCache: Partial<Record<DashboardMode, { data: unknown; time: number }>> = {}
 const DASHBOARD_CACHE_TTL = 5000
 
 export function invalidateDashboardCache(): void {
-  _dashboardCache = null
+  delete _dashboardCache.compact
+  delete _dashboardCache.full
 }
 
 // --- Data fetchers ---
@@ -321,16 +322,17 @@ function normalizeKeepers(raw: unknown): Keeper[] {
     .filter((row): row is Keeper => row !== null)
 }
 
-export async function refreshDashboard(): Promise<void> {
+export async function refreshDashboard(mode: DashboardMode = 'compact'): Promise<void> {
   const now = Date.now()
-  if (_dashboardCache && (now - _dashboardCache.time) < DASHBOARD_CACHE_TTL) {
+  const cached = _dashboardCache[mode]
+  if (cached && (now - cached.time) < DASHBOARD_CACHE_TTL) {
     return // Use cached data (already applied to signals)
   }
 
   dashboardLoading.value = true
   try {
-    const data = await fetchDashboard()
-    _dashboardCache = { data, time: now }
+    const data = await fetchDashboard(mode)
+    _dashboardCache[mode] = { data, time: now }
 
     agents.value = (Array.isArray(data.agents?.agents) ? data.agents.agents : [])
       .map(normalizeAgent)

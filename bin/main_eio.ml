@@ -5047,6 +5047,12 @@ let make_routes ~port ~host =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/keeper-metrics" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let json = Tool_keeper.keeper_metrics_json state.room_config in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   (* Lodge Agents REST API — GET public, POST admin *)
   |> Http.Router.add ~path:"/api/v1/lodge/agents" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->

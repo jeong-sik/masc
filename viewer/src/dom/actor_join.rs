@@ -38,8 +38,6 @@ pub fn bind_actor_join(mut commands: Commands) {
         bind_leave_button();
         restore_join_panel_state(); // Restore UI state from hidden inputs if available
         sync_actor_suggestions();
-        bind_actor_card_picker();
-        bind_actor_input_highlight();
         log::info!("ActorJoin: bound");
     }
 
@@ -98,7 +96,7 @@ pub fn sync_join_panel_interaction_state(
         if join_visible {
             if let Some(help) = doc.get_element_by_id("join-help") {
                 let text = if can_join {
-                    "오른쪽 PARTY 카드를 눌러 캐릭터를 고른 뒤 `참여`를 누르세요. 점유가 완료되면 아래 액션 입력창에서 직접 행동할 수 있습니다."
+                    "참여를 누르면 선택한 캐릭터를 점유(Claim)하고, 해당 캐릭터 행동을 직접 입력할 수 있습니다. 오른쪽 PARTY 카드 Skills의 Lv/Mod를 보고 액션·주사위 판정을 진행하세요."
                 } else {
                     lifecycle.help_text()
                 };
@@ -589,8 +587,7 @@ fn sync_actor_suggestions_for_doc(doc: &web_sys::Document) {
         return;
     };
 
-    let Ok(cards) = doc.query_selector_all("#character-panel .character-card[data-actor-id]")
-    else {
+    let Ok(cards) = doc.query_selector_all("#character-panel .character-card[data-actor-id]") else {
         return;
     };
 
@@ -642,133 +639,4 @@ fn sync_actor_suggestions_for_doc(doc: &web_sys::Document) {
         let _ = datalist.append_child(&option);
     }
     let _ = datalist.set_attribute("data-actor-signature", &signature);
-
-    bind_actor_card_picker_for_doc(doc);
-    sync_selected_actor_card_for_doc(doc);
-}
-
-#[cfg(target_arch = "wasm32")]
-fn bind_actor_card_picker() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    bind_actor_card_picker_for_doc(&doc);
-}
-
-#[cfg(target_arch = "wasm32")]
-fn bind_actor_card_picker_for_doc(doc: &web_sys::Document) {
-    let Ok(cards) = doc.query_selector_all("#character-panel .character-card[data-actor-id]")
-    else {
-        return;
-    };
-
-    for idx in 0..cards.length() {
-        let Some(node) = cards.item(idx) else {
-            continue;
-        };
-        let Some(card) = node.dyn_ref::<web_sys::Element>() else {
-            continue;
-        };
-        if card.get_attribute("data-join-pick-bound").as_deref() == Some("1") {
-            continue;
-        }
-        let actor_id = card
-            .get_attribute("data-actor-id")
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if actor_id.is_empty() || actor_id.eq_ignore_ascii_case("dm") {
-            continue;
-        }
-
-        let _ = card.set_attribute("data-join-pick-bound", "1");
-        let actor_id_for_click = actor_id.clone();
-        let cb = Closure::wrap(Box::new(move |_evt: web_sys::Event| {
-            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-                return;
-            };
-            if let Some(input) = doc
-                .get_element_by_id("actor-id-input")
-                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-            {
-                input.set_value(&actor_id_for_click);
-            }
-            sync_selected_actor_card_for_doc(&doc);
-            set_join_status(
-                &format!(
-                    "선택됨: {} · `참여`를 눌러 점유한 뒤 액션을 입력하세요.",
-                    actor_id_for_click
-                ),
-                "",
-            );
-        }) as Box<dyn FnMut(_)>);
-
-        let _ = card
-            .dyn_ref::<web_sys::EventTarget>()
-            .map(|t| t.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref()));
-        cb.forget();
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn bind_actor_input_highlight() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let Some(input) = doc
-        .get_element_by_id("actor-id-input")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    else {
-        return;
-    };
-    if input.get_attribute("data-join-pick-bound").as_deref() == Some("1") {
-        return;
-    }
-    let _ = input.set_attribute("data-join-pick-bound", "1");
-
-    let cb = Closure::wrap(Box::new(move |_evt: web_sys::Event| {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-        sync_selected_actor_card_for_doc(&doc);
-    }) as Box<dyn FnMut(_)>);
-
-    let _ = input
-        .dyn_ref::<web_sys::EventTarget>()
-        .map(|t| t.add_event_listener_with_callback("input", cb.as_ref().unchecked_ref()));
-    cb.forget();
-}
-
-#[cfg(target_arch = "wasm32")]
-fn sync_selected_actor_card_for_doc(doc: &web_sys::Document) {
-    let selected_actor = doc
-        .get_element_by_id("actor-id-input")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-        .map(|input| input.value().trim().to_string())
-        .unwrap_or_default();
-    let selected_lower = selected_actor.to_ascii_lowercase();
-
-    let Ok(cards) = doc.query_selector_all("#character-panel .character-card[data-actor-id]")
-    else {
-        return;
-    };
-    for idx in 0..cards.length() {
-        let Some(node) = cards.item(idx) else {
-            continue;
-        };
-        let Some(card) = node.dyn_ref::<web_sys::Element>() else {
-            continue;
-        };
-        let actor_id = card
-            .get_attribute("data-actor-id")
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase();
-        let classes = card.class_list();
-        if !selected_lower.is_empty() && actor_id == selected_lower {
-            let _ = classes.add_1("join-pick-selected");
-        } else {
-            let _ = classes.remove_1("join-pick-selected");
-        }
-    }
 }

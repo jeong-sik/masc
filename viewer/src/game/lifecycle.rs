@@ -40,7 +40,8 @@ impl TrpgLifecycleState {
             | "outcome_narration" | "state_update" | "transition" => Self::Running,
             "paused" | "stopped" | "suspended" | "halted" => Self::Stopped,
             "ended" | "completed" | "done" | "retired" | "closed" | "archived" => Self::Ended,
-            "loading" | "bootstrapping" | "syncing" => Self::Loading,
+            "loading" | "bootstrapping" | "bootstrap" | "syncing" | "starting"
+            | "initializing" | "creating" => Self::Loading,
             "unavailable" | "error" | "failed" => Self::Unavailable,
             "idle" | "lobby" | "created" | "ready" => Self::Lobby,
             "unknown" => Self::Unknown,
@@ -49,12 +50,22 @@ impl TrpgLifecycleState {
     }
 
     pub fn from_room_progress(room_status: &str, progress_status: &str) -> Self {
-        let source = if progress_status.trim().is_empty() {
-            room_status
-        } else {
-            progress_status
-        };
-        Self::from_status(source)
+        let progress_raw = progress_status.trim();
+        let room = Self::from_status(room_status);
+        if progress_raw.is_empty() {
+            return room;
+        }
+
+        let progress = Self::from_status(progress_raw);
+
+        // Progress status is more granular when valid, but stale "loading/unknown/lobby"
+        // should not mask a stronger room lifecycle from runtime state.
+        match progress {
+            Self::Loading if !matches!(room, Self::Unknown | Self::Lobby | Self::Loading) => room,
+            Self::Unknown if !matches!(room, Self::Unknown) => room,
+            Self::Lobby if !matches!(room, Self::Unknown | Self::Lobby | Self::Loading) => room,
+            _ => progress,
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -196,7 +207,7 @@ impl TrpgUiState {
 
 #[cfg(test)]
 mod tests {
-    use super::TrpgUiState;
+    use super::{TrpgLifecycleState, TrpgUiState};
 
     #[test]
     fn trpg_ui_state_code_roundtrip() {
@@ -235,5 +246,33 @@ mod tests {
             assert!(!state.help_text().trim().is_empty());
             assert!(!state.ops_class().trim().is_empty());
         }
+    }
+
+    #[test]
+    fn lifecycle_prefers_stronger_room_state_over_stale_progress_loading() {
+        assert_eq!(
+            TrpgLifecycleState::from_room_progress("running", "loading"),
+            TrpgLifecycleState::Running
+        );
+        assert_eq!(
+            TrpgLifecycleState::from_room_progress("stopped", "unknown"),
+            TrpgLifecycleState::Stopped
+        );
+        assert_eq!(
+            TrpgLifecycleState::from_room_progress("ended", "idle"),
+            TrpgLifecycleState::Ended
+        );
+    }
+
+    #[test]
+    fn lifecycle_keeps_progress_when_it_is_specific() {
+        assert_eq!(
+            TrpgLifecycleState::from_room_progress("running", "dm_narration"),
+            TrpgLifecycleState::Running
+        );
+        assert_eq!(
+            TrpgLifecycleState::from_room_progress("running", "stopped"),
+            TrpgLifecycleState::Stopped
+        );
     }
 }

@@ -50,6 +50,10 @@ pub struct SkillData {
     pub name: String,
     #[serde(default = "default_skill_level")]
     pub level: i32,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub usage_hint: String,
 }
 
 fn default_skill_level() -> i32 {
@@ -75,6 +79,12 @@ pub struct CharacterData {
     pub name: String,
     #[serde(default)]
     pub class: String,
+    #[serde(default)]
+    pub archetype: String,
+    #[serde(default)]
+    pub persona: String,
+    #[serde(default)]
+    pub traits: Vec<String>,
     #[serde(default = "default_hp")]
     pub hp: i32,
     #[serde(default = "default_hp")]
@@ -424,6 +434,8 @@ pub fn apply_initial_state(
             .map(|s| Skill {
                 name: s.name,
                 level: s.level,
+                description: s.description,
+                usage_hint: s.usage_hint,
             })
             .collect();
 
@@ -449,6 +461,9 @@ pub fn apply_initial_state(
             id: ch.id,
             name: ch.name,
             class: ch.class,
+            archetype: ch.archetype,
+            persona: ch.persona,
+            traits: ch.traits,
             hp: ch.hp,
             max_hp: ch.max_hp,
             mp: ch.mp,
@@ -499,7 +514,13 @@ async fn fetch_game_state() -> Result<GameStateResponse, JsValue> {
 
 fn normalize_state_response(root: Value) -> Result<GameStateResponse, String> {
     if root.get("room").is_some() {
-        return serde_json::from_value(root).map_err(|e| e.to_string());
+        let mut parsed: GameStateResponse =
+            serde_json::from_value(root.clone()).map_err(|e| e.to_string())?;
+        if root.get("state").is_some() {
+            let fallback = parse_masc_state_response(&root);
+            merge_state_fallback(&mut parsed, &fallback);
+        }
+        return Ok(parsed);
     }
 
     if root.get("state").is_some() {
@@ -511,6 +532,53 @@ fn normalize_state_response(root: Value) -> Result<GameStateResponse, String> {
     }
 
     Err("unsupported state payload shape".to_string())
+}
+
+fn merge_state_fallback(primary: &mut GameStateResponse, fallback: &GameStateResponse) {
+    match (&mut primary.room, fallback.room.as_ref()) {
+        (None, Some(room)) => primary.room = Some(room.clone()),
+        (Some(primary_room), Some(fallback_room)) => {
+            if primary_room.id.trim().is_empty() && !fallback_room.id.trim().is_empty() {
+                primary_room.id = fallback_room.id.clone();
+            }
+            if primary_room.status.trim().is_empty()
+                || primary_room.status.eq_ignore_ascii_case("unknown")
+            {
+                primary_room.status = fallback_room.status.clone();
+            }
+            if primary_room.turn == 0 && fallback_room.turn > 0 {
+                primary_room.turn = fallback_room.turn;
+            }
+            if primary_room.phase.trim().is_empty() && !fallback_room.phase.trim().is_empty() {
+                primary_room.phase = fallback_room.phase.clone();
+            }
+            if primary_room.current_scenario.trim().is_empty()
+                && !fallback_room.current_scenario.trim().is_empty()
+            {
+                primary_room.current_scenario = fallback_room.current_scenario.clone();
+            }
+            if primary_room.current_node.trim().is_empty() && !fallback_room.current_node.trim().is_empty() {
+                primary_room.current_node = fallback_room.current_node.clone();
+            }
+        }
+        _ => {}
+    }
+
+    if primary.characters.is_empty() && !fallback.characters.is_empty() {
+        primary.characters = fallback.characters.clone();
+    }
+    if primary.dm_keeper.trim().is_empty() && !fallback.dm_keeper.trim().is_empty() {
+        primary.dm_keeper = fallback.dm_keeper.clone();
+    }
+    if primary.current_area.trim().is_empty() && !fallback.current_area.trim().is_empty() {
+        primary.current_area = fallback.current_area.clone();
+    }
+    if primary.area_label.trim().is_empty() && !fallback.area_label.trim().is_empty() {
+        primary.area_label = fallback.area_label.clone();
+    }
+    if primary.dice_log.is_empty() && !fallback.dice_log.is_empty() {
+        primary.dice_log = fallback.dice_log.clone();
+    }
 }
 
 fn parse_masc_state_response(root: &Value) -> GameStateResponse {
@@ -626,13 +694,33 @@ fn parse_actor_control_map(state: &Value) -> HashMap<String, String> {
     actor_control
 }
 
+fn current_turn_marker(state: &Value) -> Option<u32> {
+    state
+        .get("turn")
+        .and_then(Value::as_u64)
+        .and_then(|turn| u32::try_from(turn).ok())
+        .filter(|turn| *turn > 0)
+}
+
+fn entry_turn_matches(entry: &Value, current_turn: u32) -> bool {
+    entry
+        .get("turn")
+        .and_then(Value::as_u64)
+        .and_then(|turn| u32::try_from(turn).ok())
+        .is_some_and(|turn| turn == current_turn)
+}
+
 fn infer_actor_control_from_dice(state: &Value) -> HashMap<String, String> {
+    let Some(current_turn) = current_turn_marker(state) else {
+        return HashMap::new();
+    };
     state
         .get("dice_log")
         .and_then(Value::as_array)
         .map(|entries| {
             entries
                 .iter()
+                .filter(|entry| entry_turn_matches(entry, current_turn))
                 .filter_map(|entry| {
                     let actor_id = entry
                         .get("actor_id")
@@ -662,12 +750,16 @@ fn infer_actor_control_from_dice(state: &Value) -> HashMap<String, String> {
 }
 
 fn infer_actor_control_from_narration(state: &Value) -> HashMap<String, String> {
+    let Some(current_turn) = current_turn_marker(state) else {
+        return HashMap::new();
+    };
     state
         .get("narration_log")
         .and_then(Value::as_array)
         .map(|entries| {
             entries
                 .iter()
+                .filter(|entry| entry_turn_matches(entry, current_turn))
                 .filter_map(|entry| {
                     let actor_id = entry
                         .get("actor_id")
@@ -695,11 +787,17 @@ fn infer_actor_control_from_narration(state: &Value) -> HashMap<String, String> 
 }
 
 fn infer_dm_keeper_from_narration(state: &Value) -> Option<String> {
+    let current_turn = current_turn_marker(state);
     state
         .get("narration_log")
         .and_then(Value::as_array)
         .and_then(|entries| {
             entries.iter().rev().find_map(|entry| {
+                if let Some(turn) = current_turn {
+                    if !entry_turn_matches(entry, turn) {
+                        return None;
+                    }
+                }
                 let role = entry.get("role").and_then(Value::as_str).unwrap_or("");
                 let actor_id = entry.get("actor_id").and_then(Value::as_str).unwrap_or("");
                 if role.eq_ignore_ascii_case("dm") || actor_id.eq_ignore_ascii_case("dm") {
@@ -885,6 +983,26 @@ fn parse_party_characters(
                 .or_else(|| info.get("archetype").and_then(Value::as_str))
                 .unwrap_or("")
                 .to_string();
+            let archetype = info
+                .get("archetype")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let persona = info
+                .get("persona")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let traits = info
+                .get("traits")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let hp = info.get("hp").and_then(Value::as_i64).unwrap_or(20) as i32;
             let max_hp = info
                 .get("max_hp")
@@ -957,6 +1075,8 @@ fn parse_party_characters(
                                 skill.as_str().map(|name| SkillData {
                                     name: name.to_string(),
                                     level: 10,
+                                    description: String::new(),
+                                    usage_hint: String::new(),
                                 })
                             }
                         })
@@ -1009,6 +1129,9 @@ fn parse_party_characters(
                 id: actor_id.to_string(),
                 name,
                 class,
+                archetype,
+                persona,
+                traits,
                 hp,
                 max_hp,
                 mp,
@@ -1125,6 +1248,42 @@ mod tests {
     }
 
     #[test]
+    fn normalize_hybrid_shape_backfills_room_from_state() {
+        let root = json!({
+            "room": {
+                "id": "default"
+            },
+            "state": {
+                "room_id": "default",
+                "status": "active",
+                "turn": 40,
+                "phase": "round",
+                "current_area": "A",
+                "area_label": "Forest Entrance",
+                "party": {
+                    "hero-1": {
+                        "name": "Hero",
+                        "role": "fighter",
+                        "hp": 10,
+                        "max_hp": 10,
+                        "position": "A",
+                        "alive": true
+                    }
+                }
+            }
+        });
+
+        let parsed = normalize_state_response(root).expect("hybrid parse should succeed");
+        let room = parsed.room.as_ref().expect("room should exist");
+        assert_eq!(room.status, "active");
+        assert_eq!(room.turn, 40);
+        assert_eq!(room.phase, "round");
+        assert_eq!(parsed.current_area, "A");
+        assert_eq!(parsed.area_label, "Forest Entrance");
+        assert_eq!(parsed.characters.len(), 1);
+    }
+
+    #[test]
     fn normalize_masc_shape_uses_defaults_without_fallback_party() {
         let root = json!({
             "ok": true,
@@ -1238,11 +1397,13 @@ mod tests {
                 },
                 "narration_log": [
                     {
+                        "turn": 1,
                         "role": "player",
                         "actor_id": "grimja",
                         "keeper": "trpg-grimja"
                     },
                     {
+                        "turn": 2,
                         "role": "dm",
                         "actor_id": "dm",
                         "keeper": "  trpg-dm  "
@@ -1253,6 +1414,40 @@ mod tests {
 
         let parsed = normalize_state_response(root).expect("masc parse should succeed");
         assert_eq!(parsed.dm_keeper, "trpg-dm");
+    }
+
+    #[test]
+    fn normalize_masc_shape_ignores_stale_narration_keeper_mapping() {
+        let root = json!({
+            "ok": true,
+            "room_id": "default",
+            "state": {
+                "turn": 2,
+                "phase": "round",
+                "party": {
+                    "grimja": {
+                        "name": "그림자",
+                        "role": "fighter",
+                        "hp": 28,
+                        "max_hp": 30,
+                        "position": "C",
+                        "alive": true
+                    }
+                },
+                "narration_log": [
+                    {
+                        "turn": 1,
+                        "role": "player",
+                        "actor_id": "grimja",
+                        "keeper": "old-keeper"
+                    }
+                ]
+            }
+        });
+
+        let parsed = normalize_state_response(root).expect("masc parse should succeed");
+        assert_eq!(parsed.characters.len(), 1);
+        assert_eq!(parsed.characters[0].keeper, "");
     }
 
     #[test]

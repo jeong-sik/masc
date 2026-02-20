@@ -5410,7 +5410,15 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
                         | None -> `Null);
 	                      ("handoff", `Assoc [("performed", `Bool false)]);
 	                    ] in
-                    append_jsonl_line metrics_path snapshot)
+                    append_jsonl_line metrics_path snapshot;
+                    (* SSE: keeper_heartbeat — dashboard real-time monitoring *)
+                    (try Sse.broadcast (`Assoc [
+                      ("type", `String "keeper_heartbeat");
+                      ("name", `String meta_current.name);
+                      ("generation", `Int meta_current.generation);
+                      ("context_ratio", `Float (Context_manager.context_ratio c));
+                      ("ts_unix", `Float now_ts);
+                    ]) with _ -> ()))
              with _ -> ());
             last_snapshot_ts := now_ts
           end;
@@ -7041,7 +7049,14 @@ let handle_keeper_msg ctx args : tool_result =
                                 (Option.value
                                    ~default:"policy threshold exceeded"
                                    auto_rules.guardrail_reason)))
-                    with _ -> ()));
+                    with _ -> ());
+                   (* SSE: keeper_guardrail — dashboard real-time alert *)
+                   (try Sse.broadcast (`Assoc [
+                     ("type", `String "keeper_guardrail");
+                     ("name", `String meta_turn.name);
+                     ("reason", `String (Option.value ~default:"policy threshold exceeded"
+                        auto_rules.guardrail_reason));
+                   ]) with _ -> ()));
                 let do_handoff =
                   auto_rules.handoff &&
 		                (now_ts -. meta_turn.last_handoff_ts >= float_of_int meta_turn.handoff_cooldown_sec)
@@ -7146,6 +7161,15 @@ let handle_keeper_msg ctx args : tool_result =
                    ] in
                    append_jsonl_line metrics_path metrics_json
                  with _ -> ());
+                (* SSE: keeper_compaction — emitted only when compaction occurred *)
+                (if compacted then
+                  (try Sse.broadcast (`Assoc [
+                    ("type", `String "keeper_compaction");
+                    ("name", `String meta_turn.name);
+                    ("saved_tokens", `Int (before_compact_tokens - after_compact_tokens));
+                    ("trigger", match compaction_trigger with
+                      | Some r -> `String r | None -> `Null);
+                  ]) with _ -> ()));
 
                 let json = `Assoc [
                   ("name", `String meta_turn.name);
@@ -7369,6 +7393,14 @@ let handle_keeper_msg ctx args : tool_result =
                    ] in
                    append_jsonl_line metrics_path metrics_json
                  with _ -> ());
+                (* SSE: keeper_handoff — generation succession event *)
+                (try Sse.broadcast (`Assoc [
+                  ("type", `String "keeper_handoff");
+                  ("name", `String meta_turn.name);
+                  ("from_generation", `Int meta_turn.generation);
+                  ("to_generation", `Int next_generation);
+                  ("to_model", `String next_model.model_id);
+                ]) with _ -> ());
 
                 let json = `Assoc [
                   ("name", `String meta'.name);

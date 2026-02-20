@@ -269,7 +269,13 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     {
                         game_ended.store(true, Ordering::SeqCst);
                         log::info!("RoundRunner: game ended signal in response");
-                    } else if matches!(round_response_advanced(&resp), Some(false)) {
+                    } else if matches!(round_response_stalled(&resp), Some(true)) {
+                        if round_response_all_unavailable(&resp) {
+                            log::warn!(
+                                "RoundRunner: all player keepers unavailable in this response. Stopping auto loop."
+                            );
+                            break;
+                        }
                         stalled_retries = stalled_retries.saturating_add(1);
                         if stalled_retries > MAX_STALL_RETRIES {
                             log::warn!(
@@ -440,7 +446,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         "phase": phase,
         "timeout_sec": timeout_sec,
         "lang": lang,
-        "require_claim": false
+        "require_claim": read_claimed_keeper_for_current_room().is_some()
     });
 
     Ok(body.to_string())
@@ -516,13 +522,66 @@ fn with_claimed_player_pair(
     player_pairs
 }
 
-#[cfg(target_arch = "wasm32")]
-fn round_response_advanced(resp: &str) -> Option<bool> {
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Default, Debug, Clone)]
+struct RoundRunSummary {
+    advanced: Option<bool>,
+    turn_before: Option<u64>,
+    turn_after: Option<u64>,
+    participants: u64,
+    unavailable: u64,
+    player_successes: u64,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn parse_round_run_summary(resp: &str) -> Option<RoundRunSummary> {
     let parsed = serde_json::from_str::<serde_json::Value>(resp).ok()?;
-    parsed
-        .get("summary")
-        .and_then(|summary| summary.get("advanced"))
-        .and_then(serde_json::Value::as_bool)
+    let summary = parsed.get("summary");
+    Some(RoundRunSummary {
+        advanced: summary
+            .and_then(|row| row.get("advanced"))
+            .and_then(serde_json::Value::as_bool),
+        turn_before: parsed.get("turn_before").and_then(serde_json::Value::as_u64),
+        turn_after: parsed.get("turn_after").and_then(serde_json::Value::as_u64),
+        participants: summary
+            .and_then(|row| row.get("participants"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        unavailable: summary
+            .and_then(|row| row.get("unavailable"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        player_successes: summary
+            .and_then(|row| row.get("player_successes"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+    })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_advanced(resp: &str) -> Option<bool> {
+    let summary = parse_round_run_summary(resp)?;
+    if let Some(advanced) = summary.advanced {
+        return Some(advanced);
+    }
+    match (summary.turn_before, summary.turn_after) {
+        (Some(turn_before), Some(turn_after)) => Some(turn_after > turn_before),
+        _ => None,
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_stalled(resp: &str) -> Option<bool> {
+    round_response_advanced(resp).map(|advanced| !advanced)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_all_unavailable(resp: &str) -> bool {
+    let Some(summary) = parse_round_run_summary(resp) else {
+        return false;
+    };
+    let player_slots = summary.participants.saturating_sub(1);
+    player_slots > 0 && summary.player_successes == 0 && summary.unavailable >= player_slots
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -700,7 +759,8 @@ async fn sleep_ms(ms: i32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_transient_round_conflict, round_response_api_error, stall_retry_delay_ms,
+        is_transient_round_conflict, round_response_advanced, round_response_all_unavailable,
+        round_response_api_error, round_response_stalled, stall_retry_delay_ms,
         with_claimed_player_pair,
     };
 
@@ -755,5 +815,31 @@ mod tests {
             Some(("warrior-1".to_string(), "keeper-x".to_string())),
         );
         assert_eq!(merged, vec![("mage-1".to_string(), "keeper-a".to_string())]);
+    }
+
+    #[test]
+    fn round_response_advanced_falls_back_to_turn_delta() {
+        let resp = r#"{"turn_before":7,"turn_after":8}"#;
+        assert_eq!(round_response_advanced(resp), Some(true));
+        assert_eq!(round_response_stalled(resp), Some(false));
+    }
+
+    #[test]
+    fn round_response_detects_stall_from_summary() {
+        let resp = r#"{
+            "turn_before":40,
+            "turn_after":40,
+            "summary":{"advanced":false,"participants":5,"player_successes":0,"unavailable":4}
+        }"#;
+        assert_eq!(round_response_stalled(resp), Some(true));
+        assert!(round_response_all_unavailable(resp));
+    }
+
+    #[test]
+    fn round_response_all_unavailable_requires_player_slots() {
+        let resp = r#"{
+            "summary":{"participants":1,"player_successes":0,"unavailable":1}
+        }"#;
+        assert!(!round_response_all_unavailable(resp));
     }
 }

@@ -626,6 +626,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 })
                 .collect::<Vec<_>>()
                 .join("");
+            let head = "<div class=\"skill-row skill-row-head\"><span class=\"skill-name\">Skill</span><span class=\"skill-level\">Lv</span><span class=\"skill-mod mod-neutral\">Mod (Lv-10)/2</span></div>";
             format!(
                 concat!(
                     "<input type=\"checkbox\" class=\"section-toggle\" id=\"{}\"{}/>",
@@ -635,7 +636,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 skills_id, skills_checked,
                 skills_id,
                 actor.skills.len(),
-                rows,
+                format!("{}{}", head, rows),
             )
         };
 

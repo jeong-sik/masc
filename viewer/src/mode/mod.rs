@@ -1421,9 +1421,17 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
     }
     if let Some(el) = doc.get_element_by_id("turn-flow-banner") {
         let _ = el.set_attribute("class", "turn-flow-banner is-idle");
-        el.set_inner_html(
-            "<span class=\"flow-state\">대기</span><span class=\"flow-text\">세션 상태를 불러오는 중입니다.</span>",
-        );
+        let _ = el.set_attribute("title", "세션 상태를 불러오는 중입니다.");
+    }
+    if let Some(el) = doc.get_element_by_id("turn-flow-state") {
+        el.set_text_content(Some("대기"));
+    }
+    if let Some(el) = doc.get_element_by_id("turn-flow-text") {
+        el.set_text_content(Some("세션 상태를 불러오는 중입니다."));
+    }
+    if let Some(el) = doc.get_element_by_id("turn-flow-actions") {
+        el.set_inner_html("");
+        let _ = el.remove_attribute("data-snapshot");
     }
     if let Some(el) = doc.get_element_by_id("agent-round-flow") {
         el.set_inner_html(

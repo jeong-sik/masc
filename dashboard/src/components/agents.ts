@@ -3,12 +3,13 @@
 import { html } from 'htm/preact'
 import { StatusBadge } from './common/status-badge'
 import { openKeeperDetail } from './keeper-detail'
+import { openAgentDetail } from './agent-detail'
 import { agents, keepers } from '../store'
 import type { Agent, Keeper } from '../types'
 
 function AgentCard({ agent }: { agent: Agent }) {
   return html`
-    <div class="agent-card ${agent.status}">
+    <button class="agent-card ${agent.status}" onClick=${() => openAgentDetail(agent.name)}>
       <div class="agent-card-header">
         <span class="agent-emoji">${agent.emoji ?? ''}</span>
         <div class="agent-card-info">
@@ -25,7 +26,7 @@ function AgentCard({ agent }: { agent: Agent }) {
       ${agent.model
         ? html`<div class="agent-model"><span class="pill">${agent.model}</span></div>`
         : null}
-    </div>
+    </button>
   `
 }
 

@@ -4346,6 +4346,8 @@ let proactive_prompt_for_keeper
      - Prefer the same language as the recent conversation.\n\
      - Avoid repeating the previous proactive message verbatim.\n\
      - Keep it concise and useful for the current goal.\n\
+     - If external checks or actions are needed, call tools before finalizing.\n\
+     - When a required write action is identified, execute it via tools and then summarize.\n\
      - For this proactive turn only, do NOT output [STATE] blocks.\n\
      - Output exactly one line using this format:\n\
        CHECKIN: <single complete sentence ending with punctuation>"
@@ -4359,6 +4361,7 @@ type proactive_generation_result = {
   attempts: int;
   total_cost_usd: float;
   fallback_applied: bool;
+  tools_used: string list;
 }
 
 let proactive_retry_instruction attempt ~(reason : string) =
@@ -4542,6 +4545,47 @@ let run_proactive_generation
   let max_attempts = 3 in
   let previous_preview = String.trim meta.last_proactive_preview in
   let similarity_threshold = 0.72 in
+  let fallback_skill_route =
+    route_keeper_skill ~soul_profile:meta.soul_profile ~message:"proactive idle automation checkin"
+  in
+  let skill_selection_mode = keeper_skill_selection_mode () in
+  let base_turn_system_prompt =
+    match skill_selection_mode with
+    | SkillSelectHeuristic ->
+        skill_route_system_prompt_heuristic
+          ~base_system_prompt:ctx_work.system_prompt
+          ~route:fallback_skill_route
+    | SkillSelectAgent ->
+        skill_route_system_prompt_agent
+          ~base_system_prompt:ctx_work.system_prompt
+          ~fallback_route:fallback_skill_route
+          ~soul_profile:meta.soul_profile
+  in
+  let turn_system_prompt =
+    append_continuity_context_prompt
+      ~base_prompt:base_turn_system_prompt
+      continuity_snapshot
+      ~continuity_summary
+  in
+  let max_tool_rounds = 3 in
+  let execute_tool_calls
+      ~(ctx_work : Context_manager.working_context)
+      (tcs : Llm_client.tool_call list) : (Llm_client.tool_call * string) list =
+    List.map
+      (fun (tc : Llm_client.tool_call) ->
+         let output =
+           try execute_keeper_tool_call ~meta ~ctx_work tc
+           with exn ->
+             Yojson.Safe.to_string
+               (`Assoc [
+                 ("error", `String (Printexc.to_string exn));
+                 ("tool", `String tc.call_name);
+               ])
+         in
+         (tc, output))
+      tcs
+  in
+  let run_cascade requests = Llm_client.cascade requests in
   let rec loop attempt usage_acc latency_acc cost_acc retry_hint =
     if attempt > max_attempts then
       Some {
@@ -4552,6 +4596,7 @@ let run_proactive_generation
         attempts = max_attempts;
         total_cost_usd = cost_acc;
         fallback_applied = true;
+        tools_used = [];
       }
     else
       let prompt =
@@ -4564,27 +4609,118 @@ let run_proactive_generation
             ({
                Llm_client.model;
                messages =
-                 (Llm_client.system_msg ctx_work.system_prompt)
+                 (Llm_client.system_msg turn_system_prompt)
                  :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
                temperature = proactive_temperature attempt;
                max_tokens = 220;
-               tools = [];
+               tools = keeper_llm_tools;
                response_format = `Text;
              }
               : Llm_client.completion_request))
           specs
       in
-      match Llm_client.cascade requests with
+      match run_cascade requests with
       | Error _ -> None
-      | Ok response ->
-          let usage_acc = merge_usage usage_acc response.usage in
-          let latency_acc = latency_acc + response.latency_ms in
-          let used_model =
-            model_spec_for_used specs response.model_used
+      | Ok resp0 ->
+          let used_model0 =
+            model_spec_for_used specs resp0.model_used
             |> Option.value ~default:primary
           in
-          let cost_acc = cost_acc +. cost_usd_of_usage response.usage used_model in
-          let trimmed = String.trim response.content in
+          let cost0 = cost_usd_of_usage resp0.usage used_model0 in
+          let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
+              ~acc_tools_used ~last_resp =
+            if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
+              let content =
+                let c = String.trim last_resp.Llm_client.content in
+                if c = "" && acc_tools_used <> [] then
+                  Printf.sprintf "(tools executed: %s)"
+                    (String.concat ", " acc_tools_used)
+                else last_resp.Llm_client.content
+              in
+              ( content,
+                acc_usage,
+                last_resp.Llm_client.model_used,
+                acc_latency,
+                acc_cost,
+                acc_tools_used )
+            else
+              let round_tools =
+                List.map
+                  (fun (tc : Llm_client.tool_call) -> tc.call_name)
+                  last_resp.Llm_client.tool_calls
+              in
+              let all_tools_so_far = acc_tools_used @ round_tools in
+              let tool_outputs =
+                execute_tool_calls ~ctx_work last_resp.Llm_client.tool_calls
+              in
+              let followup_prompt =
+                keeper_tool_followup_prompt
+                  ~user_message:prompt
+                  ~draft_reply:last_resp.Llm_client.content
+                  ~tool_outputs
+                  ~already_executed:all_tools_so_far
+              in
+              let write_done =
+                List.exists (fun n -> n = "keeper_board_post") all_tools_so_far
+              in
+              let next_tools =
+                if write_done then [] else keeper_llm_tools
+              in
+              let followup_requests =
+                List.map
+                  (fun (model : Llm_client.model_spec) ->
+                     ({
+                        Llm_client.model;
+                        messages = [
+                          Llm_client.system_msg
+                            (keeper_tool_loop_system_prompt
+                               ~character_context:turn_system_prompt);
+                          Llm_client.user_msg followup_prompt;
+                        ];
+                        temperature = 0.3;
+                        max_tokens = 220;
+                        tools = next_tools;
+                        response_format = `Text;
+                      }
+                       : Llm_client.completion_request))
+                  specs
+              in
+              match run_cascade followup_requests with
+              | Error _ ->
+                  ( last_resp.Llm_client.content,
+                    acc_usage,
+                    last_resp.Llm_client.model_used,
+                    acc_latency,
+                    acc_cost,
+                    acc_tools_used @ round_tools )
+              | Ok resp_next ->
+                  let used_model_next =
+                    model_spec_for_used specs resp_next.model_used
+                    |> Option.value ~default:primary
+                  in
+                  let cost_next = cost_usd_of_usage resp_next.usage used_model_next in
+                  tool_loop
+                    ~round:(round + 1)
+                    ~acc_usage:(merge_usage acc_usage resp_next.usage)
+                    ~acc_latency:(acc_latency + resp_next.latency_ms)
+                    ~acc_cost:(acc_cost +. cost_next)
+                    ~acc_tools_used:(acc_tools_used @ round_tools)
+                    ~last_resp:resp_next
+          in
+          let (attempt_content, attempt_usage, attempt_model_used, attempt_latency_ms,
+               attempt_cost_usd, attempt_tools_used) =
+            tool_loop
+              ~round:1
+              ~acc_usage:resp0.usage
+              ~acc_latency:resp0.latency_ms
+              ~acc_cost:cost0
+              ~acc_tools_used:[]
+              ~last_resp:resp0
+          in
+          let usage_acc = merge_usage usage_acc attempt_usage in
+          let latency_acc = latency_acc + attempt_latency_ms in
+          let cost_acc = cost_acc +. attempt_cost_usd in
+          let trimmed = String.trim attempt_content in
           if trimmed <> "" then
             (match proactive_quality_check trimmed with
              | Error reason when attempt < max_attempts ->
@@ -4596,11 +4732,12 @@ let run_proactive_generation
                  Some {
                    reply = proactive_fallback_reply ~meta ~idle_seconds;
                    usage = usage_acc;
-                   model_used = response.model_used;
+                   model_used = attempt_model_used;
                    latency_ms = latency_acc;
                    attempts = attempt;
                    total_cost_usd = cost_acc;
                    fallback_applied = true;
+                   tools_used = attempt_tools_used;
                  }
              | Ok checked_reply ->
                  let too_similar =
@@ -4620,11 +4757,12 @@ let run_proactive_generation
                    Some {
                      reply = checked_reply;
                      usage = usage_acc;
-                     model_used = response.model_used;
+                     model_used = attempt_model_used;
                      latency_ms = latency_acc;
                      attempts = attempt;
                      total_cost_usd = cost_acc;
                      fallback_applied = false;
+                     tools_used = attempt_tools_used;
                    })
           else
             let hint =
@@ -4753,14 +4891,15 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        let compacted = after_compact_tokens < before_compact_tokens in
                        ignore (save_checkpoint session ctx_work ~generation:meta.generation);
                        let turn_cost = generated.total_cost_usd in
-	                       let proactive_reason =
-	                         Printf.sprintf
-	                           "idle=%ds>=gate=%ds; cooldown_elapsed=%ds>=gate=%ds; soul=%s; skill=%s; attempts=%d; mode=llm_only; fallback=%d"
-	                           idle_seconds idle_gate cooldown_elapsed cooldown_gate meta.soul_profile
-	                           proactive_skill_route.primary_skill
-	                           generated.attempts
-	                           (if generated.fallback_applied then 1 else 0)
-	                       in
+                       let proactive_reason =
+                         Printf.sprintf
+                           "idle=%ds>=gate=%ds; cooldown_elapsed=%ds>=gate=%ds; soul=%s; skill=%s; attempts=%d; mode=tool_loop; tool_calls=%d; fallback=%d"
+                           idle_seconds idle_gate cooldown_elapsed cooldown_gate meta.soul_profile
+                           proactive_skill_route.primary_skill
+                           generated.attempts
+                           (List.length generated.tools_used)
+                           (if generated.fallback_applied then 1 else 0)
+                       in
                            let updated =
                              {
                                meta with
@@ -4838,8 +4977,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                     | None -> `Null );
                                 ("compaction_decision", `String compaction_decision);
                                 ("work_kind", `String "proactive_checkin");
-	                                ("tool_call_count", `Int 0);
-	                                ("tools_used", `List []);
+	                                ("tool_call_count", `Int (List.length generated.tools_used));
+	                                ("tools_used", `List (List.map (fun s -> `String s) generated.tools_used));
 	                                ("skill_primary", `String proactive_skill_route.primary_skill);
 	                                ("skill_secondary",
 	                                  `List

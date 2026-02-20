@@ -7,6 +7,7 @@ export interface Agent {
   name: string
   status: 'active' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
+  last_seen?: string
   emoji?: string
   koreanName?: string
   model?: string
@@ -23,6 +24,7 @@ export interface Task {
   id: string
   title: string
   status: 'todo' | 'in_progress' | 'claimed' | 'done' | 'cancelled'
+  priority?: number
   assignee?: string
   description?: string
   created_at?: string
@@ -31,6 +33,7 @@ export interface Task {
 
 export interface Message {
   id?: string
+  seq?: number
   from: string
   content: string
   timestamp: string
@@ -74,22 +77,136 @@ export interface BoardFlair {
   color: string
 }
 
+// --- Keeper Metrics ---
+
+export interface KeeperMetricPoint {
+  ts: number
+  context_ratio: number
+  context_tokens: number
+  context_max: number
+  latency_ms: number
+  generation: number
+  channel: string
+  is_handoff: boolean
+  is_compaction: boolean
+  compaction_saved_tokens: number
+  compaction_trigger: string | null
+  model_used: string
+  cost_usd: number
+  handoff_to_model: string | null
+  handoff_new_generation: number | null
+}
+
+export type KeeperLifecycleState =
+  | 'active'
+  | 'compacting'
+  | 'preparing'
+  | 'handoff-imminent'
+  | 'idle'
+  | 'offline'
+
+// --- Keeper SSE Events ---
+
+export interface KeeperHeartbeatEvent {
+  type: 'keeper_heartbeat'
+  name: string
+  generation: number
+  context_ratio: number
+  ts_unix: number
+}
+
+export interface KeeperHandoffEvent {
+  type: 'keeper_handoff'
+  name: string
+  from_generation: number
+  to_generation: number
+  from_model: string
+  to_model: string
+  ts_unix: number
+}
+
+export interface KeeperCompactionEvent {
+  type: 'keeper_compaction'
+  name: string
+  generation: number
+  before_tokens: number
+  after_tokens: number
+  saved_tokens: number
+  trigger: string
+  ts_unix: number
+}
+
+export interface KeeperGuardrailEvent {
+  type: 'keeper_guardrail'
+  name: string
+  generation: number
+  reason: string
+  ts_unix: number
+}
+
 // --- Keeper / Lodge ---
 
 export interface Keeper {
   name: string
-  emoji: string
+  emoji?: string
   koreanName?: string
+  agent_name?: string
+  trace_id?: string
   model?: string
+  primary_model?: string
+  active_model?: string
+  next_model_hint?: string | null
   status: string
   last_heartbeat?: string
   generation?: number
   turn_count?: number
   context_ratio?: number
+  context_tokens?: number
+  context_max?: number
+  context_source?: string
+  context?: {
+    source?: string
+    context_ratio?: number
+    context_tokens?: number
+    context_max?: number
+    message_count?: number
+    has_checkpoint?: boolean
+  }
   traits?: string[]
   interests?: string[]
   primaryValue?: string
   activityLevel?: number
+  memory_recent_note?: string | null
+  conversation_tail_count?: number
+  k2k_count?: number
+  handoff_count_total?: number
+  compaction_count?: number
+  last_compaction_saved_tokens?: number
+  skill_primary?: string | null
+  skill_secondary?: string[]
+  skill_reason?: string | null
+  metrics_window?: {
+    fallback_rate?: number
+    model_fallback_rate?: number
+    proactive_fallback_rate?: number
+    proactive_preview_similarity_avg?: number
+    memory_pass_rate?: number
+    memory_avg_score?: number
+    handoff_count?: number
+    compaction_events?: number
+    compaction_saved_tokens?: number
+    tool_call_count?: number
+    [key: string]: unknown
+  }
+  agent?: {
+    name?: string
+    status?: string
+    current_task?: string | null
+    last_seen?: string
+    [key: string]: unknown
+  }
+  // Metrics time-series (from backend metrics_series)
+  metrics_series?: KeeperMetricPoint[]
   // TRPG-specific keeper fields
   trpg_stats?: TrpgCharacterStats
   inventory?: string[]
@@ -203,15 +320,25 @@ export interface DashboardData {
 }
 
 export interface ServerStatus {
-  room: string
-  paused: boolean
-  version: string
-  uptime_seconds: number
+  room?: string
+  cluster?: string
+  project?: string
+  paused?: boolean
+  version?: string
+  uptime_seconds?: number
+  tempo_interval_s?: number
   tempo?: string
   tool_call_health?: {
     timeouts: number
     p95_duration_ms: number | null
     window_hours: number
+  }
+  alert_thresholds?: {
+    proactive_fallback_warn: number
+    proactive_fallback_bad: number
+    proactive_similarity_warn: number
+    proactive_similarity_bad: number
+    toast_cooldown_sec: number
   }
 }
 
@@ -225,6 +352,10 @@ export type SSEEventType =
   | 'board_post'
   | 'board_comment'
   | 'heartbeat'
+  | 'keeper_heartbeat'
+  | 'keeper_handoff'
+  | 'keeper_compaction'
+  | 'keeper_guardrail'
 
 export interface SSEEvent {
   type: SSEEventType
@@ -236,6 +367,20 @@ export interface SSEEvent {
   task_id?: string
   status?: string
   post_id?: string
+  // Keeper event fields
+  name?: string
+  generation?: number
+  context_ratio?: number
+  ts_unix?: number
+  from_generation?: number
+  to_generation?: number
+  from_model?: string
+  to_model?: string
+  before_tokens?: number
+  after_tokens?: number
+  saved_tokens?: number
+  trigger?: string
+  reason?: string
 }
 
 // --- Journal ---

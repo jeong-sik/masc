@@ -452,16 +452,22 @@ let parse_scenario_world_preset json : world_preset option =
 let load_scenario_world_presets ~base_dir : world_preset list =
   let scenarios_dir = config_path base_dir "examples/trpg-mvp/scenarios" in
   if Sys.file_exists scenarios_dir && Sys.is_directory scenarios_dir then
-    Sys.readdir scenarios_dir
-    |> Array.to_list
-    |> List.filter (fun name ->
-         Filename.check_suffix (String.lowercase_ascii name) ".json")
-    |> List.sort String.compare
-    |> List.filter_map (fun file_name ->
-         let path = Filename.concat scenarios_dir file_name in
-         try
-           Yojson.Safe.from_file path |> parse_scenario_world_preset
-         with _ -> None)
+    (try
+       Sys.readdir scenarios_dir
+       |> Array.to_list
+       |> List.filter (fun name ->
+            Filename.check_suffix (String.lowercase_ascii name) ".json")
+       |> List.sort String.compare
+       |> List.filter_map (fun file_name ->
+            let path = Filename.concat scenarios_dir file_name in
+            try
+              Yojson.Safe.from_file path |> parse_scenario_world_preset
+            with _ -> None)
+     with exn ->
+       Printf.eprintf
+         "[trpg_preset_store] failed to load scenario presets from %s: %s\n%!"
+         scenarios_dir (Printexc.to_string exn);
+       [])
   else
     []
 

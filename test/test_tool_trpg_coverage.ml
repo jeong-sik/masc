@@ -109,6 +109,16 @@ let parse_json_exn s =
 
 let count_from_json json = json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 let test_round_run_success_path () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -122,7 +132,7 @@ let test_round_run_success_path () =
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -187,7 +197,7 @@ let test_round_run_emits_combat_semantic_events () =
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -237,7 +247,7 @@ let test_round_run_emits_session_outcome_event () =
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -290,7 +300,7 @@ let test_round_run_timeout_policy () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -417,6 +427,94 @@ let test_round_run_timeout_policy () =
     (count_from_json (parse_json_exn unavailable_stream));
   cleanup_dir base_dir
 
+let test_round_run_unavailable_sampling_cap () =
+  with_env "MASC_TRPG_KEEPER_UNAVAILABLE_MAX_PER_TURN" "1" (fun () ->
+    let base_dir = make_temp_dir () in
+    let config = Room.default_config base_dir in
+    let _ = Room.init config ~agent_name:(Some "tester") in
+    bootstrap_room_with_actors ~base_dir ~room_id:"room-round-unavailable-sampled"
+      ~actor_ids:["p1"];
+    let seeded_unavailable =
+      Trpg_engine_event.make ~seq:3 ~room_id:"room-round-unavailable-sampled"
+        ~ts:(Types.now_iso ()) ~event_type:Trpg_engine_event.Keeper_unavailable
+        ~actor_id:"p1"
+        ~payload:
+          (`Assoc
+            [
+              ("phase", `String "round");
+              ("turn", `Int 1);
+              ("role", `String "player");
+              ("actor_id", `String "p1");
+              ("keeper", `String "pk-timeout");
+              ("reason", `String "timeout");
+              ("stage", `String "masc_keeper_msg");
+            ])
+        ()
+    in
+    append_event_exn ~base_dir ~event:seeded_unavailable;
+    let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+      match name with
+      | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "Round starts.") ])
+      | "pk-timeout" -> `Timeout
+      | _ -> `Error "unknown keeper"
+    in
+    let ctx : Tool_trpg.context =
+      { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    in
+    let args =
+      `Assoc
+        [
+          ("room_id", `String "room-round-unavailable-sampled");
+          ("dm_keeper", `String "dm-keeper");
+          ("player_keepers", `Assoc [ ("p1", `String "pk-timeout") ]);
+          ("timeout_sec", `Float 0.2);
+        ]
+    in
+    let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+    Alcotest.(check bool) "round_run success despite sampling" true ok;
+    let json = parse_json_exn body in
+    let summary = Yojson.Safe.Util.member "summary" json in
+    Alcotest.(check int)
+      "timeouts remain tracked"
+      1
+      (Yojson.Safe.Util.member "timeouts" summary |> Yojson.Safe.Util.to_int);
+    Alcotest.(check int)
+      "unavailable summary counts appended events only"
+      0
+      (Yojson.Safe.Util.member "unavailable" summary |> Yojson.Safe.Util.to_int);
+    let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
+    let timeout_status =
+      List.find_opt
+        (fun s ->
+          s |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string = "timeout")
+        statuses
+    in
+    (match timeout_status with
+    | Some status_json ->
+        Alcotest.(check bool)
+          "timeout unavailable sampled"
+          true
+          (status_json |> Yojson.Safe.Util.member "sampled" |> Yojson.Safe.Util.to_bool);
+        Alcotest.(check string)
+          "sampled reason duplicate"
+          "duplicate"
+          (status_json |> Yojson.Safe.Util.member "sampled_reason" |> Yojson.Safe.Util.to_string)
+    | None -> Alcotest.fail "timeout status is missing");
+    let _, unavailable_stream =
+      dispatch_exn ctx ~name:"masc_trpg_stream"
+        ~args:
+          (`Assoc
+            [
+              ("room_id", `String "room-round-unavailable-sampled");
+              ("event_type", `String "keeper.unavailable");
+            ])
+    in
+    Alcotest.(check int)
+      "keeper.unavailable count unchanged"
+      1
+      (count_from_json (parse_json_exn unavailable_stream));
+    cleanup_dir base_dir)
+
 let test_round_run_uses_majority_player_quorum () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -436,7 +534,7 @@ let test_round_run_uses_majority_player_quorum () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -509,7 +607,7 @@ let test_round_run_rejects_meta_only_keeper_reply () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -567,7 +665,7 @@ let test_round_run_requires_keeper_runtime () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -610,6 +708,7 @@ let test_round_run_preflight_warning_is_non_blocking () =
       agent_name = "tester";
       keeper_call = Some keeper_call;
       keeper_probe = Some keeper_probe;
+      dm_voice_emit = None;
     }
   in
   let args =
@@ -660,7 +759,7 @@ let test_round_run_lang_english_prompt () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -698,7 +797,7 @@ let test_round_run_dm_prompt_reflects_player_action () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -730,7 +829,7 @@ let test_round_run_rejects_non_unique_keepers () =
     `Ok (`Assoc [ ("reply", `String "noop") ])
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -767,7 +866,7 @@ let test_session_bootstrap_and_intervention_flow () =
       `Error ("unknown keeper: " ^ name)
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let session_id = "session-bootstrap-1" in
   let ok_preset, preset_body =
@@ -899,7 +998,7 @@ let test_examples_scenario_visible_as_world_preset () =
 }|};
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
 
   let ok_preset, preset_body =
@@ -946,7 +1045,7 @@ let test_actor_spawn_claim_release_flow () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let room_id = "room-actor-lease-flow" in
 
@@ -1095,7 +1194,7 @@ let test_actor_update_delete_flow () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let room_id = "room-actor-update-delete" in
   let actor_id = "npc-fox" in
@@ -1213,7 +1312,7 @@ let test_actor_claim_rejects_dead_actor () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None }
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let room_id = "room-actor-dead-claim" in
   let ok_spawn, _spawn =
@@ -1334,6 +1433,10 @@ let () =
             "timeout policy emits events"
             `Quick
             test_round_run_timeout_policy;
+          Alcotest.test_case
+            "samples keeper.unavailable when cap reached"
+            `Quick
+            test_round_run_unavailable_sampling_cap;
           Alcotest.test_case
             "uses majority player quorum before dm/advance"
             `Quick

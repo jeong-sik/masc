@@ -493,18 +493,110 @@ fn bind_auto_round_toggle(doc: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
+const SESSION_CONTROL_BADGE_CHAR_LIMIT: usize = 120;
+
+#[cfg(target_arch = "wasm32")]
+fn collapse_inline_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn truncate_status_text(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    if limit <= 3 {
+        return "...".to_string();
+    }
+    let mut out = text.chars().take(limit - 3).collect::<String>();
+    out.push_str("...");
+    out
+}
+
+#[cfg(target_arch = "wasm32")]
+fn summarize_session_control_payload(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        if let Some(message) = value.get("message").and_then(Value::as_str) {
+            let collapsed = collapse_inline_whitespace(message);
+            if !collapsed.is_empty() {
+                return collapsed;
+            }
+        }
+
+        let ok = value.get("ok").and_then(Value::as_bool);
+        let room_id = value
+            .get("room_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| format!("room {v}"));
+        let phase = value
+            .get("phase")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| format!("phase {v}"));
+        let turn_after = value
+            .get("turn_after")
+            .and_then(Value::as_i64)
+            .map(|turn| format!("turn {turn}"));
+        let statuses = value
+            .get("statuses")
+            .and_then(Value::as_array)
+            .map(|rows| format!("actors {}", rows.len()));
+
+        let mut parts = Vec::new();
+        if let Some(room) = room_id {
+            parts.push(room);
+        }
+        if let Some(phase) = phase {
+            parts.push(phase);
+        }
+        if let Some(turn) = turn_after {
+            parts.push(turn);
+        }
+        if let Some(statuses) = statuses {
+            parts.push(statuses);
+        }
+
+        if ok == Some(true) {
+            if parts.is_empty() {
+                return "ok".to_string();
+            }
+            return parts.join(" | ");
+        }
+    }
+
+    collapse_inline_whitespace(trimmed)
+}
+
+#[cfg(target_arch = "wasm32")]
 fn set_session_control_status(doc: &web_sys::Document, text: &str, tone: &str) {
     let Some(el) = doc.get_element_by_id("session-control-status") else {
         return;
     };
+    let full_text = {
+        let collapsed = collapse_inline_whitespace(text);
+        if collapsed.is_empty() {
+            "세션 제어 대기".to_string()
+        } else {
+            collapsed
+        }
+    };
+    let display_text = truncate_status_text(&full_text, SESSION_CONTROL_BADGE_CHAR_LIMIT);
     let class_name = if tone.trim().is_empty() {
         "widget-pill".to_string()
     } else {
         format!("widget-pill {}", tone.trim())
     };
-    el.set_text_content(Some(text));
+    el.set_text_content(Some(&display_text));
     let _ = el.set_attribute("class", &class_name);
-    let _ = el.set_attribute("title", text);
+    let _ = el.set_attribute("title", &full_text);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -661,10 +753,11 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
                             }
                             render_auto_round_toggle(&doc_async);
                             crate::game::round_runner::set_auto_round_running(false);
-                            let status = if raw.is_empty() {
+                            let detail = summarize_session_control_payload(&raw);
+                            let status = if detail.is_empty() {
                                 "세션 멈춤 완료".to_string()
                             } else {
-                                format!("세션 멈춤 완료: {}", raw)
+                                format!("세션 멈춤 완료: {}", detail)
                             };
                             set_session_control_status(&doc_async, &status, "status-warn");
                             let doc_for_refresh = doc_async.clone();
@@ -703,10 +796,11 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
                     let room_id = crate::config::current_room_id();
                     match post_tool_action("masc_resume", json!({ "room_id": room_id })).await {
                         Ok(raw) => {
-                            let status = if raw.is_empty() {
+                            let detail = summarize_session_control_payload(&raw);
+                            let status = if detail.is_empty() {
                                 "세션 재개 완료".to_string()
                             } else {
-                                format!("세션 재개 완료: {}", raw)
+                                format!("세션 재개 완료: {}", detail)
                             };
                             set_session_control_status(&doc_async, &status, "status-ok");
                             let doc_for_refresh = doc_async.clone();
@@ -1327,9 +1421,17 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
     }
     if let Some(el) = doc.get_element_by_id("turn-flow-banner") {
         let _ = el.set_attribute("class", "turn-flow-banner is-idle");
-        el.set_inner_html(
-            "<span class=\"flow-state\">대기</span><span class=\"flow-text\">세션 상태를 불러오는 중입니다.</span>",
-        );
+        let _ = el.set_attribute("title", "세션 상태를 불러오는 중입니다.");
+    }
+    if let Some(el) = doc.get_element_by_id("turn-flow-state") {
+        el.set_text_content(Some("대기"));
+    }
+    if let Some(el) = doc.get_element_by_id("turn-flow-text") {
+        el.set_text_content(Some("세션 상태를 불러오는 중입니다."));
+    }
+    if let Some(el) = doc.get_element_by_id("turn-flow-actions") {
+        el.set_inner_html("");
+        let _ = el.remove_attribute("data-snapshot");
     }
     if let Some(el) = doc.get_element_by_id("agent-round-flow") {
         el.set_inner_html(

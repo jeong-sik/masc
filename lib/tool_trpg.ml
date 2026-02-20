@@ -23,6 +23,7 @@ type result = bool * string
 
 type keeper_call_result = [ `Ok of Yojson.Safe.t | `Timeout | `Error of string ]
 type keeper_probe_result = [ `Ok | `Error of string ]
+type dm_voice_emit_result = (Yojson.Safe.t, string) Stdlib.result
 
 type context = {
   config : Room.config;
@@ -31,6 +32,12 @@ type context = {
     (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
     option;
   keeper_probe : (name:string -> keeper_probe_result) option;
+  dm_voice_emit :
+    (agent_id:string ->
+     message:string ->
+     provider:string option ->
+     dm_voice_emit_result)
+    option;
 }
 
 type trpg_role = [ `Dm | `Player ]
@@ -1289,7 +1296,53 @@ let is_reply_noise_text (raw : string) : bool =
   || starts_with t "반드시 한국어로 응답하세요."
   || contains_substring t "visible_state_json:"
 
+let extract_skill_hint_from_text (raw : string) : string option =
+  let lines =
+    raw |> String.split_on_char '\n' |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  in
+  let extract_skill line =
+    let t = String.trim line in
+    if starts_with t "SKILL:" then
+      let payload =
+        String.sub t (String.length "SKILL:") (String.length t - String.length "SKILL:")
+        |> String.trim
+      in
+      if payload = "" then None else Some payload
+    else None
+  in
+  List.find_map extract_skill lines
+
+let fallback_reply_from_keeper_json keeper_json =
+  let is_meta_skill_hint skill =
+    let lowered = String.lowercase_ascii (String.trim skill) in
+    starts_with lowered "masc-"
+    || starts_with lowered "lodge-"
+    || starts_with lowered "heartbeat"
+    || contains_substring lowered "keeper"
+    || contains_substring lowered "autonomy"
+  in
+  let skill_from_meta =
+    match keeper_json |> member "skill_primary" with
+    | `String s when String.trim s <> "" -> Some (String.trim s)
+    | _ -> None
+  in
+  let skill_hint =
+    match skill_from_meta with
+    | Some skill -> Some skill
+    | None -> (
+        match keeper_json |> member "reply" with
+        | `String s -> extract_skill_hint_from_text s
+        | _ -> None )
+  in
+  match skill_hint with
+  | Some skill when skill <> "" ->
+      if is_meta_skill_hint skill then Some "상황을 살피며 다음 행동을 준비합니다."
+      else Some (Printf.sprintf "%s 스킬을 활용해 행동을 이어갑니다." skill)
+  | _ -> None
+
 let parse_keeper_reply keeper_json =
+  let default_fallback_reply = "상황을 살피며 다음 행동을 준비합니다." in
   let raw_reply =
     let first_string_field keys =
       keys
@@ -1307,7 +1360,10 @@ let parse_keeper_reply keeper_json =
         | _ -> None )
   in
   match raw_reply with
-  | None -> Error "keeper response missing reply/content/text/message field"
+  | None -> (
+      match fallback_reply_from_keeper_json keeper_json with
+      | Some reply when String.trim reply <> "" -> Ok reply
+      | _ -> Ok default_fallback_reply)
   | Some s ->
       let cleaned = sanitize_keeper_reply s in
       let fallback = String.trim s in
@@ -1315,16 +1371,29 @@ let parse_keeper_reply keeper_json =
         contains_substring s "visible_state_json:"
         && (contains_substring s "TRPG 실행 요청입니다."
            || contains_substring s "TRPG execution request."
-           || contains_substring s "내 기록상 가장 처음 물어본 건 이거야")
+           || contains_substring s "내 기록상 가장 처음 물어본 건 이거야"
+           || contains_substring s "당신은 던전 마스터"
+           || contains_substring s "You are the Dungeon Master"
+           || contains_substring s "캐릭터에 맞게 행동하고"
+           || contains_substring s "Respond in-character as")
       in
+      let fallback_reply = fallback_reply_from_keeper_json keeper_json in
       let reply =
         if cleaned <> "" then Some cleaned
-        else if prompt_echo || is_reply_noise_text fallback then None
+        else if prompt_echo || is_reply_noise_text fallback then fallback_reply
         else Some fallback
       in
       (match reply with
       | Some reply when String.trim reply <> "" -> Ok reply
-      | _ -> Error "keeper response reply contains only prompt/meta artifacts")
+      | _ -> (
+          match fallback_reply with
+          | Some reply when String.trim reply <> "" -> Ok reply
+          | _ ->
+              if is_reply_noise_text fallback then
+                Error
+                  "meta-only reply: response contained only state/noise \
+                   markers"
+              else Ok default_fallback_reply))
 
 type prompt_language = [ `Ko | `En ]
 
@@ -1413,56 +1482,305 @@ let compact_state_for_prompt (state : Yojson.Safe.t) : Yojson.Safe.t =
         @ [ ("narration_log", narration_log); ("dice_log", dice_log) ])
   | _ -> state
 
+type prompt_context = {
+  actor_name : string;
+  actor_persona : string;
+  actor_archetype : string;
+  actor_traits : string list;
+  actor_skills : string list;
+  scene_description : string;
+  scene_mood : string;
+  narrative_recent : string list;
+  party_summary : string;
+  world_weather : string;
+  world_time : string;
+}
+
+let empty_prompt_context =
+  {
+    actor_name = "";
+    actor_persona = "";
+    actor_archetype = "";
+    actor_traits = [];
+    actor_skills = [];
+    scene_description = "";
+    scene_mood = "";
+    narrative_recent = [];
+    party_summary = "";
+    world_weather = "";
+    world_time = "";
+  }
+
+let get_string_field json key =
+  match json with
+  | `Null -> ""
+  | _ -> ( match json |> member key with `String s -> s | _ -> "")
+
+let get_string_list_field json key =
+  match json with
+  | `Null -> []
+  | _ -> (
+      match json |> member key with
+      | `List xs ->
+          xs
+          |> List.filter_map (function
+               | `String s when String.trim s <> "" -> Some s
+               | _ -> None)
+      | _ -> [])
+
+let extract_narrative_recent (state : Yojson.Safe.t) : string list =
+  match state |> member "narration_log" with
+  | `List xs ->
+      xs |> take_last 5
+      |> List.filter_map (fun entry ->
+             match entry |> member "reply" with
+             | `String s when String.trim s <> "" ->
+                 let actor =
+                   match entry |> member "actor_id" with
+                   | `String a -> a
+                   | _ -> "?"
+                 in
+                 Some (Printf.sprintf "[%s] %s" actor (compact_text ~max_len:200 s))
+             | _ -> None)
+  | _ -> []
+
+let extract_party_summary ~exclude_actor_id (state : Yojson.Safe.t) : string =
+  match state |> member "party" with
+  | `Assoc members ->
+      members
+      |> List.filter_map (fun (aid, actor_json) ->
+             if aid = exclude_actor_id then None
+             else
+               let name = get_string_field actor_json "name" in
+               let arch = get_string_field actor_json "archetype" in
+               let alive =
+                 match actor_json |> member "alive" with
+                 | `Bool b -> b
+                 | _ -> true
+               in
+               if name = "" then None
+               else
+                 let status = if alive then "" else " [dead]" in
+                 Some (Printf.sprintf "%s (%s)%s" name arch status))
+      |> String.concat ", "
+  | _ -> ""
+
+let extract_prompt_context ~actor_id (state : Yojson.Safe.t) : prompt_context =
+  let actor_json =
+    match state |> member "party" with
+    | `Assoc members -> (
+        match List.assoc_opt actor_id members with
+        | Some j -> j
+        | None -> `Null)
+    | _ -> `Null
+  in
+  let world_json = state |> member "world" in
+  {
+    actor_name = get_string_field actor_json "name";
+    actor_persona = get_string_field actor_json "persona";
+    actor_archetype = get_string_field actor_json "archetype";
+    actor_traits = get_string_list_field actor_json "traits";
+    actor_skills = get_string_list_field actor_json "skills";
+    scene_description = get_string_field world_json "description";
+    scene_mood = get_string_field world_json "intro";
+    narrative_recent = extract_narrative_recent state;
+    party_summary = extract_party_summary ~exclude_actor_id:actor_id state;
+    world_weather =
+      (let flags = get_string_list_field world_json "story_flags" in
+       flags
+       |> List.filter (fun f ->
+              String.length f > 8
+              && String.sub f 0 8 = "weather.")
+       |> (function x :: _ -> x | [] -> ""));
+    world_time =
+      (let flags = get_string_list_field world_json "story_flags" in
+       flags
+       |> List.filter (fun f ->
+              String.length f > 5
+              && String.sub f 0 5 = "time.")
+       |> (function x :: _ -> x | [] -> ""));
+  }
+
+let join_nonempty sep items =
+  items |> List.filter (fun s -> String.trim s <> "") |> String.concat sep
+
+let format_traits traits =
+  match traits with [] -> "" | ts -> String.concat ", " ts
+
+let build_player_section_ko (ctx : prompt_context) =
+  let parts =
+    [
+      Printf.sprintf "당신은 '%s'입니다." ctx.actor_name;
+      (if ctx.actor_archetype <> "" then
+         Printf.sprintf "직업/역할: %s." ctx.actor_archetype
+       else "");
+      (if ctx.actor_persona <> "" then
+         Printf.sprintf "성격: %s" ctx.actor_persona
+       else "");
+      (if ctx.actor_traits <> [] then
+         Printf.sprintf "특성: %s." (format_traits ctx.actor_traits)
+       else "");
+      (if ctx.actor_skills <> [] then
+         Printf.sprintf "보유 기술: %s." (format_traits ctx.actor_skills)
+       else "");
+      (if ctx.scene_description <> "" then
+         Printf.sprintf "현재 장소: %s" ctx.scene_description
+       else "");
+      (if ctx.scene_mood <> "" then
+         Printf.sprintf "분위기: %s" ctx.scene_mood
+       else "");
+      (if ctx.world_weather <> "" then
+         Printf.sprintf "날씨: %s." ctx.world_weather
+       else "");
+      (if ctx.world_time <> "" then
+         Printf.sprintf "시간: %s." ctx.world_time
+       else "");
+      (if ctx.party_summary <> "" then
+         Printf.sprintf "파티 동료: %s." ctx.party_summary
+       else "");
+      (match ctx.narrative_recent with
+      | [] -> ""
+      | lines ->
+          Printf.sprintf "최근 상황:\n%s"
+            (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
+      Printf.sprintf "'%s'로서 캐릭터에 맞게 행동하고 대사를 말하세요." ctx.actor_name;
+    ]
+  in
+  join_nonempty "\n" parts
+
+let build_player_section_en (ctx : prompt_context) =
+  let parts =
+    [
+      Printf.sprintf "You ARE '%s'." ctx.actor_name;
+      (if ctx.actor_archetype <> "" then
+         Printf.sprintf "Class/Role: %s." ctx.actor_archetype
+       else "");
+      (if ctx.actor_persona <> "" then
+         Printf.sprintf "Personality: %s" ctx.actor_persona
+       else "");
+      (if ctx.actor_traits <> [] then
+         Printf.sprintf "Traits: %s." (format_traits ctx.actor_traits)
+       else "");
+      (if ctx.actor_skills <> [] then
+         Printf.sprintf "Skills: %s." (format_traits ctx.actor_skills)
+       else "");
+      (if ctx.scene_description <> "" then
+         Printf.sprintf "Current scene: %s" ctx.scene_description
+       else "");
+      (if ctx.scene_mood <> "" then
+         Printf.sprintf "Mood: %s" ctx.scene_mood
+       else "");
+      (if ctx.world_weather <> "" then
+         Printf.sprintf "Weather: %s." ctx.world_weather
+       else "");
+      (if ctx.world_time <> "" then
+         Printf.sprintf "Time: %s." ctx.world_time
+       else "");
+      (if ctx.party_summary <> "" then
+         Printf.sprintf "Party members: %s." ctx.party_summary
+       else "");
+      (match ctx.narrative_recent with
+      | [] -> ""
+      | lines ->
+          Printf.sprintf "Recent events:\n%s"
+            (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
+      Printf.sprintf "Respond in-character as '%s'." ctx.actor_name;
+    ]
+  in
+  join_nonempty "\n" parts
+
+let build_dm_section_ko (ctx : prompt_context) =
+  let parts =
+    [
+      "당신은 던전 마스터(DM)입니다.";
+      (if ctx.scene_description <> "" then
+         Printf.sprintf "현재 장면: %s" ctx.scene_description
+       else "");
+      (if ctx.scene_mood <> "" then
+         Printf.sprintf "분위기: %s" ctx.scene_mood
+       else "");
+      (if ctx.world_weather <> "" then
+         Printf.sprintf "날씨: %s." ctx.world_weather
+       else "");
+      (if ctx.world_time <> "" then
+         Printf.sprintf "시간: %s." ctx.world_time
+       else "");
+      (if ctx.party_summary <> "" then
+         Printf.sprintf "파티 구성: %s." ctx.party_summary
+       else "");
+      (match ctx.narrative_recent with
+      | [] -> ""
+      | lines ->
+          Printf.sprintf "최근 서사:\n%s"
+            (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
+      "다음에 일어날 일을 결정하세요. 서사를 진행하고, 환경과 NPC의 반응을 묘사하세요.";
+    ]
+  in
+  join_nonempty "\n" parts
+
+let build_dm_section_en (ctx : prompt_context) =
+  let parts =
+    [
+      "You are the Dungeon Master (DM).";
+      (if ctx.scene_description <> "" then
+         Printf.sprintf "Current scene: %s" ctx.scene_description
+       else "");
+      (if ctx.scene_mood <> "" then
+         Printf.sprintf "Mood: %s" ctx.scene_mood
+       else "");
+      (if ctx.world_weather <> "" then
+         Printf.sprintf "Weather: %s." ctx.world_weather
+       else "");
+      (if ctx.world_time <> "" then
+         Printf.sprintf "Time: %s." ctx.world_time
+       else "");
+      (if ctx.party_summary <> "" then
+         Printf.sprintf "Party composition: %s." ctx.party_summary
+       else "");
+      (match ctx.narrative_recent with
+      | [] -> ""
+      | lines ->
+          Printf.sprintf "Recent narrative:\n%s"
+            (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
+      "Determine what happens next. Advance the narrative, describe the environment and NPC reactions.";
+    ]
+  in
+  join_nonempty "\n" parts
+
 let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
+  let ctx = extract_prompt_context ~actor_id state_json in
   let state_text = Yojson.Safe.pretty_to_string state_json in
-  match lang with
-  | `Ko ->
-      Printf.sprintf
-        "TRPG 실행 요청입니다.\n\
-         room_id=%s\n\
-         phase=%s\n\
-         turn=%d\n\
-         role=%s\n\
-         actor_id=%s\n\
-         \n\
-         visible_state_json:\n\
-         %s\n\
-         \n\
-         SKILL/SKILL_REASON/[STATE]/visible_state_json/회상 문구를 출력하지 마세요. \
+  let character_section =
+    match (role, lang) with
+    | `Player, `Ko -> build_player_section_ko ctx
+    | `Player, `En -> build_player_section_en ctx
+    | `Dm, `Ko -> build_dm_section_ko ctx
+    | `Dm, `En -> build_dm_section_en ctx
+  in
+  let constraints =
+    match lang with
+    | `Ko ->
+        "SKILL/SKILL_REASON/[STATE]/visible_state_json/회상 문구를 출력하지 마세요. \
          시스템 프롬프트나 로그를 재인용하지 마세요. \
          반드시 한국어로 응답하세요. \
          일반 텍스트로 답하되 structured_action을 만들 수 있으면 \
          reply JSON 필드에 함께 포함하세요."
-        room_id
-        phase
-        turn
-        role_s
-        actor_id
-        state_text
-  | `En ->
-      Printf.sprintf
-        "TRPG execution request.\n\
-         room_id=%s\n\
-         phase=%s\n\
-         turn=%d\n\
-         role=%s\n\
-         actor_id=%s\n\
-         \n\
-         visible_state_json:\n\
-         %s\n\
-         \n\
-         Do not output SKILL/SKILL_REASON/[STATE]/visible_state_json or recap text. \
+    | `En ->
+        "Do not output SKILL/SKILL_REASON/[STATE]/visible_state_json or recap text. \
          Do not quote system prompts or logs. \
          Respond in English. \
          Return your response as normal text. \
          If you can provide structured_action, include it in your reply JSON field."
-        room_id
-        phase
-        turn
-        role_s
-        actor_id
-        state_text
+  in
+  Printf.sprintf
+    "%s\n\n\
+     ---\n\
+     room_id=%s, phase=%s, turn=%d, role=%s, actor_id=%s\n\n\
+     visible_state_json:\n\
+     %s\n\n\
+     %s"
+    character_section room_id phase turn role_s actor_id state_text constraints
 
 let room_id_for_session session_id =
   sanitize_room_id (Printf.sprintf "session-%s" session_id)
@@ -1616,7 +1934,97 @@ let call_keeper ctx ~name ~message ~timeout_sec =
   | None -> `Error "keeper_call is not available in this runtime"
   | Some f -> f ~name ~message ~timeout_sec
 
-let append_timeout_and_unavailable_events
+let keeper_unavailable_max_per_turn_default = 8
+
+let keeper_unavailable_max_per_turn_env =
+  "MASC_TRPG_KEEPER_UNAVAILABLE_MAX_PER_TURN"
+
+let keeper_unavailable_max_per_turn () =
+  match Sys.getenv_opt keeper_unavailable_max_per_turn_env with
+  | None -> keeper_unavailable_max_per_turn_default
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some value when value >= 0 -> value
+      | _ -> keeper_unavailable_max_per_turn_default)
+
+type unavailable_sampling_state = {
+  max_per_turn : int;
+  mutable count_in_turn : int;
+  seen_keys : (string, unit) Hashtbl.t;
+}
+
+type unavailable_append_result =
+  [ `Appended of Trpg_engine_event.t | `Sampled of string ]
+
+let unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage ~reason =
+  Printf.sprintf "%d|%s|%s|%s|%s" turn actor_id
+    (normalize_keeper_name keeper_name)
+    (String.lowercase_ascii (String.trim stage))
+    (String.lowercase_ascii (String.trim reason))
+
+let make_unavailable_sampling_state ~(events : Trpg_engine_event.t list) ~turn :
+    unavailable_sampling_state =
+  let seen_keys = Hashtbl.create 64 in
+  let count_in_turn = ref 0 in
+  List.iter
+    (fun (event : Trpg_engine_event.t) ->
+      if event.event_type = Trpg_engine_event.Keeper_unavailable then
+        let payload_turn =
+          match event.payload |> member "turn" with
+          | `Int i -> Some i
+          | _ -> None
+        in
+        match payload_turn with
+        | Some payload_turn when payload_turn = turn ->
+            count_in_turn := !count_in_turn + 1;
+            let actor_id =
+              match event.payload |> member "actor_id" with
+              | `String v -> v
+              | _ ->
+                  Option.value ~default:"" event.actor_id |> String.trim
+            in
+            let keeper_name =
+              match event.payload |> member "keeper" with
+              | `String v -> v
+              | _ -> ""
+            in
+            let stage =
+              match event.payload |> member "stage" with
+              | `String v -> v
+              | _ -> ""
+            in
+            let reason =
+              match event.payload |> member "reason" with
+              | `String v -> v
+              | _ -> ""
+            in
+            if actor_id <> "" && keeper_name <> "" && stage <> "" then
+              let key =
+                unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage
+                  ~reason
+              in
+              Hashtbl.replace seen_keys key ()
+        | _ -> ())
+    events;
+  {
+    max_per_turn = keeper_unavailable_max_per_turn ();
+    count_in_turn = !count_in_turn;
+    seen_keys;
+  }
+
+let decide_unavailable_append ~sampling_state ~turn ~actor_id ~keeper_name ~stage
+    ~reason : [ `Append | `Sampled of string ] =
+  let key = unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage ~reason in
+  if Hashtbl.mem sampling_state.seen_keys key then `Sampled "duplicate"
+  else if sampling_state.count_in_turn >= sampling_state.max_per_turn then
+    `Sampled
+      (Printf.sprintf "cap:%d" (max 0 sampling_state.max_per_turn))
+  else (
+    Hashtbl.replace sampling_state.seen_keys key ();
+    sampling_state.count_in_turn <- sampling_state.count_in_turn + 1;
+    `Append)
+
+let rec append_timeout_and_unavailable_events
     ~base_dir
     ~room_id
     ~phase
@@ -1625,6 +2033,7 @@ let append_timeout_and_unavailable_events
     ~actor_id
     ~keeper_name
     ~timeout_sec
+    ~sampling_state
     =
   let ( let* ) = Result.bind in
   let timeout_reason = "timeout" in
@@ -1651,52 +2060,64 @@ let append_timeout_and_unavailable_events
       ~payload:timeout_payload
       ()
   in
-  let unavailable_payload =
-    `Assoc
-      [
-        ("phase", `String phase);
-        ("turn", `Int turn);
-        ("role", `String (role_to_string role));
-        ("actor_id", `String actor_id);
-        ("keeper", `String keeper_name);
-        ("reason", `String timeout_reason);
-        ("timeout_sec", `Float timeout_sec);
-        ("stage", `String timeout_stage);
-      ]
-  in
-  let* unavailable_event =
-    append_event
+  let* unavailable_result =
+    append_unavailable_event
       ~base_dir
       ~room_id
-      ~event_type:Trpg_engine_event.Keeper_unavailable
+      ~phase
+      ~turn
+      ~role
       ~actor_id
-      ~payload:unavailable_payload
+      ~keeper_name
+      ~reason:timeout_reason
+      ~stage:timeout_stage
+      ~sampling_state
+      ~extra_payload_fields:[ ("timeout_sec", `Float timeout_sec) ]
       ()
   in
-  Ok [ timeout_event; unavailable_event ]
+  Ok (timeout_event, unavailable_result)
 
-let append_unavailable_event
-    ~base_dir ~room_id ~phase ~turn ~role ~actor_id ~keeper_name ~reason ~stage ()
-    =
-  let payload =
-    `Assoc
-      [
-        ("phase", `String phase);
-        ("turn", `Int turn);
-        ("role", `String (role_to_string role));
-        ("actor_id", `String actor_id);
-        ("keeper", `String keeper_name);
-        ("reason", `String reason);
-        ("stage", `String stage);
-      ]
-  in
-  append_event
+and append_unavailable_event
     ~base_dir
     ~room_id
-    ~event_type:Trpg_engine_event.Keeper_unavailable
+    ~phase
+    ~turn
+    ~role
     ~actor_id
-    ~payload
+    ~keeper_name
+    ~reason
+    ~stage
+    ~sampling_state
+    ?(extra_payload_fields = [])
     ()
+    =
+  match
+    decide_unavailable_append ~sampling_state ~turn ~actor_id ~keeper_name
+      ~stage ~reason
+  with
+  | `Sampled sampled_reason -> Ok (`Sampled sampled_reason)
+  | `Append ->
+      let payload =
+        `Assoc
+          ([
+             ("phase", `String phase);
+             ("turn", `Int turn);
+             ("role", `String (role_to_string role));
+             ("actor_id", `String actor_id);
+             ("keeper", `String keeper_name);
+             ("reason", `String reason);
+             ("stage", `String stage);
+           ]
+          @ extra_payload_fields)
+      in
+      append_event
+        ~base_dir
+        ~room_id
+        ~event_type:Trpg_engine_event.Keeper_unavailable
+        ~actor_id
+        ~payload
+        ()
+      |> Result.map (fun event -> `Appended event)
 
 let append_keeper_reply_event
     ~base_dir
@@ -1813,16 +2234,17 @@ let handle_turn_advance ctx args : result =
   let base_dir = ctx.config.base_path in
   let result_json =
     let* room_id = get_required_string args "room_id" in
-    let* phase_opt = get_optional_string args "phase" in
+    let* phase_opt_raw = get_optional_string args "phase" in
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* () =
-      match phase_opt with
-      | None -> Ok ()
+    let* phase_opt =
+      match phase_opt_raw with
+      | None -> Ok None
       | Some p -> (
           match Trpg_engine_types.phase_of_string p with
-          | Ok _ -> Ok ()
+          | Ok phase ->
+              Ok (Some (Trpg_engine_types.string_of_phase phase))
           | Error e -> Error e)
     in
     let* derived = derive_state ~base_dir ~room_id ~rule_module in
@@ -2030,48 +2452,51 @@ let append_pending_interventions ~base_dir ~room_id ~phase ~turn =
   loop [] [] pending
 
 let handle_preset_list ctx args : result =
-  let ( let* ) = Result.bind in
-  let include_characters =
-    get_optional_bool args "include_characters" ~default:true
-  in
-  let include_skills = get_optional_bool args "include_skills" ~default:true in
-  let result_json =
-    let* include_characters = include_characters in
-    let* include_skills = include_skills in
-    let* catalog = Trpg_preset_store.load_catalog ~base_dir:ctx.config.base_path in
-    let payload =
-      `Assoc
-        [
-          ("ok", `Bool true);
-          ( "dm_presets",
-            `List
-              (List.map
-                 Trpg_preset_store.dm_preset_to_yojson
-                 catalog.dm_presets) );
-          ( "world_presets",
-            `List
-              (List.map
-                 Trpg_preset_store.world_preset_to_yojson
-                 catalog.world_presets) );
-          ( "character_presets",
-            if include_characters then
-              `List
-                (List.map
-                   Trpg_preset_store.character_preset_to_yojson
-                   catalog.character_presets)
-            else `List [] );
-          ( "skills",
-            if include_skills then
-              `List
-                (List.map
-                   Trpg_preset_store.skill_to_yojson
-                   catalog.skills)
-            else `List [] );
-        ]
+  try
+    let ( let* ) = Result.bind in
+    let include_characters =
+      get_optional_bool args "include_characters" ~default:true
     in
-    Ok payload
-  in
-  match result_json with Ok j -> ok_json j | Error e -> err e
+    let include_skills = get_optional_bool args "include_skills" ~default:true in
+    let result_json =
+      let* include_characters = include_characters in
+      let* include_skills = include_skills in
+      let* catalog = Trpg_preset_store.load_catalog ~base_dir:ctx.config.base_path in
+      let payload =
+        `Assoc
+          [
+            ("ok", `Bool true);
+            ( "dm_presets",
+              `List
+                (List.map
+                   Trpg_preset_store.dm_preset_to_yojson
+                   catalog.dm_presets) );
+            ( "world_presets",
+              `List
+                (List.map
+                   Trpg_preset_store.world_preset_to_yojson
+                   catalog.world_presets) );
+            ( "character_presets",
+              if include_characters then
+                `List
+                  (List.map
+                     Trpg_preset_store.character_preset_to_yojson
+                     catalog.character_presets)
+              else `List [] );
+            ( "skills",
+              if include_skills then
+                `List
+                  (List.map
+                     Trpg_preset_store.skill_to_yojson
+                     catalog.skills)
+              else `List [] );
+          ]
+      in
+      Ok payload
+    in
+    match result_json with Ok j -> ok_json j | Error e -> err e
+  with exn ->
+    err (Printf.sprintf "preset.list failed: %s" (Printexc.to_string exn))
 
 let handle_pool_generate ctx args : result =
   let ( let* ) = Result.bind in
@@ -2195,15 +2620,15 @@ let handle_session_start ctx args : result =
     let* dm_keeper_opt = get_optional_string args "dm_keeper" in
     let dm_keeper = dm_keeper_opt |> Option.value ~default:"dm-keeper" in
     let* phase_opt = get_optional_string args "phase" in
-    let phase = phase_opt |> Option.value ~default:"briefing" in
+    let phase_input = phase_opt |> Option.value ~default:"briefing" in
+    let* phase =
+      match Trpg_engine_types.phase_of_string phase_input with
+      | Ok phase -> Ok (Trpg_engine_types.string_of_phase phase)
+      | Error e -> Error e
+    in
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* force = get_optional_bool args "force" ~default:false in
-    let* () =
-      match Trpg_engine_types.phase_of_string phase with
-      | Ok _ -> Ok ()
-      | Error e -> Error e
-    in
     let* () = validate_rule_module rule_module in
     let fallback_seed =
       entropy_seed ~session_id
@@ -2775,7 +3200,7 @@ let handle_round_run ctx args : result =
       let* lang_opt = get_optional_string args "lang" in
       let* require_claim = get_optional_bool args "require_claim" ~default:false in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
-      let phase = Option.value ~default:"round" phase_opt in
+      let phase_input = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
       let* () =
         match ctx.keeper_call with
@@ -2783,9 +3208,9 @@ let handle_round_run ctx args : result =
         | None -> Error "keeper_call is not available in this runtime"
       in
       let* () = validate_rule_module rule_module in
-      let* () =
-        match Trpg_engine_types.phase_of_string phase with
-        | Ok _ -> Ok ()
+      let* phase =
+        match Trpg_engine_types.phase_of_string phase_input with
+        | Ok phase -> Ok (Trpg_engine_types.string_of_phase phase)
         | Error e -> Error e
       in
       let* () = validate_unique_keeper_assignments ~dm_keeper ~player_keepers in
@@ -2820,6 +3245,10 @@ let handle_round_run ctx args : result =
         ref (latest_session_outcome_payload existing_events_before)
       in
       let* turn_before = read_state_turn derived in
+      let unavailable_sampling =
+        make_unavailable_sampling_state ~events:existing_events_before
+          ~turn:turn_before
+      in
       let next_turn = max 1 (turn_before + 1) in
       let* () =
         if player_keepers = [] then
@@ -2883,7 +3312,7 @@ let handle_round_run ctx args : result =
 
       let process_one ~state_json ~role ~actor_id ~keeper_name =
         let record_unavailable_status ~status ~error ~stage =
-          let* unavailable_event =
+          let* unavailable_result =
             append_unavailable_event
               ~base_dir
               ~room_id
@@ -2894,10 +3323,17 @@ let handle_round_run ctx args : result =
               ~keeper_name
               ~reason:error
               ~stage
+              ~sampling_state:unavailable_sampling
               ()
           in
-          unavailable_count := !unavailable_count + 1;
-          appended_events := !appended_events @ [ unavailable_event ];
+          let sampled, sampled_reason =
+            match unavailable_result with
+            | `Appended unavailable_event ->
+                unavailable_count := !unavailable_count + 1;
+                appended_events := !appended_events @ [ unavailable_event ];
+                (false, None)
+            | `Sampled reason -> (true, Some reason)
+          in
           statuses :=
             `Assoc
               [
@@ -2908,6 +3344,10 @@ let handle_round_run ctx args : result =
                 ("reason", `String error);
                 ("stage", `String stage);
                 ("error", `String error);
+                ("sampled", `Bool sampled);
+                ( "sampled_reason",
+                  Option.fold ~none:`Null ~some:(fun v -> `String v)
+                    sampled_reason );
               ]
             :: !statuses;
           Ok ()
@@ -2948,7 +3388,7 @@ let handle_round_run ctx args : result =
         in
         match call_keeper ctx ~name:keeper_name ~message:prompt ~timeout_sec with
         | `Timeout ->
-            let* timeout_events =
+            let* timeout_event, unavailable_result =
               append_timeout_and_unavailable_events
                 ~base_dir
                 ~room_id
@@ -2958,10 +3398,18 @@ let handle_round_run ctx args : result =
                 ~actor_id
                 ~keeper_name
                 ~timeout_sec
+                ~sampling_state:unavailable_sampling
             in
             timeout_count := !timeout_count + 1;
-            unavailable_count := !unavailable_count + 1;
-            appended_events := !appended_events @ timeout_events;
+            appended_events := !appended_events @ [ timeout_event ];
+            let sampled, sampled_reason =
+              match unavailable_result with
+              | `Appended unavailable_event ->
+                  unavailable_count := !unavailable_count + 1;
+                  appended_events := !appended_events @ [ unavailable_event ];
+                  (false, None)
+              | `Sampled reason -> (true, Some reason)
+            in
             statuses :=
               `Assoc
                 [
@@ -2972,6 +3420,10 @@ let handle_round_run ctx args : result =
                   ("reason", `String "timeout");
                   ("stage", `String "masc_keeper_msg");
                   ("timeout_sec", `Float timeout_sec);
+                  ("sampled", `Bool sampled);
+                  ( "sampled_reason",
+                    Option.fold ~none:`Null ~some:(fun v -> `String v)
+                      sampled_reason );
                 ]
               :: !statuses;
             Ok ()

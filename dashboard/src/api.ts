@@ -447,6 +447,25 @@ export function runTrpgRound(room: string): Promise<unknown> {
   return post('/api/v1/trpg/rounds/run', { room_id: room })
 }
 
+function normalizeTrpgPhase(phase?: string): string | undefined {
+  const normalized = (phase ?? '').trim().toLowerCase()
+  if (!normalized) return undefined
+
+  switch (normalized) {
+    case 'discussion':
+    case 'discuss':
+    case 'party_discussion':
+    case 'player_discussion':
+    case 'action':
+    case 'dice':
+      return 'round'
+    case 'ended':
+      return 'end'
+    default:
+      return normalized
+  }
+}
+
 export interface TrpgDiceRollRequest {
   roomId: string
   actorId: string
@@ -471,9 +490,10 @@ export function rollTrpgDice(req: TrpgDiceRollRequest): Promise<unknown> {
 }
 
 export function advanceTrpgTurn(room: string, phase?: string): Promise<unknown> {
+  const normalizedPhase = normalizeTrpgPhase(phase)
   return post('/api/v1/trpg/turns/advance', {
     room_id: room,
-    ...(phase ? { phase } : {}),
+    ...(normalizedPhase ? { phase: normalizedPhase } : {}),
   })
 }
 
@@ -542,6 +562,39 @@ export async function addTaskFromDashboard(
     title,
     description,
     priority,
+  })
+}
+
+export async function joinDashboardAgent(agentName: string): Promise<string> {
+  return callMcpTool('masc_join', {
+    agent_name: agentName,
+  })
+}
+
+export async function leaveDashboardAgent(agentName: string): Promise<void> {
+  await callMcpTool('masc_leave', {
+    agent_name: agentName,
+  })
+}
+
+export async function sendAgentHeartbeat(agentName: string): Promise<void> {
+  await callMcpTool('masc_heartbeat', {
+    agent_name: agentName,
+  })
+}
+
+export async function fetchRoomMessages(limit = 40): Promise<string[]> {
+  const text = await callMcpTool('masc_messages', { limit })
+  return text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '')
+}
+
+export async function fetchTaskHistory(taskId: string, limit = 20): Promise<string> {
+  return callMcpTool('masc_task_history', {
+    task_id: taskId,
+    limit,
   })
 }
 

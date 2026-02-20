@@ -10,14 +10,17 @@ use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
 #[derive(Resource, Default)]
 pub struct TurnRuntimeCache {
     pub last_snapshot: String,
+    pub last_flow_action_snapshot: String,
 }
 
 #[cfg(target_arch = "wasm32")]
 use super::escape::html_escape;
 #[cfg(target_arch = "wasm32")]
+use wasm_bindgen::closure::Closure;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+use web_sys::{HtmlElement, HtmlInputElement, HtmlSelectElement};
 
 #[cfg(target_arch = "wasm32")]
 fn pretty_phase(phase: &str) -> String {
@@ -66,7 +69,20 @@ fn connection_status_label(status: &ConnectionStatus) -> &'static str {
 }
 
 fn normalize_phase_for_sync(phase: &str) -> String {
-    phase.trim().to_ascii_lowercase().replace('-', "_")
+    let normalized = phase.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "briefing" | "dm" | "narration" | "dm_narration" => "dm_narration".to_string(),
+        "discuss"
+        | "discussion"
+        | "player_discuss"
+        | "party_discussion"
+        | "action"
+        | "player_action"
+        | "dice"
+        | "roll"
+        | "dice_resolution" => "round".to_string(),
+        _ => normalized,
+    }
 }
 
 fn phase_is_aggregate_round(phase: &str) -> bool {
@@ -95,6 +111,45 @@ fn compact_reason_text(raw: &str) -> String {
         short.push_str("...");
         short
     }
+}
+
+fn compact_runner_result(raw: &str) -> String {
+    let compact = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_PREVIEW_CHARS: usize = 96;
+    if compact.chars().count() <= MAX_PREVIEW_CHARS {
+        compact
+    } else {
+        let mut short = compact.chars().take(MAX_PREVIEW_CHARS).collect::<String>();
+        short.push_str("...");
+        short
+    }
+}
+
+fn runner_result_has_issue(raw: &str) -> bool {
+    if raw.trim().is_empty() {
+        return false;
+    }
+
+    let lowered = raw.to_ascii_lowercase();
+    [
+        "error",
+        "failed",
+        "timeout",
+        "unavailable",
+        "stall",
+        "stuck",
+        "invalid",
+        "missing",
+        "busy",
+        "retry",
+        "conflict",
+        "lock",
+        "429",
+        "500",
+        "503",
+    ]
+    .iter()
+    .any(|keyword| lowered.contains(keyword))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -401,7 +456,16 @@ fn build_next_action_hint(
     runner_running: bool,
     current_actor: &str,
     has_actor_issues: bool,
+    has_runner_issue: bool,
 ) -> String {
+    if runner_running && has_runner_issue {
+        return "자동 진행 응답에 이슈가 있습니다. 멈춤 후 재개 또는 라운드 실행을 다시 누르세요."
+            .to_string();
+    }
+    if !runner_running && has_runner_issue {
+        return "직전 자동 진행에서 이슈가 있었습니다. 원인 확인 후 재개 또는 라운드 실행을 누르세요."
+            .to_string();
+    }
     if runner_running {
         return "자동 진행 중입니다. 이벤트 수신을 기다리세요.".to_string();
     }
@@ -441,8 +505,10 @@ fn build_flow_banner(
     connection: &ConnectionStatus,
     runner_running: bool,
     has_actor_issues: bool,
+    has_runner_issue: bool,
     current_actor: &str,
     next_action: &str,
+    runner_preview: &str,
 ) -> (&'static str, &'static str, String) {
     match connection {
         ConnectionStatus::Failed | ConnectionStatus::Disconnected => (
@@ -482,7 +548,14 @@ fn build_flow_banner(
                 "새 게임을 시작하거나 실행 가능한 방으로 이동하세요.".to_string(),
             ),
             TrpgLifecycleState::Running => {
-                if runner_running {
+                if has_runner_issue {
+                    let detail = if runner_preview.trim().is_empty() || runner_preview == "-" {
+                        format!("자동 진행 이슈 감지 · {}", next_action)
+                    } else {
+                        format!("자동 진행 이슈 감지 ({}) · {}", runner_preview, next_action)
+                    };
+                    ("주의", "is-alert", detail)
+                } else if runner_running {
                     (
                         "자동 진행",
                         "is-running",
@@ -510,6 +583,371 @@ fn build_flow_banner(
             }
         },
     }
+}
+
+fn build_flow_action_signature(
+    lifecycle: TrpgLifecycleState,
+    runner_running: bool,
+    has_actor_issues: bool,
+    has_runner_issue: bool,
+    current_actor: &str,
+) -> String {
+    let mut parts = Vec::new();
+    if matches!(
+        lifecycle,
+        TrpgLifecycleState::Lobby
+            | TrpgLifecycleState::Loading
+            | TrpgLifecycleState::Ended
+            | TrpgLifecycleState::Unavailable
+            | TrpgLifecycleState::Unknown
+    ) {
+        parts.push("new_game");
+    }
+    if runner_running {
+        parts.push("auto");
+    } else {
+        parts.push("manual");
+    }
+    if has_actor_issues {
+        parts.push("actor_issue");
+    }
+    if has_runner_issue {
+        parts.push("runner_issue");
+    }
+    let actor = current_actor.trim();
+    if actor.is_empty() || actor == "-" {
+        parts.push("actor_idle");
+    } else {
+        parts.push("actor_active");
+    }
+    parts.join(",")
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+struct FlowBannerAction {
+    key: &'static str,
+    label: String,
+    title: &'static str,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn flow_banner_action_snapshot(actions: &[FlowBannerAction]) -> String {
+    actions
+        .iter()
+        .map(|action| format!("{}:{}", action.key, action.label))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn push_flow_action(actions: &mut Vec<FlowBannerAction>, action: FlowBannerAction) {
+    if actions.iter().any(|existing| existing.key == action.key) {
+        return;
+    }
+    actions.push(action);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dom_element_visible(document: &web_sys::Document, id: &str) -> bool {
+    let Some(el) = document.get_element_by_id(id) else {
+        return false;
+    };
+    if el.has_attribute("hidden") {
+        return false;
+    }
+    if let Some(style) = el.get_attribute("style") {
+        let style = style.to_ascii_lowercase().replace(' ', "");
+        if style.contains("display:none") || style.contains("visibility:hidden") {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dom_element_disabled(document: &web_sys::Document, id: &str) -> bool {
+    let Some(el) = document.get_element_by_id(id) else {
+        return true;
+    };
+    if el.has_attribute("disabled") {
+        return true;
+    }
+    el.get_attribute("aria-disabled")
+        .map(|value| value.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn auto_toggle_action_label(document: &web_sys::Document) -> String {
+    let current = document
+        .get_element_by_id("auto-round-toggle")
+        .and_then(|el| el.text_content())
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    if current.contains("OFF") {
+        "자동 진행 켜기".to_string()
+    } else {
+        "자동 진행 끄기".to_string()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_flow_banner_actions(
+    document: &web_sys::Document,
+    lifecycle: TrpgLifecycleState,
+    runner_running: bool,
+    has_actor_issues: bool,
+    has_runner_issue: bool,
+    current_actor: &str,
+) -> Vec<FlowBannerAction> {
+    let mut actions = Vec::new();
+    let turn_controls_visible = dom_element_visible(document, "turn-controls");
+    let can_run_round =
+        turn_controls_visible && !dom_element_disabled(document, "advance-turn-btn");
+    let recovery_visible = dom_element_visible(document, "round-recovery-btn");
+    let join_panel_visible = dom_element_visible(document, "join-panel");
+    let action_panel_visible = dom_element_visible(document, "action-panel");
+
+    if matches!(
+        lifecycle,
+        TrpgLifecycleState::Lobby
+            | TrpgLifecycleState::Loading
+            | TrpgLifecycleState::Ended
+            | TrpgLifecycleState::Unavailable
+            | TrpgLifecycleState::Unknown
+    ) {
+        push_flow_action(
+            &mut actions,
+            FlowBannerAction {
+                key: "open-new-game",
+                label: "새 게임".to_string(),
+                title: "새 게임 패널을 열어 세션과 파티를 다시 구성합니다.",
+            },
+        );
+    }
+
+    if can_run_round {
+        push_flow_action(
+            &mut actions,
+            FlowBannerAction {
+                key: "run-round",
+                label: "라운드 실행".to_string(),
+                title: "현재 상태로 라운드를 한 번 실행합니다.",
+            },
+        );
+    }
+
+    if document.get_element_by_id("auto-round-toggle").is_some() {
+        push_flow_action(
+            &mut actions,
+            FlowBannerAction {
+                key: "toggle-auto",
+                label: auto_toggle_action_label(document),
+                title: "자동 라운드 진행을 켜거나 끕니다.",
+            },
+        );
+    }
+
+    if recovery_visible
+        && (has_actor_issues
+            || has_runner_issue
+            || matches!(
+                lifecycle,
+                TrpgLifecycleState::Stopped | TrpgLifecycleState::Unavailable
+            ))
+    {
+        push_flow_action(
+            &mut actions,
+            FlowBannerAction {
+                key: "open-recovery",
+                label: "복구 가이드".to_string(),
+                title: "라운드 복구 가이드를 열어 timeout/keeper 이슈를 점검합니다.",
+            },
+        );
+    }
+
+    if join_panel_visible {
+        push_flow_action(
+            &mut actions,
+            FlowBannerAction {
+                key: "focus-join",
+                label: "참여 입력칸".to_string(),
+                title: "플레이어 참여용 액터 ID 입력칸으로 이동합니다.",
+            },
+        );
+    } else if action_panel_visible
+        && (!runner_running
+            || current_actor.trim().is_empty()
+            || current_actor.trim() == "-"
+            || lifecycle.accepts_player_input())
+    {
+        push_flow_action(
+            &mut actions,
+            FlowBannerAction {
+                key: "focus-action",
+                label: "행동 입력칸".to_string(),
+                title: "플레이어 행동 입력칸으로 이동합니다.",
+            },
+        );
+    }
+
+    if actions.is_empty() && can_run_round {
+        push_flow_action(
+            &mut actions,
+            FlowBannerAction {
+                key: "run-round",
+                label: "라운드 실행".to_string(),
+                title: "현재 상태로 라운드를 한 번 실행합니다.",
+            },
+        );
+    }
+
+    if actions.len() > 4 {
+        actions.truncate(4);
+    }
+    actions
+}
+
+#[cfg(target_arch = "wasm32")]
+fn click_dom_button(document: &web_sys::Document, id: &str) {
+    let Some(el) = document.get_element_by_id(id) else {
+        return;
+    };
+    if el.has_attribute("disabled") {
+        return;
+    }
+    if el
+        .get_attribute("aria-disabled")
+        .map(|value| value.trim().eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    if let Ok(el) = el.dyn_into::<HtmlElement>() {
+        el.click();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn focus_dom_input(document: &web_sys::Document, id: &str) {
+    let Some(input) = document
+        .get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+    else {
+        return;
+    };
+    let _ = input.focus();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn trigger_flow_banner_action(document: &web_sys::Document, action: &str) {
+    match action.trim() {
+        "open-new-game" => click_dom_button(document, "new-game-toggle"),
+        "run-round" => click_dom_button(document, "advance-turn-btn"),
+        "toggle-auto" => click_dom_button(document, "auto-round-toggle"),
+        "open-recovery" => click_dom_button(document, "round-recovery-btn"),
+        "focus-join" => focus_dom_input(document, "actor-id-input"),
+        "focus-action" => focus_dom_input(document, "action-input"),
+        _ => {}
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ensure_flow_banner_action_binding(document: &web_sys::Document) {
+    let Some(actions_el) = document.get_element_by_id("turn-flow-actions") else {
+        return;
+    };
+    if actions_el
+        .get_attribute("data-bound")
+        .as_deref()
+        .map(|value| value == "1")
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let cb = Closure::wrap(Box::new(move |evt: web_sys::Event| {
+        let Some(target) = evt.target() else {
+            return;
+        };
+        let Some(mut el) = target.dyn_into::<web_sys::Element>().ok() else {
+            return;
+        };
+
+        let mut action = None;
+        loop {
+            if let Some(value) = el.get_attribute("data-flow-action") {
+                action = Some(value);
+                break;
+            }
+            let Some(parent) = el.parent_element() else {
+                break;
+            };
+            el = parent;
+        }
+        let Some(action) = action else {
+            return;
+        };
+
+        evt.prevent_default();
+        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+            trigger_flow_banner_action(&document, &action);
+        }
+    }) as Box<dyn FnMut(_)>);
+    let _ = actions_el.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+    cb.forget();
+    let _ = actions_el.set_attribute("data-bound", "1");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_flow_banner_actions(
+    document: &web_sys::Document,
+    cache: &mut TurnRuntimeCache,
+    lifecycle: TrpgLifecycleState,
+    runner_running: bool,
+    has_actor_issues: bool,
+    has_runner_issue: bool,
+    current_actor: &str,
+) {
+    let Some(actions_el) = document.get_element_by_id("turn-flow-actions") else {
+        return;
+    };
+    ensure_flow_banner_action_binding(document);
+
+    let actions = collect_flow_banner_actions(
+        document,
+        lifecycle,
+        runner_running,
+        has_actor_issues,
+        has_runner_issue,
+        current_actor,
+    );
+    let snapshot = flow_banner_action_snapshot(&actions);
+    if cache.last_flow_action_snapshot == snapshot {
+        return;
+    }
+    cache.last_flow_action_snapshot = snapshot.clone();
+    let _ = actions_el.set_attribute("data-snapshot", &snapshot);
+
+    if actions.is_empty() {
+        actions_el.set_inner_html("");
+        return;
+    }
+
+    let html = actions
+        .iter()
+        .map(|action| {
+            format!(
+                "<button type=\"button\" class=\"flow-action-chip\" data-flow-action=\"{key}\" title=\"{title}\">{label}</button>",
+                key = html_escape(action.key),
+                title = html_escape(action.title),
+                label = html_escape(&action.label),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    actions_el.set_inner_html(&html);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -790,20 +1228,46 @@ pub fn update_turn_runtime_dom(
         (false, 0, String::new())
     };
 
+    let runner_preview = if runner_last_result.trim().is_empty() {
+        "-".to_string()
+    } else {
+        compact_runner_result(&runner_last_result)
+    };
+    let has_runner_issue = runner_result_has_issue(&runner_last_result);
     let runner_state = if runner_running {
-        format!("자동 진행 {} 라운드", runner_rounds)
+        if has_runner_issue {
+            format!("자동 진행 {} 라운드 · 이슈 감지", runner_rounds)
+        } else {
+            format!("자동 진행 {} 라운드", runner_rounds)
+        }
+    } else if has_runner_issue {
+        "대기 · 이전 실행 이슈".to_string()
     } else {
         "대기".to_string()
     };
-    let next_action =
-        build_next_action_hint(lifecycle, runner_running, &current_actor, has_actor_issues);
+    let next_action = build_next_action_hint(
+        lifecycle,
+        runner_running,
+        &current_actor,
+        has_actor_issues,
+        has_runner_issue,
+    );
     let (flow_state, flow_class, flow_detail) = build_flow_banner(
         lifecycle,
         &connection,
         runner_running,
         has_actor_issues,
+        has_runner_issue,
         &current_actor,
         &next_action,
+        &runner_preview,
+    );
+    let flow_action_signature = build_flow_action_signature(
+        lifecycle,
+        runner_running,
+        has_actor_issues,
+        has_runner_issue,
+        &current_actor,
     );
 
     let connection_label = connection_status_label(&connection);
@@ -814,34 +1278,52 @@ pub fn update_turn_runtime_dom(
         &sync_class,
         &control_state,
         &runner_last_result,
+        &runner_preview,
+        &has_runner_issue,
         &flow_state,
         &flow_class,
         &flow_detail,
+        &flow_action_signature,
+        &cache.last_flow_action_snapshot,
     );
 
-    let snapshot = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        room_status_key,
-        turn,
-        phase,
-        current_actor,
-        next_actor,
-        last_result,
-        party_status,
-        current_status,
-        input_status,
-        connection_label,
-        connection_class,
-        sync_state,
-        runner_state,
-        progress.last_event,
-        issues_summary,
-        next_action,
-        flow_state,
-        flow_class,
-        flow_detail,
-    );
+    let snapshot = vec![
+        room_status_key.clone(),
+        turn.to_string(),
+        phase.clone(),
+        current_actor.clone(),
+        next_actor.clone(),
+        last_result.clone(),
+        party_status.clone(),
+        current_status.to_string(),
+        input_status.to_string(),
+        connection_label.to_string(),
+        connection_class.to_string(),
+        sync_state.clone(),
+        runner_state.clone(),
+        runner_preview.clone(),
+        progress.last_event.clone(),
+        issues_summary.clone(),
+        next_action.clone(),
+        flow_state.to_string(),
+        flow_class.to_string(),
+        flow_detail.clone(),
+        flow_action_signature,
+    ]
+    .join("|");
     if cache.last_snapshot == snapshot {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            render_flow_banner_actions(
+                &document,
+                &mut cache,
+                lifecycle,
+                runner_running,
+                has_actor_issues,
+                has_runner_issue,
+                &current_actor,
+            );
+        }
         return;
     }
     cache.last_snapshot = snapshot;
@@ -862,6 +1344,18 @@ pub fn update_turn_runtime_dom(
             "status-active"
         };
         let issues_class = if has_actor_issues {
+            "status-error"
+        } else {
+            "status-idle"
+        };
+        let runner_state_class = if has_runner_issue {
+            "status-error"
+        } else if runner_running {
+            "status-active"
+        } else {
+            "status-idle"
+        };
+        let runner_preview_class = if has_runner_issue {
             "status-error"
         } else {
             "status-idle"
@@ -987,14 +1481,23 @@ pub fn update_turn_runtime_dom(
         set_ops_hud_value(&document, "ops-sync-state", &sync_state, sync_class);
         if let Some(flow_banner) = document.get_element_by_id("turn-flow-banner") {
             let _ = flow_banner.set_attribute("class", &format!("turn-flow-banner {}", flow_class));
-            let html = format!(
-                "<span class=\"flow-state\">{}</span><span class=\"flow-text\">{}</span>",
-                html_escape(flow_state),
-                html_escape(&flow_detail),
-            );
-            flow_banner.set_inner_html(&html);
             let _ = flow_banner.set_attribute("title", &next_action);
         }
+        if let Some(flow_state_el) = document.get_element_by_id("turn-flow-state") {
+            flow_state_el.set_text_content(Some(flow_state));
+        }
+        if let Some(flow_text_el) = document.get_element_by_id("turn-flow-text") {
+            flow_text_el.set_text_content(Some(&flow_detail));
+        }
+        render_flow_banner_actions(
+            &document,
+            &mut cache,
+            lifecycle,
+            runner_running,
+            has_actor_issues,
+            has_runner_issue,
+            &current_actor,
+        );
         render_agent_round_flow(&document, &progress);
 
         let inferred_dm = if !progress.dm_keeper.trim().is_empty() {
@@ -1052,12 +1555,6 @@ pub fn update_turn_runtime_dom(
         persist_round_plan_inputs(&document, &room_id);
 
         if let Some(debug_el) = document.get_element_by_id("round-sync-debug-body") {
-            let runner_preview = if runner_last_result.trim().is_empty() {
-                "-".to_string()
-            } else {
-                let compact = runner_last_result.trim().replace('\n', " ");
-                compact.chars().take(180).collect::<String>()
-            };
             let phase_sync_class = if phase_mismatch {
                 "sync-error"
             } else {
@@ -1119,7 +1616,9 @@ pub fn update_turn_runtime_dom(
   <div class="turn-runtime-item"><span class="k">현재</span><span class="v">{current} · {current_status}</span></div>
   <div class="turn-runtime-item"><span class="k">다음</span><span class="v">{next}</span></div>
   <div class="turn-runtime-item"><span class="k">직전</span><span class="v">{last}</span></div>
+  <div class="turn-runtime-item"><span class="k">자동 진행</span><span class="v {runner_state_class}">{runner_state}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">이슈</span><span class="v {issues_class}">{issues}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">자동 진행 응답</span><span class="v {runner_preview_class}">{runner_preview}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">다음 행동</span><span class="v">{next_action}</span></div>
   <div class="turn-runtime-item"><span class="k">파티</span><span class="v {party_class}">{party}</span></div>
 </div>
@@ -1135,8 +1634,12 @@ pub fn update_turn_runtime_dom(
             current_status = html_escape(current_status),
             next = html_escape(&next_actor),
             last = html_escape(&last_result),
+            runner_state_class = runner_state_class,
+            runner_state = html_escape(&runner_state),
             issues_class = issues_class,
             issues = html_escape(&issues_summary),
+            runner_preview_class = runner_preview_class,
+            runner_preview = html_escape(&runner_preview),
             next_action = html_escape(&next_action),
             party_class = party_class,
             party = html_escape(&party_status),
@@ -1177,14 +1680,20 @@ mod tests {
 
     #[test]
     fn next_action_prefers_issue_recovery_when_running() {
-        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "-", true);
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "-", true, false);
         assert_eq!(hint, "keeper 상태를 확인한 뒤 라운드 실행을 다시 누르세요.");
     }
 
     #[test]
     fn next_action_waits_for_current_actor_when_running() {
-        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "p03", false);
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, false, "p03", false, false);
         assert_eq!(hint, "p03 응답을 기다리는 중입니다.");
+    }
+
+    #[test]
+    fn next_action_warns_on_runner_issue() {
+        let hint = build_next_action_hint(TrpgLifecycleState::Running, true, "-", false, true);
+        assert!(hint.contains("자동 진행 응답"));
     }
 
     #[test]
@@ -1194,8 +1703,10 @@ mod tests {
             &ConnectionStatus::Failed,
             false,
             false,
+            false,
             "-",
             "라운드 실행을 누르세요.",
+            "-",
         );
         assert_eq!(state, "연결 오류");
         assert_eq!(class_name, "is-error");
@@ -1209,11 +1720,39 @@ mod tests {
             &ConnectionStatus::Connected,
             true,
             false,
+            false,
             "p01",
             "자동 진행 중입니다.",
+            "-",
         );
         assert_eq!(state, "자동 진행");
         assert_eq!(class_name, "is-running");
         assert!(detail.contains("자동"));
+    }
+
+    #[test]
+    fn flow_banner_prioritizes_runner_issue() {
+        let (state, class_name, detail) = build_flow_banner(
+            TrpgLifecycleState::Running,
+            &ConnectionStatus::Connected,
+            true,
+            false,
+            true,
+            "p01",
+            "자동 진행 응답에 이슈가 있습니다.",
+            "keeper busy detected",
+        );
+        assert_eq!(state, "주의");
+        assert_eq!(class_name, "is-alert");
+        assert!(detail.contains("이슈"));
+    }
+
+    #[test]
+    fn runner_issue_detector_flags_common_errors() {
+        assert!(runner_result_has_issue(
+            "RoundRunner: round still stalled after 3 retries"
+        ));
+        assert!(runner_result_has_issue("HTTP 503 from engine"));
+        assert!(!runner_result_has_issue("round completed successfully"));
     }
 }

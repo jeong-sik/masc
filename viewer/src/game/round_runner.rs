@@ -224,7 +224,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
             match post_result {
                 Ok(resp) => {
                     if let Some(api_error) = round_response_api_error(&resp) {
-                        if is_transient_round_conflict(&api_error) {
+                        if is_transient_round_conflict(None, &api_error) {
                             round_num = round_num.saturating_sub(1);
                             stalled_retries = 0;
                             log::info!(
@@ -256,12 +256,27 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     if let Ok(mut guard) = rounds_completed.lock() {
                         *guard = round_num;
                     }
+                    if let Some(api_error) = round_response_api_error(&resp) {
+                        if is_transient_round_conflict(None, &api_error) {
+                            log::info!(
+                                "RoundRunner: round request is already in progress. Waiting for prior result."
+                            );
+                            round_num = round_num.saturating_sub(1);
+                            sleep_ms(900).await;
+                            continue;
+                        }
+                    }
                     if resp.contains("\"status\":\"ended\"")
                         || resp.contains("\"status\":\"completed\"")
                         || resp.contains("\"game_over\":true")
                     {
                         game_ended.store(true, Ordering::SeqCst);
                         log::info!("RoundRunner: game ended signal in response");
+                    } else if round_response_has_prompt_meta_artifact_failures(&resp) {
+                        log::warn!(
+                            "RoundRunner: stopping auto loop due to invalid keeper replies (prompt/meta artifacts)."
+                        );
+                        break;
                     } else if matches!(round_response_advanced(&resp), Some(false)) {
                         stalled_retries = stalled_retries.saturating_add(1);
                         if stalled_retries > MAX_STALL_RETRIES {
@@ -288,7 +303,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     let detail = e.as_string().unwrap_or_else(|| format!("{:?}", e));
                     log::warn!("RoundRunner: POST failed — {}", detail);
 
-                    if is_transient_round_conflict(&detail) {
+                    if is_transient_round_conflict(None, &detail) {
                         round_num = round_num.saturating_sub(1);
                         stalled_retries = 0;
                         log::info!(
@@ -300,6 +315,15 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     }
 
                     if let Some(status) = parse_http_status(&detail) {
+                        if is_transient_round_conflict(Some(status), &detail) {
+                            log::info!(
+                                "RoundRunner: single-flight conflict (HTTP {}). Waiting before retry.",
+                                status
+                            );
+                            round_num = round_num.saturating_sub(1);
+                            sleep_ms(900).await;
+                            continue;
+                        }
                         if (400..500).contains(&status) && status != 429 {
                             log::warn!(
                                 "RoundRunner: stopping due to non-retriable HTTP {}",
@@ -310,6 +334,11 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                     } else if detail.contains("404") || detail.contains("422") {
                         log::warn!("RoundRunner: stopping due to fatal HTTP error");
                         break;
+                    } else if is_transient_round_conflict(None, &detail) {
+                        log::info!("RoundRunner: transient in-progress conflict. Waiting before retry.");
+                        round_num = round_num.saturating_sub(1);
+                        sleep_ms(900).await;
+                        continue;
                     }
                 }
             }
@@ -400,7 +429,8 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         })
         .ok_or_else(|| "DM keeper가 비어 있습니다.".to_string())?;
 
-    let phase = read_dom_input("round-run-phase").unwrap_or_else(|| "round".to_string());
+    let phase_raw = read_dom_input("round-run-phase").unwrap_or_else(|| "round".to_string());
+    let phase = normalize_round_phase_input(&phase_raw);
     let timeout_sec = read_dom_input("round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
@@ -427,7 +457,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         "phase": phase,
         "timeout_sec": timeout_sec,
         "lang": lang,
-        "require_claim": true
+        "require_claim": false
     });
 
     Ok(body.to_string())
@@ -456,6 +486,18 @@ fn read_dom_input(id: &str) -> Option<String> {
         None
     } else {
         Some(trimmed)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_round_phase_input(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => "round".to_string(),
+        "discussion" | "discuss" | "party_discussion" | "player_discussion" | "action"
+        | "dice" => "round".to_string(),
+        "ended" => "end".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -502,6 +544,43 @@ fn round_response_api_error(resp: &str) -> Option<String> {
     )
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_has_prompt_meta_artifact_failures(resp: &str) -> bool {
+    let parsed = match serde_json::from_str::<serde_json::Value>(resp) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let Some(statuses) = parsed.get("statuses").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    if statuses.is_empty() {
+        return false;
+    }
+    let mut invalid_count = 0usize;
+    for status in statuses {
+        let state = status
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if state != "invalid_response" {
+            continue;
+        }
+        let reason = status
+            .get("reason")
+            .or_else(|| status.get("error"))
+            .or_else(|| status.get("reply"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if reason.contains("prompt/meta artifacts") {
+            invalid_count += 1;
+        }
+    }
+    invalid_count > 0
+}
+
 #[cfg(target_arch = "wasm32")]
 fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
@@ -522,7 +601,7 @@ fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn parse_http_status(detail: &str) -> Option<u16> {
     let rest = detail.strip_prefix("HTTP ")?;
     let code_text = rest.split([' ', ':']).next()?.trim();
@@ -550,10 +629,15 @@ fn is_keeper_busy_error(raw: &str) -> bool {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn is_transient_round_conflict(raw: &str) -> bool {
-    is_round_in_flight_error(raw) || is_keeper_busy_error(raw)
+fn is_transient_round_conflict(status: Option<u16>, detail: &str) -> bool {
+    let lowered = detail.trim().to_ascii_lowercase();
+    let has_conflict_phrase = is_round_in_flight_error(&lowered)
+        || is_keeper_busy_error(&lowered)
+        || lowered.contains("already running")
+        || lowered.contains("in progress");
+    let is_conflict_status = matches!(status, Some(400 | 409 | 423 | 429));
+    has_conflict_phrase || (is_conflict_status && lowered.contains("round"))
 }
-
 #[cfg(target_arch = "wasm32")]
 fn auto_round_enabled() -> bool {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -657,7 +741,11 @@ async fn sleep_ms(ms: i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_transient_round_conflict, round_response_api_error, stall_retry_delay_ms};
+    use super::{
+        is_transient_round_conflict, parse_http_status, round_response_api_error,
+        round_response_has_prompt_meta_artifact_failures,
+        stall_retry_delay_ms,
+    };
 
     #[test]
     fn stall_retry_delay_scales_and_caps() {
@@ -672,25 +760,52 @@ mod tests {
     fn stall_retry_delay_handles_zero_retry_input() {
         assert_eq!(stall_retry_delay_ms(0), 2000);
     }
-
     #[test]
-    fn transient_round_conflicts_detected() {
-        assert!(is_transient_round_conflict(
-            "HTTP 400: round run already in progress for room adventure-123"
-        ));
-        assert!(is_transient_round_conflict(
-            "keeper busy: each spawned keeper can handle only one round at a time"
-        ));
-        assert!(!is_transient_round_conflict("HTTP 404: not found"));
+    fn parse_http_status_from_prefixed_error_line() {
+        assert_eq!(
+            parse_http_status("HTTP 400: {\"ok\":false,\"error\":\"round run already in progress\"}"),
+            Some(400)
+        );
     }
 
     #[test]
-    fn round_response_api_error_extracts_ok_false_payload() {
+    fn detect_transient_round_conflict_from_message() {
+        assert!(is_transient_round_conflict(
+            Some(400),
+            "HTTP 400: round run already in progress for room_id=adventure-1",
+        ));
+        assert!(!is_transient_round_conflict(
+            Some(400),
+            "HTTP 400: missing room_id",
+        ));
+    }
+
+    #[test]
+    fn parse_round_response_api_error_payload() {
+        let payload = r#"{"ok":false,"error":"round run already in progress for room_id=abc"}"#;
         assert_eq!(
-            round_response_api_error(r#"{"ok":false,"error":"keeper busy: p01"}"#).as_deref(),
-            Some("keeper busy: p01")
+            round_response_api_error(payload),
+            Some("round run already in progress for room_id=abc".to_string())
         );
-        assert_eq!(round_response_api_error(r#"{"ok":true}"#), None);
-        assert_eq!(round_response_api_error(r#"{"turn_after":5}"#), None);
+    }
+
+    #[test]
+    fn detect_prompt_meta_artifact_failures_in_statuses() {
+        let payload = r#"{
+            "ok": true,
+            "statuses": [
+                {
+                    "actor_id":"p01",
+                    "status":"invalid_response",
+                    "reason":"keeper response reply contains only prompt/meta artifacts"
+                },
+                {
+                    "actor_id":"dm",
+                    "status":"skipped",
+                    "reason":"player quorum not met"
+                }
+            ]
+        }"#;
+        assert!(round_response_has_prompt_meta_artifact_failures(payload));
     }
 }

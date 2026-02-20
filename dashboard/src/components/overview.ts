@@ -13,6 +13,7 @@ import {
   tasksByStatus,
 } from '../store'
 import type { Agent, Keeper } from '../types'
+import { openKeeperDetail } from './keeper-detail'
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
   return html`
@@ -25,7 +26,7 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
 
 function AgentRow({ agent }: { agent: Agent }) {
   return html`
-    <div class="agent">
+    <div class="agent" onClick=${() => openKeeperDetail(agent as unknown as Keeper)} style="cursor: pointer">
       <span class="agent-emoji">${agent.emoji ?? ''}</span>
       <span class="agent-status ${agent.status}"></span>
       <span class="agent-name">${agent.name}</span>
@@ -39,7 +40,7 @@ function AgentRow({ agent }: { agent: Agent }) {
 
 function KeeperRow({ keeper }: { keeper: Keeper }) {
   return html`
-    <div class="live-agent keeper-card">
+    <div class="live-agent keeper-card" onClick=${() => openKeeperDetail(keeper)} style="cursor: pointer">
       <div class="live-agent-main">
         <div class="live-agent-title">
           <span class="live-agent-name">${keeper.emoji ?? ''} ${keeper.name}</span>
@@ -115,7 +116,7 @@ export function Overview() {
         <${Card} title="Room" class="section">
           <div class="live-agent-meta">
             <span>Room: ${status.room}</span>
-            <span>Uptime: ${formatUptime(status.uptime_seconds)}</span>
+            <span>Uptime: ${formatUptime(status.uptime_seconds ?? 0)}</span>
           </div>
         <//>
       `

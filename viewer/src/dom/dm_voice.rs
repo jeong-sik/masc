@@ -341,6 +341,12 @@ fn resolve_proxy_url_from_select(raw: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn is_openai_tts_proxy_url(proxy_url: &str) -> bool {
+    let normalized = proxy_url.trim().to_ascii_lowercase();
+    normalized.contains("/v1/audio/speech")
+}
+
+#[cfg(target_arch = "wasm32")]
 fn detect_proxy_select_value(current_url: &str) -> Option<String> {
     let current = normalize_optional(current_url)?;
     if let Some(origin) = window_origin() {
@@ -969,18 +975,38 @@ async fn speak_with_proxy_inner(
         return Err("window unavailable".to_string());
     };
 
-    let mut body_json = serde_json::json!({
-        "text": text,
-        "speaker": "dm",
-        "phase": phase,
-        "room_id": room_id,
-        "turn": turn,
-    });
-    if let Some(model) = voice_model.and_then(|v| normalize_optional(&v)) {
-        body_json["voice_model"] = serde_json::Value::String(model);
-    }
-    if let Some(id) = voice_id.and_then(|v| normalize_optional(&v)) {
-        body_json["voice_id"] = serde_json::Value::String(id);
+    let is_openai_proxy = is_openai_tts_proxy_url(&proxy_url);
+    let mut body_json = if is_openai_proxy {
+        let model = voice_model
+            .as_deref()
+            .and_then(normalize_optional)
+            .unwrap_or_else(|| "eleven_multilingual_v2".to_string());
+        let voice = voice_id
+            .as_deref()
+            .and_then(normalize_optional)
+            .unwrap_or_else(|| "alloy".to_string());
+        serde_json::json!({
+            "input": text,
+            "voice": voice,
+            "model": model,
+            "response_format": "mp3",
+        })
+    } else {
+        serde_json::json!({
+            "text": text,
+            "speaker": "dm",
+            "phase": phase,
+            "room_id": room_id,
+            "turn": turn,
+        })
+    };
+    if !is_openai_proxy {
+        if let Some(model) = voice_model.and_then(|v| normalize_optional(&v)) {
+            body_json["voice_model"] = serde_json::Value::String(model);
+        }
+        if let Some(id) = voice_id.and_then(|v| normalize_optional(&v)) {
+            body_json["voice_id"] = serde_json::Value::String(id);
+        }
     }
     let body = body_json.to_string();
 

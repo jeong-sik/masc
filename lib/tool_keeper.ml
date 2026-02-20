@@ -5500,6 +5500,24 @@ let handle_keeper_up ctx args : tool_result =
          start_keepalive ctx updated;
          (true, Yojson.Safe.pretty_to_string (meta_to_json updated)))
 
+(* Count P1/P2/P3 severity actions within a time window from JSONL lines.
+   Shared by handle_keeper_status (D1) and keeper_metrics_json (D3). *)
+let count_actions_in_window lines ~since_ts =
+  List.fold_left (fun (p1, p2, p3) line ->
+    try
+      let j = Yojson.Safe.from_string line in
+      let ts_str = Safe_ops.json_string "ts" j in
+      let ts = Resilience.Time.parse_iso8601_opt ts_str |> Option.value ~default:0.0 in
+      if ts < since_ts then (p1, p2, p3)
+      else
+        match Safe_ops.json_string_opt "severity" j with
+        | Some "P1" -> (p1 + 1, p2, p3)
+        | Some "P2" -> (p1, p2 + 1, p3)
+        | Some "P3" -> (p1, p2, p3 + 1)
+        | _ -> (p1, p2, p3)
+    with _ -> (p1, p2, p3)
+  ) (0, 0, 0) lines
+
 let handle_keeper_status ctx args : tool_result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -5937,6 +5955,61 @@ let handle_keeper_status ctx args : tool_result =
            ("history_fragment_filter_enabled", `Bool history_filter_fragments);
            ("compaction_history_tail", fst compaction_history_tail);
            ("compaction_history_count", `Int (snd compaction_history_tail));
+           (* Phase D1: review dashboard — repos watched, action severity counts, cost/day *)
+           ("review_dashboard",
+             let dir = keeper_dir ctx.config in
+             let watcher_path = Filename.concat dir (m.name ^ ".review-watcher.json") in
+             let repos_watched =
+               if not (Sys.file_exists watcher_path) then `Int 0
+               else
+                 match Safe_ops.read_json_file_safe watcher_path with
+                 | Error _ -> `Int 0
+                 | Ok json ->
+                   let open Yojson.Safe.Util in
+                   (try `Int (json |> member "allowed_repo_globs" |> to_list |> List.length)
+                    with _ -> `Int 0)
+             in
+             let actions_path = Filename.concat dir (m.name ^ ".actions.jsonl") in
+             let action_lines =
+               read_file_tail_lines actions_path ~max_bytes:60000 ~max_lines:500
+             in
+             let since_24h = now_ts -. 86400.0 in
+             let since_7d = now_ts -. (7.0 *. 86400.0) in
+             let (p1_24h, p2_24h, p3_24h) =
+               count_actions_in_window action_lines ~since_ts:since_24h
+             in
+             let (p1_7d, p2_7d, p3_7d) =
+               count_actions_in_window action_lines ~since_ts:since_7d
+             in
+             let age_days =
+               if keeper_age_s <= 0.0 then 1.0
+               else max 1.0 (keeper_age_s /. 86400.0)
+             in
+             let cost_per_day =
+               Float.round (m.total_cost_usd /. age_days *. 100.0) /. 100.0
+             in
+             (* Extract last action timestamp from most recent JSONL line *)
+             let last_action_ts =
+               match List.rev action_lines with
+               | [] -> `Null
+               | last :: _ ->
+                 (try
+                    let j = Yojson.Safe.from_string last in
+                    `String (Safe_ops.json_string "ts" j)
+                  with _ -> `Null)
+             in
+             `Assoc [
+               ("repos_watched", repos_watched);
+               ("actions_24h", `Assoc [
+                 ("P1", `Int p1_24h); ("P2", `Int p2_24h); ("P3", `Int p3_24h);
+               ]);
+               ("actions_7d", `Assoc [
+                 ("P1", `Int p1_7d); ("P2", `Int p2_7d); ("P3", `Int p3_7d);
+               ]);
+               ("cost_per_day", `Float cost_per_day);
+               ("last_action_ts", last_action_ts);
+               ("actions_jsonl_lines", `Int (List.length action_lines));
+             ]);
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
              ("metrics", `String metrics_path);
@@ -7452,22 +7525,6 @@ let handle_keeper_list ctx args : tool_result =
       (true, Yojson.Safe.pretty_to_string json)
 
 (* ---------- HTTP endpoint: /api/v1/keeper-metrics ---------- *)
-
-let count_actions_in_window lines ~since_ts =
-  List.fold_left (fun (p1, p2, p3) line ->
-    try
-      let j = Yojson.Safe.from_string line in
-      let ts_str = Safe_ops.json_string "ts" j in
-      let ts = Resilience.Time.parse_iso8601_opt ts_str |> Option.value ~default:0.0 in
-      if ts < since_ts then (p1, p2, p3)
-      else
-        match Safe_ops.json_string_opt "severity" j with
-        | Some "P1" -> (p1 + 1, p2, p3)
-        | Some "P2" -> (p1, p2 + 1, p3)
-        | Some "P3" -> (p1, p2, p3 + 1)
-        | _ -> (p1, p2, p3)
-    with _ -> (p1, p2, p3)
-  ) (0, 0, 0) lines
 
 let keeper_metrics_json (config : Room.config) : Yojson.Safe.t =
   let dir = keeper_dir config in

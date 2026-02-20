@@ -28,6 +28,7 @@ let mk_ctx base_dir =
       agent_name = "tester";
       trpg_keeper_call = None;
       trpg_keeper_probe = None;
+      trpg_dm_voice_emit = None;
     }
   in
   (config, ctx)

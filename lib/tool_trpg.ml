@@ -23,6 +23,7 @@ type result = bool * string
 
 type keeper_call_result = [ `Ok of Yojson.Safe.t | `Timeout | `Error of string ]
 type keeper_probe_result = [ `Ok | `Error of string ]
+type dm_voice_emit_result = (Yojson.Safe.t, string) Stdlib.result
 
 type context = {
   config : Room.config;
@@ -31,6 +32,12 @@ type context = {
     (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
     option;
   keeper_probe : (name:string -> keeper_probe_result) option;
+  dm_voice_emit :
+    (agent_id:string ->
+     message:string ->
+     provider:string option ->
+     dm_voice_emit_result)
+      option;
 }
 
 type trpg_role = [ `Dm | `Player ]
@@ -251,7 +258,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean), dm_voice_enabled(boolean), dm_voice_provider(auto|voicemode|elevenlabs).";
       input_schema =
         `Assoc
           [
@@ -271,6 +278,8 @@ let schemas : Types.tool_schema list =
                   ("rule_module", `Assoc [ ("type", `String "string") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "number") ]);
                   ("require_claim", `Assoc [ ("type", `String "boolean") ]);
+                  ("dm_voice_enabled", `Assoc [ ("type", `String "boolean") ]);
+                  ("dm_voice_provider", `Assoc [ ("type", `String "string") ]);
                   ("lang", `Assoc [ ("type", `String "string") ]);
                 ] );
             ( "required",
@@ -1335,6 +1344,16 @@ let prompt_language_of_string_opt = function
       | "en" | "english" -> `En
       | _ -> `Ko)
   | None -> `Ko
+
+let normalize_dm_voice_provider raw =
+  let normalized = raw |> String.trim |> String.lowercase_ascii in
+  match normalized with
+  | "auto" | "voicemode" | "elevenlabs" -> Ok normalized
+  | _ ->
+      Error
+        (Printf.sprintf
+           "dm_voice_provider must be one of: auto, voicemode, elevenlabs (got %s)"
+           raw)
 
 let take_last n xs =
   if n <= 0 then []
@@ -2774,6 +2793,21 @@ let handle_round_run ctx args : result =
       let* phase_opt = get_optional_string args "phase" in
       let* lang_opt = get_optional_string args "lang" in
       let* require_claim = get_optional_bool args "require_claim" ~default:false in
+      let* dm_voice_enabled =
+        get_optional_bool args "dm_voice_enabled" ~default:false
+      in
+      let* dm_voice_provider =
+        match args |> member "dm_voice_provider" with
+        | `Null -> Ok None
+        | `String raw when String.trim raw = "" ->
+            Error "dm_voice_provider cannot be empty"
+        | `String raw -> (
+            match normalize_dm_voice_provider raw with
+            | Ok "auto" -> Ok None
+            | Ok provider -> Ok (Some provider)
+            | Error e -> Error e)
+        | _ -> Error "dm_voice_provider must be a string"
+      in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
@@ -3154,6 +3188,83 @@ let handle_round_run ctx args : result =
       let final_state = state_of_derived final_derived in
       let statuses = List.rev !statuses in
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
+      let room_status =
+        match final_state |> member "status" with
+        | `String status when String.trim status <> "" -> status
+        | _ -> "active"
+      in
+      let room_in_progress =
+        String.equal (String.lowercase_ascii room_status) "active"
+      in
+      let dm_reply =
+        match !dm_reply_ref |> Option.map String.trim with
+        | Some s when s <> "" -> Some s
+        | _ -> None
+      in
+      let provider_label = Option.value ~default:"auto" dm_voice_provider in
+      let dm_voice_result =
+        if not dm_voice_enabled then
+          `Assoc
+            [
+              ("enabled", `Bool false);
+              ("status", `String "disabled");
+            ]
+        else if not room_in_progress then
+          `Assoc
+            [
+              ("enabled", `Bool true);
+              ("status", `String "skipped");
+              ("reason", `String "room_not_in_progress");
+              ("room_status", `String room_status);
+              ("provider", `String provider_label);
+            ]
+        else
+          match dm_reply with
+          | None ->
+              `Assoc
+                [
+                  ("enabled", `Bool true);
+                  ("status", `String "skipped");
+                  ( "reason",
+                    `String
+                      (if !dm_success then "dm_reply_missing"
+                       else "dm_not_success") );
+                  ("provider", `String provider_label);
+                ]
+          | Some reply -> (
+              match ctx.dm_voice_emit with
+              | None ->
+                  `Assoc
+                    [
+                      ("enabled", `Bool true);
+                      ("status", `String "skipped");
+                      ("reason", `String "dm_voice_emit_unavailable");
+                      ("provider", `String provider_label);
+                      ("message_preview", `String (compact_text ~max_len:120 reply));
+                    ]
+              | Some emit -> (
+                  match
+                    emit ~agent_id:"dm" ~message:reply ~provider:dm_voice_provider
+                  with
+                  | Ok payload ->
+                      `Assoc
+                        [
+                          ("enabled", `Bool true);
+                          ("status", `String "requested");
+                          ("provider", `String provider_label);
+                          ("message_preview", `String (compact_text ~max_len:120 reply));
+                          ("result", payload);
+                        ]
+                  | Error e ->
+                      `Assoc
+                        [
+                          ("enabled", `Bool true);
+                          ("status", `String "error");
+                          ("provider", `String provider_label);
+                          ("error", `String e);
+                          ("message_preview", `String (compact_text ~max_len:120 reply));
+                        ]))
+      in
       Ok
         (`Assoc
           [
@@ -3188,10 +3299,9 @@ let handle_round_run ctx args : result =
               | Some payload -> payload
               | None -> `Null );
             ("events", `List events_json);
+            ("dm_voice", dm_voice_result);
             ( "room_status",
-              match final_state |> member "status" with
-              | `String status -> `String status
-              | _ -> `String "active" );
+              `String room_status );
             ("state", final_state);
           ]))
   in

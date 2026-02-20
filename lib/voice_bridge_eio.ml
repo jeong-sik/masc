@@ -20,6 +20,9 @@
 type voice_bridge_config = {
   host: string;
   port: int;
+  base_url: string option;
+  mcp_url: string option;
+  health_url: string option;
   timeout_seconds: float;
   max_retries: int;
   initial_backoff_seconds: float;
@@ -31,6 +34,9 @@ type voice_bridge_config = {
 let default_config = {
   host = "127.0.0.1";
   port = 8936;
+  base_url = None;
+  mcp_url = None;
+  health_url = None;
   timeout_seconds = 5.0;
   max_retries = 3;
   initial_backoff_seconds = 1.0;
@@ -64,6 +70,23 @@ let load_config () =
         with Type_error _ -> try json |> member "retry" |> member key |> to_int
         with Type_error _ -> default
       in
+      let to_nonempty_string = function
+        | `String s ->
+            let trimmed = String.trim s in
+            if trimmed = "" then None else Some trimmed
+        | _ -> None
+      in
+      let get_server_opt key =
+        json |> member "server" |> member key |> to_nonempty_string
+      in
+      let get_top_opt key =
+        json |> member key |> to_nonempty_string
+      in
+      let pick_opt key =
+        match get_server_opt key with
+        | Some _ as v -> v
+        | None -> get_top_opt key
+      in
       let voices =
         try json |> member "agent_voices" |> to_assoc
             |> List.map (fun (agent, voice) -> (agent, to_string voice))
@@ -73,6 +96,9 @@ let load_config () =
         host = (try json |> member "server" |> member "host" |> to_string
                 with Type_error _ -> default_config.host);
         port = get_int "port" default_config.port;
+        base_url = pick_opt "base_url";
+        mcp_url = pick_opt "mcp_url";
+        health_url = pick_opt "health_url";
         timeout_seconds = get_float "timeout_seconds" default_config.timeout_seconds;
         max_retries = get_int "max_retries" default_config.max_retries;
         initial_backoff_seconds = get_float "initial_backoff_seconds" default_config.initial_backoff_seconds;
@@ -97,6 +123,62 @@ let max_retries () = (Lazy.force config).max_retries
 let initial_backoff_seconds () = (Lazy.force config).initial_backoff_seconds
 let backoff_multiplier () = (Lazy.force config).backoff_multiplier
 let agent_voices () = (Lazy.force config).agent_voices
+
+let ends_with ~suffix s =
+  let slen = String.length s in
+  let plen = String.length suffix in
+  slen >= plen && String.sub s (slen - plen) plen = suffix
+
+let compose_endpoint_from_base ~base_url ~path =
+  let base_uri = Uri.of_string base_url in
+  let base_path = Uri.path base_uri in
+  let base_path =
+    if base_path = "" then "/"
+    else if ends_with ~suffix:"/" base_path && String.length base_path > 1 then
+      String.sub base_path 0 (String.length base_path - 1)
+    else base_path
+  in
+  let final_path =
+    if path = "/mcp" then
+      if ends_with ~suffix:"/mcp" base_path then base_path
+      else if base_path = "/" then "/mcp"
+      else base_path ^ "/mcp"
+    else if path = "/health" then
+      if ends_with ~suffix:"/health" base_path then base_path
+      else if ends_with ~suffix:"/mcp" base_path then
+        String.sub base_path 0 (String.length base_path - 4) ^ "/health"
+      else if base_path = "/" then "/health"
+      else base_path ^ "/health"
+    else if base_path = "/" then path
+    else base_path ^ path
+  in
+  Uri.with_path base_uri final_path
+
+let voice_mcp_uri () =
+  let cfg = Lazy.force config in
+  match cfg.mcp_url with
+  | Some url -> Uri.of_string url
+  | None -> (
+      match cfg.base_url with
+      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/mcp"
+      | None ->
+          Uri.make ~scheme:"http" ~host:cfg.host ~port:cfg.port ~path:"/mcp" ())
+
+let voice_health_uri () =
+  let cfg = Lazy.force config in
+  match cfg.health_url with
+  | Some url -> Uri.of_string url
+  | None -> (
+      match cfg.base_url with
+      | Some base_url -> compose_endpoint_from_base ~base_url ~path:"/health"
+      | None ->
+          Uri.make ~scheme:"http" ~host:cfg.host ~port:cfg.port ~path:"/health" ())
+
+let client_for_uri ~net uri =
+  if Uri.scheme uri = Some "https" then
+    Cohttp_eio.Client.make ~https:(Some (Eio_context.get_https_connector ())) net
+  else
+    Cohttp_eio.Client.make ~https:None net
 
 (** ============================================
     Structured Logging
@@ -223,13 +305,7 @@ let single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str =
 (** Make HTTP POST request to Voice MCP server with timeout and retry - Eio version *)
 let call_voice_mcp ~sw ~clock ~net ~tool_name ~arguments =
   log_debug (Printf.sprintf "Calling tool: %s" tool_name);
-  let uri = Uri.make
-    ~scheme:"http"
-    ~host:(voice_mcp_host ())
-    ~port:(voice_mcp_port ())
-    ~path:"/mcp"
-    ()
-  in
+  let uri = voice_mcp_uri () in
   let request_body = `Assoc [
     ("jsonrpc", `String "2.0");
     ("method", `String "tools/call");
@@ -244,7 +320,7 @@ let call_voice_mcp ~sw ~clock ~net ~tool_name ~arguments =
     ("Content-Type", "application/json");
     ("Accept", "application/json");
   ] in
-  let client = Cohttp_eio.Client.make ~https:None net in
+  let client = client_for_uri ~net uri in
   let operation () =
     with_timeout ~clock (fun () ->
       single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
@@ -307,14 +383,8 @@ let is_voice_server_available ~sw ~clock ~net =
     voice_server_check_time := now;
     let check () =
       try
-        let uri = Uri.make
-          ~scheme:"http"
-          ~host:(voice_mcp_host ())
-          ~port:(voice_mcp_port ())
-          ~path:"/health"
-          ()
-        in
-        let client = Cohttp_eio.Client.make ~https:None net in
+        let uri = voice_health_uri () in
+        let client = client_for_uri ~net uri in
         let resp, _ = Cohttp_eio.Client.get ~sw client uri in
         let status = Cohttp.Response.status resp in
         let available = Cohttp.Code.is_success (Cohttp.Code.code_of_status status) in
@@ -391,18 +461,25 @@ let end_voice_session ~sw ~clock ~net ~agent_id =
     | Error e -> Error e
 
 (** Request speaking turn *)
-let agent_speak ~sw ~clock ~net ~agent_id ~message ?(priority=1) () =
+let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
   if not (is_voice_server_available ~sw ~clock ~net) then begin
     log_info "Voice server unavailable, using text fallback";
     text_fallback ~agent_id ~message
   end else begin
     let voice = get_voice_for_agent agent_id in
-    let args = `Assoc [
-      ("agent_id", `String agent_id);
-      ("message", `String message);
-      ("voice", `String voice);
-      ("priority", `Int priority);
-    ] in
+    let args_fields =
+      [
+        ("agent_id", `String agent_id);
+        ("message", `String message);
+        ("voice", `String voice);
+        ("priority", `Int priority);
+      ]
+      @
+      match provider with
+      | Some p when String.trim p <> "" -> [ ("provider", `String (String.trim p)) ]
+      | _ -> []
+    in
+    let args = `Assoc args_fields in
     match call_voice_mcp ~sw ~clock ~net ~tool_name:"agent_speak" ~arguments:args with
     | Ok json ->
       (match extract_mcp_result json with
@@ -509,22 +586,16 @@ let get_transcript ~sw ~clock ~net () =
 
 (** Health check for Voice MCP server *)
 let health_check ~sw ~clock:_ ~net () =
-  let uri = Uri.make
-    ~scheme:"http"
-    ~host:(voice_mcp_host ())
-    ~port:(voice_mcp_port ())
-    ~path:"/health"
-    ()
-  in
+  let uri = voice_health_uri () in
   try
-    let client = Cohttp_eio.Client.make ~https:None net in
+    let client = client_for_uri ~net uri in
     let resp, body = Cohttp_eio.Client.get ~sw client uri in
     let status = Cohttp.Response.status resp in
     let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in
     if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then
       Ok (`Assoc [
         ("status", `String "healthy");
-        ("server", `String (Printf.sprintf "%s:%d" (voice_mcp_host ()) (voice_mcp_port ())));
+        ("server", `String (Uri.to_string uri));
         ("response", (try Yojson.Safe.from_string body_str with Yojson.Json_error _ -> `String body_str));
       ])
     else

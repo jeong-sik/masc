@@ -200,7 +200,7 @@ fn format_fetch_error(err: &JsValue) -> String {
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_board_posts() -> Result<Vec<BoardPost>, JsValue> {
-    let url = format!("{}/api/v1/board", config::MASC_MCP_URL);
+    let url = config::build_masc_url("api/v1/board");
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
@@ -229,7 +229,7 @@ async fn fetch_board_posts() -> Result<Vec<BoardPost>, JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 async fn submit_vote(post_id: &str, direction: &str) -> Result<(), JsValue> {
-    let url = format!("{}/api/v1/tools/masc_board_vote", config::MASC_MCP_URL);
+    let url = config::build_masc_url("api/v1/tools/masc_board_vote");
 
     let body = format!(
         r#"{{"post_id":"{}","voter":"viewer","direction":"{}"}}"#,
@@ -259,7 +259,7 @@ async fn submit_vote(post_id: &str, direction: &str) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 async fn fetch_post_comments(post_id: &str) -> Result<Vec<BoardComment>, JsValue> {
-    let url = format!("{}/api/v1/board/{}", config::MASC_MCP_URL, post_id);
+    let url = config::build_masc_url(&format!("api/v1/board/{}", post_id));
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
@@ -290,7 +290,7 @@ async fn fetch_post_comments(post_id: &str) -> Result<Vec<BoardComment>, JsValue
 
 #[cfg(target_arch = "wasm32")]
 async fn submit_comment(post_id: &str, content: &str) -> Result<(), JsValue> {
-    let url = format!("{}/api/v1/tools/masc_board_comment", config::MASC_MCP_URL);
+    let url = config::build_masc_url("api/v1/tools/masc_board_comment");
 
     let body = format!(
         r#"{{"post_id":"{}","content":"{}","author":"viewer"}}"#,

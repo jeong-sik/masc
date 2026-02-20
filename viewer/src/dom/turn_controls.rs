@@ -426,9 +426,9 @@ pub fn sync_turn_controls_visibility(
 
         let dm_ready = !progress.dm_keeper.trim().is_empty()
             || read_dom_input(&doc, "round-run-dm")
-            .or_else(|| read_claimed_keeper_for_current_room(&doc))
-            .or_else(|| read_dom_input(&doc, "new-game-dm-select"))
-            .is_some();
+                .or_else(|| read_claimed_keeper_for_current_room(&doc))
+                .or_else(|| read_dom_input(&doc, "new-game-dm-select"))
+                .is_some();
         let player_pairs_raw = read_dom_text_value(&doc, "round-run-players").unwrap_or_default();
         let mut player_count = parse_player_keeper_pairs(&player_pairs_raw).len();
         if player_count == 0 {
@@ -822,7 +822,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
         player_keepers.insert(actor_id.clone(), Value::String(keeper_name.clone()));
     }
 
-    let url = format!("{}/api/v1/trpg/rounds/run", config::MASC_MCP_URL);
+    let url = config::build_masc_url("api/v1/trpg/rounds/run");
     let body = json!({
         "room_id": config::current_room_id(),
         "dm_keeper": plan.dm_keeper,
@@ -1485,9 +1485,7 @@ fn read_claimed_keeper_for_current_room(doc: &web_sys::Document) -> Option<Strin
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_claimed_actor_keeper_for_current_room(
-    doc: &web_sys::Document,
-) -> Option<(String, String)> {
+fn read_claimed_actor_keeper_for_current_room(doc: &web_sys::Document) -> Option<(String, String)> {
     if !claim_matches_current_room(doc) {
         return None;
     }
@@ -1543,7 +1541,8 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
     let player_pairs_raw = read_dom_text_value(doc, "round-run-players").unwrap_or_default();
     let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);
     if player_keepers.is_empty() {
-        if let Some((claimed_actor, claimed_keeper)) = read_claimed_actor_keeper_for_current_room(doc)
+        if let Some((claimed_actor, claimed_keeper)) =
+            read_claimed_actor_keeper_for_current_room(doc)
         {
             player_keepers.push((claimed_actor, claimed_keeper));
         }

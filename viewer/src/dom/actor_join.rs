@@ -265,7 +265,7 @@ fn bind_leave_button() {
 async fn claim_actor(actor_id: &str, keeper_name: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
-    let url = format!("{}/api/v1/trpg/actors/claim", config::MASC_MCP_URL);
+    let url = config::build_masc_url("api/v1/trpg/actors/claim");
     let room_id = config::current_room_id();
 
     // If keeper_name is empty, default to "Anonymous Viewer"
@@ -319,7 +319,7 @@ async fn claim_actor(actor_id: &str, keeper_name: &str) -> Result<(), JsValue> {
 async fn release_actor(actor_id: &str) -> Result<(), JsValue> {
     use wasm_bindgen_futures::JsFuture;
 
-    let url = format!("{}/api/v1/trpg/actors/release", config::MASC_MCP_URL);
+    let url = config::build_masc_url("api/v1/trpg/actors/release");
     let room_id = config::current_room_id();
 
     // Retrieve keeper name from hidden state if possible, or send empty (server might require it?)

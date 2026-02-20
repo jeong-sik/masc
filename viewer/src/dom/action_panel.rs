@@ -358,7 +358,7 @@ fn submit_intervention_from_input() {
 
 #[cfg(target_arch = "wasm32")]
 async fn submit_intervention(actor_id: &str, suggestion: &str) -> Result<(), String> {
-    let url = format!("{}/mcp", config::MASC_MCP_URL);
+    let url = config::build_masc_url("mcp");
     let room_id = config::current_room_id();
 
     let params = json!({
@@ -390,7 +390,7 @@ async fn roll_dice_intervention() -> Result<String, String> {
         return Err("No active actor".into());
     };
 
-    let url = format!("{}/mcp", config::MASC_MCP_URL);
+    let url = config::build_masc_url("mcp");
     let room_id = config::current_room_id();
 
     let params = json!({

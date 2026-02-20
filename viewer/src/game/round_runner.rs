@@ -218,7 +218,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
             round_num += 1;
             log::info!("RoundRunner: triggering round {}", round_num);
 
-            let url = format!("{}/api/v1/trpg/rounds/run", config::MASC_MCP_URL);
+            let url = config::build_masc_url("api/v1/trpg/rounds/run");
             let post_result = fetch_json_post(&url, &body).await;
             release_round_flight("auto");
             match post_result {

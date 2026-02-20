@@ -818,7 +818,13 @@ let test_round_run_recovers_prompt_echo_keeper_reply () =
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None }
+    {
+      config;
+      agent_name = "tester";
+      keeper_call = Some keeper_call;
+      keeper_probe = None;
+      dm_voice_emit = None;
+    }
   in
   let args =
     `Assoc

@@ -1509,14 +1509,7 @@ fn resolve_round_dm_keeper(doc: &web_sys::Document) -> Option<String> {
     read_dom_input(doc, "round-run-dm")
         .or_else(|| read_claimed_keeper_for_current_room(doc))
         .or_else(|| read_dom_input(doc, "new-game-dm-select"))
-        .or_else(|| {
-            let fallback = config::DEFAULT_TRPG_DM_KEEPER.trim();
-            if fallback.is_empty() {
-                None
-            } else {
-                Some(fallback.to_string())
-            }
-        })
+        .or_else(|| Some("dm-keeper".to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]

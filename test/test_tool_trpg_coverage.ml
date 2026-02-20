@@ -594,6 +594,7 @@ let test_round_run_unavailable_sampling_cap () =
         agent_name = "tester";
         keeper_call = Some keeper_call;
         keeper_probe = None;
+        dm_voice_emit = None;
       }
     in
     let args =

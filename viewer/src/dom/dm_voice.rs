@@ -81,8 +81,14 @@ const DM_VOICE_ID_PRESETS: &[(&str, &str)] = &[
 const DM_VOICE_PREVIEW_TEXT: &str = "지금은 DM 음성 미리듣기 테스트 중입니다.";
 
 #[cfg(target_arch = "wasm32")]
+struct ActiveDmVoiceAudio {
+    audio: web_sys::HtmlAudioElement,
+    cleanup_object_url: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
-    static ACTIVE_DM_VOICE_AUDIO: std::cell::RefCell<Vec<web_sys::HtmlAudioElement>> =
+    static ACTIVE_DM_VOICE_AUDIO: std::cell::RefCell<Vec<ActiveDmVoiceAudio>> =
         std::cell::RefCell::new(Vec::new());
 }
 
@@ -152,6 +158,7 @@ pub fn bind_dm_voice_controls() {
 pub fn unbind_dm_voice_controls() {
     #[cfg(target_arch = "wasm32")]
     {
+        stop_all_active_audio();
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             set_dm_voice_status(
                 &doc,
@@ -1115,48 +1122,64 @@ fn normalize_audio_source_candidate(raw: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn track_active_audio(audio: &web_sys::HtmlAudioElement) {
+fn track_active_audio(audio: &web_sys::HtmlAudioElement, cleanup_object_url: Option<String>) {
     ACTIVE_DM_VOICE_AUDIO.with(|pool| {
-        pool.borrow_mut().push(audio.clone());
+        pool.borrow_mut().push(ActiveDmVoiceAudio {
+            audio: audio.clone(),
+            cleanup_object_url,
+        });
     });
 }
 
 #[cfg(target_arch = "wasm32")]
-fn untrack_active_audio(audio: &web_sys::HtmlAudioElement) {
+fn untrack_active_audio(audio: &web_sys::HtmlAudioElement) -> Option<String> {
     ACTIVE_DM_VOICE_AUDIO.with(|pool| {
-        pool.borrow_mut()
-            .retain(|item| !js_sys::Object::is(item.as_ref(), audio.as_ref()));
-    });
+        let mut pool = pool.borrow_mut();
+        let idx = pool
+            .iter()
+            .position(|item| js_sys::Object::is(item.audio.as_ref(), audio.as_ref()))?;
+        let entry = pool.swap_remove(idx);
+        entry.cleanup_object_url
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
-fn cleanup_audio_now(audio: &web_sys::HtmlAudioElement, cleanup_object_url: Option<&str>) {
+fn cleanup_audio_now(audio: &web_sys::HtmlAudioElement) {
     audio.set_onended(None);
     audio.set_onerror(None);
     audio.set_src("");
-    if let Some(url) = cleanup_object_url {
-        let _ = web_sys::Url::revoke_object_url(url);
+    if let Some(url) = untrack_active_audio(audio) {
+        let _ = web_sys::Url::revoke_object_url(&url);
     }
-    untrack_active_audio(audio);
 }
 
 #[cfg(target_arch = "wasm32")]
-fn bind_audio_cleanup_handlers(
-    audio: &web_sys::HtmlAudioElement,
-    cleanup_object_url: Option<String>,
-) {
+fn stop_all_active_audio() {
+    let entries = ACTIVE_DM_VOICE_AUDIO.with(|pool| std::mem::take(&mut *pool.borrow_mut()));
+    for entry in entries {
+        entry.audio.set_onended(None);
+        entry.audio.set_onerror(None);
+        let _ = entry.audio.pause();
+        entry.audio.set_src("");
+        if let Some(url) = entry.cleanup_object_url {
+            let _ = web_sys::Url::revoke_object_url(&url);
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn bind_audio_cleanup_handlers(audio: &web_sys::HtmlAudioElement) {
     use wasm_bindgen::JsCast;
 
     let on_end_audio = audio.clone();
-    let on_end_cleanup = cleanup_object_url.clone();
     let on_end = wasm_bindgen::closure::Closure::once_into_js(move || {
-        cleanup_audio_now(&on_end_audio, on_end_cleanup.as_deref());
+        cleanup_audio_now(&on_end_audio);
     });
     audio.set_onended(Some(on_end.unchecked_ref::<js_sys::Function>()));
 
     let on_error_audio = audio.clone();
     let on_error = wasm_bindgen::closure::Closure::once_into_js(move || {
-        cleanup_audio_now(&on_error_audio, cleanup_object_url.as_deref());
+        cleanup_audio_now(&on_error_audio);
     });
     audio.set_onerror(Some(on_error.unchecked_ref::<js_sys::Function>()));
 }
@@ -1166,10 +1189,10 @@ fn play_audio_source(source: &str, cleanup_object_url: Option<String>) -> Result
     let audio = web_sys::HtmlAudioElement::new_with_src(source)
         .map_err(|_| "failed to create HtmlAudioElement".to_string())?;
     audio.set_preload("auto");
-    track_active_audio(&audio);
-    bind_audio_cleanup_handlers(&audio, cleanup_object_url.clone());
+    track_active_audio(&audio, cleanup_object_url);
+    bind_audio_cleanup_handlers(&audio);
     if audio.play().is_err() {
-        cleanup_audio_now(&audio, cleanup_object_url.as_deref());
+        cleanup_audio_now(&audio);
         return Err("audio play failed".to_string());
     }
     Ok(())

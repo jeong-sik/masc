@@ -2089,7 +2089,9 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
         )
     } else {
         let mut blockers = Vec::new();
+        let mut warnings = Vec::new();
         let mut notes = Vec::new();
+        let mut boot_required = Vec::new();
         let mut ready_count = 0usize;
 
         for keeper_name in &selected_keepers {
@@ -2116,7 +2118,8 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
             {
                 Ok(payload) => payload,
                 Err(err) => {
-                    blockers.push(format!("{}: status 조회 실패 ({})", keeper_name, err));
+                    warnings.push(format!("{}: status 조회 실패 ({})", keeper_name, err));
+                    boot_required.push(format!("{}: 상태 미확인", keeper_name));
                     continue;
                 }
             };
@@ -2142,15 +2145,15 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 .unwrap_or(false);
 
             if !agent_exists {
-                blockers.push(format!("{}: agent 없음", keeper_name));
+                boot_required.push(format!("{}: agent 없음", keeper_name));
                 continue;
             }
             if is_zombie {
-                blockers.push(format!("{}: zombie", keeper_name));
+                boot_required.push(format!("{}: zombie", keeper_name));
                 continue;
             }
             if !matches!(agent_status.as_str(), "active" | "busy" | "listening") {
-                blockers.push(format!("{}: status={}", keeper_name, agent_status));
+                boot_required.push(format!("{}: status={}", keeper_name, agent_status));
                 continue;
             }
 
@@ -2161,15 +2164,27 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
         }
 
         if blockers.is_empty() {
-            let detail = if notes.is_empty() {
-                format!("선택 {}명 응답 가능", ready_count)
-            } else {
-                format!(
-                    "선택 {}명 응답 가능 · 주의 {}",
-                    ready_count,
+            let mut detail_parts = vec![format!("선택 {}명 확인", selected_keepers.len())];
+            detail_parts.push(format!("응답 가능 {}", ready_count));
+            if !boot_required.is_empty() {
+                detail_parts.push(format!(
+                    "부팅 필요 {}",
+                    summarize_preflight_items(&boot_required, 3)
+                ));
+            }
+            if !warnings.is_empty() {
+                detail_parts.push(format!(
+                    "상태 경고 {}",
+                    summarize_preflight_items(&warnings, 2)
+                ));
+            }
+            if !notes.is_empty() {
+                detail_parts.push(format!(
+                    "주의 {}",
                     summarize_preflight_items(&notes, 3)
-                )
-            };
+                ));
+            }
+            let detail = detail_parts.join(" · ");
             (true, "선택 키퍼".to_string(), detail)
         } else {
             (

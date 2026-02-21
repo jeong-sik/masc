@@ -41,6 +41,23 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let keeper_payload ?(action_type = "explore") ?target_id ?flag_key ?scene
+    ?quest_info reply =
+  let optional_string_field key value =
+    match value with Some v -> [ (key, `String v) ] | None -> []
+  in
+  `Assoc
+    [
+      ("reply", `String reply);
+      ( "structured_action",
+        `Assoc
+          ([ ("type", `String action_type); ("description", `String reply) ]
+          @ optional_string_field "target_id" target_id
+          @ optional_string_field "flag_key" flag_key
+          @ optional_string_field "scene" scene
+          @ optional_string_field "quest_info" quest_info) );
+    ]
+
 let bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids =
   let party =
     `Assoc
@@ -126,9 +143,17 @@ let test_round_run_success_path () =
   bootstrap_room_with_actors ~base_dir ~room_id:"room-round-success" ~actor_ids:["p1"; "p2"];
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The scene opens in rain.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I scout ahead.") ])
-    | "pk-2" -> `Ok (`Assoc [ ("reply", `String "I hold defensive line.") ])
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Rain-soaked alley"
+             "The scene opens in rain.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"attack" ~target_id:"npc-t1-01"
+             "I scout ahead.")
+    | "pk-2" ->
+        `Ok
+          (keeper_payload ~action_type:"defend" "I hold defensive line.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
@@ -200,8 +225,14 @@ let test_round_run_emits_combat_semantic_events () =
   bootstrap_room_with_actors ~base_dir ~room_id:"room-round-combat" ~actor_ids:["p1"];
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The enemy braces.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I attack the goblin.") ])
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Battle lane"
+             "The enemy braces.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"attack" ~target_id:"npc-t1-01"
+             "I attack the goblin.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
@@ -263,8 +294,14 @@ let test_round_run_emits_session_outcome_event () =
 
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The chapter closes.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I secure the gate.") ])
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"set_flag" ~flag_key:"outcome.victory"
+             "The chapter closes.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"attack" ~target_id:"npc-t1-01"
+             "I secure the gate.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
@@ -353,8 +390,14 @@ let test_round_run_uses_current_session_for_outcome_gate () =
 
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The chapter closes.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I secure the gate.") ])
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"End corridor"
+             "The chapter closes.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"attack" ~target_id:"npc-t1-01"
+             "I secure the gate.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
   let ctx : Tool_trpg.context =
@@ -426,7 +469,10 @@ let test_round_run_timeout_policy () =
   bootstrap_room_with_actors ~base_dir ~room_id:"room-round-timeout" ~actor_ids:["p1"];
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "Round starts.") ])
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Arena"
+             "Round starts.")
     | "pk-timeout" -> `Timeout
     | _ -> `Error "unknown keeper"
   in
@@ -784,7 +830,10 @@ let test_round_run_unavailable_sampling_cap () =
     append_event_exn ~base_dir ~event:seeded_unavailable;
     let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
       match name with
-      | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "Round starts.") ])
+      | "dm-keeper" ->
+          `Ok
+            (keeper_payload ~action_type:"scene_transition" ~scene:"Round starts"
+               "Round starts.")
       | "pk-timeout" -> `Timeout
       | _ -> `Error "unknown keeper"
     in
@@ -858,8 +907,12 @@ let test_round_run_uses_majority_player_quorum () =
     match name with
     | "dm-keeper" ->
         dm_called := true;
-        `Ok (`Assoc [ ("reply", `String "DM still responds with partial quorum.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I move to flank.") ])
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Partial quorum"
+             "DM still responds with partial quorum.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"explore" "I move to flank.")
     | "pk-timeout" -> `Timeout
     | _ -> `Error "unknown keeper"
   in
@@ -974,18 +1027,23 @@ let test_round_run_rejects_meta_only_keeper_reply () =
   let p1_status =
     List.find_opt
       (fun s ->
-        s |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string = "p1")
+        match
+          ( Yojson.Safe.Util.member "actor_id" s,
+            Yojson.Safe.Util.member "status" s )
+        with
+        | `String "p1", `String "schema_invalid" -> true
+        | _ -> false)
       statuses
   in
   (match p1_status with
   | Some status_json ->
       Alcotest.(check string)
-        "p1 status is invalid_response"
-        "invalid_response"
+        "p1 status is schema_invalid"
+        "schema_invalid"
         (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
       Alcotest.(check string)
-        "p1 stage is parse_keeper_reply"
-        "parse_keeper_reply"
+        "p1 stage is re_prompt"
+        "re_prompt"
         (status_json |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string)
   | None -> Alcotest.fail "p1 status is missing");
   cleanup_dir base_dir
@@ -1022,9 +1080,17 @@ let test_round_run_preflight_warning_is_non_blocking () =
     ~room_id:"room-round-preflight"
     ~actor_ids:["p1"];
   let keeper_called = ref false in
-  let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     keeper_called := true;
-    `Ok (`Assoc [ ("reply", `String "execution proceeds with warning") ])
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Warning flow"
+             "execution proceeds with warning")
+    | _ ->
+        `Ok
+          (keeper_payload ~action_type:"explore"
+             "execution proceeds with warning")
   in
   let keeper_probe ~name : Tool_trpg.keeper_probe_result =
     match name with
@@ -1084,8 +1150,13 @@ let test_round_run_lang_english_prompt () =
   let keeper_call ~name ~message ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     prompts := (name, message) :: !prompts;
     match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "Scene starts.") ])
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I move to cover.") ])
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Bridge"
+             "Scene starts.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"defend" "I move to cover.")
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
@@ -1122,8 +1193,13 @@ let test_round_run_dm_prompt_reflects_player_action () =
   let keeper_call ~name ~message ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     prompts := (name, message) :: !prompts;
     match name with
-    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "왼쪽 엄폐물 뒤로 이동해 정찰한다.") ])
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "정찰 결과를 받아 다음 장면을 연다.") ])
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"explore" "왼쪽 엄폐물 뒤로 이동해 정찰한다.")
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"정찰 후 전진"
+             "정찰 결과를 받아 다음 장면을 연다.")
     | _ -> `Error "unknown keeper"
   in
   let ctx : Tool_trpg.context =
@@ -1156,7 +1232,7 @@ let test_round_run_rejects_non_unique_keepers () =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
-    `Ok (`Assoc [ ("reply", `String "noop") ])
+    `Ok (keeper_payload ~action_type:"scene_transition" ~scene:"noop" "noop")
   in
   let ctx : Tool_trpg.context =
     { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
@@ -1189,9 +1265,13 @@ let test_session_bootstrap_and_intervention_flow () =
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result
       =
     if name = "dm-keeper" then
-      `Ok (`Assoc [ ("reply", `String "The DM advances the grim plot.") ])
+      `Ok
+        (keeper_payload ~action_type:"scene_transition" ~scene:"grim plot"
+           "The DM advances the grim plot.")
     else if String.starts_with ~prefix:"pk-" name then
-      `Ok (`Assoc [ ("reply", `String "Player executes assigned tactic.") ])
+      `Ok
+        (keeper_payload ~action_type:"investigate"
+           "Player executes assigned tactic.")
     else
       `Error ("unknown keeper: " ^ name)
   in
@@ -1963,7 +2043,10 @@ let test_fallback_tracked_separately () =
     ~actor_ids:[ "p1"; "p2" ];
   let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     match name with
-    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The scene continues...") ])
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Fallback lane"
+             "The scene continues...")
     | _ -> `Timeout
   in
   let ctx : Tool_trpg.context =
@@ -2078,6 +2161,132 @@ let test_end_to_end_victory_via_flags () =
     | None -> false);
   cleanup_dir base_dir
 
+let test_round_run_reprompts_once_for_missing_structured_action () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-reprompt-once"
+    ~actor_ids:["p1"];
+  let p1_calls = ref 0 in
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Reprompt test"
+             "The scene shifts after the player's action.")
+    | "pk-1" ->
+        p1_calls := !p1_calls + 1;
+        if !p1_calls = 1 then
+          `Ok (`Assoc [ ("reply", `String "I hesitate for a moment.") ])
+        else
+          `Ok
+            (`Assoc
+              [
+                ( "reply",
+                  `String
+                    "I dash forward.\nstructured_action: {\"type\":\"attack\",\"target_id\":\"npc-t1-01\",\"description\":\"I dash forward.\"}" );
+              ])
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-reprompt-once");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("lang", `String "en");
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  Alcotest.(check int) "player keeper called exactly twice" 2 !p1_calls;
+  let json = parse_json_exn body in
+  let summary = Yojson.Safe.Util.member "summary" json in
+  Alcotest.(check int)
+    "reprompts"
+    1
+    (Yojson.Safe.Util.member "reprompts" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool)
+    "schema_failures recorded"
+    true
+    ((Yojson.Safe.Util.member "schema_failures" summary |> Yojson.Safe.Util.to_int) >= 1);
+  Alcotest.(check bool)
+    "advanced after reprompt recovery"
+    true
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
+  let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
+  let reprompt_status =
+    List.exists
+      (fun status_json ->
+        match
+          ( Yojson.Safe.Util.member "actor_id" status_json,
+            Yojson.Safe.Util.member "status" status_json )
+        with
+        | `String "p1", `String "re_prompt" -> true
+        | _ -> false)
+      statuses
+  in
+  Alcotest.(check bool) "status includes re_prompt marker" true reprompt_status;
+  cleanup_dir base_dir
+
+let test_round_run_dm_persona_override_in_prompt_and_summary () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-persona-override"
+    ~actor_ids:["p1"];
+  let prompts = ref [] in
+  let keeper_call ~name ~message ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    prompts := (name, message) :: !prompts;
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Persona chamber"
+             "The tactical layout sharpens.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"investigate" "I inspect enemy positions.")
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-persona-override");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("lang", `String "en");
+        ("dm_persona", `String "tactical_irony");
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  let dm_prompt =
+    !prompts
+    |> List.find_opt (fun (name, _) -> name = "dm-keeper")
+    |> Option.map snd
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool)
+    "dm prompt contains tactical irony persona directive"
+    true
+    (contains_substring dm_prompt "Persona: Tactical Irony.");
+  let summary = parse_json_exn body |> Yojson.Safe.Util.member "summary" in
+  Alcotest.(check string)
+    "summary includes overridden dm persona"
+    "tactical_irony"
+    (Yojson.Safe.Util.member "dm_persona" summary |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool)
+    "summary marks override as true"
+    true
+    (Yojson.Safe.Util.member "dm_persona_overridden" summary |> Yojson.Safe.Util.to_bool);
+  cleanup_dir base_dir
+
 let () =
   Alcotest.run "Tool_trpg coverage"
     [
@@ -2137,6 +2346,14 @@ let () =
             "supports lang=en prompt"
             `Quick
             test_round_run_lang_english_prompt;
+          Alcotest.test_case
+            "re-prompts once when structured_action is missing"
+            `Quick
+            test_round_run_reprompts_once_for_missing_structured_action;
+          Alcotest.test_case
+            "applies dm persona override in prompt and summary"
+            `Quick
+            test_round_run_dm_persona_override_in_prompt_and_summary;
           Alcotest.test_case
             "dm prompt reflects player action"
             `Quick
@@ -2220,6 +2437,21 @@ let () =
             test_apply_structured_action_emits_flag_set;
           Alcotest.test_case "apply emits Scene_transition" `Quick
             test_apply_structured_action_emits_scene_transition;
+          Alcotest.test_case "system instructions constant is non-empty" `Quick
+            (fun () ->
+              let s = Tool_trpg.trpg_structured_action_system_instructions in
+              Alcotest.(check bool)
+                "instructions non-empty"
+                true
+                (String.length s > 100);
+              Alcotest.(check bool)
+                "mentions structured_action"
+                true
+                (String.trim s |> fun s ->
+                 try
+                   let _ = Str.search_forward (Str.regexp_string "structured_action") s 0 in
+                   true
+                 with Not_found -> false));
         ] );
       ( "stagnation_and_fallback",
         [

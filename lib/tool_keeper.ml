@@ -6830,6 +6830,7 @@ let handle_keeper_msg ctx args : tool_result =
     let inline_mid_goal = parse_goal_horizon_opt args "mid_goal" in
     let inline_long_goal = parse_goal_horizon_opt args "long_goal" in
     let inline_instructions = get_string_opt args "instructions" in
+    let turn_instructions = get_string_opt args "turn_instructions" in
     let inline_will = parse_self_model_opt args "will" in
     let inline_needs = parse_self_model_opt args "needs" in
     let inline_desires = parse_self_model_opt args "desires" in
@@ -7162,6 +7163,13 @@ let handle_keeper_msg ctx args : tool_result =
                 ~base_prompt:base_turn_system_prompt
                 continuity_snapshot
                 ~continuity_summary
+            in
+            let turn_system_prompt =
+              match turn_instructions with
+              | None -> turn_system_prompt
+              | Some ti ->
+                  Printf.sprintf "%s\n\n--- Turn-specific instructions ---\n%s"
+                    turn_system_prompt ti
             in
 	            let user_msg = Llm_client.user_msg message in
 	            let ctx_work = Context_manager.append ctx_work user_msg in

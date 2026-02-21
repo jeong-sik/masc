@@ -228,7 +228,18 @@ fn derive_trpg_ui_state(
     if !connection_ok || matches!(lifecycle, TrpgLifecycleState::Unavailable) {
         return TrpgUiState::Error;
     }
-    if round_running {
+    // Only honour round_running when the session is actually active.
+    // Stale DOM attributes (data-round-runner-active) can persist after a
+    // session ends abnormally, locking the UI in RoundRunning even though
+    // the lifecycle has returned to Lobby/Ended.
+    if round_running
+        && !matches!(
+            lifecycle,
+            TrpgLifecycleState::Lobby
+                | TrpgLifecycleState::Ended
+                | TrpgLifecycleState::Unknown
+        )
+    {
         return TrpgUiState::RoundRunning;
     }
     if wizard_busy || matches!(lifecycle, TrpgLifecycleState::Loading) {
@@ -409,6 +420,22 @@ pub fn sync_turn_controls_visibility(
         let (mut can_run, mut reason, mut reason_class) =
             derive_round_control_state(lifecycle, connection_ok, plan_error.as_deref());
         let lock_owner = current_round_flight_owner(&doc);
+
+        // ── Stale DOM cleanup ──────────────────────────────────────────
+        // When the lifecycle has returned to a terminal state (Lobby or
+        // Ended), any lingering round-runner / flight-owner DOM flags are
+        // stale leftovers from a previous session that ended abnormally.
+        // Force-clear them so the UI is not permanently locked.
+        if matches!(
+            lifecycle,
+            TrpgLifecycleState::Lobby | TrpgLifecycleState::Ended
+        ) {
+            if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+                let _ = dashboard.set_attribute("data-round-runner-active", "0");
+                let _ = dashboard.remove_attribute("data-round-flight-owner");
+            }
+        }
+
         let runner_active = auto_round_runner_active(&doc);
         if runner_active {
             can_run = false;
@@ -2021,6 +2048,48 @@ mod tests {
         let state =
             derive_trpg_ui_state(TrpgLifecycleState::Lobby, true, false, false, true, false);
         assert_eq!(state, TrpgUiState::Lobby);
+    }
+
+    /// Stale `data-round-runner-active` DOM attribute must NOT lock the UI
+    /// when lifecycle has returned to Lobby (e.g. after abnormal session end).
+    #[test]
+    fn derive_trpg_ui_state_ignores_stale_round_running_in_lobby() {
+        // round_running=true but lifecycle=Lobby → should NOT be RoundRunning
+        let state =
+            derive_trpg_ui_state(TrpgLifecycleState::Lobby, true, false, true, true, true);
+        assert_ne!(state, TrpgUiState::RoundRunning);
+        // With preflight+wizard ready, it should be ConfigReady
+        assert_eq!(state, TrpgUiState::ConfigReady);
+    }
+
+    /// Same stale-state protection for Ended lifecycle.
+    #[test]
+    fn derive_trpg_ui_state_ignores_stale_round_running_in_ended() {
+        let state =
+            derive_trpg_ui_state(TrpgLifecycleState::Ended, true, false, true, true, true);
+        assert_ne!(state, TrpgUiState::RoundRunning);
+        assert_eq!(state, TrpgUiState::Ended);
+    }
+
+    /// round_running in Unknown lifecycle should also be ignored.
+    #[test]
+    fn derive_trpg_ui_state_ignores_stale_round_running_in_unknown() {
+        let state =
+            derive_trpg_ui_state(TrpgLifecycleState::Unknown, true, false, false, false, true);
+        assert_ne!(state, TrpgUiState::RoundRunning);
+        assert_eq!(state, TrpgUiState::Lobby);
+    }
+
+    /// round_running in Running lifecycle should still be honoured.
+    #[test]
+    fn derive_trpg_ui_state_honours_round_running_when_active() {
+        let state =
+            derive_trpg_ui_state(TrpgLifecycleState::Running, true, false, true, true, true);
+        assert_eq!(state, TrpgUiState::RoundRunning);
+
+        let state =
+            derive_trpg_ui_state(TrpgLifecycleState::Stopped, true, false, true, true, true);
+        assert_eq!(state, TrpgUiState::RoundRunning);
     }
 
     #[test]

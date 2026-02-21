@@ -13,10 +13,12 @@
 
 let _proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option ref = ref None
 let _clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+let _cwd_default : Eio.Fs.dir_ty Eio.Path.t option ref = ref None
 
-let init ~proc_mgr ~clock =
+let init ~cwd_default ~proc_mgr ~clock =
   _proc_mgr := Some proc_mgr;
-  _clock := Some clock
+  _clock := Some clock;
+  _cwd_default := Some cwd_default
 
 let is_initialized () = Option.is_some !_proc_mgr
 
@@ -122,11 +124,12 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
   if not (is_initialized ()) then run_unix_argv_fallback argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
+    let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in
     try
       Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
-        Eio.Process.run pm ?env ~stdout:(Eio.Flow.buffer_sink buf) argv;
+        Eio.Process.run pm ?cwd ?env ~stdout:(Eio.Flow.buffer_sink buf) argv;
         Buffer.contents buf)
     with
     | Eio.Time.Timeout ->
@@ -140,11 +143,12 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
   if not (is_initialized ()) then run_unix_argv_with_stdin_fallback ~stdin_content argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
+    let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in
     try
       Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
-        Eio.Process.run pm ?env
+        Eio.Process.run pm ?cwd ?env
           ~stdin:(Eio.Flow.string_source stdin_content)
           ~stdout:(Eio.Flow.buffer_sink buf)
           argv;
@@ -165,13 +169,14 @@ let run_argv_with_stdin_and_status
   if not (is_initialized ()) then run_unix_argv_with_stdin_and_status_fallback ~stdin_content argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
+    let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in
     try
       Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
         Eio.Switch.run (fun sw ->
           let proc =
-            Eio.Process.spawn ~sw pm ?env
+            Eio.Process.spawn ~sw pm ?cwd ?env
               ~stdin:(Eio.Flow.string_source stdin_content)
               ~stdout:(Eio.Flow.buffer_sink buf)
               argv
@@ -195,12 +200,15 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.
   if not (is_initialized ()) then run_unix_argv_with_status_fallback argv
   else
     let pm = get_proc_mgr () and clk = get_clock () in
+    let cwd = !_cwd_default in
     let buf = Buffer.create 1024 in
     let label = String.concat " " (List.map Filename.quote argv) in
     try
       Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
         Eio.Switch.run (fun sw ->
-          let proc = Eio.Process.spawn ~sw pm ?env ~stdout:(Eio.Flow.buffer_sink buf) argv in
+          let proc =
+            Eio.Process.spawn ~sw pm ?cwd ?env ~stdout:(Eio.Flow.buffer_sink buf) argv
+          in
           let status = Eio.Process.await proc in
           let unix_status =
             match status with

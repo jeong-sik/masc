@@ -135,7 +135,7 @@ step_check_mcp() {
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
       -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}')"; then
-      if [ -n "$(printf "%s" "$response" | tr -d '[:space:]')" ]; then
+      if [ -n "$(printf "%s" "$response" | LC_ALL=C tr -d '[:space:]')" ]; then
         return 0
       fi
     fi

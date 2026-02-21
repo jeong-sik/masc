@@ -5357,7 +5357,9 @@ let run_server ~sw ~env ~port ~base_path =
   Council.Thread_persist.set_eio_context ~clock
     ~https_connector:(Masc_mcp.Eio_context.get_https_connector ())
     net;
-  Masc_mcp.Process_eio.init ~proc_mgr ~clock;
+  Masc_mcp.Process_eio.init
+    ~cwd_default:Eio.Path.(fs / base_path)
+    ~proc_mgr ~clock;
 
   (* Create Caqti-compatible stdenv adapter
      Note: net type coercion from [Generic|Unix] to [Generic] is safe

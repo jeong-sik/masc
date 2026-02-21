@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::assets;
 use crate::dom::escape::html_escape;
 use crate::game::components::{Actor, Skill};
+use crate::game::state::TurnProgressState;
 
 /// Snapshot of actor state used for change detection.
 /// Re-render only fires when this changes.
@@ -370,7 +371,11 @@ fn read_collapse_state() -> std::collections::HashSet<String> {
 }
 
 /// Re-renders the #character-panel DOM whenever actor state changes.
-pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<CharacterPanelCache>) {
+pub fn update_character_panel_dom(
+    actors: Query<&Actor>,
+    mut cache: ResMut<CharacterPanelCache>,
+    progress: Res<TurnProgressState>,
+) {
     // Build current snapshot for cheap equality check
     let compat_snapshot: Vec<(String, i32, bool)> = actors
         .iter()
@@ -448,12 +453,19 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                 html_escape(&actor_initials(&actor.name, &actor.id)),
             )
         };
+        let is_thinking = progress
+            .actor_states
+            .get(&actor.id)
+            .map_or(false, |s| s == "thinking");
         let keeper_line = if actor.keeper.trim().is_empty() {
             "<div class=\"char-owner owner-unassigned\">keeper: (unassigned)</div>".to_string()
         } else {
+            let thinking_class = if is_thinking { " keeper-thinking" } else { "" };
             format!(
-                "<div class=\"char-owner owner-assigned\">keeper: {}</div>",
-                actor.keeper
+                "<div class=\"char-owner owner-assigned{}\">keeper: {}{}</div>",
+                thinking_class,
+                html_escape(&actor.keeper),
+                if is_thinking { " (thinking...)" } else { "" },
             )
         };
         let archetype_line = if actor.archetype.trim().is_empty() {

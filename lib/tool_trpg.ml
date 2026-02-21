@@ -1393,8 +1393,37 @@ let non_empty_string_list_field json key =
       xs
       |> List.filter_map (function
            | `String s when String.trim s <> "" -> Some (String.trim s)
+           | `Assoc fields -> (
+               match List.assoc_opt "name" fields with
+               | Some (`String s) when String.trim s <> "" -> Some (String.trim s)
+               | _ -> (
+                   match List.assoc_opt "id" fields with
+                   | Some (`String s) when String.trim s <> "" -> Some (String.trim s)
+                   | _ -> None ) )
            | _ -> None)
   | _ -> []
+
+let last_actor_reply ~state ~actor_id =
+  match state |> member "narration_log" with
+  | `List entries ->
+      entries
+      |> List.rev
+      |> List.find_map (fun entry ->
+             match entry with
+             | `Assoc fields -> (
+                 match List.assoc_opt "actor_id" fields with
+                 | Some (`String aid) when aid = actor_id -> (
+                     match List.assoc_opt "reply" fields with
+                     | Some (`String reply) when String.trim reply <> "" ->
+                         Some (String.trim reply)
+                     | _ -> (
+                         match List.assoc_opt "proposed_action" fields with
+                         | Some (`String reply) when String.trim reply <> "" ->
+                             Some (String.trim reply)
+                         | _ -> None ) )
+                 | _ -> None )
+             | _ -> None)
+  | _ -> None
 
 let pick_deterministic_text ~actor_id ~turn ~salt xs =
   match xs with
@@ -1404,8 +1433,30 @@ let pick_deterministic_text ~actor_id ~turn ~salt xs =
       let idx = (if hash < 0 then -hash else hash) mod List.length xs in
       Some (List.nth xs idx)
 
+let contains_any_substring text keywords =
+  List.exists (fun keyword -> contains_substring text keyword) keywords
+
+let pick_deterministic_text_excluding ~actor_id ~turn ~salt ~exclude xs =
+  let normalized_exclude = String.trim exclude in
+  let rec loop attempt fallback =
+    if attempt > 4 then fallback
+    else
+      let salt' =
+        if attempt = 0 then salt else Printf.sprintf "%s:alt:%d" salt attempt
+      in
+      match pick_deterministic_text ~actor_id ~turn ~salt:salt' xs with
+      | Some candidate when String.trim candidate <> normalized_exclude ->
+          Some candidate
+      | Some candidate ->
+          let next_fallback = if fallback = None then Some candidate else fallback in
+          loop (attempt + 1) next_fallback
+      | None -> fallback
+  in
+  loop 0 None
+
 let fallback_dm_reply ~state =
   let turn = state_turn state in
+  let previous_reply = last_actor_reply ~state ~actor_id:"dm" in
   let live_npcs =
     party_fields_of_state state
     |> List.fold_left
@@ -1463,12 +1514,23 @@ let fallback_dm_reply ~state =
       ]
   in
   let dm_actor_id = "__dm__" in
-  match pick_deterministic_text ~actor_id:dm_actor_id ~turn ~salt:"dm-fallback" templates with
-  | Some template -> template turn live_npcs live_pcs
+  let candidates = List.map (fun template -> template turn live_npcs live_pcs) templates in
+  let selected =
+    match previous_reply with
+    | Some reply ->
+        pick_deterministic_text_excluding ~actor_id:dm_actor_id ~turn
+          ~salt:"dm-fallback" ~exclude:reply candidates
+    | None ->
+        pick_deterministic_text ~actor_id:dm_actor_id ~turn ~salt:"dm-fallback"
+          candidates
+  in
+  match selected with
+  | Some reply -> reply
   | None -> Printf.sprintf "턴 %d, 전장의 상황이 다시 요동치기 시작한다." turn
 
 let fallback_player_reply ~state ~actor_id =
   let turn = state_turn state in
+  let previous_reply = last_actor_reply ~state ~actor_id in
   let skills, traits =
     match actor_json_of_state state actor_id with
     | Some actor_json ->
@@ -1482,33 +1544,111 @@ let fallback_player_reply ~state ~actor_id =
     |> Option.value ~default:""
   in
   match pick_deterministic_text ~actor_id ~turn ~salt:"skill" skills with
-  | Some skill -> (
+  | Some skill ->
+      let key = String.lowercase_ascii (String.trim skill) in
       let templates =
-        [
-          (fun skill trait ->
+        if
+          contains_any_substring key
+            [ "mend"; "heal"; "truce"; "resolve"; "ward"; "anchor" ]
+        then
+          [
+            Printf.sprintf
+              "%s%s로 동료의 호흡을 정비해 붕괴 직전 전열을 안정시킨다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s를 사용해 위험한 아군을 먼저 보호하고 회복 시간을 확보한다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s로 일행의 흔들린 페이스를 되찾아 다음 턴의 성공 확률을 끌어올린다."
+              skill trait_hint;
+          ]
+        else if
+          contains_any_substring key
+            [ "deception"; "favor"; "broker"; "shadow"; "charm" ]
+        then
+          [
+            Printf.sprintf
+              "%s%s를 활용해 상대의 판단을 흔들고 유리한 협상 구도를 만든다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s로 주의를 다른 곳으로 돌린 뒤 핵심 목표에 접근한다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s를 통해 정보 우위를 확보하고 다음 행동 선택지를 늘린다."
+              skill trait_hint;
+          ]
+        else if
+          contains_any_substring key
+            [ "supply"; "ration"; "logistics"; "scan"; "omen"; "trace" ]
+        then
+          [
+            Printf.sprintf
+              "%s%s로 변수와 자원 손실을 먼저 점검해 무리한 돌입을 막는다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s를 사용해 위험 구간을 표시하고 안전한 진행 루트를 제시한다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s로 전장의 흐름을 재평가해 파티 운영 효율을 끌어올린다."
+              skill trait_hint;
+          ]
+        else if
+          contains_any_substring key [ "shield"; "intercept"; "guard"; "defense" ]
+        then
+          [
+            Printf.sprintf
+              "%s%s로 아군 전면을 받치며 적의 강공 타이밍을 흘려낸다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s를 통해 적의 집중 화력을 분산시키고 진형 붕괴를 막는다."
+              skill trait_hint;
+            Printf.sprintf
+              "%s%s로 반격 각도를 만들기 전까지 버티는 시간을 번다."
+              skill trait_hint;
+          ]
+        else
+          [
             Printf.sprintf "%s%s로 적 전열의 약한 지점을 파고들어 공격한다." skill
-              trait);
-          (fun skill trait ->
+              trait_hint;
             Printf.sprintf "%s%s를 활용해 측면을 압박하며 핵심 목표를 공격한다." skill
-              trait);
-          (fun skill trait ->
-            Printf.sprintf "%s%s로 빈틈을 열고 전선을 밀어붙인다." skill trait);
-        ]
+              trait_hint;
+            Printf.sprintf "%s%s로 빈틈을 열고 전선을 밀어붙인다." skill trait_hint;
+            Printf.sprintf "%s%s를 연계해 적의 대응 전에 먼저 주도권을 잡는다." skill
+              trait_hint;
+          ]
       in
-      match pick_deterministic_text ~actor_id ~turn ~salt:"skill-template" templates with
-      | Some template -> template skill trait_hint
+      let selected =
+        match previous_reply with
+        | Some reply ->
+            pick_deterministic_text_excluding ~actor_id ~turn
+              ~salt:"skill-template" ~exclude:reply templates
+        | None ->
+            pick_deterministic_text ~actor_id ~turn ~salt:"skill-template"
+              templates
+      in
+      (match selected with
+      | Some reply -> reply
       | None -> Printf.sprintf "%s%s로 적을 공격해 전선을 밀어붙인다." skill trait_hint)
-  | None -> (
+  | None ->
       let templates =
         [
-          (fun trait -> Printf.sprintf "지형을 이용해%s 적의 허점을 노려 공격한다." trait);
-          (fun trait ->
-            Printf.sprintf "호흡을 고르고%s 적의 빈틈을 확인한 뒤 공격한다." trait);
-          (fun trait -> Printf.sprintf "전열을 정비하고%s 확실한 타이밍에 공격한다." trait);
+          Printf.sprintf "지형을 이용해%s 적의 허점을 노려 공격한다." trait_hint;
+          Printf.sprintf "호흡을 고르고%s 적의 빈틈을 확인한 뒤 공격한다." trait_hint;
+          Printf.sprintf "전열을 정비하고%s 확실한 타이밍에 공격한다." trait_hint;
+          Printf.sprintf "교전을 길게 끌지 않기 위해%s 짧고 강한 일격을 노린다." trait_hint;
         ]
       in
-      match pick_deterministic_text ~actor_id ~turn ~salt:"plain-template" templates with
-      | Some template -> template trait_hint
+      let selected =
+        match previous_reply with
+        | Some reply ->
+            pick_deterministic_text_excluding ~actor_id ~turn
+              ~salt:"plain-template" ~exclude:reply templates
+        | None ->
+            pick_deterministic_text ~actor_id ~turn ~salt:"plain-template"
+              templates
+      in
+      (match selected with
+      | Some reply -> reply
       | None -> Printf.sprintf "적의 빈틈을 노려%s 공격한다." trait_hint)
 
 let choose_live_npc_actor_id state =
@@ -3673,7 +3813,7 @@ let handle_round_run ctx args : result =
       let dm_reply_ref : string option ref = ref None in
       let state_for_players_ref = ref base_state_for_prompt in
       let* () =
-        if local_fallback then
+        if phase = "round" then
           let* spawn_event_opt =
             ensure_round_npc_spawn_event ~base_dir ~room_id ~turn:turn_before
               ~state:base_state_for_prompt

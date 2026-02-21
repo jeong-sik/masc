@@ -540,7 +540,7 @@ fn detect_proxy_select_value(current_url: &str) -> Option<String> {
     let current = normalize_optional(current_url)?;
     for preset in DM_VOICE_PROXY_REMOTE_PRESETS {
         if current == *preset {
-            return Some((*preset).to_string());
+            return Some(proxy_origin_value(preset));
         }
     }
     if let Some(origin) = window_origin() {
@@ -978,6 +978,10 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
             .map(|raw| parse_dm_voice_tone(&raw))
             .unwrap_or(DmVoiceTone::Auto);
         let proxy_url = select_proxy_storage_value(&doc);
+        let effective_mode = match mode {
+            DmVoiceMode::Browser if proxy_url.is_some() => DmVoiceMode::ElevenLabs,
+            _ => mode,
+        };
         let voice_model = select_storage_value(
             &doc,
             DM_VOICE_MODEL_SELECT_ID,
@@ -991,7 +995,7 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
             DM_VOICE_ID_CUSTOM_INPUT_ID,
         );
 
-        match mode {
+        match effective_mode {
             DmVoiceMode::Off => {
                 set_dm_voice_status(
                     &doc,
@@ -1000,10 +1004,16 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                 );
             }
             DmVoiceMode::Browser => {
+                set_dm_voice_status(
+                    &doc,
+                    "status-ok",
+                    "Browser TTS 모드로 미리듣기를 재생했습니다.",
+                );
                 speak_with_browser(DM_VOICE_PREVIEW_TEXT, "dm_narration", Some("dm"), tone);
-                set_dm_voice_status(&doc, "status-ok", "Browser TTS 미리듣기를 재생했습니다.");
             }
             DmVoiceMode::ElevenLabs => {
+                let model_label = voice_model.as_deref().unwrap_or("auto").to_string();
+                let voice_label = voice_id.as_deref().unwrap_or("auto").to_string();
                 let Some(proxy_url) = proxy_url else {
                     set_dm_voice_status(
                         &doc,
@@ -1012,7 +1022,7 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                     );
                     return;
                 };
-                speak_with_proxy(
+                speak_with_proxy_preview(
                     proxy_url,
                     DM_VOICE_PREVIEW_TEXT.to_string(),
                     crate::config::current_room_id(),
@@ -1020,12 +1030,10 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                     0,
                     Some("dm".to_string()),
                     tone,
-                    voice_model.clone(),
-                    voice_id.clone(),
+                    voice_model,
+                    voice_id,
                 );
 
-                let model_label = voice_model.unwrap_or_else(|| "auto".to_string());
-                let voice_label = voice_id.unwrap_or_else(|| "auto".to_string());
                 set_dm_voice_status(
                     &doc,
                     "status-info",
@@ -1177,6 +1185,45 @@ fn speak_with_proxy(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn speak_with_proxy_preview(
+    proxy_url: String,
+    text: String,
+    room_id: String,
+    phase: String,
+    turn: u32,
+    speaker: Option<String>,
+    tone: DmVoiceTone,
+    voice_model: Option<String>,
+    voice_id: Option<String>,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = speak_with_proxy_inner(
+            proxy_url,
+            text,
+            room_id,
+            phase,
+            turn,
+            speaker,
+            tone,
+            voice_model,
+            voice_id,
+        )
+        .await;
+        if let Some(doc) = web_sys::window().and_then(|win| win.document()) {
+            match result {
+                Ok(_) => {
+                    set_dm_voice_status(&doc, "status-ok", "ElevenLabs 미리듣기 재생을 완료했습니다.");
+                }
+                Err(err) => {
+                    log::warn!("dm voice preview failed: {}", err);
+                    set_dm_voice_status(&doc, "status-warn", &format!("미리듣기 실패: {}", err));
+                }
+            }
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn speak_with_proxy_inner(
     proxy_url: String,
     text: String,
@@ -1267,7 +1314,22 @@ async fn speak_with_proxy_inner(
         .map_err(|_| "response cast failed".to_string())?;
 
     if !response.ok() {
-        return Err(format!("proxy HTTP {}", response.status()));
+        let status = response.status();
+        let detail = match JsFuture::from(
+            response
+                .text()
+                .map_err(|_| "failed to read error response".to_string())?,
+        )
+        .await
+        .map_err(|_| "error response parse failed".to_string())?
+        {
+            value if value.is_string() => value.as_string().unwrap_or_default(),
+            _ => String::new(),
+        };
+        if detail.trim().is_empty() {
+            return Err(format!("proxy HTTP {}", status));
+        }
+        return Err(format!("proxy HTTP {}: {}", status, detail.trim()));
     }
 
     let content_type = response

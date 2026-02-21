@@ -640,13 +640,17 @@ let test_round_run_local_fallback_progresses_round () =
   let json = parse_json_exn body in
   let summary = Yojson.Safe.Util.member "summary" json in
   Alcotest.(check int)
-    "successes include fallback replies"
-    2
+    "successes exclude fallback"
+    0
     (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int)
-    "player successes include fallback"
-    1
+    "player successes exclude fallback"
+    0
     (Yojson.Safe.Util.member "player_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int)
+    "player fallbacks counted"
+    1
+    (Yojson.Safe.Util.member "player_fallbacks" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check bool)
     "player quorum met with fallback"
     true

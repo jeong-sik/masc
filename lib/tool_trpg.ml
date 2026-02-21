@@ -258,7 +258,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean), local_fallback(boolean; default false, enables local progression fallback when keeper replies fail).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), dm_persona(grim_gothic|tactical_irony|heroic_epic), require_claim(boolean), local_fallback(boolean; default false, enables local progression fallback when keeper replies fail).";
       input_schema =
         `Assoc
           [
@@ -277,6 +277,7 @@ let schemas : Types.tool_schema list =
                   ("phase", `Assoc [ ("type", `String "string") ]);
                   ("rule_module", `Assoc [ ("type", `String "string") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "number") ]);
+                  ("dm_persona", `Assoc [ ("type", `String "string") ]);
                   ("require_claim", `Assoc [ ("type", `String "boolean") ]);
                   ("lang", `Assoc [ ("type", `String "string") ]);
                   ("local_fallback", `Assoc [ ("type", `String "boolean") ]);
@@ -1214,6 +1215,13 @@ type structured_action = {
   raw_payload : Yojson.Safe.t;
 }
 
+let first_nonempty_string_field keys (json : Yojson.Safe.t) =
+  keys
+  |> List.find_map (fun key ->
+         match json |> member key with
+         | `String s when String.trim s <> "" -> Some (String.trim s)
+         | _ -> None)
+
 let action_type_of_string = function
   | "attack" -> Some Attack
   | "defend" | "defense" -> Some Defend
@@ -1241,11 +1249,58 @@ let string_of_action_type = function
   | SceneTransition -> "scene_transition"
   | QuestUpdate -> "quest_update"
 
+let extract_structured_action_json_from_reply_line line :
+    (Yojson.Safe.t option, string) Stdlib.result =
+  let trimmed = String.trim line in
+  if trimmed = "" then Ok None
+  else
+    let lowered = String.lowercase_ascii trimmed in
+    let prefix = "structured_action:" in
+    if not (starts_with lowered prefix) then Ok None
+    else
+      let payload =
+        String.sub trimmed (String.length prefix)
+          (String.length trimmed - String.length prefix)
+        |> String.trim
+      in
+      if payload = "" then Error "structured_action payload is empty"
+      else
+        match Yojson.Safe.from_string payload with
+        | `Assoc fields when fields <> [] -> Ok (Some (`Assoc fields))
+        | `Assoc _ -> Error "structured_action object is empty"
+        | _ -> Error "structured_action payload must be JSON object"
+        | exception Yojson.Json_error e ->
+            Error (Printf.sprintf "invalid structured_action json: %s" e)
+
+let extract_structured_action_json_from_reply (reply : string) :
+    (Yojson.Safe.t option, string) Stdlib.result =
+  let rec loop = function
+    | [] -> Ok None
+    | line :: tl -> (
+        match extract_structured_action_json_from_reply_line line with
+        | Ok None -> loop tl
+        | Ok (Some _ as found) -> Ok found
+        | Error e -> Error e)
+  in
+  loop (String.split_on_char '\n' reply)
+
+let extract_structured_action_json (keeper_json : Yojson.Safe.t) :
+    (Yojson.Safe.t option, string) Stdlib.result =
+  match keeper_json |> member "structured_action" with
+  | `Assoc fields when fields <> [] -> Ok (Some (`Assoc fields))
+  | `Assoc _ -> Error "structured_action object is empty"
+  | `Null -> (
+      match first_nonempty_string_field [ "reply"; "content"; "text"; "message" ] keeper_json with
+      | Some reply -> extract_structured_action_json_from_reply reply
+      | None -> Ok None)
+  | _ -> Error "structured_action must be an object"
+
 let extract_structured_action (keeper_json : Yojson.Safe.t) :
     structured_action option =
-  match keeper_json |> member "structured_action" with
-  | `Assoc fields when fields <> [] ->
-      let sa = `Assoc fields in
+  match extract_structured_action_json keeper_json with
+  | Error _ -> None
+  | Ok None -> None
+  | Ok (Some sa) ->
       let type_str =
         match sa |> member "type" with
         | `String s -> String.lowercase_ascii (String.trim s)
@@ -1270,7 +1325,104 @@ let extract_structured_action (keeper_json : Yojson.Safe.t) :
               quest_info = get_string "quest_info";
               raw_payload = sa;
             })
-  | _ -> None
+
+let is_player_action_type = function
+  | Attack | Defend | Heal | Investigate | Social | Explore | Magic | UseItem ->
+      true
+  | SetFlag | SceneTransition | QuestUpdate -> false
+
+let is_dm_action_type = function
+  | SetFlag | SceneTransition | QuestUpdate -> true
+  | Attack | Defend | Heal | Investigate | Social | Explore | Magic | UseItem ->
+      false
+
+type structured_action_validation_error =
+  [ `Schema of string | `Rule of string ]
+
+let validate_structured_action_for_role ~role (sa : structured_action) :
+    (structured_action, structured_action_validation_error) Stdlib.result =
+  let ( let* ) = Result.bind in
+  let actor_role = role_to_string role in
+  let action_name = string_of_action_type sa.sa_type in
+  let require_nonempty name = function
+    | Some v when String.trim v <> "" -> Ok (String.trim v)
+    | _ -> Error (`Schema (Printf.sprintf "%s is required for %s" name action_name))
+  in
+  let* () =
+    match role with
+    | `Player ->
+        if is_player_action_type sa.sa_type then Ok ()
+        else
+          Error
+            (`Rule
+               (Printf.sprintf
+                  "action_type=%s is not allowed for role=%s"
+                  action_name actor_role))
+    | `Dm ->
+        if is_dm_action_type sa.sa_type then Ok ()
+        else
+          Error
+            (`Rule
+               (Printf.sprintf
+                  "action_type=%s is not allowed for role=%s"
+                  action_name actor_role))
+  in
+  let* description =
+    let text = String.trim sa.description in
+    if text = "" then
+      Error (`Schema "description is required for structured_action")
+    else Ok text
+  in
+  let* flag_key =
+    match sa.sa_type with
+    | SetFlag -> require_nonempty "flag_key" sa.flag_key |> Result.map (fun v -> Some v)
+    | _ -> Ok sa.flag_key
+  in
+  let* scene =
+    match sa.sa_type with
+    | SceneTransition ->
+        require_nonempty "scene" sa.scene |> Result.map (fun v -> Some v)
+    | _ -> Ok sa.scene
+  in
+  let* quest_info =
+    match sa.sa_type with
+    | QuestUpdate ->
+        require_nonempty "quest_info" sa.quest_info
+        |> Result.map (fun v -> Some v)
+    | _ -> Ok sa.quest_info
+  in
+  Ok { sa with description; flag_key; scene; quest_info }
+
+let parse_and_validate_structured_action ~role (keeper_json : Yojson.Safe.t) :
+    (structured_action, structured_action_validation_error) Stdlib.result =
+  let ( let* ) = Result.bind in
+  let* sa_json_opt =
+    match extract_structured_action_json keeper_json with
+    | Ok v -> Ok v
+    | Error e -> Error (`Schema e)
+  in
+  let* sa =
+    match sa_json_opt with
+    | None -> Error (`Schema "structured_action is missing")
+    | Some _ -> (
+        match extract_structured_action keeper_json with
+        | Some parsed -> Ok parsed
+        | None ->
+            Error (`Schema "structured_action type is unknown or malformed"))
+  in
+  validate_structured_action_for_role ~role sa
+
+let string_of_structured_action_validation_error = function
+  | `Schema msg -> msg
+  | `Rule msg -> msg
+
+let structured_action_error_kind = function
+  | `Schema _ -> "schema"
+  | `Rule _ -> "rule"
+
+let structured_action_error_message = function
+  | `Schema msg -> msg
+  | `Rule msg -> msg
 
 let detect_combat_semantic (text : string) : combat_semantic option =
   let lowered = String.lowercase_ascii text in
@@ -2476,7 +2628,9 @@ let sanitize_keeper_reply (raw : string) : string =
   let lines = strip_state_block false [] (String.split_on_char '\n' text) in
   let is_noise_line line =
     let t = String.trim line in
+    let lowered = String.lowercase_ascii t in
     t = ""
+    || starts_with lowered "structured_action:"
     || starts_with t "\"reply\":"
     || starts_with t "SKILL:"
     || starts_with t "SKILL_REASON:"
@@ -2500,9 +2654,11 @@ let sanitize_keeper_reply (raw : string) : string =
     lines
     |> List.filter (fun line ->
            let t = String.trim line in
+           let lowered = String.lowercase_ascii t in
            not
              (starts_with t "```json"
              || t = "```"
+             || starts_with lowered "structured_action:"
              || starts_with t "[STATE]"
              || starts_with t "[/STATE]"
              || starts_with t "visible_state_json:"))
@@ -2512,8 +2668,10 @@ let sanitize_keeper_reply (raw : string) : string =
 
 let is_reply_noise_text (raw : string) : bool =
   let t = String.trim raw in
+  let lowered = String.lowercase_ascii t in
   t = ""
   || starts_with t "```"
+  || starts_with lowered "structured_action:"
   || starts_with t "[STATE]"
   || starts_with t "[/STATE]"
   || starts_with t "\"reply\":"
@@ -2582,14 +2740,7 @@ let fallback_reply_from_keeper_json keeper_json =
 let parse_keeper_reply keeper_json =
   let default_fallback_reply = default_placeholder_reply in
   let raw_reply =
-    let first_string_field keys =
-      keys
-      |> List.find_map (fun key ->
-             match keeper_json |> member key with
-             | `String s when String.trim s <> "" -> Some s
-             | _ -> None)
-    in
-    match first_string_field [ "reply"; "content"; "text"; "message" ] with
+    match first_nonempty_string_field [ "reply"; "content"; "text"; "message" ] keeper_json with
     | Some raw -> Some raw
     | None -> (
         match keeper_json |> member "structured_action" with
@@ -2616,8 +2767,14 @@ let parse_keeper_reply keeper_json =
            || contains_substring s "Respond in-character as")
       in
       let fallback_reply = fallback_reply_from_keeper_json keeper_json in
+      let structured_action_description =
+        match extract_structured_action keeper_json with
+        | Some sa when String.trim sa.description <> "" -> Some sa.description
+        | _ -> None
+      in
       let reply =
         if cleaned <> "" then Some cleaned
+        else if structured_action_description <> None then structured_action_description
         else if prompt_echo || is_reply_noise_text fallback then fallback_reply
         else Some fallback
       in
@@ -2713,12 +2870,62 @@ let compact_state_for_prompt (state : Yojson.Safe.t) : Yojson.Safe.t =
              "status";
              "current_node";
              "world";
+             "config";
              "party";
              "actor_control";
              "interventions";
            ]
         @ [ ("narration_log", narration_log); ("dice_log", dice_log) ])
   | _ -> state
+
+type dm_persona_id =
+  | Dm_grim_gothic
+  | Dm_tactical_irony
+  | Dm_heroic_epic
+
+let dm_persona_id_of_string = function
+  | "grim_gothic" | "grim-gothic" | "grim" -> Some Dm_grim_gothic
+  | "tactical_irony" | "tactical-irony" | "tactical" -> Some Dm_tactical_irony
+  | "heroic_epic" | "heroic-epic" | "heroic" -> Some Dm_heroic_epic
+  | _ -> None
+
+let string_of_dm_persona_id = function
+  | Dm_grim_gothic -> "grim_gothic"
+  | Dm_tactical_irony -> "tactical_irony"
+  | Dm_heroic_epic -> "heroic_epic"
+
+let infer_dm_persona_id ~explicit ~dm_style =
+  match explicit with
+  | Some id -> id
+  | None ->
+      let lowered = String.lowercase_ascii (String.trim dm_style) in
+      if
+        contains_substring lowered "grim"
+        || contains_substring lowered "gothic"
+        || contains_substring lowered "horror"
+      then Dm_grim_gothic
+      else if
+        contains_substring lowered "tactic"
+        || contains_substring lowered "irony"
+        || contains_substring lowered "wry"
+      then Dm_tactical_irony
+      else Dm_heroic_epic
+
+let dm_persona_directive_ko = function
+  | Dm_grim_gothic ->
+      "페르소나: Grim Gothic. 분위기는 음울하고 냉혹하게, 대가와 상흔을 분명히 제시하세요."
+  | Dm_tactical_irony ->
+      "페르소나: Tactical Irony. 전술적 긴장과 건조한 아이러니를 유지하고 선택의 비용을 숫자처럼 명확히 보여주세요."
+  | Dm_heroic_epic ->
+      "페르소나: Heroic Epic. 영웅 서사의 고조를 유지하되 승리도 희생과 위험을 통과해야 얻어지게 만드세요."
+
+let dm_persona_directive_en = function
+  | Dm_grim_gothic ->
+      "Persona: Grim Gothic. Keep the tone bleak and costly; make scars and consequences explicit."
+  | Dm_tactical_irony ->
+      "Persona: Tactical Irony. Keep tactical pressure with dry irony; make costs and trade-offs explicit."
+  | Dm_heroic_epic ->
+      "Persona: Heroic Epic. Build heroic momentum, but every win must pass through risk and sacrifice."
 
 type prompt_context = {
   actor_name : string;
@@ -2732,6 +2939,10 @@ type prompt_context = {
   party_summary : string;
   world_weather : string;
   world_time : string;
+  dm_style : string;
+  dm_opening_prompt : string;
+  dm_persona_id : dm_persona_id;
+  dm_persona_override : bool;
 }
 
 let empty_prompt_context =
@@ -2747,6 +2958,10 @@ let empty_prompt_context =
     party_summary = "";
     world_weather = "";
     world_time = "";
+    dm_style = "";
+    dm_opening_prompt = "";
+    dm_persona_id = Dm_heroic_epic;
+    dm_persona_override = false;
   }
 
 let get_string_field json key =
@@ -2803,7 +3018,8 @@ let extract_party_summary ~exclude_actor_id (state : Yojson.Safe.t) : string =
       |> String.concat ", "
   | _ -> ""
 
-let extract_prompt_context ~actor_id (state : Yojson.Safe.t) : prompt_context =
+let extract_prompt_context ~actor_id ~dm_persona_override (state : Yojson.Safe.t) :
+    prompt_context =
   let actor_json =
     match state |> member "party" with
     | `Assoc members -> (
@@ -2813,6 +3029,23 @@ let extract_prompt_context ~actor_id (state : Yojson.Safe.t) : prompt_context =
     | _ -> `Null
   in
   let world_json = state |> member "world" in
+  let dm_json =
+    match state |> member "config" with
+    | `Assoc fields -> (
+        match List.assoc_opt "dm" fields with
+        | Some value -> value
+        | None -> `Null)
+    | _ -> `Null
+  in
+  let dm_style = get_string_field dm_json "style" in
+  let inferred_dm_persona =
+    infer_dm_persona_id
+      ~explicit:
+        (Option.bind dm_persona_override (fun raw ->
+             dm_persona_id_of_string
+               (String.lowercase_ascii (String.trim raw))))
+      ~dm_style
+  in
   {
     actor_name = get_string_field actor_json "name";
     actor_persona = get_string_field actor_json "persona";
@@ -2837,6 +3070,10 @@ let extract_prompt_context ~actor_id (state : Yojson.Safe.t) : prompt_context =
               String.length f > 5
               && String.sub f 0 5 = "time.")
        |> (function x :: _ -> x | [] -> ""));
+    dm_style;
+    dm_opening_prompt = get_string_field dm_json "opening_prompt";
+    dm_persona_id = inferred_dm_persona;
+    dm_persona_override = Option.is_some dm_persona_override;
   }
 
 let join_nonempty sep items =
@@ -2844,6 +3081,23 @@ let join_nonempty sep items =
 
 let format_traits traits =
   match traits with [] -> "" | ts -> String.concat ", " ts
+
+let trpg_structured_action_system_instructions =
+  "CRITICAL: Your response MUST contain a JSON object called structured_action.\n\
+   Place it on its own line in your reply, exactly like this:\n\n\
+   structured_action: {\"type\":\"<ACTION_TYPE>\",\"description\":\"<what you do>\"}\n\n\
+   Available ACTION_TYPE values:\n\
+   - Player actions: attack, defend, heal, investigate, social, explore, magic, use_item\n\
+   - DM actions: set_flag, scene_transition, quest_update\n\n\
+   Examples:\n\
+   structured_action: {\"type\":\"attack\",\"target_id\":\"goblin-1\",\"description\":\"Swing sword at the goblin\"}\n\
+   structured_action: {\"type\":\"set_flag\",\"flag_key\":\"quest.hideout.found\",\"description\":\"The party discovered the hideout\"}\n\
+   structured_action: {\"type\":\"scene_transition\",\"scene\":\"Deep cave\",\"description\":\"The party enters the cave\"}\n\n\
+   Rules:\n\
+   1. EVERY response must have exactly one structured_action line.\n\
+   2. The JSON must be valid (use double quotes for keys and string values).\n\
+   3. Do NOT wrap it in markdown code blocks.\n\
+   4. Place it at the END of your narrative reply."
 
 let build_player_section_ko (ctx : prompt_context) =
   let parts =
@@ -2945,6 +3199,13 @@ let build_dm_section_ko (ctx : prompt_context) =
   let parts =
     [
       "당신은 던전 마스터(DM)입니다.";
+      dm_persona_directive_ko ctx.dm_persona_id;
+      (if ctx.dm_style <> "" then
+         Printf.sprintf "DM 스타일 레퍼런스: %s" ctx.dm_style
+       else "");
+      (if ctx.dm_opening_prompt <> "" then
+         Printf.sprintf "세션 테마: %s" (compact_text ~max_len:180 ctx.dm_opening_prompt)
+       else "");
       (if ctx.scene_description <> "" then
          Printf.sprintf "현재 장면: %s" ctx.scene_description
        else "");
@@ -2970,6 +3231,7 @@ let build_dm_section_ko (ctx : prompt_context) =
       {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"일행이 은신처를 발견했다"}|};
       {|{"type":"scene_transition","scene":"동굴 깊은 곳","description":"일행이 동굴 안으로 진입한다"}|};
       {|{"type":"quest_update","quest_info":"보스 위치 확인됨","description":"단서를 통해 보스 위치가 드러났다"}|};
+      "DM은 set_flag, scene_transition, quest_update만 사용하세요.";
       "스토리 목표 달성 시 [WIN], 전멸 시 [LOSE]를 reply에 포함하세요.";
       "매 턴마다 이야기를 진전시키세요. 같은 상황을 반복하지 마세요.";
     ]
@@ -2980,6 +3242,13 @@ let build_dm_section_en (ctx : prompt_context) =
   let parts =
     [
       "You are the Dungeon Master (DM).";
+      dm_persona_directive_en ctx.dm_persona_id;
+      (if ctx.dm_style <> "" then
+         Printf.sprintf "DM style reference: %s" ctx.dm_style
+       else "");
+      (if ctx.dm_opening_prompt <> "" then
+         Printf.sprintf "Session theme: %s" (compact_text ~max_len:180 ctx.dm_opening_prompt)
+       else "");
       (if ctx.scene_description <> "" then
          Printf.sprintf "Current scene: %s" ctx.scene_description
        else "");
@@ -3005,15 +3274,17 @@ let build_dm_section_en (ctx : prompt_context) =
       {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"The party discovered the hideout"}|};
       {|{"type":"scene_transition","scene":"Deep cave","description":"The party enters the cave"}|};
       {|{"type":"quest_update","quest_info":"Boss location confirmed","description":"Clues reveal the boss location"}|};
+      "DM must use only: set_flag, scene_transition, quest_update.";
       "When the story goal is achieved, include [WIN] in your reply. On party wipe, include [LOSE].";
       "Advance the story every turn. Do NOT repeat the same situation.";
     ]
   in
   join_nonempty "\n" parts
 
-let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang =
+let build_keeper_prompt ~dm_persona_override ~room_id ~phase ~turn ~role
+    ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
-  let ctx = extract_prompt_context ~actor_id state_json in
+  let ctx = extract_prompt_context ~actor_id ~dm_persona_override state_json in
   let state_text = Yojson.Safe.to_string state_json |> compact_text ~max_len:4200 in
   let character_section =
     match (role, lang) with
@@ -4008,6 +4279,10 @@ let handle_session_start ctx args : result =
              (member_.actor_id, `String keeper))
            party)
     in
+    let dm_persona_default =
+      infer_dm_persona_id ~explicit:None ~dm_style:dm_preset.style
+      |> string_of_dm_persona_id
+    in
     Ok
       (`Assoc
         [
@@ -4026,6 +4301,7 @@ let handle_session_start ctx args : result =
                 ("dm_keeper", `String dm_keeper);
                 ("player_keepers", player_keepers_json);
                 ("phase", `String "round");
+                ("dm_persona", `String dm_persona_default);
               ] );
           ( "events",
             `List
@@ -4617,6 +4893,7 @@ let handle_round_run ctx args : result =
       let* rule_opt = get_optional_string args "rule_module" in
       let* phase_opt = get_optional_string args "phase" in
       let* lang_opt = get_optional_string args "lang" in
+      let* dm_persona_opt = get_optional_string args "dm_persona" in
       let* require_claim = get_optional_bool args "require_claim" ~default:false in
       let* local_fallback =
         get_optional_bool args "local_fallback" ~default:false
@@ -4624,6 +4901,17 @@ let handle_round_run ctx args : result =
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase_input = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
+      let* dm_persona_override =
+        match dm_persona_opt with
+        | None -> Ok None
+        | Some raw -> (
+            let normalized = String.lowercase_ascii (String.trim raw) in
+            match dm_persona_id_of_string normalized with
+            | Some persona -> Ok (Some (string_of_dm_persona_id persona))
+            | None ->
+                Error
+                  "dm_persona must be one of: grim_gothic, tactical_irony, heroic_epic")
+      in
       let* () =
         match ctx.keeper_call with
         | Some _ -> Ok ()
@@ -4730,6 +5018,9 @@ let handle_round_run ctx args : result =
       let statuses = ref [] in
       let success_count = ref 0 in
       let fallback_count = ref 0 in
+      let schema_failures = ref 0 in
+      let rule_validation_failures = ref 0 in
+      let reprompt_count = ref 0 in
       let player_success_count = ref 0 in
       let dm_success = ref false in
       let unavailable_count = ref 0 in
@@ -4843,15 +5134,31 @@ let handle_round_run ctx args : result =
             | `Player ->
                 player_success_count := !player_success_count + 1);
             appended_events := !appended_events @ [ reply_event ];
-            let* combat_events =
+            let* action_events =
               match role with
               | `Dm -> Ok []
               | `Player ->
-                  append_combat_semantic_event ~base_dir ~room_id ~phase
-                    ~turn:turn_before ~actor_id ~reply:fallback_reply
-                    ~state:state_json
+                  let sa_fallback : structured_action =
+                    {
+                      sa_type = Attack;
+                      target_id = None;
+                      description = fallback_reply;
+                      flag_key = None;
+                      scene = None;
+                      quest_info = None;
+                      raw_payload =
+                        `Assoc
+                          [
+                            ("type", `String "attack");
+                            ("description", `String fallback_reply);
+                          ];
+                    }
+                  in
+                  apply_structured_action ~base_dir ~room_id
+                    ~turn:turn_before ~phase ~actor_id ~state:state_json
+                    sa_fallback
             in
-            appended_events := !appended_events @ combat_events;
+            appended_events := !appended_events @ action_events;
             let* pressure_events =
               match role with
               | `Dm ->
@@ -4898,8 +5205,9 @@ let handle_round_run ctx args : result =
               ~error:lease_error
               ~stage:"lease_check"
         | Ok () ->
-        let prompt =
+        let base_prompt =
           build_keeper_prompt
+            ~dm_persona_override
             ~room_id
             ~phase
             ~turn:turn_before
@@ -4908,8 +5216,71 @@ let handle_round_run ctx args : result =
             ~state_json
             ~lang:prompt_lang
         in
-        match call_keeper ctx ~name:keeper_name ~message:prompt ~timeout_sec with
-        | `Timeout ->
+        let validate_keeper_payload keeper_json =
+          let ( let* ) = Result.bind in
+          let* reply =
+            match parse_keeper_reply keeper_json with
+            | Ok value -> Ok value
+            | Error e -> Error (`Schema e)
+          in
+          let* sa = parse_and_validate_structured_action ~role keeper_json in
+          let normalized_reply =
+            let trimmed_reply = String.trim reply in
+            if trimmed_reply = "" || is_placeholder_reply trimmed_reply then
+              String.trim sa.description
+            else trimmed_reply
+          in
+          if normalized_reply = "" then
+            Error (`Schema "reply is empty after cleanup")
+          else Ok (normalized_reply, sa)
+        in
+        let re_prompt_message ~stage ~reason =
+          Printf.sprintf
+            "%s\n\n[RETRY REQUIRED]\n\
+             Your previous response was rejected at stage=%s (%s).\n\
+             Return concise in-world narrative plus exactly one valid structured_action JSON line."
+            base_prompt stage
+            (compact_summary_text ~max_len:180 reason)
+        in
+        let run_keeper_once ~stage ~message =
+          match call_keeper ctx ~name:keeper_name ~message ~timeout_sec with
+          | `Timeout -> Error (`Timeout stage)
+          | `Error err -> Error (`Unavailable (stage, err))
+          | `Ok keeper_json -> (
+              match validate_keeper_payload keeper_json with
+              | Ok (reply, sa) -> Ok (reply, sa)
+              | Error validation_error -> Error (`Validation (stage, validation_error))
+          )
+        in
+        let keeper_result = run_keeper_once ~stage:"masc_keeper_msg" ~message:base_prompt in
+        let keeper_result =
+          match keeper_result with
+          | Error (`Validation (_stage, validation_error)) ->
+              reprompt_count := !reprompt_count + 1;
+              (match validation_error with
+              | `Schema _ -> schema_failures := !schema_failures + 1
+              | `Rule _ ->
+                  rule_validation_failures := !rule_validation_failures + 1);
+              let stage = structured_action_error_kind validation_error in
+              let reason = structured_action_error_message validation_error in
+              statuses :=
+                `Assoc
+                  [
+                    ("actor_id", `String actor_id);
+                    ("role", `String (role_to_string role));
+                    ("keeper", `String keeper_name);
+                    ("status", `String "re_prompt");
+                    ("stage", `String stage);
+                    ("reason", `String reason);
+                    ("attempt", `Int 1);
+                  ]
+                :: !statuses;
+              let retry_prompt = re_prompt_message ~stage ~reason in
+              run_keeper_once ~stage:"re_prompt" ~message:retry_prompt
+          | other -> other
+        in
+        match keeper_result with
+        | Error (`Timeout stage) ->
             let* timeout_event, unavailable_result =
               append_timeout_and_unavailable_events
                 ~base_dir
@@ -4940,7 +5311,7 @@ let handle_round_run ctx args : result =
                   ("keeper", `String keeper_name);
                   ("status", `String "timeout");
                   ("reason", `String "timeout");
-                  ("stage", `String "masc_keeper_msg");
+                  ("stage", `String stage);
                   ("timeout_sec", `Float timeout_sec);
                   ("sampled", `Bool sampled);
                   ( "sampled_reason",
@@ -4952,76 +5323,70 @@ let handle_round_run ctx args : result =
               apply_local_fallback ~stage:"timeout_fallback" ~reason:"timeout"
             in
             Ok ()
-        | `Error keeper_error ->
+        | Error (`Unavailable (stage, keeper_error)) ->
             let* () =
               record_unavailable_status
-              ~status:"unavailable"
-              ~error:keeper_error
-              ~stage:"keeper_call"
+                ~status:"unavailable"
+                ~error:keeper_error
+                ~stage
             in
             apply_local_fallback ~stage:"keeper_call_fallback"
               ~reason:keeper_error
-        | `Ok keeper_json -> (
-            match parse_keeper_reply keeper_json with
-            | Error parse_error ->
-                let* () =
-                  record_unavailable_status
-                  ~status:"invalid_response"
-                  ~error:parse_error
-                  ~stage:"parse_keeper_reply"
-                in
-                apply_local_fallback ~stage:"parse_reply_fallback"
-                  ~reason:parse_error
-            | Ok reply ->
-                let reply =
-                  if is_placeholder_reply reply then
-                    match role with
-                    | `Player -> fallback_player_reply ~state:state_json ~actor_id
-                    | `Dm -> fallback_dm_reply ~state:state_json
-                  else reply
-                in
-                let* reply_event =
-                  append_keeper_reply_event
-                    ~base_dir
-                    ~room_id
-                    ~phase
-                    ~turn:turn_before
-                    ~role
-                    ~actor_id
-                    ~keeper_name
-                    ~reply
-                in
-                success_count := !success_count + 1;
-                (match role with
-                | `Dm ->
-                    dm_success := true;
-                    dm_reply_ref := Some reply
-                | `Player -> player_success_count := !player_success_count + 1);
-                appended_events := !appended_events @ [ reply_event ];
-                let* action_events =
-                  match extract_structured_action keeper_json with
-                  | Some sa ->
-                      apply_structured_action ~base_dir ~room_id
-                        ~turn:turn_before ~phase ~actor_id ~state:state_json sa
-                  | None -> (
-                      match role with
-                      | `Dm -> Ok []
-                      | `Player ->
-                          append_combat_semantic_event ~base_dir ~room_id ~phase
-                            ~turn:turn_before ~actor_id ~reply ~state:state_json)
-                in
-                appended_events := !appended_events @ action_events;
-                statuses :=
-                  `Assoc
-                    [
-                      ("actor_id", `String actor_id);
-                      ("role", `String (role_to_string role));
-                      ("keeper", `String keeper_name);
-                      ("status", `String "ok");
-                      ("reply", `String reply);
-                    ]
-                  :: !statuses;
-                Ok () )
+        | Error (`Validation (stage, validation_error)) ->
+            (match validation_error with
+            | `Schema _ -> schema_failures := !schema_failures + 1
+            | `Rule _ ->
+                rule_validation_failures := !rule_validation_failures + 1);
+            let validation_error_msg =
+              string_of_structured_action_validation_error validation_error
+            in
+            let status_name =
+              match validation_error with `Schema _ -> "schema_invalid" | `Rule _ -> "rule_invalid"
+            in
+            let* () =
+              record_unavailable_status
+                ~status:status_name
+                ~error:validation_error_msg
+                ~stage
+            in
+            apply_local_fallback ~stage:"validation_fallback"
+              ~reason:validation_error_msg
+        | Ok (reply, sa) ->
+            let* reply_event =
+              append_keeper_reply_event
+                ~base_dir
+                ~room_id
+                ~phase
+                ~turn:turn_before
+                ~role
+                ~actor_id
+                ~keeper_name
+                ~reply
+            in
+            success_count := !success_count + 1;
+            (match role with
+            | `Dm ->
+                dm_success := true;
+                dm_reply_ref := Some reply
+            | `Player -> player_success_count := !player_success_count + 1);
+            appended_events := !appended_events @ [ reply_event ];
+            let* action_events =
+              apply_structured_action ~base_dir ~room_id
+                ~turn:turn_before ~phase ~actor_id ~state:state_json sa
+            in
+            appended_events := !appended_events @ action_events;
+            statuses :=
+              `Assoc
+                [
+                  ("actor_id", `String actor_id);
+                  ("role", `String (role_to_string role));
+                  ("keeper", `String keeper_name);
+                  ("status", `String "ok");
+                  ("reply", `String reply);
+                  ("action_type", `String (string_of_action_type sa.sa_type));
+                ]
+              :: !statuses;
+            Ok ()
       in
 
       let* () =
@@ -5167,6 +5532,8 @@ let handle_round_run ctx args : result =
       let progress_reason =
         if advanced then "advanced"
         else if !timeout_count > 0 then "timeout"
+        else if !schema_failures > 0 || !rule_validation_failures > 0 then
+          "structured_action_invalid"
         else if !unavailable_count > 0 then "keeper_unavailable"
         else if not player_quorum_met then "player_quorum_not_met"
         else if not !dm_success then "dm_not_resolved"
@@ -5186,6 +5553,19 @@ let handle_round_run ctx args : result =
         count_event_type_in_list Trpg_engine_event.Actor_spawned !appended_events
       in
       let npc_attacks = count_npc_attacks_in_list !appended_events in
+      let dm_style =
+        match base_state_for_prompt |> member "config" with
+        | `Assoc fields -> (
+            match List.assoc_opt "dm" fields with
+            | Some dm_json -> get_string_field dm_json "style"
+            | None -> "")
+        | _ -> ""
+      in
+      let dm_persona_used =
+        infer_dm_persona_id
+          ~explicit:(Option.bind dm_persona_override dm_persona_id_of_string)
+          ~dm_style
+      in
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
       Ok
         (`Assoc
@@ -5223,6 +5603,11 @@ let handle_round_run ctx args : result =
                   ("effective_timeout_sec", `Float timeout_sec);
                   ("timeouts", `Int !timeout_count);
                   ("unavailable", `Int !unavailable_count);
+                  ("schema_failures", `Int !schema_failures);
+                  ("rule_validation_failures", `Int !rule_validation_failures);
+                  ("reprompts", `Int !reprompt_count);
+                  ("dm_persona", `String (string_of_dm_persona_id dm_persona_used));
+                  ("dm_persona_overridden", `Bool (Option.is_some dm_persona_override));
                   ("npc_spawned", `Int npc_spawned);
                   ("npc_attacks", `Int npc_attacks);
                   ("interventions", `Int (List.length interventions_applied));

@@ -143,6 +143,10 @@ struct RoundStallSummary {
     dm_success: bool,
     timeouts: u64,
     unavailable: u64,
+    schema_failures: u64,
+    rule_validation_failures: u64,
+    reprompts: u64,
+    dm_persona: Option<String>,
     progress_reason: Option<String>,
     progress_detail: Option<String>,
     recovery_applied: bool,
@@ -858,6 +862,19 @@ fn extract_stalled_round_summary(json: &Value) -> RoundStallSummary {
             .and_then(|s| s.get("unavailable"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
+        schema_failures: summary
+            .and_then(|s| s.get("schema_failures"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        rule_validation_failures: summary
+            .and_then(|s| s.get("rule_validation_failures"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        reprompts: summary
+            .and_then(|s| s.get("reprompts"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        dm_persona: summary_nonempty_string(summary, "dm_persona"),
         progress_reason: summary_nonempty_string(summary, "progress_reason"),
         progress_detail: progress_detail.clone(),
         recovery_applied: summary
@@ -897,6 +914,9 @@ fn build_stalled_round_guide(
     let dm_success = summary.dm_success;
     let timeouts = summary.timeouts;
     let unavailable = summary.unavailable;
+    let schema_failures = summary.schema_failures;
+    let rule_validation_failures = summary.rule_validation_failures;
+    let reprompts = summary.reprompts;
 
     let mut lines = vec![
         format!(
@@ -912,6 +932,15 @@ fn build_stalled_round_guide(
             unavailable
         ),
     ];
+    if schema_failures > 0 || rule_validation_failures > 0 || reprompts > 0 {
+        lines.push(format!(
+            "검증 지표: schema {} / rule {} / reprompt {}",
+            schema_failures, rule_validation_failures, reprompts
+        ));
+    }
+    if let Some(dm_persona) = summary.dm_persona.as_deref() {
+        lines.push(format!("DM persona: {}", dm_persona));
+    }
     if let Some(reason) = summary.progress_reason.as_deref() {
         lines.push(format!("진행 판정: {}", reason));
     }

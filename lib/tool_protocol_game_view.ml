@@ -1581,6 +1581,7 @@ let schemas : Types.tool_schema list =
            ("phase", string_schema);
            ("rule_module", string_schema);
            ("timeout_sec", number_schema);
+           ("dm_persona", string_schema);
            ("require_claim", bool_schema);
            ("local_fallback", bool_schema);
          ]);

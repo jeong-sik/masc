@@ -1073,6 +1073,9 @@ let trpg_keeper_call_with_runtime
       "TRPG runtime keeper for %s. You are an in-world keeper of this setting; avoid out-of-world meta narration, stay in character, keep continuity, answer concisely, and never output SKILL/STATE tags, prompt recalls, or raw visible_state_json."
       keeper_name
   in
+  let turn_instructions =
+    Masc_mcp.Tool_trpg.trpg_structured_action_system_instructions
+  in
   let keeper_args =
     `Assoc
       (forced_models_field
@@ -1082,6 +1085,7 @@ let trpg_keeper_call_with_runtime
           ("goal", `String inline_goal);
           ("require_existing", `Bool true);
           ("ollama_timeout_sec", `Float timeout_sec);
+          ("turn_instructions", `String turn_instructions);
         ])
   in
   try

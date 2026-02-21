@@ -386,31 +386,6 @@ pub fn poll_masc_events(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unwrap_message_event_extracts_inner_type_and_payload() {
-        let raw = r#"{"jsonrpc":"2.0","method":"masc/event","params":{"type":"experiment_created","agent":"tester","data":{"id":"exp-1","hypothesis":"smoke"}}}"#;
-        let (event_type, payload) = unwrap_message_event(raw).expect("envelope should parse");
-
-        assert_eq!(event_type, "experiment_created");
-        assert_eq!(extract_field(&payload, "id"), Some("exp-1"));
-        assert_eq!(extract_field(&payload, "hypothesis"), Some("smoke"));
-    }
-
-    #[test]
-    fn unwrap_message_event_normalizes_masc_broadcast() {
-        let raw = r#"{"jsonrpc":"2.0","method":"masc/event","params":{"type":"masc/broadcast","agent":"tester","data":{"from":"alice","content":"hello"}}}"#;
-        let (event_type, payload) = unwrap_message_event(raw).expect("envelope should parse");
-
-        assert_eq!(event_type, "broadcast");
-        assert_eq!(extract_field(&payload, "from"), Some("alice"));
-        assert_eq!(extract_field(&payload, "content"), Some("hello"));
-    }
-}
-
 // ─── DOM Update Helpers ──────────────────────
 //
 // All DOM access is gated on wasm32. On native, these are no-ops.
@@ -518,5 +493,30 @@ fn update_experiment_dashboard(_summary: &str) {
             let lines: Vec<&str> = updated.lines().take(50).collect();
             el.set_text_content(Some(&lines.join("\n")));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unwrap_message_event_extracts_inner_type_and_payload() {
+        let raw = r#"{"jsonrpc":"2.0","method":"masc/event","params":{"type":"experiment_created","agent":"tester","data":{"id":"exp-1","hypothesis":"smoke"}}}"#;
+        let (event_type, payload) = unwrap_message_event(raw).expect("envelope should parse");
+
+        assert_eq!(event_type, "experiment_created");
+        assert_eq!(extract_field(&payload, "id"), Some("exp-1"));
+        assert_eq!(extract_field(&payload, "hypothesis"), Some("smoke"));
+    }
+
+    #[test]
+    fn unwrap_message_event_normalizes_masc_broadcast() {
+        let raw = r#"{"jsonrpc":"2.0","method":"masc/event","params":{"type":"masc/broadcast","agent":"tester","data":{"from":"alice","content":"hello"}}}"#;
+        let (event_type, payload) = unwrap_message_event(raw).expect("envelope should parse");
+
+        assert_eq!(event_type, "broadcast");
+        assert_eq!(extract_field(&payload, "from"), Some("alice"));
+        assert_eq!(extract_field(&payload, "content"), Some("hello"));
     }
 }

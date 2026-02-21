@@ -361,7 +361,7 @@ pub fn update_narrative_dom(
         scroll_to_bottom(&log_el);
         trim_log(&log_el, 200);
         if !is_debug_entry {
-            dm_voice::maybe_play_dm_voice(&payload, &clean_text, &room_state, &progress);
+            dm_voice::maybe_play_dm_voice(payload, &clean_text, &room_state, &progress);
         }
     }
 }

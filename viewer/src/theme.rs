@@ -133,23 +133,12 @@ impl ViewerTheme {
 
 /// Holds pending theme transitions from JS change events.
 /// The JS closure writes here; a Bevy Update system drains it.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ThemeTransitionBuffer {
     #[cfg(target_arch = "wasm32")]
     pending: Arc<Mutex<Option<ViewerTheme>>>,
     #[cfg(not(target_arch = "wasm32"))]
     _phantom: (),
-}
-
-impl Default for ThemeTransitionBuffer {
-    fn default() -> Self {
-        Self {
-            #[cfg(target_arch = "wasm32")]
-            pending: Arc::new(Mutex::new(None)),
-            #[cfg(not(target_arch = "wasm32"))]
-            _phantom: (),
-        }
-    }
 }
 
 // ─── Plugin ──────────────────────────────────

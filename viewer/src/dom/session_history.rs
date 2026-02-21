@@ -5,6 +5,7 @@
 
 #![allow(dead_code)] // Many helpers used only in wasm32 cfg blocks.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::cmp::Ordering;
 #[cfg(target_arch = "wasm32")]
@@ -49,6 +50,15 @@ struct RoomHistory {
 #[derive(Resource, Default)]
 pub struct SessionHistoryCache {
     rooms: Vec<RoomHistory>,
+}
+
+#[derive(SystemParam)]
+pub struct SessionHistoryReaders<'w, 's> {
+    narratives: MessageReader<'w, 's, NarrativeReceived>,
+    dice_events: MessageReader<'w, 's, DiceRolled>,
+    turn_events: MessageReader<'w, 's, TurnAdvanced>,
+    progress_events: MessageReader<'w, 's, TurnProgressUpdated>,
+    session_started: MessageReader<'w, 's, SessionStarted>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -220,19 +230,21 @@ fn ensure_room_entry(
     (idx, true)
 }
 
-fn append_event(
-    rooms: &mut Vec<RoomHistory>,
-    room_id: &str,
-    room_status: &str,
+struct EventAppendInput<'a> {
+    room_id: &'a str,
+    room_status: &'a str,
     turn: u32,
-    phase: &str,
-    kind: &str,
-    actor: &str,
-    title: &str,
-    detail: &str,
-) -> (bool, bool) {
-    let normalized_turn = turn.max(1);
-    let (room_idx, mut changed) = ensure_room_entry(rooms, room_id, room_status, normalized_turn);
+    phase: &'a str,
+    kind: &'a str,
+    actor: &'a str,
+    title: &'a str,
+    detail: &'a str,
+}
+
+fn append_event(rooms: &mut Vec<RoomHistory>, input: EventAppendInput<'_>) -> (bool, bool) {
+    let normalized_turn = input.turn.max(1);
+    let (room_idx, mut changed) =
+        ensure_room_entry(rooms, input.room_id, input.room_status, normalized_turn);
     let Some(room) = rooms.get_mut(room_idx) else {
         return (false, changed);
     };
@@ -242,17 +254,17 @@ fn append_event(
         changed = true;
     }
 
-    let (turn_idx, turn_changed) = ensure_turn_entry(&mut room.turns, normalized_turn, phase);
+    let (turn_idx, turn_changed) = ensure_turn_entry(&mut room.turns, normalized_turn, input.phase);
     changed = changed || turn_changed;
     let Some(row) = room.turns.get_mut(turn_idx) else {
         return (false, changed);
     };
 
     let candidate = HistoryEvent {
-        kind: kind.to_string(),
-        actor: actor.to_string(),
-        title: title.to_string(),
-        detail: detail.to_string(),
+        kind: input.kind.to_string(),
+        actor: input.actor.to_string(),
+        title: input.title.to_string(),
+        detail: input.detail.to_string(),
     };
 
     if row
@@ -319,10 +331,8 @@ fn label_progress_event(
         "turn"
     } else if matches!(
         payload.event_type.as_str(),
-        "combat.attack" | "combat.defense" | "session.outcome"
+        "combat.attack" | "combat.defense" | "session.outcome" | "room.started" | "room.ended"
     ) {
-        "system"
-    } else if matches!(payload.event_type.as_str(), "room.started" | "room.ended") {
         "system"
     } else {
         "progress"
@@ -1042,13 +1052,17 @@ fn bump_dedup_history(document: &web_sys::Document, sample: &str) {
 pub fn update_session_history_dom(
     room_state: Res<RoomState>,
     progress: Res<TurnProgressState>,
-    mut narratives: MessageReader<NarrativeReceived>,
-    mut dice_events: MessageReader<DiceRolled>,
-    mut turn_events: MessageReader<TurnAdvanced>,
-    mut progress_events: MessageReader<TurnProgressUpdated>,
-    mut session_started: MessageReader<SessionStarted>,
+    mut readers: SessionHistoryReaders,
     mut cache: ResMut<SessionHistoryCache>,
 ) {
+    let SessionHistoryReaders {
+        mut narratives,
+        mut dice_events,
+        mut turn_events,
+        mut progress_events,
+        mut session_started,
+    } = readers;
+
     #[cfg(not(target_arch = "wasm32"))]
     {
         for _ in turn_events.read() {}
@@ -1056,7 +1070,6 @@ pub fn update_session_history_dom(
         for _ in dice_events.read() {}
         for _ in progress_events.read() {}
         for _ in session_started.read() {}
-        return;
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1158,14 +1171,16 @@ pub fn update_session_history_dom(
             };
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &event_room_id,
-                "active",
-                1,
-                &event_phase,
-                "system",
-                "",
-                "세션 시작",
-                &detail,
+                EventAppendInput {
+                    room_id: &event_room_id,
+                    room_status: "active",
+                    turn: 1,
+                    phase: &event_phase,
+                    kind: "system",
+                    actor: "",
+                    title: "세션 시작",
+                    detail: &detail,
+                },
             );
             if !appended {
                 bump_dedup_history(
@@ -1193,24 +1208,27 @@ pub fn update_session_history_dom(
                 normalize_room_id(&event.room_id)
             };
 
+            let turn_detail = format!(
+                "Turn {} ({})",
+                current_turn,
+                if current_phase.is_empty() {
+                    "-"
+                } else {
+                    &current_phase
+                }
+            );
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &event_room_id,
-                &base_room_status,
-                current_turn,
-                &current_phase,
-                "turn",
-                "",
-                "턴 진행",
-                &format!(
-                    "Turn {} ({})",
-                    current_turn,
-                    if current_phase.is_empty() {
-                        "-"
-                    } else {
-                        &current_phase
-                    }
-                ),
+                EventAppendInput {
+                    room_id: &event_room_id,
+                    room_status: &base_room_status,
+                    turn: current_turn,
+                    phase: &current_phase,
+                    kind: "turn",
+                    actor: "",
+                    title: "턴 진행",
+                    detail: &turn_detail,
+                },
             );
             if !appended {
                 bump_dedup_history(
@@ -1243,14 +1261,16 @@ pub fn update_session_history_dom(
 
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &event_room_id,
-                &base_room_status,
-                event_turn,
-                &event_phase,
-                "narrative",
-                event.speaker.as_deref().unwrap_or(""),
-                "내러티브",
-                &event.text,
+                EventAppendInput {
+                    room_id: &event_room_id,
+                    room_status: &base_room_status,
+                    turn: event_turn,
+                    phase: &event_phase,
+                    kind: "narrative",
+                    actor: event.speaker.as_deref().unwrap_or(""),
+                    title: "내러티브",
+                    detail: &event.text,
+                },
             );
             if !appended {
                 bump_dedup_history(
@@ -1280,24 +1300,27 @@ pub fn update_session_history_dom(
                 normalize_room_id(&payload.room_id)
             };
 
+            let dice_detail = format!(
+                "{} - {} (d20 {} + {} = {}, DC {})",
+                payload.character,
+                payload.action,
+                payload.d20,
+                payload.bonus,
+                payload.total,
+                payload.dc
+            );
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &event_room_id,
-                &base_room_status,
-                event_turn,
-                &current_phase,
-                "dice",
-                &payload.character,
-                "주사위",
-                &format!(
-                    "{} - {} (d20 {} + {} = {}, DC {})",
-                    payload.character,
-                    payload.action,
-                    payload.d20,
-                    payload.bonus,
-                    payload.total,
-                    payload.dc
-                ),
+                EventAppendInput {
+                    room_id: &event_room_id,
+                    room_status: &base_room_status,
+                    turn: event_turn,
+                    phase: &current_phase,
+                    kind: "dice",
+                    actor: &payload.character,
+                    title: "주사위",
+                    detail: &dice_detail,
+                },
             );
             if !appended {
                 bump_dedup_history(
@@ -1338,20 +1361,23 @@ pub fn update_session_history_dom(
             };
 
             let (kind, actor, summary) = label_progress_event(event);
+            let title = if summary.is_empty() {
+                "turn progress"
+            } else {
+                &summary
+            };
             let (appended, updated) = append_event(
                 &mut cache.rooms,
-                &event_room_id,
-                &event_status,
-                event_turn,
-                &event_phase,
-                kind,
-                &actor,
-                if summary.is_empty() {
-                    "turn progress"
-                } else {
-                    &summary
+                EventAppendInput {
+                    room_id: &event_room_id,
+                    room_status: &event_status,
+                    turn: event_turn,
+                    phase: &event_phase,
+                    kind,
+                    actor: &actor,
+                    title,
+                    detail: &event.event_type,
                 },
-                &event.event_type,
             );
             if !appended {
                 bump_dedup_history(
@@ -1389,8 +1415,7 @@ pub fn update_session_history_dom(
         history.set_inner_html(&render_session_history_html(&cache.rooms, &current_room_id));
         bind_history_focus_controls(&document);
 
-        let preferred_room = read_focus_room(&document)
-            .or_else(|| Some(base_room_id.clone()));
+        let preferred_room = read_focus_room(&document).or_else(|| Some(base_room_id.clone()));
         let preferred_turn = read_focus_turn(&document).or(Some(current_turn.max(1)));
 
         let focus_room = resolve_focus_room(&cache.rooms, preferred_room.as_deref());

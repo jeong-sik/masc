@@ -5279,7 +5279,11 @@ let run_server ~sw ~env ~port ~base_path =
      so liveness/last_seen stays up-to-date even if no tool calls happen. *)
   (try
      let keeper_ctx : _ Tool_keeper.context = { config = state.room_config; sw; clock } in
-     Tool_keeper.start_existing_keepalives keeper_ctx
+     let stats = Tool_keeper.bootstrap_existing_keepers keeper_ctx in
+     if stats.enabled then
+       Printf.eprintf
+         "[keeper-bootstrap] scanned=%d started=%d stale=%d\n%!"
+         stats.scanned stats.started stats.stale
    with _ -> ());
 
   (* Initialize Task backend - share pool with Board if PostgreSQL available *)

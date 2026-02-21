@@ -1310,6 +1310,15 @@ let keeper_session_dir config trace_id =
 let keeper_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) "history.jsonl"
 
+let keeper_alerts_path config =
+  Filename.concat (keeper_dir config) "_alerts.jsonl"
+
+let keeper_alert_retry_path config =
+  Filename.concat (keeper_dir config) "_alerts.retry.jsonl"
+
+let keeper_alert_deadletter_path config =
+  Filename.concat (keeper_dir config) "_alerts.deadletter.jsonl"
+
 let append_jsonl_line path (json : Yojson.Safe.t) =
   let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
   let fd = Unix.openfile path
@@ -1317,6 +1326,69 @@ let append_jsonl_line path (json : Yojson.Safe.t) =
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
     let _ = Unix.write_substring fd line 0 (String.length line) in
     ())
+
+type alert_channel_result = {
+  channel: string;
+  attempted: bool;
+  success: bool;
+  attempts: int;
+  detail: string option;
+}
+
+type interesting_alert_result = {
+  enabled: bool;
+  triggered: bool;
+  score: float;
+  threshold: float;
+  reasons: string list;
+  keywords: string list;
+  alert_id: string option;
+  channels: alert_channel_result list;
+  retry_queued: bool;
+  deadlettered: bool;
+}
+
+let empty_interesting_alert_result = {
+  enabled = false;
+  triggered = false;
+  score = 0.0;
+  threshold = 0.0;
+  reasons = [];
+  keywords = [];
+  alert_id = None;
+  channels = [];
+  retry_queued = false;
+  deadlettered = false;
+}
+
+let alert_channel_result_to_json (r : alert_channel_result) : Yojson.Safe.t =
+  `Assoc [
+    ("channel", `String r.channel);
+    ("attempted", `Bool r.attempted);
+    ("success", `Bool r.success);
+    ("attempts", `Int r.attempts);
+    ("detail",
+      match r.detail with
+      | Some d when String.trim d <> "" -> `String d
+      | _ -> `Null);
+  ]
+
+let interesting_alert_result_to_json (r : interesting_alert_result) : Yojson.Safe.t =
+  `Assoc [
+    ("enabled", `Bool r.enabled);
+    ("triggered", `Bool r.triggered);
+    ("score", `Float r.score);
+    ("threshold", `Float r.threshold);
+    ("reasons", `List (List.map (fun s -> `String s) r.reasons));
+    ("keywords", `List (List.map (fun s -> `String s) r.keywords));
+    ("alert_id",
+      match r.alert_id with
+      | Some id when String.trim id <> "" -> `String id
+      | _ -> `Null);
+    ("channels", `List (List.map alert_channel_result_to_json r.channels));
+    ("retry_queued", `Bool r.retry_queued);
+    ("deadlettered", `Bool r.deadlettered);
+  ]
 
 type keeper_state_snapshot = {
   goal: string option;
@@ -2919,6 +2991,539 @@ let contains_ci (haystack : string) (needle : string) : bool =
       let _ = Str.search_forward (Str.regexp_string n) h 0 in
       true
     with Not_found -> false
+
+let alert_retryable_error (msg : string) : bool =
+  let text = String.lowercase_ascii (String.trim msg) in
+  text <> ""
+  && (contains_ci text "timeout"
+      || contains_ci text "timed out"
+      || contains_ci text "429"
+      || contains_ci text "502"
+      || contains_ci text "503"
+      || contains_ci text "504"
+      || contains_ci text "connection reset"
+      || contains_ci text "connection refused"
+      || contains_ci text "temporary"
+      || contains_ci text "network")
+
+let alert_retry_delay_seconds (attempt : int) : float =
+  let base_ms = max 0 Env_config.KeeperAlert.retry_base_delay_ms in
+  let rec pow2 n acc =
+    if n <= 0 then acc else pow2 (n - 1) (acc * 2)
+  in
+  let factor = pow2 (max 0 (attempt - 1)) 1 in
+  float_of_int (base_ms * factor) /. 1000.0
+
+let run_alert_channel_with_retry
+    (ctx : _ context)
+    ~(channel : string)
+    ~(enabled : bool)
+    ~(send_once : unit -> bool * string option) : alert_channel_result =
+  if not enabled then
+    {
+      channel;
+      attempted = false;
+      success = false;
+      attempts = 0;
+      detail = Some "disabled";
+    }
+  else
+    let max_attempts = 1 + max 0 Env_config.KeeperAlert.max_retries in
+    let rec loop attempt last_error =
+      let (ok, detail_opt) = send_once () in
+      let detail =
+        match detail_opt with
+        | Some s when String.trim s <> "" -> Some (short_preview ~max_len:280 s)
+        | _ -> last_error
+      in
+      if ok then
+        { channel; attempted = true; success = true; attempts = attempt; detail }
+      else if attempt >= max_attempts then
+        {
+          channel;
+          attempted = true;
+          success = false;
+          attempts = attempt;
+          detail =
+            (match detail with
+             | Some _ -> detail
+             | None -> Some "fanout failed");
+        }
+      else
+        let err_msg = Option.value ~default:"fanout failed" detail in
+        if not (alert_retryable_error err_msg) then
+          {
+            channel;
+            attempted = true;
+            success = false;
+            attempts = attempt;
+            detail = Some err_msg;
+          }
+        else (
+          Eio.Time.sleep ctx.clock (alert_retry_delay_seconds attempt);
+          loop (attempt + 1) (Some err_msg))
+    in
+    loop 1 None
+
+let dedup_strings (xs : string list) : string list =
+  List.fold_left
+    (fun acc x -> if List.mem x acc then acc else acc @ [ x ])
+    [] xs
+
+let keeper_alert_signal
+    ~(message : string)
+    ~(reply : string)
+    ~(context_ratio : float)
+    ~(goal_alignment : float)
+    ~(response_alignment : float)
+    ~(tool_call_count : int)
+    ~(auto_rules : keeper_auto_rule_eval) : float * string list * string list =
+  let corpus = String.lowercase_ascii (message ^ "\n" ^ reply) in
+  let keyword_weights = [
+    ("장애", 0.35);
+    ("사고", 0.30);
+    ("롤백", 0.30);
+    ("긴급", 0.25);
+    ("critical", 0.30);
+    ("urgent", 0.22);
+    ("incident", 0.25);
+    ("outage", 0.38);
+    ("oncall", 0.18);
+    ("p0", 0.32);
+    ("sev1", 0.32);
+    ("security", 0.35);
+    ("breach", 0.45);
+    ("data loss", 0.45);
+    ("failover", 0.22);
+    ("hotfix", 0.20);
+    ("downtime", 0.28);
+  ] in
+  let keyword_hits =
+    keyword_weights
+    |> List.filter_map (fun (kw, w) ->
+         if contains_ci corpus kw then Some (kw, w) else None)
+  in
+  let keyword_score =
+    keyword_hits
+    |> List.fold_left (fun acc (_, w) -> acc +. w) 0.0
+    |> min 1.0
+  in
+  let score = ref keyword_score in
+  let reasons = ref [] in
+  if keyword_hits <> [] then
+    reasons := "critical_keywords" :: !reasons;
+  if auto_rules.guardrail_stop then begin
+    score := !score +. 0.45;
+    reasons := "guardrail_stop" :: !reasons
+  end;
+  if auto_rules.handoff && context_ratio >= 0.88 then begin
+    score := !score +. 0.16;
+    reasons := "handoff_pressure" :: !reasons
+  end;
+  if goal_alignment < 0.20 && response_alignment < 0.16 then begin
+    score := !score +. 0.12;
+    reasons := "low_alignment" :: !reasons
+  end;
+  if tool_call_count >= 2 then begin
+    score := !score +. 0.06;
+    reasons := "multi_tool_action" :: !reasons
+  end;
+  let score = max 0.0 (min 1.0 !score) in
+  let keywords = keyword_hits |> List.map fst |> dedup_strings in
+  (score, List.rev !reasons, keywords)
+
+let keeper_alert_text
+    ~(meta : keeper_meta)
+    ~(score : float)
+    ~(reasons : string list)
+    ~(keywords : string list)
+    ~(message : string)
+    ~(reply : string)
+    ~(work_kind : string)
+    ~(context_ratio : float)
+    ~(goal_alignment : float)
+    ~(response_alignment : float) : string =
+  let reason_text =
+    if reasons = [] then "-" else String.concat ", " reasons
+  in
+  let keyword_text =
+    if keywords = [] then "-" else String.concat ", " keywords
+  in
+  let excerpt_cap = max 240 Env_config.KeeperAlert.max_body_chars in
+  let message_preview = short_preview ~max_len:(min excerpt_cap 300) message in
+  let reply_preview = short_preview ~max_len:(min excerpt_cap 420) reply in
+  Printf.sprintf
+    "[keeper-alert] %s score=%.2f\n\
+     - trace: %s\n\
+     - generation: %d\n\
+     - work_kind: %s\n\
+     - reasons: %s\n\
+     - keywords: %s\n\
+     - context_ratio: %.2f\n\
+     - goal_alignment: %.2f\n\
+     - response_alignment: %.2f\n\
+     - user: %s\n\
+     - reply: %s"
+    meta.name score meta.trace_id meta.generation work_kind
+    reason_text keyword_text context_ratio goal_alignment response_alignment
+    message_preview reply_preview
+
+let post_keeper_alert_board
+    ~(alert_text : string) : bool * string option =
+  let author =
+    let v = String.trim Env_config.KeeperAlert.board_author in
+    if v = "" then "keeper-alert-bot" else v
+  in
+  let hearth_opt =
+    let v = String.trim Env_config.KeeperAlert.board_hearth in
+    if v = "" then None else Some v
+  in
+  let visibility =
+    let v = String.trim Env_config.KeeperAlert.board_visibility in
+    if v = "" then "internal" else v
+  in
+  let fields = ref [
+    ("author", `String author);
+    ("content", `String alert_text);
+    ("visibility", `String visibility);
+  ] in
+  (match hearth_opt with
+   | Some h -> fields := ("hearth", `String h) :: !fields
+   | None -> ());
+  let (ok, res) = Tool_board.handle_tool "masc_board_post" (`Assoc (List.rev !fields)) in
+  if ok then (true, Some "board_posted") else (false, Some res)
+
+let post_keeper_alert_slack
+    ~(alert_text : string) : bool * string option =
+  let webhook = String.trim Env_config.KeeperAlert.slack_webhook_url in
+  if webhook = "" then
+    (false, Some "missing_webhook")
+  else
+    let payload = `Assoc [ ("text", `String alert_text) ] |> Yojson.Safe.to_string in
+    let argv = [
+      "curl";
+      "-sS";
+      "--fail";
+      "--max-time"; "10";
+      "-X"; "POST";
+      "-H"; "Content-Type: application/json";
+      "--data-binary"; "@-";
+      webhook;
+    ] in
+    let (status, out) =
+      Process_eio.run_argv_with_stdin_and_status
+        ~timeout_sec:15.0
+        ~stdin_content:payload
+        argv
+    in
+    match status with
+    | Unix.WEXITED 0 -> (true, Some "slack_posted")
+    | Unix.WEXITED n ->
+        (false, Some (Printf.sprintf "curl_exit_%d: %s" n (short_preview ~max_len:200 out)))
+    | Unix.WSIGNALED n ->
+        (false, Some (Printf.sprintf "curl_signaled_%d" n))
+    | Unix.WSTOPPED n ->
+        (false, Some (Printf.sprintf "curl_stopped_%d" n))
+
+let slack_alert_token () : string option =
+  let pick name =
+    match Sys.getenv_opt name with
+    | Some v when String.trim v <> "" -> Some (String.trim v)
+    | _ -> None
+  in
+  match pick "SLACK_BOT_TOKEN" with
+  | Some _ as tok -> tok
+  | None ->
+      (match pick "SLACK_USER_TOKEN" with
+       | Some _ as tok -> tok
+       | None -> pick "SLACK_TOKEN")
+
+let slack_api_post_json
+    ~(token : string)
+    ~(endpoint : string)
+    ~(payload : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
+  let url = Printf.sprintf "https://slack.com/api/%s" endpoint in
+  let body = Yojson.Safe.to_string payload in
+  let argv = [
+    "curl";
+    "-sS";
+    "--fail";
+    "--max-time"; "12";
+    "-X"; "POST";
+    "-H"; "Content-Type: application/json; charset=utf-8";
+    "-H"; ("Authorization: Bearer " ^ token);
+    "--data-binary"; "@-";
+    url;
+  ] in
+  let (status, out) =
+    Process_eio.run_argv_with_stdin_and_status
+      ~timeout_sec:15.0
+      ~stdin_content:body
+      argv
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+      (try
+         Ok (Yojson.Safe.from_string out)
+       with exn ->
+         Error (Printf.sprintf "json_parse_failed: %s" (Printexc.to_string exn)))
+  | Unix.WEXITED n ->
+      Error (Printf.sprintf "curl_exit_%d: %s" n (short_preview ~max_len:220 out))
+  | Unix.WSIGNALED n ->
+      Error (Printf.sprintf "curl_signaled_%d" n)
+  | Unix.WSTOPPED n ->
+      Error (Printf.sprintf "curl_stopped_%d" n)
+
+let slack_ok_or_error (json : Yojson.Safe.t) : (unit, string) result =
+  let ok = Safe_ops.json_bool ~default:false "ok" json in
+  if ok then Ok ()
+  else
+    let err =
+      match Safe_ops.json_string_opt "error" json with
+      | Some e when String.trim e <> "" -> e
+      | _ -> "slack_api_error"
+    in
+    Error err
+
+let post_keeper_alert_slack_dm
+    ~(alert_text : string)
+    ~(user_id : string) : bool * string option =
+  let target = String.trim user_id in
+  if target = "" then
+    (false, Some "missing_dm_user_id")
+  else
+    match slack_alert_token () with
+    | None -> (false, Some "missing_slack_token")
+    | Some token ->
+        let open_payload = `Assoc [ ("users", `String target) ] in
+        match slack_api_post_json ~token ~endpoint:"conversations.open" ~payload:open_payload with
+        | Error e -> (false, Some ("dm_open_failed: " ^ e))
+        | Ok open_json ->
+            (match slack_ok_or_error open_json with
+             | Error e -> (false, Some ("dm_open_failed: " ^ e))
+             | Ok () ->
+                 let channel_id =
+                   let open Yojson.Safe.Util in
+                   match open_json |> member "channel" |> member "id" with
+                   | `String s when String.trim s <> "" -> Some s
+                   | _ -> None
+                 in
+                 (match channel_id with
+                  | None -> (false, Some "dm_open_failed: missing_channel_id")
+                  | Some cid ->
+                      let post_payload = `Assoc [
+                        ("channel", `String cid);
+                        ("text", `String alert_text);
+                      ] in
+                      (match slack_api_post_json ~token ~endpoint:"chat.postMessage" ~payload:post_payload with
+                       | Error e -> (false, Some ("dm_post_failed: " ^ e))
+                       | Ok post_json ->
+                           (match slack_ok_or_error post_json with
+                            | Ok () -> (true, Some ("dm_sent:" ^ cid))
+                            | Error e -> (false, Some ("dm_post_failed: " ^ e))))))
+
+let split_csv_nonempty (raw : string) : string list =
+  raw
+  |> String.split_on_char ','
+  |> List.map String.trim
+  |> List.filter (fun s -> s <> "")
+
+let post_keeper_alert_github
+    ~(title : string)
+    ~(body : string) : bool * string option =
+  let repo = String.trim Env_config.KeeperAlert.github_repo in
+  if repo = "" then
+    (false, Some "missing_repo")
+  else
+    let labels = split_csv_nonempty Env_config.KeeperAlert.github_label in
+    let args = [
+      "gh"; "issue"; "create";
+      "--repo"; repo;
+      "--title"; title;
+      "--body"; body;
+    ]
+    @ List.concat_map (fun label -> [ "--label"; label ]) labels
+    in
+    let (status, out) = Process_eio.run_argv_with_status ~timeout_sec:20.0 args in
+    match status with
+    | Unix.WEXITED 0 -> (true, Some (short_preview ~max_len:200 out))
+    | Unix.WEXITED n ->
+        (false, Some (Printf.sprintf "gh_exit_%d: %s" n (short_preview ~max_len:200 out)))
+    | Unix.WSIGNALED n ->
+        (false, Some (Printf.sprintf "gh_signaled_%d" n))
+    | Unix.WSTOPPED n ->
+        (false, Some (Printf.sprintf "gh_stopped_%d" n))
+
+let maybe_emit_interesting_alert
+    (ctx : _ context)
+    ~(meta : keeper_meta)
+    ~(message : string)
+    ~(reply : string)
+    ~(work_kind : string)
+    ~(tool_call_count : int)
+    ~(context_ratio : float)
+    ~(goal_alignment : float)
+    ~(response_alignment : float)
+    ~(auto_rules : keeper_auto_rule_eval) : interesting_alert_result =
+  let enabled = Env_config.KeeperAlert.enabled in
+  let threshold = max 0.0 (min 1.0 Env_config.KeeperAlert.min_score) in
+  if not enabled then
+    { empty_interesting_alert_result with enabled = false; threshold }
+  else
+    let (score, reasons, keywords) =
+      keeper_alert_signal
+        ~message
+        ~reply
+        ~context_ratio
+        ~goal_alignment
+        ~response_alignment
+        ~tool_call_count
+        ~auto_rules
+    in
+    if score < threshold then
+      {
+        empty_interesting_alert_result with
+        enabled = true;
+        threshold;
+        score;
+        reasons;
+        keywords;
+      }
+    else
+      let now_ts = Time_compat.now () in
+      let alert_id = Printf.sprintf "%s-%d" meta.trace_id (int_of_float (now_ts *. 1000.0)) in
+      let alert_text =
+        keeper_alert_text
+          ~meta
+          ~score
+          ~reasons
+          ~keywords
+          ~message
+          ~reply
+          ~work_kind
+          ~context_ratio
+          ~goal_alignment
+          ~response_alignment
+      in
+      let alert_json =
+        `Assoc [
+          ("ts", `String (now_iso ()));
+          ("ts_unix", `Float now_ts);
+          ("alert_id", `String alert_id);
+          ("name", `String meta.name);
+          ("agent_name", `String meta.agent_name);
+          ("trace_id", `String meta.trace_id);
+          ("generation", `Int meta.generation);
+          ("score", `Float score);
+          ("threshold", `Float threshold);
+          ("reasons", `List (List.map (fun s -> `String s) reasons));
+          ("keywords", `List (List.map (fun s -> `String s) keywords));
+          ("work_kind", `String work_kind);
+          ("tool_call_count", `Int tool_call_count);
+          ("context_ratio", `Float context_ratio);
+          ("goal_alignment", `Float goal_alignment);
+          ("response_alignment", `Float response_alignment);
+          ("message_preview", `String (short_preview ~max_len:260 message));
+          ("reply_preview", `String (short_preview ~max_len:360 reply));
+        ]
+      in
+      (try append_jsonl_line (keeper_alerts_path ctx.config) alert_json with _ -> ());
+      let board_result =
+        run_alert_channel_with_retry ctx
+          ~channel:"board"
+          ~enabled:Env_config.KeeperAlert.board_enabled
+          ~send_once:(fun () -> post_keeper_alert_board ~alert_text)
+      in
+      let slack_enabled =
+        Env_config.KeeperAlert.slack_enabled
+        && String.trim Env_config.KeeperAlert.slack_webhook_url <> ""
+      in
+      let slack_result =
+        run_alert_channel_with_retry ctx
+          ~channel:"slack"
+          ~enabled:slack_enabled
+          ~send_once:(fun () -> post_keeper_alert_slack ~alert_text)
+      in
+      let slack_dm_target = String.trim Env_config.KeeperAlert.slack_dm_user_id in
+      let slack_dm_enabled =
+        Env_config.KeeperAlert.slack_dm_enabled
+        && slack_dm_target <> ""
+      in
+      let slack_dm_result =
+        run_alert_channel_with_retry ctx
+          ~channel:"slack_dm"
+          ~enabled:slack_dm_enabled
+          ~send_once:(fun () -> post_keeper_alert_slack_dm ~alert_text ~user_id:slack_dm_target)
+      in
+      let github_enabled =
+        Env_config.KeeperAlert.github_enabled
+        && String.trim Env_config.KeeperAlert.github_repo <> ""
+        && score >= Env_config.KeeperAlert.github_min_score
+      in
+      let gh_title =
+        Printf.sprintf "[keeper-alert] %s score %.2f (%s)"
+          meta.name score (String.concat "," (if reasons = [] then [ "signal" ] else reasons))
+      in
+      let gh_body =
+        utf8_safe_prefix_bytes
+          (alert_text ^ "\n\n---\n\nraw alert json:\n" ^ Yojson.Safe.pretty_to_string alert_json)
+          ~max_bytes:(max 800 Env_config.KeeperAlert.max_body_chars)
+      in
+      let github_result =
+        run_alert_channel_with_retry ctx
+          ~channel:"github"
+          ~enabled:github_enabled
+          ~send_once:(fun () -> post_keeper_alert_github ~title:gh_title ~body:gh_body)
+      in
+      let channels = [ board_result; slack_result; slack_dm_result; github_result ] in
+      let attempted_failures =
+        channels
+        |> List.filter (fun r -> r.attempted && not r.success)
+      in
+      let attempted_success =
+        channels
+        |> List.exists (fun r -> r.attempted && r.success)
+      in
+      let retry_queued = attempted_failures <> [] in
+      let deadlettered = attempted_failures <> [] && not attempted_success in
+      if retry_queued then
+        (try
+           append_jsonl_line
+             (keeper_alert_retry_path ctx.config)
+             (`Assoc [
+                ("ts", `String (now_iso ()));
+                ("ts_unix", `Float now_ts);
+                ("alert_id", `String alert_id);
+                ("alert", alert_json);
+                ("failed_channels",
+                  `List (List.map alert_channel_result_to_json attempted_failures));
+              ])
+         with _ -> ());
+      if deadlettered then
+        (try
+           append_jsonl_line
+             (keeper_alert_deadletter_path ctx.config)
+             (`Assoc [
+                ("ts", `String (now_iso ()));
+                ("ts_unix", `Float now_ts);
+                ("alert_id", `String alert_id);
+                ("alert", alert_json);
+                ("channels",
+                  `List (List.map alert_channel_result_to_json channels));
+              ])
+         with _ -> ());
+      {
+        enabled = true;
+        triggered = true;
+        score;
+        threshold;
+        reasons;
+        keywords;
+        alert_id = Some alert_id;
+        channels;
+        retry_queued;
+        deadlettered;
+      }
 
 type keeper_skill_route = {
   primary_skill: string;
@@ -7069,6 +7674,37 @@ let handle_keeper_msg ctx args : tool_result =
 	              let (do_handoff, auto_rules) = handoff_eval in
 
 	              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
+              let interesting_alert =
+                try
+                  maybe_emit_interesting_alert
+                    ctx
+                    ~meta:meta_turn
+                    ~message
+                    ~reply:safe_reply
+                    ~work_kind
+                    ~tool_call_count
+                    ~context_ratio:ctx_ratio
+                    ~goal_alignment
+                    ~response_alignment
+                    ~auto_rules
+                with exn ->
+                  {
+                    empty_interesting_alert_result with
+                    enabled = Env_config.KeeperAlert.enabled;
+                    threshold = Env_config.KeeperAlert.min_score;
+                    reasons = [ "fanout_exception" ];
+                    keywords = [];
+                    channels = [
+                      {
+                        channel = "fanout";
+                        attempted = true;
+                        success = false;
+                        attempts = 1;
+                        detail = Some (short_preview ~max_len:220 (Printexc.to_string exn));
+                      };
+                    ];
+                  }
+              in
 
               if not do_handoff then begin
                 (match write_meta ctx.config meta_turn with
@@ -7160,6 +7796,9 @@ let handle_keeper_msg ctx args : tool_result =
                      ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
                      ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
                      ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
+                     ("interesting_alert_triggered", `Bool interesting_alert.triggered);
+                     ("interesting_alert_score", `Float interesting_alert.score);
+                     ("interesting_alert", interesting_alert_result_to_json interesting_alert);
                      ("handoff", `Assoc [("performed", `Bool false)]);
                    ] in
                    append_jsonl_line metrics_path metrics_json
@@ -7253,6 +7892,7 @@ let handle_keeper_msg ctx args : tool_result =
                   ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
                   ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
                   ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
+                  ("interesting_alert", interesting_alert_result_to_json interesting_alert);
                 ] in
                 (true, Yojson.Safe.pretty_to_string json)
               end else begin
@@ -7386,6 +8026,9 @@ let handle_keeper_msg ctx args : tool_result =
                      ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
                      ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
                      ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
+                     ("interesting_alert_triggered", `Bool interesting_alert.triggered);
+                     ("interesting_alert_score", `Float interesting_alert.score);
+                     ("interesting_alert", interesting_alert_result_to_json interesting_alert);
                      ("handoff", `Assoc [
                        ("performed", `Bool true);
                        ("prev_trace_id", `String prev_trace_id);
@@ -7477,6 +8120,7 @@ let handle_keeper_msg ctx args : tool_result =
                   ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
                   ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
                   ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
+                  ("interesting_alert", interesting_alert_result_to_json interesting_alert);
                   ("handoff", `Assoc [
                     ("performed", `Bool true);
                     ("prev_trace_id", `String prev_trace_id);
@@ -7750,18 +8394,58 @@ let handle_keeper_list ctx args : tool_result =
       (true, Yojson.Safe.pretty_to_string json)
 
 (* Start keepalive fibers for existing keepers (best-effort). *)
+type keeper_bootstrap_stats = {
+  enabled: bool;
+  scanned: int;
+  started: int;
+  stale: int;
+}
+
+let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
+  if not Env_config.KeeperBootstrap.enabled then
+    { enabled = false; scanned = 0; started = 0; stale = 0 }
+  else
+    let dir = keeper_dir ctx.config in
+    match Safe_ops.list_dir_safe dir with
+    | Error _ -> { enabled = true; scanned = 0; started = 0; stale = 0 }
+    | Ok files ->
+        let now_ts = Time_compat.now () in
+        let stale_turn_sec =
+          max 0.0 Env_config.KeeperBootstrap.stale_turn_seconds
+        in
+        let max_scan =
+          max 0 Env_config.KeeperBootstrap.max_scan
+        in
+        let names =
+          files
+          |> List.filter (fun f -> Filename.check_suffix f ".json")
+          |> List.sort String.compare
+          |> take max_scan
+        in
+        let (scanned, started, stale) =
+          List.fold_left
+            (fun (scanned_acc, started_acc, stale_acc) f ->
+              let name = Filename.remove_extension f in
+              match read_meta ctx.config name with
+              | Ok (Some m) ->
+                  let already_running = Hashtbl.mem keepalives m.name in
+                  start_keepalive ctx m;
+                  let stale_now =
+                    stale_turn_sec > 0.0
+                    && (m.last_turn_ts <= 0.0
+                        || now_ts -. m.last_turn_ts >= stale_turn_sec)
+                  in
+                  ( scanned_acc + 1,
+                    started_acc + (if already_running then 0 else 1),
+                    stale_acc + (if stale_now then 1 else 0) )
+              | _ -> (scanned_acc, started_acc, stale_acc))
+            (0, 0, 0)
+            names
+        in
+        { enabled = true; scanned; started; stale }
+
 let start_existing_keepalives ctx =
-  let dir = keeper_dir ctx.config in
-  match Safe_ops.list_dir_safe dir with
-  | Error _ -> ()
-  | Ok files ->
-    files
-    |> List.filter (fun f -> Filename.check_suffix f ".json")
-    |> List.iter (fun f ->
-      let name = Filename.remove_extension f in
-      match read_meta ctx.config name with
-      | Ok (Some m) -> start_keepalive ctx m
-      | _ -> ())
+  ignore (bootstrap_existing_keepers ctx)
 
 let dispatch ctx ~name ~args : tool_result option =
   (* Lazy boot: when any keeper tool is used, attach keepalives for existing keepers. *)

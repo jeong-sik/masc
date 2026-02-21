@@ -399,6 +399,86 @@ module Gardener = struct
     get_float ~default:1800.0 "MASC_GARDENER_CHECK_INTERVAL_SEC"
 end
 
+(** {1 Keeper Bootstrap Configuration} *)
+
+module KeeperBootstrap = struct
+  (** Enable startup keeper bootstrap scan *)
+  let enabled =
+    get_bool ~default:true "MASC_KEEPER_BOOTSTRAP_ENABLED"
+
+  (** Keeper considered stale when last turn exceeds this threshold (seconds) *)
+  let stale_turn_seconds =
+    get_float ~default:3600.0 "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
+
+  (** Max keeper meta files to scan during bootstrap *)
+  let max_scan =
+    get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
+end
+
+(** {1 Keeper Interesting Alert Configuration} *)
+
+module KeeperAlert = struct
+  (** Master switch for keeper interesting alert detection/fanout *)
+  let enabled =
+    get_bool ~default:true "MASC_KEEPER_ALERT_ENABLED"
+
+  (** Minimum score required to trigger alert fanout *)
+  let min_score =
+    get_float ~default:0.70 "MASC_KEEPER_ALERT_MIN_SCORE"
+
+  (** Maximum alert body chars used for external fanout payloads *)
+  let max_body_chars =
+    get_int ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
+
+  (** Retry count for each fanout channel (in addition to initial attempt) *)
+  let max_retries =
+    get_int ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
+
+  (** Base retry delay in milliseconds (exponential backoff) *)
+  let retry_base_delay_ms =
+    get_int ~default:250 "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
+
+  (** Board fanout configuration *)
+  let board_enabled =
+    get_bool ~default:true "MASC_KEEPER_ALERT_BOARD_ENABLED"
+
+  let board_author =
+    get_string ~default:"keeper-alert-bot" "MASC_KEEPER_ALERT_BOARD_AUTHOR"
+
+  let board_hearth =
+    get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_BOARD_HEARTH"
+
+  let board_visibility =
+    get_string ~default:"internal" "MASC_KEEPER_ALERT_BOARD_VISIBILITY"
+
+  (** Slack fanout configuration *)
+  let slack_enabled =
+    get_bool ~default:true "MASC_KEEPER_ALERT_SLACK_ENABLED"
+
+  let slack_webhook_url =
+    get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
+
+  (** Slack DM fanout configuration *)
+  let slack_dm_enabled =
+    get_bool ~default:false "MASC_KEEPER_ALERT_SLACK_DM_ENABLED"
+
+  let slack_dm_user_id =
+    get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
+
+  (** GitHub issue fanout configuration *)
+  let github_enabled =
+    get_bool ~default:false "MASC_KEEPER_ALERT_GITHUB_ENABLED"
+
+  let github_repo =
+    get_string ~default:"" "MASC_KEEPER_ALERT_GITHUB_REPO"
+
+  let github_label =
+    get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_GITHUB_LABEL"
+
+  let github_min_score =
+    get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
+end
+
 (** Print configuration summary for debugging *)
 let print_summary () =
   Printf.eprintf "[env_config] Zombie: threshold=%.0fs cleanup_interval=%.0fs\n%!"
@@ -420,4 +500,11 @@ let print_summary () =
     LodgeSelection.vote_decay_factor;
   Printf.eprintf "[env_config] Gardener: enabled=%b min=%d target=%d max=%d spawns/day=%d\n%!"
     Gardener.enabled Gardener.min_agents Gardener.target_agents
-    Gardener.max_agents Gardener.max_daily_spawns
+    Gardener.max_agents Gardener.max_daily_spawns;
+  Printf.eprintf "[env_config] KeeperBootstrap: enabled=%b stale_turn=%.0fs max_scan=%d\n%!"
+    KeeperBootstrap.enabled KeeperBootstrap.stale_turn_seconds KeeperBootstrap.max_scan;
+  Printf.eprintf "[env_config] KeeperAlert: enabled=%b min_score=%.2f retries=%d board=%b slack=%b github=%b\n%!"
+    KeeperAlert.enabled KeeperAlert.min_score KeeperAlert.max_retries
+    KeeperAlert.board_enabled KeeperAlert.slack_enabled KeeperAlert.github_enabled;
+  Printf.eprintf "[env_config] KeeperAlert(SlackDM): enabled=%b user_id_set=%b\n%!"
+    KeeperAlert.slack_dm_enabled (String.trim KeeperAlert.slack_dm_user_id <> "")

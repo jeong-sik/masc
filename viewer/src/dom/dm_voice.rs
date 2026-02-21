@@ -72,8 +72,7 @@ const DM_VOICE_RANDOM_PRESET_VALUE: &str = "random_preset";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_RANDOM_PRESET_LABEL: &str = "랜덤 (추천 Voice 중 선택)";
 #[cfg(target_arch = "wasm32")]
-const DM_VOICE_DEFAULT_PROXY_URL: &str =
-    "https://elevenlabs-proxy-production-443b.up.railway.app/v1/audio/speech";
+const DM_VOICE_DEFAULT_PROXY_URL: &str = "/api/v1/trpg/tts";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_DEFAULT_MODEL: &str = "eleven_multilingual_v2";
 #[cfg(target_arch = "wasm32")]

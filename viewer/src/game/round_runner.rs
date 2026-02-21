@@ -459,7 +459,8 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         "phase": phase,
         "timeout_sec": timeout_sec,
         "lang": lang,
-        "require_claim": false
+        "require_claim": false,
+        "local_fallback": true
     });
 
     Ok(body.to_string())

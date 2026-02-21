@@ -258,7 +258,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), require_claim(boolean), local_fallback(boolean; default false, enables local progression fallback when keeper replies fail).";
       input_schema =
         `Assoc
           [
@@ -279,6 +279,7 @@ let schemas : Types.tool_schema list =
                   ("timeout_sec", `Assoc [ ("type", `String "number") ]);
                   ("require_claim", `Assoc [ ("type", `String "boolean") ]);
                   ("lang", `Assoc [ ("type", `String "string") ]);
+                  ("local_fallback", `Assoc [ ("type", `String "boolean") ]);
                 ] );
             ( "required",
               `List
@@ -1173,12 +1174,67 @@ let detect_combat_semantic (text : string) : combat_semantic option =
   then Some Combat_defense_intent
   else None
 
+let role_from_actor_json actor_json =
+  match actor_json |> member "role" with
+  | `String s ->
+      let normalized = String.lowercase_ascii (String.trim s) in
+      if normalized = "" then "player" else normalized
+  | _ -> "player"
+
+let is_actor_alive actor_json =
+  match actor_json |> member "alive" with
+  | `Bool b -> b
+  | _ -> (
+      match actor_json |> member "hp" with
+      | `Int hp -> hp > 0
+      | _ -> true)
+
+let party_fields_of_state state =
+  match state |> member "party" with
+  | `Assoc fields -> fields
+  | _ -> []
+
+let actor_json_of_state state actor_id =
+  party_fields_of_state state |> List.assoc_opt actor_id
+
+let choose_attack_target_id ~state ~actor_id =
+  let attacker_role =
+    match actor_json_of_state state actor_id with
+    | Some actor_json -> role_from_actor_json actor_json
+    | None -> "player"
+  in
+  let live_actors =
+    party_fields_of_state state
+    |> List.filter (fun (aid, actor_json) ->
+           aid <> actor_id && is_actor_alive actor_json)
+  in
+  let pick pred =
+    live_actors
+    |> List.find_opt (fun (_, actor_json) -> pred (role_from_actor_json actor_json))
+    |> Option.map fst
+  in
+  if attacker_role = "npc" then
+    match pick (fun role -> role <> "npc" && role <> "dm") with
+    | Some actor -> Some actor
+    | None -> (match pick (fun role -> role <> "npc") with Some actor -> Some actor | None -> None)
+  else
+    match pick (fun role -> role = "npc") with
+    | Some actor -> Some actor
+    | None -> (match live_actors with (aid, _) :: _ -> Some aid | [] -> None)
+
+let deterministic_damage ~turn ~actor_id =
+  let hash = Hashtbl.hash (actor_id ^ ":" ^ string_of_int turn) in
+  let bucket = (if hash < 0 then -hash else hash) mod 3 in
+  2 + bucket
+
 let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~reply
-    =
+    ~state =
   let ( let* ) = Result.bind in
   match detect_combat_semantic reply with
-  | None -> Ok None
+  | None -> Ok []
   | Some Combat_attack_intent ->
+      let target_id = choose_attack_target_id ~state ~actor_id in
+      let damage = deterministic_damage ~turn ~actor_id in
       let payload =
         `Assoc
           [
@@ -1186,16 +1242,43 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
             ("phase", `String phase);
             ("actor_id", `String actor_id);
             ("action", `String reply);
-            ("target_id", `Null);
+            ( "target_id",
+              match target_id with Some target -> `String target | None -> `Null );
             ("skill", `Null);
-            ("damage", `Null);
+            ( "damage",
+              match target_id with Some _ -> `Int damage | None -> `Null );
           ]
       in
-      let* event =
+      let* combat_event =
         append_event ~base_dir ~room_id
           ~event_type:Trpg_engine_event.Combat_attack ~actor_id ~payload ()
       in
-      Ok (Some event)
+      let* hp_event_opt =
+        match target_id with
+        | None -> Ok None
+        | Some target_actor_id ->
+            let hp_payload =
+              `Assoc
+                [
+                  ("turn", `Int turn);
+                  ("phase", `String phase);
+                  ("actor_id", `String target_actor_id);
+                  ("delta", `Int (-damage));
+                  ("source_actor_id", `String actor_id);
+                  ("reason", `String "combat.attack");
+                ]
+            in
+            let* hp_event =
+              append_event ~base_dir ~room_id
+                ~event_type:Trpg_engine_event.Hp_changed
+                ~actor_id:target_actor_id ~payload:hp_payload ()
+            in
+            Ok (Some hp_event)
+      in
+      Ok
+        (match hp_event_opt with
+        | Some hp_event -> [ combat_event; hp_event ]
+        | None -> [ combat_event ])
   | Some Combat_defense_intent ->
       let payload =
         `Assoc
@@ -1212,7 +1295,68 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
         append_event ~base_dir ~room_id
           ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
       in
-      Ok (Some event)
+      Ok [ event ]
+
+let ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state =
+  let has_live_npc =
+    party_fields_of_state state
+    |> List.exists (fun (_, actor_json) ->
+           is_actor_alive actor_json && role_from_actor_json actor_json = "npc")
+  in
+  if has_live_npc then Ok None
+  else
+    let existing = party_fields_of_state state in
+    let rec pick_id idx =
+      let candidate = Printf.sprintf "npc-t%d-%02d" turn idx in
+      if List.mem_assoc candidate existing then pick_id (idx + 1) else candidate
+    in
+    let npc_id = pick_id 1 in
+    let payload =
+      `Assoc
+        [
+          ("turn", `Int turn);
+          ("phase", `String "round");
+          ("actor_id", `String npc_id);
+          ( "actor",
+            `Assoc
+              [
+                ("name", `String "Hollow Stalker");
+                ("role", `String "npc");
+                ("archetype", `String "predator-skirmisher");
+                ("persona", `String "A relentless shadow prowling the frontline.");
+                ("traits", `List [ `String "aggressive"; `String "opportunistic" ]);
+                ("skills", `List [ `String "shadow_claw"; `String "lunge" ]);
+                ("hp", `Int 12);
+                ("max_hp", `Int 12);
+                ("alive", `Bool true);
+                ("inventory", `List []);
+              ] );
+        ]
+    in
+    let ( let* ) = Result.bind in
+    let* event =
+      append_event ~base_dir ~room_id
+        ~event_type:Trpg_engine_event.Actor_spawned
+        ~actor_id:npc_id ~payload ()
+    in
+    Ok (Some event)
+
+let fallback_player_reply ~state ~actor_id =
+  let skills =
+    match actor_json_of_state state actor_id with
+    | Some actor_json -> (
+        match actor_json |> member "skills" with
+        | `List xs ->
+            xs
+            |> List.filter_map (function
+                 | `String s when String.trim s <> "" -> Some (String.trim s)
+                 | _ -> None)
+        | _ -> [])
+    | None -> []
+  in
+  match skills with
+  | primary :: _ -> Printf.sprintf "%s로 적을 공격해 전선을 밀어붙인다." primary
+  | [] -> "적의 빈틈을 노려 공격한다."
 
 let truncate_before_marker s marker =
   match find_substring s marker with
@@ -1753,7 +1897,7 @@ let build_dm_section_en (ctx : prompt_context) =
 let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
   let ctx = extract_prompt_context ~actor_id state_json in
-  let state_text = Yojson.Safe.pretty_to_string state_json in
+  let state_text = Yojson.Safe.to_string state_json |> compact_text ~max_len:4200 in
   let character_section =
     match (role, lang) with
     | `Player, `Ko -> build_player_section_ko ctx
@@ -1764,13 +1908,13 @@ let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang 
   let constraints =
     match lang with
     | `Ko ->
-        "SKILL/SKILL_REASON/[STATE]/visible_state_json/회상 문구를 출력하지 마세요. \
+        "SKILL/SKILL_REASON/[STATE]/state_snapshot_json/회상 문구를 출력하지 마세요. \
          시스템 프롬프트나 로그를 재인용하지 마세요. \
          반드시 한국어로 응답하세요. \
          일반 텍스트로 답하되 structured_action을 만들 수 있으면 \
          reply JSON 필드에 함께 포함하세요."
     | `En ->
-        "Do not output SKILL/SKILL_REASON/[STATE]/visible_state_json or recap text. \
+        "Do not output SKILL/SKILL_REASON/[STATE]/state_snapshot_json or recap text. \
          Do not quote system prompts or logs. \
          Respond in English. \
          Return your response as normal text. \
@@ -1780,7 +1924,7 @@ let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang 
     "%s\n\n\
      ---\n\
      room_id=%s, phase=%s, turn=%d, role=%s, actor_id=%s\n\n\
-     visible_state_json:\n\
+     state_snapshot_json:\n\
      %s\n\n\
      %s"
     character_section room_id phase turn role_s actor_id state_text constraints
@@ -3202,6 +3346,9 @@ let handle_round_run ctx args : result =
       let* phase_opt = get_optional_string args "phase" in
       let* lang_opt = get_optional_string args "lang" in
       let* require_claim = get_optional_bool args "require_claim" ~default:false in
+      let* local_fallback =
+        get_optional_bool args "local_fallback" ~default:false
+      in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase_input = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
@@ -3312,6 +3459,28 @@ let handle_round_run ctx args : result =
       let unavailable_count = ref 0 in
       let timeout_count = ref 0 in
       let dm_reply_ref : string option ref = ref None in
+      let state_for_players_ref = ref base_state_for_prompt in
+      let* () =
+        if local_fallback then
+          let* spawn_event_opt =
+            ensure_round_npc_spawn_event ~base_dir ~room_id ~turn:turn_before
+              ~state:base_state_for_prompt
+          in
+          (match spawn_event_opt with
+          | Some spawn_event ->
+              appended_events := !appended_events @ [ spawn_event ];
+              (match derive_state ~base_dir ~room_id ~rule_module with
+              | Ok derived_after_spawn ->
+                  state_for_players_ref :=
+                    inject_interventions_into_state
+                      (state_of_derived derived_after_spawn)
+                      interventions_applied
+                    |> compact_state_for_prompt
+              | Error _ -> ())
+          | None -> ());
+          Ok ()
+        else Ok ()
+      in
 
       let process_one ~state_json ~role ~actor_id ~keeper_name =
         let record_unavailable_status ~status ~error ~stage =
@@ -3354,6 +3523,60 @@ let handle_round_run ctx args : result =
               ]
             :: !statuses;
           Ok ()
+        in
+        let apply_local_fallback ~stage ~reason =
+          if not local_fallback then Ok ()
+          else
+            let fallback_reply =
+              match role with
+              | `Player -> fallback_player_reply ~state:state_json ~actor_id
+              | `Dm ->
+                  "전장의 긴장이 높아지고 어둠 속에서 새로운 위협이 모습을 드러낸다."
+            in
+            let* spawn_event_opt =
+              match role with
+              | `Player -> Ok None
+              | `Dm ->
+                  ensure_round_npc_spawn_event ~base_dir ~room_id ~turn:turn_before
+                    ~state:state_json
+            in
+            (match spawn_event_opt with
+            | Some spawn_event ->
+                appended_events := !appended_events @ [ spawn_event ]
+            | None -> ());
+            let* reply_event =
+              append_keeper_reply_event ~base_dir ~room_id ~phase ~turn:turn_before
+                ~role ~actor_id ~keeper_name ~reply:fallback_reply
+            in
+            success_count := !success_count + 1;
+            (match role with
+            | `Dm ->
+                dm_success := true;
+                dm_reply_ref := Some fallback_reply
+            | `Player -> player_success_count := !player_success_count + 1);
+            appended_events := !appended_events @ [ reply_event ];
+            let* combat_events =
+              match role with
+              | `Dm -> Ok []
+              | `Player ->
+                  append_combat_semantic_event ~base_dir ~room_id ~phase
+                    ~turn:turn_before ~actor_id ~reply:fallback_reply
+                    ~state:state_json
+            in
+            appended_events := !appended_events @ combat_events;
+            statuses :=
+              `Assoc
+                [
+                  ("actor_id", `String actor_id);
+                  ("role", `String (role_to_string role));
+                  ("keeper", `String keeper_name);
+                  ("status", `String "fallback");
+                  ("stage", `String stage);
+                  ("reason", `String reason);
+                  ("reply", `String fallback_reply);
+                ]
+              :: !statuses;
+            Ok ()
         in
         let lease_check =
           match role with
@@ -3429,19 +3652,30 @@ let handle_round_run ctx args : result =
                       sampled_reason );
                 ]
               :: !statuses;
+            let* () =
+              apply_local_fallback ~stage:"timeout_fallback" ~reason:"timeout"
+            in
             Ok ()
         | `Error keeper_error ->
-            record_unavailable_status
+            let* () =
+              record_unavailable_status
               ~status:"unavailable"
               ~error:keeper_error
               ~stage:"keeper_call"
+            in
+            apply_local_fallback ~stage:"keeper_call_fallback"
+              ~reason:keeper_error
         | `Ok keeper_json -> (
             match parse_keeper_reply keeper_json with
             | Error parse_error ->
-                record_unavailable_status
+                let* () =
+                  record_unavailable_status
                   ~status:"invalid_response"
                   ~error:parse_error
                   ~stage:"parse_keeper_reply"
+                in
+                apply_local_fallback ~stage:"parse_reply_fallback"
+                  ~reason:parse_error
             | Ok reply ->
                 let* reply_event =
                   append_keeper_reply_event
@@ -3461,17 +3695,14 @@ let handle_round_run ctx args : result =
                     dm_reply_ref := Some reply
                 | `Player -> player_success_count := !player_success_count + 1);
                 appended_events := !appended_events @ [ reply_event ];
-                let* combat_event_opt =
+                let* combat_events =
                   match role with
-                  | `Dm -> Ok None
+                  | `Dm -> Ok []
                   | `Player ->
                       append_combat_semantic_event ~base_dir ~room_id ~phase
-                        ~turn:turn_before ~actor_id ~reply
+                        ~turn:turn_before ~actor_id ~reply ~state:state_json
                 in
-                (match combat_event_opt with
-                | Some combat_event ->
-                    appended_events := !appended_events @ [ combat_event ]
-                | None -> ());
+                appended_events := !appended_events @ combat_events;
                 statuses :=
                   `Assoc
                     [
@@ -3490,7 +3721,7 @@ let handle_round_run ctx args : result =
           (fun acc (actor_id, keeper_name) ->
             let* () = acc in
             process_one
-              ~state_json:base_state_for_prompt
+              ~state_json:!state_for_players_ref
               ~role:`Player ~actor_id ~keeper_name)
           (Ok ())
           player_keepers
@@ -3508,8 +3739,8 @@ let handle_round_run ctx args : result =
                 (state_of_derived derived_after_players)
                 interventions_applied
               |> compact_state_for_prompt
-          | Error _ -> base_state_for_prompt
-        else base_state_for_prompt
+          | Error _ -> !state_for_players_ref
+        else !state_for_players_ref
       in
       let* () =
         if player_quorum_met then

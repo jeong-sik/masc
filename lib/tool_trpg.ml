@@ -997,8 +997,10 @@ let resolve_end_rules_for_room ~base_dir ~(events : Trpg_engine_event.t list) :
     Trpg_preset_store.end_rules =
   match
     events
-    |> List.find_opt (fun (ev : Trpg_engine_event.t) ->
-           ev.event_type = Trpg_engine_event.Room_created)
+    |> List.fold_left
+         (fun acc (ev : Trpg_engine_event.t) ->
+           if ev.event_type = Trpg_engine_event.Room_created then Some ev else acc)
+         None
   with
   | None -> default_end_rules_local
   | Some room_created -> (
@@ -1120,6 +1122,23 @@ let has_event_type (events : Trpg_engine_event.t list) event_type =
   List.exists
     (fun (ev : Trpg_engine_event.t) -> ev.event_type = event_type)
     events
+
+let is_session_marker_event = function
+  | Trpg_engine_event.Room_started
+  | Trpg_engine_event.Session_started
+  | Trpg_engine_event.Room_created ->
+      true
+  | _ -> false
+
+let events_since_last_session_marker (events : Trpg_engine_event.t list) :
+    Trpg_engine_event.t list =
+  let rec collect acc = function
+    | [] -> acc
+    | (ev : Trpg_engine_event.t) :: tl ->
+        let acc' = ev :: acc in
+        if is_session_marker_event ev.event_type then acc' else collect acc' tl
+  in
+  collect [] (List.rev events)
 
 let latest_session_outcome_payload (events : Trpg_engine_event.t list) :
     Yojson.Safe.t option =
@@ -3571,18 +3590,21 @@ let handle_round_run ctx args : result =
       let* existing_events_before =
         Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
       in
+      let session_events_before =
+        events_since_last_session_marker existing_events_before
+      in
       let state = state_of_derived derived in
       let room_already_ended =
-        has_event_type existing_events_before Trpg_engine_event.Room_ended
+        has_event_type session_events_before Trpg_engine_event.Room_ended
       in
       let outcome_already_emitted =
-        has_event_type existing_events_before Trpg_engine_event.Session_outcome
+        has_event_type session_events_before Trpg_engine_event.Session_outcome
       in
       let end_rules =
         resolve_end_rules_for_room ~base_dir ~events:existing_events_before
       in
       let latest_outcome_payload =
-        ref (latest_session_outcome_payload existing_events_before)
+        ref (latest_session_outcome_payload session_events_before)
       in
       let* turn_before = read_state_turn derived in
       let unavailable_sampling =

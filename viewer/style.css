@@ -2085,6 +2085,13 @@ body.wasm-dom-fallback #bevy-canvas {
     white-space: normal;
 }
 
+.skill-dnd {
+    color: #9ab6e6;
+    font-size: 9px;
+    line-height: 1.35;
+    white-space: normal;
+}
+
 .skill-hint {
     color: rgba(227, 239, 255, 0.85);
     font-size: 9px;

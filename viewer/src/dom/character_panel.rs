@@ -117,56 +117,104 @@ fn normalize_lore_key(raw: &str) -> String {
     raw.trim().to_ascii_lowercase().replace(['-', ' '], "_")
 }
 
-fn known_skill_lore(skill_name: &str) -> Option<(&'static str, &'static str)> {
+struct SkillLore {
+    description: &'static str,
+    hint: &'static str,
+    dnd5_check: &'static str,
+}
+
+fn known_skill_lore(skill_name: &str) -> Option<SkillLore> {
     match normalize_lore_key(skill_name).as_str() {
-        "mark_prey" => Some((
-            "적 한 명을 추적 표식으로 지정해 파티의 집중 화력을 유도합니다.",
-            "라운드 초반에 위협도가 높은 목표를 먼저 지정하면 효율이 큽니다.",
-        )),
-        "silent_route" => Some((
-            "소음과 시야 노출을 줄여 우회/잠입 루트를 확보합니다.",
-            "정면 충돌 전에 위치를 바꾸거나 기습 각도를 만들 때 사용하세요.",
-        )),
-        "finisher_strike" => Some((
-            "체력이 깎인 목표를 마무리하는 처형형 기술입니다.",
-            "아군의 선행 피해 후 연계하면 성공 판정이 잘 나옵니다.",
-        )),
-        "field_mend" => Some((
-            "현장에서 빠르게 상처를 봉합해 전열 붕괴를 막습니다.",
-            "집중 공격받는 아군에게 먼저 써서 다운을 방지하세요.",
-        )),
-        "truce_window" => Some((
-            "짧은 휴전 창을 만들어 협상/재정비 턴을 확보합니다.",
-            "적이 강하거나 정보가 부족할 때 시간을 벌기 좋습니다.",
-        )),
-        "resolve_hymn" => Some((
-            "파티의 동요를 진정시키고 의지를 끌어올리는 결의 기술입니다.",
-            "연속 실패 뒤 사기 회복용으로 쓰면 흐름 복구에 유리합니다.",
-        )),
-        "deception_feint" => Some((
-            "거짓 동작으로 적 판단을 흔들어 빈틈을 만듭니다.",
-            "정면 돌파보다 교란이 필요한 국면에서 효과적입니다.",
-        )),
-        "favor_broker" => Some((
-            "관계/빚을 거래해 협력이나 정보 제공을 이끌어냅니다.",
-            "NPC 또는 파티 설득 상황에서 선택지를 늘릴 때 사용하세요.",
-        )),
-        "shadow_entry" => Some((
-            "그림자 동선을 타고 경계망 안쪽으로 침투합니다.",
-            "탐지 리스크가 높은 구간을 넘어야 할 때 가장 안정적입니다.",
-        )),
-        "supply_scan" => Some((
-            "보급/자원 상태를 점검해 부족 항목을 조기에 찾습니다.",
-            "장기전 직전이나 이벤트 전환 전에 사용하면 손실을 줄입니다.",
-        )),
-        "ration_shift" => Some((
-            "자원 배분을 재조정해 생존 시간을 늘립니다.",
-            "당장 화력보다 지속력이 중요한 턴에 우선 사용하세요.",
-        )),
-        "logistics_patch" => Some((
-            "끊긴 보급 동선을 임시 복구해 팀 운영을 안정화합니다.",
-            "연속 이벤트로 소모가 누적될 때 유지력 확보에 핵심입니다.",
-        )),
+        "frontline_shield" => Some(SkillLore {
+            description: "전열에서 아군을 감싸 피해를 흡수하며 진형 붕괴를 막습니다.",
+            hint: "보스나 집중 사격 타이밍 직전에 선언하면 아군 생존률이 크게 오릅니다.",
+            dnd5_check: "STR(운동) 기반 보호 판정 또는 Protection 반응 운용",
+        }),
+        "oath_intercept" => Some(SkillLore {
+            description: "맹세 대상에게 향한 타격선으로 끼어들어 피해를 가로챕니다.",
+            hint: "직전 턴에 위협을 확정한 적에게 반응형으로 연계하면 효율이 높습니다.",
+            dnd5_check: "반응(Reaction) 기반 차단, STR(운동) 또는 CON 내성 보조",
+        }),
+        "morale_anchor" => Some(SkillLore {
+            description: "동요한 아군의 전의를 묶어 공포/혼란 이후 흐름을 회복합니다.",
+            hint: "연속 실패나 다운 직후 사기 복구용으로 사용하면 턴 손실을 줄입니다.",
+            dnd5_check: "CHA(설득) 또는 공연 계열 보조 체크",
+        }),
+        "deception_feint" => Some(SkillLore {
+            description: "거짓 동작으로 적 판단을 흔들어 빈틈을 만듭니다.",
+            hint: "정면 돌파보다 교란이 필요한 국면에서 효과적입니다.",
+            dnd5_check: "CHA(기만) 체크",
+        }),
+        "favor_broker" => Some(SkillLore {
+            description: "관계/빚을 거래해 협력이나 정보 제공을 이끌어냅니다.",
+            hint: "NPC 또는 파티 설득 상황에서 선택지를 늘릴 때 사용하세요.",
+            dnd5_check: "CHA(설득) + WIS(통찰) 조합 체크",
+        }),
+        "shadow_entry" => Some(SkillLore {
+            description: "그림자 동선을 타고 경계망 안쪽으로 침투합니다.",
+            hint: "탐지 리스크가 높은 구간을 넘어야 할 때 가장 안정적입니다.",
+            dnd5_check: "DEX(은신) 체크",
+        }),
+        "supply_scan" => Some(SkillLore {
+            description: "보급/자원 상태를 점검해 부족 항목을 조기에 찾습니다.",
+            hint: "장기전 직전이나 이벤트 전환 전에 사용하면 손실을 줄입니다.",
+            dnd5_check: "INT(조사) 체크",
+        }),
+        "ration_shift" => Some(SkillLore {
+            description: "자원 배분을 재조정해 생존 시간을 늘립니다.",
+            hint: "당장 화력보다 지속력이 중요한 턴에 우선 사용하세요.",
+            dnd5_check: "WIS(생존) 또는 INT 기반 운영 체크",
+        }),
+        "logistics_patch" => Some(SkillLore {
+            description: "끊긴 보급 동선을 임시 복구해 팀 운영을 안정화합니다.",
+            hint: "연속 이벤트로 소모가 누적될 때 유지력 확보에 핵심입니다.",
+            dnd5_check: "INT(조사) + WIS(생존) 조합 체크",
+        }),
+        "omen_trace" => Some(SkillLore {
+            description: "징조를 해석해 다음 장면의 위험 분기를 예측합니다.",
+            hint: "불확실한 분기에서 먼저 써서 실패 비용이 큰 선택지를 피하세요.",
+            dnd5_check: "INT(비전학) 또는 INT(종교학) 체크",
+        }),
+        "arc_flash" => Some(SkillLore {
+            description: "짧은 비전 폭발로 적 전열을 흔들며 공간을 확보합니다.",
+            hint: "아군이 묶였거나 도주 루트를 열어야 할 때 선행기로 쓰세요.",
+            dnd5_check: "주문 공격(Spell Attack) 또는 INT(비전학) 보조 체크",
+        }),
+        "ward_bloom" => Some(SkillLore {
+            description: "보호 장을 펼쳐 광역 피해를 줄이고 회복 창을 만듭니다.",
+            hint: "광역 피해가 예고된 턴에 선사용하면 파티 안정성이 크게 오릅니다.",
+            dnd5_check: "방호 계열 운용, INT(비전학) + WIS(의학) 보조 체크",
+        }),
+        "mark_prey" => Some(SkillLore {
+            description: "적 한 명을 추적 표식으로 지정해 파티의 집중 화력을 유도합니다.",
+            hint: "라운드 초반에 위협도가 높은 목표를 먼저 지정하면 효율이 큽니다.",
+            dnd5_check: "WIS(지각) 또는 WIS(생존) 체크",
+        }),
+        "silent_route" => Some(SkillLore {
+            description: "소음과 시야 노출을 줄여 우회/잠입 루트를 확보합니다.",
+            hint: "정면 충돌 전에 위치를 바꾸거나 기습 각도를 만들 때 사용하세요.",
+            dnd5_check: "DEX(은신) + WIS(지각) 체크",
+        }),
+        "finisher_strike" => Some(SkillLore {
+            description: "체력이 깎인 목표를 마무리하는 처형형 기술입니다.",
+            hint: "아군의 선행 피해 후 연계하면 성공 판정이 잘 나옵니다.",
+            dnd5_check: "근접/원거리 공격 굴림(STR/DEX) 체크",
+        }),
+        "field_mend" => Some(SkillLore {
+            description: "현장에서 빠르게 상처를 봉합해 전열 붕괴를 막습니다.",
+            hint: "집중 공격받는 아군에게 먼저 써서 다운을 방지하세요.",
+            dnd5_check: "WIS(의학) 체크",
+        }),
+        "truce_window" => Some(SkillLore {
+            description: "짧은 휴전 창을 만들어 협상/재정비 턴을 확보합니다.",
+            hint: "적이 강하거나 정보가 부족할 때 시간을 벌기 좋습니다.",
+            dnd5_check: "CHA(설득) 또는 WIS(통찰) 체크",
+        }),
+        "resolve_hymn" => Some(SkillLore {
+            description: "파티의 동요를 진정시키고 의지를 끌어올리는 결의 기술입니다.",
+            hint: "연속 실패 뒤 사기 회복용으로 쓰면 흐름 복구에 유리합니다.",
+            dnd5_check: "CHA(공연) 또는 CHA(설득) 체크",
+        }),
         _ => None,
     }
 }
@@ -182,6 +230,12 @@ fn trait_icon(name: &str) -> &'static str {
         "calculating" => "\u{1F9E0}",
         "charming" => "\u{1F48E}",
         "risk_seeking" => "\u{1F3B2}",
+        "stubborn" => "\u{1FAA8}",
+        "protective" => "\u{1F6E1}\u{FE0F}",
+        "honor_bound" => "\u{2696}\u{FE0F}",
+        "intense" => "\u{1F525}",
+        "empathetic" => "\u{1FA76}",
+        "fatalistic" => "\u{1F52E}",
         "pragmatic" => "\u{2699}\u{FE0F}",
         "frugal" => "\u{1F4B0}",
         "impatient" => "\u{23F1}\u{FE0F}",
@@ -200,6 +254,14 @@ fn trait_description(name: &str) -> String {
         "calculating" => "확률과 대가를 계산해 손익이 좋은 경로를 찾아냅니다.".to_string(),
         "charming" => "대화 압박을 완화하고 설득/관계 형성 판정에 유리합니다.".to_string(),
         "risk_seeking" => "높은 위험의 대가를 노려 큰 전환점을 만드는 성향입니다.".to_string(),
+        "stubborn" => "의지가 강해 정신 내성/버티기 상황에서 쉽게 물러서지 않습니다.".to_string(),
+        "protective" => "아군 대신 맞거나 엄호하는 선택을 우선합니다.".to_string(),
+        "honor_bound" => {
+            "약속과 규율을 중시해 협상/명예 관련 장면에서 신뢰를 얻습니다.".to_string()
+        }
+        "intense" => "집중력이 높아 짧은 폭발력이나 몰입이 필요한 장면에 강합니다.".to_string(),
+        "empathetic" => "상대 감정 신호를 잘 읽어 통찰/중재 상황에서 유리합니다.".to_string(),
+        "fatalistic" => "불리한 상황을 감수하고 큰 대가를 선택하는 경향이 있습니다.".to_string(),
         "pragmatic" => "당장 생존과 효율을 우선해 자원 운용 판단이 빠릅니다.".to_string(),
         "frugal" => "소모를 줄여 장기전에서 팀 유지력을 끌어올립니다.".to_string(),
         "impatient" => "결단은 빠르지만 장기 설정보다 즉시 행동을 선호합니다.".to_string(),
@@ -208,8 +270,8 @@ fn trait_description(name: &str) -> String {
 }
 
 fn fallback_skill_description(_actor: &Actor, skill_name: &str, modifier: i32) -> String {
-    if let Some((description, _hint)) = known_skill_lore(skill_name) {
-        return description.to_string();
+    if let Some(lore) = known_skill_lore(skill_name) {
+        return lore.description.to_string();
     }
     let key = skill_name.trim().to_ascii_lowercase();
     if key.contains("heal") || key.contains("cure") || key.contains("치유") {
@@ -251,8 +313,8 @@ fn fallback_skill_description(_actor: &Actor, skill_name: &str, modifier: i32) -
 }
 
 fn fallback_skill_hint(actor: &Actor, skill_name: &str) -> String {
-    if let Some((_description, hint)) = known_skill_lore(skill_name) {
-        return hint.to_string();
+    if let Some(lore) = known_skill_lore(skill_name) {
+        return lore.hint.to_string();
     }
     let key = skill_name.trim().to_ascii_lowercase();
     let base = if key.contains("heal") || key.contains("cure") || key.contains("치유") {
@@ -279,7 +341,44 @@ fn fallback_skill_hint(actor: &Actor, skill_name: &str) -> String {
     }
 }
 
-fn skill_copy(skill: &Skill, actor: &Actor) -> (String, String) {
+fn fallback_skill_dnd5(skill_name: &str) -> String {
+    if let Some(lore) = known_skill_lore(skill_name) {
+        return lore.dnd5_check.to_string();
+    }
+    let key = skill_name.trim().to_ascii_lowercase();
+    if key.contains("heal") || key.contains("cure") || key.contains("치유") {
+        "D&D5 권장 체크: WIS(의학)".to_string()
+    } else if key.contains("guard")
+        || key.contains("defend")
+        || key.contains("block")
+        || key.contains("방어")
+    {
+        "D&D5 권장 체크: STR(운동) + 반응(Reaction)".to_string()
+    } else if key.contains("stealth")
+        || key.contains("hide")
+        || key.contains("sneak")
+        || key.contains("은신")
+    {
+        "D&D5 권장 체크: DEX(은신)".to_string()
+    } else if key.contains("charm")
+        || key.contains("deception")
+        || key.contains("persuade")
+        || key.contains("협상")
+    {
+        "D&D5 권장 체크: CHA(기만/설득)".to_string()
+    } else if key.contains("arc")
+        || key.contains("spell")
+        || key.contains("omen")
+        || key.contains("magic")
+        || key.contains("마법")
+    {
+        "D&D5 권장 체크: INT(비전학) 또는 주문 공격".to_string()
+    } else {
+        "D&D5 권장 체크: 관련 능력치 체크(상황 기반)".to_string()
+    }
+}
+
+fn skill_copy(skill: &Skill, actor: &Actor) -> (String, String, String) {
     let modifier = skill.modifier();
     let description = if skill.description.trim().is_empty() {
         fallback_skill_description(actor, &skill.name, modifier)
@@ -291,7 +390,8 @@ fn skill_copy(skill: &Skill, actor: &Actor) -> (String, String) {
     } else {
         skill.usage_hint.trim().to_string()
     };
-    (description, usage_hint)
+    let dnd5_check = fallback_skill_dnd5(&skill.name);
+    (description, usage_hint, dnd5_check)
 }
 
 fn actor_initials(name: &str, id: &str) -> String {
@@ -606,16 +706,22 @@ pub fn update_character_panel_dom(
                 .iter()
                 .map(|s| {
                     let m = s.modifier();
-                    let (description, usage_hint) = skill_copy(s, actor);
+                    let (description, usage_hint, dnd5_check) = skill_copy(s, actor);
                     let escaped_name = html_escape(&s.name);
                     let escaped_desc = html_escape(&description);
                     let escaped_hint = html_escape(&usage_hint);
+                    let escaped_dnd = html_escape(&dnd5_check);
                     let mod_class = if m > 0 {
                         "mod-positive"
                     } else if m < 0 {
                         "mod-negative"
                     } else {
                         "mod-neutral"
+                    };
+                    let dnd_line = if dnd5_check.trim().is_empty() {
+                        String::new()
+                    } else {
+                        format!("<div class=\"skill-dnd\">{}</div>", escaped_dnd)
                     };
                     let hint_line = if usage_hint.trim().is_empty() {
                         String::new()
@@ -632,6 +738,7 @@ pub fn update_character_panel_dom(
                             "</div>",
                             "<div class=\"skill-desc\">{}</div>",
                             "{}",
+                            "{}",
                             "</div>"
                         ),
                         escaped_name,
@@ -639,6 +746,7 @@ pub fn update_character_panel_dom(
                         mod_class,
                         fmt_modifier(m),
                         escaped_desc,
+                        dnd_line,
                         hint_line,
                     )
                 })
@@ -656,7 +764,7 @@ pub fn update_character_panel_dom(
                 actor.skills.len(),
                 format!(
                     "{}{}{}",
-                    "<div class=\"section-guide\">액션/주사위 판정 보정치입니다. 기본 계산: Mod = (Lv-10)/2</div>",
+                    "<div class=\"section-guide\">액션/주사위 판정 보정치입니다. 기본 계산: Mod = (Lv-10)/2, D&D5 권장 체크를 함께 참고하세요.</div>",
                     head,
                     rows
                 ),

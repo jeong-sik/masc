@@ -31,6 +31,24 @@ fn archetype_color(archetype: &str) -> Color {
     }
 }
 
+fn portrait_path_for_actor(actor: &Actor) -> Option<&'static str> {
+    if let Some(path) = assets::portrait_for(&actor.id) {
+        return Some(path);
+    }
+    let name = actor.name.trim().to_ascii_lowercase();
+    if !name.is_empty() {
+        if let Some(path) = assets::portrait_for(&name) {
+            return Some(path);
+        }
+        if let Some(first) = name.split_whitespace().next() {
+            if let Some(path) = assets::portrait_for(first) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 /// Spawns character token sprites from Actor components that lack MapToken.
 /// Uses AI-generated portrait textures when available, falls back to colored squares.
 pub fn spawn_character_sprites(
@@ -42,7 +60,7 @@ pub fn spawn_character_sprites(
         let pos = area_to_position(&actor.area);
 
         // Use portrait texture if available, fallback to colored square
-        let sprite = if let Some(path) = assets::portrait_for(&actor.id) {
+        let sprite = if let Some(path) = portrait_path_for_actor(actor) {
             Sprite {
                 image: asset_server.load(path),
                 custom_size: Some(Vec2::new(64.0, 64.0)),

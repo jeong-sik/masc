@@ -63,7 +63,34 @@ pub mod paths {
 
 /// Returns the portrait asset path for a given character ID.
 pub fn portrait_for(id: &str) -> Option<&'static str> {
-    match id {
+    let normalized = id.trim().to_ascii_lowercase();
+
+    // Common runtime actor IDs are p01..p08 (and many NPC-* IDs).
+    if let Some(slot) = normalized.strip_prefix('p') {
+        if let Ok(index) = slot.parse::<u8>() {
+            return match index {
+                1 => Some(paths::PORTRAIT_IRON),
+                2 => Some(paths::PORTRAIT_ALDRIC),
+                3 => Some(paths::PORTRAIT_MOTH),
+                4 => Some(paths::PORTRAIT_DUST),
+                5 => Some(paths::PORTRAIT_BELL),
+                6 => Some(paths::PORTRAIT_BRENNA),
+                7 => Some(paths::PORTRAIT_CEDRIC),
+                8 => Some(paths::PORTRAIT_DARA),
+                _ => None,
+            };
+        }
+    }
+
+    let key = normalized.replace(' ', "_");
+    if key.starts_with("npc-") || key.starts_with("npc_") || key == "npc" {
+        return Some(paths::PORTRAIT_CEDRIC);
+    }
+    if key.starts_with("mob-") || key.starts_with("monster-") || key == "enemy" {
+        return Some(paths::PORTRAIT_DARA);
+    }
+
+    match key.as_str() {
         // Grimland originals
         "grimja" => Some(paths::PORTRAIT_GRIMJA),
         "luna" => Some(paths::PORTRAIT_LUNA),
@@ -79,6 +106,13 @@ pub fn portrait_for(id: &str) -> Option<&'static str> {
         "brenna" => Some(paths::PORTRAIT_BRENNA),
         "cedric" => Some(paths::PORTRAIT_CEDRIC),
         "dara" => Some(paths::PORTRAIT_DARA),
+        // Party preset aliases (name + preset id)
+        "brom" | "ironledger" => Some(paths::PORTRAIT_IRON),
+        "kael" | "vowblade" => Some(paths::PORTRAIT_ALDRIC),
+        "ena" | "stormseer" => Some(paths::PORTRAIT_MOTH),
+        "rook" | "gravehound" => Some(paths::PORTRAIT_DUST),
+        "mira" | "silkwhisper" => Some(paths::PORTRAIT_BELL),
+        "sera" | "lumenfriar" => Some(paths::PORTRAIT_BRENNA),
         _ => None,
     }
 }

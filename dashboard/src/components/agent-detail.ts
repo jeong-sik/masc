@@ -145,16 +145,51 @@ export function AgentDetailOverlay() {
     >
       <div class="agent-detail-modal">
         <div class="agent-detail-header">
-          <div>
-            <h2>${agentName}</h2>
+          <div style="display:flex;flex-direction:column;gap:8px;flex:1">
+            <div style="display:flex;align-items:center;gap:12px">
+              ${agent?.emoji ? html`<span style="font-size:2rem">${agent.emoji}</span>` : ''}
+              <div>
+                <h2 style="margin:0;display:flex;align-items:baseline;gap:8px">
+                  ${agentName}
+                  ${agent?.koreanName ? html`<span style="font-size:0.75em;color:#888">(${agent.koreanName})</span>` : ''}
+                </h2>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+                  ${agent
+                    ? html`
+                        <${StatusBadge} status=${agent.status} />
+                        ${agent.model ? html`<span class="mono" style="font-size:0.75rem;background:#2a2a4a;padding:2px 6px;border-radius:4px">${agent.model}</span>` : ''}
+                        ${agent.primaryValue ? html`<span style="font-size:0.75rem;color:#a78bfa">${agent.primaryValue}</span>` : ''}
+                      `
+                    : html`<span>Agent snapshot not found in current state</span>`}
+                </div>
+              </div>
+            </div>
+            ${agent?.activityLevel != null ? html`
+              <div style="display:flex;align-items:center;gap:8px;font-size:0.8rem">
+                <span style="color:#888">Activity</span>
+                <div style="flex:1;max-width:120px;height:6px;background:#1a1a2e;border-radius:3px;overflow:hidden">
+                  <div style="width:${Math.min(agent.activityLevel * 10, 100)}%;height:100%;background:${agent.activityLevel >= 8 ? '#22c55e' : agent.activityLevel >= 5 ? '#f59e0b' : '#666'};border-radius:3px"></div>
+                </div>
+                <span style="color:#888">${agent.activityLevel}/10</span>
+              </div>
+            ` : ''}
+            ${(agent?.traits?.length ?? 0) > 0 ? html`
+              <div style="display:flex;flex-wrap:wrap;gap:4px">
+                ${agent?.traits?.map((t: string) => html`<span style="font-size:0.7rem;background:#1e3a5f;color:#60a5fa;padding:2px 8px;border-radius:10px">${t}</span>`)}
+              </div>
+            ` : ''}
+            ${(agent?.interests?.length ?? 0) > 0 ? html`
+              <div style="display:flex;flex-wrap:wrap;gap:4px">
+                ${agent?.interests?.map((t: string) => html`<span style="font-size:0.7rem;background:#3b1f4e;color:#c084fc;padding:2px 8px;border-radius:10px">${t}</span>`)}
+              </div>
+            ` : ''}
             <div class="agent-detail-sub">
               ${agent
                 ? html`
-                    <${StatusBadge} status=${agent.status} />
                     ${agent.current_task ? html`<span>Task: ${agent.current_task}</span>` : null}
                     ${agent.last_seen ? html`<span>Last seen: <${TimeAgo} timestamp=${agent.last_seen} /></span>` : null}
                   `
-                : html`<span>Agent snapshot not found in current state</span>`}
+                : null}
             </div>
           </div>
           <div class="agent-detail-actions">

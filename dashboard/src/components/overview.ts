@@ -12,9 +12,12 @@ import {
   perpetualStatus,
   activeAgents,
   tasksByStatus,
+  keeperLifecycles,
+  staleKeepers,
 } from '../store'
 import type { Agent, Keeper } from '../types'
 import { openKeeperDetail } from './keeper-detail'
+import { openAgentDetail } from './agent-detail'
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
   return html`
@@ -27,7 +30,7 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
 
 function AgentRow({ agent }: { agent: Agent }) {
   return html`
-    <div class="agent" onClick=${() => openKeeperDetail(agent as unknown as Keeper)} style="cursor: pointer">
+    <div class="agent" onClick=${() => openAgentDetail(agent.name)} style="cursor: pointer">
       <span class="agent-emoji">${agent.emoji ?? ''}</span>
       <span class="agent-status ${agent.status}"></span>
       <span class="agent-name">${agent.name}</span>
@@ -59,14 +62,18 @@ function ctxBarClass(ratio: number): string {
 function KeeperRow({ keeper }: { keeper: Keeper }) {
   const ratio = keeper.context_ratio
   const pct = ratio != null ? Math.round(ratio * 100) : null
+  const lifecycle = keeperLifecycles.value.get(keeper.name)
+  const isStale = staleKeepers.value.has(keeper.name)
 
   return html`
-    <div class="live-agent keeper-card" onClick=${() => openKeeperDetail(keeper)} style="cursor: pointer">
+    <div class="live-agent keeper-card ${isStale ? 'stale' : ''}" onClick=${() => openKeeperDetail(keeper)} style="cursor: pointer">
       <div class="live-agent-main">
         <!-- Row 1: Identity -->
         <div class="live-agent-title">
           <span class="live-agent-name">${keeper.emoji ?? ''} ${keeper.name}</span>
           <${StatusBadge} status=${keeper.status} />
+          ${lifecycle ? html`<span class="pill pill-lifecycle pill-lifecycle-${lifecycle}">${lifecycle}</span>` : null}
+          ${isStale ? html`<span class="pill pill-stale">stale</span>` : null}
           ${keeper.model ? html`<span class="pill">${keeper.model}</span>` : null}
           ${keeper.skill_primary ? html`<span class="pill pill-skill">${keeper.skill_primary}</span>` : null}
         </div>
@@ -178,7 +185,13 @@ export function Overview() {
         <${Card} title="Room" class="section">
           <div class="live-agent-meta">
             <span>Room: ${status.room}</span>
+            ${status.cluster ? html`<span>Cluster: ${status.cluster}</span>` : null}
+            ${status.project ? html`<span>Project: ${status.project}</span>` : null}
+            ${status.version ? html`<span>Version: ${status.version}</span>` : null}
             <span>Uptime: ${formatUptime(status.uptime_seconds ?? 0)}</span>
+            ${status.paused ? html`<span class="pill pill-stale">Paused</span>` : null}
+            ${status.tempo ? html`<span>Tempo: ${status.tempo}</span>` : null}
+            ${status.tempo_interval_s != null ? html`<span>Interval: ${status.tempo_interval_s}s</span>` : null}
           </div>
         <//>
       `

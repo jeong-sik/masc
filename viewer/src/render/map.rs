@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::assets;
-use crate::game::components::{GameCamera, MapBackground};
+use crate::game::components::{AreaLabel, GameCamera, MapBackground};
 use crate::game::state::MapState;
 use crate::theme::ViewerTheme;
 
@@ -63,6 +63,22 @@ pub fn setup_map_background(
         Transform::from_xyz(0.0, 0.0, -10.0),
         MapBackground,
     ));
+}
+
+/// Spawns text labels below each named area position on the 2D map.
+pub fn spawn_area_labels(mut commands: Commands) {
+    for &(label, pos) in AREA_POSITIONS {
+        commands.spawn((
+            Text2d::new(label),
+            TextFont {
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+            Transform::from_xyz(pos.x, pos.y - 60.0, 0.5),
+            AreaLabel,
+        ));
+    }
 }
 
 /// Updates the map label overlay when the area changes.

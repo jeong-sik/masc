@@ -113,3 +113,13 @@ pub struct WeatherOverlay;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Debug)]
 pub struct MoodOverlay;
+
+/// Marker for condition indicator dot sprites above map tokens.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Debug)]
+pub struct ConditionIndicator;
+
+/// Marker for area name labels on the 2D map.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Debug)]
+pub struct AreaLabel;

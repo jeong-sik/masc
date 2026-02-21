@@ -47,6 +47,11 @@ let role_to_string = function `Dm -> "dm" | `Player -> "player"
 let normalize_keeper_name (s : string) : string =
   s |> String.trim |> String.lowercase_ascii
 
+let clamp_int low high value =
+  if value < low then low
+  else if value > high then high
+  else value
+
 let unique_nonempty_keepers (keepers : string list) : string list =
   keepers
   |> List.map String.trim
@@ -614,6 +619,57 @@ let schemas : Types.tool_schema list =
           ];
     };
     {
+      name = "masc_trpg_join_eligibility";
+      description =
+        "Check whether an actor is eligible for mid-session join under hard gate policy. \
+         Required: room_id, actor_id. Optional: keeper_name, rule_module.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("keeper_name", `Assoc [ ("type", `String "string") ]);
+                  ("rule_module", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "room_id"; `String "actor_id" ]);
+          ];
+    };
+    {
+      name = "masc_trpg_mid_join_request";
+      description =
+        "Request a hard-gated mid-session join (round-boundary only + contribution threshold). \
+         Required: room_id, actor_id, keeper_name. \
+         Optional: role, name, archetype, persona, hp, max_hp, traits, skills, inventory, rule_module.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("keeper_name", `Assoc [ ("type", `String "string") ]);
+                  ("role", `Assoc [ ("type", `String "string") ]);
+                  ("name", `Assoc [ ("type", `String "string") ]);
+                  ("archetype", `Assoc [ ("type", `String "string") ]);
+                  ("persona", `Assoc [ ("type", `String "string") ]);
+                  ("hp", `Assoc [ ("type", `String "integer") ]);
+                  ("max_hp", `Assoc [ ("type", `String "integer") ]);
+                  ("traits", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("skills", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("inventory", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("rule_module", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ( "required",
+              `List [ `String "room_id"; `String "actor_id"; `String "keeper_name" ] );
+          ];
+    };
+    {
       name = "masc_trpg_intervention_submit";
       description =
         "Submit a human intervention to apply before next AI round run. \
@@ -881,6 +937,225 @@ let read_state_turn derived =
   match state_of_derived derived |> member "turn" with
   | `Int i -> Ok i
   | _ -> Error "state.turn must be int"
+
+let mid_join_min_score_default = 3
+let mid_join_min_score_env = "TRPG_MID_JOIN_MIN_SCORE"
+
+let mid_join_min_score () =
+  match Sys.getenv_opt mid_join_min_score_env with
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some n when n > 0 -> n
+      | _ -> mid_join_min_score_default)
+  | None -> mid_join_min_score_default
+
+type join_gate_state = {
+  phase_open : bool;
+  min_points : int;
+  window : string;
+}
+
+let join_gate_of_state state =
+  let gate = state |> member "join_gate" in
+  let phase_open =
+    match gate |> member "phase_open" with
+    | `Bool v -> v
+    | _ -> true
+  in
+  let min_points =
+    match gate |> member "min_points" with
+    | `Int v when v > 0 -> v
+    | _ -> mid_join_min_score ()
+  in
+  let window =
+    match gate |> member "window" with
+    | `String v when String.trim v <> "" -> String.trim v
+    | _ -> "round_boundary_only"
+  in
+  { phase_open; min_points; window }
+
+let actor_role_in_state state actor_id =
+  match state_party_fields state |> List.assoc_opt actor_id with
+  | Some actor_json -> (
+      match actor_json |> member "role" with
+      | `String role when String.trim role <> "" ->
+          String.lowercase_ascii (String.trim role)
+      | _ -> "player")
+  | None -> "player"
+
+let contribution_score_in_state state actor_id =
+  match state |> member "contribution_ledger" |> member actor_id |> member "score" with
+  | `Int v -> v
+  | _ -> 0
+
+type keeper_bonus_eval = {
+  bonus : int;
+  source : string;
+  reason : string option;
+  warning : string option;
+}
+
+let parse_keeper_bonus json =
+  let raw =
+    match json |> member "bonus" with
+    | `Int i -> Some i
+    | `Float f -> Some (int_of_float f)
+    | _ -> None
+  in
+  let reason =
+    match json |> member "reason" with
+    | `String s when String.trim s <> "" -> Some (String.trim s)
+    | _ -> None
+  in
+  match raw with
+  | Some v -> Some (clamp_int (-1) 1 v, reason)
+  | None -> None
+
+let evaluate_keeper_bonus ctx ~keeper_name ~room_id ~actor_id ~server_score
+    ~required_points =
+  match ctx.keeper_call with
+  | None ->
+      {
+        bonus = 0;
+        source = "deterministic_fallback";
+        reason = None;
+        warning = Some "keeper runtime unavailable";
+      }
+  | Some keeper_call -> (
+      let message =
+        Printf.sprintf
+          "You are evaluating a TRPG mid-join request.\n\
+           Return strict JSON: {\"bonus\": -1|0|1, \"reason\": \"short\"}.\n\
+           room_id=%s actor_id=%s server_score=%d required_points=%d\n\
+           Rules: +1 only if strong positive contribution trend; -1 if disruptive risk; else 0."
+          room_id actor_id server_score required_points
+      in
+      match keeper_call ~name:keeper_name ~message ~timeout_sec:5.0 with
+      | `Ok payload -> (
+          match parse_keeper_bonus payload with
+          | Some (bonus, reason) ->
+              { bonus; source = "keeper_judge"; reason; warning = None }
+          | None ->
+              {
+                bonus = 0;
+                source = "deterministic_fallback";
+                reason = None;
+                warning = Some "keeper returned unparsable bonus";
+              })
+      | `Timeout ->
+          {
+            bonus = 0;
+            source = "deterministic_fallback";
+            reason = None;
+            warning = Some "keeper judge timeout";
+          }
+      | `Error err ->
+          {
+            bonus = 0;
+            source = "deterministic_fallback";
+            reason = None;
+            warning = Some (Printf.sprintf "keeper judge error: %s" err);
+          })
+
+let contribution_actor_id_of_event (event : Trpg_engine_event.t) =
+  let payload = event.payload in
+  let from_payload =
+    match payload |> member "actor_id" with
+    | `String v when String.trim v <> "" -> Some (String.trim v)
+    | _ -> None
+  in
+  match from_payload with
+  | Some actor_id -> Some actor_id
+  | None ->
+      Option.bind event.actor_id (fun v ->
+          let trimmed = String.trim v in
+          if trimmed = "" then None else Some trimmed)
+
+let contribution_add score_tbl reasons_tbl ~actor_id ~delta ~reason =
+  let prev = Hashtbl.find_opt score_tbl actor_id |> Option.value ~default:0 in
+  let next = clamp_int (-10) 50 (prev + delta) in
+  Hashtbl.replace score_tbl actor_id next;
+  let reasons = Hashtbl.find_opt reasons_tbl actor_id |> Option.value ~default:[] in
+  let next_reasons =
+    if String.trim reason = "" then reasons else
+      let appended = reasons @ [ reason ] in
+      let len = List.length appended in
+      if len <= 8 then appended else
+        let rec drop n xs =
+          if n <= 0 then xs
+          else
+            match xs with
+            | [] -> []
+            | _ :: tl -> drop (n - 1) tl
+        in
+        drop (len - 8) appended
+  in
+  Hashtbl.replace reasons_tbl actor_id next_reasons
+
+let contribution_snapshot_from_events events =
+  let score_tbl = Hashtbl.create 32 in
+  let reasons_tbl = Hashtbl.create 32 in
+  List.iter
+    (fun (event : Trpg_engine_event.t) ->
+      let payload = event.payload in
+      match event.event_type with
+      | Trpg_engine_event.Turn_action_resolved -> (
+          match contribution_actor_id_of_event event with
+          | Some actor_id ->
+              contribution_add score_tbl reasons_tbl ~actor_id ~delta:2
+                ~reason:"turn.action.resolved +2"
+          | None -> ())
+      | Trpg_engine_event.Intervention_applied -> (
+          let actor_id =
+            match payload |> member "target_actor" with
+            | `String v when String.trim v <> "" -> Some (String.trim v)
+            | _ -> contribution_actor_id_of_event event
+          in
+          match actor_id with
+          | Some id ->
+              contribution_add score_tbl reasons_tbl ~actor_id:id ~delta:1
+                ~reason:"intervention.applied +1"
+          | None -> ())
+      | Trpg_engine_event.Dice_rolled -> (
+          match contribution_actor_id_of_event event with
+          | Some actor_id ->
+              let passed =
+                match payload |> member "passed" with
+                | `Bool b -> b
+                | _ -> false
+              in
+              let delta = if passed then 1 else -1 in
+              let reason =
+                if passed then "dice.rolled(pass) +1"
+                else "dice.rolled(fail) -1"
+              in
+              contribution_add score_tbl reasons_tbl ~actor_id ~delta ~reason
+          | None -> ())
+      | _ -> ())
+    events;
+  (score_tbl, reasons_tbl)
+
+let contribution_for_actor_from_events events actor_id =
+  let score_tbl, reasons_tbl = contribution_snapshot_from_events events in
+  let score = Hashtbl.find_opt score_tbl actor_id |> Option.value ~default:0 in
+  let reasons = Hashtbl.find_opt reasons_tbl actor_id |> Option.value ~default:[] in
+  (score, reasons)
+
+let append_memory_signal_event ~base_dir ~room_id ~event_tier ~importance_score
+    ~summary_ko ~summary_en ~entity_refs =
+  let payload =
+    `Assoc
+      [
+        ("event_tier", `String event_tier);
+        ("importance_score", `Int (clamp_int 0 100 importance_score));
+        ("summary_ko", `String summary_ko);
+        ("summary_en", `String summary_en);
+        ("entity_refs", `Assoc entity_refs);
+      ]
+  in
+  append_event ~base_dir ~room_id
+    ~event_type:Trpg_engine_event.Memory_signal
+    ~payload ()
 
 let parse_player_keepers args =
   let ( let* ) = Result.bind in
@@ -3893,6 +4168,20 @@ let handle_turn_advance ctx args : result =
         ~payload:(`Assoc [ ("turn", `Int next_turn) ])
         ()
     in
+    let* join_window_event =
+      append_event
+        ~base_dir
+        ~room_id
+        ~event_type:Trpg_engine_event.Join_window_opened
+        ~payload:
+          (`Assoc
+            [
+              ("turn", `Int next_turn);
+              ("window", `String "round_boundary_only");
+              ("reason", `String "manual_turn_advance");
+            ])
+        ()
+    in
     let* phase_event_opt =
       match phase_opt with
       | None -> Ok None
@@ -3909,7 +4198,7 @@ let handle_turn_advance ctx args : result =
     in
     let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
     let events_json =
-      [ Some turn_event; phase_event_opt ]
+      [ Some turn_event; Some join_window_event; phase_event_opt ]
       |> List.filter_map (fun x -> x)
       |> List.map Trpg_engine_event.to_yojson
     in
@@ -4663,11 +4952,30 @@ let handle_actor_claim ctx args : result =
     let* () = validate_rule_module rule_module in
     let* derived = derive_state ~base_dir ~room_id ~rule_module in
     let state = state_of_derived derived in
+    let* events = Trpg_engine_store_sqlite.read_events ~base_dir ~room_id in
     if not (actor_exists_in_state state actor_id) then
       Error (Printf.sprintf "unknown actor_id: %s" actor_id)
     else if not (actor_alive_in_state state actor_id) then
       Error (Printf.sprintf "actor is not alive: %s" actor_id)
     else
+      let actor_role = actor_role_in_state state actor_id in
+      let* () =
+        if actor_role <> "player" then Ok ()
+        else
+          let gate = join_gate_of_state state in
+          let score, _reasons = contribution_for_actor_from_events events actor_id in
+          if not gate.phase_open then
+            Error
+              (Printf.sprintf
+                 "join gate failed: code=join_window_closed actor_id=%s window=%s"
+                 actor_id gate.window)
+          else if score < gate.min_points then
+            Error
+              (Printf.sprintf
+                 "join gate failed: code=insufficient_contribution actor_id=%s score=%d required=%d"
+                 actor_id score gate.min_points)
+          else Ok ()
+      in
       let normalized_keeper = normalize_keeper_name keeper_name in
       match owner_for_actor state actor_id with
       | Some owner when normalize_keeper_name owner = normalized_keeper ->
@@ -4771,6 +5079,384 @@ let handle_actor_release ctx args : result =
               ("event", Trpg_engine_event.to_yojson event);
               ("state", state_of_derived next_derived);
             ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_join_eligibility ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* actor_id = get_required_string args "actor_id" in
+    let* keeper_name_opt = get_optional_string args "keeper_name" in
+    let* rule_opt = get_optional_string args "rule_module" in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+    let* () = validate_rule_module rule_module in
+    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let state = state_of_derived derived in
+    let* events = Trpg_engine_store_sqlite.read_events ~base_dir ~room_id in
+    let gate = join_gate_of_state state in
+    let actor_exists = actor_exists_in_state state actor_id in
+    let actor_role =
+      if actor_exists then actor_role_in_state state actor_id else "player"
+    in
+    let server_score, reasons =
+      contribution_for_actor_from_events events actor_id
+    in
+    let keeper_eval =
+      match keeper_name_opt with
+      | Some keeper_name ->
+          evaluate_keeper_bonus ctx ~keeper_name ~room_id ~actor_id ~server_score
+            ~required_points:gate.min_points
+      | None ->
+          {
+            bonus = 0;
+            source = "server_only";
+            reason = None;
+            warning = None;
+          }
+    in
+    let effective_score = server_score + keeper_eval.bonus in
+    let eligible, reason_code, reason =
+      if actor_role <> "player" then
+        (true, None, None)
+      else if not gate.phase_open then
+        ( false,
+          Some "join_window_closed",
+          Some "mid-join is only allowed at round boundary window" )
+      else if effective_score < gate.min_points then
+        ( false,
+          Some "insufficient_contribution",
+          Some
+            (Printf.sprintf "score=%d required=%d"
+               effective_score gate.min_points) )
+      else (true, None, None)
+    in
+    Ok
+      (`Assoc
+        [
+          ("ok", `Bool true);
+          ("room_id", `String room_id);
+          ("actor_id", `String actor_id);
+          ("actor_exists", `Bool actor_exists);
+          ("actor_role", `String actor_role);
+          ("phase_open", `Bool gate.phase_open);
+          ("window", `String gate.window);
+          ("required_points", `Int gate.min_points);
+          ("server_score", `Int server_score);
+          ("keeper_bonus", `Int keeper_eval.bonus);
+          ("effective_score", `Int effective_score);
+          ("eligible", `Bool eligible);
+          ("reason_code", Option.fold ~none:`Null ~some:(fun v -> `String v) reason_code);
+          ("reason", Option.fold ~none:`Null ~some:(fun v -> `String v) reason);
+          ("score_reasons", json_of_strings reasons);
+          ("judge_source", `String keeper_eval.source);
+          ("judge_reason", Option.fold ~none:`Null ~some:(fun v -> `String v) keeper_eval.reason);
+          ("judge_warning", Option.fold ~none:`Null ~some:(fun v -> `String v) keeper_eval.warning);
+          ("state", state);
+        ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
+let handle_mid_join_request ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* actor_id = get_required_string args "actor_id" in
+    let* keeper_name = get_required_string args "keeper_name" in
+    let* rule_opt = get_optional_string args "rule_module" in
+    let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+    let* () = validate_rule_module rule_module in
+    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let state = state_of_derived derived in
+    let* events = Trpg_engine_store_sqlite.read_events ~base_dir ~room_id in
+    let gate = join_gate_of_state state in
+    let actor_exists = actor_exists_in_state state actor_id in
+    let actor_role =
+      if actor_exists then actor_role_in_state state actor_id
+      else
+        (match get_optional_string args "role" with
+        | Ok (Some role) -> String.lowercase_ascii role
+        | _ -> "player")
+    in
+    let server_score, score_reasons =
+      contribution_for_actor_from_events events actor_id
+    in
+    let keeper_eval =
+      evaluate_keeper_bonus ctx ~keeper_name ~room_id ~actor_id ~server_score
+        ~required_points:gate.min_points
+    in
+    let effective_score = server_score + keeper_eval.bonus in
+    let requested_payload =
+      `Assoc
+        [
+          ("actor_id", `String actor_id);
+          ("keeper_name", `String keeper_name);
+          ("actor_role", `String actor_role);
+          ("phase_open", `Bool gate.phase_open);
+          ("window", `String gate.window);
+          ("required_points", `Int gate.min_points);
+          ("server_score", `Int server_score);
+          ("keeper_bonus", `Int keeper_eval.bonus);
+          ("effective_score", `Int effective_score);
+          ("requested_by", `String ctx.agent_name);
+        ]
+    in
+    let* requested_event =
+      append_event ~base_dir ~room_id
+        ~event_type:Trpg_engine_event.Mid_join_requested ~actor_id
+        ~payload:requested_payload ()
+    in
+    let reject ~reason_code ~reason ~importance_score =
+      let rejected_payload =
+        `Assoc
+          [
+            ("actor_id", `String actor_id);
+            ("keeper_name", `String keeper_name);
+            ("reason_code", `String reason_code);
+            ("reason", `String reason);
+            ("required_points", `Int gate.min_points);
+            ("effective_score", `Int effective_score);
+          ]
+      in
+      let* rejected_event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Mid_join_rejected ~actor_id
+          ~payload:rejected_payload ()
+      in
+      let* memory_event =
+        append_memory_signal_event ~base_dir ~room_id ~event_tier:"short"
+          ~importance_score
+          ~summary_ko:(Printf.sprintf "중간 참여 거절: %s (%s)" actor_id reason_code)
+          ~summary_en:(Printf.sprintf "Mid-join rejected: %s (%s)" actor_id reason_code)
+          ~entity_refs:
+            [
+              ("actor_id", `String actor_id);
+              ("keeper_name", `String keeper_name);
+              ("reason_code", `String reason_code);
+            ]
+      in
+      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("keeper_name", `String keeper_name);
+            ("granted", `Bool false);
+            ("reason_code", `String reason_code);
+            ("reason", `String reason);
+            ("required_points", `Int gate.min_points);
+            ("server_score", `Int server_score);
+            ("keeper_bonus", `Int keeper_eval.bonus);
+            ("effective_score", `Int effective_score);
+            ("score_reasons", json_of_strings score_reasons);
+            ("judge_source", `String keeper_eval.source);
+            ("judge_warning", Option.fold ~none:`Null ~some:(fun v -> `String v) keeper_eval.warning);
+            ( "events",
+              `List
+                [
+                  Trpg_engine_event.to_yojson requested_event;
+                  Trpg_engine_event.to_yojson rejected_event;
+                  Trpg_engine_event.to_yojson memory_event;
+                ] );
+            ("state", state_of_derived next_derived);
+          ])
+    in
+    if actor_exists && not (actor_alive_in_state state actor_id) then
+      reject ~reason_code:"actor_not_alive"
+        ~reason:"target actor is not alive"
+        ~importance_score:55
+    else if actor_role = "player" && not gate.phase_open then
+      reject ~reason_code:"join_window_closed"
+        ~reason:"mid-join is only allowed at round boundary window"
+        ~importance_score:40
+    else if actor_role = "player" && effective_score < gate.min_points then
+      reject ~reason_code:"insufficient_contribution"
+        ~reason:
+          (Printf.sprintf "effective_score=%d required_points=%d"
+             effective_score gate.min_points)
+        ~importance_score:45
+    else
+      let* spawn_event_opt, state_after_spawn =
+        if actor_exists then Ok (None, state)
+        else
+          let* actor_json = actor_payload_from_spawn_args args ~actor_id in
+          let spawn_payload =
+            `Assoc
+              [
+                ("actor_id", `String actor_id);
+                ("actor", actor_json);
+                ("spawned_by", `String ctx.agent_name);
+                ("source", `String "mid_join");
+              ]
+          in
+          let* spawn_event =
+            append_event ~base_dir ~room_id
+              ~event_type:Trpg_engine_event.Actor_spawned ~actor_id
+              ~payload:spawn_payload ()
+          in
+          let* d = derive_state ~base_dir ~room_id ~rule_module in
+          Ok (Some spawn_event, state_of_derived d)
+      in
+      let normalized_keeper = normalize_keeper_name keeper_name in
+      let* claim_resolution =
+        match owner_for_actor state_after_spawn actor_id with
+        | Some owner when normalize_keeper_name owner = normalized_keeper ->
+            Ok (`Proceed (true, None, state_after_spawn))
+        | Some owner -> (
+            let* rejected_json =
+              reject ~reason_code:"actor_claimed_by_other_keeper"
+                ~reason:(Printf.sprintf "actor already claimed by %s" owner)
+                ~importance_score:50
+            in
+            Ok (`Rejected rejected_json))
+        | None -> (
+            match actor_for_keeper state_after_spawn keeper_name with
+            | Some current_actor -> (
+                let* rejected_json =
+                  reject ~reason_code:"keeper_already_controls_actor"
+                    ~reason:
+                      (Printf.sprintf "keeper=%s already controls actor=%s"
+                         keeper_name current_actor)
+                    ~importance_score:48
+                in
+                Ok (`Rejected rejected_json))
+            | None ->
+                let claim_payload =
+                  `Assoc
+                    [
+                      ("actor_id", `String actor_id);
+                      ("keeper_name", `String keeper_name);
+                      ("claimed_by", `String ctx.agent_name);
+                      ("source", `String "mid_join");
+                    ]
+                in
+                let* claim_event =
+                  append_event ~base_dir ~room_id
+                    ~event_type:Trpg_engine_event.Actor_claimed ~actor_id
+                    ~payload:claim_payload ()
+                in
+                let* d = derive_state ~base_dir ~room_id ~rule_module in
+                Ok (`Proceed (false, Some claim_event, state_of_derived d)))
+      in
+      match claim_resolution with
+      | `Rejected json -> Ok json
+      | `Proceed (already_claimed, claim_event_opt, state_after_claim) ->
+          let* penalty_event_opt, _state_after_penalty =
+            if actor_role <> "player" then Ok (None, state_after_claim)
+            else
+              let actor_json =
+                state_after_claim |> member "party" |> member actor_id
+              in
+              let max_hp =
+                actor_json |> member "max_hp" |> to_int_option
+                |> Option.value ~default:10
+              in
+              let hp =
+                actor_json |> member "hp" |> to_int_option
+                |> Option.value ~default:max_hp
+              in
+              let penalty_hp_target =
+                max 1 (int_of_float (float_of_int max_hp *. 0.7))
+              in
+              let penalty_hp = min hp penalty_hp_target in
+              let actor_patch =
+                `Assoc
+                  [
+                    ("hp", `Int penalty_hp);
+                    ("late_join_penalty", `Bool true);
+                    ("late_join_penalty_turns", `Int 2);
+                  ]
+              in
+              let payload =
+                `Assoc
+                  [
+                    ("actor_id", `String actor_id);
+                    ("actor_patch", actor_patch);
+                    ("updated_by", `String ctx.agent_name);
+                    ("source", `String "mid_join_penalty");
+                  ]
+              in
+              let* penalty_event =
+                append_event ~base_dir ~room_id
+                  ~event_type:Trpg_engine_event.Actor_updated ~actor_id
+                  ~payload ()
+              in
+              let* d = derive_state ~base_dir ~room_id ~rule_module in
+              Ok (Some penalty_event, state_of_derived d)
+          in
+          let granted_payload =
+            `Assoc
+              [
+                ("actor_id", `String actor_id);
+                ("keeper_name", `String keeper_name);
+                ("actor_role", `String actor_role);
+                ("already_claimed", `Bool already_claimed);
+                ("required_points", `Int gate.min_points);
+                ("effective_score", `Int effective_score);
+                ("source", `String "hard_gate");
+              ]
+          in
+          let* granted_event =
+            append_event ~base_dir ~room_id
+              ~event_type:Trpg_engine_event.Mid_join_granted ~actor_id
+              ~payload:granted_payload ()
+          in
+          let* memory_event =
+            append_memory_signal_event ~base_dir ~room_id ~event_tier:"mid"
+              ~importance_score:72
+              ~summary_ko:
+                (Printf.sprintf "중간 참여 승인: %s (%s)" actor_id keeper_name)
+              ~summary_en:
+                (Printf.sprintf "Mid-join granted: %s (%s)" actor_id keeper_name)
+              ~entity_refs:
+                [
+                  ("actor_id", `String actor_id);
+                  ("keeper_name", `String keeper_name);
+                  ("effective_score", `Int effective_score);
+                ]
+          in
+          let* final_derived = derive_state ~base_dir ~room_id ~rule_module in
+          let events =
+            [
+              Some requested_event;
+              spawn_event_opt;
+              claim_event_opt;
+              penalty_event_opt;
+              Some granted_event;
+              Some memory_event;
+            ]
+            |> List.filter_map (fun x -> x)
+            |> List.map Trpg_engine_event.to_yojson
+          in
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("room_id", `String room_id);
+                ("actor_id", `String actor_id);
+                ("keeper_name", `String keeper_name);
+                ("granted", `Bool true);
+                ( "status",
+                  `String
+                    (if already_claimed then "already_claimed" else "joined")
+                );
+                ("required_points", `Int gate.min_points);
+                ("server_score", `Int server_score);
+                ("keeper_bonus", `Int keeper_eval.bonus);
+                ("effective_score", `Int effective_score);
+                ("score_reasons", json_of_strings score_reasons);
+                ("judge_source", `String keeper_eval.source);
+                ( "judge_warning",
+                  Option.fold ~none:`Null
+                    ~some:(fun v -> `String v)
+                    keeper_eval.warning );
+                ("events", `List events);
+                ("state", state_of_derived final_derived);
+              ])
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
@@ -5099,6 +5785,20 @@ let handle_round_run ctx args : result =
                  actor_id)
         | None -> Ok ()
       in
+      let* join_window_closed_event =
+        append_event
+          ~base_dir
+          ~room_id
+          ~event_type:Trpg_engine_event.Join_window_closed
+          ~payload:
+            (`Assoc
+              [
+                ("turn", `Int turn_before);
+                ("window", `String "round_boundary_only");
+                ("reason", `String "round_run_started");
+              ])
+          ()
+      in
 
       let* phase_event =
         append_event
@@ -5116,7 +5816,9 @@ let handle_round_run ctx args : result =
         |> compact_state_for_prompt
       in
 
-      let appended_events = ref (phase_event :: intervention_events) in
+      let appended_events =
+        ref (join_window_closed_event :: phase_event :: intervention_events)
+      in
       let statuses = ref [] in
       let success_count = ref 0 in
       let fallback_count = ref 0 in
@@ -5691,10 +6393,55 @@ let handle_round_run ctx args : result =
                 appended_events := !appended_events @ [ room_end_event ]
             | None -> ());
             appended_events := !appended_events @ [ outcome_event ];
+            let importance_score =
+              match outcome with
+              | Victory -> 92
+              | Defeat -> 88
+              | Draw -> 72
+            in
+            let* memory_event =
+              append_memory_signal_event ~base_dir ~room_id ~event_tier:"long"
+                ~importance_score
+                ~summary_ko:(Printf.sprintf "세션 결과 확정: %s (%s)" outcome_str reason)
+                ~summary_en:(Printf.sprintf "Session outcome finalized: %s (%s)" outcome_str reason)
+                ~entity_refs:
+                  [
+                    ("outcome", `String outcome_str);
+                    ("reason", `String reason);
+                    ("turn", `Int turn_after);
+                  ]
+            in
+            appended_events := !appended_events @ [ memory_event ];
             latest_outcome_payload := Some outcome_payload;
             derive_state ~base_dir ~room_id ~rule_module
       in
-      let final_state = state_of_derived final_derived in
+      let* _final_derived, final_state =
+        let state_after_outcome = state_of_derived final_derived in
+        let room_status =
+          match state_after_outcome |> member "status" with
+          | `String status -> String.lowercase_ascii status
+          | _ -> "active"
+        in
+        if room_status = "ended" then Ok (final_derived, state_after_outcome)
+        else
+          let* join_window_opened_event =
+            append_event
+              ~base_dir
+              ~room_id
+              ~event_type:Trpg_engine_event.Join_window_opened
+              ~payload:
+                (`Assoc
+                  [
+                    ("turn", `Int turn_after);
+                    ("window", `String "round_boundary_only");
+                    ("reason", `String "round_run_completed");
+                  ])
+              ()
+          in
+          appended_events := !appended_events @ [ join_window_opened_event ];
+          let* reopened_derived = derive_state ~base_dir ~room_id ~rule_module in
+          Ok (reopened_derived, state_of_derived reopened_derived)
+      in
       let statuses = List.rev !statuses in
       let progress_detail = status_first_non_ok_detail statuses in
       let progress_reason =
@@ -5925,6 +6672,8 @@ let dispatch ctx ~name ~args : result option =
   | "masc_trpg_actor_delete" -> Some (handle_actor_delete ctx args)
   | "masc_trpg_actor_claim" -> Some (handle_actor_claim ctx args)
   | "masc_trpg_actor_release" -> Some (handle_actor_release ctx args)
+  | "masc_trpg_join_eligibility" -> Some (handle_join_eligibility ctx args)
+  | "masc_trpg_mid_join_request" -> Some (handle_mid_join_request ctx args)
   | "masc_trpg_intervention_submit" -> Some (handle_intervention_submit ctx args)
   | "masc_trpg_round_run" -> Some (handle_round_run ctx args)
   | "masc_trpg_scene_transition" -> Some (handle_scene_transition ctx args)

@@ -344,9 +344,21 @@ function eventContent(type: string, actorId: string, payload: Record<string, unk
     case 'actor.spawned':
       return `Actor spawned: ${asString(payload.name, actorLabel || 'unknown')}`
     case 'actor.claimed':
-      return `${asString(payload.keeper, 'keeper')} claimed ${actorLabel || 'actor'}`
+      return `${asString(payload.keeper_name, asString(payload.keeper, 'keeper'))} claimed ${actorLabel || 'actor'}`
     case 'actor.released':
-      return `${asString(payload.keeper, 'keeper')} released ${actorLabel || 'actor'}`
+      return `${asString(payload.keeper_name, asString(payload.keeper, 'keeper'))} released ${actorLabel || 'actor'}`
+    case 'join.window.opened':
+      return `Join window opened (turn ${asNumber(payload.turn, 0)})`
+    case 'join.window.closed':
+      return `Join window closed (turn ${asNumber(payload.turn, 0)})`
+    case 'mid.join.requested':
+      return `Mid-join requested: ${actorLabel || asString(payload.actor_id, 'actor')}`
+    case 'mid.join.granted':
+      return `Mid-join granted: ${actorLabel || asString(payload.actor_id, 'actor')}`
+    case 'mid.join.rejected':
+      return `Mid-join rejected: ${asString(payload.reason_code, 'unknown')}`
+    case 'memory.signal':
+      return asString(payload.summary_en, asString(payload.summary_ko, 'Memory signal'))
     case 'combat.attack':
       return asString(payload.summary, asString(payload.result, 'Attack resolved'))
     case 'combat.defense':
@@ -386,8 +398,10 @@ function normalizeTrpgState(
   const state = isRecord(rawStateResponse.state) ? rawStateResponse.state : {}
   const partyJson = isRecord(state.party) ? state.party : {}
   const actorControl = isRecord(state.actor_control) ? state.actor_control : {}
+  const joinGateRaw = isRecord(state.join_gate) ? state.join_gate : {}
+  const contributionRaw = isRecord(state.contribution_ledger) ? state.contribution_ledger : {}
 
-  const party = Object.entries(partyJson).map(([actorId, actorValue]) => {
+  const allActors = Object.entries(partyJson).map(([actorId, actorValue]) => {
     const actor = isRecord(actorValue) ? actorValue : {}
     const maxHp = statFromActor(actor, 'max_hp', undefined, 10)
     const hp = statFromActor(actor, 'hp', undefined, maxHp)
@@ -426,6 +440,27 @@ function normalizeTrpgState(
       },
     }
   })
+  const party = allActors.filter(actor => actor.status !== 'dead')
+
+  const joinGate = {
+    phase_open: asBoolean(joinGateRaw.phase_open, true),
+    min_points: asNumber(joinGateRaw.min_points, 3),
+    window: asString(joinGateRaw.window, 'round_boundary_only'),
+    last_opened_turn:
+      typeof joinGateRaw.last_opened_turn === 'number' ? joinGateRaw.last_opened_turn : null,
+    last_closed_turn:
+      typeof joinGateRaw.last_closed_turn === 'number' ? joinGateRaw.last_closed_turn : null,
+  }
+
+  const contributionLedger = Object.entries(contributionRaw).map(([actorId, entry]) => {
+    const row = isRecord(entry) ? entry : {}
+    return {
+      actor_id: actorId,
+      score: asNumber(row.score, 0),
+      last_reason: asString(row.last_reason, '') || null,
+      reasons: asStringList(row.reasons),
+    }
+  })
 
   const storyLog = rawEvents.map(normalizeRawEvent)
   const roundNumber = asNumber(state.turn, 1)
@@ -460,6 +495,8 @@ function normalizeTrpgState(
       timestamp: storyLog[storyLog.length - 1]?.timestamp ?? new Date().toISOString(),
     },
     map: map || undefined,
+    join_gate: joinGate,
+    contribution_ledger: contributionLedger,
     party,
     story_log: storyLog,
     history: [],
@@ -569,6 +606,55 @@ export function releaseTrpgActor(room: string, actorId: string, keeper: string):
     actor_id: actorId,
     keeper,
   })
+}
+
+export interface TrpgJoinEligibilityResponse {
+  ok: boolean
+  actor_id: string
+  actor_role: string
+  actor_exists: boolean
+  phase_open: boolean
+  window: string
+  required_points: number
+  server_score: number
+  keeper_bonus: number
+  effective_score: number
+  eligible: boolean
+  reason_code?: string | null
+  reason?: string | null
+  score_reasons?: string[]
+  judge_source?: string
+  judge_warning?: string | null
+}
+
+export async function fetchTrpgJoinEligibility(
+  roomId: string,
+  actorId: string,
+  keeperName?: string,
+): Promise<TrpgJoinEligibilityResponse> {
+  const text = await callMcpTool('trpg.join.eligibility', {
+    room_id: roomId,
+    actor_id: actorId,
+    ...(keeperName ? { keeper_name: keeperName } : {}),
+  })
+  return JSON.parse(text) as TrpgJoinEligibilityResponse
+}
+
+export interface TrpgMidJoinRequest {
+  room_id: string
+  actor_id: string
+  keeper_name: string
+  role?: 'player' | 'npc' | 'dm'
+  name?: string
+  archetype?: string
+  persona?: string
+}
+
+export async function requestTrpgMidJoin(
+  req: TrpgMidJoinRequest,
+): Promise<Record<string, unknown>> {
+  const text = await callMcpTool('trpg.mid_join.request', req as unknown as Record<string, unknown>)
+  return JSON.parse(text) as Record<string, unknown>
 }
 
 // --- Lodge ---

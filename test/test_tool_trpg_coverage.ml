@@ -115,6 +115,18 @@ let append_event_exn ~base_dir ~(event : Trpg_engine_event.t) =
   | Ok () -> ()
   | Error e -> failwith ("append event failed: " ^ e)
 
+let append_room_event ~base_dir ~room_id ?actor_id ~event_type ~payload () =
+  let next_seq =
+    match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+    | Ok events -> List.length events + 1
+    | Error _ -> 1
+  in
+  let event =
+    Trpg_engine_event.make ~seq:next_seq ~room_id ~ts:(Types.now_iso ())
+      ~event_type ?actor_id ~payload ()
+  in
+  append_event_exn ~base_dir ~event
+
 let dispatch_exn ctx ~name ~args =
   match Tool_trpg.dispatch ctx ~name ~args with
   | Some r -> r
@@ -1761,6 +1773,137 @@ let test_actor_claim_rejects_dead_actor () =
     (contains_substring claim_msg "not alive");
   cleanup_dir base_dir
 
+let test_mid_join_eligibility_and_request_flow () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let room_id = "room-mid-join-flow" in
+  bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+  in
+
+  let ok0, body0 =
+    dispatch_exn ctx ~name:"masc_trpg_join_eligibility"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "p1");
+            ("keeper_name", `String "keeper-p1");
+          ])
+  in
+  Alcotest.(check bool) "eligibility call ok" true ok0;
+  let json0 = parse_json_exn body0 in
+  Alcotest.(check bool) "not eligible initially" false
+    (json0 |> Yojson.Safe.Util.member "eligible" |> Yojson.Safe.Util.to_bool);
+
+  append_room_event ~base_dir ~room_id
+    ~event_type:Trpg_engine_event.Turn_action_resolved
+    ~actor_id:"p1"
+    ~payload:(`Assoc [ ("actor_id", `String "p1"); ("result", `String "advance") ])
+    ();
+  append_room_event ~base_dir ~room_id
+    ~event_type:Trpg_engine_event.Dice_rolled
+    ~actor_id:"p1"
+    ~payload:
+      (`Assoc
+        [
+          ("actor_id", `String "p1");
+          ("action", `String "ability_check");
+          ("passed", `Bool true);
+          ("total", `Int 14);
+        ])
+    ();
+
+  let ok1, body1 =
+    dispatch_exn ctx ~name:"masc_trpg_join_eligibility"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "p1");
+            ("keeper_name", `String "keeper-p1");
+          ])
+  in
+  Alcotest.(check bool) "eligibility call ok after score" true ok1;
+  let json1 = parse_json_exn body1 in
+  Alcotest.(check bool) "eligible after score" true
+    (json1 |> Yojson.Safe.Util.member "eligible" |> Yojson.Safe.Util.to_bool);
+
+  let ok_join, join_body =
+    dispatch_exn ctx ~name:"masc_trpg_mid_join_request"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "p1");
+            ("keeper_name", `String "keeper-p1");
+          ])
+  in
+  Alcotest.(check bool) "mid join request ok" true ok_join;
+  let join_json = parse_json_exn join_body in
+  Alcotest.(check bool) "mid join granted" true
+    (join_json |> Yojson.Safe.Util.member "granted" |> Yojson.Safe.Util.to_bool);
+  let state = join_json |> Yojson.Safe.Util.member "state" in
+  let actor = state |> Yojson.Safe.Util.member "party" |> Yojson.Safe.Util.member "p1" in
+  Alcotest.(check int) "late_join_penalty_turns starts at 2" 2
+    (actor |> Yojson.Safe.Util.member "late_join_penalty_turns" |> Yojson.Safe.Util.to_int);
+
+  let ok_adv1, adv_body1 =
+    dispatch_exn ctx ~name:"masc_trpg_turn_advance"
+      ~args:(`Assoc [ ("room_id", `String room_id) ])
+  in
+  Alcotest.(check bool) "turn advance1 ok" true ok_adv1;
+  let state1 = parse_json_exn adv_body1 |> Yojson.Safe.Util.member "state" in
+  Alcotest.(check int) "late_join_penalty_turns decremented to 1" 1
+    (state1 |> Yojson.Safe.Util.member "party" |> Yojson.Safe.Util.member "p1"
+    |> Yojson.Safe.Util.member "late_join_penalty_turns"
+    |> Yojson.Safe.Util.to_int);
+
+  let ok_adv2, adv_body2 =
+    dispatch_exn ctx ~name:"masc_trpg_turn_advance"
+      ~args:(`Assoc [ ("room_id", `String room_id) ])
+  in
+  Alcotest.(check bool) "turn advance2 ok" true ok_adv2;
+  let state2 = parse_json_exn adv_body2 |> Yojson.Safe.Util.member "state" in
+  Alcotest.(check int) "late_join_penalty_turns decremented to 0" 0
+    (state2 |> Yojson.Safe.Util.member "party" |> Yojson.Safe.Util.member "p1"
+    |> Yojson.Safe.Util.member "late_join_penalty_turns"
+    |> Yojson.Safe.Util.to_int);
+  cleanup_dir base_dir
+
+let test_mid_join_reject_when_window_closed () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let room_id = "room-mid-join-closed" in
+  bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p2" ];
+  append_room_event ~base_dir ~room_id
+    ~event_type:Trpg_engine_event.Join_window_closed
+    ~payload:(`Assoc [ ("turn", `Int 1); ("reason", `String "test") ])
+    ();
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+  in
+  let ok_join, join_body =
+    dispatch_exn ctx ~name:"masc_trpg_mid_join_request"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "p2");
+            ("keeper_name", `String "keeper-p2");
+          ])
+  in
+  Alcotest.(check bool) "mid join request processed" true ok_join;
+  let join_json = parse_json_exn join_body in
+  Alcotest.(check bool) "mid join rejected" false
+    (join_json |> Yojson.Safe.Util.member "granted" |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check string) "reason code is window closed" "join_window_closed"
+    (join_json |> Yojson.Safe.Util.member "reason_code" |> Yojson.Safe.Util.to_string);
+  cleanup_dir base_dir
+
 (* ================================================================
    entropy_seed / pick_by_seed unit tests
    ================================================================ *)
@@ -2393,6 +2536,14 @@ let () =
             "reject dead actor claim"
             `Quick
             test_actor_claim_rejects_dead_actor;
+          Alcotest.test_case
+            "mid join eligibility + request + penalty decay"
+            `Quick
+            test_mid_join_eligibility_and_request_flow;
+          Alcotest.test_case
+            "mid join rejects when join window is closed"
+            `Quick
+            test_mid_join_reject_when_window_closed;
         ] );
       ( "entropy",
         [

@@ -1052,6 +1052,8 @@ let legacy_alias_to_canonical = function
   | "masc_trpg_actor_delete" -> Some "trpg.actor.delete"
   | "masc_trpg_actor_claim" -> Some "trpg.actor.claim"
   | "masc_trpg_actor_release" -> Some "trpg.actor.release"
+  | "masc_trpg_join_eligibility" -> Some "trpg.join.eligibility"
+  | "masc_trpg_mid_join_request" -> Some "trpg.mid_join.request"
   | "masc_trpg_intervention_submit" -> Some "trpg.intervention.submit"
   | "masc_trpg_scene_transition" -> Some "trpg.scene.transition"
   | "masc_trpg_quest_update" -> Some "trpg.quest.update"
@@ -1214,6 +1216,14 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
       Some
         (handle_trpg_canonical ctx ~canonical_tool:name
            ~legacy_name:"masc_trpg_actor_release" args)
+  | "trpg.join.eligibility" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_join_eligibility" args)
+  | "trpg.mid_join.request" ->
+      Some
+        (handle_trpg_canonical ctx ~canonical_tool:name
+           ~legacy_name:"masc_trpg_mid_join_request" args)
   | "trpg.intervention.submit" ->
       Some
         (handle_trpg_canonical ctx ~canonical_tool:name
@@ -1523,6 +1533,35 @@ let schemas : Types.tool_schema list =
            ("actor_id", string_schema);
            ("keeper_name", string_schema);
            ("reason", string_schema);
+           ("rule_module", string_schema);
+         ]);
+    schema "trpg.join.eligibility"
+      "Canonical alias of masc_trpg_join_eligibility."
+      (object_schema
+         ~required:[ "room_id"; "actor_id" ]
+         [
+           ("room_id", string_schema);
+           ("actor_id", string_schema);
+           ("keeper_name", string_schema);
+           ("rule_module", string_schema);
+         ]);
+    schema "trpg.mid_join.request"
+      "Canonical alias of masc_trpg_mid_join_request."
+      (object_schema
+         ~required:[ "room_id"; "actor_id"; "keeper_name" ]
+         [
+           ("room_id", string_schema);
+           ("actor_id", string_schema);
+           ("keeper_name", string_schema);
+           ("role", string_schema);
+           ("name", string_schema);
+           ("archetype", string_schema);
+           ("persona", string_schema);
+           ("hp", int_schema);
+           ("max_hp", int_schema);
+           ("traits", array_of string_schema);
+           ("skills", array_of string_schema);
+           ("inventory", array_of string_schema);
            ("rule_module", string_schema);
          ]);
     schema "trpg.intervention.submit"

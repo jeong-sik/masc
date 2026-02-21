@@ -9,7 +9,13 @@ import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import { trpgState, trpgLoading, trpgRoom, refreshTrpg } from '../store'
-import { runTrpgRound, rollTrpgDice, advanceTrpgTurn } from '../api'
+import {
+  runTrpgRound,
+  rollTrpgDice,
+  advanceTrpgTurn,
+  fetchTrpgJoinEligibility,
+  requestTrpgMidJoin,
+} from '../api'
 import type { TrpgActor, TrpgState, TrpgEvent, TrpgCharacterStats } from '../types'
 
 // ── Local control state ──────────────────────────────────
@@ -20,6 +26,12 @@ const diceStatValue = signal('10')
 const diceDc = signal('12')
 const diceRawD20 = signal('')
 const runStatus = signal<'idle' | 'running' | 'ok' | 'error'>('idle')
+const joinActorId = signal('')
+const joinKeeper = signal('keeper-late')
+const joinRole = signal<'player' | 'npc' | 'dm'>('player')
+const joinActorName = signal('')
+const joinStatus = signal<'idle' | 'checking' | 'requesting' | 'ok' | 'error'>('idle')
+const joinEligibility = signal<Record<string, unknown> | null>(null)
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -86,6 +98,25 @@ function explainTrait(trait: string): string {
 function explainSkill(skill: string): string {
   const key = skill.trim().toLowerCase()
   return SKILL_HINTS[key] ?? '상황에 따라 선택되는 전술 액션입니다.'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function recString(obj: Record<string, unknown>, key: string, fallback = ''): string {
+  const value = obj[key]
+  return typeof value === 'string' ? value : fallback
+}
+
+function recNumber(obj: Record<string, unknown>, key: string, fallback = 0): number {
+  const value = obj[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function recBool(obj: Record<string, unknown>, key: string, fallback = false): boolean {
+  const value = obj[key]
+  return typeof value === 'boolean' ? value : fallback
 }
 
 // ── Sub-components ───────────────────────────────────────
@@ -385,6 +416,159 @@ function ControlBox({ state }: { state: TrpgState }) {
   `
 }
 
+function JoinGatePanel({ state }: { state: TrpgState }) {
+  const room = trpgRoom.value || state.session?.room || ''
+  const gate = state.join_gate
+  const eligibilityRaw = joinEligibility.value
+  const eligibility = isRecord(eligibilityRaw) ? eligibilityRaw : null
+
+  const checkEligibility = async () => {
+    const actorId = joinActorId.value.trim()
+    const keeper = joinKeeper.value.trim()
+    if (!room || !actorId) {
+      showToast('Room/Actor is required', 'warning')
+      return
+    }
+    joinStatus.value = 'checking'
+    try {
+      const res = await fetchTrpgJoinEligibility(room, actorId, keeper || undefined)
+      joinEligibility.value = res as unknown as Record<string, unknown>
+      joinStatus.value = 'ok'
+      showToast('Eligibility updated', 'success')
+    } catch (err) {
+      joinStatus.value = 'error'
+      const message = err instanceof Error ? err.message : 'Eligibility check failed'
+      showToast(message, 'error')
+    }
+  }
+
+  const requestMidJoin = async () => {
+    const actorId = joinActorId.value.trim()
+    const keeper = joinKeeper.value.trim()
+    const name = joinActorName.value.trim()
+    if (!room || !actorId || !keeper) {
+      showToast('Room/Actor/Keeper is required', 'warning')
+      return
+    }
+    joinStatus.value = 'requesting'
+    try {
+      const result = await requestTrpgMidJoin({
+        room_id: room,
+        actor_id: actorId,
+        keeper_name: keeper,
+        role: joinRole.value,
+        ...(name ? { name } : {}),
+      })
+      joinEligibility.value = result
+      const granted = isRecord(result) ? recBool(result, 'granted', false) : false
+      const reasonCode = isRecord(result) ? recString(result, 'reason_code', '') : ''
+      if (granted) {
+        showToast('Mid-join granted', 'success')
+      } else {
+        showToast(`Mid-join rejected${reasonCode ? `: ${reasonCode}` : ''}`, 'warning')
+      }
+      joinStatus.value = granted ? 'ok' : 'error'
+      refreshTrpg()
+    } catch (err) {
+      joinStatus.value = 'error'
+      const message = err instanceof Error ? err.message : 'Mid-join request failed'
+      showToast(message, 'error')
+    }
+  }
+
+  return html`
+    <div class="trpg-control-box">
+      <div style="font-size:12px; color:#9ca3af; margin-bottom:8px;">
+        Window: <strong>${gate?.phase_open ? 'OPEN' : 'CLOSED'}</strong>
+        ${gate?.window ? html`<span style="margin-left:8px;">(${gate.window})</span>` : null}
+        <span style="margin-left:8px;">Required: ${gate?.min_points ?? 3} pts</span>
+      </div>
+      <div class="trpg-control-grid">
+        <div class="trpg-control-field">
+          <label>Actor ID</label>
+          <input
+            type="text"
+            value=${joinActorId.value}
+            onInput=${(e: Event) => { joinActorId.value = (e.target as HTMLInputElement).value }}
+            placeholder="player-xyz"
+          />
+        </div>
+        <div class="trpg-control-field">
+          <label>Keeper</label>
+          <input
+            type="text"
+            value=${joinKeeper.value}
+            onInput=${(e: Event) => { joinKeeper.value = (e.target as HTMLInputElement).value }}
+            placeholder="keeper-name"
+          />
+        </div>
+        <div class="trpg-control-field">
+          <label>Role</label>
+          <select
+            value=${joinRole.value}
+            onChange=${(e: Event) => { joinRole.value = (e.target as HTMLSelectElement).value as 'player' | 'npc' | 'dm' }}
+          >
+            <option value="player">player</option>
+            <option value="npc">npc</option>
+            <option value="dm">dm</option>
+          </select>
+        </div>
+        <div class="trpg-control-field">
+          <label>Name (optional)</label>
+          <input
+            type="text"
+            value=${joinActorName.value}
+            onInput=${(e: Event) => { joinActorName.value = (e.target as HTMLInputElement).value }}
+            placeholder="display name"
+          />
+        </div>
+        <div class="trpg-control-field">
+          <label>Actions</label>
+          <div style="display:flex; gap:6px;">
+            <button class="trpg-run-btn secondary" onClick=${checkEligibility} disabled=${joinStatus.value === 'checking' || joinStatus.value === 'requesting'}>
+              ${joinStatus.value === 'checking' ? 'Checking...' : 'Check'}
+            </button>
+            <button class="trpg-run-btn recommend" onClick=${requestMidJoin} disabled=${joinStatus.value === 'checking' || joinStatus.value === 'requesting'}>
+              ${joinStatus.value === 'requesting' ? 'Requesting...' : 'Request Join'}
+            </button>
+          </div>
+        </div>
+      </div>
+      ${eligibility
+        ? html`
+          <div style="margin-top:8px; font-size:12px; color:#d1d5db;">
+            Eligible: <strong>${recBool(eligibility, 'eligible', false) ? 'YES' : 'NO'}</strong>
+            <span style="margin-left:8px;">Score ${recNumber(eligibility, 'effective_score', 0)}/${recNumber(eligibility, 'required_points', 0)}</span>
+            ${recString(eligibility, 'reason_code', '') ? html`<span style="margin-left:8px;">Reason: ${recString(eligibility, 'reason_code', '')}</span>` : null}
+          </div>
+        `
+        : null}
+    </div>
+  `
+}
+
+function ContributionLedger({ state }: { state: TrpgState }) {
+  const rows = [...(state.contribution_ledger ?? [])]
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .slice(0, 8)
+  if (rows.length === 0) {
+    return html`<div class="empty-state" style="font-size:13px;">No contribution data yet</div>`
+  }
+  return html`
+    <div class="trpg-round-list">
+      ${rows.map(row => html`
+        <div class="trpg-round-item active">
+          <span>${row.actor_id}</span>
+          <span style="margin-left:auto; font-size:11px;">score ${row.score}</span>
+          ${row.last_reason
+            ? html`<div style="width:100%; font-size:11px; color:#9ca3af; margin-top:4px;">${row.last_reason}</div>`
+            : null}
+        </div>
+      `)}
+    </div>
+  `
+}
+
 function NextAction({ state }: { state: TrpgState }) {
   const round = state.current_round
   if (!round) return null
@@ -471,6 +655,16 @@ export function Trpg() {
           ${'' /* Controls */}
           <${Card} title="Controls">
             <${ControlBox} state=${state} />
+          <//>
+
+          ${'' /* Mid-join gate */}
+          <${Card} title="Mid-Join Gate" style="margin-top:16px;">
+            <${JoinGatePanel} state=${state} />
+          <//>
+
+          ${'' /* Contribution ledger */}
+          <${Card} title="Contribution" style="margin-top:16px;">
+            <${ContributionLedger} state=${state} />
           <//>
 
           ${'' /* Party list */}

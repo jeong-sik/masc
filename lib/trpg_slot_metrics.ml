@@ -114,6 +114,14 @@ let increment_counter (counter : event_counter) event_type =
   | Actor_released -> { counter with actor_released = counter.actor_released + 1 }
   | Intervention_submitted -> { counter with intervention_submitted = counter.intervention_submitted + 1 }
   | Intervention_applied -> { counter with intervention_applied = counter.intervention_applied + 1 }
+  | Join_window_opened
+  | Join_window_closed
+  | Mid_join_requested
+  | Mid_join_granted
+  | Mid_join_rejected
+  | Contribution_delta
+  | Memory_signal ->
+      counter
 
 (** Convert counter to Yojson.Safe.t *)
 let counter_to_yojson (counter : event_counter) : Yojson.Safe.t =

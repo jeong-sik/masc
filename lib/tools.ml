@@ -4334,6 +4334,83 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
       ("required", `List [`String "verification_id"]);
     ];
   };
+
+  (* ========== Code Navigation Tools ========== *)
+
+  {
+    name = "masc_code_search";
+    description = "Search code using ripgrep with regex support. Returns structured results with file path, line number, and matched content. Use for finding specific patterns, function names, or text across the codebase.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search pattern (supports regex)");
+        ]);
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search path (default: current directory)");
+          ("default", `String ".");
+        ]);
+        ("file_pattern", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Glob pattern to filter files (e.g., '*.ml', '*.py')");
+          ("default", `String "");
+        ]);
+        ("case_insensitive", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Case-insensitive search (default: true)");
+          ("default", `Bool true);
+        ]);
+        ("max_results", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Maximum number of results (default: 50)");
+          ("default", `Int 50);
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+
+  {
+    name = "masc_code_symbols";
+    description = "Extract symbols (functions, types, classes) from a file using heuristics. Token-efficient alternative to reading full file content. Saves ~70% tokens by returning only symbol names and line numbers.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "File path to extract symbols from");
+        ]);
+      ]);
+      ("required", `List [`String "path"]);
+    ];
+  };
+
+  {
+    name = "masc_code_read";
+    description = "Read file with offset/limit pagination. Token-efficient way to read specific sections of large files. Use with masc_code_symbols to determine relevant line ranges.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "File path to read");
+        ]);
+        ("offset", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Starting line number (0-indexed, default: 0)");
+          ("default", `Int 0);
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Maximum lines to read (default: 100)");
+          ("default", `Int 100);
+        ]);
+      ]);
+      ("required", `List [`String "path"]);
+    ];
+  };
 ]
 
 (** All schemas including Perpetual Agent Runtime tools *)

@@ -10,6 +10,18 @@ open Alcotest
 
 module Spawn_eio = Masc_mcp.Spawn_eio
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 (* ============================================================
    spawn_config Type Tests
    ============================================================ *)
@@ -237,6 +249,78 @@ let test_parse_glm_output_invalid () =
   check (option (float 0.01)) "cost None" None cost
 
 (* ============================================================
+   GLM Cascade Policy Tests
+   ============================================================ *)
+
+let test_normalize_glm_model_alias () =
+  check (option string) "4.7 alias" (Some "glm-4.7")
+    (Spawn_eio.normalize_glm_model_alias "4.7");
+  check (option string) "5-coder alias" (Some "glm-5-code")
+    (Spawn_eio.normalize_glm_model_alias "5-coder");
+  check (option string) "flashx alias" (Some "glm-4.7-flashx")
+    (Spawn_eio.normalize_glm_model_alias "4.7-flashx")
+
+let test_glm_spawn_cascade_models_default_200k () =
+  with_env "MASC_GLM_SPAWN_CASCADE" None (fun () ->
+    with_env "MASC_GLM_DEFAULT_MODEL" None (fun () ->
+      check (list string) "default cascade"
+        Spawn_eio.default_glm_spawn_cascade_models
+        (Spawn_eio.glm_spawn_cascade_models ())))
+
+let test_glm_spawn_cascade_models_preferred_and_dedup () =
+  with_env "MASC_GLM_SPAWN_CASCADE" (Some "4.5,4.7,5-coder,4.7") (fun () ->
+    with_env "MASC_GLM_DEFAULT_MODEL" (Some "4.7-flashx") (fun () ->
+      check (list string) "preferred+dedup"
+        [ "glm-4.7-flashx"; "glm-4.5"; "glm-4.7"; "glm-5-code" ]
+        (Spawn_eio.glm_spawn_cascade_models ())))
+
+let test_glm_min_context_tokens_default_and_override () =
+  with_env "MASC_GLM_MIN_CONTEXT_TOKENS" None (fun () ->
+    check int "default 200k" 200_000 (Spawn_eio.glm_min_context_tokens ()));
+  with_env "MASC_GLM_MIN_CONTEXT_TOKENS" (Some "invalid") (fun () ->
+    check int "invalid -> default" 200_000 (Spawn_eio.glm_min_context_tokens ()));
+  with_env "MASC_GLM_MIN_CONTEXT_TOKENS" (Some "128000") (fun () ->
+    check int "override" 128_000 (Spawn_eio.glm_min_context_tokens ()))
+
+let test_glm_spawn_cascade_models_for_policy_200k_only () =
+  with_env "MASC_GLM_SPAWN_CASCADE"
+    (Some "glm-4.5,4.7,4.7-flash,5,glm-4-32b-0414-128k") (fun () ->
+      with_env "MASC_GLM_DEFAULT_MODEL" None (fun () ->
+        with_env "MASC_GLM_MIN_CONTEXT_TOKENS" (Some "200000") (fun () ->
+          check (list string) "200k models only"
+            [ "glm-4.7"; "glm-4.7-flash"; "glm-5" ]
+            (Spawn_eio.glm_spawn_cascade_models_for_policy ()))))
+
+let test_extract_glm_message_text_openai_compat () =
+  let json = Yojson.Safe.from_string
+      {|{"choices":[{"message":{"content":"hello from choices"}}]}|} in
+  check (option string) "choices.message.content string"
+    (Some "hello from choices")
+    (Spawn_eio.extract_glm_message_text json)
+
+let test_extract_glm_message_text_openai_content_list () =
+  let json = Yojson.Safe.from_string
+      {|{"choices":[{"message":{"content":[{"type":"text","text":"line1"},{"type":"text","text":"line2"}]}}]}|} in
+  check (option string) "choices.message.content list"
+    (Some "line1\nline2")
+    (Spawn_eio.extract_glm_message_text json)
+
+let test_extract_glm_message_text_result_fallback () =
+  let json = Yojson.Safe.from_string
+      {|{"result":{"content":[{"type":"text","text":"fallback text"}]}}|} in
+  check (option string) "result.content fallback"
+    (Some "fallback text")
+    (Spawn_eio.extract_glm_message_text json)
+
+let test_glm_error_message_parsing () =
+  let json = {|{"error":{"message":"Rate limit exceeded","type":"rate_limit"}}|} in
+  match Spawn_eio.glm_error_message json with
+  | Some msg ->
+      check bool "contains error message" true
+        (Str.string_match (Str.regexp ".*Rate limit exceeded.*") msg 0)
+  | None -> fail "expected glm error"
+
+(* ============================================================
    default_configs Tests
    ============================================================ *)
 
@@ -335,6 +419,17 @@ let () =
     "parse_glm_output", [
       test_case "success" `Quick test_parse_glm_output_success;
       test_case "invalid" `Quick test_parse_glm_output_invalid;
+    ];
+    "glm_cascade_policy", [
+      test_case "normalize alias" `Quick test_normalize_glm_model_alias;
+      test_case "default 200k cascade" `Quick test_glm_spawn_cascade_models_default_200k;
+      test_case "preferred + dedup" `Quick test_glm_spawn_cascade_models_preferred_and_dedup;
+      test_case "min context default/override" `Quick test_glm_min_context_tokens_default_and_override;
+      test_case "200k filter" `Quick test_glm_spawn_cascade_models_for_policy_200k_only;
+      test_case "extract choices content" `Quick test_extract_glm_message_text_openai_compat;
+      test_case "extract list content" `Quick test_extract_glm_message_text_openai_content_list;
+      test_case "extract fallback content" `Quick test_extract_glm_message_text_result_fallback;
+      test_case "error message parse" `Quick test_glm_error_message_parsing;
     ];
     "default_configs", [
       test_case "not empty" `Quick test_default_configs_not_empty;

@@ -1798,7 +1798,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
   match sa.sa_type with
   | Attack ->
       let target_id = choose_attack_target_id ~state ~actor_id in
-      let damage = deterministic_damage ~turn ~actor_id in
+      let damage = deterministic_damage ~turn ~actor_id () in
       let payload =
         `Assoc
           [

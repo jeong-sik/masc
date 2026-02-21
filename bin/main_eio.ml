@@ -898,8 +898,16 @@ let trpg_actor_claim_json ~base_dir ~body_str : trpg_api_result =
       Error (`Bad_request, Printf.sprintf "actor '%s' is not alive" actor_id)
     else
       let actor_role = trpg_actor_role state actor_id in
+      let phase_name =
+        match Yojson.Safe.Util.member "phase" state with
+        | `String phase -> String.lowercase_ascii (String.trim phase)
+        | _ -> "round"
+      in
       let* () =
         if actor_role <> "player" then Ok ()
+        else if phase_name <> "round" then
+          (* Initial party assignment (lobby/briefing) bypasses contribution gate *)
+          Ok ()
         else
           let phase_open = trpg_join_gate_phase_open state in
           let required = trpg_join_gate_min_points state in

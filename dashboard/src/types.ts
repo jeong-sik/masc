@@ -274,10 +274,27 @@ export interface TrpgSession {
   created_at: string
 }
 
+export interface TrpgJoinGate {
+  phase_open: boolean
+  min_points: number
+  window: string
+  last_opened_turn?: number | null
+  last_closed_turn?: number | null
+}
+
+export interface TrpgContributionEntry {
+  actor_id: string
+  score: number
+  last_reason?: string | null
+  reasons?: string[]
+}
+
 export interface TrpgState {
   session?: TrpgSession
   current_round?: TrpgRound
   map?: string
+  join_gate?: TrpgJoinGate
+  contribution_ledger?: TrpgContributionEntry[]
   party: TrpgActor[]
   story_log: TrpgEvent[]
   history: TrpgSession[]

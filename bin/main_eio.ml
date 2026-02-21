@@ -681,6 +681,64 @@ let trpg_actor_for_keeper state keeper =
   |> List.find_opt (fun (_aid, kn) -> trpg_normalize_keeper_name kn = norm)
   |> Option.map fst
 
+let trpg_actor_role state actor_id =
+  match trpg_state_party_fields state |> List.assoc_opt actor_id with
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "role" fields with
+      | Some (`String role) when String.trim role <> "" ->
+          String.lowercase_ascii (String.trim role)
+      | _ -> "player")
+  | _ -> "player"
+
+let trpg_join_gate_phase_open state =
+  match Yojson.Safe.Util.member "join_gate" state |> Yojson.Safe.Util.member "phase_open" with
+  | `Bool b -> b
+  | _ -> true
+
+let trpg_join_gate_min_points state =
+  match Yojson.Safe.Util.member "join_gate" state |> Yojson.Safe.Util.member "min_points" with
+  | `Int n when n > 0 -> n
+  | _ -> 3
+
+let trpg_contribution_for_actor events actor_id =
+  let score = ref 0 in
+  let reasons = ref [] in
+  let add delta reason =
+    score := max (-10) (min 50 (!score + delta));
+    reasons := !reasons @ [ reason ]
+  in
+  List.iter
+    (fun (ev : Masc_mcp.Trpg_engine_event.t) ->
+      let payload = ev.payload in
+      let event_actor_id =
+        match payload |> Yojson.Safe.Util.member "actor_id" with
+        | `String v when String.trim v <> "" -> Some (String.trim v)
+        | _ -> ev.actor_id
+      in
+      match ev.event_type with
+      | Masc_mcp.Trpg_engine_event.Turn_action_resolved ->
+          if event_actor_id = Some actor_id then add 2 "turn.action.resolved +2"
+      | Masc_mcp.Trpg_engine_event.Intervention_applied ->
+          let target_actor =
+            match payload |> Yojson.Safe.Util.member "target_actor" with
+            | `String v when String.trim v <> "" -> Some (String.trim v)
+            | _ -> event_actor_id
+          in
+          if target_actor = Some actor_id then
+            add 1 "intervention.applied +1"
+      | Masc_mcp.Trpg_engine_event.Dice_rolled ->
+          if event_actor_id = Some actor_id then
+            let passed =
+              match payload |> Yojson.Safe.Util.member "passed" with
+              | `Bool b -> b
+              | _ -> false
+            in
+            if passed then add 1 "dice.rolled(pass) +1"
+            else add (-1) "dice.rolled(fail) -1"
+      | _ -> ())
+    events;
+  (!score, !reasons)
+
 let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
   try
     let json = Yojson.Safe.from_string body_str in
@@ -826,11 +884,36 @@ let trpg_actor_claim_json ~base_dir ~body_str : trpg_api_result =
     let* keeper = trpg_parse_required_string "keeper" json in
     let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
     let state = trpg_state_from_derived derived in
+    let* events =
+      match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+      | Ok events -> Ok events
+      | Error e ->
+          Error
+            ( `Internal_server_error,
+              Printf.sprintf "failed to read events: %s" e )
+    in
     if not (trpg_actor_exists state actor_id) then
       Error (`Bad_request, Printf.sprintf "actor '%s' does not exist" actor_id)
     else if not (trpg_actor_alive state actor_id) then
       Error (`Bad_request, Printf.sprintf "actor '%s' is not alive" actor_id)
     else
+      let actor_role = trpg_actor_role state actor_id in
+      let* () =
+        if actor_role <> "player" then Ok ()
+        else
+          let phase_open = trpg_join_gate_phase_open state in
+          let required = trpg_join_gate_min_points state in
+          let score, _ = trpg_contribution_for_actor events actor_id in
+          if not phase_open then
+            Error (`Bad_request, "join gate failed: code=join_window_closed")
+          else if score < required then
+            Error
+              ( `Bad_request,
+                Printf.sprintf
+                  "join gate failed: code=insufficient_contribution score=%d required=%d"
+                  score required )
+          else Ok ()
+      in
       let norm_keeper = trpg_normalize_keeper_name keeper in
       (* Check current ownership *)
       match trpg_owner_for_actor state actor_id with

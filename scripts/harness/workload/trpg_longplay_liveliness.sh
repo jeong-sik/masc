@@ -19,6 +19,13 @@ STRICT_ADVANCE="${STRICT_ADVANCE:-true}"
 ENFORCE_DISTRIBUTION="${ENFORCE_DISTRIBUTION:-false}"
 MIN_UNIQUE_DAMAGED_PLAYERS="${MIN_UNIQUE_DAMAGED_PLAYERS:-2}"
 REPORT_PATH="${REPORT_PATH:-}"
+KEEPER_AUTO_HANDOFF="${KEEPER_AUTO_HANDOFF:-1}"
+KEEPER_HANDOFF_THRESHOLD="${KEEPER_HANDOFF_THRESHOLD:-0.82}"
+KEEPER_CONTEXT_BUDGET="${KEEPER_CONTEXT_BUDGET:-0.70}"
+KEEPER_COMPACTION_PROFILE="${KEEPER_COMPACTION_PROFILE:-balanced}"
+KEEPER_COMPACTION_RATIO_GATE="${KEEPER_COMPACTION_RATIO_GATE:-0.72}"
+KEEPER_CONTINUITY_COOLDOWN_SEC="${KEEPER_CONTINUITY_COOLDOWN_SEC:-180}"
+KEEPER_DRIFT_ENABLED="${KEEPER_DRIFT_ENABLED:-0}"
 
 PLAYER_KEEPER_NAMES=""
 CLAIMED_ACTORS=""
@@ -158,6 +165,8 @@ LOCAL_FALLBACK_BOOL="$(normalize_bool "$LOCAL_FALLBACK")"
 STRICT_ADVANCE_BOOL="$(normalize_bool "$STRICT_ADVANCE")"
 ENFORCE_DISTRIBUTION_BOOL="$(normalize_bool "$ENFORCE_DISTRIBUTION")"
 KEEPER_MODELS_JSON="$(build_models_json)"
+KEEPER_AUTO_HANDOFF_BOOL="$(normalize_bool "$KEEPER_AUTO_HANDOFF")"
+KEEPER_DRIFT_ENABLED_BOOL="$(normalize_bool "$KEEPER_DRIFT_ENABLED")"
 
 if [ "$(printf "%s" "$KEEPER_MODELS_JSON" | jq 'length')" -eq 0 ]; then
   echo "FAIL: KEEPER_MODELS is required (예: KEEPER_MODELS='gemini:gemini-2.5-flash')" >&2
@@ -207,11 +216,34 @@ player_keepers="$(printf "%s" "$party" | jq -c --arg tag "$KEEPER_TAG" '
 PLAYER_KEEPER_NAMES="$(printf "%s" "$player_keepers" | jq -r '.[]' | awk 'NF')"
 
 echo "[longplay] keeper up/claim"
-call_tool_checked 4200 "masc_keeper_up" "$(jq -cn --arg name "$DM_KEEPER" --arg room "$room_id" --argjson models "$KEEPER_MODELS_JSON" '{name:$name,goal:("TRPG room " + $room + " DM keeper"),instructions:"모든 응답은 한국어로 작성하세요.",models:$models,proactive_enabled:false,presence_keepalive:true}')" >/dev/null
+call_tool_checked 4200 "masc_keeper_up" "$(jq -cn \
+  --arg name "$DM_KEEPER" \
+  --arg room "$room_id" \
+  --argjson models "$KEEPER_MODELS_JSON" \
+  --argjson auto_handoff "$KEEPER_AUTO_HANDOFF_BOOL" \
+  --argjson handoff_threshold "$KEEPER_HANDOFF_THRESHOLD" \
+  --argjson context_budget "$KEEPER_CONTEXT_BUDGET" \
+  --arg compaction_profile "$KEEPER_COMPACTION_PROFILE" \
+  --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
+  --argjson continuity_compaction_cooldown_sec "$KEEPER_CONTINUITY_COOLDOWN_SEC" \
+  --argjson drift_enabled "$KEEPER_DRIFT_ENABLED_BOOL" \
+  '{name:$name,goal:("TRPG room " + $room + " DM keeper"),instructions:"모든 응답은 한국어로 작성하세요. 당신은 DM으로서 서사를 전개하고 턴 정체를 피해야 합니다.",models:$models,proactive_enabled:false,presence_keepalive:true,auto_handoff:$auto_handoff,handoff_threshold:$handoff_threshold,context_budget:$context_budget,compaction_profile:$compaction_profile,compaction_ratio_gate:$compaction_ratio_gate,continuity_compaction_cooldown_sec:$continuity_compaction_cooldown_sec,drift_enabled:$drift_enabled}')" >/dev/null
 while IFS='|' read -r actor_id keeper_name; do
   [ -z "$actor_id" ] && continue
   [ -z "$keeper_name" ] && continue
-  call_tool_checked 4201 "masc_keeper_up" "$(jq -cn --arg name "$keeper_name" --arg room "$room_id" --arg actor "$actor_id" --argjson models "$KEEPER_MODELS_JSON" '{name:$name,goal:("TRPG room " + $room + "에서 " + $actor + " actor를 플레이하세요."),instructions:"모든 응답은 한국어로 작성하세요.",models:$models,proactive_enabled:false,presence_keepalive:true}')" >/dev/null
+  call_tool_checked 4201 "masc_keeper_up" "$(jq -cn \
+    --arg name "$keeper_name" \
+    --arg room "$room_id" \
+    --arg actor "$actor_id" \
+    --argjson models "$KEEPER_MODELS_JSON" \
+    --argjson auto_handoff "$KEEPER_AUTO_HANDOFF_BOOL" \
+    --argjson handoff_threshold "$KEEPER_HANDOFF_THRESHOLD" \
+    --argjson context_budget "$KEEPER_CONTEXT_BUDGET" \
+    --arg compaction_profile "$KEEPER_COMPACTION_PROFILE" \
+    --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
+    --argjson continuity_compaction_cooldown_sec "$KEEPER_CONTINUITY_COOLDOWN_SEC" \
+    --argjson drift_enabled "$KEEPER_DRIFT_ENABLED_BOOL" \
+    '{name:$name,goal:("TRPG room " + $room + "에서 " + $actor + " actor를 플레이하세요."),instructions:"모든 응답은 한국어로 작성하세요. 당신은 보조자가 아니라 해당 액터를 직접 플레이하는 주체입니다.",models:$models,proactive_enabled:false,presence_keepalive:true,auto_handoff:$auto_handoff,handoff_threshold:$handoff_threshold,context_budget:$context_budget,compaction_profile:$compaction_profile,compaction_ratio_gate:$compaction_ratio_gate,continuity_compaction_cooldown_sec:$continuity_compaction_cooldown_sec,drift_enabled:$drift_enabled}')" >/dev/null
   call_tool_checked 4202 "trpg.actor.claim" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$keeper_name" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')" >/dev/null
   CLAIMED_ACTORS="${CLAIMED_ACTORS}${CLAIMED_ACTORS:+$'\n'}${actor_id}|${keeper_name}"
 done < <(printf "%s" "$player_keepers" | jq -r 'to_entries[] | "\(.key)|\(.value)"')

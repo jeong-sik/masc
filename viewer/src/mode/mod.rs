@@ -287,23 +287,12 @@ fn save_view_layout_prefs(prefs: ViewLayoutPrefs) {
 
 /// Holds pending mode transitions from JS click events.
 /// The JS closure writes here; a Bevy Update system drains it.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ModeTransitionBuffer {
     #[cfg(target_arch = "wasm32")]
     pending: Arc<Mutex<Option<ViewerMode>>>,
     #[cfg(not(target_arch = "wasm32"))]
     _phantom: (),
-}
-
-impl Default for ModeTransitionBuffer {
-    fn default() -> Self {
-        Self {
-            #[cfg(target_arch = "wasm32")]
-            pending: Arc::new(Mutex::new(None)),
-            #[cfg(not(target_arch = "wasm32"))]
-            _phantom: (),
-        }
-    }
 }
 
 // ─── Plugin ──────────────────────────────────

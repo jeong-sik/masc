@@ -173,13 +173,11 @@ pub fn maybe_play_dm_voice(
     room_state: &RoomState,
     progress: &TurnProgressState,
 ) {
-    if !should_play_dm_voice(payload, clean_text, room_state, progress) {
-        return;
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        dispatch_voice(payload, clean_text, room_state);
+    if should_play_dm_voice(payload, clean_text, room_state, progress) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            dispatch_voice(payload, clean_text, room_state);
+        }
     }
 }
 

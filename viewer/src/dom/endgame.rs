@@ -41,7 +41,7 @@ pub fn detect_endgame(
     }
 
     // Path 0: Canonical session outcome.
-    for SessionOutcome(payload) in outcomes.read() {
+    if let Some(SessionOutcome(payload)) = outcomes.read().next() {
         endgame.triggered = true;
         let tone = match payload.outcome.as_str() {
             "victory" => EndgameTone::Victory,
@@ -58,7 +58,6 @@ pub fn detect_endgame(
             runner.game_ended.store(true, Ordering::SeqCst);
         }
         for _ in narratives.read() {}
-        return;
     }
 
     // Path 1: TPK — all actors dead.

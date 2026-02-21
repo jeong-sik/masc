@@ -596,15 +596,19 @@
 /* TRPG Actors */
 .trpg-actor-list { display: flex; flex-direction: column; gap: 8px; }
 .trpg-actor {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: block;
   padding: 8px 12px;
   background: rgba(255,255,255,0.03);
   border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
 }
 .trpg-actor-emoji { font-size: 24px; }
-.trpg-actor-info { flex: 1; }
+.trpg-actor-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .trpg-actor-name { font-size: 14px; font-weight: 600; }
 .trpg-actor-stats {
   display: flex;
@@ -612,6 +616,77 @@
   font-size: 12px;
   color: #888;
   font-family: monospace;
+}
+.trpg-role-pill.trpg-role-dm {
+  background: rgba(251,191,36,0.2);
+  color: #fbbf24;
+  border-color: rgba(251,191,36,0.3);
+}
+.trpg-role-pill.trpg-role-player {
+  background: rgba(34,211,238,0.2);
+  color: #22d3ee;
+  border-color: rgba(34,211,238,0.35);
+}
+.trpg-role-pill.trpg-role-npc {
+  background: rgba(248,113,113,0.17);
+  color: #fca5a5;
+  border-color: rgba(248,113,113,0.35);
+}
+.trpg-actor-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #9fb3d3;
+  font-family: monospace;
+}
+.trpg-actor-persona {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px;
+  color: #c6d1e4;
+}
+.trpg-annot-group {
+  margin-top: 8px;
+}
+.trpg-annot-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7f95bc;
+  margin-bottom: 4px;
+}
+.trpg-annot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.trpg-annot-chip {
+  display: grid;
+  grid-template-columns: minmax(96px, 140px) 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.trpg-annot-chip.trait {
+  background: rgba(34,211,238,0.08);
+  border-color: rgba(34,211,238,0.18);
+}
+.trpg-annot-chip.skill {
+  background: rgba(167,139,250,0.09);
+  border-color: rgba(167,139,250,0.22);
+}
+.trpg-annot-name {
+  color: #d9e6ff;
+  font-weight: 600;
+  font-family: monospace;
+}
+.trpg-annot-desc {
+  color: #a9bad8;
 }
 
 /* TRPG Story */
@@ -1578,6 +1653,7 @@ button.council-row.selected {
 }
 @media (max-width: 600px) {
   .trpg-control-grid { grid-template-columns: 1fr; }
+  .trpg-annot-chip { grid-template-columns: 1fr; }
   .keeper-kpis { grid-template-columns: 1fr; }
   .agents-grid { grid-template-columns: 1fr; }
 }

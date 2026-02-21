@@ -357,8 +357,28 @@ function eventContent(type: string, actorId: string, payload: Record<string, unk
       return `Mid-join granted: ${actorLabel || asString(payload.actor_id, 'actor')}`
     case 'mid.join.rejected':
       return `Mid-join rejected: ${asString(payload.reason_code, 'unknown')}`
-    case 'memory.signal':
-      return asString(payload.summary_en, asString(payload.summary_ko, 'Memory signal'))
+    case 'memory.signal': {
+      const refs = isRecord(payload.entity_refs) ? payload.entity_refs : {}
+      const requested = asString(refs.requested_tier, '')
+      const effective = asString(refs.effective_tier, '')
+      const guardrail = asBoolean(refs.guardrail_applied, false)
+      const summary = asString(payload.summary_en, asString(payload.summary_ko, 'Memory signal'))
+      if (!requested && !effective) return summary
+      const tierLabel = requested && effective
+        ? `${requested}->${effective}`
+        : (effective || requested)
+      const guardrailLabel = guardrail ? ' (guardrail)' : ''
+      return `${summary} [${tierLabel}${guardrailLabel}]`
+    }
+    case 'world.event': {
+      const evtType = asString(payload.event_type, '')
+      if (evtType === 'canon.check') {
+        const status = asString(payload.status, 'unknown')
+        const contract = asString(payload.contract_id, 'n/a')
+        return `Canon ${status}: ${contract}`
+      }
+      return asString(payload.description, asString(payload.summary, 'World event'))
+    }
     case 'combat.attack':
       return asString(payload.summary, asString(payload.result, 'Attack resolved'))
     case 'combat.defense':

@@ -41,10 +41,33 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let write_world_contracts_json base_dir content =
+  let dir = Filename.concat base_dir "config/trpg" in
+  ensure_dir dir;
+  write_file (Filename.concat dir "world_contracts.json") content
+
 let keeper_payload ?(action_type = "explore") ?target_id ?flag_key ?scene
-    ?quest_info reply =
+    ?quest_info ?memory_hint_tier ?memory_hint_reason ?memory_hint_importance
+    reply =
   let optional_string_field key value =
     match value with Some v -> [ (key, `String v) ] | None -> []
+  in
+  let memory_hint_field =
+    match memory_hint_tier with
+    | None -> []
+    | Some tier ->
+        let details =
+          [ ("tier", `String tier) ]
+          @
+          (match memory_hint_reason with
+          | Some reason -> [ ("reason", `String reason) ]
+          | None -> [])
+          @
+          (match memory_hint_importance with
+          | Some importance -> [ ("importance_score", `Int importance) ]
+          | None -> [])
+        in
+        [ ("memory_hint", `Assoc details) ]
   in
   `Assoc
     [
@@ -55,7 +78,8 @@ let keeper_payload ?(action_type = "explore") ?target_id ?flag_key ?scene
           @ optional_string_field "target_id" target_id
           @ optional_string_field "flag_key" flag_key
           @ optional_string_field "scene" scene
-          @ optional_string_field "quest_info" quest_info) );
+          @ optional_string_field "quest_info" quest_info
+          @ memory_hint_field) );
     ]
 
 let bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids =
@@ -228,6 +252,191 @@ let test_round_run_success_path () =
   in
   let dm_json = parse_json_exn stream_dm in
   Alcotest.(check int) "dm narration count" 1 (count_from_json dm_json);
+  cleanup_dir base_dir
+
+let test_round_run_memory_hint_guardrail_escalates_tier () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-memory-guardrail" ~actor_ids:["p1"];
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Narrow bridge"
+             ~memory_hint_tier:"short"
+             ~memory_hint_reason:"keep this lightweight"
+             "The party crosses the narrow bridge.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"explore"
+             "I scout the bridge perimeter.")
+    | other -> `Error ("unknown keeper: " ^ other)
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-memory-guardrail");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("phase", `String "round");
+        ("timeout_sec", `Float 1.0);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  let json = parse_json_exn body in
+  let summary = json |> Yojson.Safe.Util.member "summary" in
+  Alcotest.(check bool)
+    "memory guardrail escalation counted"
+    true
+    ((summary |> Yojson.Safe.Util.member "memory_guardrail_escalations"
+     |> Yojson.Safe.Util.to_int)
+    >= 1);
+  let dm_status =
+    json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list
+    |> List.find_opt (fun s ->
+           s |> Yojson.Safe.Util.member "actor_id"
+           |> Yojson.Safe.Util.to_string = "dm")
+  in
+  (match dm_status with
+  | Some status_json ->
+      Alcotest.(check string)
+        "dm requested tier short"
+        "short"
+        (status_json |> Yojson.Safe.Util.member "memory_requested_tier"
+        |> Yojson.Safe.Util.to_string);
+      Alcotest.(check string)
+        "dm effective tier escalated to mid"
+        "mid"
+        (status_json |> Yojson.Safe.Util.member "memory_effective_tier"
+        |> Yojson.Safe.Util.to_string);
+      Alcotest.(check bool)
+        "guardrail applied"
+        true
+        (status_json |> Yojson.Safe.Util.member "memory_guardrail_applied"
+        |> Yojson.Safe.Util.to_bool)
+  | None -> Alcotest.fail "dm status is missing");
+  cleanup_dir base_dir
+
+let test_round_run_canon_check_strict_failure () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  write_world_contracts_json base_dir
+    {|{
+  "default_contract_id": "strict-test",
+  "contracts": [
+    {
+      "id": "strict-test",
+      "title": "Strict Test Contract",
+      "description": "Forces canon check failures for regression tests.",
+      "required_flags": ["canon.required"],
+      "forbidden_flags": ["canon.break"],
+      "required_event_types": ["scene.transition"],
+      "banned_terms": []
+    }
+  ]
+}|};
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"set_flag" ~flag_key:"canon.break"
+             "The DM forces a canon-breaking flag.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"explore"
+             "I keep moving despite the anomaly.")
+    | other -> `Error ("unknown keeper: " ^ other)
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let ok_start, start_body =
+    dispatch_exn ctx ~name:"masc_trpg_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String "session-canon-strict");
+            ("dm_keeper", `String "dm-keeper");
+            ("world_contract_id", `String "strict-test");
+            ("canon_strict", `Bool true);
+            ( "party",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("actor_id", `String "p1");
+                      ("name", `String "Player One");
+                      ("keeper_name", `String "pk-1");
+                    ];
+                ] );
+          ])
+  in
+  Alcotest.(check bool) "session start ok" true ok_start;
+  let start_json = parse_json_exn start_body in
+  let room_id =
+    start_json |> Yojson.Safe.Util.member "room_id" |> Yojson.Safe.Util.to_string
+  in
+  let player_keepers =
+    start_json |> Yojson.Safe.Util.member "round_run_template"
+    |> Yojson.Safe.Util.member "player_keepers"
+  in
+  let ok_round, round_body =
+    dispatch_exn ctx ~name:"masc_trpg_round_run"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("dm_keeper", `String "dm-keeper");
+            ("player_keepers", player_keepers);
+            ("phase", `String "round");
+            ("timeout_sec", `Float 1.0);
+          ])
+  in
+  Alcotest.(check bool) "round_run succeeds with canon fail payload" true ok_round;
+  let round_json = parse_json_exn round_body in
+  let canon_check = round_json |> Yojson.Safe.Util.member "canon_check" in
+  Alcotest.(check string)
+    "canon status fail"
+    "fail"
+    (canon_check |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool)
+    "canon has violations"
+    true
+    ((canon_check |> Yojson.Safe.Util.member "violations"
+     |> Yojson.Safe.Util.to_list
+     |> List.length)
+    >= 1);
+  let summary = round_json |> Yojson.Safe.Util.member "summary" in
+  Alcotest.(check string)
+    "summary canon status"
+    "fail"
+    (summary |> Yojson.Safe.Util.member "canon_status" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool)
+    "summary canon violation count >= 1"
+    true
+    ((summary |> Yojson.Safe.Util.member "canon_violation_count"
+     |> Yojson.Safe.Util.to_int)
+    >= 1);
+
+  let _, stream_world_event =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("event_type", `String "world.event");
+          ])
+  in
+  Alcotest.(check int)
+    "world.event count includes canon check event"
+    1
+    (count_from_json (parse_json_exn stream_world_event));
   cleanup_dir base_dir
 
 let test_round_run_emits_combat_semantic_events () =
@@ -2064,6 +2273,7 @@ let test_apply_structured_action_emits_flag_set () =
           flag_key = Some "outcome.victory";
           scene = None;
           quest_info = None;
+          memory_hint = None;
           raw_payload = `Assoc [];
         }
       in
@@ -2108,6 +2318,7 @@ let test_apply_structured_action_emits_scene_transition () =
           flag_key = None;
           scene = Some "The Dark Cave";
           quest_info = None;
+          memory_hint = None;
           raw_payload = `Assoc [];
         }
       in
@@ -2457,6 +2668,14 @@ let () =
             "success path"
             `Quick
             test_round_run_success_path;
+          Alcotest.test_case
+            "memory hint guardrail escalates tier"
+            `Quick
+            test_round_run_memory_hint_guardrail_escalates_tier;
+          Alcotest.test_case
+            "canon strict check can fail while returning payload"
+            `Quick
+            test_round_run_canon_check_strict_failure;
           Alcotest.test_case
             "timeout policy emits events"
             `Quick

@@ -478,7 +478,7 @@ let schemas : Types.tool_schema list =
       name = "masc_trpg_session_start";
       description =
         "Start a TRPG session from DM/world presets and selected party. \
-         Required: session_id. Optional: room_id, dm/world preset ids, dm_keeper, party, phase.";
+         Required: session_id. Optional: room_id, dm/world preset ids, world_contract_id, canon_strict, dm_keeper, party, phase.";
       input_schema =
         `Assoc
           [
@@ -490,6 +490,8 @@ let schemas : Types.tool_schema list =
                   ("room_id", `Assoc [ ("type", `String "string") ]);
                   ("dm_preset_id", `Assoc [ ("type", `String "string") ]);
                   ("world_preset_id", `Assoc [ ("type", `String "string") ]);
+                  ("world_contract_id", `Assoc [ ("type", `String "string") ]);
+                  ("canon_strict", `Assoc [ ("type", `String "boolean") ]);
                   ("dm_keeper", `Assoc [ ("type", `String "string") ]);
                   ("party", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "object") ]) ]);
                   ("phase", `Assoc [ ("type", `String "string") ]);
@@ -1216,6 +1218,189 @@ let default_end_rules_local : Trpg_preset_store.end_rules =
     allow_dm_end_signal = true;
   }
 
+type world_contract = {
+  id : string;
+  title : string;
+  description : string;
+  required_flags : string list;
+  forbidden_flags : string list;
+  required_event_types : string list;
+  banned_terms : string list;
+}
+
+type world_contract_catalog = {
+  default_contract_id : string option;
+  contracts : world_contract list;
+}
+
+let default_world_contract_catalog : world_contract_catalog =
+  {
+    default_contract_id = Some "open-runtime-v1";
+    contracts =
+      [
+        {
+          id = "open-runtime-v1";
+          title = "Open Runtime Contract";
+          description =
+            "Baseline canon contract that keeps guardrails lightweight for sandbox runs.";
+          required_flags = [];
+          forbidden_flags = [];
+          required_event_types = [ "scene.transition" ];
+          banned_terms = [];
+        };
+        {
+          id = "grimland-chronicle";
+          title = "Grimland Chronicle Canon";
+          description =
+            "Keeps scarcity/political tone coherent for Grimland sessions.";
+          required_flags = [ "scarcity.high" ];
+          forbidden_flags = [ "outcome.invalid"; "world.magic_unlimited" ];
+          required_event_types = [ "scene.transition" ];
+          banned_terms = [ "spaceship"; "laser rifle" ];
+        };
+        {
+          id = "emberfall-siege";
+          title = "Emberfall Siege Canon";
+          description =
+            "Keeps siege pressure active for Emberfall sessions.";
+          required_flags = [ "siege.active" ];
+          forbidden_flags = [ "peace.treaty.signed"; "outcome.invalid" ];
+          required_event_types = [ "scene.transition" ];
+          banned_terms = [ "vacation"; "tourism festival" ];
+        };
+      ];
+  }
+
+let world_contracts_path ~base_dir =
+  Filename.concat base_dir "config/trpg/world_contracts.json"
+
+let parse_world_contract_json (json : Yojson.Safe.t) :
+    (world_contract, string) Stdlib.result =
+  let ( let* ) = Result.bind in
+  let string_field key =
+    match json |> member key with
+    | `String raw ->
+        let value = String.trim raw in
+        if value = "" then Error (Printf.sprintf "world contract %s is empty" key)
+        else Ok value
+    | _ -> Error (Printf.sprintf "world contract %s is required" key)
+  in
+  let string_list_field key =
+    match json |> member key with
+    | `List xs ->
+        Ok
+          (xs
+          |> List.filter_map (function
+               | `String raw ->
+                   let value = String.trim raw in
+                   if value = "" then None else Some value
+               | _ -> None))
+    | `Null -> Ok []
+    | _ -> Error (Printf.sprintf "world contract %s must be string array" key)
+  in
+  let* id = string_field "id" in
+  let* title = string_field "title" in
+  let description =
+    match json |> member "description" with
+    | `String raw -> String.trim raw
+    | _ -> ""
+  in
+  let* required_flags = string_list_field "required_flags" in
+  let* forbidden_flags = string_list_field "forbidden_flags" in
+  let* required_event_types = string_list_field "required_event_types" in
+  let* banned_terms = string_list_field "banned_terms" in
+  Ok
+    {
+      id;
+      title;
+      description;
+      required_flags;
+      forbidden_flags;
+      required_event_types;
+      banned_terms;
+    }
+
+let parse_world_contract_catalog_json (json : Yojson.Safe.t) :
+    (world_contract_catalog, string) Stdlib.result =
+  let ( let* ) = Result.bind in
+  let default_contract_id =
+    match json |> member "default_contract_id" with
+    | `String raw ->
+        let value = String.trim raw in
+        if value = "" then None else Some value
+    | _ -> None
+  in
+  let* contracts =
+    match json |> member "contracts" with
+    | `List xs ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | item :: tl ->
+              let* parsed = parse_world_contract_json item in
+              loop (parsed :: acc) tl
+        in
+        loop [] xs
+    | _ -> Error "world contracts file must contain contracts[]"
+  in
+  if contracts = [] then Error "world contracts file has empty contracts[]"
+  else Ok { default_contract_id; contracts }
+
+let load_world_contract_catalog ~base_dir : world_contract_catalog =
+  let path = world_contracts_path ~base_dir in
+  if not (Sys.file_exists path) then default_world_contract_catalog
+  else
+    match Yojson.Safe.from_file path with
+    | exception _ -> default_world_contract_catalog
+    | json -> (
+        match parse_world_contract_catalog_json json with
+        | Ok catalog -> catalog
+        | Error _ -> default_world_contract_catalog)
+
+let find_world_contract (catalog : world_contract_catalog) ~id =
+  catalog.contracts
+  |> List.find_opt (fun (contract : world_contract) ->
+         String.equal contract.id id)
+
+let resolve_world_contract_for_session ~base_dir ~world_preset_id
+    ~world_contract_id_opt :
+    (world_contract, string) Stdlib.result =
+  let catalog = load_world_contract_catalog ~base_dir in
+  let requested_id =
+    match world_contract_id_opt with
+    | Some raw when String.trim raw <> "" -> Some (String.trim raw)
+    | _ -> None
+  in
+  let default_id =
+    match find_world_contract catalog ~id:world_preset_id with
+    | Some _ -> Some world_preset_id
+    | None -> (
+        match catalog.default_contract_id with
+        | Some raw when String.trim raw <> "" -> Some (String.trim raw)
+        | _ -> (
+            match catalog.contracts with
+            | (first : world_contract) :: _ -> Some first.id
+            | [] -> None))
+  in
+  let selected_id =
+    match requested_id with Some _ -> requested_id | None -> default_id
+  in
+  match selected_id with
+  | None -> Error "no world contract is available"
+  | Some id -> (
+      match find_world_contract catalog ~id with
+      | Some contract -> Ok contract
+      | None -> Error (Printf.sprintf "unknown world_contract_id: %s" id))
+
+let world_contract_ref_to_yojson ~(contract : world_contract) ~strict :
+    Yojson.Safe.t =
+  `Assoc
+    [
+      ("id", `String contract.id);
+      ("title", `String contract.title);
+      ("description", `String contract.description);
+      ("strict", `Bool strict);
+    ]
+
 let string_list_member_or_default json key default =
   match json |> member key with
   | `List xs ->
@@ -1394,6 +1579,241 @@ let evaluate_session_outcome ~end_rules ~(state : Yojson.Safe.t) ~dm_reply :
                     if max_turn_reached then Some (Draw, "max_turn_reached")
                     else None)))
 
+type canon_check = {
+  enabled : bool;
+  contract_id : string option;
+  strict : bool;
+  status : string;
+  violations : string list;
+  warnings : string list;
+  required_flags_missing : string list;
+  forbidden_flags_hit : string list;
+  required_event_types_missing : string list;
+  banned_terms_hit : string list;
+}
+
+let canon_check_to_yojson (check : canon_check) : Yojson.Safe.t =
+  let strings_json xs = `List (List.map (fun value -> `String value) xs) in
+  `Assoc
+    [
+      ("enabled", `Bool check.enabled);
+      ( "contract_id",
+        match check.contract_id with
+        | Some id -> `String id
+        | None -> `Null );
+      ("strict", `Bool check.strict);
+      ("status", `String check.status);
+      ("violations", strings_json check.violations);
+      ("warnings", strings_json check.warnings);
+      ("required_flags_missing", strings_json check.required_flags_missing);
+      ("forbidden_flags_hit", strings_json check.forbidden_flags_hit);
+      ( "required_event_types_missing",
+        strings_json check.required_event_types_missing );
+      ("banned_terms_hit", strings_json check.banned_terms_hit);
+    ]
+
+let canon_check_disabled : canon_check =
+  {
+    enabled = false;
+    contract_id = None;
+    strict = false;
+    status = "disabled";
+    violations = [];
+    warnings = [];
+    required_flags_missing = [];
+    forbidden_flags_hit = [];
+    required_event_types_missing = [];
+    banned_terms_hit = [];
+  }
+
+let canon_contract_ref_from_state (state : Yojson.Safe.t) :
+    (string * bool) option =
+  match state |> member "world" with
+  | `Assoc world_fields -> (
+      match List.assoc_opt "canon_contract" world_fields with
+      | Some (`Assoc canon_fields) ->
+          let canon_json = `Assoc canon_fields in
+          let id_opt =
+            match List.assoc_opt "id" canon_fields with
+            | Some (`String raw) ->
+                let id = String.trim raw in
+                if id = "" then None else Some id
+            | _ -> None
+          in
+          (match id_opt with
+          | None -> None
+          | Some id ->
+              let strict =
+                canon_json |> member "strict" |> to_bool_option
+                |> Option.value ~default:false
+              in
+              Some (id, strict))
+      | _ -> None)
+  | _ -> None
+
+let evaluate_canon_check ~base_dir ~state ~events ~dm_reply : canon_check =
+  match canon_contract_ref_from_state state with
+  | None -> canon_check_disabled
+  | Some (contract_id, strict) -> (
+      let catalog = load_world_contract_catalog ~base_dir in
+      match find_world_contract catalog ~id:contract_id with
+      | None ->
+          {
+            enabled = true;
+            contract_id = Some contract_id;
+            strict;
+            status = "warn";
+            violations = [];
+            warnings =
+              [ Printf.sprintf "contract_not_found:%s" contract_id ];
+            required_flags_missing = [];
+            forbidden_flags_hit = [];
+            required_event_types_missing = [];
+            banned_terms_hit = [];
+          }
+      | Some contract ->
+          let story_flags = story_flags_from_state state in
+          let has_story_flag candidate =
+            story_flags
+            |> List.exists (fun flag ->
+                   String.equal
+                     (String.lowercase_ascii (String.trim flag))
+                     (String.lowercase_ascii (String.trim candidate)))
+          in
+          let required_flags_missing =
+            contract.required_flags
+            |> List.filter (fun flag -> not (has_story_flag flag))
+          in
+          let forbidden_flags_hit =
+            contract.forbidden_flags
+            |> List.filter has_story_flag
+          in
+          let event_types_seen =
+            events
+            |> List.map (fun (event : Trpg_engine_event.t) ->
+                   Trpg_engine_event.string_of_event_type event.event_type)
+            |> dedupe_keep_order
+          in
+          let required_event_types_missing =
+            contract.required_event_types
+            |> List.filter (fun required ->
+                   not (List.mem required event_types_seen))
+          in
+          let dm_reply_lower =
+            dm_reply
+            |> Option.value ~default:""
+            |> String.lowercase_ascii
+          in
+          let banned_terms_hit =
+            contract.banned_terms
+            |> List.filter (fun term ->
+                   let token =
+                     term |> String.trim |> String.lowercase_ascii
+                   in
+                   token <> "" && contains_substring dm_reply_lower token)
+          in
+          let violations =
+            []
+            |> (fun acc ->
+                 acc
+                 @ List.map
+                     (fun flag ->
+                       Printf.sprintf "required_flag_missing:%s" flag)
+                     required_flags_missing)
+            |> (fun acc ->
+                 acc
+                 @ List.map
+                     (fun flag ->
+                       Printf.sprintf "forbidden_flag_present:%s" flag)
+                     forbidden_flags_hit)
+            |> (fun acc ->
+                 acc
+                 @ List.map
+                     (fun term ->
+                       Printf.sprintf "banned_term_detected:%s" term)
+                     banned_terms_hit)
+          in
+          let warnings =
+            List.map
+              (fun ev ->
+                Printf.sprintf "required_event_type_missing:%s" ev)
+              required_event_types_missing
+          in
+          let status =
+            if violations <> [] then if strict then "fail" else "warn"
+            else if warnings <> [] then "warn"
+            else "pass"
+          in
+          {
+            enabled = true;
+            contract_id = Some contract.id;
+            strict;
+            status;
+            violations;
+            warnings;
+            required_flags_missing;
+            forbidden_flags_hit;
+            required_event_types_missing;
+            banned_terms_hit;
+          })
+
+let append_canon_check_observability_events ~base_dir ~room_id ~turn ~phase
+    ~(check : canon_check) =
+  let ( let* ) = Result.bind in
+  if not check.enabled || check.status = "pass" then Ok []
+  else
+    let severity = if check.status = "fail" then "major" else "minor" in
+    let contract_id = check.contract_id |> Option.value ~default:"unknown" in
+    let description =
+      Printf.sprintf "Canon check %s for contract=%s (violations=%d warnings=%d)"
+        check.status contract_id
+        (List.length check.violations)
+        (List.length check.warnings)
+    in
+    let payload =
+      let strings_json xs = `List (List.map (fun value -> `String value) xs) in
+      `Assoc
+        [
+          ("event_type", `String "canon.check");
+          ("description", `String description);
+          ("severity", `String severity);
+          ("turn", `Int turn);
+          ("phase", `String phase);
+          ("contract_id", `String contract_id);
+          ("strict", `Bool check.strict);
+          ("status", `String check.status);
+          ("violations", strings_json check.violations);
+          ("warnings", strings_json check.warnings);
+        ]
+    in
+    let* world_event =
+      append_event ~base_dir ~room_id
+        ~event_type:Trpg_engine_event.World_event
+        ~actor_id:"dm" ~payload ()
+    in
+    let importance_score = if check.status = "fail" then 84 else 61 in
+    let memory_tier = if check.status = "fail" then "long" else "mid" in
+    let* memory_event =
+      append_memory_signal_event ~base_dir ~room_id ~event_tier:memory_tier
+        ~importance_score
+        ~summary_ko:
+          (Printf.sprintf "캐논 검사 %s: %s" check.status contract_id)
+        ~summary_en:
+          (Printf.sprintf "Canon check %s: %s" check.status contract_id)
+        ~entity_refs:
+          [
+            ("source", `String "canon_check");
+            ("contract_id", `String contract_id);
+            ("status", `String check.status);
+            ("strict", `Bool check.strict);
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("violation_count", `Int (List.length check.violations));
+            ("warning_count", `Int (List.length check.warnings));
+          ]
+    in
+    Ok [ world_event; memory_event ]
+
 let is_meaningful_event_type = function
   | Trpg_engine_event.Flag_set
   | Trpg_engine_event.Combat_attack
@@ -1480,6 +1900,17 @@ type action_type =
   | SceneTransition
   | QuestUpdate
 
+type memory_tier =
+  | Memory_short
+  | Memory_mid
+  | Memory_long
+
+type structured_memory_hint = {
+  requested_tier : memory_tier;
+  importance_score : int option;
+  reason : string option;
+}
+
 type structured_action = {
   sa_type : action_type;
   target_id : string option;
@@ -1487,6 +1918,7 @@ type structured_action = {
   flag_key : string option;
   scene : string option;
   quest_info : string option;
+  memory_hint : structured_memory_hint option;
   raw_payload : Yojson.Safe.t;
 }
 
@@ -1523,6 +1955,53 @@ let string_of_action_type = function
   | SetFlag -> "set_flag"
   | SceneTransition -> "scene_transition"
   | QuestUpdate -> "quest_update"
+
+let memory_tier_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "short" -> Some Memory_short
+  | "mid" | "medium" -> Some Memory_mid
+  | "long" -> Some Memory_long
+  | _ -> None
+
+let string_of_memory_tier = function
+  | Memory_short -> "short"
+  | Memory_mid -> "mid"
+  | Memory_long -> "long"
+
+let memory_tier_rank = function
+  | Memory_short -> 1
+  | Memory_mid -> 2
+  | Memory_long -> 3
+
+let max_memory_tier a b =
+  if memory_tier_rank a >= memory_tier_rank b then a else b
+
+let parse_structured_memory_hint (sa_json : Yojson.Safe.t) :
+    structured_memory_hint option =
+  match sa_json |> member "memory_hint" with
+  | `Assoc _ as hint_json ->
+      let tier_opt =
+        match hint_json |> member "tier" with
+        | `String raw -> memory_tier_of_string raw
+        | _ -> None
+      in
+      tier_opt
+      |> Option.map (fun requested_tier ->
+             let importance_score =
+               match hint_json |> member "importance_score" with
+               | `Int n -> Some (clamp_int 0 100 n)
+               | `Float n -> Some (clamp_int 0 100 (int_of_float n))
+               | _ -> None
+             in
+             let reason =
+               match hint_json |> member "reason" with
+               | `String raw ->
+                   let value = String.trim raw in
+                   if value = "" then None else Some value
+               | _ -> None
+             in
+             { requested_tier; importance_score; reason })
+  | _ -> None
 
 let extract_structured_action_json_from_reply_line line :
     (Yojson.Safe.t option, string) Stdlib.result =
@@ -1598,6 +2077,7 @@ let extract_structured_action (keeper_json : Yojson.Safe.t) :
               flag_key = get_string "flag_key";
               scene = get_string "scene";
               quest_info = get_string "quest_info";
+              memory_hint = parse_structured_memory_hint sa;
               raw_payload = sa;
             })
 
@@ -2321,9 +2801,126 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
       in
       Ok [ event ]
 
+let actor_hp_from_state state actor_id =
+  match actor_json_of_state state actor_id with
+  | Some actor_json ->
+      actor_json |> member "hp" |> to_int_option
+      |> Option.value ~default:0
+  | None -> 0
+
+let memory_floor_for_structured_action ~state ~(sa : structured_action) ~target_id
+    ~damage_opt : memory_tier * string list =
+  match sa.sa_type with
+  | SetFlag ->
+      let key =
+        sa.flag_key |> Option.value ~default:"" |> String.trim
+        |> String.lowercase_ascii
+      in
+      if starts_with key "outcome." || starts_with key "ending." then
+        (Memory_long, [ "set_flag_outcome" ])
+      else (Memory_mid, [ "set_flag" ])
+  | SceneTransition -> (Memory_mid, [ "scene_transition" ])
+  | QuestUpdate -> (Memory_mid, [ "quest_update" ])
+  | Attack -> (
+      match target_id, damage_opt with
+      | Some target_actor_id, Some damage ->
+          let hp_before = actor_hp_from_state state target_actor_id in
+          if hp_before > 0 && hp_before - damage <= 0 then
+            (Memory_long, [ "attack_lethal" ])
+          else (Memory_short, [])
+      | _ -> (Memory_short, []))
+  | Defend | Heal | Investigate | Social | Explore | Magic | UseItem ->
+      (Memory_short, [])
+
+let default_importance_for_memory_tier = function
+  | Memory_short -> 44
+  | Memory_mid -> 62
+  | Memory_long -> 82
+
+let append_structured_action_memory_signal ~base_dir ~room_id ~turn ~phase
+    ~actor_id ~(sa : structured_action) ~floor_tier ~floor_reasons =
+  let ( let* ) = Result.bind in
+  let requested_tier, importance_score, hint_reason =
+    match sa.memory_hint with
+    | Some hint ->
+        ( hint.requested_tier,
+          hint.importance_score
+          |> Option.map (clamp_int 0 100)
+          |> Option.value ~default:(default_importance_for_memory_tier hint.requested_tier),
+          hint.reason )
+    | None ->
+        ( floor_tier,
+          default_importance_for_memory_tier floor_tier,
+          None )
+  in
+  let effective_tier = max_memory_tier requested_tier floor_tier in
+  let guardrail_applied =
+    memory_tier_rank effective_tier > memory_tier_rank requested_tier
+  in
+  if sa.memory_hint = None && effective_tier = Memory_short then Ok None
+  else
+    let floor_reasons = dedupe_keep_order floor_reasons in
+    let summary_seed =
+      let compact = String.trim sa.description in
+      if compact <> "" then compact
+      else
+        Printf.sprintf "%s action by %s"
+          (string_of_action_type sa.sa_type)
+          actor_id
+    in
+    let summary_en =
+      Printf.sprintf
+        "Structured action memory decision (%s): %s"
+        (string_of_action_type sa.sa_type)
+        summary_seed
+    in
+    let summary_ko =
+      Printf.sprintf
+        "구조화 액션 메모리 판정 (%s): %s"
+        (string_of_action_type sa.sa_type)
+        summary_seed
+    in
+    let* event =
+      append_memory_signal_event ~base_dir ~room_id
+        ~event_tier:(string_of_memory_tier effective_tier)
+        ~importance_score
+        ~summary_ko
+        ~summary_en
+        ~entity_refs:
+          [
+            ("source", `String "structured_action");
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String actor_id);
+            ("action_type", `String (string_of_action_type sa.sa_type));
+            ("requested_tier", `String (string_of_memory_tier requested_tier));
+            ("floor_tier", `String (string_of_memory_tier floor_tier));
+            ("effective_tier", `String (string_of_memory_tier effective_tier));
+            ("guardrail_applied", `Bool guardrail_applied);
+            ( "floor_reasons",
+              `List (List.map (fun reason -> `String reason) floor_reasons) );
+            ( "hint_reason",
+              match hint_reason with Some reason -> `String reason | None -> `Null );
+          ]
+    in
+    Ok (Some event)
+
 let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
     (sa : structured_action) =
   let ( let* ) = Result.bind in
+  let finalize ~events ~target_id ~damage_opt =
+    let floor_tier, floor_reasons =
+      memory_floor_for_structured_action ~state ~sa ~target_id ~damage_opt
+    in
+    let* memory_event_opt =
+      append_structured_action_memory_signal ~base_dir ~room_id ~turn ~phase
+        ~actor_id ~sa ~floor_tier ~floor_reasons
+    in
+    Ok
+      (match memory_event_opt with
+      | Some memory_event -> events @ [ memory_event ]
+      | None -> events)
+  in
   match sa.sa_type with
   | Attack ->
       let target_id = choose_attack_target_id ~state ~actor_id in
@@ -2368,10 +2965,12 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
             in
             Ok (Some hp_event)
       in
-      Ok
-        (match hp_event_opt with
+      let events =
+        match hp_event_opt with
         | Some hp_event -> [ combat_event; hp_event ]
-        | None -> [ combat_event ])
+        | None -> [ combat_event ]
+      in
+      finalize ~events ~target_id ~damage_opt:(Some damage)
   | Defend ->
       let payload =
         `Assoc
@@ -2388,7 +2987,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
         append_event ~base_dir ~room_id
           ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
       in
-      Ok [ event ]
+      finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | SetFlag ->
       let key = match sa.flag_key with Some k -> k | None -> "" in
       if key = "" then Ok []
@@ -2407,7 +3006,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
           append_event ~base_dir ~room_id
             ~event_type:Trpg_engine_event.Flag_set ~actor_id ~payload ()
         in
-        Ok [ event ]
+        finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | SceneTransition ->
       let scene =
         match sa.scene with Some s -> s | None -> sa.description
@@ -2425,7 +3024,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
         append_event ~base_dir ~room_id
           ~event_type:Trpg_engine_event.Scene_transition ~actor_id ~payload ()
       in
-      Ok [ event ]
+      finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | QuestUpdate ->
       let quest_info =
         match sa.quest_info with Some q -> q | None -> sa.description
@@ -2443,7 +3042,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
         append_event ~base_dir ~room_id
           ~event_type:Trpg_engine_event.Quest_update ~actor_id ~payload ()
       in
-      Ok [ event ]
+      finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | Heal | Investigate | Social | Explore | Magic | UseItem ->
       let type_label = string_of_action_type sa.sa_type in
       let payload =
@@ -2462,7 +3061,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
         append_event ~base_dir ~room_id
           ~event_type:Trpg_engine_event.Narration_posted ~actor_id ~payload ()
       in
-      Ok [ event ]
+      finalize ~events:[ event ] ~target_id:sa.target_id ~damage_opt:None
 
 let ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state =
   let has_live_npc =
@@ -3463,12 +4062,15 @@ let trpg_structured_action_system_instructions =
   "CRITICAL: Your response MUST contain a JSON object called structured_action.\n\
    Place it on its own line in your reply, exactly like this:\n\n\
    structured_action: {\"type\":\"<ACTION_TYPE>\",\"description\":\"<what you do>\"}\n\n\
+   Optional memory hint (engine may up-tier via guardrail floor):\n\
+   \"memory_hint\":{\"tier\":\"short|mid|long\",\"importance_score\":0-100,\"reason\":\"why this memory matters\"}\n\n\
    Available ACTION_TYPE values:\n\
    - Player actions: attack, defend, heal, investigate, social, explore, magic, use_item\n\
    - DM actions: set_flag, scene_transition, quest_update\n\n\
    Examples:\n\
    structured_action: {\"type\":\"attack\",\"target_id\":\"goblin-1\",\"description\":\"Swing sword at the goblin\"}\n\
    structured_action: {\"type\":\"set_flag\",\"flag_key\":\"quest.hideout.found\",\"description\":\"The party discovered the hideout\"}\n\
+   structured_action: {\"type\":\"scene_transition\",\"scene\":\"Deep cave\",\"description\":\"The party enters the cave\",\"memory_hint\":{\"tier\":\"mid\",\"reason\":\"scene pivot\"}}\n\
    structured_action: {\"type\":\"scene_transition\",\"scene\":\"Deep cave\",\"description\":\"The party enters the cave\"}\n\n\
    Rules:\n\
    1. EVERY response must have exactly one structured_action line.\n\
@@ -4545,6 +5147,8 @@ let handle_session_start ctx args : result =
     in
     let* dm_preset_id = get_optional_string args "dm_preset_id" in
     let* world_preset_id = get_optional_string args "world_preset_id" in
+    let* world_contract_id_opt = get_optional_string args "world_contract_id" in
+    let* canon_strict = get_optional_bool args "canon_strict" ~default:false in
     let* dm_keeper_opt = get_optional_string args "dm_keeper" in
     let dm_keeper = dm_keeper_opt |> Option.value ~default:"dm-keeper" in
     let* phase_opt = get_optional_string args "phase" in
@@ -4567,6 +5171,10 @@ let handle_session_start ctx args : result =
     let* world_preset =
       (* +19 offset decorrelates world preset selection from DM selection *)
       resolve_world_preset ~seed:(fallback_seed + 19) catalog world_preset_id
+    in
+    let* world_contract =
+      resolve_world_contract_for_session ~base_dir
+        ~world_preset_id:world_preset.id ~world_contract_id_opt
     in
     let* party =
       match args |> member "party" with
@@ -4600,6 +5208,18 @@ let handle_session_start ctx args : result =
       else Ok ()
     in
     let room_created_payload =
+      let world_canon_ref =
+        world_contract_ref_to_yojson ~contract:world_contract
+          ~strict:canon_strict
+      in
+      let world_with_canon_config =
+        match world_config ~preset:world_preset with
+        | `Assoc fields ->
+            `Assoc
+              (("canon_contract", world_canon_ref)
+              :: List.remove_assoc "canon_contract" fields)
+        | world_json -> world_json
+      in
       `Assoc
         [
           ("session_id", `String session_id);
@@ -4607,11 +5227,12 @@ let handle_session_start ctx args : result =
           ("scenario_id", `String world_preset.id);
           ("dm_preset_id", `String dm_preset.id);
           ("world_preset_id", `String world_preset.id);
+          ("world_contract_id", `String world_contract.id);
           ( "config",
             `Assoc
               [
                 ("party", party_config party);
-                ("world", world_config ~preset:world_preset);
+                ("world", world_with_canon_config);
                 ("dm", dm_config ~preset:dm_preset ~dm_keeper);
               ] );
         ]
@@ -4629,6 +5250,8 @@ let handle_session_start ctx args : result =
           ("dm_keeper", `String dm_keeper);
           ("dm_preset_id", `String dm_preset.id);
           ("world_preset_id", `String world_preset.id);
+          ("world_contract_id", `String world_contract.id);
+          ("canon_strict", `Bool canon_strict);
           ("party_count", `Int (List.length party));
           ("mode", `String "ai_auto_with_human_nudge");
         ]
@@ -4688,6 +5311,9 @@ let handle_session_start ctx args : result =
           ("dm_keeper", `String dm_keeper);
           ("dm_preset", Trpg_preset_store.dm_preset_to_yojson dm_preset);
           ("world_preset", Trpg_preset_store.world_preset_to_yojson world_preset);
+          ( "world_contract",
+            world_contract_ref_to_yojson ~contract:world_contract
+              ~strict:canon_strict );
           ("party", `List (List.map pool_member_to_yojson party));
           ( "round_run_template",
             `Assoc
@@ -5611,6 +6237,73 @@ let count_npc_attacks_in_list (events : Trpg_engine_event.t list) =
         if String.starts_with ~prefix:"npc-" actor_id then acc + 1 else acc)
     0 events
 
+let structured_memory_decision_of_event (event : Trpg_engine_event.t) :
+    Yojson.Safe.t option =
+  if event.event_type <> Trpg_engine_event.Memory_signal then None
+  else
+    match event.payload |> member "entity_refs" with
+    | `Assoc _ as refs -> (
+        match refs |> member "source" with
+        | `String "structured_action" ->
+            Some
+              (`Assoc
+                [
+                  ( "requested_tier",
+                    match refs |> member "requested_tier" with
+                    | `String tier -> `String tier
+                    | _ -> `Null );
+                  ( "effective_tier",
+                    match refs |> member "effective_tier" with
+                    | `String tier -> `String tier
+                    | _ -> `Null );
+                  ( "floor_tier",
+                    match refs |> member "floor_tier" with
+                    | `String tier -> `String tier
+                    | _ -> `Null );
+                  ( "guardrail_applied",
+                    match refs |> member "guardrail_applied" with
+                    | `Bool b -> `Bool b
+                    | _ -> `Bool false );
+                ])
+        | _ -> None)
+    | _ -> None
+
+let memory_status_fields_of_action_events (events : Trpg_engine_event.t list) :
+    (string * Yojson.Safe.t) list =
+  let decision =
+    events |> List.find_map structured_memory_decision_of_event
+  in
+  match decision with
+  | None ->
+      [
+        ("memory_requested_tier", `Null);
+        ("memory_effective_tier", `Null);
+        ("memory_floor_tier", `Null);
+        ("memory_guardrail_applied", `Bool false);
+      ]
+  | Some memory_json ->
+      [
+        ("memory_requested_tier", memory_json |> member "requested_tier");
+        ("memory_effective_tier", memory_json |> member "effective_tier");
+        ("memory_floor_tier", memory_json |> member "floor_tier");
+        ("memory_guardrail_applied", memory_json |> member "guardrail_applied");
+      ]
+
+let memory_observability_from_events (events : Trpg_engine_event.t list) :
+    int * int =
+  List.fold_left
+    (fun (total, escalated) (event : Trpg_engine_event.t) ->
+      if event.event_type <> Trpg_engine_event.Memory_signal then
+        (total, escalated)
+      else
+        let escalated' =
+          match event.payload |> member "entity_refs" |> member "guardrail_applied" with
+          | `Bool true -> escalated + 1
+          | _ -> escalated
+        in
+        (total + 1, escalated'))
+    (0, 0) events
+
 let build_round_roll_audit (events : Trpg_engine_event.t list) : Yojson.Safe.t list =
   let to_json_opt_string = function Some value -> `String value | None -> `Null in
   let to_json_opt_int = function Some value -> `Int value | None -> `Null in
@@ -6247,16 +6940,20 @@ let handle_round_run ctx args : result =
                 ~turn:turn_before ~phase ~actor_id ~state:state_json sa
             in
             appended_events := !appended_events @ action_events;
+            let memory_status_fields =
+              memory_status_fields_of_action_events action_events
+            in
             statuses :=
               `Assoc
-                [
-                  ("actor_id", `String actor_id);
-                  ("role", `String (role_to_string role));
-                  ("keeper", `String keeper_name);
-                  ("status", `String "ok");
-                  ("reply", `String reply);
-                  ("action_type", `String (string_of_action_type sa.sa_type));
-                ]
+                ([
+                   ("actor_id", `String actor_id);
+                   ("role", `String (role_to_string role));
+                   ("keeper", `String keeper_name);
+                   ("status", `String "ok");
+                   ("reply", `String reply);
+                   ("action_type", `String (string_of_action_type sa.sa_type));
+                 ]
+                @ memory_status_fields)
               :: !statuses;
             Ok ()
       in
@@ -6446,6 +7143,16 @@ let handle_round_run ctx args : result =
           let* reopened_derived = derive_state ~base_dir ~room_id ~rule_module in
           Ok (reopened_derived, state_of_derived reopened_derived)
       in
+      let canon_check =
+        let session_events_after = existing_events_before @ !appended_events in
+        evaluate_canon_check ~base_dir ~state:final_state
+          ~events:session_events_after ~dm_reply:!dm_reply_ref
+      in
+      let* canon_events =
+        append_canon_check_observability_events ~base_dir ~room_id
+          ~turn:turn_after ~phase ~check:canon_check
+      in
+      appended_events := !appended_events @ canon_events;
       let statuses = List.rev !statuses in
       let progress_detail = status_first_non_ok_detail statuses in
       let progress_reason =
@@ -6468,6 +7175,9 @@ let handle_round_run ctx args : result =
       let roll_audit_all = build_round_roll_audit !appended_events in
       let roll_audit_count = List.length roll_audit_all in
       let roll_audit = take_first_n 8 roll_audit_all in
+      let memory_signal_count, memory_guardrail_escalations =
+        memory_observability_from_events !appended_events
+      in
       let npc_spawned =
         count_event_type_in_list Trpg_engine_event.Actor_spawned !appended_events
       in
@@ -6531,9 +7241,15 @@ let handle_round_run ctx args : result =
                   ("npc_spawned", `Int npc_spawned);
                   ("npc_attacks", `Int npc_attacks);
                   ("interventions", `Int (List.length interventions_applied));
+                  ("canon_status", `String canon_check.status);
+                  ("canon_violation_count", `Int (List.length canon_check.violations));
+                  ("canon_warning_count", `Int (List.length canon_check.warnings));
+                  ("memory_signals", `Int memory_signal_count);
+                  ("memory_guardrail_escalations", `Int memory_guardrail_escalations);
                   ("roll_audit_count", `Int roll_audit_count);
                   ("roll_audit", `List roll_audit);
                 ] );
+            ("canon_check", canon_check_to_yojson canon_check);
             ( "outcome",
               match !latest_outcome_payload with
               | Some payload -> payload

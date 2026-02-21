@@ -1,0 +1,32 @@
+{
+  "default_contract_id": "open-runtime-v1",
+  "contracts": [
+    {
+      "id": "open-runtime-v1",
+      "title": "Open Runtime Contract",
+      "description": "Baseline canon contract for sandbox sessions.",
+      "required_flags": [],
+      "forbidden_flags": [],
+      "required_event_types": ["scene.transition"],
+      "banned_terms": []
+    },
+    {
+      "id": "grimland-chronicle",
+      "title": "Grimland Chronicle Canon",
+      "description": "Scarcity and political tension must stay visible.",
+      "required_flags": ["scarcity.high"],
+      "forbidden_flags": ["outcome.invalid", "world.magic_unlimited"],
+      "required_event_types": ["scene.transition"],
+      "banned_terms": ["spaceship", "laser rifle"]
+    },
+    {
+      "id": "emberfall-siege",
+      "title": "Emberfall Siege Canon",
+      "description": "Siege pressure should remain active through the session.",
+      "required_flags": ["siege.active"],
+      "forbidden_flags": ["peace.treaty.signed", "outcome.invalid"],
+      "required_event_types": ["scene.transition"],
+      "banned_terms": ["vacation", "tourism festival"]
+    }
+  ]
+}

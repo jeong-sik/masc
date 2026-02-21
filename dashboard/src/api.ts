@@ -242,8 +242,44 @@ function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
 
-function normalizeRole(value: unknown): 'dm' | 'player' | 'npc' {
-  return value === 'dm' || value === 'player' || value === 'npc' ? value : 'npc'
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => {
+      if (typeof item === 'string') return item.trim()
+      if (isRecord(item)) {
+        const fromName = asString(item.name, '').trim()
+        const fromId = asString(item.id, '').trim()
+        const fromSkill = asString(item.skill, '').trim()
+        return fromName || fromId || fromSkill
+      }
+      return ''
+    })
+    .filter((item): item is string => item.length > 0)
+}
+
+function normalizeRole(
+  value: unknown,
+  actorId: string,
+  keeper?: string,
+): 'dm' | 'player' | 'npc' {
+  if (value === 'dm' || value === 'player' || value === 'npc') return value
+  const actorKey = actorId.trim().toLowerCase()
+  if (actorKey === 'dm' || actorKey.startsWith('dm-')) return 'dm'
+  if (
+    actorKey.startsWith('npc-') ||
+    actorKey.startsWith('enemy-') ||
+    actorKey.startsWith('mob-')
+  ) {
+    return 'npc'
+  }
+  if (/^p\d+$/i.test(actorKey) || actorKey.startsWith('player-')) return 'player'
+  if (typeof keeper === 'string' && keeper.trim() !== '') {
+    const keeperKey = keeper.trim().toLowerCase()
+    if (keeperKey.includes('dm')) return 'dm'
+    return 'player'
+  }
+  return 'npc'
 }
 
 function statFromActor(actor: Record<string, unknown>, primary: string, fallbackKey?: string, fallback = 0): number {
@@ -362,12 +398,17 @@ function normalizeTrpgState(
     const alive = asBoolean(actor.alive, hp > 0)
     const keeperValue = actorControl[actorId]
     const keeper = typeof keeperValue === 'string' ? keeperValue : undefined
+    const role = normalizeRole(actor.role, actorId, keeper)
 
     return {
       id: actorId,
       name: asString(actor.name, actorId),
-      role: normalizeRole(actor.role),
+      role,
       keeper,
+      archetype: asString(actor.archetype, ''),
+      persona: asString(actor.persona, ''),
+      traits: asStringList(actor.traits),
+      skills: asStringList(actor.skills),
       status: alive ? 'active' : 'dead',
       stats: {
         hp,

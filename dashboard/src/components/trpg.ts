@@ -34,6 +34,60 @@ function hpPct(hp: number, max: number): number {
   return max > 0 ? Math.round((hp / max) * 100) : 0
 }
 
+const TRAIT_HINTS: Record<string, string> = {
+  pragmatic: '리스크보다 확실한 이득을 우선합니다.',
+  frugal: '자원 소모를 줄이고 효율을 챙깁니다.',
+  impatient: '짧은 템포로 즉시 압박을 선호합니다.',
+  stubborn: '한 번 정한 전술을 끝까지 밀어붙입니다.',
+  protective: '아군 피해를 줄이는 선택을 우선합니다.',
+  'honor-bound': '약속과 규율을 지키는 행동에 보너스가 납니다.',
+  intense: '집중 화력을 짧게 폭발시킵니다.',
+  empathetic: '아군/약자 보호 쪽 선택 확률이 높아집니다.',
+  fatalistic: '위험을 감수하는 고배수 선택을 탑니다.',
+  suspicious: '함정/매복 경계 행동을 우선합니다.',
+  precise: '단일 목표를 정확히 노리는 경향입니다.',
+  vengeful: '직전 위협 대상에게 강하게 반응합니다.',
+  aggressive: '공격적인 전진 행동을 우선합니다.',
+  opportunistic: '빈틈이 열리면 즉시 추격합니다.',
+}
+
+const SKILL_HINTS: Record<string, string> = {
+  supply_scan: '전장/자원 상태를 스캔해 약한 지점을 찾습니다.',
+  ration_shift: '소모를 줄이고 지속 전투 능력을 확보합니다.',
+  logistics_patch: '무너진 운영 라인을 빠르게 복구합니다.',
+  frontline_shield: '전열에서 아군 피해를 흡수합니다.',
+  oath_intercept: '핵심 타깃을 가로막아 위협을 차단합니다.',
+  morale_anchor: '아군 안정도를 높여 붕괴를 막습니다.',
+  omen_trace: '다음 위험 신호를 먼저 감지합니다.',
+  arc_flash: '짧은 순간 광역 압박을 넣습니다.',
+  ward_bloom: '방어 장막을 펼쳐 생존률을 올립니다.',
+  mark_prey: '우선 제거 대상을 지정합니다.',
+  silent_route: '은밀한 진입 경로를 확보합니다.',
+  finisher_strike: '약화된 적을 마무리하는 일격입니다.',
+  shadow_claw: '근접 급습으로 출혈 피해를 노립니다.',
+  lunge: '짧은 돌진으로 전열을 흔듭니다.',
+}
+
+function prettyToken(token: string): string {
+  const trimmed = token.trim()
+  if (!trimmed) return token
+  return trimmed
+    .split(/[_-]+/g)
+    .filter(part => part.length > 0)
+    .map(part => part[0] ? `${part[0].toUpperCase()}${part.slice(1)}` : part)
+    .join(' ')
+}
+
+function explainTrait(trait: string): string {
+  const key = trait.trim().toLowerCase()
+  return TRAIT_HINTS[key] ?? '행동 선택 가중치에 영향을 주는 성향입니다.'
+}
+
+function explainSkill(skill: string): string {
+  const key = skill.trim().toLowerCase()
+  return SKILL_HINTS[key] ?? '상황에 따라 선택되는 전술 액션입니다.'
+}
+
 // ── Sub-components ───────────────────────────────────────
 
 function HpBar({ hp, max }: { hp: number; max: number }) {
@@ -74,12 +128,17 @@ function KeeperChip({ keeper, role }: { keeper?: string; role: string }) {
 }
 
 function ActorCard({ actor }: { actor: TrpgActor }) {
+  const archetype = actor.archetype?.trim()
+  const persona = actor.persona?.trim()
+  const traits = actor.traits ?? []
+  const skills = actor.skills ?? []
+
   return html`
     <div class="trpg-actor">
-      <div class="trpg-actor-info">
+      <div class="trpg-actor-header">
         <span class="trpg-actor-name">${actor.name}</span>
         <${StatusBadge} status=${actor.status ?? 'idle'} />
-        <span class="pill">${actor.role}</span>
+        <span class="pill trpg-role-pill trpg-role-${actor.role}">${actor.role}</span>
         <${KeeperChip} keeper=${actor.keeper} role=${actor.role} />
       </div>
       ${actor.stats
@@ -94,6 +153,38 @@ function ActorCard({ actor }: { actor: TrpgActor }) {
             </div>
             <${HpBar} hp=${actor.stats.hp} max=${actor.stats.max_hp} />
             <${StatGrid} stats=${actor.stats} />
+          </div>
+        `
+        : null}
+      ${archetype ? html`<div class="trpg-actor-meta">Archetype: ${prettyToken(archetype)}</div>` : null}
+      ${persona ? html`<div class="trpg-actor-persona">${persona}</div>` : null}
+      ${traits.length > 0
+        ? html`
+          <div class="trpg-annot-group">
+            <div class="trpg-annot-title">Traits</div>
+            <div class="trpg-annot-list">
+              ${traits.map(trait => html`
+                <span class="trpg-annot-chip trait">
+                  <span class="trpg-annot-name">${prettyToken(trait)}</span>
+                  <span class="trpg-annot-desc">${explainTrait(trait)}</span>
+                </span>
+              `)}
+            </div>
+          </div>
+        `
+        : null}
+      ${skills.length > 0
+        ? html`
+          <div class="trpg-annot-group">
+            <div class="trpg-annot-title">Skills</div>
+            <div class="trpg-annot-list">
+              ${skills.map(skill => html`
+                <span class="trpg-annot-chip skill">
+                  <span class="trpg-annot-name">${prettyToken(skill)}</span>
+                  <span class="trpg-annot-desc">${explainSkill(skill)}</span>
+                </span>
+              `)}
+            </div>
           </div>
         `
         : null}

@@ -235,6 +235,10 @@ export interface TrpgActor {
   name: string
   role: 'dm' | 'player' | 'npc'
   keeper?: string
+  archetype?: string
+  persona?: string
+  traits?: string[]
+  skills?: string[]
   stats?: TrpgCharacterStats
   status: string
 }

@@ -28,6 +28,13 @@ type event_type =
   | Actor_deleted
   | Actor_claimed
   | Actor_released
+  | Join_window_opened
+  | Join_window_closed
+  | Mid_join_requested
+  | Mid_join_granted
+  | Mid_join_rejected
+  | Contribution_delta
+  | Memory_signal
   | Intervention_submitted
   | Intervention_applied
 
@@ -70,6 +77,13 @@ let string_of_event_type = function
   | Actor_deleted -> "actor.deleted"
   | Actor_claimed -> "actor.claimed"
   | Actor_released -> "actor.released"
+  | Join_window_opened -> "join.window.opened"
+  | Join_window_closed -> "join.window.closed"
+  | Mid_join_requested -> "mid.join.requested"
+  | Mid_join_granted -> "mid.join.granted"
+  | Mid_join_rejected -> "mid.join.rejected"
+  | Contribution_delta -> "contribution.delta"
+  | Memory_signal -> "memory.signal"
   | Intervention_submitted -> "intervention.submitted"
   | Intervention_applied -> "intervention.applied"
 
@@ -103,6 +117,13 @@ let event_type_of_string = function
   | "actor.deleted" -> Ok Actor_deleted
   | "actor.claimed" -> Ok Actor_claimed
   | "actor.released" -> Ok Actor_released
+  | "join.window.opened" -> Ok Join_window_opened
+  | "join.window.closed" -> Ok Join_window_closed
+  | "mid.join.requested" -> Ok Mid_join_requested
+  | "mid.join.granted" -> Ok Mid_join_granted
+  | "mid.join.rejected" -> Ok Mid_join_rejected
+  | "contribution.delta" -> Ok Contribution_delta
+  | "memory.signal" -> Ok Memory_signal
   | "intervention.submitted" -> Ok Intervention_submitted
   | "intervention.applied" -> Ok Intervention_applied
   | s -> Error (Printf.sprintf "unknown event_type: %s" s)

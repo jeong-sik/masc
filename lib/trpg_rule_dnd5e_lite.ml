@@ -88,6 +88,16 @@ let init_state ~config =
       ("world", world);
       ("dice_log", `List []);
       ("narration_log", `List []);
+      ( "join_gate",
+        `Assoc
+          [
+            ("phase_open", `Bool true);
+            ("min_points", `Int 3);
+            ("window", `String "round_boundary_only");
+            ("last_opened_turn", `Int 1);
+            ("last_closed_turn", `Null);
+          ] );
+      ("contribution_ledger", `Assoc []);
     ]
 
 let config_from_room_created_payload payload =
@@ -404,6 +414,142 @@ let apply_node_advanced ~state ~event =
       else `Assoc (assoc_put "current_node" (`String to_node) fields)
   | _ -> state
 
+let apply_join_window_state ~state ~event ~phase_open =
+  match state with
+  | `Assoc fields ->
+      let join_gate_fields =
+        match assoc_get "join_gate" fields with
+        | Some (`Assoc xs) -> xs
+        | _ -> []
+      in
+      let current_turn =
+        state |> member "turn" |> to_int_option |> Option.value ~default:1
+      in
+      let turn_value =
+        get_int_opt "turn" event.Trpg_engine_event.payload
+        |> Option.value ~default:current_turn
+      in
+      let min_points =
+        match List.assoc_opt "min_points" join_gate_fields with
+        | Some (`Int v) -> v
+        | _ -> 3
+      in
+      let updated_fields =
+        join_gate_fields
+        |> assoc_put "phase_open" (`Bool phase_open)
+        |> assoc_put "min_points" (`Int min_points)
+        |> assoc_put "window" (`String "round_boundary_only")
+        |> assoc_put
+             (if phase_open then "last_opened_turn" else "last_closed_turn")
+             (`Int turn_value)
+      in
+      `Assoc (assoc_put "join_gate" (`Assoc updated_fields) fields)
+  | _ -> state
+
+let apply_contribution_delta ~state ~event =
+  let payload = event.Trpg_engine_event.payload in
+  let actor_id =
+    match get_string_opt "actor_id" payload with
+    | Some actor when String.trim actor <> "" -> String.trim actor
+    | _ ->
+        Option.value ~default:"" event.Trpg_engine_event.actor_id
+        |> String.trim
+  in
+  if actor_id = "" then state
+  else
+    match state with
+    | `Assoc fields ->
+        let ledger_fields =
+          match assoc_get "contribution_ledger" fields with
+          | Some (`Assoc xs) -> xs
+          | _ -> []
+        in
+        let actor_fields =
+          match List.assoc_opt actor_id ledger_fields with
+          | Some (`Assoc xs) -> xs
+          | _ -> []
+        in
+        let prev_score =
+          match List.assoc_opt "score" actor_fields with
+          | Some (`Int v) -> v
+          | _ -> 0
+        in
+        let delta = get_int_opt "delta" payload |> Option.value ~default:0 in
+        let score_after =
+          get_int_opt "score_after" payload |> Option.value ~default:(prev_score + delta)
+        in
+        let reason = get_string_opt "reason" payload |> Option.value ~default:"" in
+        let turn_value =
+          get_int_opt "turn" payload
+          |> Option.value
+               ~default:(state |> member "turn" |> to_int_option |> Option.value ~default:1)
+        in
+        let reasons =
+          match List.assoc_opt "reasons" actor_fields with
+          | Some (`List xs) -> xs
+          | _ -> []
+        in
+        let reasons =
+          if String.trim reason = "" then reasons
+          else
+            let next = reasons @ [ `String reason ] in
+            let len = List.length next in
+            if len <= 8 then next else
+              let rec drop n xs =
+                if n <= 0 then xs
+                else
+                  match xs with
+                  | [] -> []
+                  | _ :: tl -> drop (n - 1) tl
+              in
+              drop (len - 8) next
+        in
+        let actor_entry =
+          actor_fields
+          |> assoc_put "score" (`Int score_after)
+          |> assoc_put "last_delta" (`Int delta)
+          |> assoc_put "last_turn" (`Int turn_value)
+          |> assoc_put
+               "last_reason"
+               (if String.trim reason = "" then `Null else `String reason)
+          |> assoc_put "reasons" (`List reasons)
+        in
+        let ledger =
+          `Assoc ((actor_id, `Assoc actor_entry) :: List.remove_assoc actor_id ledger_fields)
+        in
+        `Assoc (assoc_put "contribution_ledger" ledger fields)
+    | _ -> state
+
+let apply_turn_penalty_decay state =
+  match state with
+  | `Assoc fields ->
+      let party_fields =
+        match assoc_get "party" fields with
+        | Some (`Assoc xs) -> xs
+        | _ -> []
+      in
+      let next_party =
+        party_fields
+        |> List.map (fun (actor_id, actor_json) ->
+               let actor_fields = assoc_fields_or_empty actor_json in
+               let turns_left =
+                 match List.assoc_opt "late_join_penalty_turns" actor_fields with
+                 | Some (`Int v) -> max 0 v
+                 | _ -> 0
+               in
+               if turns_left <= 0 then (actor_id, actor_json)
+               else
+                 let remaining = max 0 (turns_left - 1) in
+                 let next_fields =
+                   actor_fields
+                   |> assoc_put "late_join_penalty_turns" (`Int remaining)
+                   |> assoc_put "late_join_penalty" (`Bool (remaining > 0))
+                 in
+                 (actor_id, `Assoc next_fields))
+      in
+      `Assoc (assoc_put "party" (`Assoc next_party) fields)
+  | _ -> state
+
 let normalize_player_action_for_narration ~state payload =
   let fallback_turn = state |> member "turn" |> to_int_option |> Option.value ~default:1 in
   let phase = get_string_opt "phase" payload |> Option.value ~default:"round" in
@@ -456,6 +602,17 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
             |> assoc_put "dice_log" (`List [])
             |> assoc_put "narration_log" (`List [])
             |> assoc_put "actor_control" (`Assoc [])
+            |> assoc_put "contribution_ledger" (`Assoc [])
+            |> assoc_put
+                 "join_gate"
+                 (`Assoc
+                   [
+                     ("phase_open", `Bool true);
+                     ("min_points", `Int 3);
+                     ("window", `String "round_boundary_only");
+                     ("last_opened_turn", `Int 1);
+                     ("last_closed_turn", `Null);
+                   ])
             |> assoc_put "current_node" `Null)
       | _ -> state)
   | Trpg_engine_event.Room_ended ->
@@ -484,6 +641,7 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
             |> assoc_put "turn" (`Int next_turn)
             |> assoc_put "phase" (`String "round"))
       | _ -> state)
+      |> apply_turn_penalty_decay
   | Trpg_engine_event.Phase_changed ->
       let phase = get_string_opt "phase" event.payload |> Option.value ~default:"" in
       if phase = "" then state
@@ -511,6 +669,17 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Actor_deleted -> apply_actor_deleted ~state ~event
   | Trpg_engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
   | Trpg_engine_event.Actor_released -> apply_actor_released ~state ~event
+  | Trpg_engine_event.Join_window_opened ->
+      apply_join_window_state ~state ~event ~phase_open:true
+  | Trpg_engine_event.Join_window_closed ->
+      apply_join_window_state ~state ~event ~phase_open:false
+  | Trpg_engine_event.Contribution_delta ->
+      apply_contribution_delta ~state ~event
+  | Trpg_engine_event.Mid_join_requested
+  | Trpg_engine_event.Mid_join_granted
+  | Trpg_engine_event.Mid_join_rejected
+  | Trpg_engine_event.Memory_signal ->
+      append_to_list "narration_log" event.payload state
   | Trpg_engine_event.Scene_transition ->
       let payload = event.Trpg_engine_event.payload in
       let scene =

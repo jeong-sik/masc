@@ -28,6 +28,13 @@ type event_type =
   | Actor_deleted
   | Actor_claimed
   | Actor_released
+  | Join_window_opened
+  | Join_window_closed
+  | Mid_join_requested
+  | Mid_join_granted
+  | Mid_join_rejected
+  | Contribution_delta
+  | Memory_signal
   | Intervention_submitted
   | Intervention_applied
 

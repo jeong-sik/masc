@@ -5262,25 +5262,24 @@ let handle_round_run ctx args : result =
                   in
                   Ok [ event ]
               | `Player ->
-                  let sa_fallback : structured_action =
-                    {
-                      sa_type = Attack;
-                      target_id = None;
-                      description = fallback_reply;
-                      flag_key = None;
-                      scene = None;
-                      quest_info = None;
-                      raw_payload =
-                        `Assoc
-                          [
-                            ("type", `String "attack");
-                            ("description", `String fallback_reply);
-                          ];
-                    }
+                  let payload =
+                    `Assoc
+                      [
+                        ("phase", `String phase);
+                        ("turn", `Int turn_before);
+                        ("role", `String "player");
+                        ("actor_id", `String actor_id);
+                        ("keeper", `String keeper_name);
+                        ("narration", `String fallback_reply);
+                        ("is_fallback", `Bool true);
+                      ]
                   in
-                  apply_structured_action ~base_dir ~room_id
-                    ~turn:turn_before ~phase ~actor_id ~state:state_json
-                    sa_fallback
+                  let* event =
+                    append_event ~base_dir ~room_id
+                      ~event_type:Trpg_engine_event.Narration_posted
+                      ~actor_id ~payload ()
+                  in
+                  Ok [ event ]
             in
             appended_events := !appended_events @ action_events;
             let* pressure_events =
@@ -5600,8 +5599,8 @@ let handle_round_run ctx args : result =
                 ( "reason",
                   `String
                     (Printf.sprintf
-                       "player quorum not met: success=%d required=%d; dm execution skipped"
-                       !player_success_count
+                       "player quorum not met: success=%d fallback=%d required=%d; dm execution skipped"
+                       !player_success_count !player_fallback_count
                        player_required_successes) );
                 ("stage", `String "player_quorum");
               ]

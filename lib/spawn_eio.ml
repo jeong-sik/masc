@@ -1,5 +1,10 @@
 (** MASC Spawn - Eio Native Agent subprocess management *)
 
+(** Mutex to serialize Sys.chdir + process fork.
+    Sys.chdir is process-global; under Eio's fiber concurrency,
+    concurrent spawn_agent calls would race on CWD without this. *)
+let chdir_mutex = Eio.Mutex.create ()
+
 (** Spawn configuration for an agent *)
 type spawn_config = {
   agent_name: string;
@@ -294,51 +299,55 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
 
   let augmented_prompt = prompt ^ institution_memory ^ masc_lifecycle_suffix in
 
-  let original_dir = Sys.getcwd () in
-  (match working_dir with Some d -> Sys.chdir d | None -> ());
+  (* Build command arguments outside the chdir critical section *)
+  let (cmd_args, stdin_data) =
+    if agent_name = "glm" then
+      (* GLM: Direct Z.ai API call - no llm-mcp dependency *)
+      let api_key = Sys.getenv_opt "ZAI_API_KEY" |> Option.value ~default:"" in
+      let model = "glm-4.7" in
+      let json_body = Yojson.Safe.to_string (`Assoc [
+        ("model", `String model);
+        ("messages", `List [
+          `Assoc [("role", `String "user"); ("content", `String augmented_prompt)]
+        ]);
+        ("stream", `Bool false)
+      ]) in
+      (["curl"; "-s"; "-X"; "POST"; "https://api.z.ai/api/coding/paas/v4/chat/completions";
+        "-H"; "Content-Type: application/json";
+        "-H"; Printf.sprintf "Authorization: Bearer %s" api_key;
+        "-d"; json_body], None)
+    else
+      (* Other agents: parse command and pass prompt via stdin *)
+      let base_args = parse_command config.command in
+      (base_args @ mcp_args, Some augmented_prompt)
+  in
+  let full_args = ["timeout"; string_of_int timeout] @ cmd_args in
+
+  (* Serialize chdir + fork under mutex. Sys.chdir is process-global;
+     without this, concurrent Eio fibers would race on the CWD. *)
+  let (process, output_buf) =
+    Eio.Mutex.use_rw ~protect:true chdir_mutex (fun () ->
+      let original_dir = Sys.getcwd () in
+      (match working_dir with Some d -> Sys.chdir d | None -> ());
+      Fun.protect ~finally:(fun () -> Sys.chdir original_dir) (fun () ->
+        let buf = Buffer.create 4096 in
+        let proc = match stdin_data with
+          | Some data ->
+              Eio.Process.spawn ~sw proc_mgr
+                ~stdin:(Eio.Flow.string_source data)
+                ~stdout:(Eio.Flow.buffer_sink buf)
+                full_args
+          | None ->
+              Eio.Process.spawn ~sw proc_mgr
+                ~stdout:(Eio.Flow.buffer_sink buf)
+                full_args
+        in
+        (proc, buf)))
+  in
 
   let result =
     try
-      let output_buf = Buffer.create 4096 in
-      
-      (* Build command arguments - direct execution without shell *)
-      let (cmd_args, stdin_data) =
-        if agent_name = "glm" then
-          (* GLM: Direct Z.ai API call - no llm-mcp dependency *)
-          let api_key = Sys.getenv_opt "ZAI_API_KEY" |> Option.value ~default:"" in
-          let model = "glm-4.7" in
-          let json_body = Yojson.Safe.to_string (`Assoc [
-            ("model", `String model);
-            ("messages", `List [
-              `Assoc [("role", `String "user"); ("content", `String augmented_prompt)]
-            ]);
-            ("stream", `Bool false)
-          ]) in
-          (["curl"; "-s"; "-X"; "POST"; "https://api.z.ai/api/coding/paas/v4/chat/completions";
-            "-H"; "Content-Type: application/json";
-            "-H"; Printf.sprintf "Authorization: Bearer %s" api_key;
-            "-d"; json_body], None)
-        else
-          (* Other agents: parse command and pass prompt via stdin *)
-          let base_args = parse_command config.command in
-          (base_args @ mcp_args, Some augmented_prompt)
-      in
-      
-      (* Wrap with timeout command for process-level timeout (no shell injection) *)
-      let full_args = ["timeout"; string_of_int timeout] @ cmd_args in
-      
-      (* Spawn process with optional stdin - direct execution, no shell *)
-      let process = match stdin_data with
-        | Some data ->
-            Eio.Process.spawn ~sw proc_mgr
-              ~stdin:(Eio.Flow.string_source data)
-              ~stdout:(Eio.Flow.buffer_sink output_buf)
-              full_args
-        | None ->
-            Eio.Process.spawn ~sw proc_mgr
-              ~stdout:(Eio.Flow.buffer_sink output_buf)
-              full_args
-      in
+      let output_buf = output_buf in
       
       let status = Eio.Process.await process in
       let raw_output = Buffer.contents output_buf in
@@ -412,8 +421,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
         cache_read_tokens = None;
         cost_usd = None;
       }
-  in 
-  Sys.chdir original_dir;
+  in
   result
 
 let result_to_human_string result = 

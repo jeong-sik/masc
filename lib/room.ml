@@ -1705,6 +1705,17 @@ let heartbeat config ~agent_name =
     Printf.sprintf "⚠ Agent %s not found" agent_name
 
 (** Cleanup zombie agents - removes stale agents *)
+let is_keeper_runtime_agent_name (name : string) =
+  let normalized = String.lowercase_ascii (String.trim name) in
+  let prefix = "keeper-" in
+  let suffix = "-agent" in
+  let nlen = String.length normalized in
+  let plen = String.length prefix in
+  let slen = String.length suffix in
+  nlen > plen + slen
+  && String.sub normalized 0 plen = prefix
+  && String.sub normalized (nlen - slen) slen = suffix
+
 let cleanup_zombies config =
   ensure_initialized config;
 
@@ -1720,7 +1731,9 @@ let cleanup_zombies config =
         let path = Filename.concat agents_path name in
         let json = read_json config path in
         match agent_of_yojson json with
-        | Ok agent when is_zombie_agent agent.last_seen ->
+        | Ok agent
+          when is_zombie_agent agent.last_seen
+               && not (is_keeper_runtime_agent_name agent.name) ->
             zombies := agent.name :: !zombies;
             (* Stop heartbeats owned by this zombie agent *)
             let _stopped = Heartbeat.stop_by_agent ~agent_name:agent.name in

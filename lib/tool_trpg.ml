@@ -2374,6 +2374,10 @@ let infer_action_type_from_narrative ~(role : [ `Player | `Dm ])
             "막기"; "회피"; "가드";
           ]
       then Some (make_sa Defend desc)
+      else if desc <> "" then
+        (* Keep round progression when keeper narration is skill-name-heavy
+           but still semantically actionable. *)
+        Some (make_sa Attack desc)
       else None
   | `Dm ->
       if
@@ -2397,6 +2401,8 @@ let infer_action_type_from_narrative ~(role : [ `Player | `Dm ])
             "목표";
           ]
       then Some (make_sa QuestUpdate ~quest_info:desc desc)
+      else if desc <> "" then
+        Some (make_sa SetFlag ~flag_key:"story.inferred" desc)
       else None
 
 let role_from_actor_json actor_json =
@@ -5667,8 +5673,17 @@ let handle_actor_claim ctx args : result =
       Error (Printf.sprintf "actor is not alive: %s" actor_id)
     else
       let actor_role = actor_role_in_state state actor_id in
+      let phase_name =
+        match state |> member "phase" with
+        | `String phase -> String.lowercase_ascii (String.trim phase)
+        | _ -> "round"
+      in
       let* () =
         if actor_role <> "player" then Ok ()
+        else if phase_name <> "round" then
+          (* Initial party assignment (briefing/setup) should not be blocked by
+             mid-join contribution gate. *)
+          Ok ()
         else
           let gate = join_gate_of_state state in
           let score, _reasons = contribution_for_actor_from_events events actor_id in
@@ -6607,6 +6622,14 @@ let handle_round_run ctx args : result =
       let timeout_count = ref 0 in
       let dm_reply_ref : string option ref = ref None in
       let state_for_players_ref = ref base_state_for_prompt in
+      let participant_count = max 1 (1 + List.length player_keepers) in
+      let keeper_timeout_sec =
+        let per_actor_budget =
+          timeout_sec /. float_of_int (max 1 participant_count)
+        in
+        let floor = min 30.0 timeout_sec in
+        max floor per_actor_budget
+      in
       let* () =
         if phase = "round" then
           let* spawn_event_opt =
@@ -6816,6 +6839,29 @@ let handle_round_run ctx args : result =
             ~state_json
             ~lang:prompt_lang
         in
+        let synthesized_roleplay_reply () =
+          match role with
+          | `Player -> fallback_player_reply ~state:state_json ~actor_id
+          | `Dm -> fallback_dm_reply ~state:state_json
+        in
+        let normalize_reply_with_action reply sa =
+          let trimmed_reply = String.trim reply in
+          let candidate_reply =
+            if trimmed_reply = "" || is_placeholder_reply trimmed_reply then
+              String.trim sa.description
+            else trimmed_reply
+          in
+          let normalized_reply =
+            if candidate_reply = "" || is_placeholder_reply candidate_reply then
+              String.trim (synthesized_roleplay_reply ())
+            else candidate_reply
+          in
+          let normalized_description =
+            let desc = String.trim sa.description in
+            if desc = "" || is_placeholder_reply desc then normalized_reply else desc
+          in
+          (normalized_reply, { sa with description = normalized_description })
+        in
         let validate_keeper_payload keeper_json =
           let ( let* ) = Result.bind in
           let* reply =
@@ -6824,15 +6870,77 @@ let handle_round_run ctx args : result =
             | Error e -> Error (`Schema e)
           in
           let* sa = parse_and_validate_structured_action ~role keeper_json in
-          let normalized_reply =
-            let trimmed_reply = String.trim reply in
-            if trimmed_reply = "" || is_placeholder_reply trimmed_reply then
-              String.trim sa.description
-            else trimmed_reply
+          let normalized_reply, normalized_sa =
+            normalize_reply_with_action reply sa
           in
           if normalized_reply = "" then
             Error (`Schema "reply is empty after cleanup")
-          else Ok (normalized_reply, sa)
+          else Ok (normalized_reply, normalized_sa)
+        in
+        let synthetic_action_for_reply reply_text =
+          match infer_action_type_from_narrative ~role reply_text with
+          | Some sa -> sa
+          | None -> (
+              match role with
+              | `Player ->
+                  {
+                    sa_type = Attack;
+                    target_id = None;
+                    description = reply_text;
+                    flag_key = None;
+                    scene = None;
+                    quest_info = None;
+                    memory_hint = None;
+                    raw_payload =
+                      `Assoc
+                        [
+                          ("type", `String "attack");
+                          ("description", `String reply_text);
+                          ("inferred", `Bool true);
+                          ("source", `String "synthetic_fallback");
+                        ];
+                  }
+              | `Dm ->
+                  {
+                    sa_type = SetFlag;
+                    target_id = None;
+                    description = reply_text;
+                    flag_key = Some "story.recovered";
+                    scene = None;
+                    quest_info = None;
+                    memory_hint = None;
+                    raw_payload =
+                      `Assoc
+                        [
+                          ("type", `String "set_flag");
+                          ("description", `String reply_text);
+                          ("flag_key", `String "story.recovered");
+                          ("inferred", `Bool true);
+                          ("source", `String "synthetic_fallback");
+                        ];
+                  })
+        in
+        let infer_action_from_keeper_json keeper_json =
+          let mk_result ~reason reply_text =
+            let seed_reply =
+              let trimmed = String.trim reply_text in
+              if trimmed = "" || is_reply_noise_text trimmed then
+                String.trim (synthesized_roleplay_reply ())
+              else trimmed
+            in
+            let synthetic_action = synthetic_action_for_reply seed_reply in
+            let normalized_reply, normalized_sa =
+              normalize_reply_with_action seed_reply synthetic_action
+            in
+            if normalized_reply = "" then None
+            else Some (normalized_reply, normalized_sa, reason)
+          in
+          match parse_keeper_reply keeper_json with
+          | Ok reply_text -> mk_result ~reason:"keeper_reply_inferred" reply_text
+          | Error _ ->
+              mk_result
+                ~reason:"keeper_reply_synthesized"
+                (synthesized_roleplay_reply ())
         in
         let re_prompt_message ~stage ~reason =
           Printf.sprintf
@@ -6843,7 +6951,10 @@ let handle_round_run ctx args : result =
             (compact_summary_text ~max_len:180 reason)
         in
         let run_keeper_once ~stage ~message =
-          match call_keeper ctx ~name:keeper_name ~message ~timeout_sec with
+          match
+            call_keeper ctx ~name:keeper_name ~message
+              ~timeout_sec:keeper_timeout_sec
+          with
           | `Timeout -> Error (`Timeout stage)
           | `Error err -> Error (`Unavailable (stage, err))
           | `Ok keeper_json -> (
@@ -6855,28 +6966,48 @@ let handle_round_run ctx args : result =
         let keeper_result = run_keeper_once ~stage:"masc_keeper_msg" ~message:base_prompt in
         let keeper_result =
           match keeper_result with
-          | Error (`Validation (_stage, validation_error, _keeper_json)) ->
-              reprompt_count := !reprompt_count + 1;
-              (match validation_error with
-              | `Schema _ -> schema_failures := !schema_failures + 1
-              | `Rule _ ->
-                  rule_validation_failures := !rule_validation_failures + 1);
-              let stage = structured_action_error_kind validation_error in
-              let reason = structured_action_error_message validation_error in
-              statuses :=
-                `Assoc
-                  [
-                    ("actor_id", `String actor_id);
-                    ("role", `String (role_to_string role));
-                    ("keeper", `String keeper_name);
-                    ("status", `String "re_prompt");
-                    ("stage", `String stage);
-                    ("reason", `String reason);
-                    ("attempt", `Int 1);
-                  ]
-                :: !statuses;
-              let retry_prompt = re_prompt_message ~stage ~reason in
-              run_keeper_once ~stage:"re_prompt" ~message:retry_prompt
+          | Error (`Validation (_stage, validation_error, keeper_json)) -> (
+              match infer_action_from_keeper_json keeper_json with
+              | Some (reply_text, inferred_sa, inferred_reason) ->
+                  statuses :=
+                    `Assoc
+                      [
+                        ("actor_id", `String actor_id);
+                        ("role", `String (role_to_string role));
+                        ("keeper", `String keeper_name);
+                        ("status", `String "inferred_pre_reprompt");
+                        ("reason", `String inferred_reason);
+                        ( "validation_error",
+                          `String
+                            (string_of_structured_action_validation_error
+                               validation_error) );
+                        ("action_type", `String (string_of_action_type inferred_sa.sa_type));
+                        ("reply", `String reply_text);
+                      ]
+                    :: !statuses;
+                  Ok (reply_text, inferred_sa)
+              | None ->
+                  reprompt_count := !reprompt_count + 1;
+                  (match validation_error with
+                  | `Schema _ -> schema_failures := !schema_failures + 1
+                  | `Rule _ ->
+                      rule_validation_failures := !rule_validation_failures + 1);
+                  let stage = structured_action_error_kind validation_error in
+                  let reason = structured_action_error_message validation_error in
+                  statuses :=
+                    `Assoc
+                      [
+                        ("actor_id", `String actor_id);
+                        ("role", `String (role_to_string role));
+                        ("keeper", `String keeper_name);
+                        ("status", `String "re_prompt");
+                        ("stage", `String stage);
+                        ("reason", `String reason);
+                        ("attempt", `Int 1);
+                      ]
+                    :: !statuses;
+                  let retry_prompt = re_prompt_message ~stage ~reason in
+                  run_keeper_once ~stage:"re_prompt" ~message:retry_prompt)
           | other -> other
         in
         match keeper_result with
@@ -6912,7 +7043,7 @@ let handle_round_run ctx args : result =
                   ("status", `String "timeout");
                   ("reason", `String "timeout");
                   ("stage", `String stage);
-                  ("timeout_sec", `Float timeout_sec);
+                  ("timeout_sec", `Float keeper_timeout_sec);
                   ("sampled", `Bool sampled);
                   ( "sampled_reason",
                     Option.fold ~none:`Null ~some:(fun v -> `String v)
@@ -6930,8 +7061,51 @@ let handle_round_run ctx args : result =
                 ~error:keeper_error
                 ~stage
             in
-            apply_local_fallback ~stage:"keeper_call_fallback"
-              ~reason:keeper_error
+            if local_fallback then
+              apply_local_fallback ~stage:"keeper_call_fallback"
+                ~reason:keeper_error
+            else
+              let synthetic_reply = String.trim (synthesized_roleplay_reply ()) in
+              let synthetic_action = synthetic_action_for_reply synthetic_reply in
+              let recovered_reply, recovered_action =
+                normalize_reply_with_action synthetic_reply synthetic_action
+              in
+              if recovered_reply = "" then
+                apply_local_fallback ~stage:"keeper_call_fallback"
+                  ~reason:keeper_error
+              else
+                let* reply_event =
+                  append_keeper_reply_event ~base_dir ~room_id ~phase ~turn:turn_before
+                    ~role ~actor_id ~keeper_name ~reply:recovered_reply
+                in
+                success_count := !success_count + 1;
+                (match role with
+                | `Dm ->
+                    dm_success := true;
+                    dm_reply_ref := Some recovered_reply
+                | `Player -> player_success_count := !player_success_count + 1);
+                appended_events := !appended_events @ [ reply_event ];
+                let* action_events =
+                  apply_structured_action ~base_dir ~room_id ~turn:turn_before ~phase
+                    ~actor_id ~state:state_json recovered_action
+                in
+                appended_events := !appended_events @ action_events;
+                statuses :=
+                  `Assoc
+                    [
+                      ("actor_id", `String actor_id);
+                      ("role", `String (role_to_string role));
+                      ("keeper", `String keeper_name);
+                      ("status", `String "recovered_unavailable");
+                      ("stage", `String stage);
+                      ("reason", `String keeper_error);
+                      ("reply", `String recovered_reply);
+                      ( "action_type",
+                        `String
+                          (string_of_action_type recovered_action.sa_type) );
+                    ]
+                  :: !statuses;
+                Ok ()
         | Error (`Validation (stage, validation_error, keeper_json)) ->
             (match validation_error with
             | `Schema _ -> schema_failures := !schema_failures + 1
@@ -7087,6 +7261,27 @@ let handle_round_run ctx args : result =
               ]
             :: !statuses;
           Ok () )
+      in
+      let* () =
+        if phase = "round" && player_quorum_met && !dm_success then
+          let existing_npc_attacks = count_npc_attacks_in_list !appended_events in
+          if existing_npc_attacks > 0 then Ok ()
+          else
+            let state_for_pressure =
+              match derive_state ~base_dir ~room_id ~rule_module with
+              | Ok derived_after_dm ->
+                  inject_interventions_into_state
+                    (state_of_derived derived_after_dm)
+                    interventions_applied
+              | Error _ -> state_for_dm_prompt
+            in
+            let* pressure_events =
+              append_npc_counterattack_events ~base_dir ~room_id ~phase
+                ~turn:turn_before ~state:state_for_pressure
+            in
+            appended_events := !appended_events @ pressure_events;
+            Ok ()
+        else Ok ()
       in
       let advanced = player_quorum_met && !dm_success in
       let turn_after = if advanced then next_turn else turn_before in
@@ -7309,6 +7504,7 @@ let handle_round_run ctx args : result =
                   ("recovery_applied", `Bool recovery_applied);
                   ("recovery_mode", `String recovery_mode);
                   ("effective_timeout_sec", `Float timeout_sec);
+                  ("keeper_timeout_sec", `Float keeper_timeout_sec);
                   ("timeouts", `Int !timeout_count);
                   ("unavailable", `Int !unavailable_count);
                   ("schema_failures", `Int !schema_failures);

@@ -543,8 +543,65 @@ export async function fetchTrpgEvents(room?: string): Promise<{ events: TrpgEven
   return { events: events.map(normalizeRawEvent) }
 }
 
-export function runTrpgRound(room: string): Promise<unknown> {
-  return post('/api/v1/trpg/rounds/run', { room_id: room })
+export interface TrpgRoundRunStatus {
+  actor_id?: string
+  role?: string
+  keeper?: string
+  status?: string
+  reason?: string
+  stage?: string
+  action_type?: string
+  reply?: string
+  timeout_sec?: number
+}
+
+export interface TrpgRoundRunSummary {
+  participants?: number
+  successes?: number
+  player_successes?: number
+  player_required_successes?: number
+  player_quorum_met?: boolean
+  dm_success?: boolean
+  advanced?: boolean
+  progress_reason?: string
+  progress_detail?: string | null
+  recovery_applied?: boolean
+  recovery_mode?: string
+  effective_timeout_sec?: number
+  keeper_timeout_sec?: number
+  timeouts?: number
+  unavailable?: number
+  schema_failures?: number
+  rule_validation_failures?: number
+  reprompts?: number
+  npc_spawned?: number
+  npc_attacks?: number
+  canon_status?: string
+  canon_violation_count?: number
+  canon_warning_count?: number
+  memory_signals?: number
+  memory_guardrail_escalations?: number
+  roll_audit_count?: number
+}
+
+export interface TrpgRoundRunResult {
+  ok?: boolean
+  room_id?: string
+  phase?: string
+  turn_before?: number
+  turn_after?: number
+  timeout_sec?: number
+  statuses?: TrpgRoundRunStatus[]
+  summary?: TrpgRoundRunSummary
+  canon_check?: {
+    status?: string
+    warnings?: string[]
+    violations?: string[]
+  }
+}
+
+export function runTrpgRound(room: string): Promise<TrpgRoundRunResult> {
+  return post<TrpgRoundRunResult>('/api/v1/trpg/rounds/run', { room_id: room })
 }
 
 function normalizeTrpgPhase(phase?: string): string | undefined {

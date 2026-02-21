@@ -1203,24 +1203,44 @@ let choose_attack_target_id ~state ~actor_id =
     | Some actor_json -> role_from_actor_json actor_json
     | None -> "player"
   in
+  let turn =
+    match state |> member "turn" with
+    | `Int n when n > 0 -> n
+    | _ -> 1
+  in
   let live_actors =
     party_fields_of_state state
     |> List.filter (fun (aid, actor_json) ->
            aid <> actor_id && is_actor_alive actor_json)
   in
-  let pick pred =
-    live_actors
-    |> List.find_opt (fun (_, actor_json) -> pred (role_from_actor_json actor_json))
-    |> Option.map fst
+  let choose_from_candidates salt candidates =
+    match candidates with
+    | [] -> None
+    | _ ->
+        let len = List.length candidates in
+        let seed = Hashtbl.hash (actor_id ^ ":" ^ salt) in
+        let offset = (if seed < 0 then -seed else seed) mod len in
+        let idx = ((turn - 1) + offset) mod len in
+        Some (fst (List.nth candidates idx))
+  in
+  let pick pred salt =
+    let candidates =
+      live_actors
+      |> List.filter (fun (_, actor_json) -> pred (role_from_actor_json actor_json))
+    in
+    choose_from_candidates salt candidates
   in
   if attacker_role = "npc" then
-    match pick (fun role -> role <> "npc" && role <> "dm") with
+    match pick (fun role -> role <> "npc" && role <> "dm") "npc-primary" with
     | Some actor -> Some actor
-    | None -> (match pick (fun role -> role <> "npc") with Some actor -> Some actor | None -> None)
+    | None -> (
+        match pick (fun role -> role <> "npc") "npc-fallback" with
+        | Some actor -> Some actor
+        | None -> choose_from_candidates "npc-any" live_actors)
   else
-    match pick (fun role -> role = "npc") with
+    match pick (fun role -> role = "npc") "player-primary" with
     | Some actor -> Some actor
-    | None -> (match live_actors with (aid, _) :: _ -> Some aid | [] -> None)
+    | None -> choose_from_candidates "player-any" live_actors
 
 let deterministic_damage ~turn ~actor_id =
   let hash = Hashtbl.hash (actor_id ^ ":" ^ string_of_int turn) in
@@ -3669,6 +3689,17 @@ let handle_round_run ctx args : result =
             | Some spawn_event ->
                 appended_events := !appended_events @ [ spawn_event ]
             | None -> ());
+            let state_for_pressure =
+              match role with
+              | `Player -> state_json
+              | `Dm -> (
+                  match spawn_event_opt with
+                  | Some _ -> (
+                      match derive_state ~base_dir ~room_id ~rule_module with
+                      | Ok derived_after_spawn -> state_of_derived derived_after_spawn
+                      | Error _ -> state_json )
+                  | None -> state_json )
+            in
             let* reply_event =
               append_keeper_reply_event ~base_dir ~room_id ~phase ~turn:turn_before
                 ~role ~actor_id ~keeper_name ~reply:fallback_reply
@@ -3693,7 +3724,7 @@ let handle_round_run ctx args : result =
               match role with
               | `Dm ->
                   append_npc_counterattack_events ~base_dir ~room_id ~phase
-                    ~turn:turn_before ~state:state_json
+                    ~turn:turn_before ~state:state_for_pressure
               | `Player -> Ok []
             in
             appended_events := !appended_events @ pressure_events;

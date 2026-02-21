@@ -1,0 +1,317 @@
+(** Code Navigation Tools - Ripgrep-based code search and file reading
+
+    Phase 1: Core search tools (search, symbols, read)
+
+    Security model:
+    - Git root validation: restrict operations to repository root
+    - File size limit: reject files > 500KB
+    - Binary detection: block .so, .wasm, .jpg, etc.
+    - Path traversal prevention: deny access outside root
+*)
+
+open Types
+
+(* Argument helpers *)
+let get_string args key default =
+  match Yojson.Safe.Util.member key args with
+  | `String s -> s
+  | _ -> default
+
+let get_int args key default =
+  match Yojson.Safe.Util.member key args with
+  | `Int i -> i
+  | _ -> default
+
+let get_bool args key default =
+  match Yojson.Safe.Util.member key args with
+  | `Bool b -> b
+  | _ -> default
+
+(* Context required by code tools *)
+type context = {
+  config: Room.config;
+  agent_name: string;
+}
+
+type result = bool * string
+
+(* Security: Binary file extensions *)
+let binary_extensions = [
+  ".so"; ".a"; ".lib"; ".dll"; ".dylib";
+  ".wasm"; ".o"; ".obj";
+  ".jpg"; ".jpeg"; ".png"; ".gif"; ".bmp"; ".ico"; ".webp";
+  ".mp3"; ".mp4"; ".avi"; ".mov"; ".wav"; ".flac";
+  ".zip"; ".tar"; ".gz"; ".bz2"; ".xz"; ".7z";
+  ".pdf"; ".doc"; ".docx"; ".xls"; ".xlsx"; ".ppt"; ".pptx";
+]
+
+(* Security: Check if file is binary by extension *)
+let is_binary_file path =
+  List.exists (fun ext ->
+    String.length path >= String.length ext &&
+    String.equal (String.sub path (String.length path - String.length ext) (String.length ext)) ext
+  ) binary_extensions
+
+(* Security: Check file size limit (500KB) *)
+let max_file_size = 500 * 1024
+
+(* Security: Validate path is within git root *)
+let validate_path config path =
+  try
+    let git_root = match Room_git.git_root ~base_path:config.Room.base_path with
+      | None -> raise (Invalid_argument "Not in a git repository")
+      | Some root -> root
+    in
+    let absolute_path =
+      if Filename.is_relative path then
+        Filename.concat config.Room.base_path path
+      else
+        path
+    in
+    (* Simple path traversal check *)
+    if String.starts_with ~prefix:git_root absolute_path then
+      Ok absolute_path
+    else
+      Error (IoError "Path traversal detected: access outside git root")
+  with
+  | Invalid_argument msg -> Error (IoError msg)
+  | exn -> Error (IoError (Printexc.to_string exn))
+
+(* Handler: masc_code_search - Search code using ripgrep *)
+let handle_code_search ctx args =
+  let query = get_string args "query" "" in
+  let path = get_string args "path" "." in
+  let file_pattern = get_string args "file_pattern" "" in
+  let case_insensitive = get_bool args "case_insensitive" true in
+  let max_results = get_int args "max_results" 50 in
+
+  if query = "" then
+    (false, "❌ Query required: 'query' parameter")
+  else begin
+    (* Validate path first *)
+    let search_path_result = validate_path ctx.config path in
+    match search_path_result with
+    | Error e -> (false, Types.masc_error_to_string e)
+    | Ok search_path ->
+
+    (* Build ripgrep command as list (order is important - prepend in reverse!) *)
+    let rg_args_list = ref [] in
+
+    (* Ripgrep order: rg [OPTIONS] PATTERN PATH *)
+    (* PATH comes LAST, PATTERN second-to-last, so prepend PATH first *)
+    rg_args_list := search_path :: !rg_args_list;
+    rg_args_list := query :: !rg_args_list;
+
+    (* Max results: --max-count VALUE - prepend VALUE first, then FLAG *)
+    rg_args_list := "--max-count" :: string_of_int max_results :: !rg_args_list;
+
+    (* Context lines: -C VALUE - prepend VALUE first, then FLAG *)
+    rg_args_list := "-C" :: "2" :: !rg_args_list;
+
+    (* File pattern if specified: -g PATTERN *)
+    if file_pattern <> "" then
+      rg_args_list := file_pattern :: "-g" :: !rg_args_list;
+
+    (* Case insensitive flag: -i *)
+    if case_insensitive then
+      rg_args_list := "-i" :: !rg_args_list;
+
+    (* JSON output: --json *)
+    rg_args_list := "--json" :: !rg_args_list;
+
+    (* Executable name: rg - comes FIRST in final command, prepend LAST *)
+    rg_args_list := "rg" :: !rg_args_list;
+
+    let cmd = !rg_args_list in
+
+    match Process_eio.run_argv_with_status ~timeout_sec:30.0 cmd with
+    | Unix.WEXITED 0, output ->
+        (* Parse rg JSON output *)
+        let lines = String.split_on_char '\n' output in
+        let results = List.filter_map (fun line ->
+          if line = "" then None else
+          try Some (Yojson.Safe.from_string line)
+          with Yojson.Json_error _ -> None
+        ) lines in
+
+        let matches = List.filter_map (fun (json : Yojson.Safe.t) ->
+          let module U = Yojson.Safe.Util in
+          match U.member "type" json with
+          | `String "match" ->
+              let data = U.member "data" json in
+              (* path is {"text": "..."} not a string *)
+              let path_str = U.(data |> member "path" |> member "text" |> to_string) in
+              (* lines is {"text": "..."} not a string *)
+              let line_content = U.(data |> member "lines" |> member "text" |> to_string) in
+              let line_num = U.(data |> member "line_number" |> to_int) in
+              Some (`Assoc [
+                ("path", `String path_str);
+                ("line", `Int line_num);
+                ("content", `String line_content);
+              ])
+          | _ -> None
+        ) results in
+
+        let response = `Assoc [
+          ("count", `Int (List.length matches));
+          ("results", `List matches);
+        ] in
+        (true, Yojson.Safe.pretty_to_string response)
+    | Unix.WEXITED 1, _ ->
+        (* No matches *)
+        let response = `Assoc [
+          ("count", `Int 0);
+          ("results", `List []);
+        ] in
+        (true, Yojson.Safe.pretty_to_string response)
+    | _, output ->
+        (false, Printf.sprintf "❌ ripgrep failed: %s" output)
+  end
+
+(* Handler: masc_code_symbols - Extract file symbols using heuristics *)
+let handle_code_symbols ctx args =
+  let path = get_string args "path" "" in
+
+  if path = "" then
+    (false, "❌ Path required: 'path' parameter")
+  else begin
+    match validate_path ctx.config path with
+    | Error e -> (false, Types.masc_error_to_string e)
+    | Ok validated_path ->
+        if not (Sys.file_exists validated_path) then
+          (false, Printf.sprintf "❌ File not found: %s" path)
+        else if is_binary_file validated_path then
+          (false, "❌ Binary file detected")
+        else begin
+          (* Read file and extract symbols *)
+          let file_size = (Unix.stat validated_path).Unix.st_size in
+          if file_size > max_file_size then
+            (false, Printf.sprintf "❌ File too large: %d bytes (max: %d)" file_size max_file_size)
+          else begin
+            try
+              let content = In_channel.with_open_text validated_path In_channel.input_all in
+              let lines = String.split_on_char '\n' content in
+
+              (* Extract symbols using heuristics *)
+              let rec extract_symbols acc line_num = function
+                | [] -> List.rev acc
+                | line :: rest ->
+                    let trimmed = String.trim line in
+                    let symbols = match String.index_opt trimmed ':' with
+                      | Some colon when colon > 0 ->
+                          let prefix = String.sub trimmed 0 colon in
+                          (* Check for common patterns *)
+                          if String.starts_with ~prefix:"let " prefix ||
+                             String.starts_with ~prefix:"and " prefix ||
+                             String.starts_with ~prefix:"type " prefix ||
+                             String.starts_with ~prefix:"exception " prefix ||
+                             String.starts_with ~prefix:"module " prefix ||
+                             String.starts_with ~prefix:"open " prefix ||
+                             String.starts_with ~prefix:"include " prefix ||
+                             String.starts_with ~prefix:"class " prefix ||
+                             String.starts_with ~prefix:"def " prefix ||
+                             String.starts_with ~prefix:"func " prefix ||
+                             String.starts_with ~prefix:"function " prefix ||
+                             String.starts_with ~prefix:"interface " prefix ||
+                             String.starts_with ~prefix:"struct " prefix ||
+                             String.starts_with ~prefix:"enum " prefix ||
+                             String.starts_with ~prefix:"impl " prefix ||
+                             String.starts_with ~prefix:"pub " prefix ||
+                             String.starts_with ~prefix:"const " prefix ||
+                             String.starts_with ~prefix:"var " prefix
+                          then
+                            let name = String.trim (String.sub trimmed (colon + 1) (String.length trimmed - colon - 1)) in
+                            if name <> "" && not (String.contains name ' ') then
+                              let kind_end = try
+                                String.index trimmed ' '
+                              with Not_found -> String.length trimmed
+                              in
+                              [Some (`Assoc [
+                                ("name", `String name);
+                                ("kind", `String (String.sub trimmed 0 kind_end));
+                                ("line", `Int line_num);
+                              ])]
+                            else []
+                          else []
+                      | Some _ -> [] (* colon <= 0, ignore *)
+                      | None -> []
+                    in
+                    extract_symbols (List.rev_append symbols acc) (line_num + 1) rest
+              in
+
+              let symbols = extract_symbols [] 1 lines in
+              let symbols_json = List.map (function Some x -> x | None -> `Null) symbols in
+              let response : Yojson.Safe.t = `Assoc [
+                ("path", `String path);
+                ("count", `Int (List.length symbols));
+                ("symbols", `List symbols_json);
+              ] in
+              (true, Yojson.Safe.pretty_to_string response)
+            with exn ->
+              (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
+          end
+        end
+  end
+
+(* Handler: masc_code_read - Read file with offset/limit *)
+let handle_code_read ctx args =
+  let path = get_string args "path" "" in
+  let offset = get_int args "offset" 0 in
+  let limit = get_int args "limit" 100 in
+
+  if path = "" then
+    (false, "❌ Path required: 'path' parameter")
+  else begin
+    match validate_path ctx.config path with
+    | Error e -> (false, Types.masc_error_to_string e)
+    | Ok validated_path ->
+        if not (Sys.file_exists validated_path) then
+          (false, Printf.sprintf "❌ File not found: %s" path)
+        else if is_binary_file validated_path then
+          (false, "❌ Binary file detected")
+        else begin
+          let file_size = (Unix.stat validated_path).Unix.st_size in
+          if file_size > max_file_size then
+            (false, Printf.sprintf "❌ File too large: %d bytes (max: %d)" file_size max_file_size)
+          else begin
+            try
+              let content = In_channel.with_open_text validated_path In_channel.input_all in
+              let lines = String.split_on_char '\n' content in
+              let total_lines = List.length lines in
+
+              (* Validate offset *)
+              let safe_offset = max 0 (min offset total_lines) in
+
+              (* Calculate end line *)
+              let safe_limit = min limit (total_lines - safe_offset) in
+
+              (* Extract lines *)
+              let selected_lines = ref [] in
+              for i = safe_offset to safe_offset + safe_limit - 1 do
+                match List.nth_opt lines i with
+                | Some line -> selected_lines := line :: !selected_lines
+                | None -> ()
+              done;
+
+              let result_lines = List.rev !selected_lines in
+              let response = `Assoc [
+                ("path", `String path);
+                ("offset", `Int safe_offset);
+                ("limit", `Int safe_limit);
+                ("total_lines", `Int total_lines);
+                ("lines", `List (List.map (fun s -> `String s) result_lines));
+              ] in
+              (true, Yojson.Safe.pretty_to_string response)
+            with exn ->
+              (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
+          end
+        end
+  end
+
+(* Dispatch function - returns None if tool not handled *)
+let dispatch ctx ~name ~args : result option =
+  match name with
+  | "masc_code_search" -> Some (handle_code_search ctx args)
+  | "masc_code_symbols" -> Some (handle_code_symbols ctx args)
+  | "masc_code_read" -> Some (handle_code_read ctx args)
+  | _ -> None

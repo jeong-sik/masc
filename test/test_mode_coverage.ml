@@ -20,7 +20,8 @@ let test_category_to_string () =
   check string "cost" "cost" (Mode.category_to_string Mode.Cost);
   check string "auth" "auth" (Mode.category_to_string Mode.Auth);
   check string "ratelimit" "ratelimit" (Mode.category_to_string Mode.RateLimit);
-  check string "encryption" "encryption" (Mode.category_to_string Mode.Encryption)
+  check string "encryption" "encryption" (Mode.category_to_string Mode.Encryption);
+  check string "code" "code" (Mode.category_to_string Mode.Code)
 
 let test_category_of_string_valid () =
   check (option bool) "core" (Some true) (Option.map (fun c -> c = Mode.Core) (Mode.category_of_string "core"));
@@ -34,7 +35,8 @@ let test_category_of_string_valid () =
   check (option bool) "cost" (Some true) (Option.map (fun c -> c = Mode.Cost) (Mode.category_of_string "cost"));
   check (option bool) "auth" (Some true) (Option.map (fun c -> c = Mode.Auth) (Mode.category_of_string "auth"));
   check (option bool) "ratelimit" (Some true) (Option.map (fun c -> c = Mode.RateLimit) (Mode.category_of_string "ratelimit"));
-  check (option bool) "encryption" (Some true) (Option.map (fun c -> c = Mode.Encryption) (Mode.category_of_string "encryption"))
+  check (option bool) "encryption" (Some true) (Option.map (fun c -> c = Mode.Encryption) (Mode.category_of_string "encryption"));
+  check (option bool) "code" (Some true) (Option.map (fun c -> c = Mode.Code) (Mode.category_of_string "code"))
 
 let test_category_of_string_invalid () =
   check (option bool) "invalid" None (Option.map (fun _ -> true) (Mode.category_of_string "invalid"));
@@ -87,7 +89,7 @@ let test_mode_roundtrip () =
    ============================================================ *)
 
 let test_all_categories_count () =
-  check int "12 categories" 12 (List.length Mode.all_categories)
+  check int "13 categories" 13 (List.length Mode.all_categories)
 
 let test_all_categories_unique () =
   let rec has_duplicates = function
@@ -128,7 +130,7 @@ let test_categories_parallel () =
 
 let test_categories_full () =
   let cats = Mode.categories_for_mode Mode.Full in
-  check int "all categories" 12 (List.length cats)
+  check int "all categories" 13 (List.length cats)
 
 let test_categories_solo () =
   let cats = Mode.categories_for_mode Mode.Solo in
@@ -198,6 +200,11 @@ let test_tool_category_ratelimit () =
 let test_tool_category_encryption () =
   check bool "encryption_enable" true (Mode.tool_category "masc_encryption_enable" = Mode.Encryption);
   check bool "generate_key" true (Mode.tool_category "masc_generate_key" = Mode.Encryption)
+
+let test_tool_category_code () =
+  check bool "code_search" true (Mode.tool_category "masc_code_search" = Mode.Code);
+  check bool "code_symbols" true (Mode.tool_category "masc_code_symbols" = Mode.Code);
+  check bool "code_read" true (Mode.tool_category "masc_code_read" = Mode.Code)
 
 let test_tool_category_unknown () =
   (* Unknown tools default to Core *)
@@ -331,6 +338,7 @@ let () =
       test_case "auth tools" `Quick test_tool_category_auth;
       test_case "ratelimit tools" `Quick test_tool_category_ratelimit;
       test_case "encryption tools" `Quick test_tool_category_encryption;
+      test_case "code tools" `Quick test_tool_category_code;
       test_case "unknown defaults to core" `Quick test_tool_category_unknown;
     ];
     "is_tool_enabled", [

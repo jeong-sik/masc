@@ -3956,6 +3956,78 @@ let parse_keeper_reply keeper_json =
                    markers"
               else Ok default_fallback_reply))
 
+(** Attempt to recover truncated JSON by closing unclosed braces/brackets.
+    Returns None if the input cannot be recovered. *)
+let recover_truncated_json (raw : string) : Yojson.Safe.t option =
+  let trimmed = String.trim raw in
+  if String.length trimmed = 0 then None
+  else
+    let open_braces = ref 0 in
+    let open_brackets = ref 0 in
+    let in_string = ref false in
+    let escaped = ref false in
+    String.iter
+      (fun c ->
+        if !escaped then escaped := false
+        else
+          match c with
+          | '\\' when !in_string -> escaped := true
+          | '"' -> in_string := not !in_string
+          | '{' when not !in_string -> incr open_braces
+          | '}' when not !in_string -> decr open_braces
+          | '[' when not !in_string -> incr open_brackets
+          | ']' when not !in_string -> decr open_brackets
+          | _ -> ())
+      trimmed;
+    if !in_string then begin
+      (* Close unclosed string *)
+      let buf = Buffer.create (String.length trimmed + 16) in
+      Buffer.add_string buf trimmed;
+      Buffer.add_char buf '"';
+      for _ = 1 to !open_brackets do
+        Buffer.add_char buf ']'
+      done;
+      for _ = 1 to !open_braces do
+        Buffer.add_char buf '}'
+      done;
+      (try Some (Yojson.Safe.from_string (Buffer.contents buf))
+       with Yojson.Json_error _ -> None)
+    end
+    else if !open_braces > 0 || !open_brackets > 0 then begin
+      let buf = Buffer.create (String.length trimmed + 16) in
+      Buffer.add_string buf trimmed;
+      for _ = 1 to !open_brackets do
+        Buffer.add_char buf ']'
+      done;
+      for _ = 1 to !open_braces do
+        Buffer.add_char buf '}'
+      done;
+      (try Some (Yojson.Safe.from_string (Buffer.contents buf))
+       with Yojson.Json_error _ -> None)
+    end
+    else None
+
+(** Parse a raw string as keeper JSON, with truncated JSON recovery.
+    Tries normal Yojson parse first. On failure, attempts to close unclosed
+    braces/brackets and re-parse. Returns the parsed reply or an error. *)
+let parse_keeper_reply_raw (raw : string) =
+  let try_parse s =
+    try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
+  in
+  match try_parse raw with
+  | Some json -> parse_keeper_reply json
+  | None -> (
+      match recover_truncated_json raw with
+      | Some json ->
+          Printf.eprintf
+            "[WARN] parse_keeper_reply_raw: recovered truncated JSON\n%!";
+          parse_keeper_reply json
+      | None ->
+          (* Not JSON at all — treat the raw text as the reply *)
+          let trimmed = String.trim raw in
+          if trimmed <> "" then Ok trimmed
+          else Error "empty raw keeper response")
+
 type prompt_language = [ `Ko | `En ]
 
 let prompt_language_of_string_opt = function
@@ -4099,10 +4171,13 @@ type prompt_context = {
   actor_archetype : string;
   actor_traits : string list;
   actor_skills : string list;
+  actor_inventory : string list;
+  actor_equipment : (string * string) list;
   scene_description : string;
   scene_mood : string;
   narrative_recent : string list;
   party_summary : string;
+  relationships : (string * string) list;
   world_weather : string;
   world_time : string;
   dm_style : string;
@@ -4118,10 +4193,13 @@ let empty_prompt_context =
     actor_archetype = "";
     actor_traits = [];
     actor_skills = [];
+    actor_inventory = [];
+    actor_equipment = [];
     scene_description = "";
     scene_mood = "";
     narrative_recent = [];
     party_summary = "";
+    relationships = [];
     world_weather = "";
     world_time = "";
     dm_style = "";
@@ -4184,8 +4262,167 @@ let extract_party_summary ~exclude_actor_id (state : Yojson.Safe.t) : string =
       |> String.concat ", "
   | _ -> ""
 
-let extract_prompt_context ~actor_id ~dm_persona_override (state : Yojson.Safe.t) :
-    prompt_context =
+let extract_equipment_fields (actor_json : Yojson.Safe.t) :
+    (string * string) list =
+  match actor_json with
+  | `Null -> []
+  | _ -> (
+      match actor_json |> member "equipment" with
+      | `Assoc pairs ->
+          pairs
+          |> List.filter_map (fun (slot, v) ->
+                 match v with
+                 | `String name when String.trim name <> "" ->
+                     Some (slot, String.trim name)
+                 | _ -> None)
+      | `List items ->
+          items
+          |> List.filter_map (fun item ->
+                 let slot = get_string_field item "slot" in
+                 let name = get_string_field item "name" in
+                 if slot <> "" && name <> "" then Some (slot, name) else None)
+      | _ -> [])
+
+(** Jaccard similarity between two word sets: |A inter B| / |A union B|. *)
+let jaccard_similarity a b =
+  let module SSet = Set.Make (String) in
+  let set_a = SSet.of_list a in
+  let set_b = SSet.of_list b in
+  let inter = SSet.cardinal (SSet.inter set_a set_b) in
+  let union = SSet.cardinal (SSet.union set_a set_b) in
+  if union = 0 then 0.0 else Float.of_int inter /. Float.of_int union
+
+let tokenize_words s =
+  s |> String.lowercase_ascii |> String.split_on_char ' '
+  |> List.concat_map (String.split_on_char '\n')
+  |> List.filter (fun w -> String.length w > 0)
+
+(** Check if a new narration entry is too similar to recent entries.
+    Returns true if the entry should be skipped (>60% Jaccard overlap with
+    any of the last 3 entries). *)
+let is_narration_duplicate ~recent_replies (new_reply : string) : bool =
+  let new_tokens = tokenize_words new_reply in
+  recent_replies
+  |> List.exists (fun prev ->
+         let prev_tokens = tokenize_words prev in
+         jaccard_similarity new_tokens prev_tokens > 0.6)
+
+(** Extract last N reply strings from narration_log. *)
+let extract_recent_replies ?(n = 3) (state : Yojson.Safe.t) : string list =
+  match state |> member "narration_log" with
+  | `List xs ->
+      xs |> take_last n
+      |> List.filter_map (fun entry ->
+             match entry |> member "reply" with
+             | `String s when String.trim s <> "" -> Some (String.trim s)
+             | _ -> None)
+  | _ -> []
+
+(** Deduplicate a narration log list. For each entry, check if its reply
+    is >60% Jaccard-similar to any of the preceding 3 entries. If so, skip. *)
+let deduplicate_narration (entries : Yojson.Safe.t list) :
+    Yojson.Safe.t list =
+  let _recent, kept =
+    List.fold_left
+      (fun (recent, acc) entry ->
+        let reply =
+          match entry |> member "reply" with
+          | `String s -> String.trim s
+          | _ -> ""
+        in
+        if reply = "" then (recent, entry :: acc)
+        else if is_narration_duplicate ~recent_replies:recent reply then
+          (recent, acc)
+        else
+          let recent' = (reply :: recent) |> take_last 3 in
+          (recent', entry :: acc))
+      ([], []) entries
+  in
+  List.rev kept
+
+(** Classify the relationship between actor_id and another actor based on
+    keyword occurrence in narration log entries where both appear.
+    Returns (other_actor_name, relation_type) pairs. *)
+let extract_relationships ~actor_id (state : Yojson.Safe.t) :
+    (string * string) list =
+  let ally_keywords =
+    [ "heal"; "help"; "protect"; "치유"; "도움"; "보호"; "회복" ]
+  in
+  let rival_keywords =
+    [ "attack"; "hit"; "slash"; "strike"; "공격"; "타격"; "베" ]
+  in
+  let party_members =
+    match state |> member "party" with
+    | `Assoc members ->
+        members
+        |> List.filter_map (fun (aid, aj) ->
+               if aid = actor_id then None
+               else
+                 let name = get_string_field aj "name" in
+                 if name = "" then None else Some (aid, name))
+    | _ -> []
+  in
+  let actor_name =
+    match state |> member "party" with
+    | `Assoc members -> (
+        match List.assoc_opt actor_id members with
+        | Some actor_json -> get_string_field actor_json "name"
+        | None -> "")
+    | _ -> ""
+  in
+  let actor_name_l = String.lowercase_ascii actor_name in
+  let entries =
+    match state |> member "narration_log" with
+    | `List xs -> xs
+    | _ -> []
+  in
+  party_members
+  |> List.filter_map (fun (other_id, other_name) ->
+         let ally_score = ref 0 in
+         let rival_score = ref 0 in
+         let co_count = ref 0 in
+         entries
+         |> List.iter (fun entry ->
+                let reply =
+                  match entry |> member "reply" with
+                  | `String s -> String.lowercase_ascii s
+                  | _ -> ""
+                in
+                let entry_actor =
+                  match entry |> member "actor_id" with
+                  | `String a -> a
+                  | _ -> ""
+                in
+                let other_name_l = String.lowercase_ascii other_name in
+                let involves_both =
+                  (entry_actor = actor_id
+                  && find_substring reply other_name_l <> None)
+                  || (entry_actor = other_id && find_substring reply actor_name_l <> None)
+                in
+                if involves_both then begin
+                  incr co_count;
+                  if
+                    List.exists
+                      (fun kw -> find_substring reply kw <> None)
+                      ally_keywords
+                  then incr ally_score;
+                  if
+                    List.exists
+                      (fun kw -> find_substring reply kw <> None)
+                      rival_keywords
+                  then incr rival_score
+                end);
+         if !co_count = 0 then None
+         else
+           let relation =
+             if !ally_score > !rival_score then "ally"
+             else if !rival_score > !ally_score then "rival"
+             else "neutral"
+           in
+           Some (other_name, relation))
+
+let extract_prompt_context ~actor_id ?(dm_persona_override = None)
+    (state : Yojson.Safe.t) : prompt_context =
   let actor_json =
     match state |> member "party" with
     | `Assoc members -> (
@@ -4218,10 +4455,13 @@ let extract_prompt_context ~actor_id ~dm_persona_override (state : Yojson.Safe.t
     actor_archetype = get_string_field actor_json "archetype";
     actor_traits = get_string_list_field actor_json "traits";
     actor_skills = get_string_list_field actor_json "skills";
+    actor_inventory = get_string_list_field actor_json "inventory";
+    actor_equipment = extract_equipment_fields actor_json;
     scene_description = get_string_field world_json "description";
     scene_mood = get_string_field world_json "intro";
     narrative_recent = extract_narrative_recent state;
     party_summary = extract_party_summary ~exclude_actor_id:actor_id state;
+    relationships = extract_relationships ~actor_id state;
     world_weather =
       (let flags = get_string_list_field world_json "story_flags" in
        flags
@@ -4286,6 +4526,17 @@ let build_player_section_ko (ctx : prompt_context) =
       (if ctx.actor_skills <> [] then
          Printf.sprintf "보유 기술: %s." (format_traits ctx.actor_skills)
        else "");
+      (match ctx.actor_equipment with
+      | [] -> ""
+      | eq ->
+          Printf.sprintf "장착 중: %s."
+            (eq
+            |> List.map (fun (slot, name) ->
+                   Printf.sprintf "%s(%s)" name slot)
+            |> String.concat ", "));
+      (if ctx.actor_inventory <> [] then
+         Printf.sprintf "소지품: %s." (String.concat ", " ctx.actor_inventory)
+       else "");
       (if ctx.scene_description <> "" then
          Printf.sprintf "현재 장소: %s" ctx.scene_description
        else "");
@@ -4301,6 +4552,14 @@ let build_player_section_ko (ctx : prompt_context) =
       (if ctx.party_summary <> "" then
          Printf.sprintf "파티 동료: %s." ctx.party_summary
        else "");
+      (match ctx.relationships with
+      | [] -> ""
+      | rels ->
+          rels
+          |> List.map (fun (name, rel) ->
+                 Printf.sprintf "%s와(과)의 관계: %s" name rel)
+          |> String.concat ". "
+          |> Printf.sprintf "관계: %s.");
       (match ctx.narrative_recent with
       | [] -> ""
       | lines ->
@@ -4336,6 +4595,17 @@ let build_player_section_en (ctx : prompt_context) =
       (if ctx.actor_skills <> [] then
          Printf.sprintf "Skills: %s." (format_traits ctx.actor_skills)
        else "");
+      (match ctx.actor_equipment with
+      | [] -> ""
+      | eq ->
+          Printf.sprintf "Equipped: %s."
+            (eq
+            |> List.map (fun (slot, name) ->
+                   Printf.sprintf "%s (%s)" name slot)
+            |> String.concat ", "));
+      (if ctx.actor_inventory <> [] then
+         Printf.sprintf "Carrying: %s." (String.concat ", " ctx.actor_inventory)
+       else "");
       (if ctx.scene_description <> "" then
          Printf.sprintf "Current scene: %s" ctx.scene_description
        else "");
@@ -4351,6 +4621,14 @@ let build_player_section_en (ctx : prompt_context) =
       (if ctx.party_summary <> "" then
          Printf.sprintf "Party members: %s." ctx.party_summary
        else "");
+      (match ctx.relationships with
+      | [] -> ""
+      | rels ->
+          rels
+          |> List.map (fun (name, rel) ->
+                 Printf.sprintf "Relationship with %s: %s" name rel)
+          |> String.concat ". "
+          |> Printf.sprintf "Relationships: %s.");
       (match ctx.narrative_recent with
       | [] -> ""
       | lines ->

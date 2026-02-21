@@ -109,6 +109,15 @@ val cascade :
   completion_request list ->
   (completion_response, string) result
 
+(** {1 Concurrency Control} *)
+
+(** Maximum concurrent cascade calls (from MASC_MAX_CONCURRENT_LLM env,
+    default 2). *)
+val max_concurrent_llm : int
+
+(** Number of permits currently available (0 = all slots busy). *)
+val llm_semaphore_available : unit -> int
+
 (** {1 Helpers} *)
 
 (** Built-in model specs for common configurations. *)

@@ -3480,6 +3480,8 @@ let build_player_section_ko (ctx : prompt_context) =
   let parts =
     [
       Printf.sprintf "당신은 '%s'입니다." ctx.actor_name;
+      "당신은 보조자나 해설자가 아니라, 이 캐릭터의 의사결정을 직접 수행하는 플레이어입니다.";
+      "메타 설명(시스템/프롬프트/모델/정책 언급)은 금지됩니다. 캐릭터의 관점으로만 응답하세요.";
       (if ctx.actor_archetype <> "" then
          Printf.sprintf "직업/역할: %s." ctx.actor_archetype
        else "");
@@ -3528,6 +3530,8 @@ let build_player_section_en (ctx : prompt_context) =
   let parts =
     [
       Printf.sprintf "You ARE '%s'." ctx.actor_name;
+      "You are not an assistant or commentator. You are the active player controlling this character.";
+      "No meta talk about system prompts/models/policies. Respond only from the character perspective.";
       (if ctx.actor_archetype <> "" then
          Printf.sprintf "Class/Role: %s." ctx.actor_archetype
        else "");

@@ -69,6 +69,9 @@ fn control_status_to_ops_class(css_class: &str) -> &'static str {
 }
 
 #[cfg(target_arch = "wasm32")]
+const DEFAULT_ROUND_TIMEOUT_SEC: f64 = 45.0;
+
+#[cfg(target_arch = "wasm32")]
 fn set_round_readiness_rows(doc: &web_sys::Document, rows: &[RoundReadinessRow]) {
     let Some(container) = doc.get_element_by_id("round-readiness-checklist") else {
         return;
@@ -140,6 +143,15 @@ struct RoundStallSummary {
     dm_success: bool,
     timeouts: u64,
     unavailable: u64,
+    progress_reason: Option<String>,
+    progress_detail: Option<String>,
+    recovery_applied: bool,
+    recovery_mode: Option<String>,
+    effective_timeout_sec: Option<f64>,
+    roll_audit_count: u64,
+    roll_audit_preview: Option<String>,
+    npc_spawned: u64,
+    npc_attacks: u64,
     first_issue: Option<String>,
 }
 
@@ -744,9 +756,87 @@ fn preflight_warning_text(json: &Value) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn summary_nonempty_string(summary: Option<&Value>, key: &str) -> Option<String> {
+    summary
+        .and_then(|s| s.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| text.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn summarize_roll_audit_entry(entry: &Value) -> Option<String> {
+    let source = entry
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("event");
+    let actor = entry
+        .get("actor_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("-");
+    let target = entry
+        .get("target_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("-");
+    let damage = entry.get("damage").and_then(Value::as_i64);
+    let total = entry.get("total").and_then(Value::as_i64);
+    let dc = entry.get("dc").and_then(Value::as_i64);
+    let passed = entry.get("passed").and_then(Value::as_bool);
+
+    let mut parts = vec![format!("{} {}", source, actor)];
+    if source == "combat.attack" {
+        if target != "-" {
+            parts.push(format!("→{}", target));
+        }
+        if let Some(damage) = damage {
+            parts.push(format!("dmg {}", damage));
+        }
+    } else if source == "dice.rolled" {
+        if let Some(total) = total {
+            parts.push(format!("total {}", total));
+        }
+        if let Some(dc) = dc {
+            parts.push(format!("dc {}", dc));
+        }
+        if let Some(passed) = passed {
+            parts.push(if passed {
+                "pass".to_string()
+            } else {
+                "fail".to_string()
+            });
+        }
+    }
+
+    let text = parts.join(" ");
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(shorten_reason(&text, 90))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn extract_stalled_round_summary(json: &Value) -> RoundStallSummary {
     let summary = json.get("summary");
     let reasons = collect_stall_reasons(json);
+    let roll_audit = summary
+        .and_then(|s| s.get("roll_audit"))
+        .and_then(Value::as_array);
+    let roll_audit_count = summary
+        .and_then(|s| s.get("roll_audit_count"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| roll_audit.map(|entries| entries.len() as u64).unwrap_or(0));
+    let roll_audit_preview = roll_audit
+        .and_then(|entries| entries.first())
+        .and_then(summarize_roll_audit_entry);
+    let progress_detail = summary_nonempty_string(summary, "progress_detail");
     RoundStallSummary {
         successes: summary
             .and_then(|s| s.get("successes"))
@@ -768,7 +858,31 @@ fn extract_stalled_round_summary(json: &Value) -> RoundStallSummary {
             .and_then(|s| s.get("unavailable"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
-        first_issue: reasons.first().cloned(),
+        progress_reason: summary_nonempty_string(summary, "progress_reason"),
+        progress_detail: progress_detail.clone(),
+        recovery_applied: summary
+            .and_then(|s| s.get("recovery_applied"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        recovery_mode: summary_nonempty_string(summary, "recovery_mode"),
+        effective_timeout_sec: summary
+            .and_then(|s| s.get("effective_timeout_sec"))
+            .and_then(Value::as_f64),
+        roll_audit_count,
+        roll_audit_preview,
+        npc_spawned: summary
+            .and_then(|s| s.get("npc_spawned"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        npc_attacks: summary
+            .and_then(|s| s.get("npc_attacks"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        first_issue: reasons
+            .first()
+            .cloned()
+            .or(progress_detail)
+            .or_else(|| summary_nonempty_string(summary, "progress_reason")),
     }
 }
 
@@ -798,6 +912,50 @@ fn build_stalled_round_guide(
             unavailable
         ),
     ];
+    if let Some(reason) = summary.progress_reason.as_deref() {
+        lines.push(format!("진행 판정: {}", reason));
+    }
+    if let Some(detail) = summary.progress_detail.as_deref() {
+        lines.push(format!("진단 세부: {}", shorten_reason(detail, 120)));
+    }
+    if summary.recovery_applied || summary.recovery_mode.is_some() {
+        let mode = summary
+            .recovery_mode
+            .as_deref()
+            .map(|raw| raw.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let timeout = summary
+            .effective_timeout_sec
+            .map(|value| format!("{value:.0}s"))
+            .unwrap_or_else(|| "-".to_string());
+        lines.push(format!(
+            "복구 정책: mode={} / applied={} / timeout={}",
+            mode,
+            if summary.recovery_applied {
+                "yes"
+            } else {
+                "no"
+            },
+            timeout
+        ));
+    }
+    if summary.roll_audit_count > 0 {
+        let preview = summary
+            .roll_audit_preview
+            .as_deref()
+            .map(|entry| format!(" ({})", shorten_reason(entry, 80)))
+            .unwrap_or_default();
+        lines.push(format!(
+            "판정 추적: {}건{}",
+            summary.roll_audit_count, preview
+        ));
+    }
+    if summary.npc_spawned > 0 || summary.npc_attacks > 0 {
+        lines.push(format!(
+            "NPC 활동: spawn {} / attack {}",
+            summary.npc_spawned, summary.npc_attacks
+        ));
+    }
     let reasons = summary
         .first_issue
         .as_ref()
@@ -1135,6 +1293,96 @@ fn set_round_stall_badges(summary: Option<&RoundStallSummary>) {
         },
         Some("keeper unavailable 발생 횟수"),
     );
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "PROGRESS",
+        summary
+            .progress_reason
+            .as_deref()
+            .unwrap_or(if summary.dm_success {
+                "advanced"
+            } else {
+                "stalled"
+            }),
+        if summary.dm_success {
+            "is-ok"
+        } else {
+            "is-warn"
+        },
+        Some("턴 진행 판정 사유"),
+    );
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "RECOVERY",
+        if summary.recovery_applied {
+            "applied"
+        } else {
+            "idle"
+        },
+        if summary.recovery_applied {
+            "is-ok"
+        } else {
+            "is-warn"
+        },
+        Some("로컬 fallback 복구 적용 여부"),
+    );
+    if let Some(mode) = summary.recovery_mode.as_deref() {
+        append_round_stall_badge(
+            &doc,
+            &container,
+            "MODE",
+            &shorten_reason(mode, 36),
+            if mode.eq_ignore_ascii_case("none") {
+                "is-warn"
+            } else {
+                "is-ok"
+            },
+            Some("복구 모드"),
+        );
+    }
+    if let Some(timeout_sec) = summary.effective_timeout_sec {
+        append_round_stall_badge(
+            &doc,
+            &container,
+            "TIMEOUT_SEC",
+            &format!("{timeout_sec:.0}s"),
+            if timeout_sec <= 15.0 {
+                "is-warn"
+            } else {
+                "is-ok"
+            },
+            Some("실제 round.run timeout 값"),
+        );
+    }
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "ROLL",
+        &summary.roll_audit_count.to_string(),
+        if summary.roll_audit_count > 0 {
+            "is-ok"
+        } else {
+            "is-warn"
+        },
+        summary.roll_audit_preview.as_deref(),
+    );
+    append_round_stall_badge(
+        &doc,
+        &container,
+        "NPC",
+        &format!(
+            "spawn {} / atk {}",
+            summary.npc_spawned, summary.npc_attacks
+        ),
+        if summary.npc_spawned > 0 || summary.npc_attacks > 0 {
+            "is-ok"
+        } else {
+            "is-warn"
+        },
+        Some("이번 라운드에서 생성/행동한 NPC 수"),
+    );
     if let Some(issue) = summary.first_issue.as_deref() {
         append_round_stall_badge(
             &doc,
@@ -1315,7 +1563,7 @@ fn bind_recovery_action_buttons() {
                 let current = read_dom_input(&doc, "round-run-timeout")
                     .and_then(|raw| raw.parse::<f64>().ok())
                     .filter(|value| *value > 0.0)
-                    .unwrap_or(5.0);
+                    .unwrap_or(DEFAULT_ROUND_TIMEOUT_SEC);
                 let next = (current + 30.0).min(600.0);
                 if let Some(input) = doc
                     .get_element_by_id("round-run-timeout")
@@ -1612,7 +1860,7 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
     let timeout_sec = read_dom_input(doc, "round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
-        .unwrap_or(5.0);
+        .unwrap_or(DEFAULT_ROUND_TIMEOUT_SEC);
 
     let player_pairs_raw = read_dom_text_value(doc, "round-run-players").unwrap_or_default();
     let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);

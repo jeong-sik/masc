@@ -4445,6 +4445,163 @@ let handle_intervention_submit ctx args : result =
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
+let take_first_n n xs =
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | x :: tl -> loop (remaining - 1) (x :: acc) tl
+  in
+  loop n [] xs
+
+let compact_summary_text ?(max_len = 96) raw =
+  let compact =
+    raw |> String.trim |> String.split_on_char '\n'
+    |> List.map String.trim |> List.filter (fun s -> s <> "")
+    |> String.concat " "
+  in
+  if compact = "" then ""
+  else if String.length compact <= max_len then compact
+  else String.sub compact 0 (max_len - 1) ^ "…"
+
+let json_member_nonempty_string json key =
+  match json |> member key with
+  | `String raw ->
+      let value = String.trim raw in
+      if value = "" then None else Some value
+  | _ -> None
+
+let json_member_int_value json key =
+  match json |> member key with
+  | `Int value -> Some value
+  | `Intlit value -> int_of_string_opt value
+  | `Float value -> Some (int_of_float value)
+  | _ -> None
+
+let json_member_bool_value json key =
+  match json |> member key with `Bool value -> Some value | _ -> None
+
+let first_some a b = match a with Some _ -> a | None -> b
+let option_filter f = function Some value when f value -> Some value | _ -> None
+
+let status_first_non_ok_detail (statuses : Yojson.Safe.t list) : string option =
+  let rec loop = function
+    | [] -> None
+    | status_json :: tl ->
+        let status_name =
+          status_json |> member "status" |> to_string_option
+          |> Option.value ~default:""
+          |> String.trim |> String.lowercase_ascii
+        in
+        if status_name = "" || status_name = "ok" then loop tl
+        else
+          let actor_id =
+            status_json |> member "actor_id" |> to_string_option
+            |> Option.value ~default:"-" |> String.trim
+          in
+          let stage =
+            status_json |> member "stage" |> to_string_option
+            |> Option.value ~default:"" |> String.trim
+          in
+          let reason =
+            json_member_nonempty_string status_json "reason"
+            |> first_some (json_member_nonempty_string status_json "error")
+            |> first_some (json_member_nonempty_string status_json "reply")
+            |> Option.map (compact_summary_text ~max_len:120)
+          in
+          let head = Printf.sprintf "%s=%s" actor_id status_name in
+          let with_stage =
+            if stage = "" then head else Printf.sprintf "%s @%s" head stage
+          in
+          Some
+            (match reason with
+            | Some detail when detail <> "" ->
+                Printf.sprintf "%s (%s)" with_stage detail
+            | _ -> with_stage)
+  in
+  loop statuses
+
+let count_event_type_in_list event_type (events : Trpg_engine_event.t list) =
+  List.fold_left
+    (fun acc (event : Trpg_engine_event.t) ->
+      if event.event_type = event_type then acc + 1 else acc)
+    0 events
+
+let count_npc_attacks_in_list (events : Trpg_engine_event.t list) =
+  List.fold_left
+    (fun acc (event : Trpg_engine_event.t) ->
+      if event.event_type <> Trpg_engine_event.Combat_attack then acc
+      else
+        let actor_id =
+          json_member_nonempty_string event.payload "actor_id"
+          |> first_some
+               (event.actor_id
+               |> Option.map String.trim
+               |> option_filter (fun value -> value <> ""))
+          |> Option.value ~default:""
+          |> String.lowercase_ascii
+        in
+        if String.starts_with ~prefix:"npc-" actor_id then acc + 1 else acc)
+    0 events
+
+let build_round_roll_audit (events : Trpg_engine_event.t list) : Yojson.Safe.t list =
+  let to_json_opt_string = function Some value -> `String value | None -> `Null in
+  let to_json_opt_int = function Some value -> `Int value | None -> `Null in
+  let to_json_opt_bool = function Some value -> `Bool value | None -> `Null in
+  let rec collect acc = function
+    | [] -> List.rev acc
+    | (event : Trpg_engine_event.t) :: tl -> (
+        match event.event_type with
+        | Trpg_engine_event.Dice_rolled ->
+            let payload = event.payload in
+            let actor_id =
+              json_member_nonempty_string payload "actor_id"
+              |> first_some event.actor_id
+            in
+            let row =
+              `Assoc
+                [
+                  ("seq", `Int event.seq);
+                  ("source", `String "dice.rolled");
+                  ("actor_id", to_json_opt_string actor_id);
+                  ("action", to_json_opt_string (json_member_nonempty_string payload "action"));
+                  ("raw_d20", to_json_opt_int (json_member_int_value payload "raw_d20"));
+                  ("bonus", to_json_opt_int (json_member_int_value payload "bonus"));
+                  ("total", to_json_opt_int (json_member_int_value payload "total"));
+                  ("dc", to_json_opt_int (json_member_int_value payload "dc"));
+                  ("passed", to_json_opt_bool (json_member_bool_value payload "passed"));
+                ]
+            in
+            collect (row :: acc) tl
+        | Trpg_engine_event.Combat_attack ->
+            let payload = event.payload in
+            let actor_id =
+              json_member_nonempty_string payload "actor_id"
+              |> first_some event.actor_id
+            in
+            let row =
+              `Assoc
+                [
+                  ("seq", `Int event.seq);
+                  ("source", `String "combat.attack");
+                  ("resolved_by", `String "deterministic_damage");
+                  ("actor_id", to_json_opt_string actor_id);
+                  ( "target_id",
+                    to_json_opt_string
+                      (json_member_nonempty_string payload "target_id") );
+                  ("damage", to_json_opt_int (json_member_int_value payload "damage"));
+                  ("skill", to_json_opt_string (json_member_nonempty_string payload "skill"));
+                  ( "action",
+                    to_json_opt_string
+                      (json_member_nonempty_string payload "action"
+                      |> Option.map (compact_summary_text ~max_len:72)) );
+                  ("hp_source_reason", `String "combat.attack");
+                ]
+            in
+            collect (row :: acc) tl
+        | _ -> collect acc tl)
+  in
+  collect [] events
+
 let handle_round_run ctx args : result =
   let ( let* ) = Result.bind in
   let base_dir = ctx.config.base_path in
@@ -5006,6 +5163,29 @@ let handle_round_run ctx args : result =
       in
       let final_state = state_of_derived final_derived in
       let statuses = List.rev !statuses in
+      let progress_detail = status_first_non_ok_detail statuses in
+      let progress_reason =
+        if advanced then "advanced"
+        else if !timeout_count > 0 then "timeout"
+        else if !unavailable_count > 0 then "keeper_unavailable"
+        else if not player_quorum_met then "player_quorum_not_met"
+        else if not !dm_success then "dm_not_resolved"
+        else if !fallback_count > 0 then "fallback_applied_no_progress"
+        else "stalled"
+      in
+      let recovery_applied = !fallback_count > 0 in
+      let recovery_mode =
+        if recovery_applied then "local_fallback_applied"
+        else if local_fallback then "local_fallback_enabled"
+        else "none"
+      in
+      let roll_audit_all = build_round_roll_audit !appended_events in
+      let roll_audit_count = List.length roll_audit_all in
+      let roll_audit = take_first_n 8 roll_audit_all in
+      let npc_spawned =
+        count_event_type_in_list Trpg_engine_event.Actor_spawned !appended_events
+      in
+      let npc_attacks = count_npc_attacks_in_list !appended_events in
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
       Ok
         (`Assoc
@@ -5033,9 +5213,21 @@ let handle_round_run ctx args : result =
                   ("player_quorum_met", `Bool player_quorum_met);
                   ("dm_success", `Bool !dm_success);
                   ("advanced", `Bool advanced);
+                  ("progress_reason", `String progress_reason);
+                  ( "progress_detail",
+                    match progress_detail with
+                    | Some detail -> `String detail
+                    | None -> `Null );
+                  ("recovery_applied", `Bool recovery_applied);
+                  ("recovery_mode", `String recovery_mode);
+                  ("effective_timeout_sec", `Float timeout_sec);
                   ("timeouts", `Int !timeout_count);
                   ("unavailable", `Int !unavailable_count);
+                  ("npc_spawned", `Int npc_spawned);
+                  ("npc_attacks", `Int npc_attacks);
                   ("interventions", `Int (List.length interventions_applied));
+                  ("roll_audit_count", `Int roll_audit_count);
+                  ("roll_audit", `List roll_audit);
                 ] );
             ( "outcome",
               match !latest_outcome_payload with

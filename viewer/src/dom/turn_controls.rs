@@ -536,6 +536,9 @@ fn bind_advance_button() {
 
 #[cfg(target_arch = "wasm32")]
 fn on_advance_click() {
+    // Any click on the advance button counts as user activity for idle detection.
+    crate::game::round_runner::record_user_activity();
+
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };

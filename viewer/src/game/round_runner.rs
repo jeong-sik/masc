@@ -17,6 +17,10 @@ use crate::game::state::TurnProgressState;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 
+/// User idle timeout (ms) — pause auto-round if no interaction for this long.
+#[cfg(target_arch = "wasm32")]
+const USER_IDLE_TIMEOUT_MS: f64 = 120_000.0; // 2 minutes
+
 // ─── Resource ──────────────────────────────────
 
 /// Shared state between the Bevy ECS world and the async WASM loop.
@@ -46,6 +50,9 @@ struct RoundRunnerControl {
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     static ROUND_RUNNER_CONTROL: RefCell<Option<RoundRunnerControl>> = const { RefCell::new(None) };
+    /// Timestamp (ms since epoch) of the last user interaction.
+    /// Updated by `record_user_activity()`, checked by the auto-round loop.
+    static LAST_USER_ACTIVITY: RefCell<f64> = RefCell::new(0.0);
 }
 
 impl Default for RoundRunner {
@@ -105,6 +112,9 @@ pub fn start_round_loop(mut commands: Commands, progress: Res<TurnProgressState>
 
     #[cfg(target_arch = "wasm32")]
     {
+        // Mark game entry as user activity so idle gate doesn't fire immediately.
+        record_user_activity();
+
         let auto_enabled = auto_round_enabled();
         runner.running.store(auto_enabled, Ordering::SeqCst);
         if !auto_enabled {
@@ -181,6 +191,33 @@ pub fn set_auto_round_running(enabled: bool) {
 #[allow(dead_code)]
 pub fn set_auto_round_running(_enabled: bool) {}
 
+/// Record that the user interacted (click, key press, manual round trigger).
+/// The auto-round loop checks this to pause when the user is absent.
+#[cfg(target_arch = "wasm32")]
+pub fn record_user_activity() {
+    let now = js_sys::Date::now();
+    LAST_USER_ACTIVITY.with(|cell| {
+        *cell.borrow_mut() = now;
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub fn record_user_activity() {}
+
+/// Returns `true` if no user activity has been recorded for `USER_IDLE_TIMEOUT_MS`.
+#[cfg(target_arch = "wasm32")]
+fn is_user_idle() -> bool {
+    let last = LAST_USER_ACTIVITY.with(|cell| *cell.borrow());
+    if last == 0.0 {
+        // Never recorded — treat first few rounds as active (activity gets
+        // recorded on game entry via start_round_loop).
+        return false;
+    }
+    let elapsed = js_sys::Date::now() - last;
+    elapsed > USER_IDLE_TIMEOUT_MS
+}
+
 #[cfg(target_arch = "wasm32")]
 fn spawn_round_loop(control: RoundRunnerControl) {
     let running = control.running.clone();
@@ -200,6 +237,19 @@ fn spawn_round_loop(control: RoundRunnerControl) {
             && !game_ended.load(Ordering::SeqCst)
             && round_num < MAX_ROUNDS
         {
+            // ── Idle gate: pause when user is absent ──
+            if is_user_idle() {
+                log::info!(
+                    "RoundRunner: user idle for >{}s — pausing auto round. \
+                     Interact to resume.",
+                    (USER_IDLE_TIMEOUT_MS / 1000.0) as u32
+                );
+                running.store(false, Ordering::SeqCst);
+                set_dom_runner_active(false);
+                sync_auto_round_ui(false);
+                break;
+            }
+
             let body = match build_round_body(&dm_keeper_snapshot) {
                 Ok(body) => body,
                 Err(reason) => {
@@ -460,7 +510,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         "timeout_sec": timeout_sec,
         "lang": lang,
         "require_claim": false,
-        "local_fallback": true
+        "local_fallback": false
     });
 
     Ok(body.to_string())

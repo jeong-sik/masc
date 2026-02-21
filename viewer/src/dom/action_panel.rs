@@ -327,6 +327,9 @@ fn bind_dice_roll_button() {
 
 #[cfg(target_arch = "wasm32")]
 fn submit_intervention_from_input() {
+    // Submitting an intervention is explicit user activity.
+    crate::game::round_runner::record_user_activity();
+
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };

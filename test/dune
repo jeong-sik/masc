@@ -124,6 +124,12 @@
  (modules test_trpg_npc_bestiary)
  (libraries masc_mcp alcotest yojson))
 
+; NPC combat integration tests (spawn -> counterattack -> event store)
+(test
+ (name test_trpg_npc_integration)
+ (modules test_trpg_npc_integration)
+ (libraries masc_mcp alcotest yojson unix))
+
 (test
  (name test_trpg_engine_store_sqlite)
  (modules test_trpg_engine_store_sqlite)

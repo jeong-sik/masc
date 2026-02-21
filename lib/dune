@@ -170,6 +170,7 @@
    tool_library
    library_bridge
    tool_council
+   tool_code
    tool_protocol_game_view
    tool_experiment
    tool_suspend

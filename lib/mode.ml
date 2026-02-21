@@ -10,6 +10,7 @@ type category =
   | Comm        (* broadcast, messages, lock, unlock, listen, who, reset *)
   | Portal      (* portal_open, portal_send, portal_close, portal_status *)
   | Worktree    (* worktree_create, worktree_remove, worktree_list *)
+  | Code        (* code_search, code_symbols, code_read *)
   | Health      (* heartbeat, cleanup_zombies, gc, agents *)
   | Discovery   (* register_capabilities, find_by_capability *)
   | Voting      (* vote_create, vote_cast, vote_status, votes *)
@@ -24,6 +25,7 @@ type mode =
   | Minimal   (* core, health *)
   | Standard  (* core, comm, worktree, health *)
   | Parallel  (* heavy multi-agent: core+comm+portal+worktree+health+discovery+voting+interrupt *)
+  | Coding    (* core, worktree, code, health - for agent code development *)
   | Full      (* all categories *)
   | Solo      (* core, worktree - for single-agent work *)
   | Custom    (* user-defined categories *)
@@ -34,6 +36,7 @@ let category_to_string = function
   | Comm -> "comm"
   | Portal -> "portal"
   | Worktree -> "worktree"
+  | Code -> "code"
   | Health -> "health"
   | Discovery -> "discovery"
   | Voting -> "voting"
@@ -49,6 +52,7 @@ let category_of_string = function
   | "comm" -> Some Comm
   | "portal" -> Some Portal
   | "worktree" -> Some Worktree
+  | "code" -> Some Code
   | "health" -> Some Health
   | "discovery" -> Some Discovery
   | "voting" -> Some Voting
@@ -64,6 +68,7 @@ let mode_to_string = function
   | Minimal -> "minimal"
   | Standard -> "standard"
   | Parallel -> "parallel"
+  | Coding -> "coding"
   | Full -> "full"
   | Solo -> "solo"
   | Custom -> "custom"
@@ -73,6 +78,7 @@ let mode_of_string = function
   | "minimal" -> Some Minimal
   | "standard" -> Some Standard
   | "parallel" -> Some Parallel
+  | "coding" -> Some Coding
   | "full" -> Some Full
   | "solo" -> Some Solo
   | "custom" -> Some Custom
@@ -80,7 +86,7 @@ let mode_of_string = function
 
 (** All categories *)
 let all_categories = [
-  Core; Comm; Portal; Worktree; Health; Discovery;
+  Core; Comm; Portal; Worktree; Code; Health; Discovery;
   Voting; Interrupt; Cost; Auth; RateLimit; Encryption
 ]
 
@@ -89,6 +95,7 @@ let categories_for_mode = function
   | Minimal -> [Core; Health]
   | Standard -> [Core; Comm; Worktree; Health]
   | Parallel -> [Core; Comm; Portal; Worktree; Health; Discovery; Voting; Interrupt]
+  | Coding -> [Core; Worktree; Code; Health]
   | Full -> all_categories
   | Solo -> [Core; Worktree]
   | Custom -> [] (* Will be loaded from config *)
@@ -163,6 +170,9 @@ let tool_category tool_name =
   | "masc_encryption_status" | "masc_encryption_enable"
   | "masc_encryption_disable" | "masc_generate_key" -> Encryption
 
+  (* Code navigation tools *)
+  | "masc_code_search" | "masc_code_symbols" | "masc_code_read" -> Code
+
   (* Mode management tools - always available *)
   | "masc_switch_mode" | "masc_get_config" -> Core
 
@@ -177,11 +187,12 @@ let is_tool_enabled enabled_categories tool_name =
 (** Mode descriptions for help text *)
 let mode_description = function
   | Minimal -> "Core task management + health checks only"
-  | Standard -> "Core + communication + worktree + health"
-  | Parallel -> "Multi-agent parallel mode: comm + portal + discovery + voting + interrupt"
-  | Full -> "All features enabled"
-  | Solo -> "Single-agent mode: core + worktree, no multi-agent features"
-  | Custom -> "Custom category selection"
+  | Standard -> "Core, communication, worktree, and health"
+  | Parallel -> "Heavy multi-agent: adds portal, discovery, voting, and interrupt"
+  | Coding -> "Core, worktree, code navigation, and health for agent development"
+  | Full -> "All categories enabled"
+  | Solo -> "Single-agent work: core and worktree only"
+  | Custom -> "User-defined category set"
 
 (** Category descriptions *)
 let category_description = function
@@ -189,6 +200,7 @@ let category_description = function
   | Comm -> "Communication: broadcast, messages, listen"
   | Portal -> "A2A direct messaging: portal_open, portal_send"
   | Worktree -> "Git worktrees: worktree_create, worktree_list"
+  | Code -> "Code navigation: code_search, code_symbols, code_read"
   | Health -> "Maintenance: heartbeat, cache, tempo, relay/mitosis, gc"
   | Discovery -> "Agent discovery & metrics: register_capabilities, fitness, collaboration"
   | Voting -> "Consensus: vote_create, vote_cast, votes"

@@ -95,7 +95,7 @@ const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
 
 /// Retry delay for transient round-run conflicts (ms).
 #[cfg(target_arch = "wasm32")]
-const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 1200;
+const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 5000;
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn stall_retry_delay_ms(retry_count: u32) -> i32 {
@@ -486,7 +486,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
     let timeout_sec = read_dom_input("round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
-        .unwrap_or(30.0);
+        .unwrap_or(5.0);
     let lang = read_dom_input("round-run-lang").unwrap_or_else(|| "ko".to_string());
 
     // 2) Player keeper mapping from hidden round plan (`actor=keeper,actor=keeper,...`).

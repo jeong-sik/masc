@@ -644,8 +644,8 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
                 .get("status")
                 .or_else(|| root.get("status"))
                 .and_then(Value::as_str)
-                .unwrap_or("idle")
-                .to_string(),
+                .map(str::to_string)
+                .unwrap_or_else(|| phase.clone()),
             turn,
             phase,
             current_scenario: state

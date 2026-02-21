@@ -1464,6 +1464,108 @@ let detect_combat_semantic (text : string) : combat_semantic option =
   then Some Combat_defense_intent
   else None
 
+(* Server-side narrative inference: extract action type from LLM narrative
+   when the explicit structured_action JSON format is missing.
+   Ordered by specificity — more specific matches first to avoid
+   "heal" matching before "attack" in "heals after the attack". *)
+let infer_action_type_from_narrative ~(role : [ `Player | `Dm ])
+    (text : string) : structured_action option =
+  let lowered = String.lowercase_ascii text in
+  let has_any keywords =
+    List.exists (fun keyword -> contains_substring lowered keyword) keywords
+  in
+  let make_sa sa_type ?(flag_key : string option) ?(scene : string option)
+      ?(quest_info : string option) desc =
+    {
+      sa_type;
+      target_id = None;
+      description = desc;
+      flag_key;
+      scene;
+      quest_info;
+      raw_payload =
+        `Assoc
+          [
+            ("type", `String (string_of_action_type sa_type));
+            ("description", `String desc);
+            ("inferred", `Bool true);
+          ];
+    }
+  in
+  let truncate_desc s =
+    let max_len = 120 in
+    if String.length s <= max_len then s
+    else String.sub s 0 max_len ^ "..."
+  in
+  let desc = truncate_desc (String.trim text) in
+  match role with
+  | `Player ->
+      (* Ordered: specific first, generic last *)
+      if has_any [ "cast"; "spell"; "magic"; "incantation"; "주문"; "마법"; "시전" ]
+      then Some (make_sa Magic desc)
+      else if
+        has_any [ "heal"; "cure"; "bandage"; "potion"; "치료"; "회복"; "붕대"; "포션" ]
+      then Some (make_sa Heal desc)
+      else if
+        has_any
+          [
+            "examine"; "inspect"; "investigate"; "search"; "look for"; "조사";
+            "살펴"; "탐색"; "확인";
+          ]
+      then Some (make_sa Investigate desc)
+      else if
+        has_any
+          [
+            "talk"; "persuade"; "negotiate"; "diplomacy"; "convince"; "대화";
+            "설득"; "협상"; "말을 건";
+          ]
+      then Some (make_sa Social desc)
+      else if
+        has_any
+          [ "use"; "drink"; "equip"; "consume"; "activate"; "사용"; "마시"; "장착" ]
+      then Some (make_sa UseItem desc)
+      else if
+        has_any [ "explore"; "wander"; "travel"; "move to"; "탐험"; "이동"; "걸어" ]
+      then Some (make_sa Explore desc)
+      else if
+        has_any
+          [
+            "attack"; "strike"; "slash"; "stab"; "shoot"; "hit"; "swing";
+            "공격"; "타격"; "베기"; "사격"; "돌격"; "찌르";
+          ]
+      then Some (make_sa Attack desc)
+      else if
+        has_any
+          [
+            "defend"; "block"; "parry"; "shield"; "dodge"; "evade"; "방어";
+            "막기"; "회피"; "가드";
+          ]
+      then Some (make_sa Defend desc)
+      else None
+  | `Dm ->
+      if
+        has_any
+          [
+            "discover"; "found"; "reveal"; "unlock"; "milestone"; "발견";
+            "드러나"; "밝혀"; "획득";
+          ]
+      then Some (make_sa SetFlag ~flag_key:"story.inferred" desc)
+      else if
+        has_any
+          [
+            "enter"; "arrive"; "move to"; "travel to"; "new area"; "들어서";
+            "도착"; "이동하"; "새로운 장소"; "방으로";
+          ]
+      then Some (make_sa SceneTransition ~scene:desc desc)
+      else if
+        has_any
+          [
+            "quest"; "mission"; "objective"; "task"; "의뢰"; "임무"; "퀘스트";
+            "목표";
+          ]
+      then Some (make_sa QuestUpdate ~quest_info:desc desc)
+      else None
+
 let role_from_actor_json actor_json =
   match actor_json |> member "role" with
   | `String s ->
@@ -5022,6 +5124,7 @@ let handle_round_run ctx args : result =
       let rule_validation_failures = ref 0 in
       let reprompt_count = ref 0 in
       let player_success_count = ref 0 in
+      let player_fallback_count = ref 0 in
       let dm_success = ref false in
       let unavailable_count = ref 0 in
       let timeout_count = ref 0 in
@@ -5126,37 +5229,57 @@ let handle_round_run ctx args : result =
                 ~role ~actor_id ~keeper_name ~reply:fallback_reply
             in
             fallback_count := !fallback_count + 1;
-            success_count := !success_count + 1;
+            (* NOTE: fallback does NOT increment success_count.
+               Fallbacks are placeholder responses — counting them as success
+               masks stagnation and prevents the game from detecting
+               that no meaningful action occurred. *)
             (match role with
             | `Dm ->
                 dm_success := true;
                 dm_reply_ref := Some fallback_reply
             | `Player ->
-                player_success_count := !player_success_count + 1);
+                player_fallback_count := !player_fallback_count + 1);
             appended_events := !appended_events @ [ reply_event ];
             let* action_events =
               match role with
-              | `Dm -> Ok []
-              | `Player ->
-                  let sa_fallback : structured_action =
-                    {
-                      sa_type = Attack;
-                      target_id = None;
-                      description = fallback_reply;
-                      flag_key = None;
-                      scene = None;
-                      quest_info = None;
-                      raw_payload =
-                        `Assoc
-                          [
-                            ("type", `String "attack");
-                            ("description", `String fallback_reply);
-                          ];
-                    }
+              | `Dm ->
+                  let payload =
+                    `Assoc
+                      [
+                        ("phase", `String phase);
+                        ("turn", `Int turn_before);
+                        ("role", `String "dm");
+                        ("actor_id", `String actor_id);
+                        ("keeper", `String keeper_name);
+                        ("narration", `String fallback_reply);
+                        ("is_fallback", `Bool true);
+                      ]
                   in
-                  apply_structured_action ~base_dir ~room_id
-                    ~turn:turn_before ~phase ~actor_id ~state:state_json
-                    sa_fallback
+                  let* event =
+                    append_event ~base_dir ~room_id
+                      ~event_type:Trpg_engine_event.Narration_posted
+                      ~actor_id ~payload ()
+                  in
+                  Ok [ event ]
+              | `Player ->
+                  let payload =
+                    `Assoc
+                      [
+                        ("phase", `String phase);
+                        ("turn", `Int turn_before);
+                        ("role", `String "player");
+                        ("actor_id", `String actor_id);
+                        ("keeper", `String keeper_name);
+                        ("narration", `String fallback_reply);
+                        ("is_fallback", `Bool true);
+                      ]
+                  in
+                  let* event =
+                    append_event ~base_dir ~room_id
+                      ~event_type:Trpg_engine_event.Narration_posted
+                      ~actor_id ~payload ()
+                  in
+                  Ok [ event ]
             in
             appended_events := !appended_events @ action_events;
             let* pressure_events =
@@ -5249,13 +5372,13 @@ let handle_round_run ctx args : result =
           | `Ok keeper_json -> (
               match validate_keeper_payload keeper_json with
               | Ok (reply, sa) -> Ok (reply, sa)
-              | Error validation_error -> Error (`Validation (stage, validation_error))
+              | Error validation_error -> Error (`Validation (stage, validation_error, keeper_json))
           )
         in
         let keeper_result = run_keeper_once ~stage:"masc_keeper_msg" ~message:base_prompt in
         let keeper_result =
           match keeper_result with
-          | Error (`Validation (_stage, validation_error)) ->
+          | Error (`Validation (_stage, validation_error, _keeper_json)) ->
               reprompt_count := !reprompt_count + 1;
               (match validation_error with
               | `Schema _ -> schema_failures := !schema_failures + 1
@@ -5332,7 +5455,7 @@ let handle_round_run ctx args : result =
             in
             apply_local_fallback ~stage:"keeper_call_fallback"
               ~reason:keeper_error
-        | Error (`Validation (stage, validation_error)) ->
+        | Error (`Validation (stage, validation_error, keeper_json)) ->
             (match validation_error with
             | `Schema _ -> schema_failures := !schema_failures + 1
             | `Rule _ ->
@@ -5340,17 +5463,60 @@ let handle_round_run ctx args : result =
             let validation_error_msg =
               string_of_structured_action_validation_error validation_error
             in
-            let status_name =
-              match validation_error with `Schema _ -> "schema_invalid" | `Rule _ -> "rule_invalid"
+            (* Server-side narrative inference: extract action from free-form text *)
+            let inferred =
+              match parse_keeper_reply keeper_json with
+              | Ok reply_text ->
+                  (match infer_action_type_from_narrative ~role reply_text with
+                  | Some sa -> Some (reply_text, sa)
+                  | None -> None)
+              | Error _ -> None
             in
-            let* () =
-              record_unavailable_status
-                ~status:status_name
-                ~error:validation_error_msg
-                ~stage
-            in
-            apply_local_fallback ~stage:"validation_fallback"
-              ~reason:validation_error_msg
+            (match inferred with
+            | Some (reply_text, sa) ->
+                let* reply_event =
+                  append_keeper_reply_event
+                    ~base_dir ~room_id ~phase ~turn:turn_before
+                    ~role ~actor_id ~keeper_name ~reply:reply_text
+                in
+                success_count := !success_count + 1;
+                (match role with
+                | `Dm ->
+                    dm_success := true;
+                    dm_reply_ref := Some reply_text
+                | `Player -> player_success_count := !player_success_count + 1);
+                appended_events := !appended_events @ [ reply_event ];
+                let* action_events =
+                  apply_structured_action ~base_dir ~room_id
+                    ~turn:turn_before ~phase ~actor_id ~state:state_json sa
+                in
+                appended_events := !appended_events @ action_events;
+                statuses :=
+                  `Assoc
+                    [
+                      ("actor_id", `String actor_id);
+                      ("role", `String (role_to_string role));
+                      ("keeper", `String keeper_name);
+                      ("status", `String "inferred");
+                      ("reply", `String reply_text);
+                      ("action_type", `String (string_of_action_type sa.sa_type));
+                    ]
+                  :: !statuses;
+                Ok ()
+            | None ->
+                let status_name =
+                  match validation_error with
+                  | `Schema _ -> "schema_invalid"
+                  | `Rule _ -> "rule_invalid"
+                in
+                let* () =
+                  record_unavailable_status
+                    ~status:status_name
+                    ~error:validation_error_msg
+                    ~stage
+                in
+                apply_local_fallback ~stage:"validation_fallback"
+                  ~reason:validation_error_msg)
         | Ok (reply, sa) ->
             let* reply_event =
               append_keeper_reply_event
@@ -5403,7 +5569,9 @@ let handle_round_run ctx args : result =
         let total = List.length player_keepers in
         if total <= 0 then 0 else max 1 ((total + 1) / 2)
       in
-      let player_quorum_met = !player_success_count >= player_required_successes in
+      let player_quorum_met =
+        !player_success_count + !player_fallback_count >= player_required_successes
+      in
       let state_for_dm_prompt =
         if player_quorum_met then
           match derive_state ~base_dir ~room_id ~rule_module with
@@ -5431,8 +5599,8 @@ let handle_round_run ctx args : result =
                 ( "reason",
                   `String
                     (Printf.sprintf
-                       "player quorum not met: success=%d required=%d; dm execution skipped"
-                       !player_success_count
+                       "player quorum not met: success=%d fallback=%d required=%d; dm execution skipped"
+                       !player_success_count !player_fallback_count
                        player_required_successes) );
                 ("stage", `String "player_quorum");
               ]
@@ -5589,6 +5757,7 @@ let handle_round_run ctx args : result =
                   ("successes", `Int !success_count);
                   ("fallbacks", `Int !fallback_count);
                   ("player_successes", `Int !player_success_count);
+                  ("player_fallbacks", `Int !player_fallback_count);
                   ("player_required_successes", `Int player_required_successes);
                   ("player_quorum_met", `Bool player_quorum_met);
                   ("dm_success", `Bool !dm_success);

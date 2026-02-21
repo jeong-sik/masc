@@ -244,6 +244,54 @@ pub fn update_narrative_dom(
     };
     let debug_enabled = debug_mode_enabled(&document);
 
+    // P5: Manage thinking placeholder divs based on TurnProgressState.
+    // Inject a spinner for each actor currently in "thinking" state,
+    // and remove placeholders for actors that have left that state.
+    {
+        // Collect currently-thinking actor IDs.
+        let thinking_ids: Vec<&String> = progress
+            .actor_states
+            .iter()
+            .filter(|(_, state)| state.as_str() == "thinking")
+            .map(|(id, _)| id)
+            .collect();
+
+        // Remove stale placeholders (actors no longer thinking).
+        let mut to_remove = Vec::new();
+        let children = log_el.children();
+        for i in 0..children.length() {
+            if let Some(child) = children.item(i) {
+                if let Some(id) = child.get_attribute("data-thinking-actor") {
+                    if !thinking_ids.iter().any(|tid| tid.as_str() == id) {
+                        to_remove.push(child);
+                    }
+                }
+            }
+        }
+        for el in to_remove {
+            let _ = log_el.remove_child(&el);
+        }
+
+        // Create placeholders for newly-thinking actors (if not already present).
+        for actor_id in &thinking_ids {
+            let placeholder_id = format!("thinking-{}", actor_id);
+            if document.get_element_by_id(&placeholder_id).is_none() {
+                if let Ok(div) = document.create_element("div") {
+                    div.set_class_name("narrative-entry thinking-placeholder");
+                    let _ = div.set_attribute("id", &placeholder_id);
+                    let _ = div.set_attribute("data-thinking-actor", actor_id);
+                    let label = sanitize_text(actor_id);
+                    div.set_inner_html(&format!(
+                        "<span class=\"thinking-spinner\"></span> <span class=\"thinking-label\">{} thinking…</span>",
+                        label
+                    ));
+                    let _ = log_el.append_child(&div);
+                    scroll_to_bottom(&log_el);
+                }
+            }
+        }
+    }
+
     for NarrativeReceived(payload) in events.read() {
         let Ok(entry) = document.create_element("div") else {
             continue;
@@ -264,6 +312,15 @@ pub fn update_narrative_dom(
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("system");
+
+        // P5: Remove thinking placeholder for this speaker when their narrative arrives.
+        if speaker_raw != "system" {
+            let placeholder_id = format!("thinking-{}", speaker_raw);
+            if let Some(placeholder) = document.get_element_by_id(&placeholder_id) {
+                let _ = log_el.remove_child(&placeholder);
+            }
+        }
+
         let dedup_key = format!(
             "{}|{}|{}|{}",
             payload.turn,

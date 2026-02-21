@@ -1341,22 +1341,148 @@ let ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state =
     in
     Ok (Some event)
 
-let fallback_player_reply ~state ~actor_id =
-  let skills =
-    match actor_json_of_state state actor_id with
-    | Some actor_json -> (
-        match actor_json |> member "skills" with
-        | `List xs ->
-            xs
-            |> List.filter_map (function
-                 | `String s when String.trim s <> "" -> Some (String.trim s)
-                 | _ -> None)
-        | _ -> [])
-    | None -> []
+let default_placeholder_reply = "상황을 살피며 다음 행동을 준비합니다."
+
+let state_turn state =
+  match state |> member "turn" with
+  | `Int n when n > 0 -> n
+  | _ -> 1
+
+let non_empty_string_list_field json key =
+  match json |> member key with
+  | `List xs ->
+      xs
+      |> List.filter_map (function
+           | `String s when String.trim s <> "" -> Some (String.trim s)
+           | _ -> None)
+  | _ -> []
+
+let pick_deterministic_text ~actor_id ~turn ~salt xs =
+  match xs with
+  | [] -> None
+  | _ ->
+      let hash = Hashtbl.hash (actor_id ^ ":" ^ string_of_int turn ^ ":" ^ salt) in
+      let idx = (if hash < 0 then -hash else hash) mod List.length xs in
+      Some (List.nth xs idx)
+
+let fallback_dm_reply ~state =
+  let turn = state_turn state in
+  let live_npcs =
+    party_fields_of_state state
+    |> List.fold_left
+         (fun acc (_, actor_json) ->
+           if is_actor_alive actor_json && role_from_actor_json actor_json = "npc" then acc + 1
+           else acc)
+         0
   in
-  match skills with
-  | primary :: _ -> Printf.sprintf "%s로 적을 공격해 전선을 밀어붙인다." primary
-  | [] -> "적의 빈틈을 노려 공격한다."
+  if live_npcs > 0 then
+    Printf.sprintf
+      "턴 %d, 전장의 연기가 걷히자 남은 적들이 전열을 다시 정비하며 반격을 준비한다."
+      turn
+  else
+    Printf.sprintf
+      "턴 %d, 전장의 긴장이 다시 고조되고 어둠 속에서 새로운 위협의 기척이 느껴진다."
+      turn
+
+let fallback_player_reply ~state ~actor_id =
+  let turn = state_turn state in
+  let skills, traits =
+    match actor_json_of_state state actor_id with
+    | Some actor_json ->
+        ( non_empty_string_list_field actor_json "skills",
+          non_empty_string_list_field actor_json "traits" )
+    | None -> ([], [])
+  in
+  let trait_hint =
+    pick_deterministic_text ~actor_id ~turn ~salt:"trait" traits
+    |> Option.map (fun trait -> Printf.sprintf " (%s 성향)" trait)
+    |> Option.value ~default:""
+  in
+  match pick_deterministic_text ~actor_id ~turn ~salt:"skill" skills with
+  | Some skill -> (
+      let templates =
+        [
+          (fun skill trait ->
+            Printf.sprintf "%s%s로 적 전열의 약한 지점을 파고들어 공격한다." skill
+              trait);
+          (fun skill trait ->
+            Printf.sprintf "%s%s를 활용해 측면을 압박하며 핵심 목표를 공격한다." skill
+              trait);
+          (fun skill trait ->
+            Printf.sprintf "%s%s로 빈틈을 열고 전선을 밀어붙인다." skill trait);
+        ]
+      in
+      match pick_deterministic_text ~actor_id ~turn ~salt:"skill-template" templates with
+      | Some template -> template skill trait_hint
+      | None -> Printf.sprintf "%s%s로 적을 공격해 전선을 밀어붙인다." skill trait_hint)
+  | None -> (
+      let templates =
+        [
+          (fun trait -> Printf.sprintf "지형을 이용해%s 적의 허점을 노려 공격한다." trait);
+          (fun trait ->
+            Printf.sprintf "호흡을 고르고%s 적의 빈틈을 확인한 뒤 공격한다." trait);
+          (fun trait -> Printf.sprintf "전열을 정비하고%s 확실한 타이밍에 공격한다." trait);
+        ]
+      in
+      match pick_deterministic_text ~actor_id ~turn ~salt:"plain-template" templates with
+      | Some template -> template trait_hint
+      | None -> Printf.sprintf "적의 빈틈을 노려%s 공격한다." trait_hint)
+
+let choose_live_npc_actor_id state =
+  party_fields_of_state state
+  |> List.find_map (fun (actor_id, actor_json) ->
+         if is_actor_alive actor_json && role_from_actor_json actor_json = "npc" then
+           Some actor_id
+         else None)
+
+let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
+  let ( let* ) = Result.bind in
+  match choose_live_npc_actor_id state with
+  | None -> Ok []
+  | Some npc_actor_id -> (
+      match choose_attack_target_id ~state ~actor_id:npc_actor_id with
+      | None -> Ok []
+      | Some target_actor_id ->
+          let damage = deterministic_damage ~turn ~actor_id:npc_actor_id in
+          let attack_payload =
+            `Assoc
+              [
+                ("turn", `Int turn);
+                ("phase", `String phase);
+                ("actor_id", `String npc_actor_id);
+                ("action", `String "잔존한 적이 반격해 전열을 흔든다.");
+                ("target_id", `String target_actor_id);
+                ("skill", `Null);
+                ("damage", `Int damage);
+              ]
+          in
+          let* attack_event =
+            append_event ~base_dir ~room_id
+              ~event_type:Trpg_engine_event.Combat_attack
+              ~actor_id:npc_actor_id ~payload:attack_payload ()
+          in
+          let hp_payload =
+            `Assoc
+              [
+                ("turn", `Int turn);
+                ("phase", `String phase);
+                ("actor_id", `String target_actor_id);
+                ("delta", `Int (-damage));
+                ("source_actor_id", `String npc_actor_id);
+                ("reason", `String "combat.attack");
+              ]
+          in
+          let* hp_event =
+            append_event ~base_dir ~room_id
+              ~event_type:Trpg_engine_event.Hp_changed
+              ~actor_id:target_actor_id ~payload:hp_payload ()
+          in
+          Ok [ attack_event; hp_event ])
+
+let is_placeholder_reply (raw : string) : bool =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  normalized = String.lowercase_ascii default_placeholder_reply
+  || normalized = "assess the situation and prepare the next move."
 
 let truncate_before_marker s marker =
   match find_substring s marker with
@@ -1489,7 +1615,7 @@ let fallback_reply_from_keeper_json keeper_json =
   | _ -> None
 
 let parse_keeper_reply keeper_json =
-  let default_fallback_reply = "상황을 살피며 다음 행동을 준비합니다." in
+  let default_fallback_reply = default_placeholder_reply in
   let raw_reply =
     let first_string_field keys =
       keys
@@ -3530,8 +3656,7 @@ let handle_round_run ctx args : result =
             let fallback_reply =
               match role with
               | `Player -> fallback_player_reply ~state:state_json ~actor_id
-              | `Dm ->
-                  "전장의 긴장이 높아지고 어둠 속에서 새로운 위협이 모습을 드러낸다."
+              | `Dm -> fallback_dm_reply ~state:state_json
             in
             let* spawn_event_opt =
               match role with
@@ -3564,6 +3689,14 @@ let handle_round_run ctx args : result =
                     ~state:state_json
             in
             appended_events := !appended_events @ combat_events;
+            let* pressure_events =
+              match role with
+              | `Dm ->
+                  append_npc_counterattack_events ~base_dir ~room_id ~phase
+                    ~turn:turn_before ~state:state_json
+              | `Player -> Ok []
+            in
+            appended_events := !appended_events @ pressure_events;
             statuses :=
               `Assoc
                 [
@@ -3677,6 +3810,13 @@ let handle_round_run ctx args : result =
                 apply_local_fallback ~stage:"parse_reply_fallback"
                   ~reason:parse_error
             | Ok reply ->
+                let reply =
+                  if is_placeholder_reply reply then
+                    match role with
+                    | `Player -> fallback_player_reply ~state:state_json ~actor_id
+                    | `Dm -> fallback_dm_reply ~state:state_json
+                  else reply
+                in
                 let* reply_event =
                   append_keeper_reply_event
                     ~base_dir

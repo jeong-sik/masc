@@ -1582,6 +1582,7 @@ let schemas : Types.tool_schema list =
            ("rule_module", string_schema);
            ("timeout_sec", number_schema);
            ("require_claim", bool_schema);
+           ("local_fallback", bool_schema);
          ]);
     schema "trpg.scene.transition"
       "Canonical alias of masc_trpg_scene_transition."

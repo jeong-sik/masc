@@ -344,7 +344,7 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
         ]);
         ("remove_meta", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "Delete .masc/perpetual-keepers/<name>.json (default: true).");
+          ("description", `String "Delete .masc/perpetual-keepers/<name>.json (default: false). Set true only for permanent removal.");
         ]);
         ("remove_session", `Assoc [
           ("type", `String "boolean");
@@ -8137,7 +8137,7 @@ let handle_keeper_down ctx args : tool_result =
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
   else
-    let remove_meta = get_bool args "remove_meta" true in
+    let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
     stop_keepalive name;
     match read_meta ctx.config name with

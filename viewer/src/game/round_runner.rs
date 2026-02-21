@@ -97,6 +97,12 @@ const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
 #[cfg(target_arch = "wasm32")]
 const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 5000;
 
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_ROUND_TIMEOUT_SEC: f64 = 45.0;
+
+#[cfg(target_arch = "wasm32")]
+const AUTO_RECOVERY_TIMEOUT_SEC: f64 = 12.0;
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn stall_retry_delay_ms(retry_count: u32) -> i32 {
     let exponent = retry_count.saturating_sub(1).min(6);
@@ -250,7 +256,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                 break;
             }
 
-            let body = match build_round_body(&dm_keeper_snapshot) {
+            let body = match build_round_body(&dm_keeper_snapshot, stalled_retries) {
                 Ok(body) => body,
                 Err(reason) => {
                     log::warn!(
@@ -264,6 +270,12 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                 log::info!("RoundRunner: round flight locked by another request; waiting");
                 sleep_ms(750).await;
                 continue;
+            }
+            if stalled_retries > 0 {
+                log::info!(
+                    "RoundRunner: stall recovery mode (retry={}), enabling local_fallback with fast timeout.",
+                    stalled_retries
+                );
             }
             round_num += 1;
             log::info!("RoundRunner: triggering round {}", round_num);
@@ -462,7 +474,7 @@ async fn fetch_json_post(url: &str, body: &str) -> Result<String, wasm_bindgen::
 /// Reads keeper configuration from DOM inputs (fresh each round) with a
 /// fallback to the ECS snapshot taken at session start.
 #[cfg(target_arch = "wasm32")]
-fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
+fn build_round_body(dm_keeper_fallback: &str, stalled_retries: u32) -> Result<String, String> {
     use serde_json::{json, Map, Value};
 
     let room_id = config::current_room_id();
@@ -486,8 +498,14 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
     let timeout_sec = read_dom_input("round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
-        .unwrap_or(5.0);
+        .unwrap_or(DEFAULT_ROUND_TIMEOUT_SEC);
     let lang = read_dom_input("round-run-lang").unwrap_or_else(|| "ko".to_string());
+    let local_fallback = stalled_retries > 0;
+    let timeout_sec = if local_fallback {
+        timeout_sec.min(AUTO_RECOVERY_TIMEOUT_SEC)
+    } else {
+        timeout_sec
+    };
 
     // 2) Player keeper mapping from hidden round plan (`actor=keeper,actor=keeper,...`).
     let player_pairs = read_dom_value("round-run-players")
@@ -510,7 +528,7 @@ fn build_round_body(dm_keeper_fallback: &str) -> Result<String, String> {
         "timeout_sec": timeout_sec,
         "lang": lang,
         "require_claim": false,
-        "local_fallback": false
+        "local_fallback": local_fallback
     });
 
     Ok(body.to_string())

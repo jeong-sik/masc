@@ -69,6 +69,9 @@ fn control_status_to_ops_class(css_class: &str) -> &'static str {
 }
 
 #[cfg(target_arch = "wasm32")]
+const DEFAULT_ROUND_TIMEOUT_SEC: f64 = 45.0;
+
+#[cfg(target_arch = "wasm32")]
 fn set_round_readiness_rows(doc: &web_sys::Document, rows: &[RoundReadinessRow]) {
     let Some(container) = doc.get_element_by_id("round-readiness-checklist") else {
         return;
@@ -1315,7 +1318,7 @@ fn bind_recovery_action_buttons() {
                 let current = read_dom_input(&doc, "round-run-timeout")
                     .and_then(|raw| raw.parse::<f64>().ok())
                     .filter(|value| *value > 0.0)
-                    .unwrap_or(5.0);
+                    .unwrap_or(DEFAULT_ROUND_TIMEOUT_SEC);
                 let next = (current + 30.0).min(600.0);
                 if let Some(input) = doc
                     .get_element_by_id("round-run-timeout")
@@ -1612,7 +1615,7 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
     let timeout_sec = read_dom_input(doc, "round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
         .filter(|value| *value > 0.0)
-        .unwrap_or(5.0);
+        .unwrap_or(DEFAULT_ROUND_TIMEOUT_SEC);
 
     let player_pairs_raw = read_dom_text_value(doc, "round-run-players").unwrap_or_default();
     let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);

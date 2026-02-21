@@ -106,7 +106,95 @@ fn compact_reason_text(raw: &str) -> String {
     }
 }
 
+#[derive(Default, Clone, Debug)]
+struct RunnerSummaryDiagnostics {
+    turn_before: Option<u64>,
+    turn_after: Option<u64>,
+    advanced: Option<bool>,
+    progress_reason: Option<String>,
+    recovery_mode: Option<String>,
+    recovery_applied: bool,
+    effective_timeout_sec: Option<f64>,
+    roll_audit_count: Option<u64>,
+}
+
+fn parse_runner_summary_diagnostics(raw: &str) -> Option<RunnerSummaryDiagnostics> {
+    let parsed = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+    let summary = parsed.get("summary")?;
+    Some(RunnerSummaryDiagnostics {
+        turn_before: parsed
+            .get("turn_before")
+            .and_then(serde_json::Value::as_u64),
+        turn_after: parsed.get("turn_after").and_then(serde_json::Value::as_u64),
+        advanced: summary.get("advanced").and_then(serde_json::Value::as_bool),
+        progress_reason: summary
+            .get("progress_reason")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string()),
+        recovery_mode: summary
+            .get("recovery_mode")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string()),
+        recovery_applied: summary
+            .get("recovery_applied")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        effective_timeout_sec: summary
+            .get("effective_timeout_sec")
+            .and_then(serde_json::Value::as_f64),
+        roll_audit_count: summary
+            .get("roll_audit_count")
+            .and_then(serde_json::Value::as_u64),
+    })
+}
+
+fn compact_runner_diagnostics(diag: &RunnerSummaryDiagnostics) -> Option<String> {
+    let mut parts = Vec::new();
+    if let (Some(before), Some(after)) = (diag.turn_before, diag.turn_after) {
+        parts.push(format!("turn {}→{}", before, after));
+    }
+    if let Some(reason) = diag.progress_reason.as_deref() {
+        parts.push(reason.to_string());
+    } else if let Some(advanced) = diag.advanced {
+        parts.push(if advanced {
+            "advanced".to_string()
+        } else {
+            "stalled".to_string()
+        });
+    }
+    if let Some(mode) = diag.recovery_mode.as_deref() {
+        parts.push(format!("mode {}", mode));
+    }
+    if diag.recovery_applied {
+        parts.push("fallback".to_string());
+    }
+    if let Some(timeout_sec) = diag.effective_timeout_sec {
+        parts.push(format!("{timeout_sec:.0}s"));
+    }
+    if let Some(audit_count) = diag.roll_audit_count {
+        if audit_count > 0 {
+            parts.push(format!("roll {}", audit_count));
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
 fn compact_runner_result(raw: &str) -> String {
+    if let Some(diag) = parse_runner_summary_diagnostics(raw) {
+        if let Some(compact) = compact_runner_diagnostics(&diag) {
+            return compact_reason_text(&compact);
+        }
+    }
+
     let compact = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     const MAX_PREVIEW_CHARS: usize = 96;
     if compact.chars().count() <= MAX_PREVIEW_CHARS {
@@ -349,10 +437,7 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
                 .and_then(|v| v.parse::<f64>().ok())
                 .unwrap_or_else(|| {
                     if let Some(dash) = document.get_element_by_id("dashboard") {
-                        let _ = dash.set_attribute(
-                            "data-dm-thinking-start",
-                            &now_ms.to_string(),
-                        );
+                        let _ = dash.set_attribute("data-dm-thinking-start", &now_ms.to_string());
                     }
                     now_ms
                 });
@@ -1280,6 +1365,11 @@ pub fn update_turn_runtime_dom(
     } else {
         compact_runner_result(&runner_last_result)
     };
+    let runner_diag = parse_runner_summary_diagnostics(&runner_last_result);
+    let runner_diag_preview = runner_diag
+        .as_ref()
+        .and_then(compact_runner_diagnostics)
+        .unwrap_or_else(|| "-".to_string());
     let has_runner_issue = runner_result_has_issue(&runner_last_result);
     let runner_state = if runner_running {
         if has_runner_issue {
@@ -1328,6 +1418,7 @@ pub fn update_turn_runtime_dom(
         &control_state,
         &runner_last_result,
         &runner_preview,
+        &runner_diag_preview,
         &has_runner_issue,
         &flow_state,
         &flow_class,
@@ -1351,6 +1442,7 @@ pub fn update_turn_runtime_dom(
         sync_state.clone(),
         runner_state.clone(),
         runner_preview.clone(),
+        runner_diag_preview.clone(),
         progress.last_event.clone(),
         issues_summary.clone(),
         next_action.clone(),
@@ -1623,7 +1715,8 @@ pub fn update_turn_runtime_dom(
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">마지막 이벤트</span><span class=\"round-sync-value\">{last_event}</span></div>",
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">마지막 결과</span><span class=\"round-sync-value\">{last_result}</span></div>",
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">자동 진행 상태</span><span class=\"round-sync-value\">{runner_state}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">자동 진행 응답</span><span class=\"round-sync-value\">{runner_preview}</span></div>"
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">자동 진행 응답</span><span class=\"round-sync-value\">{runner_preview}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">라운드 진단</span><span class=\"round-sync-value\">{runner_diag_preview}</span></div>"
                 ),
                 room_id = html_escape(&room_id),
                 room_class = room_class,
@@ -1646,6 +1739,7 @@ pub fn update_turn_runtime_dom(
                 }),
                 runner_state = html_escape(&runner_state),
                 runner_preview = html_escape(&runner_preview),
+                runner_diag_preview = html_escape(&runner_diag_preview),
             );
             debug_el.set_inner_html(&html);
         }
@@ -1811,5 +1905,52 @@ mod tests {
         ));
         assert!(runner_result_has_issue("HTTP 503 from engine"));
         assert!(!runner_result_has_issue("round completed successfully"));
+    }
+
+    #[test]
+    fn parse_runner_summary_diagnostics_reads_round_summary_fields() {
+        let payload = r#"{
+            "ok": true,
+            "turn_before": 12,
+            "turn_after": 12,
+            "summary": {
+                "advanced": false,
+                "progress_reason": "player_quorum_not_met",
+                "recovery_mode": "local_fallback_applied",
+                "recovery_applied": true,
+                "effective_timeout_sec": 12,
+                "roll_audit_count": 3
+            }
+        }"#;
+        let diag = parse_runner_summary_diagnostics(payload).expect("summary diagnostics");
+        assert_eq!(diag.turn_before, Some(12));
+        assert_eq!(diag.turn_after, Some(12));
+        assert_eq!(diag.advanced, Some(false));
+        assert_eq!(
+            diag.progress_reason.as_deref(),
+            Some("player_quorum_not_met")
+        );
+        assert_eq!(
+            diag.recovery_mode.as_deref(),
+            Some("local_fallback_applied")
+        );
+        assert!(diag.recovery_applied);
+        assert_eq!(diag.roll_audit_count, Some(3));
+    }
+
+    #[test]
+    fn compact_runner_result_prefers_structured_diagnostics_when_available() {
+        let payload = r#"{
+            "turn_before": 7,
+            "turn_after": 8,
+            "summary": {
+                "advanced": true,
+                "progress_reason": "advanced",
+                "effective_timeout_sec": 45
+            }
+        }"#;
+        let compact = compact_runner_result(payload);
+        assert!(compact.contains("turn 7→8"));
+        assert!(compact.contains("advanced"));
     }
 }

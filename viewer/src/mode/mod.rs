@@ -1479,7 +1479,7 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
         .get_element_by_id("round-run-timeout")
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
-        input.set_value("30");
+        input.set_value("5");
     }
     if let Some(input) = doc
         .get_element_by_id("round-run-lang")
@@ -1613,7 +1613,7 @@ pub(super) fn set_round_run_fields(
         .get_element_by_id("round-run-timeout")
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
-        el.set_value("30");
+        el.set_value("5");
     }
     if let Some(el) = doc
         .get_element_by_id("round-run-lang")

@@ -571,13 +571,17 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             format!(
                 concat!(
                     "<input type=\"checkbox\" class=\"section-toggle\" id=\"{}\"{}/>",
-                    "<label class=\"section-header\" for=\"{}\">Traits <span class=\"section-count\">({})</span></label>",
+                    "<label class=\"section-header\" for=\"{}\" title=\"Trait은 캐릭터의 행동 성향입니다.\">Traits (성향) <span class=\"section-count\">({})</span></label>",
                     "<div class=\"section-body traits-list\">{}</div>",
                 ),
                 traits_id, traits_checked,
                 traits_id,
                 actor.traits.len(),
-                rows,
+                format!(
+                    "{}{}",
+                    "<div class=\"section-guide\">행동 선택 방향을 잡는 성향 태그입니다.</div>",
+                    rows
+                ),
             )
         };
 
@@ -593,6 +597,7 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                     let (description, usage_hint) = skill_copy(s, actor);
                     let escaped_name = html_escape(&s.name);
                     let escaped_desc = html_escape(&description);
+                    let escaped_hint = html_escape(&usage_hint);
                     let mod_class = if m > 0 {
                         "mod-positive"
                     } else if m < 0 {
@@ -600,10 +605,10 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                     } else {
                         "mod-neutral"
                     };
-                    let hint_attr = if usage_hint.trim().is_empty() {
+                    let hint_line = if usage_hint.trim().is_empty() {
                         String::new()
                     } else {
-                        format!(" title=\"{}\"", html_escape(&usage_hint))
+                        format!("<div class=\"skill-hint\">Hint: {}</div>", escaped_hint)
                     };
                     format!(
                         concat!(
@@ -613,15 +618,16 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
                             "<span class=\"skill-level\">Lv{}</span>",
                             "<span class=\"skill-mod {}\">{}</span>",
                             "</div>",
-                            "<div class=\"skill-desc\"{}>{}</div>",
+                            "<div class=\"skill-desc\">{}</div>",
+                            "{}",
                             "</div>"
                         ),
                         escaped_name,
                         s.level,
                         mod_class,
                         fmt_modifier(m),
-                        hint_attr,
                         escaped_desc,
+                        hint_line,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -630,13 +636,18 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
             format!(
                 concat!(
                     "<input type=\"checkbox\" class=\"section-toggle\" id=\"{}\"{}/>",
-                    "<label class=\"section-header\" for=\"{}\">Skills <span class=\"section-count\">({})</span></label>",
+                    "<label class=\"section-header\" for=\"{}\" title=\"Skill 수치는 액션/주사위 판정에 사용됩니다.\">Skills (판정) <span class=\"section-count\">({})</span></label>",
                     "<div class=\"section-body skills-list\">{}</div>",
                 ),
                 skills_id, skills_checked,
                 skills_id,
                 actor.skills.len(),
-                format!("{}{}", head, rows),
+                format!(
+                    "{}{}{}",
+                    "<div class=\"section-guide\">액션/주사위 판정 보정치입니다. 기본 계산: Mod = (Lv-10)/2</div>",
+                    head,
+                    rows
+                ),
             )
         };
 

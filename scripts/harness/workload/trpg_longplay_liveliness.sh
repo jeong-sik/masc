@@ -222,9 +222,14 @@ round_failures=0
 timeout_total=0
 unavailable_total=0
 placeholder_total=0
+recovery_applied_total=0
+roll_audit_total=0
+npc_spawn_total=0
+npc_attack_total=0
 all_damaged_players=""
 all_targets=""
 all_player_replies=""
+stall_reason_lines=""
 
 i=1
 while [ "$i" -le "$ROUNDS" ]; do
@@ -255,11 +260,27 @@ while [ "$i" -le "$ROUNDS" ]; do
   if [ "$advanced" != "true" ]; then
     round_failures=$((round_failures + 1))
   fi
+  progress_reason="$(printf "%s" "$p_round" | jq -r '.summary.progress_reason // ""')"
+  recovery_applied="$(printf "%s" "$p_round" | jq -r '.summary.recovery_applied // false')"
+  recovery_mode="$(printf "%s" "$p_round" | jq -r '.summary.recovery_mode // ""')"
+  effective_timeout="$(printf "%s" "$p_round" | jq -r '.summary.effective_timeout_sec // .timeout_sec // 0')"
+  roll_audit_round="$(printf "%s" "$p_round" | jq -r '.summary.roll_audit_count // 0')"
+  npc_spawn_round="$(printf "%s" "$p_round" | jq -r '.summary.npc_spawned // 0')"
+  npc_attack_round="$(printf "%s" "$p_round" | jq -r '.summary.npc_attacks // 0')"
+  if [ "$advanced" != "true" ] && [ -n "$progress_reason" ]; then
+    stall_reason_lines="${stall_reason_lines}${stall_reason_lines:+$'\n'}${progress_reason}"
+  fi
 
   timeouts="$(printf "%s" "$p_round" | jq -r '.summary.timeouts // 0')"
   unavailable="$(printf "%s" "$p_round" | jq -r '.summary.unavailable // 0')"
   timeout_total=$((timeout_total + timeouts))
   unavailable_total=$((unavailable_total + unavailable))
+  roll_audit_total=$((roll_audit_total + roll_audit_round))
+  npc_spawn_total=$((npc_spawn_total + npc_spawn_round))
+  npc_attack_total=$((npc_attack_total + npc_attack_round))
+  if [ "$recovery_applied" = "true" ]; then
+    recovery_applied_total=$((recovery_applied_total + 1))
+  fi
 
   placeholder_round="$(printf "%s" "$p_round" | jq -r '[.statuses[]? | select((.reply // "") | contains("상황을 살피며 다음 행동을 준비합니다"))] | length')"
   placeholder_total=$((placeholder_total + placeholder_round))
@@ -273,7 +294,7 @@ while [ "$i" -le "$ROUNDS" ]; do
   [ -n "$player_replies_round" ] && all_player_replies="${all_player_replies}${all_player_replies:+$'\n'}${player_replies_round}"
 
   damaged_now="$(printf "%s\n" "$damaged_round" | awk 'NF' | wc -l | tr -d ' ')"
-  echo "[round $i] turn ${turn_before}->${turn_after} advanced=$advanced timeouts=$timeouts unavailable=$unavailable damaged_players_now=$damaged_now placeholder=$placeholder_round"
+  echo "[round $i] turn ${turn_before}->${turn_after} advanced=$advanced reason=${progress_reason:-none} recovery=$recovery_applied mode=${recovery_mode:-none} timeout=${effective_timeout}s timeouts=$timeouts unavailable=$unavailable roll_audit=$roll_audit_round npc_spawn=$npc_spawn_round npc_attack=$npc_attack_round damaged_players_now=$damaged_now placeholder=$placeholder_round"
 
   i=$((i + 1))
 done
@@ -284,6 +305,7 @@ advanced_ratio="$(awk "BEGIN{if ($ROUNDS == 0) {printf \"0.000\"} else {printf \
 unique_damaged_count="$(count_unique_lines "$all_damaged_players")"
 unique_target_count="$(count_unique_lines "$all_targets")"
 unique_reply_count="$(count_unique_lines "$all_player_replies")"
+unique_stall_reasons="$(count_unique_lines "$stall_reason_lines")"
 
 summary_json="$(
   jq -cn \
@@ -299,9 +321,14 @@ summary_json="$(
     --argjson timeout_total "$timeout_total" \
     --argjson unavailable_total "$unavailable_total" \
     --argjson placeholder_total "$placeholder_total" \
+    --argjson recovery_applied_total "$recovery_applied_total" \
+    --argjson roll_audit_total "$roll_audit_total" \
+    --argjson npc_spawn_total "$npc_spawn_total" \
+    --argjson npc_attack_total "$npc_attack_total" \
     --argjson unique_damaged_players "$unique_damaged_count" \
     --argjson unique_targets "$unique_target_count" \
     --argjson unique_player_replies "$unique_reply_count" \
+    --argjson unique_stall_reasons "$unique_stall_reasons" \
     --arg local_fallback "$LOCAL_FALLBACK_BOOL" \
     '{
       room_id:$room_id,
@@ -316,9 +343,14 @@ summary_json="$(
       timeout_total:$timeout_total,
       unavailable_total:$unavailable_total,
       placeholder_total:$placeholder_total,
+      recovery_applied_total:$recovery_applied_total,
+      roll_audit_total:$roll_audit_total,
+      npc_spawn_total:$npc_spawn_total,
+      npc_attack_total:$npc_attack_total,
       unique_damaged_players:$unique_damaged_players,
       unique_targets:$unique_targets,
       unique_player_replies:$unique_player_replies,
+      unique_stall_reasons:$unique_stall_reasons,
       local_fallback:$local_fallback
     }'
 )"

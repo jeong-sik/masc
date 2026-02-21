@@ -151,6 +151,14 @@ let test_round_run_success_path () =
   Alcotest.(check int) "successes" 3 (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "timeouts" 0 (Yojson.Safe.Util.member "timeouts" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "unavailable" 0 (Yojson.Safe.Util.member "unavailable" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check string) "progress_reason" "advanced"
+    (Yojson.Safe.Util.member "progress_reason" summary |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool) "recovery_applied false" false
+    (Yojson.Safe.Util.member "recovery_applied" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check string) "recovery_mode none" "none"
+    (Yojson.Safe.Util.member "recovery_mode" summary |> Yojson.Safe.Util.to_string);
+  Alcotest.(check (float 0.0001)) "effective_timeout_sec mirrors request" 1.0
+    (Yojson.Safe.Util.member "effective_timeout_sec" summary |> Yojson.Safe.Util.to_float);
   Alcotest.(check int) "turn_after" 2 (Yojson.Safe.Util.member "turn_after" json |> Yojson.Safe.Util.to_int);
 
   let _, stream_all =
@@ -209,8 +217,21 @@ let test_round_run_emits_combat_semantic_events () =
         ("timeout_sec", `Float 1.0);
       ]
   in
-  let ok, _body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
   Alcotest.(check bool) "round_run success" true ok;
+  let summary = parse_json_exn body |> Yojson.Safe.Util.member "summary" in
+  let roll_audit_count =
+    Yojson.Safe.Util.member "roll_audit_count" summary |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check bool) "roll_audit_count >= 1" true (roll_audit_count >= 1);
+  let roll_audit = Yojson.Safe.Util.member "roll_audit" summary |> Yojson.Safe.Util.to_list in
+  let first_source =
+    roll_audit
+    |> List.hd
+    |> Yojson.Safe.Util.member "source"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "roll audit source" "combat.attack" first_source;
 
   let _, stream_attack =
     dispatch_exn ctx ~name:"masc_trpg_stream"

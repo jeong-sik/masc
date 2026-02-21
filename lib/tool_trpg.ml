@@ -2315,6 +2315,7 @@ let infer_action_type_from_narrative ~(role : [ `Player | `Dm ])
       flag_key;
       scene;
       quest_info;
+      memory_hint = None;
       raw_payload =
         `Assoc
           [

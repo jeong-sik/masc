@@ -288,6 +288,116 @@ let test_round_run_emits_session_outcome_event () =
     (count_from_json (parse_json_exn stream_outcome));
   cleanup_dir base_dir
 
+let test_round_run_uses_current_session_for_outcome_gate () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-round-restart-outcome" ~actor_ids:["p1"];
+  let old_room_end =
+    Trpg_engine_event.make ~seq:3 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg_engine_event.Room_ended
+      ~payload:(`Assoc [ ("reason", `String "old_session_done") ])
+      ()
+  in
+  append_event_exn ~base_dir ~event:old_room_end;
+  let old_outcome =
+    Trpg_engine_event.make ~seq:4 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg_engine_event.Session_outcome
+      ~payload:
+        (`Assoc
+          [
+            ("outcome", `String "victory");
+            ("reason", `String "flag:outcome.victory");
+            ("summary", `String "Victory condition met.");
+            ("turn", `Int 2);
+            ("phase", `String "round");
+          ])
+      ()
+  in
+  append_event_exn ~base_dir ~event:old_outcome;
+  let restarted =
+    Trpg_engine_event.make ~seq:5 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg_engine_event.Room_started
+      ~payload:(`Assoc [ ("phase", `String "round") ])
+      ()
+  in
+  append_event_exn ~base_dir ~event:restarted;
+  let turn_40 =
+    Trpg_engine_event.make ~seq:6 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg_engine_event.Turn_started
+      ~payload:(`Assoc [ ("turn", `Int 40) ])
+      ()
+  in
+  append_event_exn ~base_dir ~event:turn_40;
+
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The chapter closes.") ])
+    | "pk-1" -> `Ok (`Assoc [ ("reply", `String "I secure the gate.") ])
+    | other -> `Error ("unknown keeper: " ^ other)
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-restart-outcome");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("phase", `String "round");
+        ("timeout_sec", `Float 1.0);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string)
+    "current session reaches draw at max turn"
+    "draw"
+    (json |> Yojson.Safe.Util.member "outcome"
+    |> Yojson.Safe.Util.member "outcome"
+    |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "reason is max_turn_reached"
+    "max_turn_reached"
+    (json |> Yojson.Safe.Util.member "outcome"
+    |> Yojson.Safe.Util.member "reason"
+    |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "room_status ended"
+    "ended"
+    (json |> Yojson.Safe.Util.member "room_status" |> Yojson.Safe.Util.to_string);
+
+  let _, stream_outcome =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String "room-round-restart-outcome");
+            ("event_type", `String "session.outcome");
+          ])
+  in
+  Alcotest.(check int)
+    "session.outcome includes old + current session"
+    2
+    (count_from_json (parse_json_exn stream_outcome));
+
+  let _, stream_room_end =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String "room-round-restart-outcome");
+            ("event_type", `String "room.ended");
+          ])
+  in
+  Alcotest.(check int)
+    "room.ended includes old + current session"
+    2
+    (count_from_json (parse_json_exn stream_room_end));
+  cleanup_dir base_dir
+
 let test_round_run_timeout_policy () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -1676,6 +1786,10 @@ let () =
             "emits session outcome event"
             `Quick
             test_round_run_emits_session_outcome_event;
+          Alcotest.test_case
+            "current session outcome gate ignores past session outcome"
+            `Quick
+            test_round_run_uses_current_session_for_outcome_gate;
           Alcotest.test_case
             "rejects non-unique keepers"
             `Quick

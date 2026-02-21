@@ -997,8 +997,10 @@ let resolve_end_rules_for_room ~base_dir ~(events : Trpg_engine_event.t list) :
     Trpg_preset_store.end_rules =
   match
     events
-    |> List.find_opt (fun (ev : Trpg_engine_event.t) ->
-           ev.event_type = Trpg_engine_event.Room_created)
+    |> List.fold_left
+         (fun acc (ev : Trpg_engine_event.t) ->
+           if ev.event_type = Trpg_engine_event.Room_created then Some ev else acc)
+         None
   with
   | None -> default_end_rules_local
   | Some room_created -> (
@@ -1120,6 +1122,23 @@ let has_event_type (events : Trpg_engine_event.t list) event_type =
   List.exists
     (fun (ev : Trpg_engine_event.t) -> ev.event_type = event_type)
     events
+
+let is_session_marker_event = function
+  | Trpg_engine_event.Room_started
+  | Trpg_engine_event.Session_started
+  | Trpg_engine_event.Room_created ->
+      true
+  | _ -> false
+
+let events_since_last_session_marker (events : Trpg_engine_event.t list) :
+    Trpg_engine_event.t list =
+  let rec collect acc = function
+    | [] -> acc
+    | (ev : Trpg_engine_event.t) :: tl ->
+        let acc' = ev :: acc in
+        if is_session_marker_event ev.event_type then acc' else collect acc' tl
+  in
+  collect [] (List.rev events)
 
 let latest_session_outcome_payload (events : Trpg_engine_event.t list) :
     Yojson.Safe.t option =
@@ -1395,14 +1414,49 @@ let fallback_dm_reply ~state =
            else acc)
          0
   in
-  if live_npcs > 0 then
-    Printf.sprintf
-      "턴 %d, 전장의 연기가 걷히자 남은 적들이 전열을 다시 정비하며 반격을 준비한다."
-      turn
-  else
-    Printf.sprintf
-      "턴 %d, 전장의 긴장이 다시 고조되고 어둠 속에서 새로운 위협의 기척이 느껴진다."
-      turn
+  let templates =
+    if live_npcs > 0 then
+      [
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 전장의 연기가 걷히자 남은 적들이 전열을 다시 정비하며 반격을 준비한다."
+            turn);
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 금속이 맞부딪히는 소리 속에 적 진형이 재편되며 역습의 각을 만든다."
+            turn);
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 파편과 먼지 사이로 적의 지휘 신호가 번쩍이며 전선이 다시 밀려온다."
+            turn);
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 균열 난 방패 틈으로 적 선봉이 고개를 들고 압박 수위를 끌어올린다."
+            turn);
+      ]
+    else
+      [
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 전장의 긴장이 다시 고조되고 어둠 속에서 새로운 위협의 기척이 느껴진다."
+            turn);
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 잠시 정적이 흐른 뒤 먼 거리에서 불길한 발소리와 함께 그림자가 다가온다."
+            turn);
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 전장 가장자리의 안개가 걷히며 아직 드러나지 않은 적의 존재가 감지된다."
+            turn);
+        (fun turn ->
+          Printf.sprintf
+            "턴 %d, 바람이 꺼진 횃불을 흔들고 다음 국면을 예고하는 불길한 조짐이 스며든다."
+            turn);
+      ]
+  in
+  match pick_deterministic_text ~actor_id:"dm" ~turn ~salt:"fallback-dm" templates with
+  | Some template -> template turn
+  | None -> Printf.sprintf "턴 %d, 상황이 급변하며 다음 국면이 시작된다." turn
 
 let fallback_player_reply ~state ~actor_id =
   let turn = state_turn state in
@@ -3527,18 +3581,21 @@ let handle_round_run ctx args : result =
       let* existing_events_before =
         Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
       in
+      let session_events_before =
+        events_since_last_session_marker existing_events_before
+      in
       let state = state_of_derived derived in
       let room_already_ended =
-        has_event_type existing_events_before Trpg_engine_event.Room_ended
+        has_event_type session_events_before Trpg_engine_event.Room_ended
       in
       let outcome_already_emitted =
-        has_event_type existing_events_before Trpg_engine_event.Session_outcome
+        has_event_type session_events_before Trpg_engine_event.Session_outcome
       in
       let end_rules =
         resolve_end_rules_for_room ~base_dir ~events:existing_events_before
       in
       let latest_outcome_payload =
-        ref (latest_session_outcome_payload existing_events_before)
+        ref (latest_session_outcome_payload session_events_before)
       in
       let* turn_before = read_state_turn derived in
       let unavailable_sampling =

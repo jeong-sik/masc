@@ -121,7 +121,7 @@ let acquire (model_id : string) : unit =
     pool.in_flight.(idx) <- pool.in_flight.(idx) + 1;
     (* Debug logging *)
     let model = available_models.(idx) in
-    Printf.eprintf "[glm_pool] acquire %s: %d/%d\n%!"
+    Log.Glm_pool.debug "acquire %s: %d/%d"
       model_id pool.in_flight.(idx) model.concurrency_limit
   end
 
@@ -134,7 +134,7 @@ let release (model_id : string) : unit =
     let new_count = max 0 (pool.in_flight.(idx) - 1) in
     pool.in_flight.(idx) <- new_count;
     let model = available_models.(idx) in
-    Printf.eprintf "[glm_pool] release %s: %d/%d\n%!"
+    Log.Glm_pool.debug "release %s: %d/%d"
       model_id new_count model.concurrency_limit
   end
 

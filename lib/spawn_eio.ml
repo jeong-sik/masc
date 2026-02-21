@@ -187,6 +187,151 @@ let parse_glm_output output =
   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     (None, None, None)
 
+let split_csv_nonempty raw =
+  raw
+  |> String.split_on_char ','
+  |> List.map String.trim
+  |> List.filter (fun s -> s <> "")
+
+let unique_preserve_order items =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | x :: xs ->
+        if List.mem x acc then loop acc xs
+        else loop (x :: acc) xs
+  in
+  loop [] items
+
+let normalize_glm_model_alias raw =
+  let s = raw |> String.trim |> String.lowercase_ascii in
+  match s with
+  | "" -> None
+  | "4.7" -> Some "glm-4.7"
+  | "4.7-flash" -> Some "glm-4.7-flash"
+  | "4.7-flashx" -> Some "glm-4.7-flashx"
+  | "4.6" -> Some "glm-4.6"
+  | "4.5" -> Some "glm-4.5"
+  | "4.5-flash" -> Some "glm-4.5-flash"
+  | "4.5-air" -> Some "glm-4.5-air"
+  | "4.5-airx" -> Some "glm-4.5-airx"
+  | "4.5v" -> Some "glm-4.5v"
+  | "5" -> Some "glm-5"
+  | "5-code" | "5-coder" | "glm-5-coder" -> Some "glm-5-code"
+  | _ when String.starts_with ~prefix:"glm-" s -> Some s
+  | _ -> Some s
+
+let default_glm_spawn_cascade_models =
+  [ "glm-4.7"; "glm-4.7-flash"; "glm-4.7-flashx"; "glm-5"; "glm-5-code" ]
+
+let glm_spawn_cascade_models () =
+  let configured =
+    match Sys.getenv_opt "MASC_GLM_SPAWN_CASCADE" with
+    | None -> []
+    | Some raw -> split_csv_nonempty raw |> List.filter_map normalize_glm_model_alias
+  in
+  let base =
+    if configured = [] then default_glm_spawn_cascade_models else configured
+  in
+  let preferred =
+    match Sys.getenv_opt "MASC_GLM_DEFAULT_MODEL" with
+    | Some raw -> normalize_glm_model_alias raw
+    | None -> None
+  in
+  let merged =
+    match preferred with
+    | Some m -> m :: base
+    | None -> base
+  in
+  unique_preserve_order merged
+
+let extract_glm_message_text (json : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let texts_from_content = function
+    | `String s -> Some s
+    | `List items ->
+        let texts =
+          List.filter_map
+            (fun item ->
+              match item |> member "type" |> to_string_option with
+              | Some "text" -> item |> member "text" |> to_string_option
+              | _ -> None)
+            items
+        in
+        if texts = [] then None else Some (String.concat "\n" texts)
+    | _ -> None
+  in
+  let from_chat =
+    match member "choices" json with
+    | `List ((`Assoc _ as first) :: _) ->
+        first |> member "message" |> member "content" |> texts_from_content
+    | _ -> None
+  in
+  match from_chat with
+  | Some text when String.trim text <> "" -> Some text
+  | _ ->
+      (match json |> member "result" |> member "content" with
+      | `List items ->
+          let texts =
+            List.filter_map
+              (fun item ->
+                match item |> member "type" |> to_string_option with
+                | Some "text" -> item |> member "text" |> to_string_option
+                | _ -> None)
+              items
+          in
+          if texts = [] then None else Some (String.concat "\n" texts)
+      | _ -> None)
+
+let glm_error_message output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let open Yojson.Safe.Util in
+    match member "error" json with
+    | `Null -> None
+    | `String s when String.trim s <> "" -> Some s
+    | `Assoc _ as e -> Some (Yojson.Safe.to_string e)
+    | e -> Some (Yojson.Safe.to_string e)
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    None
+
+let glm_context_tokens model =
+  match String.lowercase_ascii (String.trim model) with
+  | "glm-5"
+  | "glm-5-code"
+  | "glm-4.7"
+  | "glm-4.7-flash"
+  | "glm-4.7-flashx"
+  | "glm-4.6"
+  | "glm-4.5-flash" -> Some 200_000
+  | "glm-4.6v"
+  | "glm-4.6v-flash"
+  | "glm-4.6v-flashx"
+  | "glm-4.5"
+  | "glm-4.5-air"
+  | "glm-4.5-airx"
+  | "glm-4.5v"
+  | "glm-4-32b-0414-128k" -> Some 128_000
+  | _ -> None
+
+let glm_min_context_tokens () =
+  match Sys.getenv_opt "MASC_GLM_MIN_CONTEXT_TOKENS" with
+  | None -> 200_000
+  | Some raw ->
+      let trimmed = String.trim raw in
+      (match int_of_string_opt trimmed with
+      | Some n when n > 0 -> n
+      | _ -> 200_000)
+
+let glm_spawn_cascade_models_for_policy () =
+  let min_context = glm_min_context_tokens () in
+  let configured = glm_spawn_cascade_models () in
+  List.filter
+    (fun model ->
+      match glm_context_tokens model with
+      | Some ctx -> ctx >= min_context
+      | None -> false)
+    configured
+
 let default_configs = [
   ("claude", {
     agent_name = "claude";
@@ -246,6 +391,143 @@ let parse_command cmd =
   let parts = String.split_on_char ' ' cmd in
   List.filter (fun s -> String.length s > 0) parts
 
+type glm_spawn_success = {
+  model_used: string;
+  response_text: string;
+  input_tokens_used: int option;
+  output_tokens_used: int option;
+  cost_estimate_usd: float option;
+}
+
+let call_glm_once ~api_key ~model ~prompt ~timeout_sec : (glm_spawn_success, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("model", `String model);
+          ( "messages",
+            `List [ `Assoc [ ("role", `String "user"); ("content", `String prompt) ] ] );
+          ("stream", `Bool false);
+        ])
+  in
+  try
+    let raw =
+      Process_eio.run_argv_with_stdin
+        ~timeout_sec:(Float.of_int timeout_sec +. 5.0)
+        ~stdin_content:body
+        [
+          "curl";
+          "-sS";
+          "--max-time";
+          string_of_int timeout_sec;
+          "-X";
+          "POST";
+          "https://api.z.ai/api/coding/paas/v4/chat/completions";
+          "-H";
+          "Content-Type: application/json";
+          "-H";
+          Printf.sprintf "Authorization: Bearer %s" api_key;
+          "-d";
+          "@-";
+        ]
+    in
+    match glm_error_message raw with
+    | Some msg -> Error msg
+    | None -> (
+        try
+          let json = Yojson.Safe.from_string raw in
+          match extract_glm_message_text json with
+          | Some text when String.trim text <> "" ->
+              let input_tokens, output_tokens, cost_usd = parse_glm_output raw in
+              Ok
+                {
+                  model_used = model;
+                  response_text = text;
+                  input_tokens_used = input_tokens;
+                  output_tokens_used = output_tokens;
+                  cost_estimate_usd = cost_usd;
+                }
+          | _ -> Error "empty glm response content"
+        with Yojson.Json_error e -> Error (Printf.sprintf "invalid glm json: %s" e))
+  with exn -> Error (Printexc.to_string exn)
+
+let spawn_glm_with_cascade ~prompt ~timeout ~start_time : spawn_result =
+  let api_key = Sys.getenv_opt "ZAI_API_KEY" |> Option.value ~default:"" in
+  if String.trim api_key = "" then
+    {
+      success = false;
+      output = "Spawn error (GLM): ZAI_API_KEY is not set";
+      exit_code = 1;
+      elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      input_tokens = None;
+      output_tokens = None;
+      cache_creation_tokens = None;
+      cache_read_tokens = None;
+      cost_usd = None;
+    }
+  else
+    let models = glm_spawn_cascade_models_for_policy () in
+    if models = [] then
+      let configured = glm_spawn_cascade_models () in
+      {
+        success = false;
+        output =
+          Printf.sprintf
+            "GLM cascade aborted: no models satisfy min context %d tokens (configured=%s)"
+            (glm_min_context_tokens ())
+            (String.concat "," configured);
+        exit_code = 1;
+        elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+        input_tokens = None;
+        output_tokens = None;
+        cache_creation_tokens = None;
+        cache_read_tokens = None;
+        cost_usd = None;
+      }
+    else
+    let deadline = start_time +. float_of_int timeout in
+    let rec try_models errors = function
+      | [] ->
+          let summary =
+            errors
+            |> List.rev
+            |> List.map (fun (m, e) -> Printf.sprintf "%s: %s" m e)
+            |> String.concat " | "
+          in
+          {
+            success = false;
+            output = Printf.sprintf "GLM cascade failed (%s)" summary;
+            exit_code = 1;
+            elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+            input_tokens = None;
+            output_tokens = None;
+            cache_creation_tokens = None;
+            cache_read_tokens = None;
+            cost_usd = None;
+          }
+      | model :: rest ->
+          let raw_remaining = int_of_float (Float.ceil (deadline -. Time_compat.now ())) in
+          if raw_remaining <= 0 then
+            try_models (("timeout", "overall timeout exceeded") :: errors) []
+          else
+            let remaining = max 5 raw_remaining in
+            match call_glm_once ~api_key ~model ~prompt ~timeout_sec:remaining with
+            | Ok ok_resp ->
+                {
+                  success = true;
+                  output = ok_resp.response_text;
+                  exit_code = 0;
+                  elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+                  input_tokens = ok_resp.input_tokens_used;
+                  output_tokens = ok_resp.output_tokens_used;
+                  cache_creation_tokens = None;
+                  cache_read_tokens = None;
+                  cost_usd = ok_resp.cost_estimate_usd;
+                }
+            | Error e -> try_models ((model, e) :: errors) rest
+    in
+    try_models [] models
+
 (** Spawn an agent using Eio.Process (direct execution, no shell)
 
     Agent Being Protocol: Cultural Inheritance
@@ -253,7 +535,7 @@ let parse_command cmd =
     - New agents inherit: mission, values, patterns, onboarding steps
     - This enables multi-generational knowledge transfer
 *)
-let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_config () =
+let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_config () : spawn_result =
   let start_time = Time_compat.now () in
 
   let config = match get_config agent_name with
@@ -299,132 +581,89 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
 
   let augmented_prompt = prompt ^ institution_memory ^ masc_lifecycle_suffix in
 
-  (* Build command arguments outside the chdir critical section *)
-  let (cmd_args, stdin_data) =
-    if agent_name = "glm" then
-      (* GLM: Direct Z.ai API call - no llm-mcp dependency *)
-      let api_key = Sys.getenv_opt "ZAI_API_KEY" |> Option.value ~default:"" in
-      let model = "glm-4.7" in
-      let json_body = Yojson.Safe.to_string (`Assoc [
-        ("model", `String model);
-        ("messages", `List [
-          `Assoc [("role", `String "user"); ("content", `String augmented_prompt)]
-        ]);
-        ("stream", `Bool false)
-      ]) in
-      (["curl"; "-s"; "-X"; "POST"; "https://api.z.ai/api/coding/paas/v4/chat/completions";
-        "-H"; "Content-Type: application/json";
-        "-H"; Printf.sprintf "Authorization: Bearer %s" api_key;
-        "-d"; json_body], None)
-    else
-      (* Other agents: parse command and pass prompt via stdin *)
-      let base_args = parse_command config.command in
-      (base_args @ mcp_args, Some augmented_prompt)
-  in
-  let full_args = ["timeout"; string_of_int timeout] @ cmd_args in
+  (* GLM agents use dedicated cascade function (no chdir needed — direct HTTP).
+     Non-GLM agents need chdir + fork protected by mutex. *)
+  if agent_name = "glm" then
+    spawn_glm_with_cascade ~prompt:augmented_prompt ~timeout ~start_time
+  else
+    (* Build command arguments outside the chdir critical section *)
+    let base_args = parse_command config.command in
+    let cmd_args = base_args @ mcp_args in
+    let full_args = ["timeout"; string_of_int timeout] @ cmd_args in
 
-  (* Serialize chdir + fork under mutex. Sys.chdir is process-global;
-     without this, concurrent Eio fibers would race on the CWD. *)
-  let (process, output_buf) =
-    Eio.Mutex.use_rw ~protect:true chdir_mutex (fun () ->
-      let original_dir = Sys.getcwd () in
-      (match working_dir with Some d -> Sys.chdir d | None -> ());
-      Fun.protect ~finally:(fun () -> Sys.chdir original_dir) (fun () ->
-        let buf = Buffer.create 4096 in
-        let proc = match stdin_data with
-          | Some data ->
-              Eio.Process.spawn ~sw proc_mgr
-                ~stdin:(Eio.Flow.string_source data)
-                ~stdout:(Eio.Flow.buffer_sink buf)
-                full_args
-          | None ->
-              Eio.Process.spawn ~sw proc_mgr
-                ~stdout:(Eio.Flow.buffer_sink buf)
-                full_args
+    (* Serialize chdir + fork under mutex. Sys.chdir is process-global;
+       without this, concurrent Eio fibers would race on the CWD. *)
+    let (process, output_buf) =
+      Eio.Mutex.use_rw ~protect:true chdir_mutex (fun () ->
+        let original_dir = Sys.getcwd () in
+        (match working_dir with Some d -> Sys.chdir d | None -> ());
+        Fun.protect ~finally:(fun () -> Sys.chdir original_dir) (fun () ->
+          let buf = Buffer.create 4096 in
+          let proc =
+            Eio.Process.spawn ~sw proc_mgr
+              ~stdin:(Eio.Flow.string_source augmented_prompt)
+              ~stdout:(Eio.Flow.buffer_sink buf)
+              full_args
+          in
+          (proc, buf)))
+    in
+
+    let result =
+      try
+        let status = Eio.Process.await process in
+        let raw_output = Buffer.contents output_buf in
+        let exit_code =
+          match status with
+          | `Exited code -> code
+          | `Signaled _ -> -1
         in
-        (proc, buf)))
-  in
 
-  let result =
-    try
-      let output_buf = output_buf in
-      
-      let status = Eio.Process.await process in
-      let raw_output = Buffer.contents output_buf in
-      let exit_code = match status with 
-        | `Exited code -> code
-        | `Signaled _ -> -1
-      in 
+        let output, input_tokens, output_tokens, cache_creation, cache_read, cost_usd =
+          match agent_name with
+          | "claude" ->
+              let result_opt, inp, out, cache_c, cache_r, cost =
+                parse_claude_json raw_output
+              in
+              (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
+          | "gemini" ->
+              let inp, out, cached, cost = parse_gemini_output raw_output in
+              (raw_output, inp, out, cached, None, cost)
+          | "ollama" ->
+              let inp, out, cost = parse_ollama_output raw_output in
+              (raw_output, inp, out, None, None, cost)
+          | "codex" ->
+              let inp, out, cached, cost = parse_codex_output raw_output in
+              (raw_output, inp, out, cached, None, cost)
+          | _ -> (raw_output, None, None, None, None, None)
+        in
 
-      let (output, input_tokens, output_tokens, cache_creation, cache_read, cost_usd) =
-        match agent_name with
-        | "claude" ->
-            let (result_opt, inp, out, cache_c, cache_r, cost) = parse_claude_json raw_output in
-            (Option.value result_opt ~default:raw_output, inp, out, cache_c, cache_r, cost)
-        | "gemini" ->
-            let (inp, out, cached, cost) = parse_gemini_output raw_output in
-            (raw_output, inp, out, cached, None, cost)
-        | "ollama" ->
-            let (inp, out, cost) = parse_ollama_output raw_output in
-            (raw_output, inp, out, None, None, cost)
-        | "codex" ->
-            let (inp, out, cached, cost) = parse_codex_output raw_output in
-            (raw_output, inp, out, cached, None, cost)
-        | "glm" ->
-            (* GLM response comes wrapped in MCP JSON-RPC, extract the text content *)
-            let (response_text, inp, out, cost) =
-              try
-                let json = Yojson.Safe.from_string raw_output in
-                let open Yojson.Safe.Util in
-                let result = json |> member "result" in
-                let content = result |> member "content" in
-                let text = match content with
-                  | `List items ->
-                      let texts = List.filter_map (fun item ->
-                        match item |> member "type" |> to_string_option with
-                        | Some "text" -> item |> member "text" |> to_string_option
-                        | _ -> None
-                      ) items in
-                      String.concat "\n" texts
-                  | _ -> raw_output
-                in
-                let (inp, out, cost) = parse_glm_output raw_output in
-                (text, inp, out, cost)
-              with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
-                (raw_output, None, None, None)
-            in
-            (response_text, inp, out, None, None, cost)
-        | _ ->
-            (raw_output, None, None, None, None, None)
-      in 
+        {
+          success = (exit_code = 0);
+          output;
+          exit_code;
+          elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          input_tokens;
+          output_tokens;
+          cache_creation_tokens = cache_creation;
+          cache_read_tokens = cache_read;
+          cost_usd;
+        }
+      with e ->
+        {
+          success = false;
+          output = Printf.sprintf "Spawn error (Eio): %s" (Printexc.to_string e);
+          exit_code = -99;
+          elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          input_tokens = None;
+          output_tokens = None;
+          cache_creation_tokens = None;
+          cache_read_tokens = None;
+          cost_usd = None;
+        }
+    in
+    result
 
-      {
-        success = (exit_code = 0);
-        output;
-        exit_code;
-        elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
-        input_tokens;
-        output_tokens;
-        cache_creation_tokens = cache_creation;
-        cache_read_tokens = cache_read;
-        cost_usd;
-      }
-    with e -> 
-      {
-        success = false;
-        output = Printf.sprintf "Spawn error (Eio): %s" (Printexc.to_string e);
-        exit_code = -99;
-        elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
-        input_tokens = None;
-        output_tokens = None;
-        cache_creation_tokens = None;
-        cache_read_tokens = None;
-        cost_usd = None;
-      }
-  in
-  result
-
-let result_to_human_string result = 
+let result_to_human_string (result : spawn_result) = 
   let token_info = 
     match result.input_tokens, result.output_tokens, result.cost_usd with 
     | Some inp, Some out, Some cost -> 

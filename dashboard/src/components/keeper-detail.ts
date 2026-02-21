@@ -7,7 +7,7 @@ import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
-import type { Keeper, TrpgCharacterStats } from '../types'
+import type { Keeper, KeeperMetricPoint, TrpgCharacterStats } from '../types'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -23,7 +23,18 @@ export function closeKeeperDetail() {
 
 // ── Sub-components ────────────────────────────────────────
 
+function formatTokens(n: number | undefined): string {
+  if (!n) return '—'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
 function KpiGrid({ keeper }: { keeper: Keeper }) {
+  const series = keeper.metrics_series ?? []
+  const lastPt = series[series.length - 1] as KeeperMetricPoint | undefined
+  const latestCost = lastPt?.cost_usd != null ? `$${lastPt.cost_usd.toFixed(4)}` : '—'
+
   const items: { label: string; value: string | number; hint?: string }[] = [
     {
       label: 'Generation',
@@ -56,30 +67,67 @@ function KpiGrid({ keeper }: { keeper: Keeper }) {
           ${i.hint ? html`<div class="keeper-kpi-hint">${i.hint}</div>` : null}
         </div>
       `)}
+      <div class="kpi-tile">
+        <div class="kpi-value">${formatTokens(keeper.context_tokens)}</div>
+        <div class="kpi-label">Tokens</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-value">${keeper.handoff_count_total ?? '—'}</div>
+        <div class="kpi-label">Handoffs</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-value">${keeper.compaction_count ?? '—'}</div>
+        <div class="kpi-label">Compactions</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-value">${latestCost}</div>
+        <div class="kpi-label">Cost (USD)</div>
+      </div>
     </div>
   `
 }
 
 function ContextChart({ keeper }: { keeper: Keeper }) {
-  const ratio = keeper.context_ratio
-  if (ratio == null) return null
+  const series = keeper.metrics_series ?? []
+  if (series.length < 2) {
+    const pct = ((keeper.context?.context_ratio ?? 0) * 100)
+    const color = pct > 85 ? '#ef4444' : pct > 70 ? '#f59e0b' : '#22c55e'
+    return html`
+      <div class="context-chart">
+        <div class="chart-bar-bg">
+          <div class="chart-bar" style="width:${pct.toFixed(1)}%;background:${color}"></div>
+        </div>
+        <span class="chart-pct">${pct.toFixed(1)}%</span>
+      </div>`
+  }
 
-  const pct = Math.round(ratio * 100)
-  const statusClass = pct > 80 ? 'bad' : pct > 60 ? 'warn' : ''
+  const W = 200, H = 60, pad = 2
+  const n = series.length
+  const pts = series.map((p: KeeperMetricPoint, i: number) => {
+    const x = pad + (i / (n - 1)) * (W - 2 * pad)
+    const y = H - pad - (p.context_ratio ?? 0) * (H - 2 * pad)
+    return { x, y, p }
+  })
+  const polyline = pts.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  const lastRatio = ((series[series.length - 1] as KeeperMetricPoint)?.context_ratio ?? 0) * 100
+  const lineColor = lastRatio > 85 ? '#ef4444' : lastRatio > 70 ? '#f59e0b' : '#22c55e'
 
   return html`
-    <div class="keeper-chart-card">
-      <div class="keeper-chart-container" style="display: flex; align-items: flex-end; gap: 2px; padding: 0 20px;">
-        <div style="flex:1; background: rgba(74,222,128,0.3); height: ${Math.min(pct, 100)}%; border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.3s;" />
-        <div style="flex:1; background: rgba(255,255,255,0.06); height: 100%; border-radius: 4px 4px 0 0;" />
-      </div>
-      <div class="keeper-chart-meta">
-        Context usage: <span class=${statusClass}>${pct}%</span>
-        ${pct > 70 ? html` — <span class="warn">Compaction soon</span>` : null}
-        ${pct > 85 ? html` — <span class="bad">Handoff imminent</span>` : null}
-      </div>
-    </div>
-  `
+    <div class="context-chart" style="display:flex;align-items:center;gap:8px">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="background:#1a1a2e;border-radius:4px">
+        <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
+        <line x1="${pad}" y1="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
+        <line x1="${pad}" y1="${(H - pad - 0.85 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.85 * (H - 2 * pad)).toFixed(1)}" stroke="#f59e0b" stroke-dasharray="3,3" stroke-width="0.5"/>
+        ${pts.filter(({ p }) => p.is_handoff).map(({ x }) => html`
+          <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="#ef4444" stroke-width="1.5" opacity="0.7"/>
+        `)}
+        <polyline points="${polyline}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
+        ${pts.filter(({ p }) => p.is_compaction).map(({ x, y }) => html`
+          <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="#a855f7"/>
+        `)}
+      </svg>
+      <span class="chart-pct">${lastRatio.toFixed(1)}%</span>
+    </div>`
 }
 
 // Searchable field dictionary — shows all keeper properties
@@ -124,6 +172,25 @@ function FieldDictionary({ keeper }: { keeper: Keeper }) {
           <span style="flex:1; text-align:right; color:#ccc;">${f.value}</span>
         </div>
       `)}
+      ${keeper.trace_id ? html`<div class="keeper-field-row"><span class="keeper-field-title">Trace ID</span><span class="keeper-field-key mono">${keeper.trace_id}</span></div>` : ''}
+      ${keeper.agent_name ? html`<div class="keeper-field-row"><span class="keeper-field-title">Agent</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.agent_name}</span></div>` : ''}
+      ${keeper.primary_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Primary Model</span><span class="mono" style="flex:1; text-align:right; color:#ccc;">${keeper.primary_model}</span></div>` : ''}
+      ${keeper.active_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Active Model</span><span class="mono" style="flex:1; text-align:right; color:#ccc;">${keeper.active_model}</span></div>` : ''}
+      ${keeper.next_model_hint ? html`<div class="keeper-field-row"><span class="keeper-field-title">Next Model Hint</span><span class="mono" style="flex:1; text-align:right; color:#ccc;">${keeper.next_model_hint}</span></div>` : ''}
+      ${keeper.skill_primary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Primary)</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.skill_primary}</span></div>` : ''}
+      ${keeper.skill_secondary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Secondary)</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.skill_secondary}</span></div>` : ''}
+      ${keeper.skill_reason ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill Reason</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.skill_reason}</span></div>` : ''}
+      ${keeper.context_source ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Source</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.context_source}</span></div>` : ''}
+      ${keeper.context_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Tokens</span><span style="flex:1; text-align:right; color:#ccc;">${formatTokens(keeper.context_tokens)}</span></div>` : ''}
+      ${keeper.context_max != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Max</span><span style="flex:1; text-align:right; color:#ccc;">${formatTokens(keeper.context_max)}</span></div>` : ''}
+      ${keeper.memory_recent_note ? html`<div class="keeper-field-row"><span class="keeper-field-title">Memory Note</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.memory_recent_note}</span></div>` : ''}
+      ${keeper.k2k_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">K2K Count</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.k2k_count}</span></div>` : ''}
+      ${keeper.conversation_tail_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Conv Tail</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.conversation_tail_count}</span></div>` : ''}
+      ${keeper.handoff_count_total != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Total Handoffs</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.handoff_count_total}</span></div>` : ''}
+      ${keeper.compaction_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Compactions</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.compaction_count}</span></div>` : ''}
+      ${keeper.last_compaction_saved_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Last Compact Saved</span><span style="flex:1; text-align:right; color:#ccc;">${formatTokens(keeper.last_compaction_saved_tokens)}</span></div>` : ''}
+      ${keeper.context?.message_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Message Count</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.context.message_count}</span></div>` : ''}
+      ${keeper.context?.has_checkpoint != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Has Checkpoint</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.context.has_checkpoint ? 'Yes' : 'No'}</span></div>` : ''}
     </div>
   `
 }
@@ -231,6 +298,10 @@ function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     { label: 'Saved tokens', value: typeof mw?.compaction_saved_tokens === 'number' ? mw.compaction_saved_tokens : keeper.last_compaction_saved_tokens ?? '-' },
     { label: 'K2K events', value: keeper.k2k_count ?? '-' },
     { label: 'Conversation tail', value: keeper.conversation_tail_count ?? '-' },
+    { label: 'Tool Calls', value: typeof mw?.tool_call_count === 'number' ? mw.tool_call_count : '-' },
+    { label: 'Preview Similarity', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
+    { label: 'Memory Avg Score', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
+    { label: 'Fallback Rate', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
   ]
 
   return html`

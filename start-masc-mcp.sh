@@ -38,6 +38,65 @@ if [ -z "$MASC_GUARDIAN_ENABLED" ]; then
     export MASC_GUARDIAN_ENABLED=true
 fi
 
+# Default arguments
+PORT="${MASC_MCP_PORT:-8935}"
+HTTP_MODE="${MASC_MCP_HTTP:-true}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-$(pwd -P)}}"
+# NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
+EIO_MODE="true"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --http)
+            HTTP_MODE="true"
+            shift
+            ;;
+        --stdio)
+            HTTP_MODE="false"
+            shift
+            ;;
+        --eio)
+            EIO_MODE="true"
+            shift
+            ;;
+        --lwt)
+            echo "Error: Lwt runtime is deprecated since 2026-01." >&2
+            echo "Please use Eio (default). Lwt support has been removed." >&2
+            exit 1
+            ;;
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        --base-path|--path)
+            BASE_PATH="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: $0 [--stdio] [--http] [--eio] [--lwt] [--port PORT] [--base-path PATH|--path PATH]" >&2
+            echo "Note: Eio is the default runtime; --lwt exits with an error." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Fast preflight: fail before build/init if requested port is already occupied.
+if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then
+    listener_pid="$(lsof -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"
+    listener_cmd=""
+    if [ -n "$listener_pid" ]; then
+        listener_cmd="$(ps -p "$listener_pid" -o command= 2>/dev/null || true)"
+    fi
+    echo "❌ Port $PORT already in use; refusing startup before build/init." >&2
+    if [ -n "$listener_pid" ]; then
+        echo "   Existing listener: pid=$listener_pid ${listener_cmd}" >&2
+    fi
+    echo "   Stop the existing server, choose another --port, or set MASC_ALLOW_PORT_REUSE=1." >&2
+    exit 1
+fi
+
 # Resolve executable path
 # Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
@@ -103,50 +162,6 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
     fi
 fi
 
-# Default arguments
-PORT="${MASC_MCP_PORT:-8935}"
-HTTP_MODE="${MASC_MCP_HTTP:-true}"
-BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-$(pwd -P)}}"
-# NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
-EIO_MODE="true"
-
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --http)
-            HTTP_MODE="true"
-            shift
-            ;;
-        --stdio)
-            HTTP_MODE="false"
-            shift
-            ;;
-        --eio)
-            EIO_MODE="true"
-            shift
-            ;;
-        --lwt)
-            echo "Error: Lwt runtime is deprecated since 2026-01." >&2
-            echo "Please use Eio (default). Lwt support has been removed." >&2
-            exit 1
-            ;;
-        --port)
-            PORT="$2"
-            shift 2
-            ;;
-        --base-path|--path)
-            BASE_PATH="$2"
-            shift 2
-            ;;
-        *)
-            echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--stdio] [--http] [--eio] [--lwt] [--port PORT] [--base-path PATH|--path PATH]" >&2
-            echo "Note: Eio is the default runtime; --lwt exits with an error." >&2
-            exit 1
-            ;;
-    esac
-done
-
 resolve_base_path() {
     local path="$1"
 
@@ -186,20 +201,41 @@ resolve_base_path() {
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
 
-# Wait for port to become available (prevents EADDRINUSE on launchd restart)
+# Wait for port to become available.
+# Default behavior is fail-fast on conflict to prevent duplicate server startup.
+# To preserve legacy behavior, set MASC_ALLOW_PORT_REUSE=1.
 wait_for_port() {
-    local port="$1" max_wait=10 waited=0
+    local port="$1" max_wait="${MASC_PORT_WAIT_MAX_SEC:-10}" waited=0
     while lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1; do
         if [ "$waited" -ge "$max_wait" ]; then
-            echo "⚠️ Port $port still in use after ${max_wait}s, proceeding anyway" >&2
-            return 0
+            local listener_pid listener_cmd
+            listener_pid="$(lsof -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"
+            listener_cmd=""
+            if [ -n "$listener_pid" ]; then
+                listener_cmd="$(ps -p "$listener_pid" -o command= 2>/dev/null || true)"
+            fi
+            if [ "${MASC_ALLOW_PORT_REUSE:-0}" = "1" ]; then
+                echo "⚠️ Port $port still in use after ${max_wait}s, but MASC_ALLOW_PORT_REUSE=1 so continuing." >&2
+                if [ -n "$listener_pid" ]; then
+                    echo "   Existing listener: pid=$listener_pid ${listener_cmd}" >&2
+                fi
+                return 0
+            fi
+            echo "❌ Port $port still in use after ${max_wait}s; refusing duplicate startup." >&2
+            if [ -n "$listener_pid" ]; then
+                echo "   Existing listener: pid=$listener_pid ${listener_cmd}" >&2
+            fi
+            echo "   Stop the existing server, choose another --port, or set MASC_ALLOW_PORT_REUSE=1." >&2
+            return 1
         fi
         echo "⏳ Port $port in use, waiting... (${waited}s/${max_wait}s)" >&2
         sleep 1
         waited=$((waited + 1))
     done
 }
-wait_for_port "$PORT"
+if ! wait_for_port "$PORT"; then
+    exit 1
+fi
 
 # Select executable based on EIO_MODE
 SELECTED_EXE="$MASC_EXE"

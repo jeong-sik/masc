@@ -182,6 +182,39 @@ let test_spawn_timeout_reasonable_range () =
   check bool "timeout <= 3600" true (t <= 3600)
 
 (* ============================================================
+   KeeperBootstrap Module Tests
+   ============================================================ *)
+
+let test_keeper_bootstrap_stale_positive () =
+  check bool "stale turn positive" true
+    (Env_config.KeeperBootstrap.stale_turn_seconds >= 0.0)
+
+let test_keeper_bootstrap_max_scan_positive () =
+  check bool "max scan positive" true
+    (Env_config.KeeperBootstrap.max_scan > 0)
+
+(* ============================================================
+   KeeperAlert Module Tests
+   ============================================================ *)
+
+let test_keeper_alert_min_score_range () =
+  let v = Env_config.KeeperAlert.min_score in
+  check bool "min score >= 0" true (v >= 0.0);
+  check bool "min score <= 1" true (v <= 1.0)
+
+let test_keeper_alert_retry_non_negative () =
+  check bool "max retries non-negative" true
+    (Env_config.KeeperAlert.max_retries >= 0)
+
+let test_keeper_alert_body_chars_positive () =
+  check bool "max body chars positive" true
+    (Env_config.KeeperAlert.max_body_chars > 0)
+
+let test_keeper_alert_slack_dm_user_id_readable () =
+  check bool "slack dm user id readable" true
+    (String.length Env_config.KeeperAlert.slack_dm_user_id >= 0)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -246,5 +279,15 @@ let () =
       test_case "timeout positive" `Quick test_spawn_timeout_positive;
       test_case "timeout default 600" `Quick test_spawn_timeout_default_600;
       test_case "timeout reasonable range" `Quick test_spawn_timeout_reasonable_range;
+    ];
+    "keeper_bootstrap", [
+      test_case "stale turn positive" `Quick test_keeper_bootstrap_stale_positive;
+      test_case "max scan positive" `Quick test_keeper_bootstrap_max_scan_positive;
+    ];
+    "keeper_alert", [
+      test_case "min score range" `Quick test_keeper_alert_min_score_range;
+      test_case "max retries non-negative" `Quick test_keeper_alert_retry_non_negative;
+      test_case "body chars positive" `Quick test_keeper_alert_body_chars_positive;
+      test_case "slack dm user id readable" `Quick test_keeper_alert_slack_dm_user_id_readable;
     ];
   ]

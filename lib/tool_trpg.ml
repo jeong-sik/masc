@@ -1225,6 +1225,7 @@ type world_contract = {
   required_flags : string list;
   forbidden_flags : string list;
   required_event_types : string list;
+  required_event_types_any_of : string list list;
   banned_terms : string list;
 }
 
@@ -1245,7 +1246,9 @@ let default_world_contract_catalog : world_contract_catalog =
             "Baseline canon contract that keeps guardrails lightweight for sandbox runs.";
           required_flags = [];
           forbidden_flags = [];
-          required_event_types = [ "scene.transition" ];
+          required_event_types = [];
+          required_event_types_any_of =
+            [ [ "scene.transition"; "quest.update"; "flag.set" ] ];
           banned_terms = [];
         };
         {
@@ -1253,20 +1256,32 @@ let default_world_contract_catalog : world_contract_catalog =
           title = "Grimland Chronicle Canon";
           description =
             "Keeps scarcity/political tone coherent for Grimland sessions.";
-          required_flags = [ "scarcity.high" ];
+          required_flags = [ "scarcity.high"; "trust.public-low" ];
           forbidden_flags = [ "outcome.invalid"; "world.magic_unlimited" ];
-          required_event_types = [ "scene.transition" ];
-          banned_terms = [ "spaceship"; "laser rifle" ];
+          required_event_types = [];
+          required_event_types_any_of =
+            [
+              [ "scene.transition"; "quest.update"; "flag.set" ];
+              [ "combat.attack"; "combat.defense"; "dice.rolled" ];
+            ];
+          banned_terms =
+            [ "spaceship"; "laser rifle"; "cyber implant"; "quantum drive" ];
         };
         {
           id = "emberfall-siege";
           title = "Emberfall Siege Canon";
           description =
             "Keeps siege pressure active for Emberfall sessions.";
-          required_flags = [ "siege.active" ];
+          required_flags = [ "siege.active"; "morale.volatile" ];
           forbidden_flags = [ "peace.treaty.signed"; "outcome.invalid" ];
-          required_event_types = [ "scene.transition" ];
-          banned_terms = [ "vacation"; "tourism festival" ];
+          required_event_types = [];
+          required_event_types_any_of =
+            [
+              [ "scene.transition"; "quest.update"; "flag.set" ];
+              [ "combat.attack"; "combat.defense"; "dice.rolled" ];
+            ];
+          banned_terms =
+            [ "vacation"; "tourism festival"; "beach party"; "peace parade" ];
         };
       ];
   }
@@ -1298,6 +1313,41 @@ let parse_world_contract_json (json : Yojson.Safe.t) :
     | `Null -> Ok []
     | _ -> Error (Printf.sprintf "world contract %s must be string array" key)
   in
+  let string_matrix_field key =
+    match json |> member key with
+    | `Null -> Ok []
+    | `List rows ->
+        let parse_row idx = function
+          | `List xs ->
+              let values =
+                xs
+                |> List.filter_map (function
+                     | `String raw ->
+                         let value = String.trim raw in
+                         if value = "" then None else Some value
+                     | _ -> None)
+              in
+              if values = [] then
+                Error
+                  (Printf.sprintf
+                     "world contract %s[%d] must contain at least one string"
+                     key idx)
+              else Ok values
+          | _ ->
+              Error
+                (Printf.sprintf
+                   "world contract %s[%d] must be string array"
+                   key idx)
+        in
+        let rec loop idx acc = function
+          | [] -> Ok (List.rev acc)
+          | row :: tl ->
+              let* parsed = parse_row idx row in
+              loop (idx + 1) (parsed :: acc) tl
+        in
+        loop 0 [] rows
+    | _ -> Error (Printf.sprintf "world contract %s must be string[][]" key)
+  in
   let* id = string_field "id" in
   let* title = string_field "title" in
   let description =
@@ -1308,6 +1358,9 @@ let parse_world_contract_json (json : Yojson.Safe.t) :
   let* required_flags = string_list_field "required_flags" in
   let* forbidden_flags = string_list_field "forbidden_flags" in
   let* required_event_types = string_list_field "required_event_types" in
+  let* required_event_types_any_of =
+    string_matrix_field "required_event_types_any_of"
+  in
   let* banned_terms = string_list_field "banned_terms" in
   Ok
     {
@@ -1317,6 +1370,7 @@ let parse_world_contract_json (json : Yojson.Safe.t) :
       required_flags;
       forbidden_flags;
       required_event_types;
+      required_event_types_any_of;
       banned_terms;
     }
 
@@ -1589,6 +1643,7 @@ type canon_check = {
   required_flags_missing : string list;
   forbidden_flags_hit : string list;
   required_event_types_missing : string list;
+  required_event_types_any_of_missing : string list;
   banned_terms_hit : string list;
 }
 
@@ -1609,6 +1664,8 @@ let canon_check_to_yojson (check : canon_check) : Yojson.Safe.t =
       ("forbidden_flags_hit", strings_json check.forbidden_flags_hit);
       ( "required_event_types_missing",
         strings_json check.required_event_types_missing );
+      ( "required_event_types_any_of_missing",
+        strings_json check.required_event_types_any_of_missing );
       ("banned_terms_hit", strings_json check.banned_terms_hit);
     ]
 
@@ -1623,6 +1680,7 @@ let canon_check_disabled : canon_check =
     required_flags_missing = [];
     forbidden_flags_hit = [];
     required_event_types_missing = [];
+    required_event_types_any_of_missing = [];
     banned_terms_hit = [];
   }
 
@@ -1669,6 +1727,7 @@ let evaluate_canon_check ~base_dir ~state ~events ~dm_reply : canon_check =
             required_flags_missing = [];
             forbidden_flags_hit = [];
             required_event_types_missing = [];
+            required_event_types_any_of_missing = [];
             banned_terms_hit = [];
           }
       | Some contract ->
@@ -1698,6 +1757,17 @@ let evaluate_canon_check ~base_dir ~state ~events ~dm_reply : canon_check =
             contract.required_event_types
             |> List.filter (fun required ->
                    not (List.mem required event_types_seen))
+          in
+          let required_event_types_any_of_missing =
+            contract.required_event_types_any_of
+            |> List.filter_map (fun choices ->
+                   let satisfied =
+                     choices
+                     |> List.exists (fun event_type ->
+                            List.mem event_type event_types_seen)
+                   in
+                   if satisfied then None
+                   else Some (String.concat "|" choices))
           in
           let dm_reply_lower =
             dm_reply
@@ -1734,10 +1804,16 @@ let evaluate_canon_check ~base_dir ~state ~events ~dm_reply : canon_check =
                      banned_terms_hit)
           in
           let warnings =
-            List.map
-              (fun ev ->
-                Printf.sprintf "required_event_type_missing:%s" ev)
-              required_event_types_missing
+            (List.map
+               (fun ev ->
+                 Printf.sprintf "required_event_type_missing:%s" ev)
+               required_event_types_missing)
+            @
+            (List.map
+               (fun choices ->
+                 Printf.sprintf "required_event_type_any_of_missing:%s"
+                   choices)
+               required_event_types_any_of_missing)
           in
           let status =
             if violations <> [] then if strict then "fail" else "warn"
@@ -1754,6 +1830,7 @@ let evaluate_canon_check ~base_dir ~state ~events ~dm_reply : canon_check =
             required_flags_missing;
             forbidden_flags_hit;
             required_event_types_missing;
+            required_event_types_any_of_missing;
             banned_terms_hit;
           })
 

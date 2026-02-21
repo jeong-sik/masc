@@ -14,6 +14,7 @@ KEEPER_TAG="${KEEPER_TAG:-smoke-$(date +%s)}"
 DM_KEEPER="${DM_KEEPER:-dm-$KEEPER_TAG}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-30}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
+ROUND_LOCAL_FALLBACK="${ROUND_LOCAL_FALLBACK:-1}"
 PLAYER_KEEPER_NAMES=""
 CLAIMED_ACTORS=""
 CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-120}"
@@ -95,7 +96,7 @@ call_tool_checked() {
   local raw
   local err
   raw="$(call_tool "$id" "$name" "$args_json" "$timeout_sec" "$retry_count")"
-  if [ -z "$(printf "%s" "$raw" | tr -d '[:space:]')" ]; then
+  if [ -z "$(printf "%s" "$raw" | LC_ALL=C tr -d '[:space:]')" ]; then
     echo "FAIL: $name: empty response from MCP" >&2
     exit 1
   fi
@@ -131,6 +132,13 @@ build_models_json() {
     | map(gsub("^\\s+|\\s+$";""))
     | map(select(length > 0))
   '
+}
+
+bool_to_json() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) printf "true" ;;
+    *) printf "false" ;;
+  esac
 }
 
 echo "[bootstrap] trpg.pool.generate"
@@ -192,10 +200,11 @@ echo "[bootstrap] room_id=$room_id world_preset=$world_used dm_preset=$dm_used"
 
 if [ "$RUN_ROUND" = "1" ]; then
   echo "[round] RUN_ROUND=1, executing $ROUNDS rounds"
+  round_local_fallback_json="$(bool_to_json "$ROUND_LOCAL_FALLBACK")"
   i=1
   while [ "$i" -le "$ROUNDS" ]; do
     echo "  - round $i"
-    args_round="$(jq -cn --argjson t "$round_template" --argjson timeout "$ROUND_TIMEOUT_SEC" '{room_id:$t.room_id,dm_keeper:$t.dm_keeper,player_keepers:$t.player_keepers,phase:"round",timeout_sec:$timeout,require_claim:true}')"
+    args_round="$(jq -cn --argjson t "$round_template" --argjson timeout "$ROUND_TIMEOUT_SEC" --argjson local_fallback "$round_local_fallback_json" '{room_id:$t.room_id,dm_keeper:$t.dm_keeper,player_keepers:$t.player_keepers,phase:"round",timeout_sec:$timeout,require_claim:true,local_fallback:$local_fallback}')"
     r_round="$(call_tool_checked $((4000 + i)) "trpg.round.run" "$args_round" "$ROUND_HTTP_TIMEOUT_SEC" "1")"
     advanced="$(printf "%s" "$r_round" | payload | jq -r '.summary.advanced // empty')"
     if [ "$advanced" = "false" ]; then

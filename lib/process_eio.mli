@@ -7,6 +7,7 @@
 (** {1 Global init (call once from main_eio.ml)} *)
 
 val init :
+  cwd_default:Eio.Fs.dir_ty Eio.Path.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit

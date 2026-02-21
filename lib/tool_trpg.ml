@@ -1395,14 +1395,58 @@ let fallback_dm_reply ~state =
            else acc)
          0
   in
-  if live_npcs > 0 then
-    Printf.sprintf
-      "턴 %d, 전장의 연기가 걷히자 남은 적들이 전열을 다시 정비하며 반격을 준비한다."
-      turn
-  else
-    Printf.sprintf
-      "턴 %d, 전장의 긴장이 다시 고조되고 어둠 속에서 새로운 위협의 기척이 느껴진다."
-      turn
+  let live_pcs =
+    party_fields_of_state state
+    |> List.fold_left
+         (fun acc (_, actor_json) ->
+           if is_actor_alive actor_json && role_from_actor_json actor_json <> "npc" then acc + 1
+           else acc)
+         0
+  in
+  let templates =
+    if live_npcs > 0 then
+      [
+        (fun t n _p ->
+          Printf.sprintf "턴 %d, 남은 %d명의 적이 대열을 고쳐 잡고 다음 공격을 준비한다." t n);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 적의 지휘관이 짧은 구호를 외치자 잔존 병력이 밀집 대형으로 전환한다." t);
+        (fun t n _p ->
+          Printf.sprintf "턴 %d, 흙먼지 사이로 %d개의 그림자가 천천히 위치를 바꾸며 측면을 노린다." t n);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 전장에 잠시 정적이 흐르지만 적의 눈빛은 여전히 전의를 품고 있다." t);
+        (fun t _n p ->
+          Printf.sprintf "턴 %d, 적이 아군 %d명의 배치를 살피며 약점을 탐색하는 기색이다." t p);
+        (fun t n _p ->
+          Printf.sprintf "턴 %d, %d명의 적이 짧게 숨을 고른 뒤 동시에 무기를 들어올린다." t n);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 바닥에 떨어진 무기가 달그락거리고 적 진영에서 다시 움직임이 감지된다." t);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 적의 후열에서 무언가를 준비하는 소리가 들려온다." t);
+      ]
+    else
+      [
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 전장에 고요가 내려앉지만 어딘가에서 발소리가 가까워지고 있다." t);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 쓰러진 적들 사이로 찬 바람이 불어오고 새로운 위협의 기척이 느껴진다." t);
+        (fun t _n p ->
+          Printf.sprintf "턴 %d, 일행 %d명이 잠시 숨을 돌리지만 주변의 어둠이 점점 짙어지고 있다." t p);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 멀리서 낮은 포효 소리가 울려오고 대지가 미세하게 진동한다." t);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 전투의 잔향이 가시기도 전에 새로운 그림자가 시야 끝에 나타난다." t);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 바닥의 핏자국이 어딘가로 이어지고 있다. 아직 끝나지 않았다." t);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 지하에서 무언가가 움직이는 둔탁한 소리가 일행의 긴장을 다시 끌어올린다." t);
+        (fun t _n _p ->
+          Printf.sprintf "턴 %d, 고요한 순간도 잠시, 벽 너머에서 금속이 부딪히는 소리가 들린다." t);
+      ]
+  in
+  let dm_actor_id = "__dm__" in
+  match pick_deterministic_text ~actor_id:dm_actor_id ~turn ~salt:"dm-fallback" templates with
+  | Some template -> template turn live_npcs live_pcs
+  | None -> Printf.sprintf "턴 %d, 전장의 상황이 다시 요동치기 시작한다." turn
 
 let fallback_player_reply ~state ~actor_id =
   let turn = state_turn state in

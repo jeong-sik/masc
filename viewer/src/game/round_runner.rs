@@ -97,10 +97,10 @@ const STALL_RETRY_MAX_DELAY_MS: i32 = 12000;
 #[cfg(target_arch = "wasm32")]
 const TRANSIENT_CONFLICT_RETRY_DELAY_MS: i32 = 5000;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 const DEFAULT_ROUND_TIMEOUT_SEC: f64 = 45.0;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 const AUTO_RECOVERY_TIMEOUT_SEC: f64 = 12.0;
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -108,6 +108,20 @@ fn stall_retry_delay_ms(retry_count: u32) -> i32 {
     let exponent = retry_count.saturating_sub(1).min(6);
     let multiplied = STALL_RETRY_BASE_DELAY_MS.saturating_mul(1_i32 << exponent);
     multiplied.min(STALL_RETRY_MAX_DELAY_MS)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn compute_round_execution_policy(requested_timeout_sec: Option<f64>, stalled_retries: u32) -> (f64, bool) {
+    let timeout_sec = requested_timeout_sec
+        .filter(|value| *value > 0.0)
+        .unwrap_or(DEFAULT_ROUND_TIMEOUT_SEC);
+    let local_fallback = stalled_retries > 0;
+    let effective_timeout_sec = if local_fallback {
+        timeout_sec.min(AUTO_RECOVERY_TIMEOUT_SEC)
+    } else {
+        timeout_sec
+    };
+    (effective_timeout_sec, local_fallback)
 }
 
 // ─── OnEnter System ────────────────────────────
@@ -495,17 +509,12 @@ fn build_round_body(dm_keeper_fallback: &str, stalled_retries: u32) -> Result<St
 
     let phase_raw = read_dom_input("round-run-phase").unwrap_or_else(|| "round".to_string());
     let phase = normalize_round_phase_input(&phase_raw);
-    let timeout_sec = read_dom_input("round-run-timeout")
+    let requested_timeout_sec = read_dom_input("round-run-timeout")
         .and_then(|raw| raw.parse::<f64>().ok())
-        .filter(|value| *value > 0.0)
-        .unwrap_or(DEFAULT_ROUND_TIMEOUT_SEC);
+        .filter(|value| *value > 0.0);
     let lang = read_dom_input("round-run-lang").unwrap_or_else(|| "ko".to_string());
-    let local_fallback = stalled_retries > 0;
-    let timeout_sec = if local_fallback {
-        timeout_sec.min(AUTO_RECOVERY_TIMEOUT_SEC)
-    } else {
-        timeout_sec
-    };
+    let (timeout_sec, local_fallback) =
+        compute_round_execution_policy(requested_timeout_sec, stalled_retries);
 
     // 2) Player keeper mapping from hidden round plan (`actor=keeper,actor=keeper,...`).
     let player_pairs = read_dom_value("round-run-players")
@@ -814,8 +823,9 @@ async fn sleep_ms(ms: i32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_transient_round_conflict, parse_http_status, round_response_api_error,
-        round_response_has_prompt_meta_artifact_failures, stall_retry_delay_ms,
+        compute_round_execution_policy, is_transient_round_conflict, parse_http_status,
+        round_response_api_error, round_response_has_prompt_meta_artifact_failures,
+        stall_retry_delay_ms,
     };
 
     #[test]
@@ -880,5 +890,26 @@ mod tests {
             ]
         }"#;
         assert!(round_response_has_prompt_meta_artifact_failures(payload));
+    }
+
+    #[test]
+    fn round_execution_policy_uses_default_timeout_without_retries() {
+        let (timeout_sec, local_fallback) = compute_round_execution_policy(None, 0);
+        assert_eq!(timeout_sec, 45.0);
+        assert!(!local_fallback);
+    }
+
+    #[test]
+    fn round_execution_policy_enables_fallback_and_clamps_timeout_on_retry() {
+        let (timeout_sec, local_fallback) = compute_round_execution_policy(Some(45.0), 1);
+        assert_eq!(timeout_sec, 12.0);
+        assert!(local_fallback);
+    }
+
+    #[test]
+    fn round_execution_policy_keeps_short_timeout_when_already_lower_than_cap() {
+        let (timeout_sec, local_fallback) = compute_round_execution_policy(Some(8.0), 2);
+        assert_eq!(timeout_sec, 8.0);
+        assert!(local_fallback);
     }
 }

@@ -322,7 +322,7 @@ function normalizeKeepers(raw: unknown): Keeper[] {
     .filter((row): row is Keeper => row !== null)
 }
 
-export async function refreshDashboard(mode: DashboardMode = 'compact'): Promise<void> {
+export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<void> {
   const now = Date.now()
   const cached = _dashboardCache[mode]
   if (cached && (now - cached.time) < DASHBOARD_CACHE_TTL) {

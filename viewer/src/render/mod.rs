@@ -8,8 +8,8 @@ pub mod ui;
 use bevy::prelude::*;
 
 use crate::game::components::{
-    FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken, MoodOverlay, MpBarSprite,
-    WeatherOverlay,
+    AreaLabel, ConditionIndicator, FloatingText, GameCamera, HpBarSprite, MapBackground, MapToken,
+    MoodOverlay, MpBarSprite, WeatherOverlay,
 };
 use crate::mode::ViewerMode;
 use crate::render::characters::DragState;
@@ -34,13 +34,14 @@ impl Plugin for MapRenderPlugin {
                 (
                     map::setup_camera,
                     map::setup_map_background,
+                    map::spawn_area_labels,
                     overlay::setup_weather_overlay,
                     overlay::setup_mood_overlay,
                     transition::setup_fade_overlay,
                     ui::setup_ui,
                 ),
             )
-            // Update: character sprites, positions, HP bars, effects, transitions, UI
+            // Update: character sprites, positions, HP bars, drag, map
             .add_systems(
                 Update,
                 (
@@ -49,12 +50,22 @@ impl Plugin for MapRenderPlugin {
                     characters::update_hp_bars,
                     characters::update_mp_bars,
                     characters::apply_death_visuals,
+                    characters::update_condition_indicators,
                     characters::handle_drag_start,
                     characters::handle_drag,
                     characters::handle_drag_end,
                     map::update_map_label,
                     map::update_map_texture,
+                )
+                    .run_if(in_state(ViewerMode::Trpg)),
+            )
+            // Update: effects, overlays, transitions, UI
+            .add_systems(
+                Update,
+                (
                     fx::spawn_damage_text,
+                    fx::spawn_combat_attack_fx,
+                    fx::spawn_combat_defense_fx,
                     fx::animate_floating_text,
                     overlay::update_weather_overlay,
                     overlay::update_mood_overlay,
@@ -103,6 +114,8 @@ fn cleanup_trpg_scene(
             With<WeatherOverlay>,
             With<MoodOverlay>,
             With<UiMarker>,
+            With<ConditionIndicator>,
+            With<AreaLabel>,
         )>,
     >,
     mut scene_transition: ResMut<SceneTransition>,

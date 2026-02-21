@@ -2,7 +2,9 @@ use bevy::prelude::*;
 
 use super::map::{area_to_position, position_to_area};
 use crate::assets;
-use crate::game::components::*;
+use crate::game::components::{
+    Actor, ConditionIndicator, GameCamera, HpBarSprite, MapToken, MpBarSprite,
+};
 
 /// Marker component for entities that can be dragged by the player.
 #[derive(Component)]
@@ -311,6 +313,57 @@ pub fn apply_death_visuals(
     for (actor, mut sprite) in &mut actors {
         if actor.is_dead {
             sprite.color = Color::srgb(0.3, 0.3, 0.3);
+        }
+    }
+}
+
+/// Returns a dot color for a condition name.
+fn condition_dot_color(name: &str) -> Color {
+    match name.to_ascii_lowercase().as_str() {
+        "poisoned" => Color::srgb(0.8, 0.2, 0.3),
+        "stunned" => Color::srgb(0.8, 0.7, 0.2),
+        "frozen" | "cold" => Color::srgb(0.3, 0.5, 0.9),
+        "burning" => Color::srgb(0.9, 0.4, 0.1),
+        "charmed" => Color::srgb(0.7, 0.3, 0.7),
+        "blinded" => Color::srgb(0.4, 0.4, 0.4),
+        _ => Color::srgb(0.8, 0.5, 0.2),
+    }
+}
+
+/// Spawns/updates small colored dots above tokens to indicate active conditions.
+/// Max 3 dots, spaced horizontally at y+24 above the token center.
+pub fn update_condition_indicators(
+    mut commands: Commands,
+    actors: Query<(Entity, &Actor, Option<&Children>), (With<MapToken>, Changed<Actor>)>,
+    indicators: Query<Entity, With<ConditionIndicator>>,
+) {
+    for (actor_entity, actor, children) in &actors {
+        // Despawn existing condition dots for this actor
+        if let Some(children) = children {
+            for child in children.iter() {
+                if indicators.get(child).is_ok() {
+                    commands.entity(child).try_despawn();
+                }
+            }
+        }
+
+        // Spawn new condition dots (max 3)
+        let count = actor.conditions.len().min(3);
+        for (i, condition) in actor.conditions.iter().take(count).enumerate() {
+            let color = condition_dot_color(&condition.name);
+            let x_offset = (i as f32 - (count as f32 - 1.0) / 2.0) * 8.0;
+            let dot = commands
+                .spawn((
+                    Sprite {
+                        color,
+                        custom_size: Some(Vec2::new(6.0, 6.0)),
+                        ..default()
+                    },
+                    Transform::from_xyz(x_offset, 24.0, 0.2),
+                    ConditionIndicator,
+                ))
+                .id();
+            commands.entity(actor_entity).add_child(dot);
         }
     }
 }

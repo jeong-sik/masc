@@ -467,6 +467,9 @@ fn bind_auto_round_toggle(doc: &web_sys::Document) {
 
     let doc_clone = doc.clone();
     let cb = Closure::wrap(Box::new(move || {
+        // Toggling auto-round is explicit user activity.
+        crate::game::round_runner::record_user_activity();
+
         let next = !auto_round_enabled_from_dom(&doc_clone);
         if let Some(dashboard) = doc_clone.get_element_by_id("dashboard") {
             let _ = dashboard.set_attribute("data-auto-round", if next { "1" } else { "0" });

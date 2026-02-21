@@ -427,6 +427,104 @@ let test_round_run_timeout_policy () =
     (count_from_json (parse_json_exn unavailable_stream));
   cleanup_dir base_dir
 
+let test_round_run_local_fallback_progresses_round () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors
+    ~base_dir
+    ~room_id:"room-round-local-fallback"
+    ~actor_ids:["p1"];
+  let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    `Error "keeper runtime unavailable"
+  in
+  let ctx : Tool_trpg.context =
+    {
+      config;
+      agent_name = "tester";
+      keeper_call = Some keeper_call;
+      keeper_probe = None;
+      dm_voice_emit = None;
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-local-fallback");
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-down") ]);
+        ("timeout_sec", `Float 0.2);
+        ("local_fallback", `Bool true);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success via fallback" true ok;
+
+  let json = parse_json_exn body in
+  let summary = Yojson.Safe.Util.member "summary" json in
+  Alcotest.(check int)
+    "successes include fallback replies"
+    2
+    (Yojson.Safe.Util.member "successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int)
+    "player successes include fallback"
+    1
+    (Yojson.Safe.Util.member "player_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool)
+    "player quorum met with fallback"
+    true
+    (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check bool)
+    "dm succeeds with fallback"
+    true
+    (Yojson.Safe.Util.member "dm_success" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check bool)
+    "round advances with fallback"
+    true
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check int)
+    "turn_after advanced"
+    2
+    (Yojson.Safe.Util.member "turn_after" json |> Yojson.Safe.Util.to_int);
+
+  let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
+  let fallback_count =
+    List.fold_left
+      (fun acc status_json ->
+        match status_json |> Yojson.Safe.Util.member "status" with
+        | `String "fallback" -> acc + 1
+        | _ -> acc)
+      0 statuses
+  in
+  Alcotest.(check int) "fallback statuses" 2 fallback_count;
+
+  let events = json |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list in
+  let event_types =
+    List.filter_map
+      (fun event_json ->
+        match event_json |> Yojson.Safe.Util.member "type" with
+        | `String s -> Some s
+        | _ -> None)
+      events
+  in
+  Alcotest.(check bool)
+    "actor.spawned emitted"
+    true
+    (List.mem "actor.spawned" event_types);
+  Alcotest.(check bool)
+    "combat.attack emitted"
+    true
+    (List.mem "combat.attack" event_types);
+  Alcotest.(check bool)
+    "hp.changed emitted"
+    true
+    (List.mem "hp.changed" event_types);
+  Alcotest.(check bool)
+    "turn.started emitted"
+    true
+    (List.mem "turn.started" event_types);
+  cleanup_dir base_dir
+
 let test_round_run_unavailable_sampling_cap () =
   with_env "MASC_TRPG_KEEPER_UNAVAILABLE_MAX_PER_TURN" "1" (fun () ->
     let base_dir = make_temp_dir () in
@@ -1433,6 +1531,10 @@ let () =
             "timeout policy emits events"
             `Quick
             test_round_run_timeout_policy;
+          Alcotest.test_case
+            "local fallback progresses round and emits combat events"
+            `Quick
+            test_round_run_local_fallback_progresses_round;
           Alcotest.test_case
             "samples keeper.unavailable when cap reached"
             `Quick

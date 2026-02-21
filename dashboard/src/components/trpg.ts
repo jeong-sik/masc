@@ -15,6 +15,7 @@ import {
   advanceTrpgTurn,
   fetchTrpgJoinEligibility,
   requestTrpgMidJoin,
+  type TrpgRoundRunResult,
 } from '../api'
 import type { TrpgActor, TrpgState, TrpgEvent, TrpgCharacterStats } from '../types'
 
@@ -32,6 +33,7 @@ const joinRole = signal<'player' | 'npc' | 'dm'>('player')
 const joinActorName = signal('')
 const joinStatus = signal<'idle' | 'checking' | 'requesting' | 'ok' | 'error'>('idle')
 const joinEligibility = signal<Record<string, unknown> | null>(null)
+const lastRoundRun = signal<TrpgRoundRunResult | null>(null)
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -282,13 +284,22 @@ function ControlBox({ state }: { state: TrpgState }) {
     if (!room) { showToast('No room set', 'error'); return }
     runStatus.value = 'running'
     try {
-      await runTrpgRound(room)
+      const result = await runTrpgRound(room)
+      lastRoundRun.value = result
       runStatus.value = 'ok'
-      showToast('Round executed', 'success')
+      const summary = isRecord(result.summary) ? result.summary : null
+      const advanced = summary ? recBool(summary, 'advanced', false) : false
+      const reason = summary ? recString(summary, 'progress_reason', '') : ''
+      showToast(
+        advanced ? 'Round advanced' : `Round stalled${reason ? `: ${reason}` : ''}`,
+        advanced ? 'success' : 'warning',
+      )
       refreshTrpg()
-    } catch {
+    } catch (err) {
+      lastRoundRun.value = null
       runStatus.value = 'error'
-      showToast('Round failed', 'error')
+      const message = err instanceof Error ? err.message : 'Round failed'
+      showToast(message, 'error')
     }
   }
 
@@ -586,6 +597,115 @@ function NextAction({ state }: { state: TrpgState }) {
   `
 }
 
+function RoundRunInsight() {
+  const result = lastRoundRun.value
+  if (!result) {
+    return html`<div class="empty-state" style="font-size:13px;">Run Round 결과가 아직 없습니다.</div>`
+  }
+
+  const summaryRaw = result.summary
+  const summary = isRecord(summaryRaw) ? summaryRaw : null
+  const statusesRaw = Array.isArray(result.statuses) ? result.statuses : []
+  const statuses = statusesRaw.filter(isRecord).slice(-8)
+  const canonRaw = result.canon_check
+  const canon = isRecord(canonRaw) ? canonRaw : null
+  const canonWarnings = canon && Array.isArray(canon.warnings)
+    ? canon.warnings.filter((w): w is string => typeof w === 'string').slice(0, 3)
+    : []
+  const canonViolations = canon && Array.isArray(canon.violations)
+    ? canon.violations.filter((v): v is string => typeof v === 'string').slice(0, 3)
+    : []
+
+  const advanced = summary ? recBool(summary, 'advanced', false) : false
+  const progressReason = summary ? recString(summary, 'progress_reason', '') : ''
+  const progressDetail = summary ? recString(summary, 'progress_detail', '') : ''
+  const playerSuccess = summary ? recNumber(summary, 'player_successes', 0) : 0
+  const playerRequired = summary ? recNumber(summary, 'player_required_successes', 0) : 0
+  const dmSuccess = summary ? recBool(summary, 'dm_success', false) : false
+  const timeouts = summary ? recNumber(summary, 'timeouts', 0) : 0
+  const unavailable = summary ? recNumber(summary, 'unavailable', 0) : 0
+  const reprompts = summary ? recNumber(summary, 'reprompts', 0) : 0
+  const npcAttacks = summary ? recNumber(summary, 'npc_attacks', 0) : 0
+  const keeperTimeout = summary ? recNumber(summary, 'keeper_timeout_sec', 0) : 0
+  const rollAudit = summary ? recNumber(summary, 'roll_audit_count', 0) : 0
+
+  return html`
+    <div style="display:grid; gap:10px;">
+      <div class="trpg-round-item ${advanced ? 'active' : 'failed'}" style="display:block;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <strong>${advanced ? 'ADVANCED' : 'STALLED'}</strong>
+          <span style="font-size:11px; color:#9ca3af;">
+            turn ${result.turn_before ?? 0} → ${result.turn_after ?? 0}
+          </span>
+          <span style="margin-left:auto; font-size:11px; color:#9ca3af;">
+            ${dmSuccess ? 'DM ok' : 'DM stalled'} / players ${playerSuccess}/${playerRequired}
+          </span>
+        </div>
+        ${progressReason
+          ? html`<div style="margin-top:4px; font-size:12px;">${progressReason}</div>`
+          : null}
+        ${progressDetail
+          ? html`<div style="margin-top:2px; font-size:11px; color:#9ca3af;">${progressDetail}</div>`
+          : null}
+      </div>
+
+      <div class="stats-grid" style="grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px;">
+        <div class="stat-card"><div class="stat-label">Timeouts</div><div class="stat-value">${timeouts}</div></div>
+        <div class="stat-card"><div class="stat-label">Unavailable</div><div class="stat-value">${unavailable}</div></div>
+        <div class="stat-card"><div class="stat-label">Reprompts</div><div class="stat-value">${reprompts}</div></div>
+        <div class="stat-card"><div class="stat-label">NPC Attacks</div><div class="stat-value">${npcAttacks}</div></div>
+        <div class="stat-card"><div class="stat-label">Keeper Timeout</div><div class="stat-value">${keeperTimeout || 0}s</div></div>
+        <div class="stat-card"><div class="stat-label">Roll Audit</div><div class="stat-value">${rollAudit}</div></div>
+      </div>
+
+      ${statuses.length > 0
+        ? html`
+          <div class="trpg-round-list">
+            ${statuses.map(s => {
+              const status = recString(s, 'status', 'unknown')
+              const actorId = recString(s, 'actor_id', '-')
+              const role = recString(s, 'role', '-')
+              const reason = recString(s, 'reason', '')
+              const actionType = recString(s, 'action_type', '')
+              const reply = recString(s, 'reply', '')
+              return html`
+                <div class="trpg-round-item ${status.includes('fallback') || status.includes('timeout') ? 'failed' : 'active'}">
+                  <span>${actorId} (${role})</span>
+                  <span style="margin-left:auto; font-size:11px;">${status}</span>
+                  ${actionType ? html`<div style="width:100%; font-size:11px; color:#9ca3af; margin-top:2px;">action: ${actionType}</div>` : null}
+                  ${reason ? html`<div style="width:100%; font-size:11px; color:#9ca3af; margin-top:2px;">reason: ${reason}</div>` : null}
+                  ${reply ? html`<div style="width:100%; font-size:11px; color:#d1d5db; margin-top:2px;">${reply.slice(0, 120)}</div>` : null}
+                </div>
+              `
+            })}
+          </div>`
+        : null}
+
+      ${canon
+        ? html`
+          <div class="trpg-control-box">
+            <div style="font-size:12px; color:#9ca3af;">
+              Canon status: <strong>${recString(canon, 'status', 'unknown')}</strong>
+            </div>
+            ${canonViolations.length > 0
+              ? html`
+                <div style="margin-top:6px; font-size:11px; color:#fca5a5;">
+                  ${canonViolations.map(v => html`<div>violation: ${v}</div>`)}
+                </div>`
+              : null}
+            ${canonWarnings.length > 0
+              ? html`
+                <div style="margin-top:6px; font-size:11px; color:#fbbf24;">
+                  ${canonWarnings.map(w => html`<div>warning: ${w}</div>`)}
+                </div>`
+              : null}
+          </div>
+        `
+        : null}
+    </div>
+  `
+}
+
 // ── Main TRPG component ──────────────────────────────────
 
 export function Trpg() {
@@ -655,6 +775,10 @@ export function Trpg() {
           ${'' /* Controls */}
           <${Card} title="Controls">
             <${ControlBox} state=${state} />
+          <//>
+
+          <${Card} title="Last Round Result" style="margin-top:16px;">
+            <${RoundRunInsight} />
           <//>
 
           ${'' /* Mid-join gate */}

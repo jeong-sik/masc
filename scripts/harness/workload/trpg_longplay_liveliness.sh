@@ -37,7 +37,7 @@ CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 normalize_bool() {
   local raw="${1:-false}"
   local lower
-  lower="$(printf "%s" "$raw" | tr '[:upper:]' '[:lower:]')"
+  lower="$(printf "%s" "$raw" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
   case "$lower" in
     1|true|yes|y|on) printf "true" ;;
     *) printf "false" ;;
@@ -118,7 +118,7 @@ call_tool_checked() {
   local raw
   local err
   raw="$(call_tool "$id" "$name" "$args_json" "$timeout_sec" "$retry_count")"
-  if [ -z "$(printf "%s" "$raw" | tr -d '[:space:]')" ]; then
+  if [ -z "$(printf "%s" "$raw" | LC_ALL=C tr -d '[:space:]')" ]; then
     echo "FAIL: $name: empty response from MCP" >&2
     exit 1
   fi
@@ -158,7 +158,7 @@ build_models_json() {
 
 count_unique_lines() {
   local raw="$1"
-  printf "%s\n" "$raw" | awk 'NF' | sort -u | wc -l | tr -d ' '
+  printf "%s\n" "$raw" | awk 'NF' | sort -u | wc -l | LC_ALL=C tr -d ' '
 }
 
 LOCAL_FALLBACK_BOOL="$(normalize_bool "$LOCAL_FALLBACK")"
@@ -325,7 +325,7 @@ while [ "$i" -le "$ROUNDS" ]; do
   [ -n "$targets_round" ] && all_targets="${all_targets}${all_targets:+$'\n'}${targets_round}"
   [ -n "$player_replies_round" ] && all_player_replies="${all_player_replies}${all_player_replies:+$'\n'}${player_replies_round}"
 
-  damaged_now="$(printf "%s\n" "$damaged_round" | awk 'NF' | wc -l | tr -d ' ')"
+  damaged_now="$(printf "%s\n" "$damaged_round" | awk 'NF' | wc -l | LC_ALL=C tr -d ' ')"
   echo "[round $i] turn ${turn_before}->${turn_after} advanced=$advanced reason=${progress_reason:-none} recovery=$recovery_applied mode=${recovery_mode:-none} timeout=${effective_timeout}s timeouts=$timeouts unavailable=$unavailable roll_audit=$roll_audit_round npc_spawn=$npc_spawn_round npc_attack=$npc_attack_round damaged_players_now=$damaged_now placeholder=$placeholder_round"
 
   i=$((i + 1))

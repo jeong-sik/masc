@@ -1380,10 +1380,347 @@ let choose_attack_target_id ~state ~actor_id =
     | Some actor -> Some actor
     | None -> choose_from_candidates "player-any" live_actors
 
-let deterministic_damage ~turn ~actor_id =
+(* --- NPC Bestiary -------------------------------------------------------- *)
+
+type npc_template = {
+  npc_name : string;
+  archetype : string;
+  persona : string;
+  traits : string list;
+  skills : string list;
+  base_hp : int;
+  damage_min : int;
+  damage_max : int;
+  attack_narrations : string list;
+}
+
+let npc_bestiary : npc_template array =
+  [|
+    (* -- Skirmishers: low-mid HP, fast, flanking damage -- *)
+    {
+      npc_name = "Hollow Stalker";
+      archetype = "predator-skirmisher";
+      persona = "A relentless shadow prowling the frontline.";
+      traits = [ "aggressive"; "opportunistic" ];
+      skills = [ "shadow_claw"; "lunge" ];
+      base_hp = 12;
+      damage_min = 2;
+      damage_max = 5;
+      attack_narrations =
+        [
+          "그림자 발톱이 허공을 갈랐다.";
+          "어둠 속에서 빠르게 돌진하며 할퀸다.";
+          "잔영만 남기며 옆구리를 노린다.";
+        ];
+    };
+    {
+      npc_name = "Feral Wraith";
+      archetype = "phantom-skirmisher";
+      persona = "A tormented spirit lashing out at the living.";
+      traits = [ "ethereal"; "relentless" ];
+      skills = [ "spectral_rend"; "phase_strike" ];
+      base_hp = 10;
+      damage_min = 3;
+      damage_max = 5;
+      attack_narrations =
+        [
+          "원혼의 손길이 살갗을 파고든다.";
+          "차가운 기운이 뼈를 스친다.";
+          "실체 없는 팔이 허공에서 뻗어 나온다.";
+        ];
+    };
+    {
+      npc_name = "Thorn Crawler";
+      archetype = "plant-skirmisher";
+      persona = "A twisted vine creature creeping along the walls.";
+      traits = [ "patient"; "ensnaring" ];
+      skills = [ "vine_lash"; "thorn_spray" ];
+      base_hp = 14;
+      damage_min = 2;
+      damage_max = 4;
+      attack_narrations =
+        [
+          "가시 덩굴이 발목을 감아 조인다.";
+          "날카로운 가시가 사방으로 흩뿌려진다.";
+          "땅 아래에서 뿌리가 솟아올라 찌른다.";
+        ];
+    };
+    (* -- Brutes: high HP, heavy damage, slow -- *)
+    {
+      npc_name = "Ironclad Golem";
+      archetype = "construct-brute";
+      persona = "An ancient automaton animated by forgotten runes.";
+      traits = [ "armored"; "relentless" ];
+      skills = [ "slam"; "iron_fist" ];
+      base_hp = 22;
+      damage_min = 4;
+      damage_max = 7;
+      attack_narrations =
+        [
+          "강철 주먹이 대지를 울리며 내려찍는다.";
+          "묵직한 팔이 바람을 가르며 휘둘러진다.";
+          "녹슨 관절이 삐걱대며 돌진한다.";
+        ];
+    };
+    {
+      npc_name = "Savage Ogre";
+      archetype = "beast-brute";
+      persona = "A towering mass of muscle and rage.";
+      traits = [ "brutal"; "dim-witted" ];
+      skills = [ "crush"; "roar" ];
+      base_hp = 20;
+      damage_min = 4;
+      damage_max = 8;
+      attack_narrations =
+        [
+          "거대한 곤봉이 머리 위에서 내리꽂힌다.";
+          "분노에 찬 포효와 함께 돌진한다.";
+          "땅을 흔드는 발걸음으로 짓밟으려 한다.";
+        ];
+    };
+    {
+      npc_name = "Plague Bearer";
+      archetype = "toxic-brute";
+      persona = "A bloated horror oozing contagion.";
+      traits = [ "toxic"; "resilient" ];
+      skills = [ "noxious_slam"; "bile_burst" ];
+      base_hp = 18;
+      damage_min = 3;
+      damage_max = 6;
+      attack_narrations =
+        [
+          "부패한 손아귀로 움켜쥐며 독을 퍼뜨린다.";
+          "역겨운 담즙이 터져 나와 사방을 적신다.";
+          "오염된 팔이 느릿하지만 정확하게 내려친다.";
+        ];
+    };
+    (* -- Casters: low HP, high variance damage, magic -- *)
+    {
+      npc_name = "Void Weaver";
+      archetype = "dark-caster";
+      persona = "A hooded figure channeling abyssal energy.";
+      traits = [ "cunning"; "fragile" ];
+      skills = [ "void_bolt"; "shadow_bind" ];
+      base_hp = 8;
+      damage_min = 3;
+      damage_max = 8;
+      attack_narrations =
+        [
+          "허공에서 검은 빛줄기가 쏟아진다.";
+          "어둠의 파동이 영혼을 잠식한다.";
+          "심연의 에너지가 손끝에서 폭발한다.";
+        ];
+    };
+    {
+      npc_name = "Flame Disciple";
+      archetype = "fire-caster";
+      persona = "A zealot wreathed in living fire.";
+      traits = [ "fanatical"; "volatile" ];
+      skills = [ "fireball"; "ignite" ];
+      base_hp = 9;
+      damage_min = 3;
+      damage_max = 7;
+      attack_narrations =
+        [
+          "불꽃이 손바닥에서 소용돌이치며 발사된다.";
+          "뜨거운 화염이 대지를 태우며 번져간다.";
+          "작열하는 불덩이가 포물선을 그리며 날아온다.";
+        ];
+    };
+    {
+      npc_name = "Frost Warden";
+      archetype = "ice-caster";
+      persona = "A sentinel of eternal winter.";
+      traits = [ "methodical"; "cold" ];
+      skills = [ "frost_spike"; "frozen_grasp" ];
+      base_hp = 10;
+      damage_min = 2;
+      damage_max = 7;
+      attack_narrations =
+        [
+          "서릿발이 땅을 타고 발밑을 얼린다.";
+          "얼음 창이 허공에서 결정화되어 꽂힌다.";
+          "차가운 손길이 사지를 마비시킨다.";
+        ];
+    };
+    (* -- Elites: balanced, multiple skills, mid-late game -- *)
+    {
+      npc_name = "Shadow Knight";
+      archetype = "dark-elite";
+      persona = "A fallen warrior wielding cursed steel.";
+      traits = [ "disciplined"; "relentless"; "armored" ];
+      skills = [ "cursed_slash"; "dark_shield"; "riposte" ];
+      base_hp = 18;
+      damage_min = 3;
+      damage_max = 6;
+      attack_narrations =
+        [
+          "저주받은 검날이 암흑빛을 뿜으며 베어낸다.";
+          "묵직한 반격이 방패 너머로 날아온다.";
+          "어둠의 기사가 냉정하게 칼을 내리친다.";
+        ];
+    };
+    {
+      npc_name = "Chimera Hound";
+      archetype = "beast-elite";
+      persona = "A multi-headed beast fused by dark alchemy.";
+      traits = [ "ferocious"; "unpredictable" ];
+      skills = [ "triple_bite"; "acid_spit"; "pounce" ];
+      base_hp = 16;
+      damage_min = 3;
+      damage_max = 7;
+      attack_narrations =
+        [
+          "세 개의 머리가 동시에 이빨을 드러낸다.";
+          "산성 침이 갑옷을 녹이며 튀어 오른다.";
+          "거대한 몸이 도약하며 짓누른다.";
+        ];
+    };
+    {
+      npc_name = "Bone Colossus";
+      archetype = "undead-elite";
+      persona = "A towering skeleton assembled from a hundred corpses.";
+      traits = [ "imposing"; "resilient"; "slow" ];
+      skills = [ "bone_crush"; "skeletal_rain"; "reassemble" ];
+      base_hp = 24;
+      damage_min = 4;
+      damage_max = 7;
+      attack_narrations =
+        [
+          "거대한 뼈 주먹이 천천히, 그러나 확실하게 내려온다.";
+          "부러진 뼈 파편이 쏟아져 내린다.";
+          "해골 거인이 한 발 내딛으며 대지가 울린다.";
+        ];
+    };
+  |]
+
+(** Difficulty tier for NPC selection based on game progression. *)
+type difficulty_tier = Early | Mid | Late
+
+(** Tier pools: which bestiary indices are available at each game stage. *)
+let early_pool = [| 0; 1; 2 |]
+let mid_pool = [| 0; 1; 2; 3; 4; 5; 6; 7; 8 |]
+let late_pool = [| 0; 1; 2; 3; 4; 5; 6; 7; 8; 9; 10; 11 |]
+
+(** Determine difficulty tier from turn number. *)
+let tier_of_turn turn =
+  let t = if turn < 0 then -turn else turn in
+  if t <= 5 then Early
+  else if t <= 15 then Mid
+  else Late
+
+(** Select an NPC template deterministically based on turn number.
+    Restricts the pool based on game progression:
+    - Early (turns 1-5): skirmishers only (indices 0-2)
+    - Mid (turns 6-15): +brutes, +casters (indices 0-8)
+    - Late (turns 16+): all including elites (indices 0-11) *)
+let select_npc_template ~turn =
+  let abs_turn = if turn < 0 then -turn else turn in
+  let pool =
+    match tier_of_turn turn with
+    | Early -> early_pool
+    | Mid -> mid_pool
+    | Late -> late_pool
+  in
+  let idx = abs_turn mod Array.length pool in
+  npc_bestiary.(pool.(idx))
+
+(** Select an NPC template with explicit tier override.
+    Allows callers to force a specific difficulty tier regardless of turn. *)
+let select_npc_template_with_tier ~turn ~tier =
+  let abs_turn = if turn < 0 then -turn else turn in
+  let pool =
+    match tier with
+    | Early -> early_pool
+    | Mid -> mid_pool
+    | Late -> late_pool
+  in
+  let idx = abs_turn mod Array.length pool in
+  npc_bestiary.(pool.(idx))
+
+(** Scale NPC HP based on game progression.
+    Early (turn 1-5): base_hp,
+    Mid (turn 6-15): base_hp * 1.5,
+    Late (turn 16+): base_hp * 2.0 *)
+let scale_hp ~turn ~base_hp =
+  if turn <= 5 then base_hp
+  else if turn <= 15 then base_hp + (base_hp / 2)
+  else base_hp * 2
+
+(** Archetype-aware deterministic damage.
+    When ~damage_range is provided, uses that range instead of flat 2-4.
+    Range is (min, max) inclusive. *)
+let deterministic_damage ~turn ~actor_id ?(damage_range = (2, 4)) () =
+  let min_d, max_d = damage_range in
   let hash = Hashtbl.hash (actor_id ^ ":" ^ string_of_int turn) in
-  let bucket = (if hash < 0 then -hash else hash) mod 3 in
-  2 + bucket
+  let span = max_d - min_d + 1 in
+  let bucket = (if hash < 0 then -hash else hash) mod span in
+  min_d + bucket
+
+(** Pick a counterattack narration for an NPC based on its template and turn. *)
+let npc_attack_narration ~turn ~npc_template =
+  let narrations = npc_template.attack_narrations in
+  let len = List.length narrations in
+  if len = 0 then "잔존한 적이 반격해 전열을 흔든다."
+  else
+    let idx = (if turn < 0 then -turn else turn) mod len in
+    List.nth narrations idx
+
+(** Find a bestiary template by NPC name.  Falls back to the turn-based
+    selection if no exact match is found (e.g. legacy data). *)
+let find_npc_template_by_name name =
+  Array.to_seq npc_bestiary
+  |> Seq.find (fun t -> t.npc_name = name)
+
+(** Skill effect variants for NPC archetype abilities. *)
+type skill_effect =
+  | BonusDamage of int
+  | DoubleDamage
+  | MultiTarget
+  | SelfHeal of int
+  | NoSkill
+
+(** Check if a string contains a given substring. *)
+let string_contains ~haystack ~needle =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len > haystack_len then false
+  else
+    let found = ref false in
+    let i = ref 0 in
+    while !i <= haystack_len - needle_len && not !found do
+      if String.sub haystack !i needle_len = needle then found := true;
+      incr i
+    done;
+    !found
+
+(** Resolve which skill effect an NPC triggers on a given turn.
+    Deterministic: based on archetype category and turn number.
+    - Skirmishers: "Quick Strike" on even turns (BonusDamage 1)
+    - Brutes: "Crushing Blow" on turns divisible by 3 (DoubleDamage)
+    - Casters: "Spell Surge" on turns divisible by 4 (MultiTarget)
+    - Elites: "War Cry" on turn 1 (SelfHeal of 25% max HP) *)
+let resolve_npc_skill ~turn ~npc_template =
+  let arch = npc_template.archetype in
+  if string_contains ~haystack:arch ~needle:"skirmisher" then
+    if turn mod 2 = 0 then BonusDamage 1 else NoSkill
+  else if
+    string_contains ~haystack:arch ~needle:"brute"
+    || string_contains ~haystack:arch ~needle:"construct"
+  then if turn mod 3 = 0 then DoubleDamage else NoSkill
+  else if string_contains ~haystack:arch ~needle:"caster" then
+    if turn mod 4 = 0 then MultiTarget else NoSkill
+  else if string_contains ~haystack:arch ~needle:"elite" then
+    if turn = 1 then SelfHeal (npc_template.base_hp / 4) else NoSkill
+  else NoSkill
+
+(** Human-readable name for a skill effect. *)
+let skill_effect_name = function
+  | BonusDamage _ -> "Quick Strike"
+  | DoubleDamage -> "Crushing Blow"
+  | MultiTarget -> "Spell Surge"
+  | SelfHeal _ -> "War Cry"
+  | NoSkill -> ""
 
 let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~reply
     ~state =
@@ -1392,7 +1729,7 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
   | None -> Ok []
   | Some Combat_attack_intent ->
       let target_id = choose_attack_target_id ~state ~actor_id in
-      let damage = deterministic_damage ~turn ~actor_id in
+      let damage = deterministic_damage ~turn ~actor_id () in
       let payload =
         `Assoc
           [
@@ -1612,6 +1949,8 @@ let ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state =
       if List.mem_assoc candidate existing then pick_id (idx + 1) else candidate
     in
     let npc_id = pick_id 1 in
+    let tmpl = select_npc_template ~turn in
+    let hp = scale_hp ~turn ~base_hp:tmpl.base_hp in
     let payload =
       `Assoc
         [
@@ -1621,14 +1960,16 @@ let ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state =
           ( "actor",
             `Assoc
               [
-                ("name", `String "Hollow Stalker");
+                ("name", `String tmpl.npc_name);
                 ("role", `String "npc");
-                ("archetype", `String "predator-skirmisher");
-                ("persona", `String "A relentless shadow prowling the frontline.");
-                ("traits", `List [ `String "aggressive"; `String "opportunistic" ]);
-                ("skills", `List [ `String "shadow_claw"; `String "lunge" ]);
-                ("hp", `Int 12);
-                ("max_hp", `Int 12);
+                ("archetype", `String tmpl.archetype);
+                ("persona", `String tmpl.persona);
+                ( "traits",
+                  `List (List.map (fun t -> `String t) tmpl.traits) );
+                ( "skills",
+                  `List (List.map (fun s -> `String s) tmpl.skills) );
+                ("hp", `Int hp);
+                ("max_hp", `Int hp);
                 ("alive", `Bool true);
                 ("inventory", `List []);
               ] );
@@ -1920,6 +2261,26 @@ let choose_live_npc_actor_id state =
            Some actor_id
          else None)
 
+(** Find a second live player target (excluding the primary target and NPC).
+    Deterministic selection based on turn and actor_id hash. *)
+let choose_second_player_target ~state ~npc_actor_id ~exclude_actor_id ~turn =
+  let live_players =
+    party_fields_of_state state
+    |> List.filter (fun (aid, actor_json) ->
+           aid <> npc_actor_id
+           && aid <> exclude_actor_id
+           && is_actor_alive actor_json
+           && role_from_actor_json actor_json <> "npc"
+           && role_from_actor_json actor_json <> "dm")
+  in
+  match live_players with
+  | [] -> None
+  | _ ->
+      let len = List.length live_players in
+      let hash = Hashtbl.hash (npc_actor_id ^ ":multi:" ^ string_of_int turn) in
+      let idx = (if hash < 0 then -hash else hash) mod len in
+      Some (fst (List.nth live_players idx))
+
 let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
   let ( let* ) = Result.bind in
   match choose_live_npc_actor_id state with
@@ -1928,16 +2289,81 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
       match choose_attack_target_id ~state ~actor_id:npc_actor_id with
       | None -> Ok []
       | Some target_actor_id ->
-          let damage = deterministic_damage ~turn ~actor_id:npc_actor_id in
+          (* Look up NPC name from state -> find bestiary template *)
+          let npc_tmpl =
+            match actor_json_of_state state npc_actor_id with
+            | Some actor_json -> (
+                match actor_json |> member "name" with
+                | `String name -> find_npc_template_by_name name
+                | _ -> None)
+            | None -> None
+          in
+          let damage_range =
+            match npc_tmpl with
+            | Some t -> (t.damage_min, t.damage_max)
+            | None -> (2, 4)
+          in
+          let narration =
+            match npc_tmpl with
+            | Some t -> npc_attack_narration ~turn ~npc_template:t
+            | None -> "잔존한 적이 반격해 전열을 흔든다."
+          in
+          let base_damage =
+            deterministic_damage ~turn ~actor_id:npc_actor_id ~damage_range ()
+          in
+          (* Resolve archetype skill effect *)
+          let skill =
+            match npc_tmpl with
+            | Some t -> resolve_npc_skill ~turn ~npc_template:t
+            | None -> NoSkill
+          in
+          let skill_name_str = skill_effect_name skill in
+          let skill_json =
+            if skill_name_str = "" then `Null else `String skill_name_str
+          in
+          (* Apply skill effects *)
+          let pre_attack_events = ref [] in
+          let damage =
+            match skill with
+            | BonusDamage n -> base_damage + n
+            | DoubleDamage -> base_damage * 2
+            | _ -> base_damage
+          in
+          (* SelfHeal: emit hp.changed event with positive delta before attack *)
+          (match skill with
+          | SelfHeal heal_amount when heal_amount > 0 ->
+              let heal_payload =
+                `Assoc
+                  [
+                    ("turn", `Int turn);
+                    ("phase", `String phase);
+                    ("actor_id", `String npc_actor_id);
+                    ("delta", `Int heal_amount);
+                    ("source_actor_id", `String npc_actor_id);
+                    ("reason", `String "skill.war_cry");
+                  ]
+              in
+              (match
+                 append_event ~base_dir ~room_id
+                   ~event_type:Trpg_engine_event.Hp_changed
+                   ~actor_id:npc_actor_id ~payload:heal_payload ()
+               with
+              | Ok ev -> pre_attack_events := [ ev ]
+              | Error _ -> ())
+          | _ -> ());
+          let narration_with_skill =
+            if skill_name_str = "" then narration
+            else Printf.sprintf "[%s] %s" skill_name_str narration
+          in
           let attack_payload =
             `Assoc
               [
                 ("turn", `Int turn);
                 ("phase", `String phase);
                 ("actor_id", `String npc_actor_id);
-                ("action", `String "잔존한 적이 반격해 전열을 흔든다.");
+                ("action", `String narration_with_skill);
                 ("target_id", `String target_actor_id);
-                ("skill", `Null);
+                ("skill", skill_json);
                 ("damage", `Int damage);
               ]
           in
@@ -1962,7 +2388,61 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
               ~event_type:Trpg_engine_event.Hp_changed
               ~actor_id:target_actor_id ~payload:hp_payload ()
           in
-          Ok [ attack_event; hp_event ])
+          (* MultiTarget: attack a second player target if available *)
+          let* extra_events =
+            match skill with
+            | MultiTarget -> (
+                match
+                  choose_second_player_target ~state ~npc_actor_id
+                    ~exclude_actor_id:target_actor_id ~turn
+                with
+                | None -> Ok []
+                | Some second_target_id ->
+                    let second_damage =
+                      deterministic_damage ~turn
+                        ~actor_id:(npc_actor_id ^ "-multi") ~damage_range ()
+                    in
+                    let second_narration =
+                      Printf.sprintf "[Spell Surge] 주문의 여파가 %s에게도 번진다."
+                        second_target_id
+                    in
+                    let second_attack_payload =
+                      `Assoc
+                        [
+                          ("turn", `Int turn);
+                          ("phase", `String phase);
+                          ("actor_id", `String npc_actor_id);
+                          ("action", `String second_narration);
+                          ("target_id", `String second_target_id);
+                          ("skill", `String "Spell Surge");
+                          ("damage", `Int second_damage);
+                        ]
+                    in
+                    let* second_attack_ev =
+                      append_event ~base_dir ~room_id
+                        ~event_type:Trpg_engine_event.Combat_attack
+                        ~actor_id:npc_actor_id ~payload:second_attack_payload ()
+                    in
+                    let second_hp_payload =
+                      `Assoc
+                        [
+                          ("turn", `Int turn);
+                          ("phase", `String phase);
+                          ("actor_id", `String second_target_id);
+                          ("delta", `Int (-second_damage));
+                          ("source_actor_id", `String npc_actor_id);
+                          ("reason", `String "combat.attack");
+                        ]
+                    in
+                    let* second_hp_ev =
+                      append_event ~base_dir ~room_id
+                        ~event_type:Trpg_engine_event.Hp_changed
+                        ~actor_id:second_target_id ~payload:second_hp_payload ()
+                    in
+                    Ok [ second_attack_ev; second_hp_ev ])
+            | _ -> Ok []
+          in
+          Ok (!pre_attack_events @ [ attack_event; hp_event ] @ extra_events))
 
 let is_placeholder_reply (raw : string) : bool =
   let normalized = String.lowercase_ascii (String.trim raw) in

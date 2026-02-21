@@ -511,11 +511,39 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
   | Trpg_engine_event.Actor_deleted -> apply_actor_deleted ~state ~event
   | Trpg_engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
   | Trpg_engine_event.Actor_released -> apply_actor_released ~state ~event
+  | Trpg_engine_event.Scene_transition ->
+      let payload = event.Trpg_engine_event.payload in
+      let scene =
+        get_string_opt "scene" payload |> Option.value ~default:"unknown"
+      in
+      let state = append_to_list "narration_log" payload state in
+      (match state with
+      | `Assoc fields ->
+          let world =
+            match assoc_get "world" fields with
+            | Some (`Assoc w) -> `Assoc (assoc_put "current_scene" (`String scene) w)
+            | _ -> `Assoc [ ("current_scene", `String scene) ]
+          in
+          `Assoc (assoc_put "world" world fields)
+      | _ -> state)
+  | Trpg_engine_event.Quest_update ->
+      let payload = event.Trpg_engine_event.payload in
+      let quest_info =
+        get_string_opt "quest_info" payload |> Option.value ~default:""
+      in
+      let state = append_to_list "narration_log" payload state in
+      (match state with
+      | `Assoc fields ->
+          let world =
+            match assoc_get "world" fields with
+            | Some (`Assoc w) -> `Assoc (assoc_put "quest_status" (`String quest_info) w)
+            | _ -> `Assoc [ ("quest_status", `String quest_info) ]
+          in
+          `Assoc (assoc_put "world" world fields)
+      | _ -> state)
   | Trpg_engine_event.Turn_timeout
   | Trpg_engine_event.Keeper_unavailable
   | Trpg_engine_event.Metric_updated
-  | Trpg_engine_event.Scene_transition
-  | Trpg_engine_event.Quest_update
   | Trpg_engine_event.World_event
   | Trpg_engine_event.Session_started
   | Trpg_engine_event.Party_selected

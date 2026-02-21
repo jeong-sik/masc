@@ -576,6 +576,13 @@ let test_round_run_emits_combat_semantic_events () =
     |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check string) "roll audit source" "combat.attack" first_source;
+  let npc_attacks =
+    Yojson.Safe.Util.member "npc_attacks" summary |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check bool)
+    "auto npc pressure emits npc attack"
+    true
+    (npc_attacks >= 1);
 
   let _, stream_attack =
     dispatch_exn ctx ~name:"masc_trpg_stream"
@@ -586,10 +593,10 @@ let test_round_run_emits_combat_semantic_events () =
             ("event_type", `String "combat.attack");
           ])
   in
-  Alcotest.(check int)
-    "combat.attack count"
-    1
-    (count_from_json (parse_json_exn stream_attack));
+  Alcotest.(check bool)
+    "combat.attack count includes player + npc pressure"
+    true
+    (count_from_json (parse_json_exn stream_attack) >= 2);
   cleanup_dir base_dir
 
 let test_round_run_emits_session_outcome_event () =
@@ -1321,23 +1328,27 @@ let test_round_run_rejects_meta_only_keeper_reply () =
   let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
   Alcotest.(check bool) "round_run returns payload" true ok;
   Alcotest.(check bool)
-    "dm call is skipped when player reply is meta-only"
-    false
+    "dm call proceeds after synthetic recovery for meta-only player reply"
+    true
     !dm_called;
 
   let json = parse_json_exn body in
   let summary = Yojson.Safe.Util.member "summary" json in
   Alcotest.(check int)
     "player_successes"
-    0
+    1
     (Yojson.Safe.Util.member "player_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int)
+    "reprompts"
+    0
+    (Yojson.Safe.Util.member "reprompts" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check bool)
     "player quorum met"
-    false
+    true
     (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
   Alcotest.(check bool)
     "round advanced"
-    false
+    true
     (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
 
   let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
@@ -1348,21 +1359,21 @@ let test_round_run_rejects_meta_only_keeper_reply () =
           ( Yojson.Safe.Util.member "actor_id" s,
             Yojson.Safe.Util.member "status" s )
         with
-        | `String "p1", `String "schema_invalid" -> true
+        | `String "p1", `String "inferred_pre_reprompt" -> true
         | _ -> false)
       statuses
   in
   (match p1_status with
   | Some status_json ->
       Alcotest.(check string)
-        "p1 status is schema_invalid"
-        "schema_invalid"
+        "p1 status is inferred_pre_reprompt"
+        "inferred_pre_reprompt"
         (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
       Alcotest.(check string)
-        "p1 stage is re_prompt"
-        "re_prompt"
-        (status_json |> Yojson.Safe.Util.member "stage" |> Yojson.Safe.Util.to_string)
-  | None -> Alcotest.fail "p1 status is missing");
+        "p1 reason is synthetic"
+        "keeper_reply_synthesized"
+        (status_json |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "p1 inferred_pre_reprompt status is missing");
   cleanup_dir base_dir
 
 let test_round_run_requires_keeper_runtime () =
@@ -2652,34 +2663,40 @@ let test_round_run_reprompts_once_for_missing_structured_action () =
   in
   let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
   Alcotest.(check bool) "round_run success" true ok;
-  Alcotest.(check int) "player keeper called exactly twice" 2 !p1_calls;
+  Alcotest.(check int)
+    "player keeper called once due pre-reprompt inference recovery"
+    1
+    !p1_calls;
   let json = parse_json_exn body in
   let summary = Yojson.Safe.Util.member "summary" json in
   Alcotest.(check int)
     "reprompts"
-    1
+    0
     (Yojson.Safe.Util.member "reprompts" summary |> Yojson.Safe.Util.to_int);
-  Alcotest.(check bool)
-    "schema_failures recorded"
-    true
-    ((Yojson.Safe.Util.member "schema_failures" summary |> Yojson.Safe.Util.to_int) >= 1);
+  Alcotest.(check int)
+    "schema_failures remain zero when pre-reprompt inference recovers"
+    0
+    (Yojson.Safe.Util.member "schema_failures" summary |> Yojson.Safe.Util.to_int);
   Alcotest.(check bool)
     "advanced after reprompt recovery"
     true
     (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
   let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
-  let reprompt_status =
+  let inferred_status =
     List.exists
       (fun status_json ->
         match
           ( Yojson.Safe.Util.member "actor_id" status_json,
             Yojson.Safe.Util.member "status" status_json )
         with
-        | `String "p1", `String "re_prompt" -> true
+        | `String "p1", `String "inferred_pre_reprompt" -> true
         | _ -> false)
       statuses
   in
-  Alcotest.(check bool) "status includes re_prompt marker" true reprompt_status;
+  Alcotest.(check bool)
+    "status includes inferred_pre_reprompt marker"
+    true
+    inferred_status;
   cleanup_dir base_dir
 
 let test_round_run_dm_persona_override_in_prompt_and_summary () =
@@ -2793,7 +2810,7 @@ let () =
             `Quick
             test_round_run_uses_majority_player_quorum;
           Alcotest.test_case
-            "rejects meta-only keeper replies"
+            "recovers meta-only keeper replies via synthetic action"
             `Quick
             test_round_run_rejects_meta_only_keeper_reply;
           Alcotest.test_case
@@ -2809,7 +2826,7 @@ let () =
             `Quick
             test_round_run_lang_english_prompt;
           Alcotest.test_case
-            "re-prompts once when structured_action is missing"
+            "pre-reprompt inference recovers missing structured_action in one keeper call"
             `Quick
             test_round_run_reprompts_once_for_missing_structured_action;
           Alcotest.test_case

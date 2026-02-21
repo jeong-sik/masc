@@ -39,6 +39,24 @@ let ollama_timeout_sec () =
     ~min_v:10
     ~max_v:180
 
+(* ================================================================ *)
+(* Concurrency limiter — throttle simultaneous LLM requests          *)
+(* ================================================================ *)
+
+(** Maximum concurrent cascade/LLM calls.
+    Default 2 matches OLLAMA_MAX_LOADED_MODELS on M3 Max 128GB.
+    Prevents keeper stampede from overloading Ollama VRAM. *)
+let max_concurrent_llm =
+  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:2 ~min_v:1 ~max_v:16
+
+let llm_semaphore = Eio.Semaphore.make max_concurrent_llm
+
+let llm_semaphore_available () = Eio.Semaphore.get_value llm_semaphore
+
+let with_llm_permit f =
+  Eio.Semaphore.acquire llm_semaphore;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release llm_semaphore) f
+
 let ollama_should_fallback_to_generate (err : string) : bool =
   contains_ci err "404"
   || contains_ci err "not found"
@@ -685,24 +703,28 @@ let complete ?ollama_timeout_sec (req : completion_request) : (completion_respon
 (* ================================================================ *)
 
 let cascade ?ollama_timeout_sec (requests : completion_request list) : (completion_response, string) result =
-  let rec try_next errors = function
-    | [] ->
-      let all_errors = String.concat "; " (List.rev errors) in
-      Error (sprintf "All models failed: %s" all_errors)
-    | req :: rest ->
-      eprintf "[llm_client] cascade: trying %s (%s)\n%!"
-        req.model.model_id (string_of_provider req.model.provider);
-      match complete ?ollama_timeout_sec req with
-      | Ok resp ->
-        eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
-          resp.model_used resp.latency_ms;
-        Ok resp
-      | Error e ->
-        eprintf "[llm_client] cascade: %s failed: %s\n%!"
-          req.model.model_id e;
-        try_next (e :: errors) rest
-  in
-  try_next [] requests
+  with_llm_permit (fun () ->
+    let avail = Eio.Semaphore.get_value llm_semaphore in
+    eprintf "[llm_client] cascade: acquired permit (%d/%d available)\n%!"
+      avail max_concurrent_llm;
+    let rec try_next errors = function
+      | [] ->
+        let all_errors = String.concat "; " (List.rev errors) in
+        Error (sprintf "All models failed: %s" all_errors)
+      | req :: rest ->
+        eprintf "[llm_client] cascade: trying %s (%s)\n%!"
+          req.model.model_id (string_of_provider req.model.provider);
+        match complete ?ollama_timeout_sec req with
+        | Ok resp ->
+          eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
+            resp.model_used resp.latency_ms;
+          Ok resp
+        | Error e ->
+          eprintf "[llm_client] cascade: %s failed: %s\n%!"
+            req.model.model_id e;
+          try_next (e :: errors) rest
+    in
+    try_next [] requests)
 
 (* ================================================================ *)
 (* Model Spec Parser                                                *)

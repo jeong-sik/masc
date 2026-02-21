@@ -71,115 +71,113 @@ pub fn update_overlay_dom(
     let choice_changed = choice.active != cache.last_choice_active;
     let combat_changed = combat.active != cache.last_combat_active;
 
-    if !weather_changed && !mood_changed && !choice_changed && !combat_changed {
-        return;
-    }
+    if weather_changed || mood_changed || choice_changed || combat_changed {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-
-        if weather_changed {
-            if let Some(el) = document.get_element_by_id("weather-indicator") {
-                if overlay.weather.is_empty() {
-                    el.set_text_content(None);
-                } else {
-                    el.set_text_content(Some(&pretty_label(&overlay.weather)));
-                }
-            }
-            if let Some(img) = document
-                .get_element_by_id("weather-icon")
-                .and_then(|el| el.dyn_into::<web_sys::HtmlImageElement>().ok())
-            {
-                if let Some(path) = weather_icon_path(overlay.weather.trim()) {
-                    img.set_src(path);
-                    img.set_alt(&pretty_label(&overlay.weather));
-                    let _ = img.set_attribute("data-empty", "0");
-                } else {
-                    let _ = img.remove_attribute("src");
-                    img.set_alt("");
-                    let _ = img.set_attribute("data-empty", "1");
-                }
-            }
-            cache.last_weather = overlay.weather.clone();
-        }
-
-        if mood_changed {
-            if let Some(el) = document.get_element_by_id("mood-indicator") {
-                if overlay.mood.is_empty() {
-                    el.set_text_content(None);
-                } else {
-                    el.set_text_content(Some(&pretty_label(&overlay.mood)));
-                }
-            }
-            if let Some(img) = document
-                .get_element_by_id("mood-icon")
-                .and_then(|el| el.dyn_into::<web_sys::HtmlImageElement>().ok())
-            {
-                if let Some(path) = mood_icon_path(overlay.mood.trim()) {
-                    img.set_src(path);
-                    img.set_alt(&pretty_label(&overlay.mood));
-                    let _ = img.set_attribute("data-empty", "0");
-                } else {
-                    let _ = img.remove_attribute("src");
-                    img.set_alt("");
-                    let _ = img.set_attribute("data-empty", "1");
-                }
-            }
-            cache.last_mood = overlay.mood.clone();
-        }
-
-        if choice_changed {
-            if let Some(el) = document.get_element_by_id("choice-overlay") {
-                if choice.active {
-                    let html = format!(
-                        "<strong>{}</strong><p>{}</p><ul>{}</ul>",
-                        html_escape(&choice.character),
-                        html_escape(&choice.description),
-                        choice
-                            .options
-                            .iter()
-                            .map(|o| format!("<li>{}</li>", html_escape(o)))
-                            .collect::<Vec<_>>()
-                            .join("")
-                    );
-                    el.set_inner_html(&html);
-                    if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
-                        let _ = html_el.style().set_property("display", "block");
-                    }
-                } else {
-                    el.set_inner_html("");
-                    if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
-                        let _ = html_el.style().set_property("display", "none");
+            if weather_changed {
+                if let Some(el) = document.get_element_by_id("weather-indicator") {
+                    if overlay.weather.is_empty() {
+                        el.set_text_content(None);
+                    } else {
+                        el.set_text_content(Some(&pretty_label(&overlay.weather)));
                     }
                 }
-            }
-            cache.last_choice_active = choice.active;
-        }
-
-        if combat_changed {
-            if let Some(el) = document.get_element_by_id("combat-overlay") {
-                if combat.active {
-                    let enemies_str = combat.enemies.join(", ");
-                    let html = format!(
-                        "<strong>COMBAT</strong> <span>{}</span><p>{}</p>",
-                        html_escape(&combat.area),
-                        html_escape(&enemies_str)
-                    );
-                    el.set_inner_html(&html);
-                    if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
-                        let _ = html_el.style().set_property("display", "block");
-                    }
-                } else {
-                    el.set_inner_html("");
-                    if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
-                        let _ = html_el.style().set_property("display", "none");
+                if let Some(img) = document
+                    .get_element_by_id("weather-icon")
+                    .and_then(|el| el.dyn_into::<web_sys::HtmlImageElement>().ok())
+                {
+                    if let Some(path) = weather_icon_path(overlay.weather.trim()) {
+                        img.set_src(path);
+                        img.set_alt(&pretty_label(&overlay.weather));
+                        let _ = img.set_attribute("data-empty", "0");
+                    } else {
+                        let _ = img.remove_attribute("src");
+                        img.set_alt("");
+                        let _ = img.set_attribute("data-empty", "1");
                     }
                 }
+                cache.last_weather = overlay.weather.clone();
             }
-            cache.last_combat_active = combat.active;
+
+            if mood_changed {
+                if let Some(el) = document.get_element_by_id("mood-indicator") {
+                    if overlay.mood.is_empty() {
+                        el.set_text_content(None);
+                    } else {
+                        el.set_text_content(Some(&pretty_label(&overlay.mood)));
+                    }
+                }
+                if let Some(img) = document
+                    .get_element_by_id("mood-icon")
+                    .and_then(|el| el.dyn_into::<web_sys::HtmlImageElement>().ok())
+                {
+                    if let Some(path) = mood_icon_path(overlay.mood.trim()) {
+                        img.set_src(path);
+                        img.set_alt(&pretty_label(&overlay.mood));
+                        let _ = img.set_attribute("data-empty", "0");
+                    } else {
+                        let _ = img.remove_attribute("src");
+                        img.set_alt("");
+                        let _ = img.set_attribute("data-empty", "1");
+                    }
+                }
+                cache.last_mood = overlay.mood.clone();
+            }
+
+            if choice_changed {
+                if let Some(el) = document.get_element_by_id("choice-overlay") {
+                    if choice.active {
+                        let html = format!(
+                            "<strong>{}</strong><p>{}</p><ul>{}</ul>",
+                            html_escape(&choice.character),
+                            html_escape(&choice.description),
+                            choice
+                                .options
+                                .iter()
+                                .map(|o| format!("<li>{}</li>", html_escape(o)))
+                                .collect::<Vec<_>>()
+                                .join("")
+                        );
+                        el.set_inner_html(&html);
+                        if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+                            let _ = html_el.style().set_property("display", "block");
+                        }
+                    } else {
+                        el.set_inner_html("");
+                        if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+                            let _ = html_el.style().set_property("display", "none");
+                        }
+                    }
+                }
+                cache.last_choice_active = choice.active;
+            }
+
+            if combat_changed {
+                if let Some(el) = document.get_element_by_id("combat-overlay") {
+                    if combat.active {
+                        let enemies_str = combat.enemies.join(", ");
+                        let html = format!(
+                            "<strong>COMBAT</strong> <span>{}</span><p>{}</p>",
+                            html_escape(&combat.area),
+                            html_escape(&enemies_str)
+                        );
+                        el.set_inner_html(&html);
+                        if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+                            let _ = html_el.style().set_property("display", "block");
+                        }
+                    } else {
+                        el.set_inner_html("");
+                        if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+                            let _ = html_el.style().set_property("display", "none");
+                        }
+                    }
+                }
+                cache.last_combat_active = combat.active;
+            }
         }
     }
 }

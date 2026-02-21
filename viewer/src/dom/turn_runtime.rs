@@ -72,15 +72,8 @@ fn normalize_phase_for_sync(phase: &str) -> String {
     let normalized = phase.trim().to_ascii_lowercase().replace('-', "_");
     match normalized.as_str() {
         "briefing" | "dm" | "narration" | "dm_narration" => "dm_narration".to_string(),
-        "discuss"
-        | "discussion"
-        | "player_discuss"
-        | "party_discussion"
-        | "action"
-        | "player_action"
-        | "dice"
-        | "roll"
-        | "dice_resolution" => "round".to_string(),
+        "discuss" | "discussion" | "player_discuss" | "party_discussion" | "action"
+        | "player_action" | "dice" | "roll" | "dice_resolution" => "round".to_string(),
         _ => normalized,
     }
 }
@@ -500,15 +493,19 @@ fn build_next_action_hint(
     }
 }
 
-fn build_flow_banner(
-    lifecycle: TrpgLifecycleState,
-    connection: &ConnectionStatus,
+struct FlowBannerInput<'a> {
     runner_running: bool,
     has_actor_issues: bool,
     has_runner_issue: bool,
-    current_actor: &str,
-    next_action: &str,
-    runner_preview: &str,
+    current_actor: &'a str,
+    next_action: &'a str,
+    runner_preview: &'a str,
+}
+
+fn build_flow_banner(
+    lifecycle: TrpgLifecycleState,
+    connection: &ConnectionStatus,
+    input: FlowBannerInput<'_>,
 ) -> (&'static str, &'static str, String) {
     match connection {
         ConnectionStatus::Failed | ConnectionStatus::Disconnected => (
@@ -548,36 +545,46 @@ fn build_flow_banner(
                 "새 게임을 시작하거나 실행 가능한 방으로 이동하세요.".to_string(),
             ),
             TrpgLifecycleState::Running => {
-                if has_runner_issue {
-                    let detail = if runner_preview.trim().is_empty() || runner_preview == "-" {
-                        format!("자동 진행 이슈 감지 · {}", next_action)
-                    } else {
-                        format!("자동 진행 이슈 감지 ({}) · {}", runner_preview, next_action)
-                    };
+                if input.has_runner_issue {
+                    let detail =
+                        if input.runner_preview.trim().is_empty() || input.runner_preview == "-" {
+                            format!("자동 진행 이슈 감지 · {}", input.next_action)
+                        } else {
+                            format!(
+                                "자동 진행 이슈 감지 ({}) · {}",
+                                input.runner_preview, input.next_action
+                            )
+                        };
                     ("주의", "is-alert", detail)
-                } else if runner_running {
+                } else if input.runner_running {
                     (
                         "자동 진행",
                         "is-running",
-                        format!("AI 라운드 자동 순환 중 · {}", next_action),
+                        format!("AI 라운드 자동 순환 중 · {}", input.next_action),
                     )
-                } else if has_actor_issues {
+                } else if input.has_actor_issues {
                     (
                         "주의",
                         "is-alert",
-                        format!("응답 이슈 감지 · {}", next_action),
+                        format!("응답 이슈 감지 · {}", input.next_action),
                     )
-                } else if !current_actor.trim().is_empty() && current_actor.trim() != "-" {
+                } else if !input.current_actor.trim().is_empty()
+                    && input.current_actor.trim() != "-"
+                {
                     (
                         "진행 중",
                         "is-running",
-                        format!("{} 턴 처리 중 · {}", current_actor.trim(), next_action),
+                        format!(
+                            "{} 턴 처리 중 · {}",
+                            input.current_actor.trim(),
+                            input.next_action
+                        ),
                     )
                 } else {
                     (
                         "대기",
                         "is-waiting",
-                        format!("다음 액션 대기 · {}", next_action),
+                        format!("다음 액션 대기 · {}", input.next_action),
                     )
                 }
             }
@@ -1255,12 +1262,14 @@ pub fn update_turn_runtime_dom(
     let (flow_state, flow_class, flow_detail) = build_flow_banner(
         lifecycle,
         &connection,
-        runner_running,
-        has_actor_issues,
-        has_runner_issue,
-        &current_actor,
-        &next_action,
-        &runner_preview,
+        FlowBannerInput {
+            runner_running,
+            has_actor_issues,
+            has_runner_issue,
+            current_actor: &current_actor,
+            next_action: &next_action,
+            runner_preview: &runner_preview,
+        },
     );
     let flow_action_signature = build_flow_action_signature(
         lifecycle,
@@ -1655,8 +1664,10 @@ mod tests {
 
     #[test]
     fn summarize_actor_issues_respects_actor_order_and_reason() {
-        let mut progress = TurnProgressState::default();
-        progress.actor_order = vec!["dm".to_string(), "p01".to_string(), "p02".to_string()];
+        let mut progress = TurnProgressState {
+            actor_order: vec!["dm".to_string(), "p01".to_string(), "p02".to_string()],
+            ..TurnProgressState::default()
+        };
         progress
             .actor_states
             .insert("p02".to_string(), "unavailable".to_string());
@@ -1701,12 +1712,14 @@ mod tests {
         let (state, class_name, detail) = build_flow_banner(
             TrpgLifecycleState::Running,
             &ConnectionStatus::Failed,
-            false,
-            false,
-            false,
-            "-",
-            "라운드 실행을 누르세요.",
-            "-",
+            FlowBannerInput {
+                runner_running: false,
+                has_actor_issues: false,
+                has_runner_issue: false,
+                current_actor: "-",
+                next_action: "라운드 실행을 누르세요.",
+                runner_preview: "-",
+            },
         );
         assert_eq!(state, "연결 오류");
         assert_eq!(class_name, "is-error");
@@ -1718,12 +1731,14 @@ mod tests {
         let (state, class_name, detail) = build_flow_banner(
             TrpgLifecycleState::Running,
             &ConnectionStatus::Connected,
-            true,
-            false,
-            false,
-            "p01",
-            "자동 진행 중입니다.",
-            "-",
+            FlowBannerInput {
+                runner_running: true,
+                has_actor_issues: false,
+                has_runner_issue: false,
+                current_actor: "p01",
+                next_action: "자동 진행 중입니다.",
+                runner_preview: "-",
+            },
         );
         assert_eq!(state, "자동 진행");
         assert_eq!(class_name, "is-running");
@@ -1735,12 +1750,14 @@ mod tests {
         let (state, class_name, detail) = build_flow_banner(
             TrpgLifecycleState::Running,
             &ConnectionStatus::Connected,
-            true,
-            false,
-            true,
-            "p01",
-            "자동 진행 응답에 이슈가 있습니다.",
-            "keeper busy detected",
+            FlowBannerInput {
+                runner_running: true,
+                has_actor_issues: false,
+                has_runner_issue: true,
+                current_actor: "p01",
+                next_action: "자동 진행 응답에 이슈가 있습니다.",
+                runner_preview: "keeper busy detected",
+            },
         );
         assert_eq!(state, "주의");
         assert_eq!(class_name, "is-alert");

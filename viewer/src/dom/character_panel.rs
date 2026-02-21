@@ -113,10 +113,7 @@ fn fmt_modifier(m: i32) -> String {
 }
 
 fn normalize_lore_key(raw: &str) -> String {
-    raw.trim()
-        .to_ascii_lowercase()
-        .replace('-', "_")
-        .replace(' ', "_")
+    raw.trim().to_ascii_lowercase().replace(['-', ' '], "_")
 }
 
 fn known_skill_lore(skill_name: &str) -> Option<(&'static str, &'static str)> {
@@ -479,7 +476,10 @@ pub fn update_character_panel_dom(actors: Query<&Actor>, mut cache: ResMut<Chara
         let lore_line = if archetype_line.is_empty() && persona_line.is_empty() {
             String::new()
         } else {
-            format!("<div class=\"char-lore\">{}{}</div>", archetype_line, persona_line)
+            format!(
+                "<div class=\"char-lore\">{}{}</div>",
+                archetype_line, persona_line
+            )
         };
 
         // Buffs / debuffs

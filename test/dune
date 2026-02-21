@@ -118,6 +118,12 @@
  (modules test_trpg_rule_dnd5e_lite)
  (libraries masc_mcp alcotest yojson))
 
+; NPC Bestiary tests (12 archetypes, scaling, deterministic damage)
+(test
+ (name test_trpg_npc_bestiary)
+ (modules test_trpg_npc_bestiary)
+ (libraries masc_mcp alcotest yojson))
+
 (test
  (name test_trpg_engine_store_sqlite)
  (modules test_trpg_engine_store_sqlite)

@@ -1118,6 +1118,44 @@ let evaluate_session_outcome ~end_rules ~(state : Yojson.Safe.t) ~dm_reply :
                     if max_turn_reached then Some (Draw, "max_turn_reached")
                     else None)))
 
+let is_meaningful_event_type = function
+  | Trpg_engine_event.Flag_set
+  | Trpg_engine_event.Combat_attack
+  | Trpg_engine_event.Combat_defense
+  | Trpg_engine_event.Scene_transition
+  | Trpg_engine_event.Quest_update
+  | Trpg_engine_event.Hp_changed
+  | Trpg_engine_event.Inventory_changed ->
+      true
+  | _ -> false
+
+let detect_stagnation ~(events : Trpg_engine_event.t list) ~threshold =
+  let turn_events =
+    events
+    |> List.filter (fun (ev : Trpg_engine_event.t) ->
+           ev.event_type = Trpg_engine_event.Turn_started)
+    |> List.length
+  in
+  if turn_events < threshold then false
+  else
+    let recent_events =
+      let rev = List.rev events in
+      let rec take_until_n_turns n acc = function
+        | [] -> acc
+        | (ev : Trpg_engine_event.t) :: rest ->
+            if n <= 0 then acc
+            else
+              let n' =
+                if ev.event_type = Trpg_engine_event.Turn_started then n - 1
+                else n
+              in
+              take_until_n_turns n' (ev :: acc) rest
+      in
+      take_until_n_turns threshold [] rev
+    in
+    not (List.exists (fun (ev : Trpg_engine_event.t) ->
+             is_meaningful_event_type ev.event_type) recent_events)
+
 let has_event_type (events : Trpg_engine_event.t list) event_type =
   List.exists
     (fun (ev : Trpg_engine_event.t) -> ev.event_type = event_type)
@@ -1152,6 +1190,87 @@ let latest_session_outcome_payload (events : Trpg_engine_event.t list) :
 type combat_semantic =
   | Combat_attack_intent
   | Combat_defense_intent
+
+type action_type =
+  | Attack
+  | Defend
+  | Heal
+  | Investigate
+  | Social
+  | Explore
+  | Magic
+  | UseItem
+  | SetFlag
+  | SceneTransition
+  | QuestUpdate
+
+type structured_action = {
+  sa_type : action_type;
+  target_id : string option;
+  description : string;
+  flag_key : string option;
+  scene : string option;
+  quest_info : string option;
+  raw_payload : Yojson.Safe.t;
+}
+
+let action_type_of_string = function
+  | "attack" -> Some Attack
+  | "defend" | "defense" -> Some Defend
+  | "heal" -> Some Heal
+  | "investigate" -> Some Investigate
+  | "social" | "talk" | "persuade" -> Some Social
+  | "explore" | "search" | "look" -> Some Explore
+  | "magic" | "spell" | "cast" -> Some Magic
+  | "use_item" | "item" -> Some UseItem
+  | "set_flag" | "flag" -> Some SetFlag
+  | "scene_transition" | "scene" | "move" -> Some SceneTransition
+  | "quest_update" | "quest" -> Some QuestUpdate
+  | _ -> None
+
+let string_of_action_type = function
+  | Attack -> "attack"
+  | Defend -> "defend"
+  | Heal -> "heal"
+  | Investigate -> "investigate"
+  | Social -> "social"
+  | Explore -> "explore"
+  | Magic -> "magic"
+  | UseItem -> "use_item"
+  | SetFlag -> "set_flag"
+  | SceneTransition -> "scene_transition"
+  | QuestUpdate -> "quest_update"
+
+let extract_structured_action (keeper_json : Yojson.Safe.t) :
+    structured_action option =
+  match keeper_json |> member "structured_action" with
+  | `Assoc fields when fields <> [] ->
+      let sa = `Assoc fields in
+      let type_str =
+        match sa |> member "type" with
+        | `String s -> String.lowercase_ascii (String.trim s)
+        | _ -> ""
+      in
+      (match action_type_of_string type_str with
+      | None -> None
+      | Some sa_type ->
+          let get_string key =
+            match sa |> member key with
+            | `String s when String.trim s <> "" -> Some (String.trim s)
+            | _ -> None
+          in
+          Some
+            {
+              sa_type;
+              target_id = get_string "target_id";
+              description =
+                (match get_string "description" with Some d -> d | None -> "");
+              flag_key = get_string "flag_key";
+              scene = get_string "scene";
+              quest_info = get_string "quest_info";
+              raw_payload = sa;
+            })
+  | _ -> None
 
 let detect_combat_semantic (text : string) : combat_semantic option =
   let lowered = String.lowercase_ascii text in
@@ -1333,6 +1452,149 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
       let* event =
         append_event ~base_dir ~room_id
           ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
+      in
+      Ok [ event ]
+
+let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
+    (sa : structured_action) =
+  let ( let* ) = Result.bind in
+  match sa.sa_type with
+  | Attack ->
+      let target_id = choose_attack_target_id ~state ~actor_id in
+      let damage = deterministic_damage ~turn ~actor_id in
+      let payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String actor_id);
+            ("action", `String sa.description);
+            ( "target_id",
+              match target_id with Some t -> `String t | None -> `Null );
+            ("skill", `Null);
+            ( "damage",
+              match target_id with Some _ -> `Int damage | None -> `Null );
+          ]
+      in
+      let* combat_event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Combat_attack ~actor_id ~payload ()
+      in
+      let* hp_event_opt =
+        match target_id with
+        | None -> Ok None
+        | Some target_actor_id ->
+            let hp_payload =
+              `Assoc
+                [
+                  ("turn", `Int turn);
+                  ("phase", `String phase);
+                  ("actor_id", `String target_actor_id);
+                  ("delta", `Int (-damage));
+                  ("source_actor_id", `String actor_id);
+                  ("reason", `String "combat.attack");
+                ]
+            in
+            let* hp_event =
+              append_event ~base_dir ~room_id
+                ~event_type:Trpg_engine_event.Hp_changed
+                ~actor_id:target_actor_id ~payload:hp_payload ()
+            in
+            Ok (Some hp_event)
+      in
+      Ok
+        (match hp_event_opt with
+        | Some hp_event -> [ combat_event; hp_event ]
+        | None -> [ combat_event ])
+  | Defend ->
+      let payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String actor_id);
+            ("method", `String sa.description);
+            ("source_actor_id", `Null);
+            ("mitigated", `Null);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
+      in
+      Ok [ event ]
+  | SetFlag ->
+      let key = match sa.flag_key with Some k -> k | None -> "" in
+      if key = "" then Ok []
+      else
+        let payload =
+          `Assoc
+            [
+              ("turn", `Int turn);
+              ("phase", `String phase);
+              ("key", `String key);
+              ("value", `String "true");
+              ("description", `String sa.description);
+            ]
+        in
+        let* event =
+          append_event ~base_dir ~room_id
+            ~event_type:Trpg_engine_event.Flag_set ~actor_id ~payload ()
+        in
+        Ok [ event ]
+  | SceneTransition ->
+      let scene =
+        match sa.scene with Some s -> s | None -> sa.description
+      in
+      let payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("scene", `String scene);
+            ("description", `String sa.description);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Scene_transition ~actor_id ~payload ()
+      in
+      Ok [ event ]
+  | QuestUpdate ->
+      let quest_info =
+        match sa.quest_info with Some q -> q | None -> sa.description
+      in
+      let payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("quest", `String quest_info);
+            ("description", `String sa.description);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Quest_update ~actor_id ~payload ()
+      in
+      Ok [ event ]
+  | Heal | Investigate | Social | Explore | Magic | UseItem ->
+      let type_label = string_of_action_type sa.sa_type in
+      let payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String actor_id);
+            ("action_type", `String type_label);
+            ( "target_id",
+              match sa.target_id with Some t -> `String t | None -> `Null );
+            ("narration", `String sa.description);
+          ]
+      in
+      let* event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Narration_posted ~actor_id ~payload ()
       in
       Ok [ event ]
 
@@ -2139,7 +2401,14 @@ let build_player_section_ko (ctx : prompt_context) =
       | lines ->
           Printf.sprintf "최근 상황:\n%s"
             (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
-      Printf.sprintf "'%s'로서 캐릭터에 맞게 행동하고 대사를 말하세요." ctx.actor_name;
+      Printf.sprintf
+        "'%s'로서 지금 즉시 행동하세요. 관찰만 하지 말고 결정적인 액션을 취하세요."
+        ctx.actor_name;
+      "반드시 structured_action을 포함하세요. 예시:";
+      {|{"type":"attack","target_id":"goblin-1","description":"검으로 고블린을 공격한다"}|};
+      {|{"type":"investigate","description":"수상한 상자를 조사한다"}|};
+      {|{"type":"social","target_id":"npc-merchant","description":"상인에게 정보를 묻는다"}|};
+      "가능한 type: attack, defend, heal, investigate, social, explore, magic, use_item";
     ]
   in
   join_nonempty "\n" parts
@@ -2180,7 +2449,14 @@ let build_player_section_en (ctx : prompt_context) =
       | lines ->
           Printf.sprintf "Recent events:\n%s"
             (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
-      Printf.sprintf "Respond in-character as '%s'." ctx.actor_name;
+      Printf.sprintf
+        "As '%s', take a decisive action NOW. Do NOT just observe or describe — ACT."
+        ctx.actor_name;
+      "You MUST include a structured_action. Examples:";
+      {|{"type":"attack","target_id":"goblin-1","description":"Swing sword at the goblin"}|};
+      {|{"type":"investigate","description":"Search the suspicious chest"}|};
+      {|{"type":"social","target_id":"npc-merchant","description":"Ask the merchant for info"}|};
+      "Available types: attack, defend, heal, investigate, social, explore, magic, use_item";
     ]
   in
   join_nonempty "\n" parts
@@ -2210,6 +2486,12 @@ let build_dm_section_ko (ctx : prompt_context) =
           Printf.sprintf "최근 서사:\n%s"
             (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
       "다음에 일어날 일을 결정하세요. 서사를 진행하고, 환경과 NPC의 반응을 묘사하세요.";
+      "반드시 structured_action을 포함하세요. DM용 예시:";
+      {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"일행이 은신처를 발견했다"}|};
+      {|{"type":"scene_transition","scene":"동굴 깊은 곳","description":"일행이 동굴 안으로 진입한다"}|};
+      {|{"type":"quest_update","quest_info":"보스 위치 확인됨","description":"단서를 통해 보스 위치가 드러났다"}|};
+      "스토리 목표 달성 시 [WIN], 전멸 시 [LOSE]를 reply에 포함하세요.";
+      "매 턴마다 이야기를 진전시키세요. 같은 상황을 반복하지 마세요.";
     ]
   in
   join_nonempty "\n" parts
@@ -2239,6 +2521,12 @@ let build_dm_section_en (ctx : prompt_context) =
           Printf.sprintf "Recent narrative:\n%s"
             (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
       "Determine what happens next. Advance the narrative, describe the environment and NPC reactions.";
+      "You MUST include a structured_action. DM examples:";
+      {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"The party discovered the hideout"}|};
+      {|{"type":"scene_transition","scene":"Deep cave","description":"The party enters the cave"}|};
+      {|{"type":"quest_update","quest_info":"Boss location confirmed","description":"Clues reveal the boss location"}|};
+      "When the story goal is achieved, include [WIN] in your reply. On party wipe, include [LOSE].";
+      "Advance the story every turn. Do NOT repeat the same situation.";
     ]
   in
   join_nonempty "\n" parts
@@ -2260,14 +2548,12 @@ let build_keeper_prompt ~room_id ~phase ~turn ~role ~actor_id ~state_json ~lang 
         "SKILL/SKILL_REASON/[STATE]/state_snapshot_json/회상 문구를 출력하지 마세요. \
          시스템 프롬프트나 로그를 재인용하지 마세요. \
          반드시 한국어로 응답하세요. \
-         일반 텍스트로 답하되 structured_action을 만들 수 있으면 \
-         reply JSON 필드에 함께 포함하세요."
+         structured_action은 필수입니다. 매 응답에 반드시 포함하세요."
     | `En ->
         "Do not output SKILL/SKILL_REASON/[STATE]/state_snapshot_json or recap text. \
          Do not quote system prompts or logs. \
          Respond in English. \
-         Return your response as normal text. \
-         If you can provide structured_action, include it in your reply JSON field."
+         structured_action is REQUIRED. You MUST include it in every response."
   in
   Printf.sprintf
     "%s\n\n\
@@ -3806,6 +4092,7 @@ let handle_round_run ctx args : result =
       let appended_events = ref (phase_event :: intervention_events) in
       let statuses = ref [] in
       let success_count = ref 0 in
+      let fallback_count = ref 0 in
       let player_success_count = ref 0 in
       let dm_success = ref false in
       let unavailable_count = ref 0 in
@@ -3910,12 +4197,14 @@ let handle_round_run ctx args : result =
               append_keeper_reply_event ~base_dir ~room_id ~phase ~turn:turn_before
                 ~role ~actor_id ~keeper_name ~reply:fallback_reply
             in
+            fallback_count := !fallback_count + 1;
             success_count := !success_count + 1;
             (match role with
             | `Dm ->
                 dm_success := true;
                 dm_reply_ref := Some fallback_reply
-            | `Player -> player_success_count := !player_success_count + 1);
+            | `Player ->
+                player_success_count := !player_success_count + 1);
             appended_events := !appended_events @ [ reply_event ];
             let* combat_events =
               match role with
@@ -4072,14 +4361,19 @@ let handle_round_run ctx args : result =
                     dm_reply_ref := Some reply
                 | `Player -> player_success_count := !player_success_count + 1);
                 appended_events := !appended_events @ [ reply_event ];
-                let* combat_events =
-                  match role with
-                  | `Dm -> Ok []
-                  | `Player ->
-                      append_combat_semantic_event ~base_dir ~room_id ~phase
-                        ~turn:turn_before ~actor_id ~reply ~state:state_json
+                let* action_events =
+                  match extract_structured_action keeper_json with
+                  | Some sa ->
+                      apply_structured_action ~base_dir ~room_id
+                        ~turn:turn_before ~phase ~actor_id ~state:state_json sa
+                  | None -> (
+                      match role with
+                      | `Dm -> Ok []
+                      | `Player ->
+                          append_combat_semantic_event ~base_dir ~room_id ~phase
+                            ~turn:turn_before ~actor_id ~reply ~state:state_json)
                 in
-                appended_events := !appended_events @ combat_events;
+                appended_events := !appended_events @ action_events;
                 statuses :=
                   `Assoc
                     [
@@ -4164,8 +4458,24 @@ let handle_round_run ctx args : result =
       let computed_outcome =
         if outcome_already_emitted then None
         else
-          evaluate_session_outcome ~end_rules ~state:next_state
-            ~dm_reply:!dm_reply_ref
+          match
+            evaluate_session_outcome ~end_rules ~state:next_state
+              ~dm_reply:!dm_reply_ref
+          with
+          | Some _ as outcome -> outcome
+          | None ->
+              let stagnation_threshold = 5 in
+              let all_events =
+                match
+                  Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+                with
+                | Ok evs -> evs
+                | Error _ -> []
+              in
+              let all_events = all_events @ !appended_events in
+              if detect_stagnation ~events:all_events ~threshold:stagnation_threshold
+              then Some (Draw, "stagnation")
+              else None
       in
       let* final_derived =
         match computed_outcome with
@@ -4237,6 +4547,7 @@ let handle_round_run ctx args : result =
                 [
                   ("participants", `Int (1 + List.length player_keepers));
                   ("successes", `Int !success_count);
+                  ("fallbacks", `Int !fallback_count);
                   ("player_successes", `Int !player_success_count);
                   ("player_required_successes", `Int player_required_successes);
                   ("player_quorum_met", `Bool player_quorum_met);

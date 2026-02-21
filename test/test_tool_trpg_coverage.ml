@@ -1715,6 +1715,348 @@ let test_pick_by_seed_negative_seed () =
       "negative seed still returns valid element"
       true (List.mem v items)
 
+(* --- Phase E: structured_action + stagnation tests --- *)
+
+let test_extract_structured_action_attack () =
+  let json =
+    `Assoc
+      [
+        ("reply", `String "I strike the goblin with my sword.");
+        ( "structured_action",
+          `Assoc
+            [
+              ("type", `String "attack");
+              ("target_id", `String "npc-goblin-01");
+              ("description", `String "Sword swing at goblin");
+            ] );
+      ]
+  in
+  match Tool_trpg.extract_structured_action json with
+  | None -> Alcotest.fail "expected Some structured_action for attack"
+  | Some sa ->
+      Alcotest.(check string)
+        "action type is attack"
+        "attack"
+        (Tool_trpg.string_of_action_type sa.sa_type);
+      Alcotest.(check (option string))
+        "target_id extracted"
+        (Some "npc-goblin-01")
+        sa.target_id;
+      Alcotest.(check string)
+        "description extracted"
+        "Sword swing at goblin"
+        sa.description
+
+let test_extract_structured_action_set_flag () =
+  let json =
+    `Assoc
+      [
+        ("reply", `String "The party discovers the hidden entrance.");
+        ( "structured_action",
+          `Assoc
+            [
+              ("type", `String "set_flag");
+              ("flag_key", `String "quest.hideout.found");
+              ("description", `String "Hidden entrance discovered");
+            ] );
+      ]
+  in
+  match Tool_trpg.extract_structured_action json with
+  | None -> Alcotest.fail "expected Some structured_action for set_flag"
+  | Some sa ->
+      Alcotest.(check string)
+        "action type is set_flag"
+        "set_flag"
+        (Tool_trpg.string_of_action_type sa.sa_type);
+      Alcotest.(check (option string))
+        "flag_key extracted"
+        (Some "quest.hideout.found")
+        sa.flag_key
+
+let test_extract_structured_action_invalid () =
+  let json_no_sa = `Assoc [ ("reply", `String "I look around.") ] in
+  Alcotest.(check bool)
+    "None when no structured_action field"
+    true
+    (Tool_trpg.extract_structured_action json_no_sa = None);
+  let json_bad_type =
+    `Assoc
+      [
+        ( "structured_action",
+          `Assoc
+            [
+              ("type", `String "foobar_unknown");
+              ("description", `String "something");
+            ] );
+      ]
+  in
+  Alcotest.(check bool)
+    "None when unknown action type"
+    true
+    (Tool_trpg.extract_structured_action json_bad_type = None);
+  let json_empty_sa = `Assoc [ ("structured_action", `Assoc []) ] in
+  Alcotest.(check bool)
+    "None when structured_action is empty object"
+    true
+    (Tool_trpg.extract_structured_action json_empty_sa = None)
+
+let test_apply_structured_action_emits_flag_set () =
+  let base_dir = make_temp_dir () in
+  let room_id = "room-sa-flag" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let _ = Room.init (Room.default_config base_dir) ~agent_name:(Some "tester") in
+      bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
+      let sa : Tool_trpg.structured_action =
+        {
+          sa_type = Tool_trpg.SetFlag;
+          target_id = None;
+          description = "Victory flag set by DM";
+          flag_key = Some "outcome.victory";
+          scene = None;
+          quest_info = None;
+          raw_payload = `Assoc [];
+        }
+      in
+      match
+        Tool_trpg.apply_structured_action ~base_dir ~room_id ~turn:1
+          ~phase:"round" ~actor_id:"dm" ~state:(`Assoc []) sa
+      with
+      | Error e -> Alcotest.fail ("apply_structured_action failed: " ^ e)
+      | Ok events ->
+          let has_flag_set =
+            List.exists
+              (fun (ev : Trpg_engine_event.t) ->
+                ev.event_type = Trpg_engine_event.Flag_set)
+              events
+          in
+          Alcotest.(check bool) "Flag_set event emitted" true has_flag_set;
+          let flag_event =
+            List.find
+              (fun (ev : Trpg_engine_event.t) ->
+                ev.event_type = Trpg_engine_event.Flag_set)
+              events
+          in
+          let key =
+            flag_event.payload |> Yojson.Safe.Util.member "key"
+            |> Yojson.Safe.Util.to_string
+          in
+          Alcotest.(check string) "flag key is outcome.victory" "outcome.victory" key)
+
+let test_apply_structured_action_emits_scene_transition () =
+  let base_dir = make_temp_dir () in
+  let room_id = "room-sa-scene" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let _ = Room.init (Room.default_config base_dir) ~agent_name:(Some "tester") in
+      bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
+      let sa : Tool_trpg.structured_action =
+        {
+          sa_type = Tool_trpg.SceneTransition;
+          target_id = None;
+          description = "The party enters the dark cave";
+          flag_key = None;
+          scene = Some "The Dark Cave";
+          quest_info = None;
+          raw_payload = `Assoc [];
+        }
+      in
+      match
+        Tool_trpg.apply_structured_action ~base_dir ~room_id ~turn:2
+          ~phase:"round" ~actor_id:"dm" ~state:(`Assoc []) sa
+      with
+      | Error e -> Alcotest.fail ("apply_structured_action failed: " ^ e)
+      | Ok events ->
+          let has_scene =
+            List.exists
+              (fun (ev : Trpg_engine_event.t) ->
+                ev.event_type = Trpg_engine_event.Scene_transition)
+              events
+          in
+          Alcotest.(check bool) "Scene_transition event emitted" true has_scene;
+          let scene_event =
+            List.find
+              (fun (ev : Trpg_engine_event.t) ->
+                ev.event_type = Trpg_engine_event.Scene_transition)
+              events
+          in
+          let scene_name =
+            scene_event.payload |> Yojson.Safe.Util.member "scene"
+            |> Yojson.Safe.Util.to_string
+          in
+          Alcotest.(check string) "scene is The Dark Cave" "The Dark Cave" scene_name)
+
+let make_event ~seq ~room_id ~event_type =
+  Trpg_engine_event.make ~seq ~room_id ~ts:(Types.now_iso ()) ~event_type
+    ~payload:(`Assoc []) ()
+
+let test_detect_stagnation_true () =
+  let room_id = "room-stagnation" in
+  let events =
+    [
+      make_event ~seq:1 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:2 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:3 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:4 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:5 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:6 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:7 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:8 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:9 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:10 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+    ]
+  in
+  Alcotest.(check bool)
+    "5 empty turns -> stagnation detected"
+    true
+    (Tool_trpg.detect_stagnation ~events ~threshold:5)
+
+let test_detect_stagnation_false () =
+  let room_id = "room-no-stagnation" in
+  let events =
+    [
+      make_event ~seq:1 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:2 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:3 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:4 ~room_id ~event_type:Trpg_engine_event.Flag_set;
+      make_event ~seq:5 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:6 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:7 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:8 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:9 ~room_id ~event_type:Trpg_engine_event.Turn_started;
+      make_event ~seq:10 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+    ]
+  in
+  Alcotest.(check bool)
+    "Flag_set in window -> no stagnation"
+    false
+    (Tool_trpg.detect_stagnation ~events ~threshold:5)
+
+let test_fallback_tracked_separately () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-fallback-track"
+    ~actor_ids:[ "p1"; "p2" ];
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" -> `Ok (`Assoc [ ("reply", `String "The scene continues...") ])
+    | _ -> `Timeout
+  in
+  let ctx : Tool_trpg.context =
+    {
+      config;
+      agent_name = "tester";
+      keeper_call = Some keeper_call;
+      keeper_probe = None;
+      dm_voice_emit = None;
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-fallback-track");
+        ("local_fallback", `Bool true);
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1"); ("p2", `String "pk-2") ]);
+      ]
+  in
+  let _ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  let json = parse_json_exn body in
+  let summary = json |> Yojson.Safe.Util.member "summary" in
+  let fallbacks =
+    summary |> Yojson.Safe.Util.member "fallbacks" |> Yojson.Safe.Util.to_int
+  in
+  let successes =
+    summary |> Yojson.Safe.Util.member "successes" |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check bool)
+    "fallback_count > 0 (players timed out)"
+    true (fallbacks > 0);
+  Alcotest.(check bool)
+    "successes still counts fallbacks for quorum"
+    true (successes > 0);
+  cleanup_dir base_dir
+
+let test_end_to_end_victory_via_flags () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir ~room_id:"room-victory-flag"
+    ~actor_ids:[ "p1" ];
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (`Assoc
+            [
+              ("reply", `String "The heroes triumph over evil.");
+              ( "structured_action",
+                `Assoc
+                  [
+                    ("type", `String "set_flag");
+                    ("flag_key", `String "outcome.victory");
+                    ("description", `String "Heroes win the final battle");
+                  ] );
+            ])
+    | "pk-1" ->
+        `Ok
+          (`Assoc
+            [
+              ("reply", `String "I deliver the final blow.");
+              ( "structured_action",
+                `Assoc
+                  [
+                    ("type", `String "attack");
+                    ("target_id", `String "npc-boss");
+                    ("description", `String "Final strike");
+                  ] );
+            ])
+    | other -> `Error ("unknown keeper: " ^ other)
+  in
+  let ctx : Tool_trpg.context =
+    {
+      config;
+      agent_name = "tester";
+      keeper_call = Some keeper_call;
+      keeper_probe = None;
+      dm_voice_emit = None;
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-victory-flag");
+        ("local_fallback", `Bool true);
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers",
+         `Assoc [ ("p1", `String "pk-1") ]);
+      ]
+  in
+  let _ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  let json = parse_json_exn body in
+  let outcome_obj = json |> Yojson.Safe.Util.member "outcome" in
+  let outcome_str =
+    outcome_obj |> Yojson.Safe.Util.member "outcome"
+    |> Yojson.Safe.Util.to_string_option
+  in
+  let outcome_reason =
+    outcome_obj |> Yojson.Safe.Util.member "reason"
+    |> Yojson.Safe.Util.to_string_option
+  in
+  Alcotest.(check (option string))
+    "outcome is Victory"
+    (Some "victory") outcome_str;
+  Alcotest.(check bool)
+    "outcome_reason mentions flag"
+    true
+    (match outcome_reason with
+    | Some r -> contains_substring r "outcome.victory"
+    | None -> false);
+  cleanup_dir base_dir
+
 let () =
   Alcotest.run "Tool_trpg coverage"
     [
@@ -1844,5 +2186,29 @@ let () =
             "pick_by_seed handles negative seed"
             `Quick
             test_pick_by_seed_negative_seed;
+        ] );
+      ( "structured_action",
+        [
+          Alcotest.test_case "extract attack" `Quick
+            test_extract_structured_action_attack;
+          Alcotest.test_case "extract set_flag" `Quick
+            test_extract_structured_action_set_flag;
+          Alcotest.test_case "extract invalid returns None" `Quick
+            test_extract_structured_action_invalid;
+          Alcotest.test_case "apply emits Flag_set" `Quick
+            test_apply_structured_action_emits_flag_set;
+          Alcotest.test_case "apply emits Scene_transition" `Quick
+            test_apply_structured_action_emits_scene_transition;
+        ] );
+      ( "stagnation_and_fallback",
+        [
+          Alcotest.test_case "stagnation detected after empty turns" `Quick
+            test_detect_stagnation_true;
+          Alcotest.test_case "no stagnation with meaningful events" `Quick
+            test_detect_stagnation_false;
+          Alcotest.test_case "fallback tracked separately" `Quick
+            test_fallback_tracked_separately;
+          Alcotest.test_case "victory via flags E2E" `Quick
+            test_end_to_end_victory_via_flags;
         ] );
     ]

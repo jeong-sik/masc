@@ -327,10 +327,50 @@ fn render_agent_round_flow(document: &web_sys::Document, progress: &TurnProgress
     } else if !quorum_met {
         "플레이어 응답/쿼럼 대기".to_string()
     } else if dm_done {
+        // P7: Clear thinking timer on completion.
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(dash) = document.get_element_by_id("dashboard") {
+                let _ = dash.remove_attribute("data-dm-thinking-start");
+            }
+        }
         format!("DM 처리 완료 ({})", dm_state)
     } else if dm_state == "thinking" {
-        "DM 응답 생성 중 (thinking)".to_string()
+        // P7: Show elapsed seconds during DM thinking via Performance.now().
+        #[cfg(target_arch = "wasm32")]
+        {
+            let now_ms = web_sys::window()
+                .and_then(|w| w.performance())
+                .map(|p: web_sys::Performance| p.now())
+                .unwrap_or(0.0);
+            let start_ms = document
+                .get_element_by_id("dashboard")
+                .and_then(|dash| dash.get_attribute("data-dm-thinking-start"))
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or_else(|| {
+                    if let Some(dash) = document.get_element_by_id("dashboard") {
+                        let _ = dash.set_attribute(
+                            "data-dm-thinking-start",
+                            &now_ms.to_string(),
+                        );
+                    }
+                    now_ms
+                });
+            let elapsed_sec = (now_ms - start_ms) / 1000.0;
+            format!("DM 응답 생성 중 ({:.1}s)", elapsed_sec)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            "DM 응답 생성 중 (thinking)".to_string()
+        }
     } else {
+        // P7: Clear thinking timer when DM is not thinking.
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(dash) = document.get_element_by_id("dashboard") {
+                let _ = dash.remove_attribute("data-dm-thinking-start");
+            }
+        }
         "DM 실행 대기 (라운드 실행)".to_string()
     };
 

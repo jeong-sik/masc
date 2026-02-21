@@ -15,25 +15,18 @@ pub struct DragState {
     pub drag_offset: Vec2,
 }
 
-/// Character color assignments — each party member gets a distinct color.
+/// Archetype-based color assignments for map tokens.
 /// Used as fallback tint when portrait texture is not yet loaded.
-fn character_color(id: &str) -> Color {
-    match id {
-        // Grimland originals
-        "grimja" => Color::srgb(0.8, 0.3, 0.2), // warrior red
-        "luna" => Color::srgb(0.3, 0.4, 0.8),   // mage blue
-        "songarak" => Color::srgb(0.3, 0.7, 0.3), // rogue green
-        "miso" => Color::srgb(0.8, 0.7, 0.3),   // cleric gold
-        // Identity Erosion
-        "iron" => Color::srgb(0.9, 0.9, 0.85), // ivory white (uncanny saint)
-        "moth" => Color::srgb(0.4, 0.3, 0.5),  // murky purple (J-horror)
-        "bell" => Color::srgb(1.0, 0.85, 0.3), // bright gold (cult leader glow)
-        "dust" => Color::srgb(0.4, 0.4, 0.35), // muted brown-grey (shrinking)
-        // Conformity Pressure
-        "aldric" => Color::srgb(0.6, 0.2, 0.15), // dark crimson (authority)
-        "brenna" => Color::srgb(0.7, 0.55, 0.4), // warm tan (agreeable)
-        "cedric" => Color::srgb(0.5, 0.6, 0.7),  // pale blue (uncertain)
-        "dara" => Color::srgb(0.5, 0.45, 0.55),  // sage purple (observer)
+fn archetype_color(archetype: &str) -> Color {
+    match archetype.to_ascii_lowercase().as_str() {
+        "warrior" | "fighter" | "barbarian" | "knight" => Color::srgb(0.8, 0.3, 0.2),
+        "mage" | "wizard" | "sorcerer" | "warlock" => Color::srgb(0.3, 0.4, 0.8),
+        "rogue" | "thief" | "assassin" | "ranger" => Color::srgb(0.3, 0.7, 0.3),
+        "cleric" | "priest" | "healer" | "paladin" => Color::srgb(0.8, 0.7, 0.3),
+        "bard" | "performer" => Color::srgb(0.7, 0.4, 0.7),
+        "druid" | "shaman" => Color::srgb(0.4, 0.6, 0.3),
+        "monk" | "mystic" => Color::srgb(0.6, 0.5, 0.3),
+        "necromancer" => Color::srgb(0.4, 0.2, 0.5),
         _ => Color::srgb(0.6, 0.6, 0.6),
     }
 }
@@ -57,7 +50,7 @@ pub fn spawn_character_sprites(
             }
         } else {
             Sprite {
-                color: character_color(&actor.id),
+                color: archetype_color(&actor.archetype),
                 custom_size: Some(Vec2::new(40.0, 40.0)),
                 ..default()
             }

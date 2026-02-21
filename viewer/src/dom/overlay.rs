@@ -3,7 +3,7 @@ use bevy::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
-use crate::game::state::{ChoiceState, CombatState, OverlayState};
+use crate::game::state::{ChoiceState, CombatState, OverlayState, RoomState};
 
 #[cfg(target_arch = "wasm32")]
 use super::escape::html_escape;
@@ -15,6 +15,8 @@ pub struct OverlayCache {
     pub last_mood: String,
     pub last_choice_active: bool,
     pub last_combat_active: bool,
+    pub last_scenario: String,
+    pub last_node: String,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -59,19 +61,24 @@ fn mood_icon_path(id: &str) -> Option<&'static str> {
 /// - `#mood-indicator` — mood/atmosphere text
 /// - `#choice-overlay` — choice panel (hidden when inactive)
 /// - `#combat-overlay` — combat indicator (hidden when inactive)
+/// - `#scene-indicator` — current scenario and node display
 #[allow(unused_mut)]
+#[allow(unused_variables)]
 pub fn update_overlay_dom(
     overlay: Res<OverlayState>,
     choice: Res<ChoiceState>,
     combat: Res<CombatState>,
+    room_state: Res<RoomState>,
     mut cache: ResMut<OverlayCache>,
 ) {
     let weather_changed = overlay.weather != cache.last_weather;
     let mood_changed = overlay.mood != cache.last_mood;
     let choice_changed = choice.active != cache.last_choice_active;
     let combat_changed = combat.active != cache.last_combat_active;
+    let scene_changed = room_state.current_scenario != cache.last_scenario
+        || room_state.current_node != cache.last_node;
 
-    if weather_changed || mood_changed || choice_changed || combat_changed {
+    if weather_changed || mood_changed || choice_changed || combat_changed || scene_changed {
         #[cfg(target_arch = "wasm32")]
         {
             let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -177,6 +184,31 @@ pub fn update_overlay_dom(
                     }
                 }
                 cache.last_combat_active = combat.active;
+            }
+
+            if scene_changed {
+                if let Some(el) = document.get_element_by_id("scene-indicator") {
+                    let scenario = room_state.current_scenario.trim();
+                    let node = room_state.current_node.trim();
+                    if scenario.is_empty() && node.is_empty() {
+                        el.set_text_content(None);
+                        if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+                            let _ = html_el.style().set_property("display", "none");
+                        }
+                    } else {
+                        let label = if node.is_empty() {
+                            pretty_label(scenario)
+                        } else {
+                            format!("{} — {}", pretty_label(scenario), pretty_label(node))
+                        };
+                        el.set_text_content(Some(&label));
+                        if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
+                            let _ = html_el.style().set_property("display", "block");
+                        }
+                    }
+                }
+                cache.last_scenario = room_state.current_scenario.clone();
+                cache.last_node = room_state.current_node.clone();
             }
         }
     }

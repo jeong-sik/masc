@@ -174,6 +174,15 @@ let () =
     (args.compact_at *. 100.0) (args.handoff_at *. 100.0);
   eprintf "---\n%!";
 
+  (* Run inside Eio runtime — required for Eio.Semaphore (llm_client)
+     and Process_eio subprocess management *)
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let fs = Eio.Stdenv.fs env in
+  let cwd = Eio.Path.(fs / Sys.getcwd ()) in
+  Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
+
   let state = Perpetual_loop.create_state config in
   Perpetual_loop.run ~config ~state;
 

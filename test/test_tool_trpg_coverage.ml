@@ -525,6 +525,107 @@ let test_round_run_local_fallback_progresses_round () =
     (List.mem "turn.started" event_types);
   cleanup_dir base_dir
 
+let test_round_run_local_fallback_distributes_team_pressure () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  bootstrap_room_with_actors ~base_dir
+    ~room_id:"room-round-local-fallback-team"
+    ~actor_ids:["p1"; "p2"; "p3"; "p4"];
+  let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    `Error "keeper runtime unavailable"
+  in
+  let ctx : Tool_trpg.context =
+    {
+      config;
+      agent_name = "tester";
+      keeper_call = Some keeper_call;
+      keeper_probe = None;
+      dm_voice_emit = None;
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String "room-round-local-fallback-team");
+        ("dm_keeper", `String "dm-keeper");
+        ( "player_keepers",
+          `Assoc
+            [
+              ("p1", `String "pk-1");
+              ("p2", `String "pk-2");
+              ("p3", `String "pk-3");
+              ("p4", `String "pk-4");
+            ] );
+        ("timeout_sec", `Float 0.2);
+        ("local_fallback", `Bool true);
+      ]
+  in
+  let final_json = ref None in
+  for round_idx = 1 to 4 do
+    let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+    Alcotest.(check bool)
+      (Printf.sprintf "round %d executes" round_idx)
+      true ok;
+    let json = parse_json_exn body in
+    final_json := Some json;
+    let turn_before = Yojson.Safe.Util.member "turn_before" json |> Yojson.Safe.Util.to_int in
+    let turn_after = Yojson.Safe.Util.member "turn_after" json |> Yojson.Safe.Util.to_int in
+    Alcotest.(check int)
+      (Printf.sprintf "round %d turn advances" round_idx)
+      (turn_before + 1)
+      turn_after;
+    let has_player_hp_change =
+      json |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list
+      |> List.exists (fun event_json ->
+             match
+               ( Yojson.Safe.Util.member "type" event_json,
+                 Yojson.Safe.Util.member "actor_id" event_json )
+             with
+             | `String "hp.changed", `String actor_id ->
+                 String.length actor_id > 0 && actor_id.[0] = 'p'
+             | _ -> false)
+    in
+    Alcotest.(check bool)
+      (Printf.sprintf "round %d emits player hp pressure" round_idx)
+      true has_player_hp_change
+  done;
+  let json =
+    match !final_json with
+    | Some json -> json
+    | None -> failwith "expected final json after fallback loop"
+  in
+  let hp_of actor_id =
+    json |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.member "party"
+    |> Yojson.Safe.Util.member actor_id |> Yojson.Safe.Util.member "hp"
+    |> Yojson.Safe.Util.to_int
+  in
+  let damaged_players =
+    [ "p1"; "p2"; "p3"; "p4" ]
+    |> List.filter (fun actor_id -> hp_of actor_id < 10)
+  in
+  Alcotest.(check bool)
+    "team pressure is distributed across multiple players"
+    true
+    (List.length damaged_players >= 2);
+  let dm_fallback_reply =
+    json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list
+    |> List.find_map (fun status_json ->
+           match
+             ( Yojson.Safe.Util.member "actor_id" status_json,
+               Yojson.Safe.Util.member "status" status_json,
+               Yojson.Safe.Util.member "reply" status_json )
+           with
+           | `String "dm", `String "fallback", `String reply -> Some reply
+           | _ -> None)
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool)
+    "dm fallback avoids placeholder text"
+    false
+    (contains_substring dm_fallback_reply "상황을 살피며 다음 행동을 준비합니다");
+  cleanup_dir base_dir
+
 let test_round_run_unavailable_sampling_cap () =
   with_env "MASC_TRPG_KEEPER_UNAVAILABLE_MAX_PER_TURN" "1" (fun () ->
     let base_dir = make_temp_dir () in
@@ -1535,6 +1636,10 @@ let () =
             "local fallback progresses round and emits combat events"
             `Quick
             test_round_run_local_fallback_progresses_round;
+          Alcotest.test_case
+            "local fallback distributes pressure across multi-player team"
+            `Quick
+            test_round_run_local_fallback_distributes_team_pressure;
           Alcotest.test_case
             "samples keeper.unavailable when cap reached"
             `Quick

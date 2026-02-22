@@ -8,6 +8,7 @@ import type {
   BoardHearth,
   BoardFlair,
   TrpgState,
+  TrpgSessionSummary,
   TrpgEvent,
   Agent,
   CouncilDebate,
@@ -410,6 +411,7 @@ function normalizeTrpgState(
   rawStateResponse: TrpgRawStateResponse,
   rawEvents: unknown[],
   requestedRoom?: string,
+  sessions?: TrpgSessionSummary[],
 ): TrpgState {
   const roomId =
     asString(rawStateResponse.room_id, '') ||
@@ -519,7 +521,30 @@ function normalizeTrpgState(
     contribution_ledger: contributionLedger,
     party,
     story_log: storyLog,
-    history: [],
+    history: sessions ?? [],
+  }
+}
+
+async function fetchTrpgSessionsRaw(): Promise<TrpgSessionSummary[]> {
+  try {
+    const data = await get<{ sessions: unknown[] }>('/api/v1/trpg/sessions')
+    const raw = Array.isArray(data.sessions) ? data.sessions : []
+    return raw
+      .map(s => {
+        if (!isRecord(s)) return null
+        return {
+          room_id: asString(s.room_id, ''),
+          first_ts: asString(s.first_ts, ''),
+          last_ts: asString(s.last_ts, ''),
+          event_count: asNumber(s.event_count, 0),
+          last_seq: asNumber(s.last_seq, 0),
+          ended: asBoolean(s.ended, false),
+          current: asBoolean(s.current, false),
+        }
+      })
+      .filter((s): s is TrpgSessionSummary => s !== null)
+  } catch {
+    return []
   }
 }
 
@@ -531,11 +556,12 @@ async function fetchTrpgEventsRaw(room?: string): Promise<unknown[]> {
 
 export async function fetchTrpgState(room?: string): Promise<TrpgState> {
   const params = room ? `?room_id=${encodeURIComponent(room)}` : ''
-  const [rawState, rawEvents] = await Promise.all([
+  const [rawState, rawEvents, sessions] = await Promise.all([
     get<TrpgRawStateResponse>(`/api/v1/trpg/state${params}`),
     fetchTrpgEventsRaw(room),
+    fetchTrpgSessionsRaw(),
   ])
-  return normalizeTrpgState(rawState, rawEvents, room)
+  return normalizeTrpgState(rawState, rawEvents, room, sessions)
 }
 
 export async function fetchTrpgEvents(room?: string): Promise<{ events: TrpgEvent[] }> {

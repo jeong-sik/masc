@@ -68,18 +68,18 @@ let test_code_search_basic () =
 
   (* Verify response structure *)
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
         | Some (`Assoc result) ->
+            let result_obj = `Assoc result in
             (* Check count field *)
-            (match json_get_int result "count" with
+            (match json_get_int result_obj "count" with
              | Some count ->
-                 check bool "has results" true (count > 0);
-                 check int "count positive" true (count > 0)
+                 check bool "has results" true (count > 0)
              | None -> fail "missing count field");
 
             (* Check results array *)
-            (match json_get_field result "results" with
+            (match json_get_field result_obj "results" with
              | Some (`List results) ->
                  check bool "results is array" true (List.length results > 0);
                  (* Verify first result structure *)
@@ -87,11 +87,12 @@ let test_code_search_basic () =
                   | first :: _ ->
                       (match first with
                        | `Assoc match_obj ->
+                           let match_obj = `Assoc match_obj in
                            (* Check required fields: path, line, content *)
                            (match json_get_string match_obj "path" with
                             | Some path ->
                                 check bool "path contains lib/" true
-                                  (String.is_substring ~substring:"lib/" path)
+                                  (contains_substring path "lib/")
                             | None -> fail "missing path field");
                            (match json_get_int match_obj "line" with
                             | Some line -> check bool "line > 0" true (line > 0)
@@ -140,25 +141,26 @@ let test_code_symbols_basic () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
 
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
         | Some (`Assoc result) ->
+            let result_obj = `Assoc result in
             (* Check path field *)
-            (match json_get_string result "path" with
+            (match json_get_string result_obj "path" with
              | Some path ->
                  check string "correct path" "lib/mode.ml" path
              | None -> fail "missing path field");
 
             (* Check count field *)
-            (match json_get_int result "count" with
+            (match json_get_int result_obj "count" with
              | Some count ->
                  (* For OCaml, simple heuristic may find few symbols *)
                  check bool "count is non-negative" true (count >= 0)
              | None -> fail "missing count field");
 
             (* Check symbols array *)
-            (match json_get_field result "symbols" with
-             | Some (`List symbols) ->
+            (match json_get_field result_obj "symbols" with
+             | Some (`List _symbols) ->
                    (* Symbols may be empty for OCaml with simple heuristic *)
                    ()
              | Some _ -> fail "symbols not a list"
@@ -197,35 +199,36 @@ let test_code_read_basic () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
 
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
         | Some (`Assoc result) ->
+            let result_obj = `Assoc result in
             (* Check path field *)
-            (match json_get_string result "path" with
+            (match json_get_string result_obj "path" with
              | Some path ->
                  check string "correct path" "lib/mode.ml" path
              | None -> fail "missing path field");
 
             (* Check offset field *)
-            (match json_get_int result "offset" with
+            (match json_get_int result_obj "offset" with
              | Some offset -> check int "offset is 0" 0 offset
              | None -> fail "missing offset field");
 
             (* Check limit field *)
-            (match json_get_int result "limit" with
+            (match json_get_int result_obj "limit" with
              | Some limit ->
                  (* May be less if file is shorter *)
                  check bool "limit is positive" true (limit > 0)
              | None -> fail "missing limit field");
 
             (* Check total_lines field *)
-            (match json_get_int result "total_lines" with
+            (match json_get_int result_obj "total_lines" with
              | Some total ->
                  check bool "total_lines > 0" true (total > 0)
              | None -> fail "missing total_lines field");
 
             (* Check lines array *)
-            (match json_get_field result "lines" with
+            (match json_get_field result_obj "lines" with
              | Some (`List lines) ->
                    check bool "lines is array" true (List.length lines > 0)
              | Some _ -> fail "lines not a list"
@@ -263,16 +266,17 @@ let test_code_read_offset_limit () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
 
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
         | Some (`Assoc result) ->
+            let result_obj = `Assoc result in
             (* Verify offset is preserved *)
-            (match json_get_int result "offset" with
+            (match json_get_int result_obj "offset" with
              | Some offset -> check int "offset is 10" 10 offset
              | None -> fail "missing offset field");
 
             (* Verify limit is preserved (or reduced if file is shorter) *)
-            (match json_get_int result "limit" with
+            (match json_get_int result_obj "limit" with
              | Some limit ->
                  check bool "limit is positive" true (limit > 0);
                  check bool "limit <= requested" true (limit <= 10)

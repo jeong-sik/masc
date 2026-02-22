@@ -34,3 +34,15 @@ val load_recovery :
   base_dir:string ->
   room_id:string ->
   ((snapshot option * Trpg_engine_event.t list), string) result
+
+type session_summary = {
+  room_id : string;
+  first_ts : string;
+  last_ts : string;
+  event_count : int;
+  last_seq : int;
+  ended : bool;
+}
+
+val list_sessions_summary :
+  base_dir:string -> (session_summary list, string) result

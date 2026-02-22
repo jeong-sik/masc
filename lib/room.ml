@@ -2355,6 +2355,10 @@ let write_current_room config room_id =
   (* Legacy compatibility: keep base_path/current_room in sync *)
   write_to (legacy_current_room_path config)
 
+(** Clear current room pointer (e.g. after session ends) *)
+let clear_current_room config =
+  write_current_room config ""
+
 (** Get path for a specific room *)
 let room_path config room_id = room_dir_for config room_id
 

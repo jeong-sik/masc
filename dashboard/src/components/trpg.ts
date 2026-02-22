@@ -17,7 +17,7 @@ import {
   requestTrpgMidJoin,
   type TrpgRoundRunResult,
 } from '../api'
-import type { TrpgActor, TrpgState, TrpgEvent, TrpgCharacterStats } from '../types'
+import type { TrpgActor, TrpgState, TrpgEvent, TrpgCharacterStats, TrpgSessionSummary } from '../types'
 
 // ── Local control state ──────────────────────────────────
 
@@ -250,17 +250,35 @@ function StoryLog({ events }: { events: TrpgEvent[] }) {
   `
 }
 
+function formatDuration(firstTs: string, lastTs: string): string {
+  const start = new Date(firstTs).getTime()
+  const end = new Date(lastTs).getTime()
+  if (isNaN(start) || isNaN(end) || end <= start) return ''
+  const secs = Math.floor((end - start) / 1000)
+  if (secs < 60) return `${secs}s`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
 function RoundHistory({ state }: { state: TrpgState }) {
-  const rounds = state.history ?? []
-  if (rounds.length === 0) return null
+  const sessions = state.history ?? []
+  if (sessions.length === 0) return null
 
   return html`
     <div class="trpg-round-list">
-      ${rounds.slice(-10).map(s => html`
-        <div class="trpg-round-item ${s.status}">
-          <span>Session ${s.id.slice(0, 8)}</span>
-          <span style="margin-left:auto; font-size:11px; color:#888;">
-            Round ${s.round} — ${s.status}
+      ${sessions.slice(0, 20).map((s: TrpgSessionSummary) => html`
+        <div class="trpg-round-item ${s.current ? 'active' : s.ended ? 'ended' : 'paused'}">
+          <span title=${s.room_id}>${s.room_id.length > 12 ? s.room_id.slice(0, 12) + '...' : s.room_id}</span>
+          <span style="margin-left:auto; display:flex; gap:8px; font-size:11px; color:#888; align-items:center;">
+            <span>${s.event_count} events</span>
+            ${formatDuration(s.first_ts, s.last_ts)
+              ? html`<span>${formatDuration(s.first_ts, s.last_ts)}</span>`
+              : null}
+            <span style="color:${s.current ? '#4CAF50' : s.ended ? '#f44336' : '#ff9800'};">
+              ${s.current ? 'active' : s.ended ? 'ended' : 'paused'}
+            </span>
           </span>
         </div>
       `)}

@@ -38,11 +38,6 @@ let json_get_string obj field =
   | Some (`String s) -> Some s
   | _ -> None
 
-let json_get_list obj field =
-  match json_get_field obj field with
-  | Some (`List l) -> Some l
-  | _ -> None
-
 (* ===== E2E Test: masc_code_search ===== *)
 
 let test_code_search_basic () =
@@ -84,7 +79,7 @@ let test_code_search_basic () =
              | None -> fail "missing count field");
 
             (* Check results array *)
-            (match json_get_list result "results" with
+            (match json_get_field result "results" with
              | Some (`List results) ->
                  check bool "results is array" true (List.length results > 0);
                  (* Verify first result structure *)
@@ -108,7 +103,8 @@ let test_code_search_basic () =
                             | None -> fail "missing content field")
                        | _ -> fail "match not an object")
                   | [] -> fail "results array empty")
-             | _ -> fail "results not a list")
+             | Some _ -> fail "results not a list"
+             | None -> fail "missing results field")
         | Some (`String error_msg) ->
             (* Error is acceptable if rg not installed *)
             check bool "error mentions ripgrep or command" true
@@ -161,11 +157,12 @@ let test_code_symbols_basic () =
              | None -> fail "missing count field");
 
             (* Check symbols array *)
-            (match json_get_list result "symbols" with
+            (match json_get_field result "symbols" with
              | Some (`List symbols) ->
                    (* Symbols may be empty for OCaml with simple heuristic *)
                    ()
-             | _ -> fail "symbols not a list")
+             | Some _ -> fail "symbols not a list"
+             | None -> fail "missing symbols field")
         | Some (`String error_msg) ->
             (* Error is acceptable if file not found *)
             check bool "error message present" true (String.length error_msg > 0)
@@ -228,10 +225,11 @@ let test_code_read_basic () =
              | None -> fail "missing total_lines field");
 
             (* Check lines array *)
-            (match json_get_list result "lines" with
+            (match json_get_field result "lines" with
              | Some (`List lines) ->
                    check bool "lines is array" true (List.length lines > 0)
-             | _ -> fail "lines not a list")
+             | Some _ -> fail "lines not a list"
+             | None -> fail "missing lines field")
         | Some (`String error_msg) ->
             check bool "error message present" true (String.length error_msg > 0)
         | _ -> fail "unexpected result type")

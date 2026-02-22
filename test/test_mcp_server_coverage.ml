@@ -481,6 +481,50 @@ let test_handle_request_tool_masc_status () =
 
   cleanup_dir base_path
 
+let test_handle_request_tool_not_initialized_error () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_tasks");
+      ("arguments", `Assoc []);
+    ]);
+  ]) in
+
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+
+  (match response with
+   | `Assoc fields ->
+       Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields);
+       (match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) ->
+            (match List.assoc_opt "isError" result_fields with
+             | Some (`Bool is_error) -> Alcotest.(check bool) "isError true" true is_error
+             | _ -> Alcotest.fail "isError missing");
+            (match List.assoc_opt "content" result_fields with
+             | Some (`List items) ->
+                 (match items with
+                  | `Assoc item :: _ ->
+                      (match List.assoc_opt "text" item with
+                       | Some (`String text) ->
+                           Alcotest.(check bool) "not initialized message" true
+                             (try let _ = Str.search_forward (Str.regexp_string "❌ MASC not initialized. Use masc_init first.") text 0 in true with Not_found -> false)
+                       | _ -> Alcotest.fail "missing text")
+                  | _ -> Alcotest.fail "content not a list of objects")
+             | _ -> Alcotest.fail "content missing")
+        | _ -> Alcotest.fail "result not object")
+   | _ -> Alcotest.fail "response not an object");
+
+  cleanup_dir base_path
+
 (* ===== 10. Execute Tool Tests ===== *)
 
 let test_execute_tool_masc_set_room () =
@@ -671,6 +715,7 @@ let eio_tests = [
   "handle_wrong_jsonrpc_version", `Quick, test_handle_request_wrong_jsonrpc_version;
   "handle_missing_params", `Quick, test_handle_request_missing_params_tools_call;
   "handle_tool_masc_status", `Quick, test_handle_request_tool_masc_status;
+  "handle_tool_not_initialized_error", `Quick, test_handle_request_tool_not_initialized_error;
 ]
 
 let execute_tool_tests = [

@@ -8469,8 +8469,23 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
         in
         { enabled = true; scanned; started; stale }
 
+let existing_keepalive_bootstrap_done = ref false
+
 let start_existing_keepalives ctx =
-  ignore (bootstrap_existing_keepers ctx)
+  if !existing_keepalive_bootstrap_done then ()
+  else begin
+    existing_keepalive_bootstrap_done := true;
+    try
+      let stats = bootstrap_existing_keepers ctx in
+      if keeper_debug then
+        Printf.eprintf
+          "[KEEPER-DEBUG] bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d\n%!"
+          stats.enabled stats.scanned stats.started stats.stale
+    with exn ->
+      (* Retry bootstrap on next keeper tool call if this attempt failed. *)
+      existing_keepalive_bootstrap_done := false;
+      raise exn
+  end
 
 let dispatch ctx ~name ~args : tool_result option =
   (* Lazy boot: when any keeper tool is used, attach keepalives for existing keepers. *)

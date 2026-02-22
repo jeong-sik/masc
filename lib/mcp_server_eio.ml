@@ -2546,8 +2546,17 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
     with exn ->
       (* Never let a tool exception crash the MCP server. *)
       let err = Printexc.to_string exn in
-      Log.Mcp.error "tools/call crashed: %s" err;
-      (false, Printf.sprintf "❌ Internal error: %s" err)
+      if String.starts_with ~prefix:"Invalid_argument(\"MASC not initialized." err then
+        let msg =
+          if err = "Invalid_argument(\"MASC not initialized. Use masc_init first.\")" then
+            Types.masc_error_to_string Types.NotInitialized
+          else
+            Printf.sprintf "❌ Invalid argument: %s" err
+        in
+        (false, msg)
+      else
+        (Log.Mcp.error "tools/call crashed: %s" err;
+         false, Printf.sprintf "❌ Internal error: %s" err)
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in

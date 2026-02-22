@@ -3549,166 +3549,218 @@ let choose_second_player_target ~state ~npc_actor_id ~exclude_actor_id ~turn =
 
 let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
   let ( let* ) = Result.bind in
-  match choose_live_npc_actor_id state with
-  | None -> Ok []
-  | Some npc_actor_id -> (
-      match choose_attack_target_id ~state ~actor_id:npc_actor_id with
-      | None -> Ok []
-      | Some target_actor_id ->
-          (* Look up NPC name from state -> find bestiary template *)
-          let npc_tmpl =
-            match actor_json_of_state state npc_actor_id with
-            | Some actor_json -> (
-                match actor_json |> member "name" with
-                | `String name -> find_npc_template_by_name name
-                | _ -> None)
-            | None -> None
+  let spawn_npc_for_pressure state =
+    let existing = party_fields_of_state state in
+    let rec pick_id idx =
+      let candidate = Printf.sprintf "npc-t%d-%02d" turn idx in
+      if List.mem_assoc candidate existing then pick_id (idx + 1) else candidate
+    in
+    let npc_id = pick_id 1 in
+    let tmpl = select_npc_template ~turn in
+    let hp = scale_hp ~turn ~base_hp:tmpl.base_hp in
+    let npc_actor_json =
+      `Assoc
+        [
+          ("name", `String tmpl.npc_name);
+          ("role", `String "npc");
+          ("archetype", `String tmpl.archetype);
+          ("persona", `String tmpl.persona);
+          ("traits", `List (List.map (fun t -> `String t) tmpl.traits));
+          ("skills", `List (List.map (fun s -> `String s) tmpl.skills));
+          ("hp", `Int hp);
+          ("max_hp", `Int hp);
+          ("alive", `Bool true);
+          ("inventory", `List []);
+        ]
+    in
+    let spawn_payload =
+      `Assoc
+        [
+          ("turn", `Int turn);
+          ("phase", `String phase);
+          ("actor_id", `String npc_id);
+          ("actor", npc_actor_json);
+        ]
+    in
+    let* spawn_event =
+      append_event ~base_dir ~room_id
+        ~event_type:Trpg_engine_event.Actor_spawned ~actor_id:npc_id
+        ~payload:spawn_payload ()
+    in
+    let state_with_spawn =
+      match state with
+      | `Assoc fields ->
+          let party_fields = party_fields_of_state state in
+          let next_party =
+            `Assoc ((npc_id, npc_actor_json) :: List.remove_assoc npc_id party_fields)
           in
-          let damage_range =
-            match npc_tmpl with
-            | Some t -> (t.damage_min, t.damage_max)
-            | None -> (2, 4)
-          in
-          let narration =
-            match npc_tmpl with
-            | Some t -> npc_attack_narration ~turn ~npc_template:t
-            | None -> "잔존한 적이 반격해 전열을 흔든다."
-          in
-          let base_damage =
-            deterministic_damage ~turn ~actor_id:npc_actor_id ~damage_range ()
-          in
-          (* Resolve archetype skill effect *)
-          let skill =
-            match npc_tmpl with
-            | Some t -> resolve_npc_skill ~turn ~npc_template:t
-            | None -> NoSkill
-          in
-          let skill_name_str = skill_effect_name skill in
-          let skill_json =
-            if skill_name_str = "" then `Null else `String skill_name_str
-          in
-          (* Apply skill effects *)
-          let pre_attack_events = ref [] in
-          let damage =
-            match skill with
-            | BonusDamage n -> base_damage + n
-            | DoubleDamage -> base_damage * 2
-            | _ -> base_damage
-          in
-          (* SelfHeal: emit hp.changed event with positive delta before attack *)
-          (match skill with
-          | SelfHeal heal_amount when heal_amount > 0 ->
-              let heal_payload =
-                `Assoc
-                  [
-                    ("turn", `Int turn);
-                    ("phase", `String phase);
-                    ("actor_id", `String npc_actor_id);
-                    ("delta", `Int heal_amount);
-                    ("source_actor_id", `String npc_actor_id);
-                    ("reason", `String "skill.war_cry");
-                  ]
-              in
-              (match
-                 append_event ~base_dir ~room_id
-                   ~event_type:Trpg_engine_event.Hp_changed
-                   ~actor_id:npc_actor_id ~payload:heal_payload ()
-               with
-              | Ok ev -> pre_attack_events := [ ev ]
-              | Error _ -> ())
-          | _ -> ());
-          let narration_with_skill =
-            if skill_name_str = "" then narration
-            else Printf.sprintf "[%s] %s" skill_name_str narration
-          in
-          let attack_payload =
+          `Assoc (("party", next_party) :: List.remove_assoc "party" fields)
+      | _ -> state
+    in
+    Ok (state_with_spawn, [ spawn_event ], npc_id)
+  in
+  let* state_for_attack, bootstrap_events, npc_actor_id =
+    match choose_live_npc_actor_id state with
+    | Some npc_id -> Ok (state, [], npc_id)
+    | None -> spawn_npc_for_pressure state
+  in
+  match choose_attack_target_id ~state:state_for_attack ~actor_id:npc_actor_id with
+  | None -> Ok bootstrap_events
+  | Some target_actor_id ->
+      (* Look up NPC name from state -> find bestiary template *)
+      let npc_tmpl =
+        match actor_json_of_state state_for_attack npc_actor_id with
+        | Some actor_json -> (
+            match actor_json |> member "name" with
+            | `String name -> find_npc_template_by_name name
+            | _ -> None)
+        | None -> None
+      in
+      let damage_range =
+        match npc_tmpl with
+        | Some t -> (t.damage_min, t.damage_max)
+        | None -> (2, 4)
+      in
+      let narration =
+        match npc_tmpl with
+        | Some t -> npc_attack_narration ~turn ~npc_template:t
+        | None -> "잔존한 적이 반격해 전열을 흔든다."
+      in
+      let base_damage =
+        deterministic_damage ~turn ~actor_id:npc_actor_id ~damage_range ()
+      in
+      (* Resolve archetype skill effect *)
+      let skill =
+        match npc_tmpl with
+        | Some t -> resolve_npc_skill ~turn ~npc_template:t
+        | None -> NoSkill
+      in
+      let skill_name_str = skill_effect_name skill in
+      let skill_json =
+        if skill_name_str = "" then `Null else `String skill_name_str
+      in
+      (* Apply skill effects *)
+      let pre_attack_events = ref [] in
+      let damage =
+        match skill with
+        | BonusDamage n -> base_damage + n
+        | DoubleDamage -> base_damage * 2
+        | _ -> base_damage
+      in
+      (* SelfHeal: emit hp.changed event with positive delta before attack *)
+      (match skill with
+      | SelfHeal heal_amount when heal_amount > 0 ->
+          let heal_payload =
             `Assoc
               [
                 ("turn", `Int turn);
                 ("phase", `String phase);
                 ("actor_id", `String npc_actor_id);
-                ("action", `String narration_with_skill);
-                ("target_id", `String target_actor_id);
-                ("skill", skill_json);
-                ("damage", `Int damage);
-              ]
-          in
-          let* attack_event =
-            append_event ~base_dir ~room_id
-              ~event_type:Trpg_engine_event.Combat_attack
-              ~actor_id:npc_actor_id ~payload:attack_payload ()
-          in
-          let hp_payload =
-            `Assoc
-              [
-                ("turn", `Int turn);
-                ("phase", `String phase);
-                ("actor_id", `String target_actor_id);
-                ("delta", `Int (-damage));
+                ("delta", `Int heal_amount);
                 ("source_actor_id", `String npc_actor_id);
-                ("reason", `String "combat.attack");
+                ("reason", `String "skill.war_cry");
               ]
           in
-          let* hp_event =
-            append_event ~base_dir ~room_id
-              ~event_type:Trpg_engine_event.Hp_changed
-              ~actor_id:target_actor_id ~payload:hp_payload ()
-          in
-          (* MultiTarget: attack a second player target if available *)
-          let* extra_events =
-            match skill with
-            | MultiTarget -> (
-                match
-                  choose_second_player_target ~state ~npc_actor_id
-                    ~exclude_actor_id:target_actor_id ~turn
-                with
-                | None -> Ok []
-                | Some second_target_id ->
-                    let second_damage =
-                      deterministic_damage ~turn
-                        ~actor_id:(npc_actor_id ^ "-multi") ~damage_range ()
-                    in
-                    let second_narration =
-                      Printf.sprintf "[Spell Surge] 주문의 여파가 %s에게도 번진다."
-                        second_target_id
-                    in
-                    let second_attack_payload =
-                      `Assoc
-                        [
-                          ("turn", `Int turn);
-                          ("phase", `String phase);
-                          ("actor_id", `String npc_actor_id);
-                          ("action", `String second_narration);
-                          ("target_id", `String second_target_id);
-                          ("skill", `String "Spell Surge");
-                          ("damage", `Int second_damage);
-                        ]
-                    in
-                    let* second_attack_ev =
-                      append_event ~base_dir ~room_id
-                        ~event_type:Trpg_engine_event.Combat_attack
-                        ~actor_id:npc_actor_id ~payload:second_attack_payload ()
-                    in
-                    let second_hp_payload =
-                      `Assoc
-                        [
-                          ("turn", `Int turn);
-                          ("phase", `String phase);
-                          ("actor_id", `String second_target_id);
-                          ("delta", `Int (-second_damage));
-                          ("source_actor_id", `String npc_actor_id);
-                          ("reason", `String "combat.attack");
-                        ]
-                    in
-                    let* second_hp_ev =
-                      append_event ~base_dir ~room_id
-                        ~event_type:Trpg_engine_event.Hp_changed
-                        ~actor_id:second_target_id ~payload:second_hp_payload ()
-                    in
-                    Ok [ second_attack_ev; second_hp_ev ])
-            | _ -> Ok []
-          in
-          Ok (!pre_attack_events @ [ attack_event; hp_event ] @ extra_events))
+          (match
+             append_event ~base_dir ~room_id
+               ~event_type:Trpg_engine_event.Hp_changed
+               ~actor_id:npc_actor_id ~payload:heal_payload ()
+           with
+          | Ok ev -> pre_attack_events := [ ev ]
+          | Error _ -> ())
+      | _ -> ());
+      let narration_with_skill =
+        if skill_name_str = "" then narration
+        else Printf.sprintf "[%s] %s" skill_name_str narration
+      in
+      let attack_payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String npc_actor_id);
+            ("action", `String narration_with_skill);
+            ("target_id", `String target_actor_id);
+            ("skill", skill_json);
+            ("damage", `Int damage);
+          ]
+      in
+      let* attack_event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Combat_attack ~actor_id:npc_actor_id
+          ~payload:attack_payload ()
+      in
+      let hp_payload =
+        `Assoc
+          [
+            ("turn", `Int turn);
+            ("phase", `String phase);
+            ("actor_id", `String target_actor_id);
+            ("delta", `Int (-damage));
+            ("source_actor_id", `String npc_actor_id);
+            ("reason", `String "combat.attack");
+          ]
+      in
+      let* hp_event =
+        append_event ~base_dir ~room_id
+          ~event_type:Trpg_engine_event.Hp_changed ~actor_id:target_actor_id
+          ~payload:hp_payload ()
+      in
+      (* MultiTarget: attack a second player target if available *)
+      let* extra_events =
+        match skill with
+        | MultiTarget -> (
+            match
+              choose_second_player_target ~state:state_for_attack ~npc_actor_id
+                ~exclude_actor_id:target_actor_id ~turn
+            with
+            | None -> Ok []
+            | Some second_target_id ->
+                let second_damage =
+                  deterministic_damage ~turn
+                    ~actor_id:(npc_actor_id ^ "-multi") ~damage_range ()
+                in
+                let second_narration =
+                  Printf.sprintf "[Spell Surge] 주문의 여파가 %s에게도 번진다."
+                    second_target_id
+                in
+                let second_attack_payload =
+                  `Assoc
+                    [
+                      ("turn", `Int turn);
+                      ("phase", `String phase);
+                      ("actor_id", `String npc_actor_id);
+                      ("action", `String second_narration);
+                      ("target_id", `String second_target_id);
+                      ("skill", `String "Spell Surge");
+                      ("damage", `Int second_damage);
+                    ]
+                in
+                let* second_attack_ev =
+                  append_event ~base_dir ~room_id
+                    ~event_type:Trpg_engine_event.Combat_attack
+                    ~actor_id:npc_actor_id ~payload:second_attack_payload ()
+                in
+                let second_hp_payload =
+                  `Assoc
+                    [
+                      ("turn", `Int turn);
+                      ("phase", `String phase);
+                      ("actor_id", `String second_target_id);
+                      ("delta", `Int (-second_damage));
+                      ("source_actor_id", `String npc_actor_id);
+                      ("reason", `String "combat.attack");
+                    ]
+                in
+                let* second_hp_ev =
+                  append_event ~base_dir ~room_id
+                    ~event_type:Trpg_engine_event.Hp_changed
+                    ~actor_id:second_target_id ~payload:second_hp_payload ()
+                in
+                Ok [ second_attack_ev; second_hp_ev ])
+        | _ -> Ok []
+      in
+      Ok (bootstrap_events @ !pre_attack_events @ [ attack_event; hp_event ] @ extra_events)
 
 let is_placeholder_reply (raw : string) : bool =
   let normalized = String.lowercase_ascii (String.trim raw) in
@@ -6615,19 +6667,10 @@ let handle_round_run ctx args : result =
                  actor_id)
         | None -> Ok ()
       in
-      let* () =
-        let dead_actor =
-          List.find_opt
-            (fun (actor_id, _) -> not (actor_alive_in_state state actor_id))
-            player_keepers
-        in
-        match dead_actor with
-        | Some (actor_id, _) ->
-            Error
-              (Printf.sprintf
-                 "invalid player assignment: actor_id=%s is not alive"
-                 actor_id)
-        | None -> Ok ()
+      let live_player_keepers, dead_player_keepers =
+        List.partition
+          (fun (actor_id, _) -> actor_alive_in_state state actor_id)
+          player_keepers
       in
       let* join_window_closed_event =
         append_event
@@ -6676,7 +6719,8 @@ let handle_round_run ctx args : result =
       let timeout_count = ref 0 in
       let dm_reply_ref : string option ref = ref None in
       let state_for_players_ref = ref base_state_for_prompt in
-      let participant_count = max 1 (1 + List.length player_keepers) in
+      let active_player_count = List.length live_player_keepers in
+      let participant_count = max 1 (1 + active_player_count) in
       let keeper_timeout_sec =
         let per_actor_budget =
           timeout_sec /. float_of_int (max 1 participant_count)
@@ -6705,6 +6749,21 @@ let handle_round_run ctx args : result =
           Ok ()
         else Ok ()
       in
+
+      List.iter
+        (fun (actor_id, keeper_name) ->
+          statuses :=
+            `Assoc
+              [
+                ("actor_id", `String actor_id);
+                ("role", `String "player");
+                ("keeper", `String keeper_name);
+                ("status", `String "skipped_dead");
+                ("reason", `String "actor is not alive at round start");
+                ("stage", `String "preflight");
+              ]
+            :: !statuses)
+        dead_player_keepers;
 
       let process_one ~state_json ~role ~actor_id ~keeper_name =
         let record_unavailable_status ~status ~error ~stage =
@@ -7302,14 +7361,15 @@ let handle_round_run ctx args : result =
               ~state_json:!state_for_players_ref
               ~role:`Player ~actor_id ~keeper_name)
           (Ok ())
-          player_keepers
+          live_player_keepers
       in
       let player_required_successes =
-        let total = List.length player_keepers in
+        let total = active_player_count in
         if total <= 0 then 0 else max 1 ((total + 1) / 2)
       in
       let player_quorum_met =
-        !player_success_count + !player_fallback_count >= player_required_successes
+        active_player_count > 0
+        && !player_success_count + !player_fallback_count >= player_required_successes
       in
       let state_for_dm_prompt =
         if player_quorum_met then
@@ -7571,7 +7631,7 @@ let handle_round_run ctx args : result =
             ( "summary",
               `Assoc
                 [
-                  ("participants", `Int (1 + List.length player_keepers));
+                  ("participants", `Int (1 + active_player_count));
                   ("successes", `Int !success_count);
                   ("fallbacks", `Int !fallback_count);
                   ("player_successes", `Int !player_success_count);

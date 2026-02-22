@@ -434,10 +434,17 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   let state2 = Perpetual_loop.create_state config in
   assert_true "context:has_system"
     (String.length state2.context.system_prompt > 0);
-  assert_true "context:system_contains_goal"
-    (try let _ = Str.search_forward (Str.regexp_string "test")
-       state2.context.system_prompt 0 in true
-     with Not_found -> false);
+  (* Goal is now injected as first user message, not in system prompt
+     (prompt cache optimization: static system prompt preserves prefix cache) *)
+  assert_true "context:goal_in_first_user_msg"
+    (match state2.context.messages with
+     | msg :: _ ->
+       msg.role = User &&
+       (try let _ = Str.search_forward
+              (Str.regexp_string Context_manager.goal_prefix)
+              msg.content 0 in true
+        with Not_found -> false)
+     | [] -> false);
 
   (* 8. Cost starts at zero *)
   assert_float_near "cost:initial" 0.0 state2.total_cost 0.001;

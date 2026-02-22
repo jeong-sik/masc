@@ -764,6 +764,13 @@ let cosine_similarity a b =
 
     All legacy bridges have been removed.
 *)
+let read_only_tools =
+  ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
+   "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
+   "masc_worktree_list"; "masc_pending_interrupts";
+   "masc_cost_report"; "masc_portal_status";
+   "masc_goal_list"]
+
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
@@ -987,11 +994,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (false, Printf.sprintf "❌ %s" msg)
   | None ->
 
-  let read_only_tools = ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
-                         "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
-                         "masc_worktree_list"; "masc_pending_interrupts";
-                         "masc_cost_report"; "masc_portal_status";
-                         "masc_goal_list"] in
   let is_read_only = List.mem name read_only_tools in
 
   let can_auto_join =
@@ -2494,6 +2496,106 @@ let int_of_env_default name ~default ~min_v ~max_v =
       in
       max min_v (min max_v parsed)
 
+let contains_casefold haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+    true
+  with Not_found -> false
+
+let parse_status_from_message ~success ~message =
+  if not success then
+    if
+      contains_casefold message "input required"
+      || contains_casefold message "ask agent"
+      || contains_casefold message "ask agent question"
+    then
+      ("ask_agent_question", Some "ask_agent_question")
+    else if
+      contains_casefold message "auth required"
+      || contains_casefold message "authentication required"
+      || contains_casefold message "unauthorized"
+    then
+      ("ask_for_auth", Some "ask_for_auth")
+    else
+      ("error", None)
+  else
+    ("ok", None)
+
+let quality_issue severity code message attempts =
+  `Assoc [
+    ("severity", `String severity);
+    ("code", `String code);
+    ("message", `String message);
+    ("retry_attempts", `Int attempts);
+  ]
+
+let quality_from_result ~success ~message ~attempts =
+  if success then
+    `Assoc [
+      ("passed", `Bool true);
+      ("issues", `List []);
+    ]
+  else
+    let issue =
+      if contains_casefold message "timeout" then
+        quality_issue "warning" "tool_timeout" message attempts
+      else
+        quality_issue "error" "tool_failure" message attempts
+    in
+    `Assoc [
+      ("passed", `Bool false);
+      ("issues", `List [issue]);
+    ]
+
+let read_only_retry_limit () =
+  match Sys.getenv_opt "MASC_TOOL_READONLY_RETRY_LIMIT" with
+  | Some raw ->
+      (try
+         let parsed = int_of_string (String.trim raw) in
+         max 1 (min 5 parsed)
+       with _ -> 2)
+  | None -> 2
+
+let is_retryable_message message =
+  contains_casefold message "timeout" ||
+  contains_casefold message "temporary" ||
+  contains_casefold message "temporarily" ||
+  contains_casefold message "econn" ||
+  contains_casefold message "connection" ||
+  contains_casefold message "unavailable" ||
+  contains_casefold message "rate limit" ||
+  contains_casefold message "502" ||
+  contains_casefold message "503"
+
+let read_only_retry_wait ~attempt =
+  let attempt = float_of_int attempt in
+  min 1.5 (0.2 *. attempt)
+
+let call_tool_with_readonly_retry
+    ~clock
+    ~run_tool
+    ~is_read_only
+    () =
+  let max_attempts = read_only_retry_limit () in
+  let rec loop attempt =
+    let (success, message) =
+      run_tool ()
+    in
+    if
+      success
+      || attempt >= max_attempts
+      || not is_read_only
+      || not (is_retryable_message message)
+    then
+      (success, message, attempt)
+    else (
+      Eio.Time.sleep clock (read_only_retry_wait ~attempt);
+      loop (attempt + 1))
+  in
+  loop 1
+
 (** Optional per-tool timeout to prevent long calls from starving the request loop. *)
 let tool_timeout_sec_opt ~(tool_name : string) : float option =
   match tool_name with
@@ -2512,51 +2614,62 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
   let module U = Yojson.Safe.Util in
   let name = params |> U.member "name" |> U.to_string in
   let arguments = params |> U.member "arguments" in
+  let is_read_only = List.mem name read_only_tools in
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
   let timeout_hit = ref false in
-  let (success, message) =
-    try
-      match tool_timeout_sec_opt ~tool_name:name with
-      | None ->
-          execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
-      | Some timeout_sec ->
-          (try
-             Eio.Time.with_timeout_exn
-               clock
-               timeout_sec
-               (fun () ->
-                 execute_tool_eio
-                   ~sw
-                   ~clock
-                   ?mcp_session_id
-                   ?auth_token
-                   state
-                 ~name
-                 ~arguments)
-           with Eio.Time.Timeout ->
-             timeout_hit := true;
-             Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
-             ( false,
-               Printf.sprintf
-                 "❌ Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
+let execute_with_timeout () =
+    let local_timeout_hit = ref false in
+    let result =
+      try
+        match tool_timeout_sec_opt ~tool_name:name with
+        | None ->
+            execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
+        | Some timeout_sec ->
+            (try
+               Eio.Time.with_timeout_exn
+                 clock
                  timeout_sec
-                 name ))
-    with exn ->
-      (* Never let a tool exception crash the MCP server. *)
-      let err = Printexc.to_string exn in
-      if String.starts_with ~prefix:"Invalid_argument(\"MASC not initialized." err then
-        let msg =
-          if err = "Invalid_argument(\"MASC not initialized. Use masc_init first.\")" then
-            Types.masc_error_to_string Types.NotInitialized
-          else
-            Printf.sprintf "❌ Invalid argument: %s" err
-        in
-        (false, msg)
-      else
-        (Log.Mcp.error "tools/call crashed: %s" err;
-         false, Printf.sprintf "❌ Internal error: %s" err)
+                 (fun () ->
+                   execute_tool_eio
+                     ~sw
+                     ~clock
+                     ?mcp_session_id
+                     ?auth_token
+                     state
+                     ~name
+                     ~arguments)
+             with Eio.Time.Timeout ->
+               local_timeout_hit := true;
+               Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
+               (false,
+                Printf.sprintf
+                  "❌ Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
+                  timeout_sec
+                  name))
+     with exn ->
+       (* Never let a tool exception crash the MCP server. *)
+       let err = Printexc.to_string exn in
+       if contains_casefold err "Invalid_argument(\"MASC not initialized" then
+         (false, Types.masc_error_to_string Types.NotInitialized)
+       else
+         (Log.Mcp.error "tools/call crashed: %s" err;
+          false, Printf.sprintf "❌ Internal error: %s" err)
+  in
+  if !local_timeout_hit then timeout_hit := true;
+  result
+in
+let (success, message, attempts) =
+  if is_read_only then
+    call_tool_with_readonly_retry
+      ~clock
+      ~run_tool:execute_with_timeout
+      ~is_read_only
+      ()
+  else
+    let (success, message) = execute_with_timeout () in
+    (success, message, 1)
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
@@ -2595,7 +2708,32 @@ let handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params 
             Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!" (Printexc.to_string exn))
      | None -> ());
 
+  let trace_id =
+    match id with
+    | `String s -> s
+    | `Int i -> string_of_int i
+    | `Intlit s -> s
+    | `Float f -> Printf.sprintf "%0.0f" f
+    | _ -> "unknown"
+  in
+  let (status, required_follow_up) = parse_status_from_message ~success ~message in
+  let quality = quality_from_result ~success ~message ~attempts in
+  let envelope =
+    `Assoc [
+      ("kind", `String "tool_call");
+      ("summary", `String message);
+      ("status", `String status);
+      ("tool", `String name);
+      ("required_follow_up",
+       (match required_follow_up with
+        | None -> `Null
+        | Some value -> `String value));
+      ("trace_id", `String trace_id);
+      ("quality", quality);
+    ]
+  in
   let result = make_response ~id (`Assoc [
+    ("resultEnvelope", envelope);
     ("content", `List [
       `Assoc [
         ("type", `String "text");
@@ -2695,38 +2833,52 @@ let handle_request ~clock ~sw ?mcp_session_id ?auth_token state request_str =
         else if not (is_jsonrpc_v2 json) then
           make_error ~id:`Null (-32600) "Invalid Request: jsonrpc must be 2.0"
         else
-          match jsonrpc_request_of_yojson json with
-          | Error msg -> make_error ~id:`Null ~data:(`String msg) (-32600) "Invalid Request"
-          | Ok req ->
-              let id = get_id req in
-              if not (is_valid_request_id id) then
-                make_error ~id:`Null (-32600) "Invalid Request: id must be string, number, or null"
-              else if is_notification req then
-                `Null
-              else
-                (match req.method_ with
-                | "initialize" -> handle_initialize_eio id req.params
-                | "initialized"
-                | "notifications/initialized" -> make_response ~id `Null
-                | "resources/list" -> handle_list_resources_eio id
-                | "resources/read" ->
-                    (* Eio native - pure sync resource reading *)
-                    handle_read_resource_eio state id req.params
-                | "resources/templates/list" -> handle_list_resource_templates_eio id
-                | "prompts/list" -> handle_list_prompts_eio id
-                | "tools/list" -> handle_list_tools_eio state id
-                | "tools/call" ->
-                    (match req.params with
-                    | Some params ->
-                        let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                        Printf.eprintf "[MCP] tools/call: %s (id=%s, session=%s)\n%!" name
-                          (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
-                          (match mcp_session_id with Some s -> s | None -> "none");
-                        let result = handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params in
-                        Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
-                        result
-                    | None -> make_error ~id (-32602) "Missing params")
-                | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))
+        match jsonrpc_request_of_yojson json with
+        | Error msg -> make_error ~id:`Null ~data:(`String msg) (-32600) "Invalid Request"
+        | Ok req ->
+            let id = get_id req in
+            if not (is_valid_request_id id) then
+              make_error ~id:`Null (-32600) "Invalid Request: id must be string, number, or null"
+            else if is_notification req then
+              `Null
+            else
+                (try
+                   (match req.method_ with
+                   | "initialize" -> handle_initialize_eio id req.params
+                   | "initialized"
+                   | "notifications/initialized" -> make_response ~id `Null
+                   | "resources/list" -> handle_list_resources_eio id
+                   | "resources/read" ->
+                       (* Eio native - pure sync resource reading *)
+                       handle_read_resource_eio state id req.params
+                   | "resources/templates/list" -> handle_list_resource_templates_eio id
+                   | "prompts/list" -> handle_list_prompts_eio id
+                   | "tools/list" -> handle_list_tools_eio state id
+                   | "tools/call" ->
+                       (match req.params with
+                       | Some params ->
+                           (try
+                             let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
+                             Printf.eprintf "[MCP] tools/call: %s (id=%s, session=%s)\n%!" name
+                               (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
+                               (match mcp_session_id with Some s -> s | None -> "none");
+                             let result =
+                               handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params
+                             in
+                             Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
+                             result
+                           with _ ->
+                             make_error ~id (-32602) "Invalid params: name must be a string")
+                       | None -> make_error ~id (-32602) "Missing params")
+                   | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_))
+                 with
+                 | Invalid_argument msg
+                   when contains_casefold msg "invalid_argument(\"masc not initialized" ->
+                     make_error ~id (-32603) (Types.masc_error_to_string Types.NotInitialized)
+                   | exn ->
+                       let err = Printexc.to_string exn in
+                       Log.Mcp.error "Request handling failed: %s" err;
+                       make_error ~id (-32603) (Printf.sprintf "Internal error: %s" err))
   with exn ->
     make_error ~id:`Null ~data:(`String (Printexc.to_string exn)) (-32603) "Internal error"
 

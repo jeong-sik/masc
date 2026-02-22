@@ -6786,7 +6786,8 @@ let handle_round_run ctx args : result =
           | `Dm -> Ok ()
           | `Player -> (
               match owner_for_actor state actor_id with
-              | Some owner when normalize_keeper_name owner <> normalize_keeper_name keeper_name ->
+              | Some owner when normalize_keeper_name owner <> "auto-pilot"
+                            && normalize_keeper_name owner <> normalize_keeper_name keeper_name ->
                   Error
                     (Printf.sprintf
                        "actor lease mismatch: actor_id=%s owner=%s requested=%s"

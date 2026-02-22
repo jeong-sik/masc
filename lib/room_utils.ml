@@ -149,10 +149,13 @@ let backend_config_for base_path =
     match env_opt "MASC_POSTGRES_URL" with
     | Some _ as url -> url
     | None ->
-        (* Fallback chain: DATABASE_URL -> RAILWAY_PG_URL *)
+        (* Fallback chain: DATABASE_URL -> SUPABASE_DB_URL -> SB_PG_URL *)
         match env_opt "DATABASE_URL" with
         | Some _ as url -> url
-        | None -> env_opt "RAILWAY_PG_URL"
+        | None ->
+            match env_opt "SUPABASE_DB_URL" with
+            | Some _ as url -> url
+            | None -> env_opt "SB_PG_URL"
   in
   let cluster_name =
     match env_opt "MASC_CLUSTER_NAME" with

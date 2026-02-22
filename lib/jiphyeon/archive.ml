@@ -93,12 +93,12 @@ let get_neo4j_url () =
   Sys.getenv_opt "RAILWAY_NEO4J_URL"
 
 let get_postgres_url () =
-  (* Try multiple env vars: DATABASE_URL, RAILWAY_PG_URL, RAILWAY_POSTGRES_URL *)
+  (* Try multiple env vars: DATABASE_URL, SUPABASE_DB_URL, SB_PG_URL *)
   match Sys.getenv_opt "DATABASE_URL" with
   | Some url -> Some url
-  | None -> match Sys.getenv_opt "RAILWAY_PG_URL" with
+  | None -> match Sys.getenv_opt "SUPABASE_DB_URL" with
     | Some url -> Some url
-    | None -> Sys.getenv_opt "RAILWAY_POSTGRES_URL"
+    | None -> Sys.getenv_opt "SB_PG_URL"
 
 (** {1 Neo4j Operations} *)
 

@@ -653,6 +653,13 @@ let keeper_continuity_compaction_cooldown_sec () : int =
     ~min_v:0
     ~max_v:172800
 
+let keeper_bootstrap_proactive_warmup_sec () : int =
+  int_of_env_default
+    "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
+    ~default:300
+    ~min_v:0
+    ~max_v:172800
+
 let keeper_compaction_policy_from_env () : (float * int * int) =
   ( keeper_compact_ratio (),
     keeper_compact_max_messages (),
@@ -5870,7 +5877,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 (* Presence keepalive fibers keyed by keeper name. *)
 let keepalives : (string, bool ref) Hashtbl.t = Hashtbl.create 8
 
-let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
+let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit =
   if not m.presence_keepalive then ()
   else if Hashtbl.mem keepalives m.name then ()
   else begin
@@ -5887,6 +5894,7 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
          ignore (Room.join ctx.config ~agent_name:m.agent_name ~capabilities:["keeper"] ())
      with _ -> ());
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+      let keepalive_started_ts = Time_compat.now () in
       let snapshot_interval_sec =
         match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
         | Some s ->
@@ -6030,8 +6038,14 @@ let start_keepalive (ctx : _ context) (m : keeper_meta) : unit =
              with _ -> ());
             last_snapshot_ts := now_ts
           end;
+          let proactive_warmup_elapsed =
+            proactive_warmup_sec <= 0
+            || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
+          in
           let meta_after_proactive =
-            try maybe_emit_proactive ctx meta_current with _ -> meta_current
+            if proactive_warmup_elapsed
+            then (try maybe_emit_proactive ctx meta_current with _ -> meta_current)
+            else meta_current
           in
           let base = float_of_int (max 30 (min 300 meta_after_proactive.presence_keepalive_sec)) in
           let jitter = base *. 0.2 *. Random.float 1.0 in
@@ -8418,6 +8432,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     | Error _ -> { enabled = true; scanned = 0; started = 0; stale = 0 }
     | Ok files ->
         let now_ts = Time_compat.now () in
+        let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
         let stale_turn_sec =
           max 0.0 Env_config.KeeperBootstrap.stale_turn_seconds
         in
@@ -8442,7 +8457,8 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                         || now_ts -. m.last_turn_ts >= stale_turn_sec)
                   in
                   let already_running = Hashtbl.mem keepalives m.name in
-                  if not stale_now then start_keepalive ctx m;
+                  if not stale_now then
+                    start_keepalive ~proactive_warmup_sec ctx m;
                   ( scanned_acc + 1,
                     started_acc
                     + (if stale_now || already_running then 0 else 1),

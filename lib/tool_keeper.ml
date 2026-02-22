@@ -2987,6 +2987,8 @@ let merge_usage
     Llm_client.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     total_tokens = a.total_tokens + b.total_tokens;
+    cache_creation_input_tokens = a.cache_creation_input_tokens + b.cache_creation_input_tokens;
+    cache_read_input_tokens = a.cache_read_input_tokens + b.cache_read_input_tokens;
   }
 
 let contains_ci (haystack : string) (needle : string) : bool =
@@ -5399,7 +5401,8 @@ let run_proactive_generation
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
   let zero_usage : Llm_client.token_usage =
-    { Llm_client.input_tokens = 0; output_tokens = 0; total_tokens = 0 }
+    { Llm_client.input_tokens = 0; output_tokens = 0; total_tokens = 0;
+      cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
   in
   let max_attempts = 3 in
   let previous_preview = String.trim meta.last_proactive_preview in

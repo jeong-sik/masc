@@ -378,15 +378,15 @@ body.mode-lobby #dashboard {
 }
 
 #dashboard[data-show-ops="0"] {
-    grid-template-rows: 44px 1fr 120px;
+    grid-template-rows: minmax(44px, auto) 1fr 120px;
 }
 
 #dashboard[data-show-bottom="0"] {
-    grid-template-rows: 44px auto 1fr;
+    grid-template-rows: minmax(44px, auto) auto 1fr;
 }
 
 #dashboard[data-show-ops="0"][data-show-bottom="0"] {
-    grid-template-rows: 44px 1fr;
+    grid-template-rows: minmax(44px, auto) 1fr;
 }
 
 #dashboard[data-show-ops="0"] #ops-hud {
@@ -426,7 +426,7 @@ body:not(.mode-trpg) #ops-hud {
     border-bottom: 1px solid var(--border-main);
     padding: 5px 12px;
     display: grid;
-    grid-template-columns: repeat(6, minmax(110px, 1fr));
+    grid-template-columns: repeat(6, minmax(130px, 1fr));
     gap: 8px;
     align-items: center;
 }
@@ -451,6 +451,7 @@ body:not(.mode-trpg) #ops-hud {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .ops-v.status-active {
@@ -521,9 +522,9 @@ body:not(.mode-trpg) #ops-hud {
     align-items: center;
     flex-wrap: wrap;
     justify-content: flex-end;
-    flex: 1 1 520px;
+    flex: 1 1 0;
     min-width: 0;
-    gap: 12px;
+    gap: 8px 12px;
     position: relative;
 }
 
@@ -531,6 +532,8 @@ body:not(.mode-trpg) #ops-hud {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
 }
 
 .session-control-inline {
@@ -541,11 +544,12 @@ body:not(.mode-trpg) #ops-hud {
 }
 
 #session-control-status {
-    flex: 0 1 min(44vw, 520px);
-    max-width: min(44vw, 520px);
+    flex: 0 1 auto;
+    max-width: min(30vw, 320px);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .inline-select {
@@ -1075,7 +1079,7 @@ body:not(.mode-trpg) #ops-hud {
 
 @media (max-width: 1280px) {
     #ops-hud {
-        grid-template-columns: repeat(3, minmax(120px, 1fr));
+        grid-template-columns: repeat(3, minmax(140px, 1fr));
     }
     .new-game-grid {
         grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -1093,6 +1097,8 @@ body:not(.mode-trpg) #ops-hud {
         border-left: none;
         border-top: 1px solid var(--border-main);
     }
+    .top-bar-right { gap: 6px 10px; }
+    #session-control-status { max-width: min(25vw, 240px); }
 }
 
 @media (max-width: 980px) {
@@ -1103,7 +1109,27 @@ body:not(.mode-trpg) #ops-hud {
 
 @media (max-width: 820px) {
     #ops-hud {
-        grid-template-columns: repeat(2, minmax(120px, 1fr));
+        grid-template-columns: repeat(2, minmax(140px, 1fr));
+    }
+    #top-bar { padding: 4px 8px; gap: 6px; }
+    .top-bar-right {
+        flex-basis: 100%;
+        gap: 6px 8px;
+        justify-content: flex-start;
+    }
+    #mode-title { flex: 0 1 auto; max-width: 160px; }
+    .room-switch-inline { order: 10; flex-basis: 100%; }
+    #session-control-status { max-width: min(40vw, 200px); }
+}
+
+@media (max-width: 600px) {
+    .top-bar-right { flex-basis: 100%; gap: 4px 6px; }
+    #room-status { display: none; }
+    #session-control-status { max-width: 140px; }
+    #ops-hud {
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 4px 8px;
     }
 }
 

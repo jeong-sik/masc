@@ -6672,6 +6672,152 @@ let handle_round_run ctx args : result =
           (fun (actor_id, _) -> actor_alive_in_state state actor_id)
           player_keepers
       in
+      let terminal_session = room_already_ended || outcome_already_emitted in
+      if terminal_session then
+        let active_player_count = List.length live_player_keepers in
+        let participant_count = max 1 (1 + active_player_count) in
+        let keeper_timeout_sec =
+          let per_actor_budget =
+            timeout_sec /. float_of_int (max 1 participant_count)
+          in
+          let floor = min 30.0 timeout_sec in
+          max floor per_actor_budget
+        in
+        let player_required_successes =
+          let total = active_player_count in
+          if total <= 0 then 0 else max 1 ((total + 1) / 2)
+        in
+        let terminal_reason =
+          if room_already_ended && outcome_already_emitted then
+            "room already ended and session outcome already emitted"
+          else if room_already_ended then
+            "room already ended"
+          else "session outcome already emitted"
+        in
+        let dead_statuses =
+          dead_player_keepers
+          |> List.map (fun (actor_id, keeper_name) ->
+                 `Assoc
+                   [
+                     ("actor_id", `String actor_id);
+                     ("role", `String "player");
+                     ("keeper", `String keeper_name);
+                     ("status", `String "skipped_dead");
+                     ("reason", `String "actor is not alive at round start");
+                     ("stage", `String "preflight");
+                   ])
+        in
+        let live_statuses =
+          live_player_keepers
+          |> List.map (fun (actor_id, keeper_name) ->
+                 `Assoc
+                   [
+                     ("actor_id", `String actor_id);
+                     ("role", `String "player");
+                     ("keeper", `String keeper_name);
+                     ("status", `String "skipped_session_ended");
+                     ("reason", `String terminal_reason);
+                     ("stage", `String "session_guard");
+                   ])
+        in
+        let dm_status =
+          `Assoc
+            [
+              ("actor_id", `String "dm");
+              ("role", `String "dm");
+              ("keeper", `String dm_keeper);
+              ("status", `String "skipped_session_ended");
+              ("reason", `String terminal_reason);
+              ("stage", `String "session_guard");
+            ]
+        in
+        let statuses = dead_statuses @ live_statuses @ [ dm_status ] in
+        let canon_check =
+          evaluate_canon_check ~base_dir ~state ~events:existing_events_before
+            ~dm_reply:None
+        in
+        let dm_style =
+          match state |> member "config" with
+          | `Assoc fields -> (
+              match List.assoc_opt "dm" fields with
+              | Some dm_json -> get_string_field dm_json "style"
+              | None -> "")
+          | _ -> ""
+        in
+        let dm_persona_used =
+          infer_dm_persona_id
+            ~explicit:(Option.bind dm_persona_override dm_persona_id_of_string)
+            ~dm_style
+        in
+        let room_status =
+          match state |> member "status" with
+          | `String status when String.trim status <> "" -> status
+          | _ -> "ended"
+        in
+        Ok
+          (`Assoc
+            [
+              ("ok", `Bool true);
+              ("room_id", `String room_id);
+              ("phase", `String phase);
+              ("turn_before", `Int turn_before);
+              ("turn_after", `Int turn_before);
+              ("timeout_sec", `Float timeout_sec);
+              ( "preflight_warning",
+                match preflight_warning with
+                | Some warning -> `String warning
+                | None -> `Null );
+              ("statuses", `List statuses);
+              ("interventions_applied", `List []);
+              ( "summary",
+                `Assoc
+                  [
+                    ("participants", `Int participant_count);
+                    ("successes", `Int 0);
+                    ("fallbacks", `Int 0);
+                    ("player_successes", `Int 0);
+                    ("player_fallbacks", `Int 0);
+                    ("player_required_successes", `Int player_required_successes);
+                    ("player_quorum_met", `Bool false);
+                    ("dm_success", `Bool false);
+                    ("advanced", `Bool false);
+                    ("progress_reason", `String "session_ended");
+                    ("progress_detail", `String terminal_reason);
+                    ("recovery_applied", `Bool false);
+                    ( "recovery_mode",
+                      if local_fallback then
+                        `String "local_fallback_enabled"
+                      else `String "none" );
+                    ("effective_timeout_sec", `Float timeout_sec);
+                    ("keeper_timeout_sec", `Float keeper_timeout_sec);
+                    ("timeouts", `Int 0);
+                    ("unavailable", `Int 0);
+                    ("schema_failures", `Int 0);
+                    ("rule_validation_failures", `Int 0);
+                    ("reprompts", `Int 0);
+                    ("dm_persona", `String (string_of_dm_persona_id dm_persona_used));
+                    ("dm_persona_overridden", `Bool (Option.is_some dm_persona_override));
+                    ("npc_spawned", `Int 0);
+                    ("npc_attacks", `Int 0);
+                    ("interventions", `Int 0);
+                    ("canon_status", `String canon_check.status);
+                    ("canon_violation_count", `Int (List.length canon_check.violations));
+                    ("canon_warning_count", `Int (List.length canon_check.warnings));
+                    ("memory_signals", `Int 0);
+                    ("memory_guardrail_escalations", `Int 0);
+                    ("roll_audit_count", `Int 0);
+                    ("roll_audit", `List []);
+                  ] );
+              ("canon_check", canon_check_to_yojson canon_check);
+              ( "outcome",
+                match !latest_outcome_payload with
+                | Some payload -> payload
+                | None -> `Null );
+              ("events", `List []);
+              ("room_status", `String room_status);
+              ("state", state);
+            ])
+      else
       let* join_window_closed_event =
         append_event
           ~base_dir

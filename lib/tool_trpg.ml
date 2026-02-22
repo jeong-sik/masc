@@ -3237,8 +3237,44 @@ let last_actor_reply ~state ~actor_id =
                              Some (String.trim reply)
                          | _ -> None ) )
                  | _ -> None )
-             | _ -> None)
+              | _ -> None)
   | _ -> None
+
+let normalize_reply_for_comparison (raw : string) : string =
+  raw
+  |> String.trim
+  |> String.lowercase_ascii
+  |> String.split_on_char ' '
+  |> List.filter (fun s -> s <> "")
+  |> String.concat " "
+
+let recent_actor_replies ~state ~actor_id ~limit =
+  if limit <= 0 then []
+  else
+    match state |> member "narration_log" with
+    | `List entries ->
+        let rec collect acc = function
+          | [] -> List.rev acc
+          | _ when List.length acc >= limit -> List.rev acc
+          | entry :: tl -> (
+              match entry with
+              | `Assoc fields -> (
+                  match List.assoc_opt "actor_id" fields with
+                  | Some (`String aid) when aid = actor_id -> (
+                      match
+                        List.assoc_opt "reply" fields
+                        |> Option.value
+                             ~default:(Option.value ~default:`Null
+                                         (List.assoc_opt "proposed_action" fields))
+                      with
+                      | `String reply when String.trim reply <> "" ->
+                          collect (String.trim reply :: acc) tl
+                      | _ -> collect acc tl )
+                  | _ -> collect acc tl )
+              | _ -> collect acc tl)
+        in
+        collect [] (List.rev entries)
+    | _ -> []
 
 let pick_deterministic_text ~actor_id ~turn ~salt xs =
   match xs with
@@ -3250,6 +3286,29 @@ let pick_deterministic_text ~actor_id ~turn ~salt xs =
 
 let contains_any_substring text keywords =
   List.exists (fun keyword -> contains_substring text keyword) keywords
+
+let pick_deterministic_text_excluding_many ~actor_id ~turn ~salt ~excludes xs =
+  let normalized_excludes =
+    excludes
+    |> List.map normalize_reply_for_comparison
+    |> List.filter (fun s -> s <> "")
+  in
+  let rec loop attempt fallback =
+    if attempt > 10 then fallback
+    else
+      let salt' =
+        if attempt = 0 then salt else Printf.sprintf "%s:alt:%d" salt attempt
+      in
+      match pick_deterministic_text ~actor_id ~turn ~salt:salt' xs with
+      | Some candidate ->
+          let normalized_candidate = normalize_reply_for_comparison candidate in
+          if List.mem normalized_candidate normalized_excludes then
+            let next_fallback = if fallback = None then Some candidate else fallback in
+            loop (attempt + 1) next_fallback
+          else Some candidate
+      | None -> fallback
+  in
+  loop 0 None
 
 let pick_deterministic_text_excluding ~actor_id ~turn ~salt ~exclude xs =
   let normalized_exclude = String.trim exclude in
@@ -3271,7 +3330,7 @@ let pick_deterministic_text_excluding ~actor_id ~turn ~salt ~exclude xs =
 
 let fallback_dm_reply ~state =
   let turn = state_turn state in
-  let previous_reply = last_actor_reply ~state ~actor_id:"dm" in
+  let recent_replies = recent_actor_replies ~state ~actor_id:"dm" ~limit:3 in
   let live_npcs =
     party_fields_of_state state
     |> List.fold_left
@@ -3331,13 +3390,12 @@ let fallback_dm_reply ~state =
   let dm_actor_id = "__dm__" in
   let candidates = List.map (fun template -> template turn live_npcs live_pcs) templates in
   let selected =
-    match previous_reply with
-    | Some reply ->
-        pick_deterministic_text_excluding ~actor_id:dm_actor_id ~turn
-          ~salt:"dm-fallback" ~exclude:reply candidates
-    | None ->
-        pick_deterministic_text ~actor_id:dm_actor_id ~turn ~salt:"dm-fallback"
-          candidates
+    match recent_replies with
+    | [] ->
+        pick_deterministic_text ~actor_id:dm_actor_id ~turn ~salt:"dm-fallback" candidates
+    | replies ->
+        pick_deterministic_text_excluding_many ~actor_id:dm_actor_id ~turn
+          ~salt:"dm-fallback" ~excludes:replies candidates
   in
   match selected with
   | Some reply -> reply
@@ -3345,7 +3403,7 @@ let fallback_dm_reply ~state =
 
 let fallback_player_reply ~state ~actor_id =
   let turn = state_turn state in
-  let previous_reply = last_actor_reply ~state ~actor_id in
+  let recent_replies = recent_actor_replies ~state ~actor_id ~limit:3 in
   let skills, traits =
     match actor_json_of_state state actor_id with
     | Some actor_json ->
@@ -3433,13 +3491,11 @@ let fallback_player_reply ~state ~actor_id =
           ]
       in
       let selected =
-        match previous_reply with
-        | Some reply ->
-            pick_deterministic_text_excluding ~actor_id ~turn
-              ~salt:"skill-template" ~exclude:reply templates
-        | None ->
-            pick_deterministic_text ~actor_id ~turn ~salt:"skill-template"
-              templates
+        match recent_replies with
+        | [] -> pick_deterministic_text ~actor_id ~turn ~salt:"skill-template" templates
+        | replies ->
+            pick_deterministic_text_excluding_many ~actor_id ~turn
+              ~salt:"skill-template" ~excludes:replies templates
       in
       (match selected with
       | Some reply -> reply
@@ -3454,13 +3510,11 @@ let fallback_player_reply ~state ~actor_id =
         ]
       in
       let selected =
-        match previous_reply with
-        | Some reply ->
-            pick_deterministic_text_excluding ~actor_id ~turn
-              ~salt:"plain-template" ~exclude:reply templates
-        | None ->
-            pick_deterministic_text ~actor_id ~turn ~salt:"plain-template"
-              templates
+        match recent_replies with
+        | [] -> pick_deterministic_text ~actor_id ~turn ~salt:"plain-template" templates
+        | replies ->
+            pick_deterministic_text_excluding_many ~actor_id ~turn
+              ~salt:"plain-template" ~excludes:replies templates
       in
       (match selected with
       | Some reply -> reply
@@ -6852,10 +6906,39 @@ let handle_round_run ctx args : result =
               String.trim sa.description
             else trimmed_reply
           in
-          let normalized_reply =
+          let normalized_reply0 =
             if candidate_reply = "" || is_placeholder_reply candidate_reply then
               String.trim (synthesized_roleplay_reply ())
             else candidate_reply
+          in
+          let recent_replies =
+            recent_actor_replies ~state:state_json ~actor_id ~limit:3
+          in
+          let normalized_reply =
+            let normalized_current =
+              normalize_reply_for_comparison normalized_reply0
+            in
+            let is_repeated =
+              normalized_current <> ""
+              && List.exists
+                   (fun recent ->
+                     normalize_reply_for_comparison recent = normalized_current)
+                   recent_replies
+            in
+            if not is_repeated then normalized_reply0
+            else
+              let alternate = String.trim (synthesized_roleplay_reply ()) in
+              if alternate = "" then normalized_reply0
+              else
+                let normalized_alt = normalize_reply_for_comparison alternate in
+                let alt_repeated =
+                  normalized_alt <> ""
+                  && List.exists
+                       (fun recent ->
+                         normalize_reply_for_comparison recent = normalized_alt)
+                       recent_replies
+                in
+                if alt_repeated then normalized_reply0 else alternate
           in
           let normalized_description =
             let desc = String.trim sa.description in

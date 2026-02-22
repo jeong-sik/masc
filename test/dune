@@ -140,6 +140,12 @@
  (modules test_tool_trpg_coverage)
  (libraries masc_mcp alcotest yojson unix))
 
+; Narrative Intelligence tests (inventory, relationships, dedup, JSON recovery)
+(test
+ (name test_narrative_intelligence)
+ (modules test_narrative_intelligence)
+ (libraries masc_mcp alcotest yojson))
+
 (test
  (name test_tool_goals)
  (modules test_tool_goals)

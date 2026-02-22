@@ -1454,6 +1454,74 @@ let test_round_run_skips_dead_player_assignments () =
   | None -> Alcotest.fail "dead actor status is missing");
   cleanup_dir base_dir
 
+let test_round_run_short_circuits_when_session_already_ended () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let room_id = "room-round-session-ended" in
+  bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:["p1"];
+  append_room_event ~base_dir ~room_id
+    ~event_type:Trpg_engine_event.Session_outcome
+    ~payload:
+      (`Assoc
+        [
+          ("outcome", `String "defeat");
+          ("reason", `String "all_players_dead");
+          ("summary", `String "The party has fallen.");
+          ("turn", `Int 1);
+          ("phase", `String "round");
+        ])
+    ();
+  let keeper_called = ref false in
+  let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    keeper_called := true;
+    `Ok (keeper_payload ~action_type:"explore" "Should not be called.")
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String room_id);
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("timeout_sec", `Float 0.5);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run returns payload" true ok;
+  Alcotest.(check bool) "keeper call skipped on ended session" false !keeper_called;
+  let json = parse_json_exn body in
+  let summary = Yojson.Safe.Util.member "summary" json in
+  Alcotest.(check string)
+    "progress reason is session_ended"
+    "session_ended"
+    (Yojson.Safe.Util.member "progress_reason" summary |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool)
+    "round not advanced"
+    false
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check int)
+    "no emitted events"
+    0
+    (Yojson.Safe.Util.member "events" json |> Yojson.Safe.Util.to_list |> List.length);
+  let statuses = Yojson.Safe.Util.member "statuses" json |> Yojson.Safe.Util.to_list in
+  let dm_status =
+    List.find_opt
+      (fun s ->
+        s |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string = "dm")
+      statuses
+  in
+  (match dm_status with
+  | Some status_json ->
+      Alcotest.(check string)
+        "dm status is skipped_session_ended"
+        "skipped_session_ended"
+        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "dm status is missing");
+  cleanup_dir base_dir
+
 let test_round_run_rejects_meta_only_keeper_reply () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -2968,6 +3036,10 @@ let () =
             "skips dead player assignments and keeps round progression"
             `Quick
             test_round_run_skips_dead_player_assignments;
+          Alcotest.test_case
+            "short-circuits when session is already ended"
+            `Quick
+            test_round_run_short_circuits_when_session_already_ended;
           Alcotest.test_case
             "recovers meta-only keeper replies via synthetic action"
             `Quick

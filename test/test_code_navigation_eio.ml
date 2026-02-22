@@ -68,14 +68,15 @@ let test_code_search_basic () =
 
   (* Verify response structure *)
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
-        | Some (`Assoc result) ->
+        | Some (`Assoc result_fields) ->
+            let result = `Assoc result_fields in
             (* Check count field *)
             (match json_get_int result "count" with
              | Some count ->
                  check bool "has results" true (count > 0);
-                 check int "count positive" true (count > 0)
+                 check bool "count positive" true (count > 0)
              | None -> fail "missing count field");
 
             (* Check results array *)
@@ -86,12 +87,13 @@ let test_code_search_basic () =
                  (match results with
                   | first :: _ ->
                       (match first with
-                       | `Assoc match_obj ->
+                       | `Assoc match_obj_fields ->
+                           let match_obj = `Assoc match_obj_fields in
                            (* Check required fields: path, line, content *)
                            (match json_get_string match_obj "path" with
                             | Some path ->
                                 check bool "path contains lib/" true
-                                  (String.is_substring ~substring:"lib/" path)
+                                  (contains_substring path "lib/")
                             | None -> fail "missing path field");
                            (match json_get_int match_obj "line" with
                             | Some line -> check bool "line > 0" true (line > 0)
@@ -140,9 +142,10 @@ let test_code_symbols_basic () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
 
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
-        | Some (`Assoc result) ->
+        | Some (`Assoc result_fields) ->
+            let result = `Assoc result_fields in
             (* Check path field *)
             (match json_get_string result "path" with
              | Some path ->
@@ -158,7 +161,7 @@ let test_code_symbols_basic () =
 
             (* Check symbols array *)
             (match json_get_field result "symbols" with
-             | Some (`List symbols) ->
+             | Some (`List _symbols) ->
                    (* Symbols may be empty for OCaml with simple heuristic *)
                    ()
              | Some _ -> fail "symbols not a list"
@@ -197,9 +200,10 @@ let test_code_read_basic () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
 
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
-        | Some (`Assoc result) ->
+        | Some (`Assoc result_fields) ->
+            let result = `Assoc result_fields in
             (* Check path field *)
             (match json_get_string result "path" with
              | Some path ->
@@ -263,9 +267,10 @@ let test_code_read_offset_limit () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
 
   (match response with
-   | `Assoc fields ->
+   | `Assoc _fields ->
        (match json_get_field response "result" with
-        | Some (`Assoc result) ->
+        | Some (`Assoc result_fields) ->
+            let result = `Assoc result_fields in
             (* Verify offset is preserved *)
             (match json_get_int result "offset" with
              | Some offset -> check int "offset is 10" 10 offset

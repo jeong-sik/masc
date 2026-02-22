@@ -92,8 +92,8 @@ let bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids =
                [
                  ("name", `String id);
                  ("role", `String "player");
-                 ("hp", `Int 10);
-                 ("max_hp", `Int 10);
+                 ("hp", `Int 1000);
+                 ("max_hp", `Int 1000);
                  ("alive", `Bool true);
                ] ))
          actor_ids)
@@ -1103,7 +1103,7 @@ let test_round_run_local_fallback_distributes_team_pressure () =
   in
   let damaged_players =
     [ "p1"; "p2"; "p3"; "p4" ]
-    |> List.filter (fun actor_id -> hp_of actor_id < 10)
+    |> List.filter (fun actor_id -> hp_of actor_id < 1000)
   in
   Alcotest.(check bool)
     "team pressure is distributed across multiple players"

@@ -8436,15 +8436,16 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               let name = Filename.remove_extension f in
               match read_meta ctx.config name with
               | Ok (Some m) ->
-                  let already_running = Hashtbl.mem keepalives m.name in
-                  start_keepalive ctx m;
                   let stale_now =
                     stale_turn_sec > 0.0
                     && (m.last_turn_ts <= 0.0
                         || now_ts -. m.last_turn_ts >= stale_turn_sec)
                   in
+                  let already_running = Hashtbl.mem keepalives m.name in
+                  if not stale_now then start_keepalive ctx m;
                   ( scanned_acc + 1,
-                    started_acc + (if already_running then 0 else 1),
+                    started_acc
+                    + (if stale_now || already_running then 0 else 1),
                     stale_acc + (if stale_now then 1 else 0) )
               | _ -> (scanned_acc, started_acc, stale_acc))
             (0, 0, 0)

@@ -599,6 +599,78 @@ let test_round_run_emits_combat_semantic_events () =
     (count_from_json (parse_json_exn stream_attack) >= 2);
   cleanup_dir base_dir
 
+let test_round_run_reinforces_pressure_after_wave_clear () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let room_id = "room-round-pressure-reinforce" in
+  bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:["p1"];
+  append_room_event ~base_dir ~room_id
+    ~event_type:Trpg_engine_event.Actor_spawned
+    ~payload:
+      (`Assoc
+        [
+          ("turn", `Int 1);
+          ("phase", `String "round");
+          ("actor_id", `String "npc-seeded");
+          ( "actor",
+            `Assoc
+              [
+                ("name", `String "Seeded Threat");
+                ("role", `String "npc");
+                ("hp", `Int 1);
+                ("max_hp", `Int 1);
+                ("alive", `Bool true);
+                ("traits", `List []);
+                ("skills", `List []);
+                ("inventory", `List []);
+              ] );
+        ])
+    ();
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Counterpressure"
+             "The battlefield does not stay quiet.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"attack" ~target_id:"npc-seeded"
+             "I finish the seeded enemy quickly.")
+    | other -> `Error ("unknown keeper: " ^ other)
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let args =
+    `Assoc
+      [
+        ("room_id", `String room_id);
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1") ]);
+        ("phase", `String "round");
+        ("timeout_sec", `Float 1.0);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run success" true ok;
+  let summary = parse_json_exn body |> Yojson.Safe.Util.member "summary" in
+  let npc_spawned =
+    Yojson.Safe.Util.member "npc_spawned" summary |> Yojson.Safe.Util.to_int
+  in
+  let npc_attacks =
+    Yojson.Safe.Util.member "npc_attacks" summary |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check bool)
+    "pressure reinforcement spawns npc after wave clear"
+    true
+    (npc_spawned >= 1);
+  Alcotest.(check bool)
+    "pressure reinforcement still emits npc attack"
+    true
+    (npc_attacks >= 1);
+  cleanup_dir base_dir
+
 let test_round_run_emits_session_outcome_event () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -1297,6 +1369,89 @@ let test_round_run_uses_majority_player_quorum () =
         "ok"
         (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string)
   | None -> Alcotest.fail "dm status is missing");
+  cleanup_dir base_dir
+
+let test_round_run_skips_dead_player_assignments () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let room_id = "room-round-dead-assignment" in
+  bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:["p1"; "p2"];
+  let dead_keeper_called = ref false in
+  let keeper_call ~name ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
+    match name with
+    | "dm-keeper" ->
+        `Ok
+          (keeper_payload ~action_type:"scene_transition" ~scene:"Aftermath"
+             "The round advances with surviving actors.")
+    | "pk-1" ->
+        `Ok
+          (keeper_payload ~action_type:"attack" ~target_id:"npc-t1-01"
+             "I strike the nearest threat.")
+    | "pk-dead" ->
+        dead_keeper_called := true;
+        `Ok (keeper_payload ~action_type:"explore" "This should never run.")
+    | _ -> `Error "unknown keeper"
+  in
+  let ctx : Tool_trpg.context =
+    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+  in
+  let ok_update, _ =
+    dispatch_exn ctx ~name:"masc_trpg_actor_update"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String "p2");
+            ("hp", `Int 0);
+            ("alive", `Bool false);
+          ])
+  in
+  Alcotest.(check bool) "mark p2 dead" true ok_update;
+  let args =
+    `Assoc
+      [
+        ("room_id", `String room_id);
+        ("dm_keeper", `String "dm-keeper");
+        ("player_keepers", `Assoc [ ("p1", `String "pk-1"); ("p2", `String "pk-dead") ]);
+        ("timeout_sec", `Float 0.5);
+      ]
+  in
+  let ok, body = dispatch_exn ctx ~name:"masc_trpg_round_run" ~args in
+  Alcotest.(check bool) "round_run returns payload" true ok;
+  Alcotest.(check bool) "dead keeper should not be called" false !dead_keeper_called;
+  let json = parse_json_exn body in
+  let summary = Yojson.Safe.Util.member "summary" json in
+  Alcotest.(check int)
+    "player_successes from alive actors only"
+    1
+    (Yojson.Safe.Util.member "player_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int)
+    "player_required_successes from alive actors only"
+    1
+    (Yojson.Safe.Util.member "player_required_successes" summary |> Yojson.Safe.Util.to_int);
+  Alcotest.(check bool)
+    "player quorum met"
+    true
+    (Yojson.Safe.Util.member "player_quorum_met" summary |> Yojson.Safe.Util.to_bool);
+  Alcotest.(check bool)
+    "round advanced"
+    true
+    (Yojson.Safe.Util.member "advanced" summary |> Yojson.Safe.Util.to_bool);
+  let statuses = json |> Yojson.Safe.Util.member "statuses" |> Yojson.Safe.Util.to_list in
+  let dead_status =
+    List.find_opt
+      (fun s ->
+        s |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string = "p2")
+      statuses
+  in
+  (match dead_status with
+  | Some status_json ->
+      Alcotest.(check string)
+        "dead actor status marked skipped_dead"
+        "skipped_dead"
+        (status_json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string)
+  | None -> Alcotest.fail "dead actor status is missing");
   cleanup_dir base_dir
 
 let test_round_run_rejects_meta_only_keeper_reply () =
@@ -2810,6 +2965,10 @@ let () =
             `Quick
             test_round_run_uses_majority_player_quorum;
           Alcotest.test_case
+            "skips dead player assignments and keeps round progression"
+            `Quick
+            test_round_run_skips_dead_player_assignments;
+          Alcotest.test_case
             "recovers meta-only keeper replies via synthetic action"
             `Quick
             test_round_run_rejects_meta_only_keeper_reply;
@@ -2841,6 +3000,10 @@ let () =
             "emits combat semantic events"
             `Quick
             test_round_run_emits_combat_semantic_events;
+          Alcotest.test_case
+            "reinforces npc pressure after wave clear"
+            `Quick
+            test_round_run_reinforces_pressure_after_wave_clear;
           Alcotest.test_case
             "emits session outcome event"
             `Quick

@@ -425,3 +425,9 @@
  (name test_perpetual)
  (modules test_perpetual)
  (libraries masc_mcp str yojson unix))
+
+; Code Navigation E2E tests (ripgrep-based search, symbols, read)
+(test
+ (name test_code_navigation_eio)
+ (modules test_code_navigation_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))

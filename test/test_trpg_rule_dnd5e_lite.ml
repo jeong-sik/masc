@@ -208,11 +208,381 @@ let test_room_restart_clears_previous_session_state () =
   Alcotest.(check bool) "old actor removed" false (List.mem_assoc "p01" party);
   Alcotest.(check bool) "new actor present" true (List.mem_assoc "p02" party)
 
+let combat_party_config =
+  `Assoc
+    [
+      ( "party",
+        `Assoc
+          [
+            ( "warrior",
+              `Assoc
+                [
+                  ("name", `String "Warrior");
+                  ("hp", `Int 20);
+                  ("max_hp", `Int 20);
+                  ("alive", `Bool true);
+                  ("atk", `Int 12);
+                  ("def", `Int 8);
+                  ("inventory", `List []);
+                ] );
+            ( "goblin",
+              `Assoc
+                [
+                  ("name", `String "Goblin");
+                  ("hp", `Int 15);
+                  ("max_hp", `Int 15);
+                  ("alive", `Bool true);
+                  ("atk", `Int 6);
+                  ("def", `Int 6);
+                  ("inventory", `List []);
+                ] );
+          ] );
+      ("world", `Assoc [ ("story_flags", `List []) ]);
+    ]
+
+let test_combat_attack_damages_target () =
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T00:00:00Z"
+      ~event_type:Trpg_engine_event.Combat_attack
+      ~payload:
+        (`Assoc
+          [
+            ("actor_id", `String "warrior");
+            ("target_id", `String "goblin");
+            ("raw_d20", `Int 15);
+            ("base_damage", `Int 6);
+          ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config:combat_party_config ~events:[ ev ]
+  in
+  (* warrior ATK=12, bonus=12/3=4. raw_d20=15, total=15+4=19 => Great tier *)
+  (* damage = round((6+4) * 1.5) = round(15.0) = 15 *)
+  (* goblin HP: 15 - 15 = 0 *)
+  let goblin_hp =
+    state |> member "party" |> member "goblin" |> member "hp" |> to_int
+  in
+  let goblin_alive =
+    state |> member "party" |> member "goblin" |> member "alive" |> to_bool
+  in
+  Alcotest.(check int) "goblin hp is 0" 0 goblin_hp;
+  Alcotest.(check bool) "goblin is dead" false goblin_alive;
+  let narration_log = state |> member "narration_log" |> to_list in
+  Alcotest.(check bool) "narration has attack entry" true
+    (List.length narration_log > 0);
+  let entry = List.hd narration_log in
+  Alcotest.(check string) "narration type is combat_attack" "combat_attack"
+    (entry |> member "type" |> to_string);
+  Alcotest.(check string) "tier is great" "great"
+    (entry |> member "tier" |> to_string);
+  Alcotest.(check int) "damage recorded" 15 (entry |> member "damage" |> to_int)
+
+let test_combat_attack_critical_fail_misses () =
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T00:00:00Z"
+      ~event_type:Trpg_engine_event.Combat_attack
+      ~payload:
+        (`Assoc
+          [
+            ("actor_id", `String "warrior");
+            ("target_id", `String "goblin");
+            ("raw_d20", `Int 1);
+            ("base_damage", `Int 6);
+          ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config:combat_party_config ~events:[ ev ]
+  in
+  (* nat 1 = Critical_fail, damage multiplier 0.0 => damage = 0 *)
+  let goblin_hp =
+    state |> member "party" |> member "goblin" |> member "hp" |> to_int
+  in
+  Alcotest.(check int) "goblin hp unchanged on miss" 15 goblin_hp;
+  let entry =
+    state |> member "narration_log" |> to_list |> List.hd
+  in
+  Alcotest.(check string) "tier is critical_fail" "critical_fail"
+    (entry |> member "tier" |> to_string);
+  Alcotest.(check int) "damage is 0" 0 (entry |> member "damage" |> to_int)
+
+let test_combat_defense_reduces_damage () =
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T00:00:00Z"
+      ~event_type:Trpg_engine_event.Combat_defense
+      ~payload:
+        (`Assoc
+          [
+            ("actor_id", `String "warrior");
+            ("raw_d20", `Int 15);
+            ("incoming_damage", `Int 10);
+          ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config:combat_party_config ~events:[ ev ]
+  in
+  (* warrior DEF=8, bonus=8/3=2. raw_d20=15, total=15+2=17 => Great tier *)
+  (* mitigation=0.75, mitigated=round(10*0.75)=round(7.5)=8 *)
+  (* actual_damage = 10 - 8 = 2 *)
+  (* warrior HP: 20 - 2 = 18 *)
+  let warrior_hp =
+    state |> member "party" |> member "warrior" |> member "hp" |> to_int
+  in
+  Alcotest.(check int) "warrior hp after defense" 18 warrior_hp;
+  let entry =
+    state |> member "narration_log" |> to_list |> List.hd
+  in
+  Alcotest.(check string) "narration type is combat_defense" "combat_defense"
+    (entry |> member "type" |> to_string);
+  Alcotest.(check int) "mitigated damage" 8
+    (entry |> member "mitigated" |> to_int);
+  Alcotest.(check int) "actual damage" 2
+    (entry |> member "actual_damage" |> to_int)
+
+let test_turn_timeout_advances_turn () =
+  let config =
+    `Assoc
+      [
+        ("party", `Assoc []);
+        ("world", `Assoc [ ("story_flags", `List []) ]);
+      ]
+  in
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T00:00:00Z"
+      ~event_type:Trpg_engine_event.Turn_timeout
+      ~payload:(`Assoc [ ("actor_id", `String "p01") ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config ~events:[ ev ]
+  in
+  let narration_log = state |> member "narration_log" |> to_list in
+  Alcotest.(check bool) "narration has timeout entry" true
+    (List.length narration_log > 0);
+  let entry = List.hd narration_log in
+  Alcotest.(check string) "type is turn_timeout" "turn_timeout"
+    (entry |> member "type" |> to_string);
+  let turn = state |> member "turn" |> to_int in
+  Alcotest.(check int) "turn advanced from 1 to 2" 2 turn
+
+let test_keeper_unavailable_sets_auto_pilot () =
+  let config =
+    `Assoc
+      [
+        ( "party",
+          `Assoc
+            [
+              ( "p01",
+                `Assoc
+                  [
+                    ("hp", `Int 10);
+                    ("max_hp", `Int 10);
+                    ("alive", `Bool true);
+                    ("inventory", `List []);
+                  ] );
+            ] );
+        ("world", `Assoc [ ("story_flags", `List []) ]);
+      ]
+  in
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T00:00:00Z"
+      ~event_type:Trpg_engine_event.Keeper_unavailable
+      ~payload:(`Assoc [ ("actor_id", `String "p01") ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config ~events:[ ev ]
+  in
+  let control =
+    state |> member "actor_control" |> member "p01" |> to_string
+  in
+  Alcotest.(check string) "actor set to auto-pilot" "auto-pilot" control;
+  let narration_log = state |> member "narration_log" |> to_list in
+  Alcotest.(check bool) "narration has keeper_unavailable entry" true
+    (List.length narration_log > 0)
+
+let test_world_event_damages_all_alive () =
+  let config =
+    `Assoc
+      [
+        ( "party",
+          `Assoc
+            [
+              ( "p1",
+                `Assoc
+                  [
+                    ("hp", `Int 20);
+                    ("max_hp", `Int 20);
+                    ("alive", `Bool true);
+                    ("inventory", `List []);
+                  ] );
+              ( "p2",
+                `Assoc
+                  [
+                    ("hp", `Int 10);
+                    ("max_hp", `Int 10);
+                    ("alive", `Bool true);
+                    ("inventory", `List []);
+                  ] );
+              ( "dead_one",
+                `Assoc
+                  [
+                    ("hp", `Int 0);
+                    ("max_hp", `Int 10);
+                    ("alive", `Bool false);
+                    ("inventory", `List []);
+                  ] );
+            ] );
+        ("world", `Assoc [ ("story_flags", `List []) ]);
+      ]
+  in
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T00:00:00Z"
+      ~event_type:Trpg_engine_event.World_event
+      ~payload:
+        (`Assoc
+          [ ("effect_type", `String "earthquake"); ("damage", `Int 5) ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config ~events:[ ev ]
+  in
+  let p1_hp = state |> member "party" |> member "p1" |> member "hp" |> to_int in
+  let p2_hp = state |> member "party" |> member "p2" |> member "hp" |> to_int in
+  let dead_hp =
+    state |> member "party" |> member "dead_one" |> member "hp" |> to_int
+  in
+  Alcotest.(check int) "p1 hp reduced by 5" 15 p1_hp;
+  Alcotest.(check int) "p2 hp reduced by 5" 5 p2_hp;
+  Alcotest.(check int) "dead actor hp unchanged" 0 dead_hp;
+  let narration_log = state |> member "narration_log" |> to_list in
+  Alcotest.(check bool) "narration has world_event entry" true
+    (List.length narration_log > 0)
+
+let test_session_started_sets_timestamp () =
+  let config =
+    `Assoc
+      [
+        ("party", `Assoc []);
+        ("world", `Assoc [ ("story_flags", `List []) ]);
+      ]
+  in
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T12:00:00Z"
+      ~event_type:Trpg_engine_event.Session_started
+      ~payload:(`Assoc [])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config ~events:[ ev ]
+  in
+  let session_started_at =
+    state |> member "session_started_at" |> to_string
+  in
+  Alcotest.(check string) "session_started_at set" "2026-02-21T12:00:00Z"
+    session_started_at
+
+let test_advantage_takes_higher_roll () =
+  let open Trpg_rule_dnd5e_lite in
+  (* Advantage: max(5, 18) = 18. total = 18 + 10/3 + 0 = 18 + 3 = 21. Great. *)
+  let result =
+    roll_with_advantage ~d20_1:5 ~d20_2:18 ~stat:10 ~modifier:0
+  in
+  Alcotest.(check string) "advantage uses higher" "great"
+    (roll_tier_to_string result.tier);
+  (* Disadvantage: min(5, 18) = 5. total = 5 + 3 = 8. Partial. *)
+  let result2 =
+    roll_with_disadvantage ~d20_1:5 ~d20_2:18 ~stat:10 ~modifier:0
+  in
+  Alcotest.(check string) "disadvantage uses lower" "partial"
+    (roll_tier_to_string result2.tier)
+
+let test_roll_with_modifier () =
+  let open Trpg_rule_dnd5e_lite in
+  (* raw_d20=10, stat=9 (bonus=3), modifier=2 => total = 10+3+2 = 15. Success. *)
+  let r = roll_with_modifier ~raw_d20:10 ~stat:9 ~modifier:2 in
+  Alcotest.(check string) "total 15 is success" "success"
+    (roll_tier_to_string r.tier);
+  Alcotest.(check bool) "success passed" true r.passed;
+  (* nat 20 with modifier still miracle *)
+  let r2 = roll_with_modifier ~raw_d20:20 ~stat:0 ~modifier:0 in
+  Alcotest.(check string) "nat20 is miracle" "miracle"
+    (roll_tier_to_string r2.tier)
+
+let test_combat_attack_with_advantage () =
+  let ev =
+    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+      ~ts:"2026-02-21T00:00:00Z"
+      ~event_type:Trpg_engine_event.Combat_attack
+      ~payload:
+        (`Assoc
+          [
+            ("actor_id", `String "warrior");
+            ("target_id", `String "goblin");
+            ("raw_d20", `Int 3);
+            ("d20_2", `Int 18);
+            ("advantage", `Bool true);
+            ("base_damage", `Int 6);
+          ])
+      ()
+  in
+  let state =
+    Trpg_engine_replay.derive_state
+      ~rule:(module Trpg_rule_dnd5e_lite)
+      ~config:combat_party_config ~events:[ ev ]
+  in
+  (* Advantage: max(3,18)=18. ATK=12, bonus=4. total=18+4=22 => Great *)
+  (* damage = round((6+4)*1.5) = 15. goblin HP: 15-15=0 *)
+  let goblin_hp =
+    state |> member "party" |> member "goblin" |> member "hp" |> to_int
+  in
+  Alcotest.(check int) "advantage gives great roll, goblin dead" 0 goblin_hp
+
 let () =
   Alcotest.run "TRPG Rule DnD5e Lite"
     [
-      ("math", [ Alcotest.test_case "stat bonus" `Quick test_stat_bonus ]);
+      ( "math",
+        [
+          Alcotest.test_case "stat bonus" `Quick test_stat_bonus;
+          Alcotest.test_case "roll_with_modifier" `Quick test_roll_with_modifier;
+          Alcotest.test_case "advantage/disadvantage" `Quick
+            test_advantage_takes_higher_roll;
+        ] );
       ("tier", [ Alcotest.test_case "classify roll" `Quick test_classify_roll ]);
+      ( "combat",
+        [
+          Alcotest.test_case "attack damages target" `Quick
+            test_combat_attack_damages_target;
+          Alcotest.test_case "critical fail misses" `Quick
+            test_combat_attack_critical_fail_misses;
+          Alcotest.test_case "defense reduces damage" `Quick
+            test_combat_defense_reduces_damage;
+          Alcotest.test_case "attack with advantage" `Quick
+            test_combat_attack_with_advantage;
+        ] );
       ( "event",
         [
           Alcotest.test_case "hp changed applies" `Quick test_hp_changed_event;
@@ -220,5 +590,13 @@ let () =
             test_turn_action_proposed_added_to_narration_log;
           Alcotest.test_case "room restart clears previous session state" `Quick
             test_room_restart_clears_previous_session_state;
+          Alcotest.test_case "turn timeout advances turn" `Quick
+            test_turn_timeout_advances_turn;
+          Alcotest.test_case "keeper unavailable sets auto-pilot" `Quick
+            test_keeper_unavailable_sets_auto_pilot;
+          Alcotest.test_case "world event damages all alive" `Quick
+            test_world_event_damages_all_alive;
+          Alcotest.test_case "session started sets timestamp" `Quick
+            test_session_started_sets_timestamp;
         ] );
     ]

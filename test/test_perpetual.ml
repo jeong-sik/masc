@@ -93,7 +93,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
 
   (match Llm_client.model_spec_of_string "google:flash" with
    | Ok m ->
-     assert_equal "parse_model:google_alias_id" "gemini-2.5-flash" m.model_id;
+     assert_equal "parse_model:google_alias_id" "gemini-3-flash-preview" m.model_id;
      assert_true "parse_model:google_alias_provider"
        (m.provider = Llm_client.Gemini)
    | Error _ -> assert_true "parse_model:google_alias" false);

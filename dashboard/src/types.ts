@@ -157,7 +157,17 @@ export interface Keeper {
   active_model?: string
   next_model_hint?: string | null
   status: string
+  created_at?: string
+  updated_at?: string
   last_heartbeat?: string
+  keeper_age_s?: number
+  last_turn_ago_s?: number
+  last_handoff_ago_s?: number
+  last_compaction_ago_s?: number
+  last_proactive_ago_s?: number
+  last_proactive_reason?: string | null
+  last_drift_reason?: string | null
+  drift_count_total?: number
   generation?: number
   turn_count?: number
   context_ratio?: number
@@ -176,9 +186,13 @@ export interface Keeper {
   interests?: string[]
   primaryValue?: string
   activityLevel?: number
+  will?: string | null
+  needs?: string | null
+  desires?: string | null
   memory_recent_note?: string | null
   conversation_tail_count?: number
   k2k_count?: number
+  k2k_mentions?: Array<{ keeper: string; count: number }>
   handoff_count_total?: number
   compaction_count?: number
   last_compaction_saved_tokens?: number
@@ -274,14 +288,12 @@ export interface TrpgSession {
   created_at: string
 }
 
-export interface TrpgSessionSummary {
-  room_id: string
-  first_ts: string
-  last_ts: string
-  event_count: number
-  last_seq: number
-  ended: boolean
-  current: boolean
+export interface TrpgOutcome {
+  result: 'victory' | 'defeat' | 'draw'
+  reason?: string
+  summary?: string
+  turn?: number
+  phase?: string
 }
 
 export interface TrpgJoinGate {
@@ -305,9 +317,10 @@ export interface TrpgState {
   map?: string
   join_gate?: TrpgJoinGate
   contribution_ledger?: TrpgContributionEntry[]
+  outcome?: TrpgOutcome
   party: TrpgActor[]
   story_log: TrpgEvent[]
-  history: TrpgSessionSummary[]
+  history: TrpgSession[]
 }
 
 // --- Perpetual Agent ---

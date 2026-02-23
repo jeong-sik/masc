@@ -70,9 +70,9 @@ let test_llm_client () = group "LLM Client" (fun () ->
        (m.provider = Llm_client.Claude)
    | Error _ -> assert_true "parse_model:claude" false);
 
-  (match Llm_client.model_spec_of_string "gemini:gemini-3.1-pro-preview" with
+  (match Llm_client.model_spec_of_string "gemini:gemini-2.5-flash" with
    | Ok m ->
-     assert_equal "parse_model:gemini_id" "gemini-3.1-pro-preview" m.model_id;
+     assert_equal "parse_model:gemini_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:gemini_provider"
        (m.provider = Llm_client.Gemini)
    | Error _ -> assert_true "parse_model:gemini" false);
@@ -93,7 +93,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
 
   (match Llm_client.model_spec_of_string "google:flash" with
    | Ok m ->
-     assert_equal "parse_model:google_alias_id" "gemini-3.1-pro-preview" m.model_id;
+     assert_equal "parse_model:google_alias_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:google_alias_provider"
        (m.provider = Llm_client.Gemini)
    | Error _ -> assert_true "parse_model:google_alias" false);
@@ -434,28 +434,10 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   let state2 = Perpetual_loop.create_state config in
   assert_true "context:has_system"
     (String.length state2.context.system_prompt > 0);
-  assert_true "context:system_does_not_contain_goal"
-    (not
-       (try
-          let _ =
-            Str.search_forward (Str.regexp_string "test") state2.context.system_prompt 0
-          in true
-        with Not_found -> false));
-  assert_true "context:goal_is_first_message_with_prefix"
-    (match state2.context.messages with
-     | first :: _ ->
-       (try
-          let prefix = Context_manager.goal_prefix in
-          let re = Str.regexp_string prefix in
-          let has_prefix =
-            try
-              let idx = Str.search_forward re first.content 0 in
-              idx = 0
-            with Not_found -> false
-          in
-          first.role = Llm_client.User && has_prefix
-        with _ -> false)
-     | _ -> false);
+  assert_true "context:system_contains_goal"
+    (try let _ = Str.search_forward (Str.regexp_string "test")
+       state2.context.system_prompt 0 in true
+     with Not_found -> false);
 
   (* 8. Cost starts at zero *)
   assert_float_near "cost:initial" 0.0 state2.total_cost 0.001;

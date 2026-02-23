@@ -695,18 +695,6 @@ let schemas : Types.tool_schema list =
             ("required", `List [ `String "room_id"; `String "intervention_type" ]);
           ];
     };
-    {
-      name = "masc_trpg_session_list";
-      description =
-        "List all TRPG sessions with summary (room_id, timestamps, event count, ended status). \
-         No parameters required.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ("properties", `Assoc []);
-          ];
-    };
   ]
 
 let ok_json json = (true, Yojson.Safe.to_string json)
@@ -7909,32 +7897,12 @@ let handle_round_run ctx args : result =
         | Some (outcome, reason) ->
             let outcome_str = string_of_session_outcome outcome in
             let summary = summary_of_session_outcome outcome in
-            (* Compute session metadata for Room_ended payload *)
-            let all_session_events =
-              session_events_before @ !appended_events
-            in
-            let total_events = List.length all_session_events in
-            let total_turns = turn_after in
-            let duration_seconds =
-              match all_session_events with
-              | [] -> 0
-              | first_ev :: _ ->
-                  let now_ts = Unix.gettimeofday () in
-                  let start_ts =
-                    Resilience.Time.parse_iso8601_opt first_ev.Trpg_engine_event.ts
-                    |> Option.value ~default:now_ts
-                  in
-                  int_of_float (now_ts -. start_ts)
-            in
             let room_end_payload =
               `Assoc
                 [
                   ("room_id", `String room_id);
                   ("reason", `String reason);
                   ("outcome", `String outcome_str);
-                  ("duration_seconds", `Int duration_seconds);
-                  ("total_events", `Int total_events);
-                  ("total_turns", `Int total_turns);
                 ]
             in
             let outcome_payload =
@@ -7964,12 +7932,7 @@ let handle_round_run ctx args : result =
             in
             (match room_end_event_opt with
             | Some room_end_event ->
-                appended_events := !appended_events @ [ room_end_event ];
-                (* Clear current_room pointer if this room was the active one *)
-                (match Room.read_current_room ctx.config with
-                | Some current when current = room_id ->
-                    Room.clear_current_room ctx.config
-                | _ -> ())
+                appended_events := !appended_events @ [ room_end_event ]
             | None -> ());
             appended_events := !appended_events @ [ outcome_event ];
             let importance_score =
@@ -8257,36 +8220,6 @@ let handle_world_event ctx args : result =
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
-let handle_session_list ctx _args : result =
-  let base_dir = ctx.config.base_path in
-  let result_json =
-    let ( let* ) = Result.bind in
-    let* summaries = Trpg_engine_store_sqlite.list_sessions_summary ~base_dir in
-    let current_room = Room.read_current_room ctx.config in
-    let sessions =
-      List.map
-        (fun (s : Trpg_engine_store_sqlite.session_summary) ->
-          let is_current =
-            match current_room with
-            | Some cr -> cr = s.room_id
-            | None -> false
-          in
-          `Assoc
-            [
-              ("room_id", `String s.room_id);
-              ("first_ts", `String s.first_ts);
-              ("last_ts", `String s.last_ts);
-              ("event_count", `Int s.event_count);
-              ("last_seq", `Int s.last_seq);
-              ("ended", `Bool s.ended);
-              ("current", `Bool is_current);
-            ])
-        summaries
-    in
-    Ok (`Assoc [ ("ok", `Bool true); ("sessions", `List sessions) ])
-  in
-  match result_json with Ok j -> ok_json j | Error e -> err e
-
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_trpg_dice_roll" -> Some (handle_dice_roll ctx args)
@@ -8308,5 +8241,4 @@ let dispatch ctx ~name ~args : result option =
   | "masc_trpg_scene_transition" -> Some (handle_scene_transition ctx args)
   | "masc_trpg_quest_update" -> Some (handle_quest_update ctx args)
   | "masc_trpg_world_event" -> Some (handle_world_event ctx args)
-  | "masc_trpg_session_list" -> Some (handle_session_list ctx args)
   | _ -> None

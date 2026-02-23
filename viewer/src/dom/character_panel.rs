@@ -12,6 +12,11 @@ use wasm_bindgen::JsCast;
 #[derive(Clone, PartialEq)]
 pub struct ActorSnapshot {
     id: String,
+    name: String,
+    class_name: String,
+    keeper: String,
+    archetype: String,
+    persona: String,
     hp: i32,
     hp_known: bool,
     max_hp_known: bool,
@@ -45,6 +50,8 @@ pub struct CharacterPanelCache {
 
 pub(crate) const DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE: &str = "파티원을 선택하면 상세 정보가 표시됩니다.";
 pub(crate) const DEFAULT_ACTOR_INSPECTOR_NO_DIALOGUE_MESSAGE: &str = "최근 대사 없음";
+pub(crate) const DEFAULT_ACTOR_INSPECTOR_NOT_FOUND_MESSAGE: &str =
+    "선택한 파티원을 찾지 못했습니다. 목록이 갱신되었거나 식별자가 변경되었을 수 있습니다.";
 
 /// Determines HP bar color class based on percentage.
 fn hp_class(hp: i32, max_hp: i32) -> &'static str {
@@ -1010,6 +1017,40 @@ fn render_actor_inspector(document: &web_sys::Document, selected: &web_sys::Elem
             html_escape(&contribution_reasons.join(" · "))
         )
     };
+    let hp_hint = if hp_known {
+        if max_hp_known {
+            "현재 값/최대값"
+        } else {
+            "최대값 미확인"
+        }
+    } else {
+        "미확인"
+    };
+    let mp_hint = if mp_known {
+        if max_mp_known {
+            "현재 값/최대값"
+        } else {
+            "최대값 미확인"
+        }
+    } else {
+        "미확인"
+    };
+    let field_legend = format!(
+        concat!(
+            "<div class=\"actor-inspector-section actor-inspector-section-compact\">",
+            "<div class=\"actor-inspector-section-title\">지표 해설</div>",
+            "<div class=\"actor-inspector-legend-grid\">",
+            "<div><span class=\"actor-inspector-legend-key\">HP</span><span class=\"actor-inspector-legend-value\">체력 ({})</span></div>",
+            "<div><span class=\"actor-inspector-legend-key\">MP</span><span class=\"actor-inspector-legend-value\">마력 ({})</span></div>",
+            "<div><span class=\"actor-inspector-legend-key\">능력치</span><span class=\"actor-inspector-legend-value\">확인된 항목만 표시</span></div>",
+            "<div><span class=\"actor-inspector-legend-key\">상태</span><span class=\"actor-inspector-legend-value\">런타임 상태 + 사유</span></div>",
+            "<div><span class=\"actor-inspector-legend-key\">기여</span><span class=\"actor-inspector-legend-value\">행동 기반 가중치 합산</span></div>",
+            "<div><span class=\"actor-inspector-legend-key\">관계</span><span class=\"actor-inspector-legend-value\">최근 관계 태그</span></div>",
+            "</div></div>"
+        ),
+        hp_hint,
+        mp_hint
+    );
     let hp_display = metric_text(hp, hp_known, max_hp, max_hp_known);
     let mp_display = metric_text(mp, mp_known, max_mp, max_mp_known);
     let hp_display_class = metric_text_class(hp_known, max_hp_known);
@@ -1064,6 +1105,7 @@ fn render_actor_inspector(document: &web_sys::Document, selected: &web_sys::Elem
             "<div class=\"actor-inspector-line\">능력치: <span class=\"actor-inspector-metric {atk_class}\">ATK={atk}</span> <span class=\"actor-inspector-metric {def_class}\">DEF={def}</span> <span class=\"actor-inspector-metric {int_class}\">INT={int}</span> <span class=\"actor-inspector-metric {luck_class}\">LCK={luck}</span></div>",
             "<div class=\"actor-inspector-line\">최근 기여 사유: {contribution_reason}</div>",
             "{contribution_reasons}",
+            "{field_legend}",
             "<div class=\"actor-inspector-section\">",
             "<div class=\"actor-inspector-section-title\">관계</div>",
             "<div class=\"actor-rel-list\">{relationships}</div>",
@@ -1129,6 +1171,7 @@ fn render_actor_inspector(document: &web_sys::Document, selected: &web_sys::Elem
         int = html_escape(&int_text),
         luck_class = luck_class,
         luck = html_escape(&luck_text),
+        field_legend = field_legend,
     ));
 }
 
@@ -1147,6 +1190,25 @@ pub(crate) fn select_character_card(document: &web_sys::Document, actor_id: &str
     let Ok(cards) = document.query_selector_all("#character-panel .character-card[data-actor-id]") else {
         return;
     };
+
+    let mut exact_match_actor_id = None::<String>;
+    for idx in 0..cards.length() {
+        let Some(node) = cards.item(idx) else {
+            continue;
+        };
+        let Some(card) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let card_actor = card
+            .get_attribute("data-actor-id")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if card_actor.eq_ignore_ascii_case(actor_id) {
+            exact_match_actor_id = Some(card_actor);
+            break;
+        }
+    }
 
     let mut selected_card = None::<web_sys::Element>;
     for idx in 0..cards.length() {
@@ -1172,11 +1234,23 @@ pub(crate) fn select_character_card(document: &web_sys::Document, actor_id: &str
             .trim()
             .to_string();
         let card_aliases = collect_actor_aliases(&card_actor, &card_name, &card_keeper);
-
-        let matched = card_actor.eq_ignore_ascii_case(actor_id)
-            || query_aliases
-                .iter()
-                .any(|q| card_aliases.iter().any(|alias| identity_matches(q, alias)));
+        let card_name_compact = identity_token(&card_name);
+        let card_actor_compact = identity_token(&card_actor);
+        let card_keeper_compact = identity_token(&card_keeper);
+        let query_compact = identity_token(&actor_id_lower);
+        let matched = if let Some(exact_match) = exact_match_actor_id.as_deref() {
+            card_actor.eq_ignore_ascii_case(exact_match)
+        } else {
+            card_actor.eq_ignore_ascii_case(actor_id)
+                || (!query_compact.is_empty() && query_compact == card_actor_compact)
+                || (!card_name_compact.is_empty()
+                    && identity_matches(&query_compact, &card_name_compact))
+                || (!card_keeper_compact.is_empty()
+                    && identity_matches(&query_compact, &card_keeper_compact))
+                || query_aliases
+                    .iter()
+                    .any(|q| card_aliases.iter().any(|alias| identity_matches(q, alias)))
+        };
         if matched {
             let _ = card.class_list().add_1("join-pick-selected");
             let _ = card.set_attribute("aria-selected", "true");
@@ -1193,9 +1267,9 @@ pub(crate) fn select_character_card(document: &web_sys::Document, actor_id: &str
             .get_element_by_id("actor-id-input")
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
         {
-            input.set_value("");
+            input.set_value(actor_id);
         }
-        render_actor_inspector_empty(document, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE);
+        render_actor_inspector_empty(document, DEFAULT_ACTOR_INSPECTOR_NOT_FOUND_MESSAGE);
         return;
     };
 
@@ -1207,6 +1281,7 @@ pub(crate) fn select_character_card(document: &web_sys::Document, actor_id: &str
     if !selected_id.is_empty() {
         card.scroll_into_view_with_bool(true);
         let _ = dashboard.set_attribute("data-selected-actor", &selected_id);
+        let _ = dashboard.set_attribute("data-selected-manual", "1");
         if let Some(input) = document
             .get_element_by_id("actor-id-input")
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
@@ -1224,23 +1299,64 @@ pub(crate) fn select_character_card(document: &web_sys::Document, actor_id: &str
         {
             input.set_value("");
         }
-        render_actor_inspector_empty(document, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE);
+        let _ = dashboard.set_attribute("data-selected-manual", "1");
+        render_actor_inspector_empty(document, DEFAULT_ACTOR_INSPECTOR_NOT_FOUND_MESSAGE);
     }
 }
 
 fn resolve_character_card_actor_id(target: web_sys::EventTarget) -> Option<String> {
-    let card = if let Ok(el) = target.clone().dyn_into::<web_sys::Element>() {
-        el.closest(".character-card").ok().flatten()
+    let mut node = if let Ok(element) = target.clone().dyn_into::<web_sys::Element>() {
+        Some(element)
     } else {
         target
             .clone()
             .dyn_into::<web_sys::Node>()
             .ok()
             .and_then(|node| node.parent_element())
-            .and_then(|el| el.closest(".character-card").ok().flatten())
     };
+    while let Some(current) = node {
+        if is_internal_character_panel_control(&current) {
+            return None;
+        }
+        if let Ok(Some(card)) = current.closest(".character-card[data-actor-id]") {
+            let actor_id = card
+                .get_attribute("data-actor-id")
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if actor_id.is_empty() {
+                return None;
+            }
+            return Some(actor_id);
+        }
+        node = current.parent_element();
+    }
+    None
+}
 
-    card.and_then(|card| card.get_attribute("data-actor-id").map(|value| value.trim().to_string()))
+fn is_internal_character_panel_control(element: &web_sys::Element) -> bool {
+    let tag_name = element.tag_name().to_ascii_lowercase();
+    if tag_name == "input" {
+        return element
+            .dyn_ref::<web_sys::HtmlInputElement>()
+            .map(|input| input.type_() == "checkbox" || input.type_() == "radio")
+            .unwrap_or(true);
+    }
+
+    if tag_name == "label" {
+        return element.class_list().contains("section-header");
+    }
+
+    element
+        .closest(".section-header")
+        .ok()
+        .flatten()
+        .is_some()
+        || element
+            .closest(".section-toggle")
+            .ok()
+            .flatten()
+            .is_some()
 }
 
 fn ensure_character_panel_selection_binding(document: &web_sys::Document) {
@@ -1324,6 +1440,11 @@ pub fn update_character_panel_dom(
         .iter()
         .map(|a| ActorSnapshot {
             id: a.id.clone(),
+            name: a.name.clone(),
+            class_name: a.class.clone(),
+            keeper: a.keeper.clone(),
+            archetype: a.archetype.clone(),
+            persona: a.persona.clone(),
             hp: a.hp,
             hp_known: a.hp_known,
             max_hp_known: a.max_hp_known,

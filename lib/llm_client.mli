@@ -147,7 +147,7 @@ val tool_msg : name:string -> call_id:string -> string -> message
 val estimate_tokens : message list -> int
 
 (** Parse model spec from string like "ollama:glm-4.7-flash:latest",
-    "claude:opus", or "gemini:gemini-2.5-flash".
+    "claude:opus", or "gemini:gemini-3-flash-preview".
     Splits at the first ':' only, so model IDs may contain additional ':'. *)
 val model_spec_of_string : string -> (model_spec, string) result
 

@@ -805,7 +805,7 @@ let model_spec_of_string s =
         | "gemini" | "google" ->
           if model_id = "pro" then Ok gemini_pro
           else if model_id = "flash" then
-            Ok { gemini_pro with model_id = "gemini-2.5-flash" }
+            Ok { gemini_pro with model_id = "gemini-3-flash-preview" }
           else
             Ok { gemini_pro with model_id }
         | "claude" | "anthropic" ->

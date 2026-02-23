@@ -2841,7 +2841,7 @@ let test_end_to_end_victory_via_flags () =
     "outcome_reason mentions flag"
     true
     (match outcome_reason with
-    | Some r -> contains_substring r "outcome.victory"
+    | Some r -> contains_substring r "flag:"
     | None -> false);
   cleanup_dir base_dir
 

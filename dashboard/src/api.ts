@@ -8,11 +8,11 @@ import type {
   BoardHearth,
   BoardFlair,
   TrpgState,
-  TrpgSessionSummary,
   TrpgEvent,
   Agent,
   CouncilDebate,
   CouncilSession,
+  BoardSortMode,
 } from './types'
 
 // --- Auth ---
@@ -133,7 +133,7 @@ function extractMcpText(res: McpCallResponse): string {
   return res.result?.content?.[0]?.text ?? ''
 }
 
-async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
+export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
   const text = await postRaw('/mcp', {
     jsonrpc: '2.0',
     method: 'tools/call',
@@ -166,8 +166,11 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
 
 // --- Board ---
 
-export function fetchBoard(): Promise<{ posts: BoardPost[] }> {
-  return get('/api/v1/board')
+export function fetchBoard(sortBy?: BoardSortMode): Promise<{ posts: BoardPost[] }> {
+  const params = new URLSearchParams()
+  if (sortBy) params.set('sort_by', sortBy)
+  const qs = params.toString()
+  return get(`/api/v1/board${qs ? `?${qs}` : ''}`)
 }
 
 export function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
@@ -223,8 +226,152 @@ interface TrpgRawEvent {
   room_id?: string
   type?: string
   actor_id?: string | null
+  actor_name?: string | null
   ts?: string
+  timestamp?: string
+  phase?: string
+  category?: string
+  visibility?: string
+  event_id?: string
   payload?: unknown
+}
+
+function parseOutcomeResult(value: unknown): 'victory' | 'defeat' | 'draw' | undefined {
+  const normalized = asString(value, '').trim().toLowerCase()
+  if (normalized === 'win' || normalized === 'won' || normalized === 'victory') return 'victory'
+  if (normalized === 'lose' || normalized === 'lost' || normalized === 'defeat') return 'defeat'
+  if (normalized === 'draw' || normalized === 'stalemate' || normalized === 'tie') return 'draw'
+  return undefined
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = asString(value, '')
+    if (text.trim()) return text.trim()
+  }
+  return ''
+}
+
+function parseSessionOutcomePayload(payload: Record<string, unknown>): {
+  result: 'victory' | 'defeat' | 'draw'
+  reason?: string
+  summary?: string
+  details?: string
+  winner?: string
+  winner_actor_id?: string
+  evidence?: string[]
+  raw_reason?: string
+  turn?: number
+  phase?: string
+} | undefined {
+  const result = parseOutcomeResult(firstString(payload.outcome, payload.result, payload.result_code))
+  if (!result) return undefined
+  const reason = firstString(
+    payload.reason,
+    payload.reason_code,
+    payload.description,
+    payload.detail,
+  )
+  const summary = firstString(payload.summary, payload.summary_ko, payload.summary_en, payload.note)
+  const details = firstString(
+    payload.details,
+    payload.details_text,
+    payload.text,
+    payload.note,
+  )
+  const winner = firstString(
+    payload.winner,
+    payload.winner_name,
+    payload.actor_winner,
+    payload.winner_actor,
+  )
+  const winnerActorId = firstString(
+    payload.winner_actor_id,
+    payload.winner_actor,
+    payload.actor_winner_id,
+  )
+  const rawReason = firstString(payload.raw_reason, payload.raw_reason_code, payload.error_message)
+  const evidence = (() => {
+    const rawEvidence =
+      payload.evidence ??
+      payload.evidence_ids ??
+      payload.supporting_events ??
+      payload.event_ids ??
+      []
+    if (typeof rawEvidence === 'string') return [rawEvidence]
+    if (!Array.isArray(rawEvidence)) return []
+    return rawEvidence
+      .map(item => {
+        if (typeof item === 'string') return item.trim()
+        if (isRecord(item)) {
+          const fromSummary = asString(item.summary, '').trim()
+          if (fromSummary) return fromSummary
+          const fromText = asString(item.text, '').trim()
+          if (fromText) return fromText
+          const fromType = asString(item.type, '').trim()
+          if (fromType) return fromType
+          return asString(item.event_id, '').trim()
+        }
+        return ''
+      })
+      .filter((item): item is string => item.length > 0)
+  })()
+  const turn = (() => {
+    const fromTurn = asNumber(payload.turn, Number.NaN)
+    if (Number.isFinite(fromTurn)) return fromTurn
+    const fromTurnNumber = asNumber(payload.turn_number, Number.NaN)
+    if (Number.isFinite(fromTurnNumber)) return fromTurnNumber
+    const fromCurrentTurn = asNumber(payload.current_turn, Number.NaN)
+    if (Number.isFinite(fromCurrentTurn)) return fromCurrentTurn
+    const fromRound = asNumber(payload.round, Number.NaN)
+    return Number.isFinite(fromRound) ? fromRound : undefined
+  })()
+  const phase = firstString(payload.phase, payload.phase_name, payload.current_phase, payload.phase_id)
+  return {
+    result,
+    reason: reason || undefined,
+    summary: summary || undefined,
+    details: details || undefined,
+    winner: winner || undefined,
+    winner_actor_id: winnerActorId || undefined,
+    evidence: evidence.length > 0 ? evidence : undefined,
+    raw_reason: rawReason || undefined,
+    turn,
+    phase: phase || undefined,
+  }
+}
+
+function parseSessionOutcomeFromEvents(
+  rawStateResponse: TrpgRawStateResponse,
+  rawEvents: unknown[],
+): {
+  result: 'victory' | 'defeat' | 'draw'
+  reason?: string
+  summary?: string
+  details?: string
+  winner?: string
+  winner_actor_id?: string
+  evidence?: string[]
+  raw_reason?: string
+  turn?: number
+  phase?: string
+} | undefined {
+  const stateRaw = isRecord(rawStateResponse.state) ? rawStateResponse.state : {}
+  const statusRaw = asString(stateRaw.status, 'active').toLowerCase()
+  if (statusRaw !== 'ended') return undefined
+
+  const latest = [...rawEvents].reverse().find(raw => {
+    if (!isRecord(raw)) return false
+    return asString(raw.type, '') === 'session.outcome'
+  })
+  const stateOutcome = isRecord(stateRaw.session_outcome) ? stateRaw.session_outcome : {}
+  if (isRecord(stateOutcome) && Object.keys(stateOutcome).length > 0) {
+    const fromState = parseSessionOutcomePayload(stateOutcome)
+    if (fromState) return fromState
+  }
+
+  if (!isRecord(latest)) return undefined
+  return parseSessionOutcomePayload(isRecord(latest.payload) ? latest.payload : {})
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -237,6 +384,15 @@ function asString(value: unknown, fallback = ''): string {
 
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function asInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value.trim(), 10)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
 }
 
 function asBoolean(value: unknown, fallback = false): boolean {
@@ -257,6 +413,42 @@ function asStringList(value: unknown): string[] {
       return ''
     })
     .filter((item): item is string => item.length > 0)
+}
+
+function asStringMap(value: unknown): Record<string, string> {
+  const result: Record<string, string> = {}
+
+  if (!isRecord(value) && !Array.isArray(value)) return result
+  if (isRecord(value)) {
+    Object.entries(value).forEach(([key, rawValue]) => {
+      const normalizedKey = key.trim()
+      const text = asString(rawValue, '').trim()
+      if (!normalizedKey || !text) return
+      result[normalizedKey] = text
+    })
+    return result
+  }
+
+  for (const item of value) {
+    if (!isRecord(item)) continue
+    const target = firstString(
+      item.to,
+      item.target,
+      item.actor_id,
+      item.name,
+      item.id,
+    )
+    const relation = firstString(
+      item.relationship,
+      item.relation,
+      item.type,
+      item.kind,
+    )
+    if (!target || !relation) continue
+    result[target] = relation
+  }
+
+  return result
 }
 
 function normalizeRole(
@@ -315,8 +507,27 @@ function stringifyPayload(payload: Record<string, unknown>): string {
   return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact
 }
 
-function eventContent(type: string, actorId: string, payload: Record<string, unknown>): string {
-  const actorLabel = actorId || asString(payload.actor_id, '')
+function eventCategoryFromType(type: string): string {
+  const lower = type.trim().toLowerCase()
+  if (!lower) return 'meta'
+  if (lower.startsWith('dice.')) return 'dice'
+  if (lower.startsWith('combat.') || lower.includes('.attack') || lower.includes('.damage')) return 'combat'
+  if (lower.includes('actor.')) return 'actor'
+  if (lower.includes('turn.') || lower === 'turn.started' || lower === 'phase.changed') return 'turn'
+  if (lower.includes('join.')) return 'join'
+  if (lower.includes('memory')) return 'memory'
+  if (lower.includes('world.')) return 'world'
+  if (lower.includes('narration')) return 'story'
+  return 'meta'
+}
+
+function eventContent(
+  type: string,
+  actorId: string,
+  actorName: string,
+  payload: Record<string, unknown>,
+): string {
+  const actorLabel = actorName || actorId || asString(payload.actor_id, '') || asString(payload.actor_name, '')
   switch (type) {
     case 'turn.action.proposed': {
       const reply = asString(payload.proposed_action, asString(payload.reply, ''))
@@ -393,17 +604,36 @@ function eventContent(type: string, actorId: string, payload: Record<string, unk
   }
 }
 
-function normalizeRawEvent(value: unknown): TrpgEvent {
+function normalizeRawEvent(
+  value: unknown,
+  actorNameById: Record<string, string>,
+): TrpgEvent {
   const raw = isRecord(value) ? (value as TrpgRawEvent) : {}
   const type = asString(raw.type, 'event')
-  const actorId = typeof raw.actor_id === 'string' ? raw.actor_id : ''
+  const actorId = typeof raw.actor_id === 'string' && raw.actor_id.trim() ? raw.actor_id.trim() : ''
+  const actorName =
+    asString(raw.actor_name, '').trim() ||
+    actorNameById[actorId] ||
+    asString((isRecord(raw.payload) ? raw.payload.actor_name : ''), '')
   const payload = isRecord(raw.payload) ? raw.payload : {}
+  const timestamp = asString(raw.ts, asString(raw.timestamp, new Date().toISOString()))
+  const phase = asString(raw.phase, asString(payload.phase, ''))
+  const category = asString(raw.category, '')
+
   return {
     type,
-    actor: actorId || asString(payload.actor_id, ''),
-    content: eventContent(type, actorId, payload),
+    actor: actorName || actorId || asString(payload.actor_name, ''),
+    actor_id: actorId || asString(payload.actor_id, ''),
+    actor_name: actorName,
+    seq: raw.seq,
+    room_id: asString(raw.room_id, ''),
+    phase: phase || undefined,
+    category: category || eventCategoryFromType(type),
+    visibility: asString(raw.visibility, asString(payload.visibility, 'public')),
+    event_id: asString(raw.event_id, ''),
+    content: eventContent(type, actorId, actorName, payload),
     dice_roll: normalizeDiceRoll(type, payload),
-    timestamp: asString(raw.ts, new Date().toISOString()),
+    timestamp,
   }
 }
 
@@ -411,7 +641,6 @@ function normalizeTrpgState(
   rawStateResponse: TrpgRawStateResponse,
   rawEvents: unknown[],
   requestedRoom?: string,
-  sessions?: TrpgSessionSummary[],
 ): TrpgState {
   const roomId =
     asString(rawStateResponse.room_id, '') ||
@@ -435,6 +664,44 @@ function normalizeTrpgState(
     const keeperValue = actorControl[actorId]
     const keeper = typeof keeperValue === 'string' ? keeperValue : undefined
     const role = normalizeRole(actor.role, actorId, keeper)
+    const generation = asInt(actor.generation)
+    const joinedAt = firstString(
+      actor.joined_at,
+      actor.joinedAt,
+      actor.started_at,
+      actor.startedAt,
+    )
+    const claimedAt = firstString(
+      actor.claimed_at,
+      actor.claimedAt,
+      actor.assigned_at,
+      actor.assignedAt,
+      actor.assigned_time,
+    )
+    const lastSeen = firstString(
+      actor.last_seen,
+      actor.lastSeen,
+      actor.last_seen_at,
+      actor.lastSeenAt,
+      actor.last_active,
+      actor.lastActive,
+    )
+    const actorScene = firstString(
+      actor.scene,
+      actor.current_scene,
+      actor.currentScene,
+      actor.world_scene,
+      actor.scene_name,
+      actor.sceneName,
+    )
+    const actorLocation = firstString(
+      actor.location,
+      actor.current_location,
+      actor.currentLocation,
+      actor.position,
+      actor.zone,
+      actor.area,
+    )
 
     return {
       id: actorId,
@@ -446,6 +713,15 @@ function normalizeTrpgState(
       traits: asStringList(actor.traits),
       skills: asStringList(actor.skills),
       status: alive ? 'active' : 'dead',
+      generation,
+      joined_at: joinedAt || undefined,
+      claimed_at: claimedAt || undefined,
+      last_seen: lastSeen || undefined,
+      scene: actorScene || undefined,
+      location: actorLocation || undefined,
+      inventory: asStringList(actor.inventory),
+      notes: asStringList(actor.notes),
+      relationships: asStringMap(actor.relationships),
       stats: {
         hp,
         max_hp: maxHp,
@@ -463,6 +739,7 @@ function normalizeTrpgState(
     }
   })
   const party = allActors.filter(actor => actor.status !== 'dead')
+  const outcome = parseSessionOutcomeFromEvents(rawStateResponse, rawEvents)
 
   const joinGate = {
     phase_open: asBoolean(joinGateRaw.phase_open, true),
@@ -484,7 +761,11 @@ function normalizeTrpgState(
     }
   })
 
-  const storyLog = rawEvents.map(normalizeRawEvent)
+  const actorNameById = allActors.reduce<Record<string, string>>((acc, actor) => {
+    acc[actor.id] = actor.name
+    return acc
+  }, {})
+  const storyLog = rawEvents.map(event => normalizeRawEvent(event, actorNameById))
   const roundNumber = asNumber(state.turn, 1)
   const phase = asString(state.phase, 'round')
   const mapValue = asString(state.map, '')
@@ -519,32 +800,10 @@ function normalizeTrpgState(
     map: map || undefined,
     join_gate: joinGate,
     contribution_ledger: contributionLedger,
+    outcome,
     party,
     story_log: storyLog,
-    history: sessions ?? [],
-  }
-}
-
-async function fetchTrpgSessionsRaw(): Promise<TrpgSessionSummary[]> {
-  try {
-    const data = await get<{ sessions: unknown[] }>('/api/v1/trpg/sessions')
-    const raw = Array.isArray(data.sessions) ? data.sessions : []
-    return raw
-      .map(s => {
-        if (!isRecord(s)) return null
-        return {
-          room_id: asString(s.room_id, ''),
-          first_ts: asString(s.first_ts, ''),
-          last_ts: asString(s.last_ts, ''),
-          event_count: asNumber(s.event_count, 0),
-          last_seq: asNumber(s.last_seq, 0),
-          ended: asBoolean(s.ended, false),
-          current: asBoolean(s.current, false),
-        }
-      })
-      .filter((s): s is TrpgSessionSummary => s !== null)
-  } catch {
-    return []
+    history: [],
   }
 }
 
@@ -556,17 +815,35 @@ async function fetchTrpgEventsRaw(room?: string): Promise<unknown[]> {
 
 export async function fetchTrpgState(room?: string): Promise<TrpgState> {
   const params = room ? `?room_id=${encodeURIComponent(room)}` : ''
-  const [rawState, rawEvents, sessions] = await Promise.all([
+  const [rawState, rawEvents] = await Promise.all([
     get<TrpgRawStateResponse>(`/api/v1/trpg/state${params}`),
     fetchTrpgEventsRaw(room),
-    fetchTrpgSessionsRaw(),
   ])
-  return normalizeTrpgState(rawState, rawEvents, room, sessions)
+  return normalizeTrpgState(rawState, rawEvents, room)
 }
 
 export async function fetchTrpgEvents(room?: string): Promise<{ events: TrpgEvent[] }> {
   const events = await fetchTrpgEventsRaw(room)
-  return { events: events.map(normalizeRawEvent) }
+  const actorNameById: Record<string, string> = {}
+  events.forEach(rawEvent => {
+    if (!isRecord(rawEvent)) return
+    const id = asString(rawEvent.actor_id, '').trim()
+    const name = asString(rawEvent.actor_name, '').trim()
+    if (id && name && actorNameById[id] !== name) {
+      actorNameById[id] = name
+    }
+    if (isRecord(rawEvent.payload)) {
+      const payload = rawEvent.payload
+      const payloadId = asString(payload.actor_id, '').trim()
+      const payloadName = asString(payload.actor_name, '').trim()
+      if (payloadId && payloadName && actorNameById[payloadId] !== payloadName) {
+        actorNameById[payloadId] = payloadName
+      }
+    }
+  })
+  return {
+    events: events.map(event => normalizeRawEvent(event, actorNameById)),
+  }
 }
 
 export interface TrpgRoundRunStatus {
@@ -851,4 +1128,10 @@ export async function startDebate(topic: string): Promise<CouncilDebate | null> 
 
 export function fetchDebateStatus(debateId: string): Promise<string> {
   return callMcpTool('masc_debate_status', { debate_id: debateId })
+}
+
+export function sendKeeperMessage(name: string, message: string, models?: string[]): Promise<string> {
+  const args: Record<string, unknown> = { name, message }
+  if (models && models.length > 0) args.models = models
+  return callMcpTool("masc_keeper_msg", args)
 }

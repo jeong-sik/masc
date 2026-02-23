@@ -569,10 +569,11 @@ let curl_post ~url ~headers ~body ~timeout_sec : (string, string) result =
 (* ================================================================ *)
 
 (** Build native Ollama /api/chat request body with think:false.
-    Uses the same message format as OpenAI but adds Ollama-specific fields. *)
+    Uses the same message format as OpenAI but adds Ollama-specific fields.
+    Includes tools when provided - Ollama supports OpenAI-compatible tool format. *)
 let build_ollama_chat_body (req : completion_request) : string =
   let messages_json = List.map message_to_openai_json req.messages in
-  let body = [
+  let base = [
     ("model", `String req.model.model_id);
     ("messages", `List messages_json);
     ("stream", `Bool false);
@@ -582,13 +583,21 @@ let build_ollama_chat_body (req : completion_request) : string =
       ("num_predict", `Int req.max_tokens);
     ]);
   ] in
-  Yojson.Safe.to_string (`Assoc body)
+  let with_tools = match req.tools with
+    | [] -> base
+    | tools ->
+      let tools_json = List.map tool_def_to_openai_json tools in
+      ("tools", `List tools_json) :: base
+  in
+  Yojson.Safe.to_string (`Assoc with_tools)
 
 let call_ollama_chat ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let url = sprintf "%s/api/chat" req.model.api_url in
   let body = build_ollama_chat_body req in
   let headers = [("Content-Type", "application/json")] in
   let timeout_sec = Option.value timeout_sec ~default:(ollama_timeout_sec ()) in
+  eprintf "[llm_client] ollama_chat req: model=%s tools=%d body_len=%d\n%!"
+    req.model.model_id (List.length req.tools) (String.length body);
   match curl_post ~url ~headers ~body ~timeout_sec with
   | Error e -> Error e
   | Ok raw -> parse_ollama_chat_response raw
@@ -620,7 +629,7 @@ let call_ollama_generate ?timeout_sec (req : completion_request) : (completion_r
   | Error e -> Error e
   | Ok raw -> parse_ollama_generate_response raw
 
-let call_claude (req : completion_request) : (completion_response, string) result =
+let call_claude ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let api_key = get_api_key req.model in
   if api_key = "" then Error "ANTHROPIC_API_KEY not set"
   else
@@ -631,11 +640,12 @@ let call_claude (req : completion_request) : (completion_response, string) resul
       ("x-api-key", api_key);
       ("anthropic-version", "2023-06-01");
     ] in
-    match curl_post ~url ~headers ~body ~timeout_sec:120 with
+    let timeout_sec = Option.value timeout_sec ~default:120 in
+    match curl_post ~url ~headers ~body ~timeout_sec with
     | Error e -> Error e
     | Ok raw -> parse_claude_response raw
 
-let call_openai_compatible (req : completion_request) : (completion_response, string) result =
+let call_openai_compatible ?timeout_sec (req : completion_request) : (completion_response, string) result =
   let api_key = get_api_key req.model in
   let path = match req.model.provider with
     | Gemini -> "/v1beta/openai/chat/completions"
@@ -653,7 +663,8 @@ let call_openai_compatible (req : completion_request) : (completion_response, st
   let headers = [("Content-Type", "application/json")] @
     (if api_key <> "" then [("Authorization", sprintf "Bearer %s" api_key)] else [])
   in
-  match curl_post ~url ~headers ~body ~timeout_sec:60 with
+  let timeout_sec = Option.value timeout_sec ~default:60 in
+  match curl_post ~url ~headers ~body ~timeout_sec with
   | Error e -> Error e
   | Ok raw ->
     let trunc = if String.length raw > 500 then String.sub raw 0 500 ^ "..." else raw in
@@ -662,7 +673,7 @@ let call_openai_compatible (req : completion_request) : (completion_response, st
 
 (** GLM Cloud call with pool-based load balancing.
     Uses Glm_pool.with_model to select best available model and track usage. *)
-let call_glm_cloud_with_pool (req : completion_request) : (completion_response, string) result =
+let call_glm_cloud_with_pool ?timeout_sec (req : completion_request) : (completion_response, string) result =
   (* Check if the requested model is in our pool for load balancing *)
   let preferred_model =
     if Glm_pool.is_pool_model req.model.model_id then
@@ -676,7 +687,7 @@ let call_glm_cloud_with_pool (req : completion_request) : (completion_response, 
     let modified_model = { req.model with model_id = pool_model_id } in
     let modified_req = { req with model = modified_model } in
     (* Make the actual API call *)
-    match call_openai_compatible modified_req with
+    match call_openai_compatible ?timeout_sec modified_req with
     | Ok resp ->
       (* Return response with pool model_id reflected in model_used *)
       Ok { resp with model_used = pool_model_id }
@@ -687,24 +698,31 @@ let call_glm_cloud_with_pool (req : completion_request) : (completion_response, 
 (* Core: complete                                                   *)
 (* ================================================================ *)
 
-let complete ?ollama_timeout_sec (req : completion_request) : (completion_response, string) result =
+let complete ?timeout_sec ?ollama_timeout_sec (req : completion_request) : (completion_response, string) result =
   let t0 = Time_compat.now () in
+  let effective_ollama_timeout_sec =
+    match timeout_sec, ollama_timeout_sec with
+    | None, None -> None
+    | Some t, None -> Some (max 1 t)
+    | None, Some o -> Some o
+    | Some t, Some o -> Some (min (max 1 t) o)
+  in
   let result = match req.model.provider with
     | Ollama ->
       (* Try chat API first.
          Fallback to /api/generate only for likely endpoint-support errors,
          because retrying on timeouts doubles latency and can exceed caller deadlines. *)
-      (match call_ollama_chat ?timeout_sec:ollama_timeout_sec req with
+      (match call_ollama_chat ?timeout_sec:effective_ollama_timeout_sec req with
        | Ok _ as ok -> ok
        | Error e ->
          if req.tools <> [] then Error e
          else if ollama_should_fallback_to_generate e then
-           call_ollama_generate ?timeout_sec:ollama_timeout_sec req
+           call_ollama_generate ?timeout_sec:effective_ollama_timeout_sec req
          else Error e)
-    | Claude -> call_claude req
-    | Glm_cloud -> call_glm_cloud_with_pool req
+    | Claude -> call_claude ?timeout_sec req
+    | Glm_cloud -> call_glm_cloud_with_pool ?timeout_sec req
     | Gemini | OpenRouter | Custom _ ->
-      call_openai_compatible req
+      call_openai_compatible ?timeout_sec req
   in
   let elapsed_ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
   (* Inject latency into response *)
@@ -714,19 +732,41 @@ let complete ?ollama_timeout_sec (req : completion_request) : (completion_respon
 (* Cascade: try models in order                                     *)
 (* ================================================================ *)
 
-let cascade ?ollama_timeout_sec (requests : completion_request list) : (completion_response, string) result =
+let cascade ?timeout_sec ?ollama_timeout_sec (requests : completion_request list) : (completion_response, string) result =
   with_llm_permit (fun () ->
     let avail = Eio.Semaphore.get_value llm_semaphore in
     eprintf "[llm_client] cascade: acquired permit (%d/%d available)\n%!"
       avail max_concurrent_llm;
+    let deadline_opt =
+      Option.map (fun sec -> Time_compat.now () +. float_of_int sec) timeout_sec
+    in
+    let remaining_timeout_sec () =
+      match deadline_opt with
+      | None -> None
+      | Some deadline ->
+          let remaining = int_of_float (Float.ceil (deadline -. Time_compat.now ())) in
+          Some (max 0 remaining)
+    in
     let rec try_next errors = function
       | [] ->
         let all_errors = String.concat "; " (List.rev errors) in
         Error (sprintf "All models failed: %s" all_errors)
+      | _ when Option.value ~default:1 (remaining_timeout_sec ()) <= 0 ->
+        let all_errors =
+          String.concat "; " (List.rev ("cascade deadline exceeded" :: errors))
+        in
+        Error (sprintf "All models failed: %s" all_errors)
       | req :: rest ->
         eprintf "[llm_client] cascade: trying %s (%s)\n%!"
           req.model.model_id (string_of_provider req.model.provider);
-        match complete ?ollama_timeout_sec req with
+        let attempt_result =
+          match remaining_timeout_sec () with
+          | None -> complete ?ollama_timeout_sec req
+          | Some sec when sec > 0 ->
+              complete ~timeout_sec:sec ?ollama_timeout_sec req
+          | Some _ -> Error "cascade deadline exceeded"
+        in
+        match attempt_result with
         | Ok resp ->
           eprintf "[llm_client] cascade: success with %s (%dms)\n%!"
             resp.model_used resp.latency_ms;

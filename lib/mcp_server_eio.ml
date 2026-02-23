@@ -1180,6 +1180,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         [
           ("name", `String keeper_name);
           ("message", `String message);
+          ("timeout_sec", `Float timeout_sec);
           ("ollama_timeout_sec", `Float timeout_sec);
         ]
     in
@@ -2596,17 +2597,30 @@ let call_tool_with_readonly_retry
   in
   loop 1
 
-(** Optional per-tool timeout to prevent long calls from starving the request loop. *)
-let tool_timeout_sec_opt ~(tool_name : string) : float option =
+let coerce_tool_timeout_sec (raw_timeout_sec : float option) : float option =
+  match raw_timeout_sec with
+  | None -> None
+  | Some raw when raw <= 0.0 -> None
+  | Some raw ->
+      let raw_sec = int_of_float (Float.ceil raw) in
+      Some (float_of_int (max 5 (min 300 raw_sec)))
+
+(** Optional per-tool timeout to prevent long calls from starving the request loop.
+    For request-specific controls (currently masc_keeper_msg), we clamp against an
+    environment cap when present. *)
+let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : float option =
+  let default_timeout_sec =
+    float_of_int
+      (int_of_env_default
+         "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
+         ~default:45
+         ~min_v:10
+         ~max_v:300)
+  in
   match tool_name with
   | "masc_keeper_msg" ->
-      Some
-        (float_of_int
-           (int_of_env_default
-              "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
-              ~default:45
-              ~min_v:10
-              ~max_v:300))
+      let requested_timeout_sec = coerce_tool_timeout_sec (Safe_ops.json_float_opt "timeout_sec" arguments) in
+      Some (Option.value requested_timeout_sec ~default:default_timeout_sec)
   | _ -> None
 
 (** Eio-native handler for tools/call - uses execute_tool_eio directly *)
@@ -2623,7 +2637,7 @@ let execute_with_timeout () =
     let local_timeout_hit = ref false in
     let result =
       try
-        match tool_timeout_sec_opt ~tool_name:name with
+        match tool_timeout_sec_opt ~tool_name:name ~arguments with
         | None ->
             execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments
         | Some timeout_sec ->
@@ -2660,8 +2674,8 @@ let execute_with_timeout () =
   if !local_timeout_hit then timeout_hit := true;
   result
 in
-let (success, message, attempts) =
-  if is_read_only then
+    let (success, message, attempts) =
+    if is_read_only then
     call_tool_with_readonly_retry
       ~clock
       ~run_tool:execute_with_timeout

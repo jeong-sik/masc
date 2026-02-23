@@ -1,7 +1,6 @@
-// Activity tab — Recent messages and events
+// Activity tab — Hacker Terminal Style Live Feed
 
 import { html } from 'htm/preact'
-import { TimeAgo } from './common/time-ago'
 import { messages } from '../store'
 import { journal } from '../sse'
 import type { Message, JournalEntry } from '../types'
@@ -39,13 +38,17 @@ function toEpoch(ts: string): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-function MessageRow({ row }: { row: ActivityRowModel }) {
+function TerminalRow({ row }: { row: ActivityRowModel }) {
+  // Simple time formatter HH:MM:SS
+  const d = new Date(row.timestamp)
+  const timeStr = isNaN(d.getTime()) ? '00:00:00' : d.toLocaleTimeString('en-US', { hour12: false })
+
   return html`
-    <div class="message-row">
-      <span class="message-agent">${row.actor}</span>
-      <span class="message-source ${row.source}">${row.source}</span>
-      <span class="message-text">${row.content}</span>
-      <span class="message-time"><${TimeAgo} timestamp=${row.timestamp} /></span>
+    <div class="term-row">
+      <span class="term-time">${timeStr}</span>
+      <span class="term-actor">${row.actor}</span>
+      <span class="term-source ${row.source}">${row.source === 'message' ? 'msg' : 'evt'}</span>
+      <span class="term-text">${row.content}</span>
     </div>
   `
 }
@@ -55,17 +58,15 @@ export function Activity() {
   const journalRows = journal.value.map(fromJournal)
   const rows = [...msgRows, ...journalRows]
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))
-    .slice(0, 80)
+    .slice(0, 100)
 
   return html`
     <div class="section">
-      <h2>Recent Activity</h2>
-      <div class="message-list">
+      <h2 style="color: var(--accent); text-shadow: 0 0 10px rgba(0,240,255,0.5); margin-bottom: 16px; font-family: monospace;">> LIVE_ACTIVITY_STREAM</h2>
+      <div class="terminal-feed">
         ${rows.length === 0
-          ? html`<div class="empty-state">No recent activity</div>`
-          : rows.map(row =>
-              html`<${MessageRow} key=${row.id} row=${row} />`
-            )}
+          ? html`<div class="empty-state" style="font-family: monospace; color: var(--ok);">> Waiting for signal...</div>`
+          : rows.map(row => html`<${TerminalRow} key=${row.id} row=${row} />`)}
       </div>
     </div>
   `

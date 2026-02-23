@@ -100,7 +100,7 @@ let html () = Printf.sprintf {|<!DOCTYPE html>
       min-height: 100vh;
       padding: 20px;
     }
-    .container { max-width: 900px; margin: 0 auto; }
+    .container { max-width: 100%%; max-width: calc(100%% - 40px); margin: 0 auto; }
 
     header {
       display: flex;

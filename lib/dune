@@ -22,6 +22,7 @@
    bounded
    cache_eio
    env_config
+   trpg_profile_env
    capability_match
    cancellation
    checkpoint_types
@@ -200,6 +201,7 @@
    succession
    perpetual_loop
    tool_perpetual
+   tool_shard
    tool_keeper
    tool_trpg
    trpg_preset_store

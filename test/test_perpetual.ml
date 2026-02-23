@@ -438,9 +438,9 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
     (List.exists
        (fun (msg : Llm_client.message) ->
          msg.role = Llm_client.User &&
-         Context_manager.starts_with
-           ~prefix:(Context_manager.goal_prefix ^ " test")
-           msg.content)
+         Str.string_match
+           (Str.regexp_string (Context_manager.goal_prefix ^ " test"))
+           msg.content 0)
        state2.context.messages);
 
   (* 8. Cost starts at zero *)

@@ -188,6 +188,11 @@
  (modules test_walph_eio)
  (libraries masc_mcp alcotest eio eio_main yojson))
 
+; Code Navigation E2E tests (ripgrep-based search, symbols, read)
+(test
+ (name test_code_navigation_eio)
+ (modules test_code_navigation_eio)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 ; TODO: These tests need to be created
 ; - test_dtls_eio
 ; - test_sctp_eio
@@ -425,9 +430,3 @@
  (name test_perpetual)
  (modules test_perpetual)
  (libraries masc_mcp str yojson unix))
-
-; Code Navigation E2E tests (ripgrep-based search, symbols, read)
-(test
- (name test_code_navigation_eio)
- (modules test_code_navigation_eio)
- (libraries masc_mcp alcotest eio eio_main yojson unix))

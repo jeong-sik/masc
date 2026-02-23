@@ -1,3 +1,5 @@
+import { useState, useEffect } from "preact/hooks"
+import { callMcpTool } from "../api"
 // Keeper detail overlay — full keeper info with KPIs, field dictionary,
 // memory, conversations, equipment, relationships, handoff timeline
 // CSS classes: .keeper-kpis, .keeper-field-dict, .keeper-memory-list, etc. (components.css)
@@ -318,6 +320,93 @@ function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 
 // ── Main Detail Overlay ───────────────────────────────────
 
+
+function KeeperMonologue({ keeperName }: { keeperName: string }) {
+  const [statusText, setStatusText] = useState<string>("Loading internal monologue...")
+  const [chatInput, setChatInput] = useState<string>("")
+  const [chatLog, setChatLog] = useState<{role: string, text: string}[]>([])
+  const [isSending, setIsSending] = useState(false)
+  
+  const fetchStatus = async () => {
+    try {
+      const res = await callMcpTool("masc_keeper_status", { name: keeperName, fast: false, include_history_tail: true, include_context: true })
+      if (typeof res === "string") {
+        setStatusText(res)
+      } else {
+        setStatusText(JSON.stringify(res, null, 2))
+      }
+    } catch (e) {
+      setStatusText("Failed to load: " + String(e))
+    }
+  }
+
+  useEffect(() => {
+    fetchStatus()
+  }, [keeperName])
+
+  const sendPing = async () => {
+    if (!chatInput.trim()) return
+    setIsSending(true)
+    const msg = chatInput
+    setChatInput("")
+    setChatLog(prev => [...prev, {role: "You", text: msg}])
+    try {
+      const res = await callMcpTool("masc_keeper_msg", { name: keeperName, message: msg })
+      setChatLog(prev => [...prev, {role: keeperName, text: typeof res === "string" ? res : JSON.stringify(res)}])
+      fetchStatus() // refresh status after message
+    } catch (e) {
+      setChatLog(prev => [...prev, {role: "System", text: "Error: " + String(e)}])
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  return html`
+    <div style="margin-top: 24px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 24px;">
+      <h3 style="margin: 0 0 16px; color: var(--accent-cyan); font-family: var(--font-display);">Direct Comms & Inner Monologue</h3>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <!-- Chat Area -->
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 12px; height: 300px; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem;">
+            ${chatLog.length === 0 ? html`<div style="color: var(--text-muted); font-style: italic;">No direct messages yet.</div>` : null}
+            ${chatLog.map(msg => html`
+              <div style="padding: 8px; border-radius: 8px; background: ${msg.role === "You" ? "rgba(0, 240, 255, 0.1)" : "rgba(255, 255, 255, 0.05)"}; border-left: 2px solid ${msg.role === "You" ? "var(--accent-cyan)" : "var(--text-muted)"};">
+                <strong style="color: ${msg.role === "You" ? "var(--accent-cyan)" : "var(--text-primary)"}; display: block; margin-bottom: 4px;">${msg.role}</strong>
+                <span style="white-space: pre-wrap;">${msg.text}</span>
+              </div>
+            `)}
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <input 
+              type="text" 
+              value=${chatInput} 
+              onInput=${(e: any) => setChatInput(e.target.value)} 
+              onKeyDown=${(e: KeyboardEvent) => e.key === "Enter" && !e.shiftKey && sendPing()}
+              placeholder="Ping the agent..."
+              disabled=${isSending}
+              style="flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text-primary); font-family: var(--font-body);"
+            />
+            <button 
+              onClick=${sendPing} 
+              disabled=${isSending || !chatInput.trim()}
+              style="background: var(--accent-cyan); color: #000; border: none; border-radius: 8px; padding: 8px 16px; font-weight: bold; cursor: pointer; opacity: ${isSending ? 0.5 : 1};"
+            >
+              ${isSending ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </div>
+
+        <!-- Monologue / Status Area -->
+        <div style="background: #050810; border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; height: 345px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; color: var(--ok); white-space: pre-wrap; box-shadow: inset 0 0 15px rgba(0,0,0,0.8);">
+          ${statusText}
+        </div>
+        
+      </div>
+    </div>
+  `
+}
+
 export function KeeperDetailOverlay() {
   const keeper = selectedKeeper.value
   if (!keeper) return null
@@ -325,7 +414,7 @@ export function KeeperDetailOverlay() {
   return html`
     <div
       class="keeper-detail-overlay"
-      style="position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; padding:20px;"
+      style="display:flex; align-items:center; justify-content:center; padding:20px;"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('keeper-detail-overlay')) {
           closeKeeperDetail()
@@ -441,6 +530,7 @@ export function KeeperDetailOverlay() {
             </div>
           <//>
         </div>
+        <${KeeperMonologue} keeperName=${keeper.name} />
       </div>
     </div>
   `

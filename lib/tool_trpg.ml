@@ -52,6 +52,24 @@ let clamp_int low high value =
   else if value > high then high
   else value
 
+let trpg_keeper_timeout_sec_default = 0.0
+let trpg_keeper_timeout_sec_env = "MASC_TRPG_KEEPER_TIMEOUT_SEC"
+
+let trpg_keeper_timeout_sec () =
+  match Sys.getenv_opt trpg_keeper_timeout_sec_env with
+  | Some raw -> (
+      match float_of_string_opt (String.trim raw) with
+      | Some value when value > 0.0 -> value
+      | _ -> trpg_keeper_timeout_sec_default)
+  | None -> trpg_keeper_timeout_sec_default
+
+let resolve_keeper_timeout_sec ~timeout_sec ~participant_count : float =
+  let participant_count = max 1 participant_count in
+  let per_actor_budget = timeout_sec /. float_of_int participant_count in
+  let base = min timeout_sec per_actor_budget in
+  let floor_sec = trpg_keeper_timeout_sec () in
+  if floor_sec <= 0.0 then base else min timeout_sec (max floor_sec base)
+
 let unique_nonempty_keepers (keepers : string list) : string list =
   keepers
   |> List.map String.trim
@@ -263,7 +281,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), dm_persona(grim_gothic|tactical_irony|heroic_epic), require_claim(boolean), local_fallback(boolean; default false, enables local progression fallback when keeper replies fail).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), dm_persona(grim_gothic|tactical_irony|heroic_epic), require_claim(boolean), local_fallback(boolean).";
       input_schema =
         `Assoc
           [
@@ -285,7 +303,8 @@ let schemas : Types.tool_schema list =
                   ("dm_persona", `Assoc [ ("type", `String "string") ]);
                   ("require_claim", `Assoc [ ("type", `String "boolean") ]);
                   ("lang", `Assoc [ ("type", `String "string") ]);
-                  ("local_fallback", `Assoc [ ("type", `String "boolean") ]);
+                  ( "local_fallback",
+                    `Assoc [ ("type", `String "boolean") ] );
                 ] );
             ( "required",
               `List
@@ -1032,7 +1051,7 @@ let evaluate_keeper_bonus ctx ~keeper_name ~room_id ~actor_id ~server_score
            Rules: +1 only if strong positive contribution trend; -1 if disruptive risk; else 0."
           room_id actor_id server_score required_points
       in
-      match keeper_call ~name:keeper_name ~message ~timeout_sec:5.0 with
+      match keeper_call ~name:keeper_name ~message ~timeout_sec:(trpg_keeper_timeout_sec ()) with
       | `Ok payload -> (
           match parse_keeper_bonus payload with
           | Some (bonus, reason) ->
@@ -6857,9 +6876,10 @@ let handle_round_run ctx args : result =
       let* lang_opt = get_optional_string args "lang" in
       let* dm_persona_opt = get_optional_string args "dm_persona" in
       let* require_claim = get_optional_bool args "require_claim" ~default:false in
-      let* local_fallback =
+      let* local_fallback_requested =
         get_optional_bool args "local_fallback" ~default:false
       in
+      let local_fallback = local_fallback_requested in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase_input = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
@@ -6955,11 +6975,7 @@ let handle_round_run ctx args : result =
         let active_player_count = List.length live_player_keepers in
         let participant_count = max 1 (1 + active_player_count) in
         let keeper_timeout_sec =
-          let per_actor_budget =
-            timeout_sec /. float_of_int (max 1 participant_count)
-          in
-          let floor = min 30.0 timeout_sec in
-          max floor per_actor_budget
+          resolve_keeper_timeout_sec ~timeout_sec ~participant_count
         in
         let player_required_successes =
           let total = active_player_count in
@@ -7067,6 +7083,7 @@ let handle_round_run ctx args : result =
                         `String "local_fallback_enabled"
                       else `String "none" );
                     ("effective_timeout_sec", `Float timeout_sec);
+                    ("requested_timeout_sec", `Float timeout_sec);
                     ("keeper_timeout_sec", `Float keeper_timeout_sec);
                     ("timeouts", `Int 0);
                     ("unavailable", `Int 0);
@@ -7146,11 +7163,7 @@ let handle_round_run ctx args : result =
       let active_player_count = List.length live_player_keepers in
       let participant_count = max 1 (1 + active_player_count) in
       let keeper_timeout_sec =
-        let per_actor_budget =
-          timeout_sec /. float_of_int (max 1 participant_count)
-        in
-        let floor = min 30.0 timeout_sec in
-        max floor per_actor_budget
+        resolve_keeper_timeout_sec ~timeout_sec ~participant_count
       in
       let* () =
         if phase = "round" then
@@ -7232,7 +7245,11 @@ let handle_round_run ctx args : result =
           Ok ()
         in
         let apply_local_fallback ~stage ~reason =
-          if not local_fallback then Ok ()
+          if not local_fallback then
+            Error
+              (Printf.sprintf
+                 "local fallback disabled: actor=%s keeper=%s stage=%s reason=%s"
+                 actor_id keeper_name stage reason)
           else
             let fallback_reply =
               match role with
@@ -7583,13 +7600,13 @@ let handle_round_run ctx args : result =
               append_timeout_and_unavailable_events
                 ~base_dir
                 ~room_id
-                ~phase
-                ~turn:turn_before
-                ~role
-                ~actor_id
-                ~keeper_name
-                ~timeout_sec
-                ~sampling_state:unavailable_sampling
+              ~phase
+              ~turn:turn_before
+              ~role
+              ~actor_id
+              ~keeper_name
+              ~timeout_sec:keeper_timeout_sec
+              ~sampling_state:unavailable_sampling
             in
             timeout_count := !timeout_count + 1;
             appended_events := !appended_events @ [ timeout_event ];
@@ -7617,10 +7634,12 @@ let handle_round_run ctx args : result =
                       sampled_reason );
                 ]
               :: !statuses;
-            let* () =
-              apply_local_fallback ~stage:"timeout_fallback" ~reason:"timeout"
-            in
-            Ok ()
+            if local_fallback then
+              let* () =
+                apply_local_fallback ~stage:"timeout_fallback" ~reason:"timeout"
+              in
+              Ok ()
+            else Ok ()
         | Error (`Unavailable (stage, keeper_error)) ->
             let* () =
               record_unavailable_status
@@ -7631,48 +7650,7 @@ let handle_round_run ctx args : result =
             if local_fallback then
               apply_local_fallback ~stage:"keeper_call_fallback"
                 ~reason:keeper_error
-            else
-              let synthetic_reply = String.trim (synthesized_roleplay_reply ()) in
-              let synthetic_action = synthetic_action_for_reply synthetic_reply in
-              let recovered_reply, recovered_action =
-                normalize_reply_with_action synthetic_reply synthetic_action
-              in
-              if recovered_reply = "" then
-                apply_local_fallback ~stage:"keeper_call_fallback"
-                  ~reason:keeper_error
-              else
-                let* reply_event =
-                  append_keeper_reply_event ~base_dir ~room_id ~phase ~turn:turn_before
-                    ~role ~actor_id ~keeper_name ~reply:recovered_reply
-                in
-                success_count := !success_count + 1;
-                (match role with
-                | `Dm ->
-                    dm_success := true;
-                    dm_reply_ref := Some recovered_reply
-                | `Player -> player_success_count := !player_success_count + 1);
-                appended_events := !appended_events @ [ reply_event ];
-                let* action_events =
-                  apply_structured_action ~base_dir ~room_id ~turn:turn_before ~phase
-                    ~actor_id ~state:state_json recovered_action
-                in
-                appended_events := !appended_events @ action_events;
-                statuses :=
-                  `Assoc
-                    [
-                      ("actor_id", `String actor_id);
-                      ("role", `String (role_to_string role));
-                      ("keeper", `String keeper_name);
-                      ("status", `String "recovered_unavailable");
-                      ("stage", `String stage);
-                      ("reason", `String keeper_error);
-                      ("reply", `String recovered_reply);
-                      ( "action_type",
-                        `String
-                          (string_of_action_type recovered_action.sa_type) );
-                    ]
-                  :: !statuses;
-                Ok ()
+            else Ok ()
         | Error (`Validation (stage, validation_error, keeper_json)) ->
             (match validation_error with
             | `Schema _ -> schema_failures := !schema_failures + 1
@@ -8071,8 +8049,9 @@ let handle_round_run ctx args : result =
                     | None -> `Null );
                   ("recovery_applied", `Bool recovery_applied);
                   ("recovery_mode", `String recovery_mode);
-                  ("effective_timeout_sec", `Float timeout_sec);
-                  ("keeper_timeout_sec", `Float keeper_timeout_sec);
+                    ("effective_timeout_sec", `Float timeout_sec);
+                    ("requested_timeout_sec", `Float timeout_sec);
+                    ("keeper_timeout_sec", `Float keeper_timeout_sec);
                   ("timeouts", `Int !timeout_count);
                   ("unavailable", `Int !unavailable_count);
                   ("schema_failures", `Int !schema_failures);

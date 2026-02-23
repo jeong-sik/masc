@@ -434,10 +434,14 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   let state2 = Perpetual_loop.create_state config in
   assert_true "context:has_system"
     (String.length state2.context.system_prompt > 0);
-  assert_true "context:system_contains_goal"
-    (try let _ = Str.search_forward (Str.regexp_string "test")
-       state2.context.system_prompt 0 in true
-     with Not_found -> false);
+  assert_true "context:has_goal_message"
+    (List.exists
+       (fun (msg : Llm_client.message) ->
+         msg.role = Llm_client.User &&
+         Context_manager.starts_with
+           ~prefix:(Context_manager.goal_prefix ^ " test")
+           msg.content)
+       state2.context.messages);
 
   (* 8. Cost starts at zero *)
   assert_float_near "cost:initial" 0.0 state2.total_cost 0.001;

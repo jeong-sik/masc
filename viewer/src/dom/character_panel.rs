@@ -4,6 +4,8 @@ use crate::assets;
 use crate::dom::escape::html_escape;
 use crate::game::components::{Actor, Skill};
 use crate::game::state::TurnProgressState;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 
 /// Snapshot of actor state used for change detection.
 /// Re-render only fires when this changes.
@@ -11,21 +13,38 @@ use crate::game::state::TurnProgressState;
 pub struct ActorSnapshot {
     id: String,
     hp: i32,
+    hp_known: bool,
+    max_hp_known: bool,
     mp: i32,
+    mp_known: bool,
+    max_mp_known: bool,
     is_dead: bool,
+    atk_known: bool,
+    def_known: bool,
+    int_known: bool,
+    luck_known: bool,
     buff_count: usize,
     debuff_count: usize,
     skill_count: usize,
     condition_count: usize,
     equip_count: usize,
+    relation_count: usize,
+    contribution_score: i32,
+    contribution_last_reason: String,
+    contribution_reasons_fingerprint: String,
+    relationship_fingerprint: String,
 }
 
 /// Tracks the last known state so we only re-render on change.
 #[derive(Resource, Default)]
 pub struct CharacterPanelCache {
-    pub last_snapshot: Vec<(String, i32, bool)>,
+    pub last_snapshot: Vec<(String, i32, bool, bool, bool, bool, bool)>,
     pub last_full: Vec<ActorSnapshot>,
+    pub last_progress_signature: String,
 }
+
+pub(crate) const DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE: &str = "파티원을 선택하면 상세 정보가 표시됩니다.";
+pub(crate) const DEFAULT_ACTOR_INSPECTOR_NO_DIALOGUE_MESSAGE: &str = "최근 대사 없음";
 
 /// Determines HP bar color class based on percentage.
 fn hp_class(hp: i32, max_hp: i32) -> &'static str {
@@ -44,6 +63,45 @@ fn mp_class(mp: i32, max_mp: i32) -> &'static str {
         0..=20 => "mp-depleted",
         21..=50 => "mp-low",
         _ => "mp-full",
+    }
+}
+
+fn parse_bool_attr(value: Option<&str>) -> bool {
+    value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| matches!(value, "1" | "true" | "on" | "yes"))
+}
+
+fn metric_text(current: i32, current_known: bool, max: i32, max_known: bool) -> String {
+    if current_known {
+        if max_known {
+            format!("{current} / {max}")
+        } else if max > 0 {
+            format!("{} / 미확인 최대", current)
+        } else {
+            current.to_string()
+        }
+    } else {
+        "미확인".to_string()
+    }
+}
+
+fn metric_text_class(current_known: bool, max_known: bool) -> &'static str {
+    if !current_known {
+        "actor-metric-unknown"
+    } else if max_known {
+        "actor-metric-known"
+    } else {
+        "actor-metric-partial"
+    }
+}
+
+fn known_stat_text(value: i32, known: bool) -> String {
+    if known {
+        value.to_string()
+    } else {
+        "-".to_string()
     }
 }
 
@@ -66,6 +124,47 @@ fn class_slug(class: &str) -> String {
     class
         .to_lowercase()
         .replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+}
+
+fn dom_safe_id(value: &str) -> String {
+    let mut out = String::new();
+    let mut prev_hyphen = false;
+    for ch in value.trim().chars() {
+        let ch = ch.to_ascii_lowercase();
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+            prev_hyphen = false;
+        } else {
+            if !prev_hyphen && !out.is_empty() {
+                out.push('-');
+                prev_hyphen = true;
+            }
+        }
+    }
+    let collapsed = out.trim_matches('-').to_string();
+    let normalized = if collapsed.is_empty() {
+        "actor".to_string()
+    } else {
+        collapsed
+    };
+    if normalized.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        format!("a-{}", normalized)
+    } else {
+        normalized
+    }
+}
+
+fn ensure_unique_dom_id(base: &str, seen: &mut std::collections::HashSet<String>) -> String {
+    if seen.insert(base.to_string()) {
+        return base.to_string();
+    }
+    for suffix in 2..1000 {
+        let candidate = format!("{base}-{suffix}");
+        if seen.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    base.to_string()
 }
 
 /// Icon for a condition name.
@@ -115,6 +214,109 @@ fn fmt_modifier(m: i32) -> String {
 
 fn normalize_lore_key(raw: &str) -> String {
     raw.trim().to_ascii_lowercase().replace(['-', ' '], "_")
+}
+
+fn collect_actor_aliases(actor_id: &str, actor_name: &str, keeper: &str) -> Vec<String> {
+    let mut aliases = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    let push_alias = |raw: &str, aliases: &mut Vec<String>, seen: &mut std::collections::HashSet<String>| {
+        let trimmed = raw.trim().to_ascii_lowercase();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let compact = trimmed.replace(['_', '-'], "");
+        let plain = trimmed
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+            .collect::<String>();
+        for candidate in [trimmed.clone(), compact, plain] {
+            if !candidate.is_empty() && seen.insert(candidate.clone()) {
+                aliases.push(candidate);
+            }
+        }
+
+        if let Some((head, _)) = trimmed.split_once('-') {
+            if seen.insert(head.to_string()) {
+                aliases.push(head.to_string());
+            }
+        }
+        if let Some((head, _)) = trimmed.split_once('_') {
+            if seen.insert(head.to_string()) {
+                aliases.push(head.to_string());
+            }
+        }
+
+        if let Some((head, _)) = trimmed.rsplit_once('-') {
+            if seen.insert(head.to_string()) {
+                aliases.push(head.to_string());
+            }
+        }
+
+        if let Some((head, _)) = trimmed.rsplit_once('_') {
+            if seen.insert(head.to_string()) {
+                aliases.push(head.to_string());
+            }
+        }
+    };
+
+    let push_tokens = |raw: &str,
+                       aliases: &mut Vec<String>,
+                       seen: &mut std::collections::HashSet<String>| {
+        let normalized = raw.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            return;
+        }
+
+        for token in normalized
+            .split(|ch| matches!(ch, '=' | ';' | ',' | '|' | '/' | '\\' | '(' | ')' | '[' | ']' | '{' | '}'))
+        {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+
+            push_alias(token, aliases, seen);
+            for word in token.split_whitespace() {
+                if !word.trim().is_empty() {
+                    push_alias(word.trim(), aliases, seen);
+                }
+            }
+        }
+    };
+
+    push_tokens(actor_id, &mut aliases, &mut seen);
+    for token in actor_name.split_whitespace().filter(|token| !token.trim().is_empty()) {
+        push_tokens(token, &mut aliases, &mut seen);
+    }
+    push_tokens(keeper, &mut aliases, &mut seen);
+    aliases
+}
+
+fn identity_token(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn identity_matches(a: &str, b: &str) -> bool {
+    let a = a.trim().to_ascii_lowercase();
+    let b = b.trim().to_ascii_lowercase();
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    let compact_a = identity_token(&a);
+    let compact_b = identity_token(&b);
+
+    a == b
+        || compact_a == compact_b
+        || compact_a == b
+        || a == compact_b
+        || compact_a.ends_with(&compact_b)
+        || compact_b.ends_with(&compact_a)
 }
 
 struct SkillLore {
@@ -258,7 +460,7 @@ fn trait_description(name: &str) -> String {
         "protective" => "아군 대신 맞거나 엄호하는 선택을 우선합니다.".to_string(),
         "honor_bound" => {
             "약속과 규율을 중시해 협상/명예 관련 장면에서 신뢰를 얻습니다.".to_string()
-        }
+        },
         "intense" => "집중력이 높아 짧은 폭발력이나 몰입이 필요한 장면에 강합니다.".to_string(),
         "empathetic" => "상대 감정 신호를 잘 읽어 통찰/중재 상황에서 유리합니다.".to_string(),
         "fatalistic" => "불리한 상황을 감수하고 큰 대가를 선택하는 경향이 있습니다.".to_string(),
@@ -470,6 +672,632 @@ fn read_collapse_state() -> std::collections::HashSet<String> {
     std::collections::HashSet::new()
 }
 
+fn compact_inline(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+struct ActorDialogueRow {
+    source: String,
+    text: String,
+}
+
+fn classify_actor_log_source(entry: &web_sys::Element) -> String {
+    let class_name = entry.class_name().to_ascii_lowercase();
+    if class_name.contains("history-event") {
+        let kind = entry.get_attribute("data-kind").unwrap_or_default();
+        let log_kind = entry.get_attribute("data-log-kind").unwrap_or_default();
+        let kind_label = match kind.as_str() {
+            "dice" => "주사위",
+            "turn" => "턴",
+            "progress" => "진행",
+            "system" => "시스템",
+            "narrative" => "내러티브",
+            _ => "이벤트",
+        };
+        let tone = match log_kind.as_str() {
+            "action" => "액션",
+            "outcome" => "결과",
+            "debug" => "디버그",
+            "system" => "시스템",
+            _ => "이벤트",
+        };
+        return format!("{kind_label}({tone})");
+    }
+    if class_name.contains("dice-entry") {
+        return "주사위".to_string();
+    }
+    if class_name.contains("narrative-entry") {
+        let phase = entry.get_attribute("data-phase").unwrap_or_default();
+        return if phase.trim().is_empty() {
+            "내러티브".to_string()
+        } else {
+            format!("내러티브({phase})")
+        };
+    }
+    "로그".to_string()
+}
+
+pub(crate) fn render_actor_inspector_empty(document: &web_sys::Document, message: &str) {
+    if let Some(panel) = document.get_element_by_id("actor-inspector") {
+        panel.set_inner_html(&format!(
+            "<div class=\"actor-inspector-empty\">{}</div>",
+            html_escape(message)
+        ));
+    }
+}
+
+fn collect_recent_actor_dialogues(
+    document: &web_sys::Document,
+    actor_id: &str,
+    actor_name: &str,
+    keeper: &str,
+) -> Vec<ActorDialogueRow> {
+    let Ok(entries) = document.query_selector_all(
+        "#narrative-log .narrative-entry, #session-history .history-event, #dice-log .dice-entry"
+    ) else {
+        return Vec::new();
+    };
+    let actor_id = actor_id.trim().to_ascii_lowercase();
+    let actor_name = actor_name.trim().to_ascii_lowercase();
+    let keeper = keeper.trim().to_ascii_lowercase();
+    let aliases = collect_actor_aliases(&actor_id, &actor_name, &keeper);
+    let mut normalized_identities = Vec::with_capacity(aliases.len() * 2 + 3);
+    for alias in aliases.iter() {
+        let alias = alias.trim();
+        if alias.is_empty() {
+            continue;
+        }
+        let compact = alias.replace(['_', '-'], "");
+        if !compact.is_empty() {
+            normalized_identities.push(compact);
+        }
+        normalized_identities.push(alias.to_string());
+    }
+    normalized_identities.push(actor_id.clone());
+    normalized_identities.push(actor_name.clone());
+    normalized_identities.push(keeper);
+    normalized_identities.push(actor_id.replace('_', ""));
+    normalized_identities.push(actor_name.replace('_', ""));
+    normalized_identities.sort();
+    normalized_identities.dedup();
+    normalized_identities.retain(|item| !item.is_empty());
+
+    let exact_match = |value: &str, identity: &str| {
+        if identity.is_empty() {
+            return false;
+        }
+        let value = value.trim().to_ascii_lowercase();
+        let compact_value = value.replace(['_', '-'], "");
+        value == identity || compact_value == identity || compact_value.ends_with(identity)
+    };
+
+    let mut rows = Vec::new();
+
+    let len = entries.length();
+    for idx in (0..len).rev() {
+        let Some(node) = entries.item(idx) else {
+            continue;
+        };
+        let Some(entry) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+
+        let actor_id_candidates = [
+            entry.get_attribute("data-actor-id").unwrap_or_default(),
+            entry
+                .query_selector(".history-actor")
+                .ok()
+                .flatten()
+                .and_then(|actor_el| actor_el.text_content())
+                .unwrap_or_default(),
+        ];
+        let actor_name_candidates = [
+            entry.get_attribute("data-actor-name").unwrap_or_default(),
+            entry
+                .get_attribute("data-speaker")
+                .unwrap_or_default(),
+            entry
+                .query_selector(".history-actor")
+                .ok()
+                .flatten()
+                .and_then(|actor_el| actor_el.text_content())
+                .unwrap_or_default(),
+        ];
+        let text = compact_inline(&entry.text_content().unwrap_or_default());
+        let is_speaker_match = actor_id_candidates
+            .iter()
+            .chain(actor_name_candidates.iter())
+            .any(|candidate| {
+                normalized_identities
+                    .iter()
+                    .any(|identity| exact_match(candidate, identity))
+            });
+
+        if !is_speaker_match {
+            continue;
+        }
+
+        let source = classify_actor_log_source(entry);
+        let clipped = if text.chars().count() > 140 {
+            let mut short = text.chars().take(140).collect::<String>();
+            short.push_str("...");
+            short
+        } else {
+            text
+        };
+        rows.push(ActorDialogueRow {
+            source,
+            text: clipped,
+        });
+        if rows.len() >= 4 {
+            break;
+        }
+    }
+    rows.reverse();
+    rows
+}
+
+fn render_actor_inspector(document: &web_sys::Document, selected: &web_sys::Element) {
+    let Some(panel) = document.get_element_by_id("actor-inspector") else {
+        return;
+    };
+    let actor_id = selected
+        .get_attribute("data-actor-id")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if actor_id.is_empty() {
+        render_actor_inspector_empty(document, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE);
+        return;
+    }
+
+    let actor_name = selected
+        .get_attribute("data-actor-name")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let actor_class = selected
+        .get_attribute("data-actor-class")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let keeper = selected
+        .get_attribute("data-keeper")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let runtime_state = selected
+        .get_attribute("data-runtime-state")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let runtime_reason = selected
+        .get_attribute("data-runtime-reason")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let archetype = selected
+        .get_attribute("data-archetype")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let persona = selected
+        .get_attribute("data-persona")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let contribution_score = selected
+        .get_attribute("data-contribution-score")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let contribution_reason = selected
+        .get_attribute("data-contribution-reason")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let contribution_score_value = contribution_score
+        .trim()
+        .parse::<i32>()
+        .unwrap_or(0);
+    let contribution_reasons = selected
+        .get_attribute("data-contribution-reasons")
+        .unwrap_or_default()
+        .split('|')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let hp = selected
+        .get_attribute("data-hp")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let max_hp = selected
+        .get_attribute("data-max-hp")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let mp = selected
+        .get_attribute("data-mp")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let max_mp = selected
+        .get_attribute("data-max-mp")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let hp_known = parse_bool_attr(selected.get_attribute("data-hp-known").as_deref());
+    let max_hp_known = parse_bool_attr(selected.get_attribute("data-max-hp-known").as_deref());
+    let mp_known = parse_bool_attr(selected.get_attribute("data-mp-known").as_deref());
+    let max_mp_known = parse_bool_attr(selected.get_attribute("data-max-mp-known").as_deref());
+    let atk = selected
+        .get_attribute("data-atk")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let def = selected
+        .get_attribute("data-def")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let int = selected
+        .get_attribute("data-int")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let lck = selected
+        .get_attribute("data-luck")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0);
+    let atk_known = parse_bool_attr(selected.get_attribute("data-atk-known").as_deref());
+    let def_known = parse_bool_attr(selected.get_attribute("data-def-known").as_deref());
+    let int_known = parse_bool_attr(selected.get_attribute("data-int-known").as_deref());
+    let luck_known = parse_bool_attr(selected.get_attribute("data-luck-known").as_deref());
+    let relationship_rows = selected
+        .get_attribute("data-relationships")
+        .unwrap_or_default()
+        .split('|')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let dialogue_rows = collect_recent_actor_dialogues(document, &actor_id, &actor_name, &keeper);
+
+    let dialogue_html = if dialogue_rows.is_empty() {
+        format!(
+            "<div class=\"actor-inspector-empty-sub\">{}</div>",
+            DEFAULT_ACTOR_INSPECTOR_NO_DIALOGUE_MESSAGE
+        )
+    } else {
+        dialogue_rows
+            .iter()
+            .map(|line| {
+                format!(
+                    "<div class=\"actor-inspector-line\"><span class=\"actor-inspector-source\">{}</span><span class=\"actor-inspector-line-text\">{}</span></div>",
+                    html_escape(&line.source),
+                    html_escape(&line.text)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let relation_html = if relationship_rows.is_empty() {
+        "<span class=\"actor-inspector-muted\">관계 없음</span>".to_string()
+    } else {
+        relationship_rows
+            .iter()
+            .map(|line| format!("<span class=\"actor-rel-chip\">{}</span>", html_escape(line)))
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let contribution_reason_html = if contribution_reason.is_empty() {
+        "<span class=\"actor-inspector-muted\">기여 사유 없음</span>".to_string()
+    } else {
+        html_escape(&contribution_reason)
+    };
+    let contribution_score_class = if contribution_score_value > 0 {
+        "actor-score-positive"
+    } else if contribution_score_value < 0 {
+        "actor-score-negative"
+    } else {
+        "actor-score-neutral"
+    };
+    let contribution_score_text = if contribution_score_value > 0 {
+        format!("+{}", contribution_score_value)
+    } else {
+        contribution_score_value.to_string()
+    };
+    let contribution_reasons_html = if contribution_reasons.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<div class=\"actor-inspector-line\">최근 사유: {}</div>",
+            html_escape(&contribution_reasons.join(" · "))
+        )
+    };
+    let hp_display = metric_text(hp, hp_known, max_hp, max_hp_known);
+    let mp_display = metric_text(mp, mp_known, max_mp, max_mp_known);
+    let hp_display_class = metric_text_class(hp_known, max_hp_known);
+    let mp_display_class = metric_text_class(mp_known, max_mp_known);
+    let hp_known_badge = if hp_known {
+        if max_hp_known {
+            "확인됨"
+        } else {
+            "부분 확인"
+        }
+    } else {
+        "미확인"
+    };
+    let mp_known_badge = if mp_known {
+        if max_mp_known {
+            "확인됨"
+        } else {
+            "부분 확인"
+        }
+    } else {
+        "미확인"
+    };
+
+    let atk_text = known_stat_text(atk, atk_known);
+    let def_text = known_stat_text(def, def_known);
+    let int_text = known_stat_text(int, int_known);
+    let luck_text = known_stat_text(lck, luck_known);
+    let atk_class = metric_text_class(atk_known, true);
+    let def_class = metric_text_class(def_known, true);
+    let int_class = metric_text_class(int_known, true);
+    let luck_class = metric_text_class(luck_known, true);
+
+    panel.set_inner_html(&format!(
+        concat!(
+            "<div class=\"actor-inspector-head\">",
+            "<span class=\"actor-inspector-title\">{name}</span>",
+            "<span class=\"actor-inspector-id\">{id}</span>",
+            "</div>",
+            "<div class=\"actor-inspector-chips\">",
+            "<span class=\"actor-inspector-chip\">Class: {class_name}</span>",
+            "<span class=\"actor-inspector-chip\">Keeper: {keeper}</span>",
+            "<span class=\"actor-inspector-chip actor-inspector-chip-score {score_class}\">기여 {score}</span>",
+            "</div>",
+            "<div class=\"actor-inspector-grid\">",
+            "<div><span class=\"k\">HP</span><span class=\"v\"><span class=\"actor-inspector-metric {hp_metric_class}\">{hp}</span> <span class=\"actor-inspector-muted\">({hp_known_hint})</span></span></div>",
+            "<div><span class=\"k\">MP</span><span class=\"v\"><span class=\"actor-inspector-metric {mp_metric_class}\">{mp}</span> <span class=\"actor-inspector-muted\">({mp_known_hint})</span></span></div>",
+            "<div><span class=\"k\">현재 상태</span><span class=\"v\">{runtime}</span></div>",
+            "<div><span class=\"k\">상태 사유</span><span class=\"v\">{reason}</span></div>",
+            "</div>",
+            "<div class=\"actor-inspector-line\">Archetype: {archetype}</div>",
+            "<div class=\"actor-inspector-line\">Persona: {persona}</div>",
+            "<div class=\"actor-inspector-line\">능력치: <span class=\"actor-inspector-metric {atk_class}\">ATK={atk}</span> <span class=\"actor-inspector-metric {def_class}\">DEF={def}</span> <span class=\"actor-inspector-metric {int_class}\">INT={int}</span> <span class=\"actor-inspector-metric {luck_class}\">LCK={luck}</span></div>",
+            "<div class=\"actor-inspector-line\">최근 기여 사유: {contribution_reason}</div>",
+            "{contribution_reasons}",
+            "<div class=\"actor-inspector-section\">",
+            "<div class=\"actor-inspector-section-title\">관계</div>",
+            "<div class=\"actor-rel-list\">{relationships}</div>",
+            "</div>",
+            "<div class=\"actor-inspector-section\">",
+            "<div class=\"actor-inspector-section-title\">최근 대사 / 행동 로그 (선택 액터 관련)</div>",
+            "{dialogues}",
+            "</div>"
+        ),
+        name = html_escape(if actor_name.is_empty() {
+            actor_id.as_str()
+        } else {
+            actor_name.as_str()
+        }),
+        id = html_escape(&actor_id),
+        class_name = html_escape(if actor_class.is_empty() {
+            "-"
+        } else {
+            actor_class.as_str()
+        }),
+        keeper = html_escape(if keeper.is_empty() {
+            "미할당"
+        } else {
+            keeper.as_str()
+        }),
+        runtime = html_escape(if runtime_state.is_empty() {
+            "상태 없음"
+        } else {
+            runtime_state.as_str()
+        }),
+        reason = html_escape(if runtime_reason.is_empty() {
+            "사유 없음"
+        } else {
+            runtime_reason.as_str()
+        }),
+        archetype = html_escape(if archetype.is_empty() {
+            "-"
+        } else {
+            archetype.as_str()
+        }),
+        persona = html_escape(if persona.is_empty() {
+            "-"
+        } else {
+            persona.as_str()
+        }),
+        score = html_escape(&contribution_score_text),
+        score_class = contribution_score_class,
+        contribution_reason = contribution_reason_html,
+        contribution_reasons = contribution_reasons_html,
+        relationships = relation_html,
+        dialogues = dialogue_html,
+        hp = html_escape(&hp_display),
+        hp_metric_class = hp_display_class,
+        hp_known_hint = hp_known_badge,
+        mp = html_escape(&mp_display),
+        mp_metric_class = mp_display_class,
+        mp_known_hint = mp_known_badge,
+        atk_class = atk_class,
+        atk = html_escape(&atk_text),
+        def_class = def_class,
+        def = html_escape(&def_text),
+        int_class = int_class,
+        int = html_escape(&int_text),
+        luck_class = luck_class,
+        luck = html_escape(&luck_text),
+    ));
+}
+
+pub(crate) fn select_character_card(document: &web_sys::Document, actor_id: &str) {
+    let actor_id = actor_id.trim();
+    if actor_id.is_empty() {
+        return;
+    }
+    let actor_id_lower = actor_id.to_ascii_lowercase();
+    let query_aliases = collect_actor_aliases(&actor_id_lower, &actor_id_lower, "");
+
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+
+    let Ok(cards) = document.query_selector_all("#character-panel .character-card[data-actor-id]") else {
+        return;
+    };
+
+    let mut selected_card = None::<web_sys::Element>;
+    for idx in 0..cards.length() {
+        let Some(node) = cards.item(idx) else {
+            continue;
+        };
+        let Some(card) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let card_actor = card
+            .get_attribute("data-actor-id")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let card_name = card
+            .get_attribute("data-actor-name")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let card_keeper = card
+            .get_attribute("data-keeper")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let card_aliases = collect_actor_aliases(&card_actor, &card_name, &card_keeper);
+
+        let matched = card_actor.eq_ignore_ascii_case(actor_id)
+            || query_aliases
+                .iter()
+                .any(|q| card_aliases.iter().any(|alias| identity_matches(q, alias)));
+        if matched {
+            let _ = card.class_list().add_1("join-pick-selected");
+            let _ = card.set_attribute("aria-selected", "true");
+            selected_card = Some(card.clone());
+        } else {
+            let _ = card.class_list().remove_1("join-pick-selected");
+            let _ = card.set_attribute("aria-selected", "false");
+        }
+    }
+
+    let Some(card) = selected_card else {
+        let _ = dashboard.remove_attribute("data-selected-actor");
+        if let Some(input) = document
+            .get_element_by_id("actor-id-input")
+            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            input.set_value("");
+        }
+        render_actor_inspector_empty(document, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE);
+        return;
+    };
+
+    let selected_id = card
+        .get_attribute("data-actor-id")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if !selected_id.is_empty() {
+        card.scroll_into_view_with_bool(true);
+        let _ = dashboard.set_attribute("data-selected-actor", &selected_id);
+        if let Some(input) = document
+            .get_element_by_id("actor-id-input")
+            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            input.set_value(&selected_id);
+        }
+        let _ = card.class_list().add_1("join-pick-selected");
+        let _ = card.set_attribute("aria-selected", "true");
+        render_actor_inspector(document, &card);
+    } else {
+        let _ = dashboard.remove_attribute("data-selected-actor");
+        if let Some(input) = document
+            .get_element_by_id("actor-id-input")
+            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            input.set_value("");
+        }
+        render_actor_inspector_empty(document, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE);
+    }
+}
+
+fn resolve_character_card_actor_id(target: web_sys::EventTarget) -> Option<String> {
+    let card = if let Ok(el) = target.clone().dyn_into::<web_sys::Element>() {
+        el.closest(".character-card").ok().flatten()
+    } else {
+        target
+            .clone()
+            .dyn_into::<web_sys::Node>()
+            .ok()
+            .and_then(|node| node.parent_element())
+            .and_then(|el| el.closest(".character-card").ok().flatten())
+    };
+
+    card.and_then(|card| card.get_attribute("data-actor-id").map(|value| value.trim().to_string()))
+}
+
+fn ensure_character_panel_selection_binding(document: &web_sys::Document) {
+    let Some(panel) = document.get_element_by_id("character-panel") else {
+        return;
+    };
+    if panel
+        .get_attribute("data-bound-select")
+        .as_deref()
+        .map(|value| value == "1")
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let cb = Closure::wrap(Box::new(move |evt: web_sys::Event| {
+        let Some(target) = evt.target() else {
+            return;
+        };
+        let Some(actor_id) = resolve_character_card_actor_id(target) else {
+            return;
+        };
+        if actor_id.is_empty() {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        select_character_card(&document, &actor_id);
+    }) as Box<dyn FnMut(_)>);
+    let _ = panel.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+    cb.forget();
+    let key_cb = Closure::wrap(Box::new(move |evt: web_sys::KeyboardEvent| {
+        if evt.key() != "Enter" && evt.key() != " " && evt.key() != "Spacebar" {
+            return;
+        }
+        let Some(target) = evt.target() else {
+            return;
+        };
+        let Some(actor_id) = resolve_character_card_actor_id(target) else {
+            return;
+        };
+        if actor_id.is_empty() {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        select_character_card(&document, &actor_id);
+        evt.prevent_default();
+    }) as Box<dyn FnMut(_)>);
+    let _ = panel
+        .add_event_listener_with_callback("keydown", key_cb.as_ref().unchecked_ref());
+    key_cb.forget();
+    let _ = panel.set_attribute("data-bound-select", "1");
+}
+
 /// Re-renders the #character-panel DOM whenever actor state changes.
 pub fn update_character_panel_dom(
     actors: Query<&Actor>,
@@ -477,9 +1305,19 @@ pub fn update_character_panel_dom(
     progress: Res<TurnProgressState>,
 ) {
     // Build current snapshot for cheap equality check
-    let compat_snapshot: Vec<(String, i32, bool)> = actors
+    let compat_snapshot: Vec<(String, i32, bool, bool, bool, bool, bool)> = actors
         .iter()
-        .map(|a| (a.id.clone(), a.hp, a.is_dead))
+        .map(|a| {
+            (
+                a.id.clone(),
+                a.hp,
+                a.is_dead,
+                a.hp_known,
+                a.max_hp_known,
+                a.mp_known,
+                a.max_mp_known,
+            )
+        })
         .collect();
 
     let full_snapshot: Vec<ActorSnapshot> = actors
@@ -487,22 +1325,65 @@ pub fn update_character_panel_dom(
         .map(|a| ActorSnapshot {
             id: a.id.clone(),
             hp: a.hp,
+            hp_known: a.hp_known,
+            max_hp_known: a.max_hp_known,
             mp: a.mp,
+            mp_known: a.mp_known,
+            max_mp_known: a.max_mp_known,
             is_dead: a.is_dead,
+            atk_known: a.atk_known,
+            def_known: a.def_known,
+            int_known: a.int_known,
+            luck_known: a.luck_known,
             buff_count: a.buffs.len(),
             debuff_count: a.debuffs.len(),
             skill_count: a.skills.len(),
             condition_count: a.conditions.len(),
             equip_count: a.equipment.len(),
+            relation_count: a.relationships.len(),
+            contribution_score: a.contribution_score,
+            contribution_last_reason: a.contribution_last_reason.trim().to_string(),
+            contribution_reasons_fingerprint: a.contribution_reasons.join("|"),
+            relationship_fingerprint: a.relationships.join("|"),
         })
         .collect();
 
+    let mut actor_state_rows = progress
+        .actor_states
+        .iter()
+        .map(|(actor, state)| format!("{}={}", actor.trim(), state.trim()))
+        .collect::<Vec<_>>();
+    actor_state_rows.sort();
+    let mut actor_reason_rows = progress
+        .actor_reasons
+        .iter()
+        .map(|(actor, reason)| format!("{}={}", actor.trim(), reason.trim()))
+        .collect::<Vec<_>>();
+    actor_reason_rows.sort();
+    let narrative_count = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("narrative-log"))
+        .map(|el| el.child_element_count())
+        .unwrap_or(0);
+    let progress_signature = format!(
+        "{}|{}|{}|{}|{}",
+        progress.turn,
+        progress.phase.trim(),
+        actor_state_rows.join(","),
+        actor_reason_rows.join(","),
+        narrative_count
+    );
+
     // Skip if nothing changed
-    if compat_snapshot == cache.last_snapshot && full_snapshot == cache.last_full {
+    if compat_snapshot == cache.last_snapshot
+        && full_snapshot == cache.last_full
+        && progress_signature == cache.last_progress_signature
+    {
         return;
     }
     cache.last_snapshot = compat_snapshot;
     cache.last_full = full_snapshot;
+    cache.last_progress_signature = progress_signature;
 
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
@@ -524,15 +1405,23 @@ pub fn update_character_panel_dom(
     };
 
     let mut html = String::new();
+    let mut card_ids = std::collections::HashSet::new();
 
     for actor in actors.iter() {
-        let hp_pct = if actor.max_hp > 0 {
-            (actor.hp as f32 / actor.max_hp as f32 * 100.0).max(0.0)
+        let card_id = ensure_unique_dom_id(&format!("actor-{}", dom_safe_id(&actor.id)), &mut card_ids);
+        let escaped_actor_id = html_escape(&actor.id);
+        let data_actor_id = escaped_actor_id.clone();
+        let hp_display = metric_text(actor.hp, actor.hp_known, actor.max_hp, actor.max_hp_known);
+        let mp_display = metric_text(actor.mp, actor.mp_known, actor.max_mp, actor.max_mp_known);
+        let hp_display_class = metric_text_class(actor.hp_known, actor.max_hp_known);
+        let mp_display_class = metric_text_class(actor.mp_known, actor.max_mp_known);
+        let hp_pct = if actor.hp_known && actor.max_hp_known && actor.max_hp > 0 {
+            ((actor.hp.max(0) as f32 / actor.max_hp.max(1) as f32) * 100.0).clamp(0.0, 100.0)
         } else {
             0.0
         };
-        let mp_pct = if actor.max_mp > 0 {
-            (actor.mp as f32 / actor.max_mp as f32 * 100.0).max(0.0)
+        let mp_pct = if actor.mp_known && actor.max_mp_known && actor.max_mp > 0 {
+            ((actor.mp.max(0) as f32 / actor.max_mp.max(1) as f32) * 100.0).clamp(0.0, 100.0)
         } else {
             0.0
         };
@@ -558,7 +1447,7 @@ pub fn update_character_panel_dom(
             .get(&actor.id)
             .map_or(false, |s| s == "thinking");
         let keeper_line = if actor.keeper.trim().is_empty() {
-            "<div class=\"char-owner owner-unassigned\">keeper: (unassigned)</div>".to_string()
+            "<div class=\"char-owner owner-unassigned\">keeper: 미할당</div>".to_string()
         } else {
             let thinking_class = if is_thinking { " keeper-thinking" } else { "" };
             format!(
@@ -593,6 +1482,50 @@ pub fn update_character_panel_dom(
                 archetype_line, persona_line
             )
         };
+        let runtime_state = progress
+            .actor_states
+            .get(&actor.id)
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default();
+        let runtime_reason = progress
+            .actor_reasons
+            .get(&actor.id)
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default();
+        let runtime_line = if runtime_state.is_empty() && runtime_reason.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<div class=\"char-runtime\">state: {} · reason: {}</div>",
+                html_escape(if runtime_state.is_empty() {
+                    "상태 없음"
+                } else {
+                    runtime_state.as_str()
+                }),
+                html_escape(if runtime_reason.is_empty() {
+                    "사유 없음"
+                } else {
+                    runtime_reason.as_str()
+                })
+            )
+        };
+        let contribution_line = if actor.contribution_score == 0
+            && actor.contribution_last_reason.trim().is_empty()
+        {
+            String::new()
+        } else {
+            format!(
+                "<div class=\"char-contribution\">기여 {} · {}</div>",
+                actor.contribution_score,
+                html_escape(if actor.contribution_last_reason.trim().is_empty() {
+                    "기여 사유 없음"
+                } else {
+                    actor.contribution_last_reason.trim()
+                })
+            )
+        };
+        let relationships_attr = actor.relationships.join(" | ");
+        let contribution_reasons_attr = actor.contribution_reasons.join(" | ");
 
         // Buffs / debuffs
         let buffs_html = actor
@@ -633,9 +1566,9 @@ pub fn update_character_panel_dom(
         };
 
         // Collapsible section IDs
-        let traits_id = format!("toggle-traits-{}", actor.id);
-        let skills_id = format!("toggle-skills-{}", actor.id);
-        let equip_id = format!("toggle-equip-{}", actor.id);
+        let traits_id = format!("{}-traits", card_id);
+        let skills_id = format!("{}-skills", card_id);
+        let equip_id = format!("{}-equip", card_id);
 
         let traits_checked = if expanded.contains(&traits_id) {
             " checked"
@@ -799,26 +1732,79 @@ pub fn update_character_panel_dom(
             )
         };
 
-        // MP bar (only if max_mp > 0)
-        let mp_row = if actor.max_mp > 0 {
+        // Metrics row - hide synthetic bar when max is unknown.
+        let hp_row = if actor.hp_known && actor.max_hp_known && actor.max_hp > 0 {
+            format!(
+                concat!(
+                    "<div class=\"hp-row\">",
+                    "<div class=\"hp-bar-container\">",
+                    "<div class=\"hp-bar-fill {}\" style=\"width: {}%\"></div>",
+                    "</div>",
+                    "<div class=\"hp-text actor-inspector-metric {}\">{}</div>",
+                    "</div>",
+                ),
+                bar_class,
+                hp_pct,
+                hp_display_class,
+                html_escape(&hp_display),
+            )
+        } else {
+            format!(
+                "<div class=\"hp-row\"><div class=\"hp-text actor-inspector-metric {}\">{}</div></div>",
+                hp_display_class,
+                html_escape(&hp_display),
+            )
+        };
+        let mp_row = if actor.mp_known && actor.max_mp_known && actor.max_mp > 0 {
             format!(
                 concat!(
                     "<div class=\"mp-row\">",
                     "<div class=\"mp-bar-container\">",
                     "<div class=\"mp-bar-fill {}\" style=\"width: {}%\"></div>",
                     "</div>",
-                    "<div class=\"mp-text\">{} / {}</div>",
+                    "<div class=\"mp-text actor-inspector-metric {}\">{}</div>",
                     "</div>",
                 ),
-                mp_bar_class, mp_pct, actor.mp, actor.max_mp,
+                mp_bar_class,
+                mp_pct,
+                mp_display_class,
+                html_escape(&mp_display),
             )
         } else {
-            String::new()
+            format!(
+                "<div class=\"mp-row\"><div class=\"mp-text actor-inspector-metric {}\">{}</div></div>",
+                mp_display_class,
+                html_escape(&mp_display),
+            )
         };
+
+        let hp_attr = if actor.hp_known { "1" } else { "0" };
+        let max_hp_attr = if actor.max_hp_known { "1" } else { "0" };
+        let mp_attr = if actor.mp_known { "1" } else { "0" };
+        let max_mp_attr = if actor.max_mp_known { "1" } else { "0" };
+        let display_name = if actor.name.trim().is_empty() {
+            actor.id.clone()
+        } else {
+            actor.name.clone()
+        };
+        let atk_attr = if actor.atk_known { "1" } else { "0" };
+        let def_attr = if actor.def_known { "1" } else { "0" };
+        let int_attr = if actor.int_known { "1" } else { "0" };
+        let luck_attr = if actor.luck_known { "1" } else { "0" };
 
         html.push_str(&format!(
             concat!(
-                "<div class=\"character-card{}\" data-actor-id=\"{}\" data-class=\"{}\">",
+                "<div class=\"character-card{}\" role=\"button\" tabindex=\"0\" aria-label=\"{} 선택\" ",
+                "id=\"{}\" data-card-id=\"{}\" data-actor-id=\"{}\" data-class=\"{}\" ",
+                "data-actor-name=\"{}\" data-actor-class=\"{}\" data-keeper=\"{}\" ",
+                "data-archetype=\"{}\" data-persona=\"{}\" ",
+                "data-runtime-state=\"{}\" data-runtime-reason=\"{}\" ",
+                "data-hp=\"{}\" data-max-hp=\"{}\" data-hp-known=\"{}\" data-max-hp-known=\"{}\" ",
+                "data-mp=\"{}\" data-max-mp=\"{}\" data-mp-known=\"{}\" data-max-mp-known=\"{}\" ",
+                "data-atk=\"{}\" data-atk-known=\"{}\" data-def=\"{}\" data-def-known=\"{}\" ",
+                "data-int=\"{}\" data-int-known=\"{}\" data-luck=\"{}\" data-luck-known=\"{}\" ",
+                "data-contribution-score=\"{}\" data-contribution-reason=\"{}\" data-contribution-reasons=\"{}\" ",
+                "data-relationships=\"{}\" aria-selected=\"false\">",
                 "<div class=\"char-header\">",
                 "{}",
                 "<div class=\"char-identity\">",
@@ -828,44 +1814,74 @@ pub fn update_character_panel_dom(
                 "</div>",
                 "</div>",
                 "{}",
-                "<div class=\"hp-row\">",
-                "<div class=\"hp-bar-container\">",
-                "<div class=\"hp-bar-fill {}\" style=\"width: {}%\"></div>",
-                "</div>",
-                "<div class=\"hp-text\">{} / {}</div>",
-                "</div>",
+                "{}",
+                "{}",
                 "{}",
                 "<div class=\"char-stats\">",
-                "<div class=\"stat\"><div class=\"stat-value\">{}</div><div class=\"stat-label\">ATK</div></div>",
-                "<div class=\"stat\"><div class=\"stat-value\">{}</div><div class=\"stat-label\">DEF</div></div>",
-                "<div class=\"stat\"><div class=\"stat-value\">{}</div><div class=\"stat-label\">INT</div></div>",
-                "<div class=\"stat\"><div class=\"stat-value\">{}</div><div class=\"stat-label\">LCK</div></div>",
+                "<div class=\"stat\"><div class=\"stat-value actor-metric-{}\">{}</div><div class=\"stat-label\">ATK</div></div>",
+                "<div class=\"stat\"><div class=\"stat-value actor-metric-{}\">{}</div><div class=\"stat-label\">DEF</div></div>",
+                "<div class=\"stat\"><div class=\"stat-value actor-metric-{}\">{}</div><div class=\"stat-label\">INT</div></div>",
+                "<div class=\"stat\"><div class=\"stat-value actor-metric-{}\">{}</div><div class=\"stat-label\">LCK</div></div>",
                 "</div>",
                 "{}",
                 "<div class=\"char-effects\">{}{}</div>",
                 "{}",
                 "{}",
                 "{}",
+                "{}",
                 "</div>",
             ),
-            dead_class,
-            actor.id,
-            slug,
+                dead_class,
+                card_id,
+                card_id,
+                html_escape(&display_name),
+                data_actor_id,
+                slug,
+                html_escape(&actor.name),
+            html_escape(&actor.class),
+            html_escape(&actor.keeper),
+            html_escape(actor.archetype.trim()),
+            html_escape(actor.persona.trim()),
+            html_escape(&runtime_state),
+            html_escape(&runtime_reason),
+            actor.hp,
+            actor.max_hp,
+            hp_attr,
+            max_hp_attr,
+            actor.mp,
+            actor.max_mp,
+            mp_attr,
+            max_mp_attr,
+            actor.stats.atk,
+            atk_attr,
+            actor.stats.def,
+            def_attr,
+            actor.stats.int,
+            int_attr,
+            actor.stats.luck,
+            luck_attr,
+            actor.contribution_score,
+            html_escape(actor.contribution_last_reason.trim()),
+            html_escape(&contribution_reasons_attr),
+            html_escape(&relationships_attr),
             portrait_html,
             actor.name,
             icon,
             actor.class,
             lore_line,
             keeper_line,
-            bar_class,
-            hp_pct,
-            actor.hp,
-            actor.max_hp,
+            runtime_line,
+            contribution_line,
+            hp_row,
             mp_row,
-            actor.stats.atk,
-            actor.stats.def,
-            actor.stats.int,
-            actor.stats.luck,
+            metric_text_class(actor.atk_known, true),
+            html_escape(&known_stat_text(actor.stats.atk, actor.atk_known)),
+            metric_text_class(actor.def_known, true),
+            html_escape(&known_stat_text(actor.stats.def, actor.def_known)),
+            metric_text_class(actor.int_known, true),
+            html_escape(&known_stat_text(actor.stats.int, actor.int_known)),
+            metric_text_class(actor.luck_known, true),
+            html_escape(&known_stat_text(actor.stats.luck, actor.luck_known)),
             conditions_html,
             buffs_html,
             debuffs_html,
@@ -876,4 +1892,25 @@ pub fn update_character_panel_dom(
     }
 
     panel.set_inner_html(&html);
+    ensure_character_panel_selection_binding(&document);
+
+    let selected_actor = document
+        .get_element_by_id("dashboard")
+        .and_then(|el| el.get_attribute("data-selected-actor"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            document
+                .query_selector("#character-panel .character-card[data-actor-id]")
+                .ok()
+                .flatten()
+                .and_then(|el| el.get_attribute("data-actor-id"))
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+    if let Some(actor_id) = selected_actor {
+        select_character_card(&document, &actor_id);
+    } else {
+        render_actor_inspector_empty(&document, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE);
+    }
 }

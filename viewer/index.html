@@ -149,46 +149,12 @@
 
     <!-- ═══ Dashboard (Active Mode View) ═══ -->
     <div id="dashboard" style="display: none;" data-auto-round="1">
-        <!-- Top Bar -->
+        <!-- Top Bar (minimal navigation) -->
         <header id="top-bar">
             <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
             <span id="mode-title">—</span>
             <div class="top-bar-right">
-                <div class="room-switch-inline">
-                    <select id="room-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
-                        <option value="default" selected>default</option>
-                    </select>
-                    <input id="room-input-inline" class="inline-input" type="text" value="default" placeholder="방 이름 입력" maxlength="64" title="이동할 방 이름을 직접 입력" />
-                    <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방으로 이동합니다">이동</button>
-                    <button id="room-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
-                    <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
-                    <span id="room-status" class="widget-pill">현재 게임: default</span>
-                </div>
-                <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
-                <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="true" title="AI 턴 자동 진행을 멈춥니다">자동 진행: ON</button>
-                <div class="session-control-inline">
-                    <button id="session-pause-btn" class="inline-toggle" type="button" title="현재 세션을 멈춥니다">멈춤</button>
-                    <button id="session-resume-btn" class="inline-toggle" type="button" title="멈춘 세션을 재개합니다">재개</button>
-                    <span id="session-control-status" class="widget-pill">세션 제어 대기</span>
-                </div>
-                <button id="view-options-toggle" class="inline-toggle" type="button" aria-pressed="false" title="화면 표시 옵션 열기/닫기">화면 옵션</button>
-                <div id="view-options-popover" class="view-options-popover" style="display:none">
-                    <label><input id="opt-show-ops" type="checkbox" checked /> 운영 HUD</label>
-                    <label><input id="opt-show-secondary" type="checkbox" checked /> 내러티브 패널</label>
-                    <label><input id="opt-show-tertiary" type="checkbox" checked /> 파티 패널</label>
-                    <label><input id="opt-show-bottom" type="checkbox" checked /> 하단 로그</label>
-                </div>
-                <select id="theme-selector-inline" class="inline-select">
-                    <option value="dark-fantasy">Dark Fantasy</option>
-                    <option value="cyberpunk">Cyberpunk</option>
-                    <option value="terminal">Terminal</option>
-                    <option value="parchment">Parchment</option>
-                </select>
-              <button id="debug-log-toggle" class="inline-toggle debug-only" type="button" aria-pressed="false" title="개발자 디버그 로그 표시/숨김">Debug</button>
-              <span id="debug-log-status" class="widget-pill debug-only" style="display:none">DEBUG</span>
-              <span id="widget-status" class="widget-pill debug-only" style="display:none">Widgets N:0 P:0 H:0</span>
-              <button id="dedup-status" class="widget-pill dedup-pill debug-only" type="button" aria-expanded="false" style="display:none">Dedup S:0 N:0 H:0</button>
-              <div id="dedup-popover" class="dedup-popover" style="display:none"></div>
+                <button id="ops-hud-toggle" class="inline-toggle" type="button" title="운영 상태 패널 열기/닫기">상태</button>
                 <div id="connection-status" class="disconnected">
                     <span class="status-dot"></span>
                     <span class="status-text">Disconnected</span>
@@ -196,7 +162,77 @@
             </div>
         </header>
 
-        <section id="ops-hud" aria-label="TRPG 운영 상태">
+        <!-- Tab Bar (context separation) -->
+        <nav id="control-tab-bar" class="control-tab-bar">
+            <button class="tab-btn active" data-tab="room">방</button>
+            <button class="tab-btn" data-tab="game">게임</button>
+            <button class="tab-btn" data-tab="settings">설정</button>
+        </nav>
+
+        <!-- Tab Panel: 방 -->
+        <div id="tab-panel-room" class="tab-panel active">
+            <div class="room-switch-inline">
+                <select id="room-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
+                    <option value="default" selected>default</option>
+                </select>
+                <input id="room-input-inline" class="inline-input" type="text" value="default" placeholder="방 이름 입력" maxlength="64" title="이동할 방 이름을 직접 입력" />
+                <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방으로 이동합니다">이동</button>
+                <button id="room-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
+                <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
+                <span id="room-status" class="widget-pill">현재 게임: default</span>
+            </div>
+        </div>
+
+        <!-- Tab Panel: 게임 -->
+        <div id="tab-panel-game" class="tab-panel">
+            <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
+            <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="true" title="AI 턴 자동 진행을 멈춥니다">자동 진행: ON</button>
+            <div class="session-control-inline">
+                <button id="session-pause-btn" class="inline-toggle" type="button" title="현재 세션을 멈춥니다">멈춤</button>
+                <button id="session-resume-btn" class="inline-toggle" type="button" title="멈춘 세션을 재개합니다">재개</button>
+                <span id="session-control-status" class="widget-pill">세션 제어 대기</span>
+            </div>
+        </div>
+
+        <!-- Tab Panel: 설정 -->
+        <div id="tab-panel-settings" class="tab-panel">
+            <button id="view-options-toggle" class="inline-toggle" type="button" aria-pressed="false" aria-expanded="false" aria-haspopup="menu" aria-controls="view-options-popover" title="화면 표시 옵션 열기/닫기">화면 옵션</button>
+            <div id="view-options-popover" class="view-options-popover" role="menu" aria-label="화면 표시 메뉴" aria-labelledby="view-options-title" aria-hidden="true" style="display:none" tabindex="-1">
+                <div class="view-options-header">
+                    <span id="view-options-title" class="view-options-title">화면 표시</span>
+                    <button id="view-options-close" class="view-options-close" type="button" aria-label="화면 옵션 닫기">✕</button>
+                </div>
+                <label class="view-option-item" data-view-option-item="opt-show-ops"><input id="opt-show-ops" type="checkbox" role="menuitemcheckbox" aria-checked="true" checked /> 운영 HUD</label>
+                <label class="view-option-item" data-view-option-item="opt-show-secondary"><input id="opt-show-secondary" type="checkbox" role="menuitemcheckbox" aria-checked="true" checked /> 내러티브 패널</label>
+                <label class="view-option-item" data-view-option-item="opt-show-tertiary"><input id="opt-show-tertiary" type="checkbox" role="menuitemcheckbox" aria-checked="true" checked /> 파티 패널</label>
+                <label class="view-option-item" data-view-option-item="opt-show-bottom"><input id="opt-show-bottom" type="checkbox" role="menuitemcheckbox" aria-checked="true" checked /> 하단 로그</label>
+                <div class="view-options-divider"></div>
+                <label for="opt-log-view-mode" class="view-options-subtitle">로그 모드</label>
+                <label>
+                    <select id="opt-log-view-mode" role="menuitem">
+                        <option value="all" selected>전체</option>
+                        <option value="narrative">내러티브</option>
+                        <option value="action">액션</option>
+                        <option value="system">시스템</option>
+                        <option value="outcome">결과</option>
+                        <option value="debug">디버그</option>
+                    </select>
+                </label>
+            </div>
+            <select id="theme-selector-inline" class="inline-select">
+                <option value="dark-fantasy">Dark Fantasy</option>
+                <option value="cyberpunk">Cyberpunk</option>
+                <option value="terminal">Terminal</option>
+                <option value="parchment">Parchment</option>
+            </select>
+            <button id="debug-log-toggle" class="inline-toggle debug-only" type="button" aria-pressed="false" title="개발자 디버그 로그 표시/숨김">Debug</button>
+            <span id="debug-log-status" class="widget-pill debug-only" style="display:none">DEBUG</span>
+            <span id="widget-status" class="widget-pill debug-only" style="display:none">Widgets N:0 P:0 H:0</span>
+            <button id="dedup-status" class="widget-pill dedup-pill debug-only" type="button" aria-expanded="false" style="display:none">Dedup S:0 N:0 H:0</button>
+            <div id="dedup-popover" class="dedup-popover" style="display:none"></div>
+        </div>
+
+        <section id="ops-hud" class="collapsed" aria-label="TRPG 운영 상태">
             <div class="ops-hud-item">
                 <span class="ops-k">Room</span>
                 <span id="ops-room-id" class="ops-v">default</span>
@@ -220,6 +256,58 @@
             <div class="ops-hud-item">
                 <span class="ops-k">Sync</span>
                 <span id="ops-sync-state" class="ops-v">대기</span>
+            </div>
+        </section>
+
+        <section id="playability-proof" aria-label="TRPG 플레이 증명">
+            <div class="play-proof-card">
+                <div class="play-proof-head">
+                    <strong>플레이 증명</strong>
+                    <div class="play-proof-statuses">
+                        <span class="play-proof-tag">Liveness</span>
+                        <span id="play-proof-liveness-status" class="play-proof-status play-proof-warn">점검 중</span>
+                        <span class="play-proof-tag">Quality</span>
+                        <span id="play-proof-quality-status" class="play-proof-status play-proof-warn">점검 중</span>
+                    </div>
+                </div>
+                <div class="play-proof-grid">
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">턴 진행</span>
+                        <span id="play-proof-turns" class="play-proof-v">turn=0 / started=0</span>
+                    </div>
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">DM 응답</span>
+                        <span id="play-proof-dm" class="play-proof-v">0</span>
+                    </div>
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">플레이어 액션</span>
+                        <span id="play-proof-actions" class="play-proof-v">0</span>
+                    </div>
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">유니크 액터</span>
+                        <span id="play-proof-actors" class="play-proof-v">0</span>
+                    </div>
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">Timeout</span>
+                        <span id="play-proof-timeout" class="play-proof-v">0</span>
+                    </div>
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">Unavailable</span>
+                        <span id="play-proof-unavailable" class="play-proof-v">0</span>
+                    </div>
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">Recovery</span>
+                        <span id="play-proof-recovery" class="play-proof-v">0</span>
+                    </div>
+                    <div class="play-proof-item">
+                        <span class="play-proof-k">Outcome</span>
+                        <span id="play-proof-outcome" class="play-proof-v">진행 중</span>
+                    </div>
+                </div>
+                <div id="play-proof-liveness-reasons" class="play-proof-reasons">Liveness 점검 중...</div>
+                <div id="play-proof-quality-reasons" class="play-proof-reasons">Quality 점검 중...</div>
+                <div id="play-proof-contract-status" class="play-proof-status play-proof-warn" style="display:none">점검 중</div>
+                <div id="play-proof-reasons" class="play-proof-reasons" style="display:none">계약 지표 수집 중...</div>
             </div>
         </section>
 
@@ -292,7 +380,7 @@
 
                     <label class="new-game-field">
                         <span>AI 모델 (쉼표로 구분)</span>
-                        <input id="new-game-models" type="text" value="ollama:glm-4.7-flash" title="AI가 사용할 LLM 모델 지정" />
+                        <input id="new-game-models" type="text" value="glm:glm-5,glm:glm-4.7,glm:glm-4.7-flashx,glm:glm-4.6v,glm:glm-4.5,ollama:glm-4.7-flash" title="AI가 사용할 LLM 모델 지정" />
                     </label>
                 </div>
 
@@ -445,6 +533,7 @@
                     <input type="hidden" id="round-run-timeout" value="45" />
                     <input type="hidden" id="round-run-lang" value="" />
                     <input type="hidden" id="round-run-players" value="" />
+                    <input type="hidden" id="round-run-fallback-mode" value="on" />
                     <details id="dm-voice-config" class="dm-voice-config">
                         <summary>DM 음성 설정</summary>
                         <div class="dm-voice-grid">
@@ -593,6 +682,9 @@
             <aside id="tertiary-zone">
                 <h2 class="panel-title" id="tertiary-title">Party</h2>
                 <div id="tertiary-content" class="scrollable">
+                    <div id="actor-inspector" class="actor-inspector">
+                        <div class="actor-inspector-empty">파티원을 선택하면 상세 정보가 표시됩니다.</div>
+                    </div>
                     <div id="character-panel"></div>
                 </div>
             </aside>
@@ -610,6 +702,33 @@
             </section>
         </footer>
     </div>
+
+    <script>
+    /* Tab switching + Ops HUD toggle */
+    (function () {
+        var tabBar = document.getElementById('control-tab-bar');
+        if (tabBar) {
+            tabBar.addEventListener('click', function (e) {
+                var btn = e.target.closest('.tab-btn');
+                if (!btn) return;
+                var tab = btn.dataset.tab;
+                document.querySelectorAll('.tab-btn').forEach(function (b) {
+                    b.classList.toggle('active', b === btn);
+                });
+                document.querySelectorAll('.tab-panel').forEach(function (p) {
+                    p.classList.toggle('active', p.id === 'tab-panel-' + tab);
+                });
+            });
+        }
+        var hudToggle = document.getElementById('ops-hud-toggle');
+        if (hudToggle) {
+            hudToggle.addEventListener('click', function () {
+                var hud = document.getElementById('ops-hud');
+                if (hud) hud.classList.toggle('collapsed');
+            });
+        }
+    })();
+    </script>
 
     <script>
     (function () {

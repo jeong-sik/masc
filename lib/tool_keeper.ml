@@ -993,6 +993,11 @@ type keeper_meta = {
   last_compaction_decision: string;
   last_continuity_update_ts: float;
   continuity_summary: string;
+  (* Autonomy fields (Phase 2: Keeper Autonomy Engine) *)
+  autonomy_level: string;  (** L1_Reactive..L5_Independent, stored as string for JSON compat *)
+  active_goal_ids: string list;  (** goal_store goal IDs this keeper pursues *)
+  last_autonomous_action_at: string;  (** ISO timestamp of last autonomous action *)
+  autonomous_action_count: int;  (** total autonomous actions taken *)
 }
 
 let now_iso () = Types.now_iso ()
@@ -1060,6 +1065,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ("last_compaction_decision", `String m.last_compaction_decision);
     ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
     ("continuity_summary", `String m.continuity_summary);
+    ("autonomy_level", `String m.autonomy_level);
+    ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
+    ("last_autonomous_action_at", `String m.last_autonomous_action_at);
+    ("autonomous_action_count", `Int m.autonomous_action_count);
   ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
@@ -1189,6 +1198,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       else
         parsed_ts
     in
+    let autonomy_level = Safe_ops.json_string ~default:"l1_reactive" "autonomy_level" json in
+    let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
+    let last_autonomous_action_at = Safe_ops.json_string ~default:"" "last_autonomous_action_at" json in
+    let autonomous_action_count = Safe_ops.json_int ~default:0 "autonomous_action_count" json in
     if not (validate_name name) then
       Error "invalid keeper meta (bad name)"
     else if not (validate_name trace_id) then
@@ -1256,6 +1269,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         last_compaction_decision;
         last_continuity_update_ts;
         continuity_summary;
+        autonomy_level;
+        active_goal_ids;
+        last_autonomous_action_at;
+        autonomous_action_count;
       }
   with exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
@@ -5535,6 +5552,82 @@ let memory_check_default_json () : Yojson.Safe.t =
     ("recall_fallback_applied", `Bool false);
   ]
 
+(** Check if keeper autonomy engine is enabled via environment variable. *)
+let keeper_autonomy_enabled () =
+  match Sys.getenv_opt "MASC_KEEPER_AUTONOMY_ENABLED" with
+  | Some s -> String.lowercase_ascii (String.trim s) = "true"
+  | None -> false
+
+(** Autonomous goal turn: evaluate goals and optionally generate/verify action plan.
+    Returns Some updated_meta when an autonomous action decision was made,
+    None to fall through to regular proactive generation.
+    @since 2.74.0 *)
+let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
+    ~(specs : Llm_client.model_spec list) : keeper_meta option =
+  if not (keeper_autonomy_enabled ()) then None
+  else if meta.active_goal_ids = [] then None
+  else
+    match Keeper_autonomy.autonomy_level_of_string meta.autonomy_level with
+    | None -> None
+    | Some L1_Reactive -> None
+    | Some level ->
+        let primary = match specs with p :: _ -> p | [] -> Llm_client.ollama_glm in
+        let verify_model = Llm_client.ollama_lfm in
+        let keeper_context =
+          Printf.sprintf "keeper=%s autonomy=%s turns=%d cost=$%.4f"
+            meta.name (Keeper_autonomy.autonomy_level_to_string level)
+            meta.total_turns meta.total_cost_usd
+        in
+        match level with
+        | L1_Reactive -> None
+        | L2_Suggestive ->
+            (* L2: evaluate and log suggestion only, do not alter proactive flow *)
+            let next = Keeper_autonomy.evaluate_next_action
+              ~config ~goal_ids:meta.active_goal_ids ~keeper_name:meta.name in
+            (match next with
+             | Propose pa ->
+                 Printf.eprintf "[keeper-autonomy] %s L2 suggest: %s (risk=%s, cost=$%.2f)\n%!"
+                   meta.name pa.action_description
+                   (Keeper_autonomy.risk_level_to_string pa.risk_level)
+                   pa.estimated_cost_usd;
+                 None
+             | _ -> None)
+        | _ ->
+            (* L3+: full pipeline — evaluate, plan, verify, decide *)
+            let result = Keeper_verifier.run_pipeline
+              ~config
+              ~goal_ids:meta.active_goal_ids
+              ~keeper_name:meta.name
+              ~keeper_context
+              ~plan_model:primary
+              ~verify_model
+              ~autonomy_level:level
+            in
+            (match result with
+             | NothingToDo reason ->
+                 Printf.eprintf "[keeper-autonomy] %s: nothing to do (%s)\n%!" meta.name reason;
+                 None
+             | Approved (pa, _plan) ->
+                 Printf.eprintf "[keeper-autonomy] %s APPROVED: %s\n%!"
+                   meta.name pa.action_description;
+                 Some { meta with
+                   last_autonomous_action_at = now_iso ();
+                   autonomous_action_count = meta.autonomous_action_count + 1;
+                   updated_at = now_iso ();
+                 }
+             | Cautioned (pa, _plan, warning) ->
+                 Printf.eprintf "[keeper-autonomy] %s CAUTIONED: %s (warning: %s)\n%!"
+                   meta.name pa.action_description warning;
+                 Some { meta with
+                   last_autonomous_action_at = now_iso ();
+                   autonomous_action_count = meta.autonomous_action_count + 1;
+                   updated_at = now_iso ();
+                 }
+             | Rejected (pa, reason) ->
+                 Printf.eprintf "[keeper-autonomy] %s REJECTED: %s (%s)\n%!"
+                   meta.name pa.action_description reason;
+                 None)
+
 let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
   if not meta.proactive_enabled then meta
   else
@@ -5563,6 +5656,13 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
           (match ensure_api_keys specs with
            | Error _ -> meta
            | Ok () ->
+               (* Phase 2: Autonomous goal turn (L2+ with active goals) *)
+               (match run_autonomous_goal_turn ~config:ctx.config ~meta ~specs with
+                | Some updated_meta ->
+                    (match write_meta ctx.config updated_meta with
+                     | Ok () -> () | Error _ -> ());
+                    updated_meta
+                | None ->
                let primary =
                  match specs with
                  | p :: _ -> p
@@ -5748,7 +5848,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                           in
                           append_jsonl_line metrics_path metrics_json
                         with _ -> ());
-                       updated)
+                       updated))
 
 (* Presence keepalive fibers keyed by keeper name. *)
 let keepalives : (string, bool ref) Hashtbl.t = Hashtbl.create 8
@@ -6156,6 +6256,10 @@ let handle_keeper_up ctx args : tool_result =
                 last_proactive_preview = "";
                 last_continuity_update_ts = now_ts;
                 continuity_summary = "";
+                autonomy_level = "l1_reactive";
+                active_goal_ids = [];
+                last_autonomous_action_at = "";
+                autonomous_action_count = 0;
              } in
              match write_meta ctx.config meta with
              | Error e -> (false, "❌ " ^ e)
@@ -6871,6 +6975,10 @@ let handle_keeper_msg ctx args : tool_result =
             last_proactive_preview = "";
             last_continuity_update_ts = now_ts;
             continuity_summary = "";
+            autonomy_level = "l1_reactive";
+            active_goal_ids = [];
+            last_autonomous_action_at = "";
+            autonomous_action_count = 0;
           } in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;

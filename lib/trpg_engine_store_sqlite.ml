@@ -304,3 +304,52 @@ let load_recovery ~base_dir ~room_id =
       match read_events_after ~base_dir ~room_id ~after_seq:snap.last_seq with
       | Error _ as e -> e
       | Ok tail -> Ok (Some snap, tail))
+
+type session_summary = {
+  room_id : string;
+  first_ts : string;
+  last_ts : string;
+  event_count : int;
+  last_seq : int;
+  ended : bool;
+}
+
+let list_sessions_summary ~base_dir =
+  let* () = init ~base_dir in
+  with_db ~base_dir (fun db ->
+      let stmt =
+        Sqlite3.prepare db
+          "SELECT e.room_id, \
+                  MIN(e.ts) AS first_ts, \
+                  MAX(e.ts) AS last_ts, \
+                  COUNT(*) AS event_count, \
+                  MAX(e.seq) AS last_seq, \
+                  MAX(CASE WHEN e.event_type = 'room.ended' THEN 1 ELSE 0 END) AS ended \
+           FROM trpg_events e \
+           GROUP BY e.room_id \
+           ORDER BY MAX(e.seq) DESC"
+      in
+      Common.protect
+        ~module_name:"trpg_engine_store_sqlite"
+        ~finally_label:"finalize_list_sessions"
+        ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
+        (fun () ->
+          let rec loop acc =
+            match Sqlite3.step stmt with
+            | Sqlite3.Rc.ROW ->
+                let room_id = Sqlite3.column stmt 0 |> string_of_data |> Option.value ~default:"" in
+                let first_ts = Sqlite3.column stmt 1 |> string_of_data |> Option.value ~default:"" in
+                let last_ts = Sqlite3.column stmt 2 |> string_of_data |> Option.value ~default:"" in
+                let event_count = Sqlite3.column stmt 3 |> int_of_data |> Option.value ~default:0 in
+                let last_seq = Sqlite3.column stmt 4 |> int_of_data |> Option.value ~default:0 in
+                let ended = (Sqlite3.column stmt 5 |> int_of_data |> Option.value ~default:0) = 1 in
+                loop ({ room_id; first_ts; last_ts; event_count; last_seq; ended } :: acc)
+            | Sqlite3.Rc.DONE -> Ok (List.rev acc)
+            | rc ->
+                Error
+                  (Printf.sprintf
+                     "sqlite list sessions failed (%s): %s"
+                     (Sqlite3.Rc.to_string rc)
+                     (Sqlite3.errmsg db))
+          in
+          loop []))

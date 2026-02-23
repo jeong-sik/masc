@@ -536,6 +536,54 @@ let test_cleanup_zombies_empty () =
     Alcotest.(check bool) "cleanup result" true (String.length result > 0)
   )
 
+(** Return ISO8601 timestamp offset by seconds from now *)
+let iso_ago seconds =
+  let t = Unix.gettimeofday () -. seconds in
+  let tm = Unix.gmtime t in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+(** Helper: join an agent then overwrite its last_seen to simulate staleness *)
+let make_stale_agent config ~name ~age_seconds =
+  let _ = Room.join config ~agent_name:name ~capabilities:[] () in
+  (* Overwrite the agent file with a stale last_seen *)
+  let agents_path = Filename.concat (Room.masc_dir config) "agents" in
+  let path = Filename.concat agents_path (Room.safe_filename name ^ ".json") in
+  let stale_ts = iso_ago age_seconds in
+  let agent_json = Printf.sprintf
+    {|{"name":"%s","agent_type":"test","status":"inactive","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
+    name stale_ts stale_ts
+  in
+  Room.write_json config path (Yojson.Safe.from_string agent_json)
+
+let test_cleanup_zombies_detects_regular () =
+  with_test_env (fun config ->
+    (* Create a regular agent idle for 10 minutes (> 300s threshold) *)
+    make_stale_agent config ~name:"stale-regular-agent" ~age_seconds:700.0;
+    let result = Room.cleanup_zombies config in
+    Alcotest.(check bool) "regular zombie detected"
+      true (str_contains result "stale-regular-agent")
+  )
+
+let test_cleanup_zombies_detects_keeper () =
+  with_test_env (fun config ->
+    (* Create a keeper agent idle for 2 hours (> 3600s keeper threshold) *)
+    make_stale_agent config ~name:"keeper-longplay-agent" ~age_seconds:7200.0;
+    let result = Room.cleanup_zombies config in
+    Alcotest.(check bool) "keeper zombie detected after keeper threshold"
+      true (str_contains result "keeper-longplay-agent")
+  )
+
+let test_cleanup_zombies_spares_recent_keeper () =
+  with_test_env (fun config ->
+    (* Create a keeper agent idle for 10 minutes (< 3600s keeper threshold) *)
+    make_stale_agent config ~name:"keeper-active-agent" ~age_seconds:600.0;
+    let result = Room.cleanup_zombies config in
+    Alcotest.(check bool) "recent keeper spared"
+      true (not (str_contains result "keeper-active-agent"))
+  )
+
 (* ============================================================ *)
 (* Agent Discovery / Capability Tests                           *)
 (* ============================================================ *)
@@ -1081,6 +1129,9 @@ let () =
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
+      Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
+      Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;
+      Alcotest.test_case "cleanup spares recent keeper" `Quick test_cleanup_zombies_spares_recent_keeper;
     ];
 
     (* === Agent Discovery / Capability Tests === *)

@@ -4203,6 +4203,11 @@ type prompt_context = {
   dm_opening_prompt : string;
   dm_persona_id : dm_persona_id;
   dm_persona_override : bool;
+  (* Phase 1-3: Keeper Intelligence Harness fields *)
+  bdi_fragment : string;
+  dm_intent_hint : string;
+  narrative_arc_phase : string;
+  character_memory_notes : string;
 }
 
 let empty_prompt_context =
@@ -4225,6 +4230,10 @@ let empty_prompt_context =
     dm_opening_prompt = "";
     dm_persona_id = Dm_heroic_epic;
     dm_persona_override = false;
+    bdi_fragment = "";
+    dm_intent_hint = "";
+    narrative_arc_phase = "";
+    character_memory_notes = "";
   }
 
 let get_string_field json key =
@@ -4499,6 +4508,10 @@ let extract_prompt_context ~actor_id ?(dm_persona_override = None)
     dm_opening_prompt = get_string_field dm_json "opening_prompt";
     dm_persona_id = inferred_dm_persona;
     dm_persona_override = Option.is_some dm_persona_override;
+    bdi_fragment = "";
+    dm_intent_hint = "";
+    narrative_arc_phase = "";
+    character_memory_notes = "";
   }
 
 let join_nonempty sep items =
@@ -4754,7 +4767,23 @@ let build_dm_section_en (ctx : prompt_context) =
 let build_keeper_prompt ~dm_persona_override ~room_id ~phase ~turn ~role
     ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
-  let ctx = extract_prompt_context ~actor_id ~dm_persona_override state_json in
+  let ctx0 = extract_prompt_context ~actor_id ~dm_persona_override state_json in
+  (* Phase 1-3: Inject BDI fragment from actor's memory state *)
+  let bdi_frag =
+    let room_dir = Filename.concat (Filename.concat "." room_id) "" in
+    let bdi = Trpg_bdi.load ~room_dir ~actor_id in
+    Trpg_bdi.to_prompt_fragment bdi ~max_len:800
+  in
+  (* Phase 3: Inject DM intent hint from recent narrative *)
+  let dm_hint =
+    match ctx0.narrative_recent with
+    | [] -> ""
+    | lines ->
+      let recent = String.concat " " lines in
+      let intent = Trpg_dm_intent.extract recent in
+      Trpg_dm_intent.to_hint intent
+  in
+  let ctx = { ctx0 with bdi_fragment = bdi_frag; dm_intent_hint = dm_hint } in
   let state_text = Yojson.Safe.to_string state_json |> compact_text ~max_len:4200 in
   let character_section =
     match (role, lang) with
@@ -4776,14 +4805,25 @@ let build_keeper_prompt ~dm_persona_override ~room_id ~phase ~turn ~role
          Respond in English. \
          structured_action is REQUIRED. You MUST include it in every response."
   in
+  let bdi_section =
+    if ctx.bdi_fragment <> "" then
+      Printf.sprintf "\n---\n[Character Memory]\n%s\n" ctx.bdi_fragment
+    else ""
+  in
+  let intent_section =
+    if ctx.dm_intent_hint <> "" then
+      Printf.sprintf "\n%s\n" ctx.dm_intent_hint
+    else ""
+  in
   Printf.sprintf
-    "%s\n\n\
+    "%s%s%s\n\n\
      ---\n\
      room_id=%s, phase=%s, turn=%d, role=%s, actor_id=%s\n\n\
      state_snapshot_json:\n\
      %s\n\n\
      %s"
-    character_section room_id phase turn role_s actor_id state_text constraints
+    character_section bdi_section intent_section
+    room_id phase turn role_s actor_id state_text constraints
 
 let room_id_for_session session_id =
   sanitize_room_id (Printf.sprintf "session-%s" session_id)
@@ -7358,6 +7398,61 @@ let handle_round_run ctx args : result =
               :: !statuses;
             Ok ()
         in
+        (* Phase 1: BDI state update after successful keeper reply.
+           Observation-only — errors are logged but never block the main path. *)
+        let update_bdi_after_reply ~reply_text ~sa =
+          let room_dir = Filename.concat base_dir room_id in
+          let bdi0 = Trpg_bdi.load ~room_dir ~actor_id in
+          let bdi1 = Trpg_bdi.decay_beliefs ~current_turn:turn_before bdi0 in
+          (* Update belief: the keeper's reply reflects what the character now knows *)
+          let belief_subject =
+            Printf.sprintf "turn_%d_action" turn_before
+          in
+          let belief_content =
+            let max_len = 120 in
+            if String.length reply_text <= max_len then reply_text
+            else String.sub reply_text 0 max_len ^ "..."
+          in
+          let bdi2 =
+            Trpg_bdi.update_belief
+              ~subject:belief_subject
+              ~content:belief_content
+              ~confidence:0.9
+              ~turn:turn_before
+              bdi1
+          in
+          (* Update desire based on action type *)
+          let bdi3 =
+            match sa.sa_type with
+            | Attack | Defend ->
+                Trpg_bdi.update_desire
+                  ~goal:"survive combat" ~priority:0.9 ~category:"survival" bdi2
+            | Heal ->
+                Trpg_bdi.update_desire
+                  ~goal:"recover health" ~priority:0.8 ~category:"survival" bdi2
+            | Social ->
+                Trpg_bdi.update_desire
+                  ~goal:"build relationships" ~priority:0.6 ~category:"social" bdi2
+            | Investigate | Explore ->
+                Trpg_bdi.update_desire
+                  ~goal:"discover information" ~priority:0.7 ~category:"quest" bdi2
+            | QuestUpdate ->
+                Trpg_bdi.update_desire
+                  ~goal:"advance quest" ~priority:0.8 ~category:"quest" bdi2
+            | Magic | UseItem | SetFlag | SceneTransition -> bdi2
+          in
+          (* Save BDI state — ignore errors (observation-only) *)
+          let _save_result = Trpg_bdi.save ~room_dir bdi3 in
+          (* Emit Bdi_updated event — ignore errors *)
+          let _event_result =
+            append_event ~base_dir ~room_id
+              ~event_type:Trpg_engine_event.Bdi_updated
+              ~actor_id
+              ~payload:(Trpg_bdi.to_yojson bdi3)
+              ()
+          in
+          ()
+        in
         let lease_check =
           match role with
           | `Dm -> Ok ()
@@ -7687,6 +7782,8 @@ let handle_round_run ctx args : result =
                     ~turn:turn_before ~phase ~actor_id ~state:state_json sa
                 in
                 appended_events := !appended_events @ action_events;
+                (* Phase 1: Update BDI state after inferred reply *)
+                update_bdi_after_reply ~reply_text ~sa;
                 statuses :=
                   `Assoc
                     [
@@ -7740,6 +7837,8 @@ let handle_round_run ctx args : result =
             let memory_status_fields =
               memory_status_fields_of_action_events action_events
             in
+            (* Phase 1: Update BDI state after successful reply *)
+            update_bdi_after_reply ~reply_text:reply ~sa;
             statuses :=
               `Assoc
                 ([

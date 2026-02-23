@@ -37,6 +37,8 @@ type event_type =
   | Memory_signal
   | Intervention_submitted
   | Intervention_applied
+  | Bdi_updated
+  | Evaluation_scored
 
 type t = {
   seq : int;

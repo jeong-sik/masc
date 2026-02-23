@@ -220,6 +220,10 @@
    trpg_slot_world
    trpg_slot_metrics
    trpg_plugin_loader
+   trpg_dm_intent
+   trpg_bdi
+   trpg_harness
+   trpg_actor_match
    json_util)
  (libraries
    yojson

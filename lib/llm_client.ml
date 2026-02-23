@@ -110,6 +110,8 @@ type token_usage = {
   input_tokens : int;
   output_tokens : int;
   total_tokens : int;
+  cache_creation_input_tokens : int;
+  cache_read_input_tokens : int;
 }
 
 type completion_request = {
@@ -418,6 +420,8 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
       input_tokens = (try usage_json |> member "prompt_tokens" |> to_int with _ -> 0);
       output_tokens = (try usage_json |> member "completion_tokens" |> to_int with _ -> 0);
       total_tokens = (try usage_json |> member "total_tokens" |> to_int with _ -> 0);
+      cache_creation_input_tokens = 0;
+      cache_read_input_tokens = 0;
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
@@ -458,10 +462,14 @@ let parse_claude_response (json_str : string) : (completion_response, string) re
     let usage_json = json |> member "usage" in
     let input_tokens = try usage_json |> member "input_tokens" |> to_int with _ -> 0 in
     let output_tokens = try usage_json |> member "output_tokens" |> to_int with _ -> 0 in
+    let cache_creation = try usage_json |> member "cache_creation_input_tokens" |> to_int with _ -> 0 in
+    let cache_read = try usage_json |> member "cache_read_input_tokens" |> to_int with _ -> 0 in
     let usage = {
       input_tokens;
       output_tokens;
       total_tokens = input_tokens + output_tokens;
+      cache_creation_input_tokens = cache_creation;
+      cache_read_input_tokens = cache_read;
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
@@ -483,6 +491,8 @@ let parse_ollama_generate_response (json_str : string) : (completion_response, s
       input_tokens = prompt_eval_count;
       output_tokens = eval_count;
       total_tokens = prompt_eval_count + eval_count;
+      cache_creation_input_tokens = 0;
+      cache_read_input_tokens = 0;
     } in
     Ok { content; tool_calls = []; usage; model_used; latency_ms = 0 }
   with exn ->
@@ -506,6 +516,8 @@ let parse_ollama_chat_response (json_str : string) : (completion_response, strin
       input_tokens = prompt_eval_count;
       output_tokens = eval_count;
       total_tokens = prompt_eval_count + eval_count;
+      cache_creation_input_tokens = 0;
+      cache_read_input_tokens = 0;
     } in
     Ok { content; tool_calls = []; usage; model_used; latency_ms = 0 }
   with exn ->

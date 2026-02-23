@@ -53,6 +53,7 @@ type compaction_strategy =
 (* ================================================================ *)
 
 let memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
+let goal_prefix = "[MASC_GOAL]"
 
 let state_block_start = "[STATE]"
 let state_block_end = "[/STATE]"
@@ -172,9 +173,10 @@ let score_importance ctx =
     (* Tool call indicator *)
     let tool_w = match m.tool_call_id with Some _ -> 0.8 | None -> 0.5 in
     let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
-    (* Sticky memory: never drop our compacted memory summary. *)
+    (* Sticky memory: never drop compacted memory summary or goal injection. *)
     let score =
-      if starts_with ~prefix:memory_summary_prefix m.content then
+      if starts_with ~prefix:memory_summary_prefix m.content
+         || starts_with ~prefix:goal_prefix m.content then
         Float.max score 0.95
       else
         score

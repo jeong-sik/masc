@@ -59,11 +59,15 @@ type tool_call = {
   call_arguments : string;     (** JSON string of arguments *)
 }
 
-(** Token usage from a completion. *)
+(** Token usage from a completion.
+    [cache_creation_input_tokens] and [cache_read_input_tokens] track
+    Anthropic prompt caching metrics (0 for non-Anthropic providers). *)
 type token_usage = {
   input_tokens : int;
   output_tokens : int;
   total_tokens : int;
+  cache_creation_input_tokens : int;
+  cache_read_input_tokens : int;
 }
 
 (** {1 Request/Response} *)

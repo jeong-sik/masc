@@ -85,7 +85,7 @@ Stores context on disk and keeps presence alive. Auto-handoff is enabled by defa
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-2.5-flash', 'ollama:glm-4.7-flash', 'glm:glm-4.7', 'openrouter:...'.");
+          ("description", `String "Model cascade (provider:model). Examples: 'claude:opus', 'gemini:gemini-3.1-pro-preview', 'ollama:glm-4.7-flash', 'glm:glm-4.7', 'openrouter:...'.");
         ]);
         ("verify", `Assoc [
           ("type", `String "boolean");
@@ -2858,6 +2858,10 @@ let merge_usage
     Llm_client.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     total_tokens = a.total_tokens + b.total_tokens;
+    cache_creation_input_tokens =
+      a.cache_creation_input_tokens + b.cache_creation_input_tokens;
+    cache_read_input_tokens =
+      a.cache_read_input_tokens + b.cache_read_input_tokens;
   }
 
 let contains_ci (haystack : string) (needle : string) : bool =
@@ -5270,7 +5274,8 @@ let run_proactive_generation
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
   let zero_usage : Llm_client.token_usage =
-    { Llm_client.input_tokens = 0; output_tokens = 0; total_tokens = 0 }
+    { Llm_client.input_tokens = 0; output_tokens = 0; total_tokens = 0;
+      cache_creation_input_tokens = 0; cache_read_input_tokens = 0; }
   in
   let max_attempts = 3 in
   let previous_preview = String.trim meta.last_proactive_preview in
@@ -5342,7 +5347,7 @@ let run_proactive_generation
                  (Llm_client.system_msg turn_system_prompt)
                  :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
                temperature = proactive_temperature attempt;
-               max_tokens = 220;
+               max_tokens = 1024; (* increased from 220 to allow tool calls *)
                tools = keeper_llm_tools;
                response_format = `Text;
              }
@@ -5417,7 +5422,7 @@ let run_proactive_generation
                           Llm_client.user_msg followup_prompt;
                         ];
                         temperature = 0.3;
-                        max_tokens = 220;
+                        max_tokens = 1024; (* increased from 220 to allow tool calls *)
                         tools = next_tools;
                         response_format = `Text;
                       }
@@ -5747,10 +5752,15 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 
 (* Presence keepalive fibers keyed by keeper name. *)
 let keepalives : (string, bool ref) Hashtbl.t = Hashtbl.create 8
+let running_keepers () = Hashtbl.length keepalives
+let keeper_spawn_slots_available () =
+  let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+  max_keepers <= 0 || running_keepers () < max_keepers
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit =
   if not m.presence_keepalive then ()
   else if Hashtbl.mem keepalives m.name then ()
+  else if not (keeper_spawn_slots_available ()) then ()
   else begin
     let stop = ref false in
     Hashtbl.replace keepalives m.name stop;
@@ -5994,6 +6004,14 @@ let handle_keeper_up ctx args : tool_result =
         let verify = Option.value ~default:false verify_opt in
         let presence_keepalive = Option.value ~default:true presence_keepalive_opt in
         let presence_keepalive_sec = Option.value ~default:30 presence_keepalive_sec_opt in
+        let max_active_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+        let active_keepers = running_keepers () in
+        if presence_keepalive && max_active_keepers > 0 && active_keepers >= max_active_keepers then
+          (false,
+            Printf.sprintf
+              "❌ keeper keepalive max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
+              active_keepers max_active_keepers)
+        else
         let proactive_enabled =
           Option.value ~default:default_proactive_enabled proactive_enabled_opt
         in
@@ -8320,6 +8338,14 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
         let max_scan =
           max 0 Env_config.KeeperBootstrap.max_scan
         in
+        let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+        let remaining_slots =
+          ref
+            (if max_keepers > 0 then
+               max 0 (max_keepers - running_keepers ())
+             else
+               max_int)
+        in
         let names =
           files
           |> List.filter (fun f -> Filename.check_suffix f ".json")
@@ -8338,11 +8364,18 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                         || now_ts -. m.last_turn_ts >= stale_turn_sec)
                   in
                   let already_running = Hashtbl.mem keepalives m.name in
-                  if not stale_now then
-                    start_keepalive ~proactive_warmup_sec ctx m;
+                  let started_here =
+                    if stale_now then false
+                    else if already_running then false
+                    else if max_keepers > 0 && !remaining_slots <= 0 then false
+                    else (
+                      start_keepalive ~proactive_warmup_sec ctx m;
+                      if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
+                      true
+                    )
+                  in
                   ( scanned_acc + 1,
-                    started_acc
-                    + (if stale_now || already_running then 0 else 1),
+                    started_acc + (if started_here then 1 else 0),
                     stale_acc + (if stale_now then 1 else 0) )
               | _ -> (scanned_acc, started_acc, stale_acc))
             (0, 0, 0)

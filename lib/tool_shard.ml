@@ -225,6 +225,40 @@ let tools_of_shards (shard_names : string list) : Llm_client.tool_def list =
   |> List.filter_map (fun name -> Hashtbl.find_opt all_shards name)
   |> List.concat_map (fun (s : shard) -> s.tools)
 
+(** {1 Dynamic Shard Management} *)
+
+(** Grant a shard to an agent. Returns new active_shards list.
+    Fails if shard doesn't exist or is already granted. *)
+let[@warning "-32"] grant_shard (active_shards : string list) (shard_name : string) :
+  (string list, string) result =
+  match Hashtbl.find_opt all_shards shard_name with
+  | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
+  | Some _ ->
+    if List.mem shard_name active_shards then
+      Error (Printf.sprintf "Shard already granted: %s" shard_name)
+    else
+      Ok (active_shards @ [shard_name])
+
+(** Revoke a shard from an agent. Returns new active_shards list.
+    Fails if shard is not removable or not currently granted. *)
+let[@warning "-32"] revoke_shard (active_shards : string list) (shard_name : string) :
+  (string list, string) result =
+  match Hashtbl.find_opt all_shards shard_name with
+  | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
+  | Some shard ->
+    if not shard.removable then
+      Error (Printf.sprintf "Cannot revoke non-removable shard: %s" shard_name)
+    else if not (List.mem shard_name active_shards) then
+      Error (Printf.sprintf "Shard not currently granted: %s" shard_name)
+    else
+      Ok (List.filter (fun n -> n <> shard_name) active_shards)
+
+(** List all available shards with their status *)
+let[@warning "-32"] list_all_shards () : (string * bool * int) list =
+  Hashtbl.fold (fun name (shard : shard) acc ->
+    (name, shard.removable, List.length shard.tools) :: acc
+  ) all_shards []
+
 (** Full tool set (all 11 tools) — backward compatible *)
 let keeper_llm_tools : Llm_client.tool_def list =
   tools_of_shards default_shard_names

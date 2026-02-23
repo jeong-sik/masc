@@ -262,3 +262,93 @@ let[@warning "-32"] list_all_shards () : (string * bool * int) list =
 (** Full tool set (all 11 tools) — backward compatible *)
 let keeper_llm_tools : Llm_client.tool_def list =
   tools_of_shards default_shard_names
+
+(** {1 MCP Schemas} *)
+
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_tool_grant";
+    description = "Grant a tool shard to an agent. \
+Shards: base (core), board, filesystem, shell, weather.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to grant shard to");
+        ]);
+        ("shard_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Shard to grant: base, board, filesystem, shell, weather");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "shard_name"]);
+    ];
+  };
+  {
+    name = "masc_tool_revoke";
+    description = "Revoke a tool shard from an agent. \
+Cannot revoke 'base' shard (always present).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to revoke shard from");
+        ]);
+        ("shard_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Shard to revoke (must be removable)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "shard_name"]);
+    ];
+  };
+  {
+    name = "masc_tool_list";
+    description = "List all available tool shards with their capabilities.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+]
+
+(** {1 MCP Execute} *)
+
+(** Execute tool_shard MCP tools.
+    Note: This is a stub. Full implementation requires agent state tracking. *)
+let execute (tool_name : string) (arguments : Yojson.Safe.t) : (bool * Yojson.Safe.t) =
+  let module U = Yojson.Safe.Util in
+  match tool_name with
+  | "masc_tool_list" ->
+    let shards = list_all_shards () in
+    let shard_list = List.map (fun (name, removable, tool_count) ->
+      `Assoc [
+        ("name", `String name);
+        ("removable", `Bool removable);
+        ("tool_count", `Int tool_count);
+      ]
+    ) shards in
+    (true, `Assoc [("shards", `List shard_list)])
+
+  | "masc_tool_grant" ->
+    (* TODO: Requires agent state tracking to store active_shards *)
+    let shard_name = arguments |> U.member "shard_name" |> U.to_string in
+    (true, `Assoc [
+      ("status", `String "granted");
+      ("shard", `String shard_name);
+      ("note", `String "Stub: agent state tracking not yet implemented");
+    ])
+
+  | "masc_tool_revoke" ->
+    (* TODO: Requires agent state tracking to store active_shards *)
+    let shard_name = arguments |> U.member "shard_name" |> U.to_string in
+    (true, `Assoc [
+      ("status", `String "revoked");
+      ("shard", `String shard_name);
+      ("note", `String "Stub: agent state tracking not yet implemented");
+    ])
+
+  | _ -> (false, `String "Unknown tool")
+

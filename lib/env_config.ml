@@ -417,6 +417,11 @@ module KeeperBootstrap = struct
   (** Max keeper meta files to scan during bootstrap *)
   let max_scan =
     get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
+
+  (** Backward compatibility: legacy field for call sites not yet migrated
+      from pre-dynamic-sharding versions. Keep alias for max_scan. *)
+  let max_active_keepers =
+    get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
 end
 
 (** {1 Keeper Interesting Alert Configuration} *)

@@ -30,13 +30,15 @@ pub fn update_actor_lifecycle_dom(
                 .create_element("div")
                 .expect("create div for actor-spawn");
             div.set_class_name("narrative-entry actor-spawn");
-            let name = match p.name.as_deref() {
-                Some(n) if !n.is_empty() => n,
-                _ => &p.actor_id,
+            let name = if p.name.is_empty() {
+                &p.actor_id
+            } else {
+                &p.name
             };
-            let class_info = match p.class.as_deref() {
-                Some(c) if !c.is_empty() => format!(" ({})", html_escape(c)),
-                _ => String::new(),
+            let class_info = if p.class.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", html_escape(&p.class))
             };
             div.set_inner_html(&format!(
                 "<span class=\"actor-icon\">+</span> <strong>{}</strong>{} joined the adventure",
@@ -51,9 +53,10 @@ pub fn update_actor_lifecycle_dom(
                 .create_element("div")
                 .expect("create div for actor-delete");
             div.set_class_name("narrative-entry actor-delete");
-            let name = match p.name.as_deref() {
-                Some(n) if !n.is_empty() => n,
-                _ => &p.actor_id,
+            let name = if p.name.is_empty() {
+                &p.actor_id
+            } else {
+                &p.name
             };
             div.set_inner_html(&format!(
                 "<span class=\"actor-icon\">-</span> <strong>{}</strong> has left the adventure",
@@ -67,13 +70,15 @@ pub fn update_actor_lifecycle_dom(
                 .create_element("div")
                 .expect("create div for actor-claim");
             div.set_class_name("narrative-entry actor-claim");
-            let name = match p.name.as_deref() {
-                Some(n) if !n.is_empty() => n,
-                _ => &p.actor_id,
+            let name = if p.name.is_empty() {
+                &p.actor_id
+            } else {
+                &p.name
             };
-            let keeper = match p.keeper.as_deref() {
-                Some(k) if !k.is_empty() => k,
-                _ => "a keeper",
+            let keeper = if p.keeper.is_empty() {
+                "a keeper"
+            } else {
+                &p.keeper
             };
             div.set_inner_html(&format!(
                 "<span class=\"actor-icon\">&gt;</span> <strong>{}</strong> is now controlled by {}",
@@ -88,9 +93,10 @@ pub fn update_actor_lifecycle_dom(
                 .create_element("div")
                 .expect("create div for actor-release");
             div.set_class_name("narrative-entry actor-release");
-            let name = match p.name.as_deref() {
-                Some(n) if !n.is_empty() => n,
-                _ => &p.actor_id,
+            let name = if p.name.is_empty() {
+                &p.actor_id
+            } else {
+                &p.name
             };
             div.set_inner_html(&format!(
                 "<span class=\"actor-icon\">&lt;</span> <strong>{}</strong> is now uncontrolled",

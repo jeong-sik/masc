@@ -17,7 +17,7 @@ import {
   requestTrpgMidJoin,
   type TrpgRoundRunResult,
 } from '../api'
-import type { TrpgActor, TrpgState, TrpgEvent, TrpgCharacterStats, TrpgSessionSummary } from '../types'
+import type { TrpgActor, TrpgState, TrpgEvent, TrpgCharacterStats } from '../types'
 
 // ── Local control state ──────────────────────────────────
 
@@ -250,35 +250,60 @@ function StoryLog({ events }: { events: TrpgEvent[] }) {
   `
 }
 
-function formatDuration(firstTs: string, lastTs: string): string {
-  const start = new Date(firstTs).getTime()
-  const end = new Date(lastTs).getTime()
-  if (isNaN(start) || isNaN(end) || end <= start) return ''
-  const secs = Math.floor((end - start) / 1000)
-  if (secs < 60) return `${secs}s`
-  if (secs < 3600) return `${Math.floor(secs / 60)}m`
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
+function SessionOutcome({ outcome }: { outcome?: TrpgState['outcome'] }) {
+  if (!outcome) return null
+
+  const normalizeOutcomeText = (value: string): string => {
+    const normalized = value.trim()
+    if (!normalized) return normalized
+    if (/[A-Z]/.test(normalized) && !normalized.includes(' ')) {
+      return normalized
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[_\.]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    }
+    return normalized.replace(/[_\.]/g, ' ').replace(/\s+/g, ' ').trim()
+  }
+
+  const label =
+    outcome.result === 'victory'
+      ? '승리'
+      : outcome.result === 'defeat'
+        ? '패배'
+        : outcome.result === 'draw'
+          ? '무승부'
+          : '종료'
+  const color = outcome.result === 'victory' ? '#34d399' : outcome.result === 'defeat' ? '#f87171' : '#9ca3af'
+  const meta = [
+    outcome.reason ? `원인: ${normalizeOutcomeText(outcome.reason)}` : null,
+    outcome.phase ? `페이즈: ${normalizeOutcomeText(outcome.phase)}` : null,
+    typeof outcome.turn === 'number' ? `턴: ${outcome.turn}` : null,
+  ].filter(Boolean).join(' · ')
+
+  return html`
+    <div style="margin-bottom:16px; padding:10px 12px; border:1px solid rgba(255,255,255,0.12); border-radius:10px; background:rgba(255,255,255,0.03);">
+      <div style="font-size:12px; color:#9ca3af; text-transform:uppercase; letter-spacing:0.08em;">Session Outcome</div>
+      <div style="font-size:18px; font-weight:700; color:${color}; margin-top:4px;">${label}</div>
+      ${outcome.summary
+        ? html`<div style="margin-top:4px; font-size:13px; color:#d1d5db;">${normalizeOutcomeText(outcome.summary)}</div>`
+        : null}
+      ${meta ? html`<div style="margin-top:4px; font-size:11px; color:#9ca3af;">${meta}</div>` : null}
+    </div>
+  `
 }
 
 function RoundHistory({ state }: { state: TrpgState }) {
-  const sessions = state.history ?? []
-  if (sessions.length === 0) return null
+  const rounds = state.history ?? []
+  if (rounds.length === 0) return null
 
   return html`
     <div class="trpg-round-list">
-      ${sessions.slice(0, 20).map((s: TrpgSessionSummary) => html`
-        <div class="trpg-round-item ${s.current ? 'active' : s.ended ? 'ended' : 'paused'}">
-          <span title=${s.room_id}>${s.room_id.length > 12 ? s.room_id.slice(0, 12) + '...' : s.room_id}</span>
-          <span style="margin-left:auto; display:flex; gap:8px; font-size:11px; color:#888; align-items:center;">
-            <span>${s.event_count} events</span>
-            ${formatDuration(s.first_ts, s.last_ts)
-              ? html`<span>${formatDuration(s.first_ts, s.last_ts)}</span>`
-              : null}
-            <span style="color:${s.current ? '#4CAF50' : s.ended ? '#f44336' : '#ff9800'};">
-              ${s.current ? 'active' : s.ended ? 'ended' : 'paused'}
-            </span>
+      ${rounds.slice(-10).map(s => html`
+        <div class="trpg-round-item ${s.status}">
+          <span>Session ${s.id.slice(0, 8)}</span>
+          <span style="margin-left:auto; font-size:11px; color:#888;">
+            Round ${s.round} — ${s.status}
           </span>
         </div>
       `)}
@@ -371,6 +396,8 @@ function ControlBox({ state }: { state: TrpgState }) {
         <div class="trpg-control-field">
           <label>Room</label>
           <input
+            id="trpg-room-input"
+            name="trpg-room-input"
             type="text"
             value=${room}
             onInput=${(e: Event) => { trpgRoom.value = (e.target as HTMLInputElement).value }}
@@ -393,24 +420,32 @@ function ControlBox({ state }: { state: TrpgState }) {
           <label>Dice</label>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
             <input
+              id="trpg-dice-action-input"
+              name="trpg-dice-action-input"
               type="text"
               value=${diceAction.value}
               onInput=${(e: Event) => { diceAction.value = (e.target as HTMLInputElement).value }}
               placeholder="action"
             />
             <input
+              id="trpg-dice-stat-input"
+              name="trpg-dice-stat-input"
               type="text"
               value=${diceStatValue.value}
               onInput=${(e: Event) => { diceStatValue.value = (e.target as HTMLInputElement).value }}
               placeholder="stat (e.g. 14)"
             />
             <input
+              id="trpg-dice-dc-input"
+              name="trpg-dice-dc-input"
               type="text"
               value=${diceDc.value}
               onInput=${(e: Event) => { diceDc.value = (e.target as HTMLInputElement).value }}
               placeholder="dc (e.g. 15)"
             />
             <input
+              id="trpg-dice-raw-input"
+              name="trpg-dice-raw-input"
               type="text"
               value=${diceRawD20.value}
               onInput=${(e: Event) => { diceRawD20.value = (e.target as HTMLInputElement).value }}
@@ -516,6 +551,8 @@ function JoinGatePanel({ state }: { state: TrpgState }) {
         <div class="trpg-control-field">
           <label>Actor ID</label>
           <input
+            id="trpg-join-actor-input"
+            name="trpg-join-actor-input"
             type="text"
             value=${joinActorId.value}
             onInput=${(e: Event) => { joinActorId.value = (e.target as HTMLInputElement).value }}
@@ -525,6 +562,8 @@ function JoinGatePanel({ state }: { state: TrpgState }) {
         <div class="trpg-control-field">
           <label>Keeper</label>
           <input
+            id="trpg-join-keeper-input"
+            name="trpg-join-keeper-input"
             type="text"
             value=${joinKeeper.value}
             onInput=${(e: Event) => { joinKeeper.value = (e.target as HTMLInputElement).value }}
@@ -545,6 +584,8 @@ function JoinGatePanel({ state }: { state: TrpgState }) {
         <div class="trpg-control-field">
           <label>Name (optional)</label>
           <input
+            id="trpg-join-name-input"
+            name="trpg-join-name-input"
             type="text"
             value=${joinActorName.value}
             onInput=${(e: Event) => { joinActorName.value = (e.target as HTMLInputElement).value }}
@@ -746,9 +787,12 @@ export function Trpg() {
 
   const party = state.party ?? []
   const events = state.story_log ?? []
+  const outcome = state.outcome
 
   return html`
     <div>
+      <${SessionOutcome} outcome=${outcome} />
+
       ${'' /* Summary stats */}
       <div class="stats-grid" style="margin-bottom:16px;">
         <div class="stat-card">

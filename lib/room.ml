@@ -2359,10 +2359,6 @@ let write_current_room config room_id =
   (* Legacy compatibility: keep base_path/current_room in sync *)
   write_to (legacy_current_room_path config)
 
-(** Clear current room pointer (e.g. after session ends) *)
-let clear_current_room config =
-  write_current_room config ""
-
 (** Get path for a specific room *)
 let room_path config room_id = room_dir_for config room_id
 
@@ -2505,6 +2501,40 @@ let room_create config ~name ~description : Yojson.Safe.t =
         ("message", `String (Printf.sprintf "✅ Room '%s' created" room_id));
       ]
     end
+  end
+
+(** Ensure room exists as an SSOT registry entry and directory skeleton. *)
+let ensure_room_entry config room_id =
+  if room_id = "default" || room_id = "" then
+    ()
+  else if not (root_is_initialized config) then
+    ()
+  else begin
+    let registry = load_registry config in
+    if List.exists (fun (r : Types.room_info) -> r.id = room_id) registry.rooms then
+      ()
+    else (
+      mkdir_p (rooms_dir config);
+      let rpath = room_path config room_id in
+      mkdir_p rpath;
+      mkdir_p (Filename.concat rpath "agents");
+      mkdir_p (Filename.concat rpath "tasks");
+      mkdir_p (Filename.concat rpath "locks");
+      let room_info : Types.room_info = {
+        id = room_id;
+        name = room_id;
+        description = None;
+        created_at = now_iso ();
+        created_by = None;
+        agent_count = 0;
+        task_count = 0;
+      } in
+      let updated_registry = {
+        registry with
+        rooms = room_info :: registry.rooms;
+      } in
+      save_registry config updated_registry
+    )
   end
 
 (** Enter a room (switch context) *)

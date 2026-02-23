@@ -95,20 +95,25 @@ type completion_response = {
 
 (** Call LLM with structured request.
     Uses subprocess curl for HTTP — no Eio runtime dependency.
+    Optional [timeout_sec] overrides provider HTTP timeout (seconds) for this call.
     Optional [ollama_timeout_sec] overrides Ollama request timeout (seconds)
     for this call only.
     @return Ok response on success, Error message on failure. *)
 val complete :
+  ?timeout_sec:int ->
   ?ollama_timeout_sec:int ->
   completion_request ->
   (completion_response, string) result
 
 (** Cascade — try models in order until one succeeds.
     Each request targets a different model. First success wins.
+    Optional [timeout_sec] sets an overall wall-clock budget (seconds) for the
+    full cascade. Remaining budget is applied per-attempt.
     Optional [ollama_timeout_sec] overrides Ollama request timeout (seconds)
     for all tries in this cascade.
     @return Ok response from first successful model, Error if all fail. *)
 val cascade :
+  ?timeout_sec:int ->
   ?ollama_timeout_sec:int ->
   completion_request list ->
   (completion_response, string) result

@@ -1154,7 +1154,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_audit : Tool_audit.context = { config } in
   let simple_ctx_rate_limit : Tool_rate_limit.context = { config; agent_name; registry } in
   let simple_ctx_cost : Tool_cost.context = { agent_name } in
-  let simple_ctx_walph : _ Tool_walph.context = { config; agent_name; net = get_net (); clock } in
+  let simple_ctx_walph = lazy ({ config; agent_name; net = get_net (); clock } : _ Tool_walph.context) in
   let simple_ctx_agent : Tool_agent.context = { config; agent_name } in
   let simple_ctx_task : Tool_task.context = { config; agent_name } in
   let simple_ctx_room : Tool_room.context = { config; agent_name } in
@@ -1324,7 +1324,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_cost.dispatch simple_ctx_cost ~name ~args:arguments with
   | Some result -> result
   | None ->
-  match Tool_walph.dispatch simple_ctx_walph ~name ~args:arguments with
+  match Tool_walph.dispatch (Lazy.force simple_ctx_walph) ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_agent.dispatch simple_ctx_agent ~name ~args:arguments with

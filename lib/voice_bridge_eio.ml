@@ -3,7 +3,11 @@
     Enables multi-agent voice collaboration via turn-based speaking.
     Core constraint: "병렬 수집 → 순차 출력" (parallel collection → sequential output)
 
-    Voice MCP Server: http://127.0.0.1:8936/mcp
+    TTS Strategy (priority order):
+    1. ElevenLabs API direct (ELEVENLABS_API_KEY)
+    2. Railway proxy (ELEVENLABS_PROXY_URL)
+    3. Voice MCP Server (port 8936, legacy)
+    4. text_fallback (silent)
 
     Eio Migration Notes:
     - Direct style (no monads)
@@ -201,6 +205,193 @@ let get_voice_for_agent agent_id =
   match List.assoc_opt agent_id voices with
   | Some voice -> voice
   | None -> "Sarah"
+
+(** ============================================
+    ElevenLabs Direct TTS
+    ============================================ *)
+
+(** ElevenLabs voice name → voice_id mapping.
+    Used when calling api.elevenlabs.io directly (requires voice_id).
+    Railway proxy accepts voice names, so this is only needed for direct API. *)
+let elevenlabs_voice_ids = [
+  ("Sarah",  "EXAVITQu4vr4xnSDxMaL");
+  ("Roger",  "CwhRBWXzGAHq8TQ4Fs17");
+  ("George", "JBFqnCBsd6RMkjVDRZzb");
+  ("Laura",  "FGY2WhTYpPnrIDTdsKH5");
+]
+
+(** Resolve voice name to ElevenLabs voice_id.
+    Falls back to Rachel (default) if name is unknown. *)
+let voice_name_to_id name =
+  match List.assoc_opt name elevenlabs_voice_ids with
+  | Some id -> id
+  | None -> "21m00Tcm4TlvDq8ikWAM" (* Rachel — default *)
+
+(** Ensure .masc/audio/ directory exists *)
+let ensure_audio_dir () =
+  let dir = ".masc/audio" in
+  if not (Sys.file_exists dir) then
+    Sys.mkdir dir 0o755
+  else if not (Sys.is_directory dir) then
+    log_error ".masc/audio exists but is not a directory"
+
+(** Direct ElevenLabs TTS call — no MCP intermediary.
+    Uses ELEVENLABS_API_KEY for api.elevenlabs.io,
+    or falls back to Railway proxy if ELEVENLABS_PROXY_URL is set.
+    Saves audio to .masc/audio/{timestamp}_{agent_id}.mp3 *)
+let elevenlabs_direct_tts ~agent_id ~message ~voice =
+  let voice_id = voice_name_to_id voice in
+  match Sys.getenv_opt "ELEVENLABS_API_KEY" with
+  | Some api_key when String.length api_key > 0 ->
+    let url = Printf.sprintf
+      "https://api.elevenlabs.io/v1/text-to-speech/%s" voice_id in
+    let req_body = Yojson.Safe.to_string (`Assoc [
+      ("text", `String message);
+      ("model_id", `String "eleven_multilingual_v2");
+      ("voice_settings", `Assoc [
+        ("stability", `Float 0.5);
+        ("similarity_boost", `Float 0.75);
+        ("style", `Float 0.0);
+      ]);
+    ]) in
+    let timestamp = int_of_float (Unix.gettimeofday ()) in
+    let safe_agent = String.map (fun c ->
+      if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+         || (c >= '0' && c <= '9') || c = '-' || c = '_'
+      then c else '_') agent_id in
+    let audio_file = Printf.sprintf ".masc/audio/%d_%s.mp3" timestamp safe_agent in
+    ensure_audio_dir ();
+    let argv = [
+      "curl"; "-s"; "--max-time"; "30";
+      "-X"; "POST"; url;
+      "-H"; Printf.sprintf "xi-api-key: %s" api_key;
+      "-H"; "Content-Type: application/json";
+      "-H"; "Accept: audio/mpeg";
+      "-d"; "@-";
+      "-o"; audio_file;
+      "-w"; "%{http_code}";
+    ] in
+    let (status, http_code_str) = Process_eio.run_argv_with_stdin_and_status
+      ~timeout_sec:35.0
+      ~stdin_content:req_body
+      argv in
+    (match status with
+     | Unix.WEXITED 0 ->
+       let http_code = try int_of_string (String.trim http_code_str) with _ -> 0 in
+       if http_code >= 200 && http_code < 300 then begin
+         let file_size = try (Unix.stat audio_file).st_size with _ -> 0 in
+         if file_size > 100 then begin
+           log_info (Printf.sprintf "ElevenLabs TTS OK: %s (%d bytes)" audio_file file_size);
+           Ok (`Assoc [
+             ("status", `String "spoken");
+             ("agent_id", `String agent_id);
+             ("voice", `String voice);
+             ("audio_file", `String audio_file);
+             ("audio_size", `Int file_size);
+             ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
+           ])
+         end else begin
+           (* Small file likely means JSON error body *)
+           (try Sys.remove audio_file with _ -> ());
+           Error (Printf.sprintf "ElevenLabs returned small response (%d bytes), likely error" file_size)
+         end
+       end else begin
+         (try Sys.remove audio_file with _ -> ());
+         Error (Printf.sprintf "ElevenLabs HTTP %d" http_code)
+       end
+     | Unix.WEXITED 28 ->
+       (try Sys.remove audio_file with _ -> ());
+       Error "ElevenLabs request timed out"
+     | Unix.WEXITED code ->
+       (try Sys.remove audio_file with _ -> ());
+       Error (Printf.sprintf "curl exit %d" code)
+     | _ ->
+       (try Sys.remove audio_file with _ -> ());
+       Error "ElevenLabs curl process failed")
+  | _ ->
+    (* No ELEVENLABS_API_KEY, try Railway proxy *)
+    match Sys.getenv_opt "ELEVENLABS_PROXY_URL" with
+    | Some proxy_url when String.length proxy_url > 0 ->
+      let url = Printf.sprintf "%s/v1/audio/speech" proxy_url in
+      let req_body = Yojson.Safe.to_string (`Assoc [
+        ("input", `String message);
+        ("voice", `String voice);
+        ("model", `String "eleven_multilingual_v2");
+        ("response_format", `String "mp3");
+      ]) in
+      let timestamp = int_of_float (Unix.gettimeofday ()) in
+      let safe_agent = String.map (fun c ->
+        if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+           || (c >= '0' && c <= '9') || c = '-' || c = '_'
+        then c else '_') agent_id in
+      let audio_file = Printf.sprintf ".masc/audio/%d_%s.mp3" timestamp safe_agent in
+      ensure_audio_dir ();
+      let argv = [
+        "curl"; "-s"; "--max-time"; "30";
+        "-X"; "POST"; url;
+        "-H"; "Content-Type: application/json";
+        "-H"; "Accept: audio/mpeg";
+        "-d"; "@-";
+        "-o"; audio_file;
+        "-w"; "%{http_code}";
+      ] in
+      let (status, http_code_str) = Process_eio.run_argv_with_stdin_and_status
+        ~timeout_sec:35.0
+        ~stdin_content:req_body
+        argv in
+      (match status with
+       | Unix.WEXITED 0 ->
+         let http_code = try int_of_string (String.trim http_code_str) with _ -> 0 in
+         if http_code >= 200 && http_code < 300 then begin
+           let file_size = try (Unix.stat audio_file).st_size with _ -> 0 in
+           if file_size > 100 then begin
+             log_info (Printf.sprintf "Railway proxy TTS OK: %s (%d bytes)" audio_file file_size);
+             Ok (`Assoc [
+               ("status", `String "spoken");
+               ("agent_id", `String agent_id);
+               ("voice", `String voice);
+               ("audio_file", `String audio_file);
+               ("audio_size", `Int file_size);
+               ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
+             ])
+           end else begin
+             (try Sys.remove audio_file with _ -> ());
+             Error (Printf.sprintf "Proxy returned small response (%d bytes)" file_size)
+           end
+         end else begin
+           (try Sys.remove audio_file with _ -> ());
+           Error (Printf.sprintf "Proxy HTTP %d" http_code)
+         end
+       | Unix.WEXITED 28 ->
+         (try Sys.remove audio_file with _ -> ());
+         Error "Proxy request timed out"
+       | _ ->
+         (try Sys.remove audio_file with _ -> ());
+         Error "Proxy curl failed")
+    | _ ->
+      Error "No ELEVENLABS_API_KEY or ELEVENLABS_PROXY_URL configured"
+
+(** Clean up old audio files (>1 hour). Call from heartbeat. *)
+let cleanup_old_audio_files () =
+  let dir = ".masc/audio" in
+  if Sys.file_exists dir && Sys.is_directory dir then begin
+    let now = Unix.gettimeofday () in
+    let cutoff = now -. 3600.0 in
+    let entries = Sys.readdir dir in
+    let removed = ref 0 in
+    Array.iter (fun entry ->
+      let path = Filename.concat dir entry in
+      (try
+        let stat = Unix.stat path in
+        if stat.st_mtime < cutoff then begin
+          Sys.remove path;
+          incr removed
+        end
+      with _ -> ())
+    ) entries;
+    if !removed > 0 then
+      log_info (Printf.sprintf "Cleaned up %d old audio files" !removed)
+  end
 
 (** ============================================
     Types
@@ -460,13 +651,55 @@ let end_voice_session ~sw ~clock ~net ~agent_id =
       | Error e -> Error e)
     | Error e -> Error e
 
-(** Request speaking turn *)
+(** Request speaking turn.
+    Fallback chain: ElevenLabs direct → Voice MCP (legacy) → text_fallback *)
 let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
-  if not (is_voice_server_available ~sw ~clock ~net) then begin
-    log_info "Voice server unavailable, using text fallback";
-    text_fallback ~agent_id ~message
-  end else begin
-    let voice = get_voice_for_agent agent_id in
+  let voice = get_voice_for_agent agent_id in
+  let has_elevenlabs =
+    Sys.getenv_opt "ELEVENLABS_API_KEY" <> None
+    || Sys.getenv_opt "ELEVENLABS_PROXY_URL" <> None
+  in
+  if has_elevenlabs then begin
+    log_info (Printf.sprintf "ElevenLabs direct TTS for agent=%s voice=%s" agent_id voice);
+    cleanup_old_audio_files ();
+    match elevenlabs_direct_tts ~agent_id ~message ~voice with
+    | Ok result -> Ok result
+    | Error e ->
+      log_info (Printf.sprintf "ElevenLabs direct failed (%s), trying MCP fallback" e);
+      if is_voice_server_available ~sw ~clock ~net then begin
+        let args_fields =
+          [
+            ("agent_id", `String agent_id);
+            ("message", `String message);
+            ("voice", `String voice);
+            ("priority", `Int priority);
+          ]
+          @
+          (match provider with
+          | Some p when String.trim p <> "" -> [ ("provider", `String (String.trim p)) ]
+          | _ -> [])
+        in
+        let args = `Assoc args_fields in
+        match call_voice_mcp ~sw ~clock ~net ~tool_name:"agent_speak" ~arguments:args with
+        | Ok json ->
+          (match extract_mcp_result json with
+          | Ok data ->
+            let open Yojson.Safe.Util in
+            let status = data |> member "status" |> to_string_option |> Option.value ~default:"queued" in
+            let queue_pos = data |> member "queue_position" |> to_int_option |> Option.value ~default:0 in
+            Ok (`Assoc [
+              ("status", `String status);
+              ("agent_id", `String agent_id);
+              ("message_preview", `String (String.sub message 0 (min 50 (String.length message))));
+              ("voice", `String voice);
+              ("queue_position", `Int queue_pos);
+            ])
+          | Error _ -> text_fallback ~agent_id ~message)
+        | Error _ -> text_fallback ~agent_id ~message
+      end else
+        text_fallback ~agent_id ~message
+  end else if is_voice_server_available ~sw ~clock ~net then begin
+    log_info "No ElevenLabs keys, using Voice MCP";
     let args_fields =
       [
         ("agent_id", `String agent_id);
@@ -475,9 +708,9 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
         ("priority", `Int priority);
       ]
       @
-      match provider with
+      (match provider with
       | Some p when String.trim p <> "" -> [ ("provider", `String (String.trim p)) ]
-      | _ -> []
+      | _ -> [])
     in
     let args = `Assoc args_fields in
     match call_voice_mcp ~sw ~clock ~net ~tool_name:"agent_speak" ~arguments:args with
@@ -494,8 +727,11 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
           ("voice", `String voice);
           ("queue_position", `Int queue_pos);
         ])
-      | Error e -> Error e)
-    | Error e -> Error e
+      | Error _ -> text_fallback ~agent_id ~message)
+    | Error _ -> text_fallback ~agent_id ~message
+  end else begin
+    log_info "No TTS provider available, using text fallback";
+    text_fallback ~agent_id ~message
   end
 
 (** List active voice sessions *)

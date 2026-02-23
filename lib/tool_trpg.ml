@@ -7458,14 +7458,17 @@ let handle_round_run ctx args : result =
            Tier 1 (structural gate): cheap model, ~50 tokens.
            Tier 2 (quality scoring): capable model, ~200 tokens. *)
         let evaluate_keeper_response ~reply_text =
+          (* Opt-in only: skip evaluation when no model is configured.
+             Prevents CI hang — LLM HTTP calls block indefinitely
+             when the endpoint (e.g. Ollama) is unreachable. *)
+          match Sys.getenv_opt "TRPG_HARNESS_TIER1_MODEL" with
+          | None -> ()
+          | Some tier1_str ->
           try
             let tier1_model =
-              match Sys.getenv_opt "TRPG_HARNESS_TIER1_MODEL" with
-              | Some s -> (
-                  match Llm_client.model_spec_of_string s with
-                  | Ok m -> m
-                  | Error _ -> Llm_client.ollama_lfm)
-              | None -> Llm_client.ollama_lfm
+              match Llm_client.model_spec_of_string tier1_str with
+              | Ok m -> m
+              | Error _ -> Llm_client.ollama_lfm
             in
             let tier2_model =
               match Sys.getenv_opt "TRPG_HARNESS_TIER2_MODEL" with

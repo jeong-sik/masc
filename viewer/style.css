@@ -13,8 +13,6 @@
     --z-floating-overlay: 40;
     --z-join-panel: 50;
     --z-action-panel: 51;
-    --z-actor-inspector: 40;
-    --z-character-list: 35;
     --z-endgame: 9999;
 }
 
@@ -1869,7 +1867,6 @@ body.wasm-dom-fallback #bevy-canvas {
     border-radius: var(--panel-radius);
     padding: 10px;
     box-shadow: inset 0 0 0 1px rgba(196, 162, 101, 0.12);
-    position: relative;
     top: auto;
     scroll-margin-top: 4px;
 }
@@ -2001,12 +1998,44 @@ body.wasm-dom-fallback #bevy-canvas {
     border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.actor-inspector-section-compact {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
 .actor-inspector-section-title {
     font-family: var(--font-display);
     letter-spacing: 1px;
     font-size: 10px;
     color: var(--accent-primary-dim);
     margin-bottom: 5px;
+}
+
+.actor-inspector-legend-grid {
+    display: grid;
+    gap: 4px 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.actor-inspector-legend-grid > div {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.actor-inspector-legend-key {
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+}
+
+.actor-inspector-legend-value {
+    color: var(--text-primary);
+    font-size: 10px;
+    line-height: 1.35;
 }
 
 .actor-rel-list {
@@ -2076,7 +2105,6 @@ body.wasm-dom-fallback #bevy-canvas {
     flex-direction: column;
     min-height: 0;
     flex: 1 1 auto;
-    position: relative;
 }
 
 .character-card.dead {

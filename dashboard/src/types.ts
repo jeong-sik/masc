@@ -274,6 +274,16 @@ export interface TrpgSession {
   created_at: string
 }
 
+export interface TrpgSessionSummary {
+  room_id: string
+  first_ts: string
+  last_ts: string
+  event_count: number
+  last_seq: number
+  ended: boolean
+  current: boolean
+}
+
 export interface TrpgJoinGate {
   phase_open: boolean
   min_points: number
@@ -297,7 +307,7 @@ export interface TrpgState {
   contribution_ledger?: TrpgContributionEntry[]
   party: TrpgActor[]
   story_log: TrpgEvent[]
-  history: TrpgSession[]
+  history: TrpgSessionSummary[]
 }
 
 // --- Perpetual Agent ---

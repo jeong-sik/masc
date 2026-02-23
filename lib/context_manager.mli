@@ -77,6 +77,13 @@ val score_importance : working_context -> working_context
 
 (** {1 Compaction} *)
 
+(** Prefix for goal-injection messages.
+    Messages starting with this prefix receive sticky importance (>= 0.95)
+    so they survive compaction.  Used by perpetual_loop to inject the goal
+    as a user message rather than embedding it in the system prompt
+    (preserves prompt-cache prefix). *)
+val goal_prefix : string
+
 (** Apply a single compaction strategy. *)
 val apply_strategy : working_context -> compaction_strategy -> working_context
 

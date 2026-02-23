@@ -117,9 +117,8 @@ let generate_trace_id () =
   sprintf "trace-%d-%05d" ts rnd
 
 let create_state config =
-  let system_prompt = sprintf
+  let system_prompt =
     "You are a perpetual agent with infinite context via compaction and succession.\n\
-     Goal: %s\n\
      \n\
      Continuity rules:\n\
      - This run may be compacted/summarized; you must preserve continuity.\n\
@@ -139,7 +138,6 @@ let create_state config =
      Tooling:\n\
      - You may have tools available; use them when helpful.\n\
      - When goal complete, include [GOAL_COMPLETE]. When stuck, include [STUCK: reason]."
-    config.initial_goal
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
@@ -148,12 +146,17 @@ let create_state config =
   let context = Context_manager.create
     ~system_prompt
     ~max_tokens:primary_model.max_context in
+  (* Inject goal as first user message with sticky prefix for compaction safety *)
+  let goal_msg = Llm_client.user_msg
+    (sprintf "%s %s" Context_manager.goal_prefix config.initial_goal) in
+  let context = Context_manager.append context goal_msg in
   let trace_id = generate_trace_id () in
   let session = Context_manager.create_session
     ~session_id:trace_id
     ~base_dir:config.session_base_dir in
   let zero_usage : Llm_client.token_usage = {
     input_tokens = 0; output_tokens = 0; total_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
   } in
   let now_ts = Time_compat.now () in
   {

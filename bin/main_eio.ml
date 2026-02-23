@@ -568,6 +568,36 @@ let trpg_append_event_json ~base_dir ~body_str : trpg_api_result =
       )
   with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
 
+let trpg_sessions_list_json ~base_dir ~(room_config : Masc_mcp.Room.config) : trpg_api_result =
+  try
+    match Masc_mcp.Trpg_engine_store_sqlite.list_sessions_summary ~base_dir with
+    | Error e -> Error (`Internal_server_error, e)
+    | Ok summaries ->
+        let current_room = Masc_mcp.Room.read_current_room room_config in
+        let sessions =
+          List.map
+            (fun (s : Masc_mcp.Trpg_engine_store_sqlite.session_summary) ->
+              let is_current =
+                match current_room with
+                | Some cr -> cr = s.room_id
+                | None -> false
+              in
+              `Assoc
+                [
+                  ("room_id", `String s.room_id);
+                  ("first_ts", `String s.first_ts);
+                  ("last_ts", `String s.last_ts);
+                  ("event_count", `Int s.event_count);
+                  ("last_seq", `Int s.last_seq);
+                  ("ended", `Bool s.ended);
+                  ("current", `Bool is_current);
+                ])
+            summaries
+        in
+        Ok (`Assoc [ ("ok", `Bool true); ("sessions", `List sessions) ])
+  with exn ->
+    Error (`Internal_server_error, Printexc.to_string exn)
+
 let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
   try
     let room_id = String.trim room_id in
@@ -4958,6 +4988,20 @@ let make_routes ~port ~host =
                  (Yojson.Safe.to_string (trpg_error_json msg))
          )
        ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/sessions" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_dir = state.Mcp_server.room_config.base_path in
+         let room_config = state.Mcp_server.room_config in
+         match trpg_sessions_list_json ~base_dir ~room_config with
+         | Ok json ->
+             respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+         | Error (`Bad_request, msg) ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (trpg_error_json msg))
+         | Error (`Internal_server_error, msg) ->
+             respond_json_with_cors ~status:`Internal_server_error request reqd
+               (Yojson.Safe.to_string (trpg_error_json msg))
+       ) request reqd)
   |> Http.Router.get "/api/v1/trpg/state" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_dir = state.Mcp_server.room_config.base_path in
@@ -5477,6 +5521,89 @@ let run_server ~sw ~env ~port ~base_path =
          stats.scanned stats.started stats.stale
    with _ -> ());
 
+  (* TRPG zombie session cleanup — clear current_room if room already ended *)
+  (try
+     let trpg_base_dir = state.room_config.base_path in
+     (match Room.read_current_room state.room_config with
+      | Some room_id when room_id <> "" ->
+          (match Masc_mcp.Trpg_engine_store_sqlite.read_events ~base_dir:trpg_base_dir ~room_id with
+           | Ok events ->
+               let has_ended =
+                 List.exists
+                   (fun (ev : Masc_mcp.Trpg_engine_event.t) ->
+                     ev.event_type = Masc_mcp.Trpg_engine_event.Room_ended)
+                   events
+               in
+               if has_ended then (
+                 Room.clear_current_room state.room_config;
+                 Printf.eprintf
+                   "[trpg-zombie-cleanup] cleared stale current_room pointer: %s\n%!"
+                   room_id)
+           | Error _ -> ())
+      | _ -> ())
+   with _ -> ());
+
+  (* TRPG stale session auto-end — close sessions inactive for 6+ hours *)
+  (try
+     let trpg_base_dir = state.room_config.base_path in
+     (match Masc_mcp.Trpg_engine_store_sqlite.list_sessions_summary ~base_dir:trpg_base_dir with
+      | Ok summaries ->
+          let now = Unix.gettimeofday () in
+          let stale_threshold_sec = 6.0 *. 3600.0 in
+          List.iter
+            (fun (s : Masc_mcp.Trpg_engine_store_sqlite.session_summary) ->
+              if not s.ended then
+                let last_ts =
+                  Masc_mcp.Resilience.Time.parse_iso8601_opt s.last_ts
+                  |> Option.value ~default:0.0
+                in
+                let idle_sec = now -. last_ts in
+                if idle_sec >= stale_threshold_sec then (
+                  let duration_seconds = int_of_float idle_sec in
+                  let payload =
+                    `Assoc
+                      [
+                        ("room_id", `String s.room_id);
+                        ("reason", `String "stale_timeout");
+                        ("outcome", `String "draw");
+                        ("duration_seconds", `Int duration_seconds);
+                        ("total_events", `Int s.event_count);
+                        ("total_turns", `Int 0);
+                      ]
+                  in
+                  let next_seq = s.last_seq + 1 in
+                  let ts = Masc_mcp.Types.now_iso () in
+                  let event : Masc_mcp.Trpg_engine_event.t =
+                    {
+                      seq = next_seq;
+                      room_id = s.room_id;
+                      ts;
+                      event_type = Masc_mcp.Trpg_engine_event.Room_ended;
+                      actor_id = None;
+                      payload;
+                    }
+                  in
+                  (match
+                     Masc_mcp.Trpg_engine_store_sqlite.append_event
+                       ~base_dir:trpg_base_dir ~event
+                   with
+                  | Ok () ->
+                      (* Also clear current_room if this was the active session *)
+                      (match Masc_mcp.Room.read_current_room state.room_config with
+                       | Some current when current = s.room_id ->
+                           Masc_mcp.Room.clear_current_room state.room_config
+                       | _ -> ());
+                      Printf.eprintf
+                        "[trpg-stale-cleanup] auto-ended stale session: %s (idle %.0fh)\n%!"
+                        s.room_id (idle_sec /. 3600.0)
+                  | Error e ->
+                      Printf.eprintf
+                        "[trpg-stale-cleanup] failed to end %s: %s\n%!"
+                        s.room_id e)))
+            summaries
+      | Error _ -> ())
+   with _ -> ());
+
   (* Initialize Task backend - share pool with Board if PostgreSQL available *)
   (match Board_dispatch.get_pg_pool () with
    | Some pool ->
@@ -5878,6 +6005,20 @@ let run_server ~sw ~env ~port ~base_path =
           | Ok json ->
               let normalized = trpg_normalize_events_json ~default_room_id:room_id json in
               h2_respond_json h2_reqd (Yojson.Safe.to_string normalized) ~extra_headers:cors
+          | Error (`Bad_request, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Bad_request ~extra_headers:cors
+          | Error (`Internal_server_error, msg) ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
+                ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `GET, "/api/v1/trpg/sessions" ->
+          let state = get_server_state () in
+          let base_dir = state.Mcp_server.room_config.base_path in
+          let room_config = state.Mcp_server.room_config in
+          (match trpg_sessions_list_json ~base_dir ~room_config with
+          | Ok json ->
+              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
           | Error (`Bad_request, msg) ->
               h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
                 ~status:`Bad_request ~extra_headers:cors

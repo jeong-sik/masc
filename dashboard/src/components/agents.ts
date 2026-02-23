@@ -109,6 +109,40 @@ function KeeperCard({ keeper }: { keeper: Keeper }) {
             <strong class="keeper-core-value">${personality}</strong>
           </div>
         </div>
+
+        <!-- Inner Information Section -->
+        <div class="keeper-inner-info">
+          ${keeper.agent?.current_task ? html`
+            <div class="keeper-detail-row">
+              <span class="keeper-label">Task</span>
+              <span class="keeper-value">${keeper.agent.current_task}</span>
+            </div>
+          ` : null}
+          ${keeper.will ? html`
+            <div class="keeper-detail-row">
+              <span class="keeper-label">Will (의지)</span>
+              <span class="keeper-value">${keeper.will}</span>
+            </div>
+          ` : null}
+          ${keeper.needs ? html`
+            <div class="keeper-detail-row">
+              <span class="keeper-label">Needs (니즈)</span>
+              <span class="keeper-value">${keeper.needs}</span>
+            </div>
+          ` : null}
+          ${keeper.desires ? html`
+            <div class="keeper-detail-row">
+              <span class="keeper-label">Desires (욕구)</span>
+              <span class="keeper-value">${keeper.desires}</span>
+            </div>
+          ` : null}
+          ${keeper.memory_recent_note ? html`
+            <div class="keeper-detail-row">
+              <span class="keeper-label">Memory Note</span>
+              <span class="keeper-value memory-note">"${keeper.memory_recent_note}"</span>
+            </div>
+          ` : null}
+        </div>
       </div>
     </div>
   `

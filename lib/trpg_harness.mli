@@ -54,3 +54,15 @@ val result_to_yojson : evaluation_result -> Yojson.Safe.t
 
 (** String representation of dimension. *)
 val string_of_dimension : dimension -> string
+
+(** {2 Exposed for testing} *)
+
+(** Parse tier1 LLM response text into Pass/Fail. *)
+val parse_tier1 : string -> tier1_result
+
+(** Parse tier2 LLM response text into dimension scores.
+    Returns default score (3.0) for any dimension not found. *)
+val parse_tier2 : string -> dimension_score list
+
+(** Compute weighted total from dimension scores, normalized to 0.0-1.0. *)
+val compute_weighted_total : dimension_score list -> float

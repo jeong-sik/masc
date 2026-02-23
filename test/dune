@@ -448,3 +448,9 @@
  (name test_trpg_actor_match)
  (modules test_trpg_actor_match)
  (libraries masc_mcp alcotest yojson))
+
+; TRPG Keeper Intelligence — Evaluation Harness (parsers + scoring)
+(test
+ (name test_trpg_harness)
+ (modules test_trpg_harness)
+ (libraries masc_mcp alcotest yojson))

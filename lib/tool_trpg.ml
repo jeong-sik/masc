@@ -7453,6 +7453,66 @@ let handle_round_run ctx args : result =
           in
           ()
         in
+        (* Phase 2: Harness evaluation after successful keeper reply.
+           Observation-only — errors are logged but never block the main path.
+           Tier 1 (structural gate): cheap model, ~50 tokens.
+           Tier 2 (quality scoring): capable model, ~200 tokens. *)
+        let evaluate_keeper_response ~reply_text =
+          try
+            let tier1_model =
+              match Sys.getenv_opt "TRPG_HARNESS_TIER1_MODEL" with
+              | Some s -> (
+                  match Llm_client.model_spec_of_string s with
+                  | Ok m -> m
+                  | Error _ -> Llm_client.ollama_lfm)
+              | None -> Llm_client.ollama_lfm
+            in
+            let tier2_model =
+              match Sys.getenv_opt "TRPG_HARNESS_TIER2_MODEL" with
+              | Some s -> (
+                  match Llm_client.model_spec_of_string s with
+                  | Ok m -> m
+                  | Error _ -> Llm_client.glm_cloud)
+              | None -> Llm_client.glm_cloud
+            in
+            let pctx =
+              extract_prompt_context ~actor_id ~dm_persona_override state_json
+            in
+            let actor_persona =
+              match role with
+              | `Dm -> "Dungeon Master"
+              | `Player -> pctx.actor_persona
+            in
+            let scene_context =
+              let recent = String.concat "\n" pctx.narrative_recent in
+              Printf.sprintf "Scene: %s (%s)\n%s"
+                pctx.scene_description pctx.scene_mood recent
+            in
+            let result =
+              Trpg_harness.evaluate
+                ~tier1_model ~tier2_model
+                ~actor_name:pctx.actor_name
+                ~actor_persona
+                ~actor_traits:pctx.actor_traits
+                ~scene_context
+                ~response_text:reply_text
+            in
+            let _event_result =
+              append_event ~base_dir ~room_id
+                ~event_type:Trpg_engine_event.Evaluation_scored
+                ~actor_id
+                ~payload:(Trpg_harness.result_to_yojson result)
+                ()
+            in
+            ()
+          with exn ->
+            let _ignore =
+              Printf.eprintf
+                "[harness] evaluate_keeper_response failed for %s: %s\n%!"
+                actor_id (Printexc.to_string exn)
+            in
+            ()
+        in
         let lease_check =
           match role with
           | `Dm -> Ok ()
@@ -7784,6 +7844,8 @@ let handle_round_run ctx args : result =
                 appended_events := !appended_events @ action_events;
                 (* Phase 1: Update BDI state after inferred reply *)
                 update_bdi_after_reply ~reply_text ~sa;
+                (* Phase 2: Harness evaluation — observation-only *)
+                evaluate_keeper_response ~reply_text;
                 statuses :=
                   `Assoc
                     [
@@ -7839,6 +7901,8 @@ let handle_round_run ctx args : result =
             in
             (* Phase 1: Update BDI state after successful reply *)
             update_bdi_after_reply ~reply_text:reply ~sa;
+            (* Phase 2: Harness evaluation — observation-only *)
+            evaluate_keeper_response ~reply_text:reply;
             statuses :=
               `Assoc
                 ([

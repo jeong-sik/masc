@@ -215,3 +215,7 @@ module Trpg_visibility = Trpg_visibility
 module Trpg_rule = Trpg_rule
 module Trpg_rule_dnd5e_lite = Trpg_rule_dnd5e_lite
 module Trpg_engine_replay = Trpg_engine_replay
+module Trpg_bdi = Trpg_bdi
+module Trpg_harness = Trpg_harness
+module Trpg_dm_intent = Trpg_dm_intent
+module Trpg_actor_match = Trpg_actor_match

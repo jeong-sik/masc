@@ -120,7 +120,9 @@ let increment_counter (counter : event_counter) event_type =
   | Mid_join_granted
   | Mid_join_rejected
   | Contribution_delta
-  | Memory_signal ->
+  | Memory_signal
+  | Bdi_updated
+  | Evaluation_scored ->
       counter
 
 (** Convert counter to Yojson.Safe.t *)

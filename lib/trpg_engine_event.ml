@@ -37,6 +37,8 @@ type event_type =
   | Memory_signal
   | Intervention_submitted
   | Intervention_applied
+  | Bdi_updated
+  | Evaluation_scored
 
 type t = {
   seq : int;
@@ -86,6 +88,8 @@ let string_of_event_type = function
   | Memory_signal -> "memory.signal"
   | Intervention_submitted -> "intervention.submitted"
   | Intervention_applied -> "intervention.applied"
+  | Bdi_updated -> "bdi.updated"
+  | Evaluation_scored -> "evaluation.scored"
 
 let event_type_of_string = function
   | "room.created" -> Ok Room_created
@@ -126,6 +130,8 @@ let event_type_of_string = function
   | "memory.signal" -> Ok Memory_signal
   | "intervention.submitted" -> Ok Intervention_submitted
   | "intervention.applied" -> Ok Intervention_applied
+  | "bdi.updated" -> Ok Bdi_updated
+  | "evaluation.scored" -> Ok Evaluation_scored
   | s -> Error (Printf.sprintf "unknown event_type: %s" s)
 
 let make ~seq ~room_id ~ts ~event_type ?actor_id ~payload () =

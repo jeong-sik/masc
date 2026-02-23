@@ -1,23 +1,21 @@
-// Tasks tab — Task list grouped by status
+// Tasks tab — Kanban Board style
 
-import { html } from 'htm/preact'
-import { Card } from './common/card'
-import { StatusBadge } from './common/status-badge'
-import { TimeAgo } from './common/time-ago'
-import { tasksByStatus } from '../store'
-import type { Task } from '../types'
+import { html } from "htm/preact"
+import { TimeAgo } from "./common/time-ago"
+import { tasksByStatus } from "../store"
+import type { Task } from "../types"
 
-function TaskRow({ task }: { task: Task }) {
+function KanbanCard({ task }: { task: Task }) {
+  // Priority 1=urgent, 5=low
+  const pClass = (task.priority ?? 4) <= 1 ? "p1" : (task.priority ?? 4) === 2 ? "p2" : (task.priority ?? 4) === 3 ? "p3" : "p4"
+  
   return html`
-    <div class="task-row">
-      <${StatusBadge} status=${task.status} />
-      <div class="task-info">
-        <span class="task-title">${task.title}</span>
-        ${task.assignee
-          ? html`<span class="task-assignee">${task.assignee}</span>`
-          : null}
+    <div class="kanban-card ${pClass}">
+      <div class="kanban-card-title">${task.title}</div>
+      <div class="kanban-card-meta">
+        ${task.created_at ? html`<${TimeAgo} timestamp=${task.created_at} />` : html`<span>-</span>`}
+        ${task.assignee ? html`<span class="kanban-assignee">${task.assignee}</span>` : null}
       </div>
-      ${task.created_at ? html`<${TimeAgo} timestamp=${task.created_at} />` : null}
     </div>
   `
 }
@@ -26,35 +24,42 @@ export function Tasks() {
   const { todo, inProgress, done } = tasksByStatus.value
 
   return html`
-    <div class="grid-2col">
-      <${Card} title="In Progress (${inProgress.length})" class="section">
-        <div class="task-list">
-          ${inProgress.length === 0
-            ? html`<div class="empty-state">No tasks in progress</div>`
-            : inProgress.map(t => html`<${TaskRow} key=${t.id} task=${t} />`)}
+    <div class="kanban-board">
+      <!-- TODO Column -->
+      <div class="kanban-column">
+        <div class="kanban-header todo">
+          <span>TO DO</span>
+          <span class="kanban-badge">${todo.length}</span>
         </div>
-      <//>
+        ${todo.length === 0
+          ? html`<div class="empty-state" style="opacity: 0.5;">No pending tasks</div>`
+          : todo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+      </div>
 
-      <${Card} title="To Do (${todo.length})" class="section">
-        <div class="task-list">
-          ${todo.length === 0
-            ? html`<div class="empty-state">No pending tasks</div>`
-            : todo.map(t => html`<${TaskRow} key=${t.id} task=${t} />`)}
+      <!-- IN PROGRESS Column -->
+      <div class="kanban-column">
+        <div class="kanban-header inprogress">
+          <span>IN PROGRESS</span>
+          <span class="kanban-badge">${inProgress.length}</span>
         </div>
-      <//>
+        ${inProgress.length === 0
+          ? html`<div class="empty-state" style="opacity: 0.5;">No active tasks</div>`
+          : inProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+      </div>
+
+      <!-- DONE Column -->
+      <div class="kanban-column">
+        <div class="kanban-header done">
+          <span>DONE</span>
+          <span class="kanban-badge">${done.length}</span>
+        </div>
+        ${done.length === 0
+          ? html`<div class="empty-state" style="opacity: 0.5;">No completed tasks</div>`
+          : done.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+        ${done.length > 20
+          ? html`<div class="empty-state" style="opacity: 0.5;">...and ${done.length - 20} more</div>`
+          : null}
+      </div>
     </div>
-
-    ${done.length > 0
-      ? html`
-        <${Card} title="Done (${done.length})" class="section" style="margin-top: 20px">
-          <div class="task-list">
-            ${done.slice(0, 20).map(t => html`<${TaskRow} key=${t.id} task=${t} />`)}
-            ${done.length > 20
-              ? html`<div class="empty-state">...and ${done.length - 20} more</div>`
-              : null}
-          </div>
-        <//>
-      `
-      : null}
   `
 }

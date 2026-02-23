@@ -12,21 +12,15 @@ pub mod gameplay_events;
 pub mod map_canvas;
 pub mod narrative;
 pub mod overlay;
-pub mod playability_proof;
 pub mod session_events;
 pub mod session_history;
 pub mod turn_controls;
 pub mod turn_phase;
 pub mod turn_runtime;
-pub mod panel_visibility;
 
 use bevy::prelude::*;
 
 use crate::mode::ViewerMode;
-#[cfg(target_arch = "wasm32")]
-use crate::dom::panel_visibility::set_panel_visibility;
-#[cfg(target_arch = "wasm32")]
-use crate::dom::character_panel::{render_actor_inspector_empty, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE};
 
 /// Plugin that bridges Bevy game state changes to HTML DOM updates.
 /// Text-heavy panels are rendered via DOM for scrolling, rich formatting, and CSS.
@@ -47,8 +41,6 @@ impl Plugin for DomBridgePlugin {
             .init_resource::<map_canvas::CanvasMapCache>()
             .init_resource::<overlay::OverlayCache>()
             .init_resource::<endgame::EndgameState>()
-            .init_resource::<crate::game::playability_contract::PlayabilityCounters>()
-            .init_resource::<crate::game::playability_contract::PlayabilityThresholds>()
             .add_systems(OnEnter(ViewerMode::Trpg), reset_trpg_dom_state)
             // TRPG-specific DOM update systems
             .add_systems(
@@ -70,7 +62,6 @@ impl Plugin for DomBridgePlugin {
                     overlay::update_overlay_dom,
                     actor_lifecycle::update_actor_lifecycle_dom,
                     session_events::update_session_events_dom,
-                    playability_proof::update_playability_proof_dom,
                 )
                     .run_if(in_state(ViewerMode::Trpg)),
             )
@@ -112,7 +103,6 @@ fn reset_trpg_dom_state(
 ) {
     character_cache.last_snapshot.clear();
     character_cache.last_full.clear();
-    character_cache.last_progress_signature.clear();
     turn_cache.last_turn = 0;
     turn_cache.last_phase.clear();
     runtime_cache.last_snapshot.clear();
@@ -140,10 +130,6 @@ fn reset_trpg_dom_state(
         if let Some(el) = document.get_element_by_id("character-panel") {
             el.set_inner_html("");
         }
-        if let Some(el) = document.get_element_by_id("dashboard") {
-            let _ = el.remove_attribute("data-selected-actor");
-        }
-        render_actor_inspector_empty(&document, DEFAULT_ACTOR_INSPECTOR_EMPTY_MESSAGE);
         if let Some(el) = document.get_element_by_id("turn-num") {
             el.set_text_content(Some("1"));
         }
@@ -190,40 +176,6 @@ fn reset_trpg_dom_state(
         if let Some(el) = document.get_element_by_id("event-beacon") {
             el.set_inner_html("");
             el.set_class_name("event-beacon");
-        }
-        set_panel_visibility(&document, "action-panel", false);
-        set_panel_visibility(&document, "join-panel", true);
-
-        // Tab reset: activate "방" tab on TRPG entry
-        for tab_id in ["tab-panel-room", "tab-panel-game", "tab-panel-settings"] {
-            if let Some(el) = document.get_element_by_id(tab_id) {
-                if tab_id == "tab-panel-room" {
-                    el.set_class_name("tab-panel active");
-                } else {
-                    el.set_class_name("tab-panel");
-                }
-            }
-        }
-        if let Some(bar) = document.get_element_by_id("control-tab-bar") {
-            if let Ok(buttons) = bar.query_selector_all(".tab-btn") {
-                for i in 0..buttons.length() {
-                    if let Some(node) = buttons.item(i) {
-                        if let Ok(btn) = node.dyn_into::<web_sys::Element>() {
-                            let is_room = btn.get_attribute("data-tab")
-                                .map_or(false, |v| v == "room");
-                            if is_room {
-                                let _ = btn.class_list().add_1("active");
-                            } else {
-                                let _ = btn.class_list().remove_1("active");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // Collapse ops-hud on entry
-        if let Some(hud) = document.get_element_by_id("ops-hud") {
-            let _ = hud.class_list().add_1("collapsed");
         }
     }
 }

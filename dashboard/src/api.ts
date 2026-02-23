@@ -8,11 +8,11 @@ import type {
   BoardHearth,
   BoardFlair,
   TrpgState,
-  TrpgSessionSummary,
   TrpgEvent,
   Agent,
   CouncilDebate,
   CouncilSession,
+  BoardSortMode,
 } from './types'
 
 // --- Auth ---
@@ -166,8 +166,11 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
 
 // --- Board ---
 
-export function fetchBoard(): Promise<{ posts: BoardPost[] }> {
-  return get('/api/v1/board')
+export function fetchBoard(sortBy?: BoardSortMode): Promise<{ posts: BoardPost[] }> {
+  const params = new URLSearchParams()
+  if (sortBy) params.set('sort_by', sortBy)
+  const qs = params.toString()
+  return get(`/api/v1/board${qs ? `?${qs}` : ''}`)
 }
 
 export function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
@@ -225,6 +228,86 @@ interface TrpgRawEvent {
   actor_id?: string | null
   ts?: string
   payload?: unknown
+}
+
+function parseOutcomeResult(value: unknown): 'victory' | 'defeat' | 'draw' | undefined {
+  const normalized = asString(value, '').trim().toLowerCase()
+  if (normalized === 'win' || normalized === 'won' || normalized === 'victory') return 'victory'
+  if (normalized === 'lose' || normalized === 'lost' || normalized === 'defeat') return 'defeat'
+  if (normalized === 'draw' || normalized === 'stalemate' || normalized === 'tie') return 'draw'
+  return undefined
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = asString(value, '')
+    if (text.trim()) return text.trim()
+  }
+  return ''
+}
+
+function parseSessionOutcomePayload(payload: Record<string, unknown>): {
+  result: 'victory' | 'defeat' | 'draw'
+  reason?: string
+  summary?: string
+  turn?: number
+  phase?: string
+} | undefined {
+  const result = parseOutcomeResult(firstString(payload.outcome, payload.result, payload.result_code))
+  if (!result) return undefined
+  const reason = firstString(
+    payload.reason,
+    payload.reason_code,
+    payload.description,
+    payload.detail,
+  )
+  const summary = firstString(payload.summary, payload.summary_ko, payload.summary_en, payload.note)
+  const turn = (() => {
+    const fromTurn = asNumber(payload.turn, Number.NaN)
+    if (Number.isFinite(fromTurn)) return fromTurn
+    const fromTurnNumber = asNumber(payload.turn_number, Number.NaN)
+    if (Number.isFinite(fromTurnNumber)) return fromTurnNumber
+    const fromCurrentTurn = asNumber(payload.current_turn, Number.NaN)
+    if (Number.isFinite(fromCurrentTurn)) return fromCurrentTurn
+    const fromRound = asNumber(payload.round, Number.NaN)
+    return Number.isFinite(fromRound) ? fromRound : undefined
+  })()
+  const phase = firstString(payload.phase, payload.phase_name, payload.current_phase, payload.phase_id)
+  return {
+    result,
+    reason: reason || undefined,
+    summary: summary || undefined,
+    turn,
+    phase: phase || undefined,
+  }
+}
+
+function parseSessionOutcomeFromEvents(
+  rawStateResponse: TrpgRawStateResponse,
+  rawEvents: unknown[],
+): {
+  result: 'victory' | 'defeat' | 'draw'
+  reason?: string
+  summary?: string
+  turn?: number
+  phase?: string
+} | undefined {
+  const stateRaw = isRecord(rawStateResponse.state) ? rawStateResponse.state : {}
+  const statusRaw = asString(stateRaw.status, 'active').toLowerCase()
+  if (statusRaw !== 'ended') return undefined
+
+  const latest = [...rawEvents].reverse().find(raw => {
+    if (!isRecord(raw)) return false
+    return asString(raw.type, '') === 'session.outcome'
+  })
+  const stateOutcome = isRecord(stateRaw.session_outcome) ? stateRaw.session_outcome : {}
+  if (isRecord(stateOutcome) && Object.keys(stateOutcome).length > 0) {
+    const fromState = parseSessionOutcomePayload(stateOutcome)
+    if (fromState) return fromState
+  }
+
+  if (!isRecord(latest)) return undefined
+  return parseSessionOutcomePayload(isRecord(latest.payload) ? latest.payload : {})
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -411,7 +494,6 @@ function normalizeTrpgState(
   rawStateResponse: TrpgRawStateResponse,
   rawEvents: unknown[],
   requestedRoom?: string,
-  sessions?: TrpgSessionSummary[],
 ): TrpgState {
   const roomId =
     asString(rawStateResponse.room_id, '') ||
@@ -463,6 +545,7 @@ function normalizeTrpgState(
     }
   })
   const party = allActors.filter(actor => actor.status !== 'dead')
+  const outcome = parseSessionOutcomeFromEvents(rawStateResponse, rawEvents)
 
   const joinGate = {
     phase_open: asBoolean(joinGateRaw.phase_open, true),
@@ -519,32 +602,10 @@ function normalizeTrpgState(
     map: map || undefined,
     join_gate: joinGate,
     contribution_ledger: contributionLedger,
+    outcome,
     party,
     story_log: storyLog,
-    history: sessions ?? [],
-  }
-}
-
-async function fetchTrpgSessionsRaw(): Promise<TrpgSessionSummary[]> {
-  try {
-    const data = await get<{ sessions: unknown[] }>('/api/v1/trpg/sessions')
-    const raw = Array.isArray(data.sessions) ? data.sessions : []
-    return raw
-      .map(s => {
-        if (!isRecord(s)) return null
-        return {
-          room_id: asString(s.room_id, ''),
-          first_ts: asString(s.first_ts, ''),
-          last_ts: asString(s.last_ts, ''),
-          event_count: asNumber(s.event_count, 0),
-          last_seq: asNumber(s.last_seq, 0),
-          ended: asBoolean(s.ended, false),
-          current: asBoolean(s.current, false),
-        }
-      })
-      .filter((s): s is TrpgSessionSummary => s !== null)
-  } catch {
-    return []
+    history: [],
   }
 }
 
@@ -556,12 +617,11 @@ async function fetchTrpgEventsRaw(room?: string): Promise<unknown[]> {
 
 export async function fetchTrpgState(room?: string): Promise<TrpgState> {
   const params = room ? `?room_id=${encodeURIComponent(room)}` : ''
-  const [rawState, rawEvents, sessions] = await Promise.all([
+  const [rawState, rawEvents] = await Promise.all([
     get<TrpgRawStateResponse>(`/api/v1/trpg/state${params}`),
     fetchTrpgEventsRaw(room),
-    fetchTrpgSessionsRaw(),
   ])
-  return normalizeTrpgState(rawState, rawEvents, room, sessions)
+  return normalizeTrpgState(rawState, rawEvents, room)
 }
 
 export async function fetchTrpgEvents(room?: string): Promise<{ events: TrpgEvent[] }> {

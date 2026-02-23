@@ -431,6 +431,30 @@
  (modules test_perpetual)
  (libraries masc_mcp str yojson unix))
 
+; TRPG Keeper Intelligence — BDI Memory Module
+(test
+ (name test_trpg_bdi)
+ (modules test_trpg_bdi)
+ (libraries masc_mcp alcotest yojson unix))
+
+; TRPG Keeper Intelligence — DM Intent Extraction
+(test
+ (name test_trpg_dm_intent)
+ (modules test_trpg_dm_intent)
+ (libraries masc_mcp alcotest yojson))
+
+; TRPG Keeper Intelligence — Actor-Keeper Compatibility
+(test
+ (name test_trpg_actor_match)
+ (modules test_trpg_actor_match)
+ (libraries masc_mcp alcotest yojson))
+
+; TRPG Keeper Intelligence — Evaluation Harness (parsers + scoring)
+(test
+ (name test_trpg_harness)
+ (modules test_trpg_harness)
+ (libraries masc_mcp alcotest yojson))
+
 ; ============================================================
 ; Keeper Agent Harness tests (trajectory + eval gates + scenarios)
 ; ============================================================

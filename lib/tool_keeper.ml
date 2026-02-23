@@ -6995,6 +6995,16 @@ let handle_keeper_msg ctx args : tool_result =
           updated
       in
       start_keepalive ctx meta;
+      (* === Harness: trajectory accumulator + eval gate config === *)
+      let masc_root = Filename.concat ctx.config.base_path ".masc" in
+      let trajectory_acc =
+        Trajectory.create_accumulator
+          ~masc_root
+          ~keeper_name:meta.name
+          ~trace_id:meta.trace_id
+          ~generation:meta.generation
+      in
+      let gate_config = Eval_gate.default_config in
       let effective_models =
         if inline_models <> [] then inline_models else meta.models
       in
@@ -7129,6 +7139,7 @@ let handle_keeper_msg ctx args : tool_result =
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with
             | Error e ->
+              ignore (Trajectory.finalize trajectory_acc (Trajectory.Failed e));
               (false, Printf.sprintf "❌ LLM failed: %s" e)
             | Ok resp0 ->
               let used_model0 =
@@ -7143,19 +7154,55 @@ let handle_keeper_msg ctx args : tool_result =
                 List.map (fun (tc : Llm_client.tool_call) ->
                   Printf.eprintf "[TRPG-TRACE] Executing tool: %s args: %s\n%!"
                     tc.call_name (_trunc tc.call_arguments 200);
-                  let output =
-                    try
-                      let r = execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc in
-                      Printf.eprintf "[TRPG-TRACE] Tool %s OK: %s\n%!" tc.call_name (_trunc r 200);
-                      r
-                    with exn ->
-                      Printf.eprintf "[TRPG-TRACE] Tool %s EXCEPTION: %s\n%!"
-                        tc.call_name (Printexc.to_string exn);
-                      Yojson.Safe.to_string (`Assoc [
-                        ("error", `String (Printexc.to_string exn));
-                        ("tool", `String tc.call_name);
-                      ])
+                  let (decision, result_opt, eval_opt, duration_ms) =
+                    Eval_gate.guarded_execute
+                      ~config:gate_config
+                      ~accumulated_cost:trajectory_acc.Trajectory.total_cost
+                      ~trajectory_acc:(Some trajectory_acc)
+                      ~tool_name:tc.call_name
+                      ~args_json:tc.call_arguments
+                      ~execute:(fun () ->
+                        execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc)
                   in
+                  let output = match decision with
+                    | Trajectory.Reject reason ->
+                        Printf.eprintf "[HARNESS] Tool %s GATED: %s\n%!" tc.call_name reason;
+                        Yojson.Safe.to_string (`Assoc [
+                          ("error", `String (Printf.sprintf "gated: %s" reason));
+                          ("tool", `String tc.call_name);
+                        ])
+                    | Trajectory.Pass ->
+                        let r = Option.value ~default:"" result_opt in
+                        Printf.eprintf "[TRPG-TRACE] Tool %s OK: %s\n%!" tc.call_name (_trunc r 200);
+                        (* Log post-eval warnings *)
+                        (match eval_opt with
+                         | Some eval when eval.Eval_gate.should_warn ->
+                             Printf.eprintf "[HARNESS] Warning for %s: %s\n%!" tc.call_name
+                               (Option.value ~default:"" eval.Eval_gate.warning)
+                         | _ -> ());
+                        r
+                  in
+                  (* Record trajectory entry *)
+                  let entry : Trajectory.tool_call_entry = {
+                    ts = Unix.gettimeofday ();
+                    ts_iso = Types.now_iso ();
+                    turn = trajectory_acc.Trajectory.turn;
+                    round = 0;  (* updated by tool_loop caller *)
+                    tool_name = tc.call_name;
+                    args_json = tc.call_arguments;
+                    gate_decision = decision;
+                    result = (match decision with
+                      | Trajectory.Pass -> result_opt
+                      | Trajectory.Reject _ -> Some output);
+                    duration_ms;
+                    error = (match eval_opt with
+                      | Some e -> e.Eval_gate.error_message
+                      | None -> None);
+                    cost_usd = (match eval_opt with
+                      | Some e -> e.Eval_gate.cost_usd
+                      | None -> 0.0);
+                  } in
+                  Trajectory.record_entry trajectory_acc entry;
                   (tc, output)
                 ) tcs
               in
@@ -7248,6 +7295,8 @@ let handle_keeper_msg ctx args : tool_result =
                       ~last_resp:resp_next
                 end
               in
+              (* Harness: increment turn counter before tool execution *)
+              Trajectory.increment_turn trajectory_acc;
               let (base_content, base_usage, base_model_used, base_latency_ms,
                    base_cost_usd, tools_used) =
                 tool_loop ~round:1 ~acc_usage:resp0.usage
@@ -7724,6 +7773,20 @@ let handle_keeper_msg ctx args : tool_result =
                    ] in
                    append_jsonl_line metrics_path metrics_json
                  with _ -> ());
+                (* Harness: finalize trajectory with outcome *)
+                (let traj_outcome =
+                  if trajectory_acc.Trajectory.total_cost >= gate_config.Eval_gate.max_cost_usd then
+                    Trajectory.CostExceeded
+                  else
+                    Trajectory.Completed
+                in
+                let _traj = Trajectory.finalize trajectory_acc traj_outcome in
+                Printf.eprintf "[HARNESS] Trajectory finalized: %s turns=%d calls=%d cost=$%.4f outcome=%s\n%!"
+                  meta_turn.trace_id
+                  _traj.Trajectory.total_turns
+                  _traj.Trajectory.total_tool_calls
+                  _traj.Trajectory.total_cost_usd
+                  (Trajectory.outcome_to_string traj_outcome));
                 (* SSE: keeper_compaction — emitted only when compaction occurred *)
                 (if compacted then
                   (try Sse.broadcast (`Assoc [

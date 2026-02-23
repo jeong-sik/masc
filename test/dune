@@ -430,3 +430,21 @@
  (name test_perpetual)
  (modules test_perpetual)
  (libraries masc_mcp str yojson unix))
+
+; ============================================================
+; Keeper Agent Harness tests (trajectory + eval gates + scenarios)
+; ============================================================
+(test
+ (name test_trajectory)
+ (modules test_trajectory)
+ (libraries masc_mcp alcotest str yojson unix))
+
+(test
+ (name test_eval_gate)
+ (modules test_eval_gate)
+ (libraries masc_mcp alcotest str yojson unix))
+
+(test
+ (name test_eval_harness)
+ (modules test_eval_harness)
+ (libraries masc_mcp alcotest str yojson unix))

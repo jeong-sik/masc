@@ -602,6 +602,7 @@ let schemas : Types.tool_schema list =
       description =
         "Claim an actor lease for a keeper. \
          Required: room_id, actor_id, keeper_name. \
+         Optional: keeper_style, keeper_description (when provided, response includes match_score). \
          Enforces one keeper -> one actor and denies claim when actor is dead.";
       input_schema =
         `Assoc
@@ -613,6 +614,8 @@ let schemas : Types.tool_schema list =
                   ("room_id", `Assoc [ ("type", `String "string") ]);
                   ("actor_id", `Assoc [ ("type", `String "string") ]);
                   ("keeper_name", `Assoc [ ("type", `String "string") ]);
+                  ("keeper_style", `Assoc [ ("type", `String "string") ]);
+                  ("keeper_description", `Assoc [ ("type", `String "string") ]);
                 ] );
             ( "required",
               `List [ `String "room_id"; `String "actor_id"; `String "keeper_name" ] );
@@ -688,6 +691,45 @@ let schemas : Types.tool_schema list =
                 ] );
             ( "required",
               `List [ `String "room_id"; `String "actor_id"; `String "keeper_name" ] );
+          ];
+    };
+    {
+      name = "masc_trpg_actor_match";
+      description =
+        "Rank keepers by compatibility with actors using trait overlap, archetype affinity, \
+         and semantic alignment. Returns scored rankings per actor. \
+         Required: room_id, keepers (array of {name, style, description}). \
+         Optional: actor_id (single actor), rule_module.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("room_id", `Assoc [ ("type", `String "string") ]);
+                  ( "keepers",
+                    `Assoc
+                      [
+                        ("type", `String "array");
+                        ( "items",
+                          `Assoc
+                            [
+                              ("type", `String "object");
+                              ( "properties",
+                                `Assoc
+                                  [
+                                    ("name", `Assoc [ ("type", `String "string") ]);
+                                    ("style", `Assoc [ ("type", `String "string") ]);
+                                    ("description", `Assoc [ ("type", `String "string") ]);
+                                  ] );
+                              ("required", `List [ `String "name"; `String "style"; `String "description" ]);
+                            ] );
+                      ] );
+                  ("actor_id", `Assoc [ ("type", `String "string") ]);
+                  ("rule_module", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "room_id"; `String "keepers" ]);
           ];
     };
     {
@@ -6097,6 +6139,125 @@ let handle_actor_delete ctx args : result =
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
+(* ---------- Actor Match (advisory keeper-actor ranking) ---------- *)
+
+let parse_keeper_entry (j : Yojson.Safe.t) :
+    (string * string * string, string) Stdlib.result =
+  let ( let* ) = Result.bind in
+  match j with
+  | `Assoc _ ->
+      let* name =
+        match j |> member "name" with
+        | `String s when String.trim s <> "" -> Ok (String.trim s)
+        | _ -> Error "keeper entry missing 'name'"
+      in
+      let style =
+        match j |> member "style" with
+        | `String s -> String.trim s
+        | _ -> ""
+      in
+      let description =
+        match j |> member "description" with
+        | `String s -> String.trim s
+        | _ -> ""
+      in
+      Ok (name, style, description)
+  | _ -> Error "keeper entry must be an object"
+
+let parse_keeper_list (j : Yojson.Safe.t) :
+    ((string * string * string) list, string) Stdlib.result =
+  match j with
+  | `List xs ->
+      let rec go acc = function
+        | [] -> Ok (List.rev acc)
+        | x :: rest -> (
+            match parse_keeper_entry x with
+            | Ok entry -> go (entry :: acc) rest
+            | Error e -> Error e)
+      in
+      go [] xs
+  | _ -> Error "keepers must be a JSON array"
+
+let handle_actor_match ctx args : result =
+  let ( let* ) = Result.bind in
+  let base_dir = ctx.config.base_path in
+  let result_json =
+    let* room_id = get_required_string args "room_id" in
+    let* keepers_json =
+      match args |> member "keepers" with
+      | `Null -> Error "missing required field: keepers"
+      | j -> Ok j
+    in
+    let* keepers = parse_keeper_list keepers_json in
+    if keepers = [] then
+      Error "keepers array must not be empty"
+    else
+      let* actor_id_opt = get_optional_string args "actor_id" in
+      let* rule_opt = get_optional_string args "rule_module" in
+      let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
+      let* () = validate_rule_module rule_module in
+      let* derived = derive_state ~base_dir ~room_id ~rule_module in
+      let state = state_of_derived derived in
+      let party = state_party_fields state in
+      let target_actors =
+        match actor_id_opt with
+        | Some id -> (
+            match List.assoc_opt id party with
+            | Some aj -> [ (id, aj) ]
+            | None -> [])
+        | None ->
+            (* Only include alive actors with player role *)
+            party
+            |> List.filter (fun (_id, aj) ->
+                   let alive =
+                     aj |> member "alive" |> to_bool_option
+                     |> Option.value ~default:true
+                   in
+                   alive)
+      in
+      if target_actors = [] then
+        Error
+          (match actor_id_opt with
+          | Some id -> Printf.sprintf "actor not found: %s" id
+          | None -> "no alive actors in room")
+      else
+        let rankings =
+          target_actors
+          |> List.map (fun (actor_id, actor_json) ->
+                 let archetype = get_string_field actor_json "archetype" in
+                 let traits = get_string_list_field actor_json "traits" in
+                 let persona = get_string_field actor_json "persona" in
+                 let scores =
+                   Trpg_actor_match.rank ~keepers ~actor_id
+                     ~actor_archetype:archetype ~actor_traits:traits
+                     ~actor_persona:persona
+                 in
+                 ( actor_id,
+                   `Assoc
+                     [
+                       ("actor_id", `String actor_id);
+                       ("archetype", `String archetype);
+                       ( "rankings",
+                         Trpg_actor_match.ranking_to_yojson scores );
+                       ( "best_keeper",
+                         match scores with
+                         | best :: _ -> `String best.keeper_name
+                         | [] -> `Null );
+                     ] ))
+        in
+        Ok
+          (`Assoc
+            [
+              ("ok", `Bool true);
+              ("room_id", `String room_id);
+              ( "actor_rankings",
+                `List (List.map (fun (_id, j) -> j) rankings) );
+              ("keeper_count", `Int (List.length keepers));
+              ("actor_count", `Int (List.length target_actors));
+            ])
+  in
+  match result_json with Ok j -> ok_json j | Error e -> err e
+
 let handle_actor_claim ctx args : result =
   let ( let* ) = Result.bind in
   let base_dir = ctx.config.base_path in
@@ -6104,6 +6265,8 @@ let handle_actor_claim ctx args : result =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
     let* keeper_name = get_required_string args "keeper_name" in
+    let* keeper_style_opt = get_optional_string args "keeper_style" in
+    let* keeper_desc_opt = get_optional_string args "keeper_description" in
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
@@ -6182,9 +6345,31 @@ let handle_actor_claim ctx args : result =
                   ~actor_id ~payload ()
               in
               let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+              (* Compute optional match_score when keeper metadata is provided *)
+              let match_score_field =
+                match (keeper_style_opt, keeper_desc_opt) with
+                | (Some style, Some description) ->
+                    let actor_json =
+                      match List.assoc_opt actor_id (state_party_fields state) with
+                      | Some aj -> aj
+                      | None -> `Assoc []
+                    in
+                    let archetype = get_string_field actor_json "archetype" in
+                    let traits = get_string_list_field actor_json "traits" in
+                    let persona = get_string_field actor_json "persona" in
+                    let ms =
+                      Trpg_actor_match.score
+                        ~keeper_name ~keeper_style:style
+                        ~keeper_description:description
+                        ~actor_id ~actor_archetype:archetype
+                        ~actor_traits:traits ~actor_persona:persona
+                    in
+                    [ ("match_score", Trpg_actor_match.to_yojson ms) ]
+                | _ -> []
+              in
               Ok
                 (`Assoc
-                  [
+                  ([
                     ("ok", `Bool true);
                     ("room_id", `String room_id);
                     ("actor_id", `String actor_id);
@@ -6192,7 +6377,7 @@ let handle_actor_claim ctx args : result =
                     ("status", `String "claimed");
                     ("event", Trpg_engine_event.to_yojson event);
                     ("state", state_of_derived next_derived);
-                  ]) )
+                  ] @ match_score_field)) )
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
 
@@ -8377,6 +8562,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_trpg_actor_spawn" -> Some (handle_actor_spawn ctx args)
   | "masc_trpg_actor_update" -> Some (handle_actor_update ctx args)
   | "masc_trpg_actor_delete" -> Some (handle_actor_delete ctx args)
+  | "masc_trpg_actor_match" -> Some (handle_actor_match ctx args)
   | "masc_trpg_actor_claim" -> Some (handle_actor_claim ctx args)
   | "masc_trpg_actor_release" -> Some (handle_actor_release ctx args)
   | "masc_trpg_join_eligibility" -> Some (handle_join_eligibility ctx args)

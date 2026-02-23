@@ -196,6 +196,12 @@ module Succession = Succession
 module Perpetual_loop = Perpetual_loop
 module Tool_perpetual = Tool_perpetual
 module Tool_keeper = Tool_keeper
+
+(* Keeper Agent Harness — trajectory + eval gates + scenarios *)
+module Trajectory = Trajectory
+module Eval_gate = Eval_gate
+module Eval_harness = Eval_harness
+
 module Tool_goals = Tool_goals
 module Tool_trpg = Tool_trpg
 module Trpg_preset_store = Trpg_preset_store

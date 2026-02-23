@@ -193,6 +193,10 @@
    webrtc_bindings
    webrtc_common
    webrtc_datachannel
+   ;; Keeper Agent Harness (trajectory + eval gates + scenarios)
+   trajectory
+   eval_gate
+   eval_harness
    ;; Perpetual Agent Runtime (infinite context system)
    llm_client
    context_manager

@@ -235,6 +235,14 @@ let dashboard_compact_mode request =
   | Some s -> String.equal "compact" (String.lowercase_ascii (String.trim s))
   | None -> false
 
+let trpg_resolve_room_id ~config request =
+  let fallback = Option.value ~default:"default" (Masc_mcp.Room.read_current_room config) in
+  match query_param request "room_id" with
+  | None -> fallback
+  | Some raw -> (
+      let room_id = String.trim raw in
+      if room_id = "" then fallback else room_id)
+
 type trpg_api_error_kind = [ `Bad_request | `Internal_server_error ]
 type trpg_api_result = (Yojson.Safe.t, trpg_api_error_kind * string) result
 
@@ -1125,9 +1133,14 @@ let trpg_default_fast_keeper_models () : string list =
   | false, true -> [ "gemini:gemini-2.5-flash"; "ollama:glm-4.7-flash" ]
   | false, false -> [ "ollama:glm-4.7-flash" ]
 
+let trpg_keeper_models_override_csv () : string option =
+  match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
+  | Some raw -> Some raw
+  | None -> Sys.getenv_opt "KEEPER_MODELS"
+
 let trpg_keeper_models_for_round () : string list =
   let configured_opt =
-    match Sys.getenv_opt "MASC_TRPG_KEEPER_MODELS" with
+    match trpg_keeper_models_override_csv () with
     | Some raw ->
         let parsed = split_csv_nonempty raw in
         if parsed = [] then None else Some parsed
@@ -1175,6 +1188,7 @@ let trpg_keeper_call_with_runtime
           ("message", `String message);
           ("goal", `String inline_goal);
           ("require_existing", `Bool true);
+          ("timeout_sec", `Float timeout_sec);
           ("ollama_timeout_sec", `Float timeout_sec);
           ("turn_instructions", `String turn_instructions);
         ])
@@ -4958,10 +4972,44 @@ let make_routes ~port ~host =
                  (Yojson.Safe.to_string (trpg_error_json msg))
          )
        ) request reqd)
+  |> Http.Router.get "/api/v1/room/current" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let config = state.Mcp_server.room_config in
+         let room_id = Option.value ~default:"default" (Masc_mcp.Room.read_current_room config) in
+         let json = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+         respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+       ) request reqd)
+  |> Http.Router.post "/api/v1/room/current" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let config = state.Mcp_server.room_config in
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+              (match trpg_parse_required_string "room_id" json with
+               | Error (`Bad_request, msg) ->
+                   respond_json_with_cors ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (trpg_error_json msg))
+               | Ok room_id ->
+                   let room_id = String.trim room_id in
+                   if room_id = "" then
+                     respond_json_with_cors ~status:`Bad_request request reqd
+                       (Yojson.Safe.to_string
+                          (trpg_error_json "room_id cannot be empty"))
+                   else (
+                     Masc_mcp.Room.write_current_room config room_id;
+                     Masc_mcp.Room.ensure_room_entry config room_id;
+                     let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+                     respond_json_with_cors request reqd (Yojson.Safe.to_string response)))
+           with
+           | Yojson.Json_error msg ->
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string
+                    (trpg_error_json (Printf.sprintf "invalid json: %s" msg))))
+       ) request reqd)
   |> Http.Router.get "/api/v1/trpg/state" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_dir = state.Mcp_server.room_config.base_path in
-         let room_id = Option.value ~default:"" (query_param req "room_id") in
+         let room_id = trpg_resolve_room_id ~config:state.Mcp_server.room_config req in
          let rule_module =
            Option.value ~default:"dnd5e-lite" (query_param req "rule_module")
          in
@@ -5885,6 +5933,42 @@ let run_server ~sw ~env ~port ~base_path =
               h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
                 ~status:`Internal_server_error ~extra_headers:cors)
 
+      | `GET, "/api/v1/room/current" ->
+          let state = get_server_state () in
+          let config = state.Mcp_server.room_config in
+          let room_id = Option.value ~default:"default" (Masc_mcp.Room.read_current_room config) in
+          let json = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `POST, "/api/v1/room/current" ->
+          let state = get_server_state () in
+          let config = state.Mcp_server.room_config in
+          h2_read_body h2_reqd (fun body_str ->
+            try
+              let json = Yojson.Safe.from_string body_str in
+              (match trpg_parse_required_string "room_id" json with
+               | Error (`Bad_request, msg) ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string (trpg_error_json msg))
+                      ~status:`Bad_request ~extra_headers:cors
+               | Ok room_id ->
+                   let room_id = String.trim room_id in
+                   if room_id = "" then
+                     h2_respond_json h2_reqd
+                       (Yojson.Safe.to_string (trpg_error_json "room_id cannot be empty"))
+                       ~status:`Bad_request ~extra_headers:cors
+                   else (
+                     Masc_mcp.Room.write_current_room config room_id;
+                     Masc_mcp.Room.ensure_room_entry config room_id;
+                     let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+                     h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors))
+            with
+            | Yojson.Json_error msg ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (trpg_error_json (Printf.sprintf "invalid json: %s" msg)))
+                  ~status:`Bad_request ~extra_headers:cors
+            )
+
       | `POST, "/api/v1/trpg/events" ->
           let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
@@ -5904,7 +5988,8 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/trpg/state" ->
           let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
-          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
+          let room_id =
+            trpg_resolve_room_id ~config:state.Mcp_server.room_config httpun_request in
           let rule_module =
             Option.value ~default:"dnd5e-lite" (query_param httpun_request "rule_module")
           in

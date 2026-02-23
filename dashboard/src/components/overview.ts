@@ -30,13 +30,12 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
 
 function AgentRow({ agent }: { agent: Agent }) {
   return html`
-    <div class="agent" onClick=${() => openAgentDetail(agent.name)} style="cursor: pointer">
+    <div class="agent-row" onClick=${() => openAgentDetail(agent.name)} style="cursor: pointer">
       <span class="agent-emoji">${agent.emoji ?? ''}</span>
-      <span class="agent-status ${agent.status}"></span>
       <span class="agent-name">${agent.name}</span>
       <${StatusBadge} status=${agent.status} />
       ${agent.current_task
-        ? html`<span class="agent-task">${agent.current_task}</span>`
+        ? html`<span class="agent-task" style="margin-left: auto; font-size: 12px; color: var(--text-muted);">${agent.current_task}</span>`
         : null}
     </div>
   `
@@ -54,9 +53,9 @@ function truncate(s: string, max: number): string {
 }
 
 function ctxBarClass(ratio: number): string {
-  if (ratio > 0.8) return 'ctx-bar-bad'
-  if (ratio > 0.6) return 'ctx-bar-warn'
-  return 'ctx-bar-ok'
+  if (ratio > 0.8) return 'bad'
+  if (ratio > 0.6) return 'warn'
+  return 'ok'
 }
 
 function KeeperRow({ keeper }: { keeper: Keeper }) {
@@ -66,68 +65,66 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
   const isStale = staleKeepers.value.has(keeper.name)
 
   return html`
-    <div class="live-agent keeper-card ${isStale ? 'stale' : ''}" onClick=${() => openKeeperDetail(keeper)} style="cursor: pointer">
-      <div class="live-agent-main">
-        <!-- Row 1: Identity -->
-        <div class="live-agent-title">
-          <span class="live-agent-name">${keeper.emoji ?? ''} ${keeper.name}</span>
+    <div class="live-agent keeper-card ${isStale ? 'stale' : ''}" onClick=${() => openKeeperDetail(keeper)}>
+      <!-- Row 1: Identity -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="font-size: 18px;">${keeper.emoji ?? ''}</span>
+          <span style="font-weight: 600; color: var(--text-strong); font-size: 15px;">${keeper.name}</span>
           <${StatusBadge} status=${keeper.status} />
-          ${lifecycle ? html`<span class="pill pill-lifecycle pill-lifecycle-${lifecycle}">${lifecycle}</span>` : null}
-          ${isStale ? html`<span class="pill pill-stale">stale</span>` : null}
-          ${keeper.model ? html`<span class="pill">${keeper.model}</span>` : null}
-          ${keeper.skill_primary ? html`<span class="pill pill-skill">${keeper.skill_primary}</span>` : null}
+          ${lifecycle ? html`<span class="pill">${lifecycle}</span>` : null}
+          ${isStale ? html`<span class="pill" style="color: var(--bad); border-color: rgba(239, 68, 68, 0.3);">stale</span>` : null}
         </div>
-        <div class="live-agent-sub">${keeper.koreanName ?? ''}</div>
+        ${keeper.model ? html`<span class="pill" style="font-family: monospace;">${keeper.model}</span>` : null}
+      </div>
 
-        <!-- Row 2: Context bar -->
-        ${ratio != null ? html`
-          <div class="keeper-ctx-row">
-            <div class="keeper-ctx-bar">
-              <div class="keeper-ctx-fill ${ctxBarClass(ratio)}" style="width: ${pct}%"></div>
-            </div>
-            <span class="keeper-ctx-label ${ctxBarClass(ratio)}">
-              ${pct}%
-              ${keeper.context_tokens != null ? html` (${formatTokens(keeper.context_tokens)})` : null}
+      <!-- Row 2: Context bar (Full Width) -->
+      ${ratio != null ? html`
+        <div style="margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">
+            <span>Context Usage</span>
+            <span class=${pct && pct > 80 ? 'warn-metric' : ''}>
+              ${pct}% ${keeper.context_tokens != null ? `(${formatTokens(keeper.context_tokens)})` : ''}
             </span>
           </div>
-        ` : null}
-
-        <!-- Row 3: Operational metrics -->
-        ${keeper.generation != null ? html`
-          <div class="keeper-metrics-row">
-            <span>Gen ${keeper.generation}</span>
-            <span>T${keeper.turn_count ?? 0}</span>
-            ${(keeper.handoff_count_total ?? 0) > 0
-              ? html`<span class="keeper-metric-hl">↻${keeper.handoff_count_total}</span>` : null}
-            ${(keeper.compaction_count ?? 0) > 0
-              ? html`<span class="keeper-metric-compact">◆${keeper.compaction_count}</span>` : null}
-            ${(keeper.k2k_count ?? 0) > 0
-              ? html`<span>K2K:${keeper.k2k_count}</span>` : null}
-            ${(keeper.conversation_tail_count ?? 0) > 0
-              ? html`<span>💬${keeper.conversation_tail_count}</span>` : null}
+          <div class="ctx-bar">
+            <div class="ctx-fill ${ctxBarClass(ratio)}" style="width: ${pct}%"></div>
           </div>
-        ` : null}
+        </div>
+      ` : null}
 
-        <!-- Row 4: Heartbeat freshness -->
+      <!-- Row 3: Operational metrics (Grid) -->
+      ${keeper.generation != null ? html`
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--text-muted); background: var(--bg-0); padding: 8px; border-radius: 6px; border: 1px solid var(--card-border);">
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 10px; text-transform: uppercase;">Gen</span>
+            <strong style="color: var(--text-strong);">${keeper.generation}</strong>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 10px; text-transform: uppercase;">Turns</span>
+            <strong style="color: var(--text-strong);">${keeper.turn_count ?? 0}</strong>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 10px; text-transform: uppercase;">Handoffs</span>
+            <strong style="color: ${(keeper.handoff_count_total ?? 0) > 0 ? 'var(--warn)' : 'var(--text-strong)'};">${keeper.handoff_count_total ?? 0}</strong>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 10px; text-transform: uppercase;">K2K</span>
+            <strong style="color: var(--accent);">${keeper.k2k_count ?? 0}</strong>
+          </div>
+        </div>
+      ` : null}
+
+      <!-- Row 4: Heartbeat freshness & Meta -->
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted);">
         ${keeper.last_heartbeat ? html`
-          <div class="keeper-heartbeat-row">
-            <span class="keeper-heartbeat-dot ${keeper.status === 'active' ? 'pulse' : ''}"></span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span class="status-dot-inline ${keeper.status === 'active' ? 'active' : ''}"></span>
             <${TimeAgo} timestamp=${keeper.last_heartbeat} />
           </div>
-        ` : null}
-
-        <!-- Row 5: Trait chips -->
-        ${keeper.traits && keeper.traits.length > 0 ? html`
-          <div class="keeper-trait-row">
-            ${keeper.traits.slice(0, 3).map(t => html`<span class="keeper-trait-chip">${t}</span>`)}
-            ${keeper.traits.length > 3 ? html`<span class="keeper-trait-more">+${keeper.traits.length - 3}</span>` : null}
-          </div>
-        ` : null}
-
-        <!-- Row 6: Memory note preview -->
-        ${keeper.memory_recent_note ? html`
-          <div class="keeper-note-preview">${truncate(keeper.memory_recent_note, 80)}</div>
-        ` : null}
+        ` : html`<span>No heartbeat</span>`}
+        
+        ${keeper.skill_primary ? html`<span class="pill" style="color: #a78bfa; border-color: rgba(167, 139, 250, 0.3); background: rgba(167, 139, 250, 0.1);">${keeper.skill_primary}</span>` : null}
       </div>
     </div>
   `
@@ -140,62 +137,77 @@ export function Overview() {
   const byStatus = tasksByStatus.value
 
   return html`
-    <div class="stats-grid">
-      <${StatCard} label="Agents" value=${agentList.length} />
-      <${StatCard} label="Active" value=${activeAgents.value.length} color="#4ade80" />
-      <${StatCard} label="Keepers" value=${keeperList.length} color="#22d3ee" />
-      <${StatCard} label="Tasks" value=${tasks.value.length} />
-      <${StatCard} label="In Progress" value=${byStatus.inProgress.length} color="#fbbf24" />
-      <${StatCard} label="Done" value=${byStatus.done.length} color="#4ade80" />
+    <!-- High-level Full Width System Health -->
+    <div class="stats-grid" style="grid-template-columns: repeat(6, 1fr);">
+      <${StatCard} label="Total Agents" value=${agentList.length} />
+      <${StatCard} label="Active Agents" value=${activeAgents.value.length} color="var(--ok)" />
+      <${StatCard} label="Keepers" value=${keeperList.length} color="var(--accent)" />
+      <${StatCard} label="Total Tasks" value=${tasks.value.length} />
+      <${StatCard} label="In Progress" value=${byStatus.inProgress.length} color="var(--warn)" />
+      <${StatCard} label="Completed" value=${byStatus.done.length} color="var(--ok)" />
     </div>
 
-    <div class="grid-2col">
-      <${Card} title="Agents" class="section">
+    <!-- System Status & Perpetual Runtime Full Width Banner -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+      ${status?.room ? html`
+        <div class="section" style="margin-bottom: 0;">
+          <h2>MASC Room Status</h2>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; font-size: 13px;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="color: var(--text-muted);">Room / Cluster</span>
+              <strong style="color: var(--text-strong);">${status.room} / ${status.cluster || 'N/A'}</strong>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="color: var(--text-muted);">Uptime</span>
+              <strong style="color: var(--text-strong);">${formatUptime(status.uptime_seconds ?? 0)}</strong>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="color: var(--text-muted);">State</span>
+              ${status.paused ? html`<span class="pill" style="color: var(--bad); width: fit-content;">Paused</span>` : html`<span class="pill" style="color: var(--ok); width: fit-content;">Active</span>`}
+            </div>
+          </div>
+        </div>
+      ` : null}
+
+      ${perpetualStatus.value ? html`
+        <div class="section" style="margin-bottom: 0;">
+          <h2>Perpetual Runtime</h2>
+          <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-muted);">Engine Status</span>
+              <span style="color: ${perpetualStatus.value.running ? 'var(--ok)' : 'var(--text-muted)'}; font-weight: 500;">
+                ${perpetualStatus.value.running ? 'Running' : 'Stopped'}
+              </span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid var(--card-border);">
+              <span style="color: var(--text-muted);">Current Goal</span>
+              <strong style="color: var(--text-strong); font-size: 14px;">${perpetualStatus.value.goal || 'No active goal'}</strong>
+            </div>
+          </div>
+        </div>
+      ` : null}
+    </div>
+
+    <!-- Main Content Area -->
+    <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px;">
+      <div class="section" style="margin-bottom: 0;">
+        <h2>Keepers Health & Context</h2>
+        <div class="live-agent-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          ${keeperList.length === 0
+            ? html`<div class="empty-state" style="grid-column: 1 / -1;">No keepers active</div>`
+            : keeperList.map(k => html`<${KeeperRow} key=${k.name} keeper=${k} />`)}
+        </div>
+      </div>
+
+      <div class="section" style="margin-bottom: 0;">
+        <h2>Connected Agents</h2>
         <div class="agent-list">
           ${agentList.length === 0
             ? html`<div class="empty-state">No agents connected</div>`
             : agentList.map(a => html`<${AgentRow} key=${a.name} agent=${a} />`)}
         </div>
-      <//>
-
-      <${Card} title="Keepers" class="section">
-        <div class="live-agent-list">
-          ${keeperList.length === 0
-            ? html`<div class="empty-state">No keepers active</div>`
-            : keeperList.map(k => html`<${KeeperRow} key=${k.name} keeper=${k} />`)}
-        </div>
-      <//>
+      </div>
     </div>
-
-    ${perpetualStatus.value
-      ? html`
-        <${Card} title="Perpetual Runtime" class="section">
-          <div class="live-agent-meta">
-            <span>Status: ${perpetualStatus.value.running ? 'Running' : 'Stopped'}</span>
-            ${perpetualStatus.value.goal
-              ? html`<span>Goal: ${perpetualStatus.value.goal}</span>`
-              : null}
-          </div>
-        <//>
-      `
-      : null}
-
-    ${status?.room
-      ? html`
-        <${Card} title="Room" class="section">
-          <div class="live-agent-meta">
-            <span>Room: ${status.room}</span>
-            ${status.cluster ? html`<span>Cluster: ${status.cluster}</span>` : null}
-            ${status.project ? html`<span>Project: ${status.project}</span>` : null}
-            ${status.version ? html`<span>Version: ${status.version}</span>` : null}
-            <span>Uptime: ${formatUptime(status.uptime_seconds ?? 0)}</span>
-            ${status.paused ? html`<span class="pill pill-stale">Paused</span>` : null}
-            ${status.tempo ? html`<span>Tempo: ${status.tempo}</span>` : null}
-            ${status.tempo_interval_s != null ? html`<span>Interval: ${status.tempo_interval_s}s</span>` : null}
-          </div>
-        <//>
-      `
-      : null}
   `
 }
 

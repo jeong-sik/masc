@@ -279,6 +279,10 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Optional: set models when creating keeper inline. If keeper already exists, this acts as a runtime-only cascade override for this message call.");
         ]);
+        ("timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Optional: overall cascade timeout (sec) for this keeper message call");
+        ]);
         ("ollama_timeout_sec", `Assoc [
           ("type", `String "number");
           ("description", `String "Optional: override Ollama timeout (sec) for this keeper message call");
@@ -2843,142 +2847,9 @@ let work_kind_of_eval (e : memory_recall_eval) : string =
     | Some topic when topic <> "" -> topic
     | _ -> "general_chat"
 
-let keeper_llm_tools : Llm_client.tool_def list = [
-  {
-    tool_name = "keeper_time_now";
-    tool_description = "Get current server time in ISO8601 and unix timestamp.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
-    tool_name = "keeper_context_status";
-    tool_description = "Get keeper context usage and lifecycle status.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
-    tool_name = "keeper_memory_search";
-    tool_description =
-      "Search recent user messages in keeper memory by keyword.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("query", `Assoc [("type", `String "string")]);
-        ("limit", `Assoc [("type", `String "integer")]);
-      ]);
-      ("required", `List [`String "query"]);
-    ];
-  };
-  {
-    tool_name = "keeper_weather_note";
-    tool_description =
-      "Get weather capability note and recent weather-related questions.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("location", `Assoc [("type", `String "string")]);
-      ]);
-    ];
-  };
-  (* Board tools — allow keepers to post/read MASC Board *)
-  {
-    tool_name = "keeper_board_post";
-    tool_description =
-      "Create a post on the MASC Board. Use hearth to target a topic channel.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
-        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. trpg, code-review)")]);
-        ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID (optional)")]);
-      ]);
-      ("required", `List [`String "content"]);
-    ];
-  };
-  {
-    tool_name = "keeper_board_list";
-    tool_description =
-      "List recent posts on the MASC Board. Filter by hearth to see topic-specific posts.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. trpg)")]);
-        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
-        ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort: recent (newest), hot (score+recency), updated (most active)")]);
-      ]);
-    ];
-  };
-  {
-    tool_name = "keeper_board_comment";
-    tool_description =
-      "Add a comment/reply to an existing Board post.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to comment on")]);
-        ("content", `Assoc [("type", `String "string"); ("description", `String "Comment content")]);
-      ]);
-      ("required", `List [`String "post_id"; `String "content"]);
-    ];
-  };
-  {
-    tool_name = "keeper_fs_read";
-    tool_description =
-      "Read a file under current project root. Use for source inspection before edits.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
-        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes to return (default: 20000)")]);
-      ]);
-      ("required", `List [`String "path"]);
-    ];
-  };
-  {
-    tool_name = "keeper_fs_edit";
-    tool_description =
-      "Write/append a file under current project root. Use for concrete code changes.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
-        ("content", `Assoc [("type", `String "string"); ("description", `String "New file content or append payload")]);
-        ("mode", `Assoc [("type", `String "string"); ("description", `String "overwrite (default) or append")]);
-      ]);
-      ("required", `List [`String "path"; `String "content"]);
-    ];
-  };
-  {
-    tool_name = "keeper_bash";
-    tool_description =
-      "Run a shell command from project root. Use for build/test/check commands.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Shell command string to run via zsh -lc")]);
-        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
-      ]);
-      ("required", `List [`String "cmd"]);
-    ];
-  };
-  {
-    tool_name = "keeper_github";
-    tool_description =
-      "Run gh CLI commands from project root. Use for PR/review/comment operations.";
-    parameters = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'pr view 123 --comments'")]);
-        ("args", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Optional argv list for gh (without leading gh)")]);
-        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
-      ]);
-    ];
-  };
-]
+(* Tool definitions moved to Tool_shard for dynamic composition.
+   This alias maintains backward compatibility. *)
+let keeper_llm_tools = Tool_shard.keeper_llm_tools
 
 let merge_usage
     (a : Llm_client.token_usage)
@@ -6862,6 +6733,12 @@ let handle_keeper_msg ctx args : tool_result =
     let new_drift_min_turn_gap_opt = Safe_ops.json_int_opt "new_drift_min_turn_gap" args in
     let inline_models = get_string_list args "models" in
     let require_existing = get_bool args "require_existing" false in
+    let timeout_sec_opt =
+      Safe_ops.json_float_opt "timeout_sec" args
+      |> Option.map (fun v ->
+             let sec = int_of_float (Float.ceil v) in
+             max 5 (min 300 sec))
+    in
     let ollama_timeout_sec_opt =
       Safe_ops.json_float_opt "ollama_timeout_sec" args
       |> Option.map (fun v ->
@@ -7222,10 +7099,14 @@ let handle_keeper_msg ctx args : tool_result =
               ) specs
             in
             let run_cascade requests =
-              match ollama_timeout_sec_opt with
-              | Some timeout_sec ->
-                  Llm_client.cascade ~ollama_timeout_sec:timeout_sec requests
-              | None -> Llm_client.cascade requests
+              match timeout_sec_opt, ollama_timeout_sec_opt with
+              | Some timeout_sec, Some ollama_timeout_sec ->
+                  Llm_client.cascade ~timeout_sec ~ollama_timeout_sec requests
+              | Some timeout_sec, None ->
+                  Llm_client.cascade ~timeout_sec requests
+              | None, Some ollama_timeout_sec ->
+                  Llm_client.cascade ~ollama_timeout_sec requests
+              | None, None -> Llm_client.cascade requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with

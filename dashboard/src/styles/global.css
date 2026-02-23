@@ -27,11 +27,13 @@
    * Overlay contract:
    * 1) Keeper modal: 3020
    * 2) Agent modal: 3030
-   * 3) Toast: 3070
-   * 4) Tooltip: 3080
+   * 3) TRPG actor modal: 3040
+   * 4) Toast: 3070
+   * 5) Tooltip: 3080
    */
   --z-overlay-keeper: 3020;
   --z-overlay-agent: 3030;
+  --z-overlay-trpg-actor: 3040;
   --z-overlay-toast: 3070;
   --z-overlay-tooltip: 3080;
 }
@@ -784,10 +786,10 @@ body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
 }
 .top-nav { background: rgba(5, 8, 16, 0.7) !important; backdrop-filter: blur(12px) !important; border-bottom: 1px solid rgba(71, 184, 255, 0.2) !important; }
-.brand { font-weight: 800 !important; font-size: 1.5rem !important; background: linear-gradient(135deg, #00f0ff, #00ff9d) !important; -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important; text-shadow: 0 0 20px rgba(0, 240, 255, 0.3) !important; }
+.brand { font-weight: 800 !important; font-size: 1.5rem !important; background: linear-gradient(135deg, #00f0ff, #00ff9d) !important; -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }
 .card { background: rgba(16, 24, 43, 0.6) !important; backdrop-filter: blur(16px) !important; border: 1px solid rgba(71, 184, 255, 0.15) !important; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important; transition: all 0.3s ease !important; }
 .card:hover { transform: translateY(-4px) !important; box-shadow: 0 12px 40px rgba(0, 240, 255, 0.1) !important; border-color: rgba(0, 240, 255, 0.4) !important; }
 .agent-card { background: rgba(16, 24, 43, 0.6) !important; backdrop-filter: blur(12px) !important; border: 1px solid rgba(71, 184, 255, 0.15) !important; border-radius: 16px !important; padding: 16px !important; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important; }
-.agent-card:hover { transform: translateY(-5px) scale(1.02) !important; box-shadow: 0 15px 35px rgba(0, 240, 255, 0.15), 0 0 15px rgba(0, 255, 157, 0.1) inset !important; border-color: rgba(0, 255, 157, 0.5) !important; }
-.status-badge.active, .status-badge.online { animation: pulse-glow-green 2s infinite; }
+.agent-card:hover { transform: translateY(-5px) scale(1.02) !important; box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important; border-color: rgba(71, 184, 255, 0.3) !important; }
+.status-badge.active, .status-badge.online {  }
 @keyframes pulse-glow-green { 0% { box-shadow: 0 0 5px #00ff9d, inset 0 0 2px #00ff9d; } 50% { box-shadow: 0 0 15px #00ff9d, inset 0 0 5px #00ff9d; } 100% { box-shadow: 0 0 5px #00ff9d, inset 0 0 2px #00ff9d; } }

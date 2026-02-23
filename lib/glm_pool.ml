@@ -22,9 +22,9 @@ type glm_model = {
   description: string;
 }
 
-(** All available GLM Cloud models with their concurrency limits.
+(** All available GLM Cloud models with default concurrency limits.
     Ordered by preference (higher concurrency models first for better throughput). *)
-let available_models : glm_model array = [|
+let base_models : glm_model array = [|
   { model_id = "glm-4.5"; concurrency_limit = 10; description = "High concurrency, general purpose" };
   { model_id = "glm-4.6v"; concurrency_limit = 10; description = "High concurrency, vision-capable" };
   { model_id = "glm-5"; concurrency_limit = 5; description = "Flagship model" };
@@ -34,6 +34,54 @@ let available_models : glm_model array = [|
   { model_id = "glm-4.7-flashx"; concurrency_limit = 3; description = "Fast latest generation" };
   (* glm-4.7-flash has limit 1, excluded from pool for efficiency *)
 |]
+
+let env_key_for_limit (model_id : string) : string =
+  let b = Buffer.create (String.length model_id + 24) in
+  Buffer.add_string b "MASC_GLM_POOL_LIMIT_";
+  String.iter
+    (fun ch ->
+      let normalized =
+        if
+          ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+         || (ch >= '0' && ch <= '9'))
+        then Char.uppercase_ascii ch
+        else '_'
+      in
+      Buffer.add_char b normalized)
+    model_id;
+  Buffer.contents b
+
+let positive_int_of_string (raw : string) : int option =
+  match int_of_string_opt (String.trim raw) with
+  | Some n when n > 0 -> Some n
+  | _ -> None
+
+let limit_for_model ~(model_id : string) ~(default : int) : int =
+  let env_key = env_key_for_limit model_id in
+  match Sys.getenv_opt env_key with
+  | None -> default
+  | Some raw -> (
+      match positive_int_of_string raw with
+      | Some limit ->
+          if limit <> default then
+            Log.Glm_pool.info "pool limit override: %s=%d (%s)" model_id limit env_key;
+          limit
+      | None ->
+          Log.Glm_pool.warn
+            "invalid pool limit override ignored: %s=%S (expected positive int)"
+            env_key raw;
+          default )
+
+(** Runtime model table with personal overrides from env/profile. *)
+let available_models : glm_model array =
+  Array.map
+    (fun model ->
+      let resolved =
+        limit_for_model ~model_id:model.model_id ~default:model.concurrency_limit
+      in
+      if resolved = model.concurrency_limit then model
+      else { model with concurrency_limit = resolved })
+    base_models
 
 (** Pool state: tracks in-flight requests per model. *)
 type pool_state = {

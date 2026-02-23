@@ -1732,8 +1732,12 @@ let cleanup_zombies config =
         let json = read_json config path in
         match agent_of_yojson json with
         | Ok agent
-          when is_zombie_agent agent.last_seen
-               && not (is_keeper_runtime_agent_name agent.name) ->
+          when (let threshold =
+                  if is_keeper_runtime_agent_name agent.name
+                  then Env_config.Zombie.keeper_threshold_seconds
+                  else Env_config.Zombie.threshold_seconds
+                in
+                Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
             zombies := agent.name :: !zombies;
             (* Stop heartbeats owned by this zombie agent *)
             let _stopped = Heartbeat.stop_by_agent ~agent_name:agent.name in

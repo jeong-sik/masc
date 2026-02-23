@@ -43,5 +43,32 @@ val default_shard_names : string list
 val tools_of_shards : string list -> Llm_client.tool_def list
 (** Combine tools from multiple shard names. *)
 
+(** {1 Dynamic Shard Management} *)
+
+val grant_shard : string list -> string -> (string list, string) result
+(** Grant a shard to an agent. Returns new active_shards list.
+    @param active_shards Current list of granted shard names
+    @param shard_name Shard to grant
+    @return Ok new_list on success, Error msg on failure *)
+
+val revoke_shard : string list -> string -> (string list, string) result
+(** Revoke a shard from an agent. Returns new active_shards list.
+    @param active_shards Current list of granted shard names
+    @param shard_name Shard to revoke (must be removable)
+    @return Ok new_list on success, Error msg on failure *)
+
+val list_all_shards : unit -> (string * bool * int) list
+(** List all available shards with their status.
+    Returns (name, removable, tool_count) tuples. *)
+
+(** {1 MCP Interface} *)
+
+val schemas : Types.tool_schema list
+(** MCP tool schemas for masc_tool_grant, masc_tool_revoke, masc_tool_list. *)
+
+val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
+(** Execute tool_shard MCP tools.
+    Note: grant/revoke are stubs pending agent state tracking. *)
+
 val keeper_llm_tools : Llm_client.tool_def list
 (** Full tool set (all 11 tools) — backward compatible with existing code. *)

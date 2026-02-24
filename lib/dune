@@ -197,6 +197,9 @@
    trajectory
    eval_gate
    eval_harness
+   ;; Keeper Autonomy Engine (Phase 2: autonomy slider + verifier)
+   keeper_autonomy
+   keeper_verifier
    ;; Perpetual Agent Runtime (infinite context system)
    llm_client
    context_manager

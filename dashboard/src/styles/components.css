@@ -2514,3 +2514,156 @@ button.council-row.selected {
   font-style: italic;
   color: var(--ok);
 }
+
+/* ── Goals ────────────────────────────────────── */
+
+.goal-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.goal-summary-item {
+  flex: 1;
+  min-width: 60px;
+  text-align: center;
+  padding: 8px 4px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+}
+
+.goal-summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #e0e0e0;
+}
+
+.goal-summary-label {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.goal-filters {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.goal-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.goal-filter-label {
+  font-size: 11px;
+  color: #888;
+  margin-right: 4px;
+}
+
+.goal-filter-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #aaa;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.goal-filter-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #e0e0e0;
+}
+
+.goal-filter-btn.active {
+  background: rgba(99,102,241,0.2);
+  border-color: rgba(99,102,241,0.4);
+  color: #818cf8;
+}
+
+.goal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.goal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  transition: background 0.15s;
+}
+
+.goal-row:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.goal-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.goal-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e0e0e0;
+}
+
+.goal-horizon-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.goal-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #888;
+}
+
+.goal-priority {
+  color: #f59e0b;
+  letter-spacing: 1px;
+}
+
+.goal-metric {
+  color: #22d3ee;
+}
+
+.goal-due {
+  color: #f87171;
+}
+
+.goal-review-note {
+  font-size: 11px;
+  color: #888;
+  font-style: italic;
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(255,255,255,0.08);
+}
+
+.goal-row-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.goal-updated {
+  font-size: 11px;
+  color: #666;
+}

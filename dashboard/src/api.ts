@@ -1135,3 +1135,32 @@ export function sendKeeperMessage(name: string, message: string, models?: string
   if (models && models.length > 0) args.models = models
   return callMcpTool("masc_keeper_msg", args)
 }
+
+// --- Goal Store ---
+
+export async function fetchGoals(): Promise<import('./types').Goal[]> {
+  try {
+    const res = await callMcpTool('masc_goal_list', {})
+    if (typeof res === 'string') {
+      const parsed = JSON.parse(res)
+      return Array.isArray(parsed) ? parsed : parsed.goals ?? []
+    }
+    if (Array.isArray(res)) return res
+    return (res as Record<string, unknown>).goals as import('./types').Goal[] ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchKeeperAutonomy(name: string): Promise<import('./types').KeeperAutonomyInfo | null> {
+  try {
+    const res = await callMcpTool('masc_keeper_status', { name })
+    if (typeof res === 'string') {
+      const parsed = JSON.parse(res)
+      return parsed.autonomy ?? null
+    }
+    return (res as Record<string, unknown>).autonomy as import('./types').KeeperAutonomyInfo ?? null
+  } catch {
+    return null
+  }
+}

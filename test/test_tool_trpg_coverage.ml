@@ -192,8 +192,9 @@ let test_round_run_success_path () =
           (keeper_payload ~action_type:"defend" "I hold defensive line.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -273,8 +274,9 @@ let test_round_run_memory_hint_guardrail_escalates_tier () =
              "I scout the bridge perimeter.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -353,8 +355,9 @@ let test_round_run_canon_check_strict_failure () =
              "I keep moving despite the anomaly.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let ok_start, start_body =
     dispatch_exn ctx ~name:"masc_trpg_session_start"
@@ -471,8 +474,9 @@ let test_round_run_canon_any_of_passes_with_flag_set () =
              "I secure the perimeter.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let ok_start, start_body =
     dispatch_exn ctx ~name:"masc_trpg_session_start"
@@ -548,8 +552,9 @@ let test_round_run_emits_combat_semantic_events () =
              "I attack the goblin.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -639,8 +644,9 @@ let test_round_run_reinforces_pressure_after_wave_clear () =
              "I finish the seeded enemy quickly.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -696,8 +702,9 @@ let test_round_run_emits_session_outcome_event () =
              "I secure the gate.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -792,8 +799,9 @@ let test_round_run_uses_current_session_for_outcome_gate () =
              "I secure the gate.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -868,8 +876,9 @@ let test_round_run_timeout_policy () =
     | "pk-timeout" -> `Timeout
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1007,9 +1016,10 @@ let test_round_run_local_fallback_progresses_round () =
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     `Error "keeper runtime unavailable"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
-      config;
+      store;
       agent_name = "tester";
       keeper_call = Some keeper_call;
       keeper_probe = None;
@@ -1108,9 +1118,10 @@ let test_round_run_local_fallback_distributes_team_pressure () =
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     `Error "keeper runtime unavailable"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
-      config;
+      store;
       agent_name = "tester";
       keeper_call = Some keeper_call;
       keeper_probe = None;
@@ -1233,8 +1244,9 @@ let test_round_run_unavailable_sampling_cap () =
       | "pk-timeout" -> `Timeout
       | _ -> `Error "unknown keeper"
     in
+    let store = Trpg_store.make_sqlite ~base_dir in
     let ctx : Tool_trpg.context =
-      { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+      { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
     in
     let args =
       `Assoc
@@ -1312,8 +1324,9 @@ let test_round_run_uses_majority_player_quorum () =
     | "pk-timeout" -> `Timeout
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1393,8 +1406,9 @@ let test_round_run_skips_dead_player_assignments () =
         `Ok (keeper_payload ~action_type:"explore" "This should never run.")
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let ok_update, _ =
     dispatch_exn ctx ~name:"masc_trpg_actor_update"
@@ -1477,8 +1491,9 @@ let test_round_run_short_circuits_when_session_already_ended () =
     keeper_called := true;
     `Ok (keeper_payload ~action_type:"explore" "Should not be called.")
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1536,8 +1551,9 @@ let test_round_run_rejects_meta_only_keeper_reply () =
     | "pk-meta" -> `Ok (`Assoc [ ("reply", `String "[/STATE]") ])
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1603,8 +1619,9 @@ let test_round_run_requires_keeper_runtime () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1649,9 +1666,10 @@ let test_round_run_preflight_warning_is_non_blocking () =
     | "pk-down" -> `Error "keeper not found"
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
-      config;
+      store;
       agent_name = "tester";
       keeper_call = Some keeper_call;
       keeper_probe = Some keeper_probe;
@@ -1710,8 +1728,9 @@ let test_round_run_lang_english_prompt () =
           (keeper_payload ~action_type:"defend" "I move to cover.")
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1753,8 +1772,9 @@ let test_round_run_dm_prompt_reflects_player_action () =
              "정찰 결과를 받아 다음 장면을 연다.")
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1785,8 +1805,9 @@ let test_round_run_rejects_non_unique_keepers () =
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     `Ok (keeper_payload ~action_type:"scene_transition" ~scene:"noop" "noop")
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -1826,8 +1847,9 @@ let test_session_bootstrap_and_intervention_flow () =
     else
       `Error ("unknown keeper: " ^ name)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let session_id = "session-bootstrap-1" in
   let ok_preset, preset_body =
@@ -1958,8 +1980,9 @@ let test_examples_scenario_visible_as_world_preset () =
   "runtime": { "max_rounds": 6 }
 }|};
   let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
 
   let ok_preset, preset_body =
@@ -2005,8 +2028,9 @@ let test_actor_spawn_claim_release_flow () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let room_id = "room-actor-lease-flow" in
 
@@ -2154,8 +2178,9 @@ let test_actor_update_delete_flow () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let room_id = "room-actor-update-delete" in
   let actor_id = "npc-fox" in
@@ -2272,8 +2297,9 @@ let test_actor_claim_rejects_dead_actor () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let room_id = "room-actor-dead-claim" in
   let ok_spawn, _spawn =
@@ -2314,8 +2340,9 @@ let test_mid_join_eligibility_and_request_flow () =
   let _ = Room.init config ~agent_name:(Some "tester") in
   let room_id = "room-mid-join-flow" in
   bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
 
   let ok0, body0 =
@@ -2418,8 +2445,9 @@ let test_mid_join_reject_when_window_closed () =
     ~event_type:Trpg_engine_event.Join_window_closed
     ~payload:(`Assoc [ ("turn", `Int 1); ("reason", `String "test") ])
     ();
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
   let ok_join, join_body =
     dispatch_exn ctx ~name:"masc_trpg_mid_join_request"
@@ -2591,6 +2619,7 @@ let test_apply_structured_action_emits_flag_set () =
     (fun () ->
       let _ = Room.init (Room.default_config base_dir) ~agent_name:(Some "tester") in
       bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
+      let store = Trpg_store.make_sqlite ~base_dir in
       let sa : Tool_trpg.structured_action =
         {
           sa_type = Tool_trpg.SetFlag;
@@ -2604,7 +2633,7 @@ let test_apply_structured_action_emits_flag_set () =
         }
       in
       match
-        Tool_trpg.apply_structured_action ~base_dir ~room_id ~turn:1
+        Tool_trpg.apply_structured_action ~store ~room_id ~turn:1
           ~phase:"round" ~actor_id:"dm" ~state:(`Assoc []) sa
       with
       | Error e -> Alcotest.fail ("apply_structured_action failed: " ^ e)
@@ -2636,6 +2665,7 @@ let test_apply_structured_action_emits_scene_transition () =
     (fun () ->
       let _ = Room.init (Room.default_config base_dir) ~agent_name:(Some "tester") in
       bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
+      let store = Trpg_store.make_sqlite ~base_dir in
       let sa : Tool_trpg.structured_action =
         {
           sa_type = Tool_trpg.SceneTransition;
@@ -2649,7 +2679,7 @@ let test_apply_structured_action_emits_scene_transition () =
         }
       in
       match
-        Tool_trpg.apply_structured_action ~base_dir ~room_id ~turn:2
+        Tool_trpg.apply_structured_action ~store ~room_id ~turn:2
           ~phase:"round" ~actor_id:"dm" ~state:(`Assoc []) sa
       with
       | Error e -> Alcotest.fail ("apply_structured_action failed: " ^ e)
@@ -2733,9 +2763,10 @@ let test_fallback_tracked_separately () =
              "The scene continues...")
     | _ -> `Timeout
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
-      config;
+      store;
       agent_name = "tester";
       keeper_call = Some keeper_call;
       keeper_probe = None;
@@ -2804,9 +2835,10 @@ let test_end_to_end_victory_via_flags () =
             ])
     | other -> `Error ("unknown keeper: " ^ other)
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
-      config;
+      store;
       agent_name = "tester";
       keeper_call = Some keeper_call;
       keeper_probe = None;
@@ -2872,8 +2904,9 @@ let test_round_run_reprompts_once_for_missing_structured_action () =
               ])
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc
@@ -2941,8 +2974,9 @@ let test_round_run_dm_persona_override_in_prompt_and_summary () =
           (keeper_payload ~action_type:"investigate" "I inspect enemy positions.")
     | _ -> `Error "unknown keeper"
   in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
-    { config; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
+    { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
   let args =
     `Assoc

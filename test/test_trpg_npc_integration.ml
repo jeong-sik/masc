@@ -48,13 +48,14 @@ let make_npc_actor ?(hp = 15) ?(alive = true) name =
 
 let test_npc_spawns_when_no_npc_alive () =
   let base_dir = make_base_dir () in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let room_id = "room-spawn-1" in
   let state =
     make_state
       [ ("player-1", make_player_actor "Hero"); ("player-2", make_player_actor "Mage") ]
   in
   let result =
-    Tool_trpg.ensure_round_npc_spawn_event ~base_dir ~room_id ~turn:1 ~state
+    Tool_trpg.ensure_round_npc_spawn_event ~store ~room_id ~turn:1 ~state
   in
   match get_ok result with
   | None -> Alcotest.fail "expected an NPC spawn event, got None"
@@ -75,6 +76,7 @@ let test_npc_spawns_when_no_npc_alive () =
 
 let test_npc_not_spawned_when_npc_alive () =
   let base_dir = make_base_dir () in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let room_id = "room-spawn-2" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   let state =
@@ -85,7 +87,7 @@ let test_npc_not_spawned_when_npc_alive () =
       ]
   in
   let result =
-    Tool_trpg.ensure_round_npc_spawn_event ~base_dir ~room_id ~turn:1 ~state
+    Tool_trpg.ensure_round_npc_spawn_event ~store ~room_id ~turn:1 ~state
   in
   match get_ok result with
   | None -> () (* correct: no spawn when live NPC exists *)
@@ -93,6 +95,7 @@ let test_npc_not_spawned_when_npc_alive () =
 
 let test_spawned_npc_has_scaled_hp () =
   let base_dir = make_base_dir () in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let room_id = "room-spawn-3" in
   let turn = 10 in
   let state =
@@ -100,7 +103,7 @@ let test_spawned_npc_has_scaled_hp () =
       [ ("player-1", make_player_actor "Hero") ]
   in
   let result =
-    Tool_trpg.ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state
+    Tool_trpg.ensure_round_npc_spawn_event ~store ~room_id ~turn ~state
   in
   match get_ok result with
   | None -> Alcotest.fail "expected spawn at turn 10"
@@ -126,6 +129,7 @@ let test_spawned_npc_has_scaled_hp () =
 
 let test_counterattack_produces_attack_and_hp_events () =
   let base_dir = make_base_dir () in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let room_id = "room-counter-1" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   (* Use odd turn to avoid skill effects for a skirmisher (NoSkill on odd turns) *)
@@ -137,7 +141,7 @@ let test_counterattack_produces_attack_and_hp_events () =
       ]
   in
   let result =
-    Tool_trpg.append_npc_counterattack_events ~base_dir ~room_id ~phase:"round"
+    Tool_trpg.append_npc_counterattack_events ~store ~room_id ~phase:"round"
       ~turn:1 ~state
   in
   let events = get_ok result in
@@ -160,6 +164,7 @@ let test_counterattack_produces_attack_and_hp_events () =
 
 let test_counterattack_damage_uses_template_range () =
   let base_dir = make_base_dir () in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let room_id = "room-counter-2" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   let state =
@@ -175,7 +180,7 @@ let test_counterattack_damage_uses_template_range () =
      by resolving the skill for each turn. *)
   for turn = 1 to 20 do
     let result =
-      Tool_trpg.append_npc_counterattack_events ~base_dir ~room_id ~phase:"round"
+      Tool_trpg.append_npc_counterattack_events ~store ~room_id ~phase:"round"
         ~turn ~state
     in
     let events = get_ok result in
@@ -216,6 +221,7 @@ let test_counterattack_damage_uses_template_range () =
 
 let test_counterattack_narration_from_template () =
   let base_dir = make_base_dir () in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let room_id = "room-counter-3" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   let state =
@@ -227,7 +233,7 @@ let test_counterattack_narration_from_template () =
   in
   (* Use odd turn to get NoSkill for a skirmisher, so narration has no prefix *)
   let result =
-    Tool_trpg.append_npc_counterattack_events ~base_dir ~room_id ~phase:"round"
+    Tool_trpg.append_npc_counterattack_events ~store ~room_id ~phase:"round"
       ~turn:1 ~state
   in
   let events = get_ok result in
@@ -264,6 +270,7 @@ let test_counterattack_narration_from_template () =
 
 let test_full_round_spawn_and_counterattack () =
   let base_dir = make_base_dir () in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let room_id = "room-full-1" in
   let turn = 3 in
 
@@ -278,7 +285,7 @@ let test_full_round_spawn_and_counterattack () =
 
   (* Step 2: NPC spawn *)
   let spawn_result =
-    Tool_trpg.ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state
+    Tool_trpg.ensure_round_npc_spawn_event ~store ~room_id ~turn ~state
   in
   let spawn_event =
     match get_ok spawn_result with
@@ -306,7 +313,7 @@ let test_full_round_spawn_and_counterattack () =
 
   (* Step 4: NPC counterattack *)
   let counter_result =
-    Tool_trpg.append_npc_counterattack_events ~base_dir ~room_id ~phase:"round"
+    Tool_trpg.append_npc_counterattack_events ~store ~room_id ~phase:"round"
       ~turn ~state:state_with_npc
   in
   let counter_events = get_ok counter_result in

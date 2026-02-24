@@ -22,9 +22,11 @@ let cleanup_dir dir =
 let mk_ctx base_dir =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
   let ctx : Tool_protocol_game_view.context =
     {
       config;
+      store;
       agent_name = "tester";
       trpg_keeper_call = None;
       trpg_keeper_probe = None;

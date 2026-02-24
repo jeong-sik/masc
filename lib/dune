@@ -207,6 +207,7 @@
    tool_shard
    tool_keeper
    tool_trpg
+   trpg_store
    trpg_preset_store
    trpg_engine_types
    trpg_engine_event

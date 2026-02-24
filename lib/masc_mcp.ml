@@ -204,6 +204,7 @@ module Eval_harness = Eval_harness
 
 module Tool_goals = Tool_goals
 module Tool_trpg = Tool_trpg
+module Trpg_store = Trpg_store
 module Trpg_preset_store = Trpg_preset_store
 module Trpg_engine_types = Trpg_engine_types
 module Trpg_engine_event = Trpg_engine_event

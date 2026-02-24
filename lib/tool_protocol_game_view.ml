@@ -16,6 +16,7 @@ type tool_result = bool * string
 
 type context = {
   config : Room.config;
+  store : Trpg_store.t;
   agent_name : string;
   trpg_keeper_call :
     (name:string -> message:string -> timeout_sec:float -> Tool_trpg.keeper_call_result)
@@ -315,7 +316,7 @@ let broadcast_decision_finalize_events ~agent
 
 let trpg_context_of (ctx : context) : Tool_trpg.context =
   {
-    config = ctx.config;
+    store = ctx.store;
     agent_name = ctx.agent_name;
     keeper_call = ctx.trpg_keeper_call;
     keeper_probe = ctx.trpg_keeper_probe;

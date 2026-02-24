@@ -1230,9 +1230,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     in
     Voice_bridge.agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ()
   in
+  let trpg_store = Trpg_store.make_sqlite ~base_dir:config.base_path in
   let simple_ctx_trpg : Tool_trpg.context =
     {
-      config;
+      store = trpg_store;
       agent_name;
       keeper_call = Some trpg_keeper_call;
       keeper_probe = Some trpg_keeper_probe;
@@ -1242,6 +1243,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_protocol : Tool_protocol_game_view.context =
     {
       config;
+      store = trpg_store;
       agent_name;
       trpg_keeper_call = Some trpg_keeper_call;
       trpg_keeper_probe = Some trpg_keeper_probe;

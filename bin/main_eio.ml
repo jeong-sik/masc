@@ -1338,7 +1338,7 @@ let trpg_round_run_json
       in
       let trpg_ctx : Masc_mcp.Tool_trpg.context =
         {
-          config = state.Mcp_server.room_config;
+          store = Masc_mcp.Trpg_store.make_sqlite ~base_dir:state.Mcp_server.room_config.base_path;
           agent_name;
           keeper_call = Some keeper_call;
           keeper_probe = Some keeper_probe;

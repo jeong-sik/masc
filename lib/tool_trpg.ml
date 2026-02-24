@@ -26,7 +26,7 @@ type keeper_probe_result = [ `Ok | `Error of string ]
 type dm_voice_emit_result = (Yojson.Safe.t, string) Stdlib.result
 
 type context = {
-  config : Room.config;
+  store : Trpg_store.t;
   agent_name : string;
   keeper_call :
     (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
@@ -905,8 +905,8 @@ let extract_config_from_events (events : Trpg_engine_event.t list) : Yojson.Safe
   in
   loop events
 
-let next_seq ~base_dir ~room_id =
-  match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+let next_seq ~store ~room_id =
+  match store.Trpg_store.read_events ~room_id with
   | Error e -> Error e
   | Ok events ->
       Ok
@@ -915,7 +915,7 @@ let next_seq ~base_dir ~room_id =
             (fun acc (ev : Trpg_engine_event.t) -> max acc ev.seq)
             0 events)
 
-let append_event ~base_dir ~room_id ~event_type ?actor_id ?ts ?seq ~payload () =
+let append_event ~store ~room_id ~event_type ?actor_id ?ts ?seq ~payload () =
   let room_id = String.trim room_id in
   if room_id = "" then Error "room_id is required"
   else
@@ -923,7 +923,7 @@ let append_event ~base_dir ~room_id ~event_type ?actor_id ?ts ?seq ~payload () =
       match seq with
       | Some s when s <= 0 -> Error "seq must be positive"
       | Some s -> Ok s
-      | None -> next_seq ~base_dir ~room_id
+      | None -> next_seq ~store ~room_id
     in
     match seq_result with
     | Error e -> Error e
@@ -933,15 +933,15 @@ let append_event ~base_dir ~room_id ~event_type ?actor_id ?ts ?seq ~payload () =
           Trpg_engine_event.make
             ~seq ~room_id ~ts ~event_type ?actor_id ~payload ()
         in
-        (match Trpg_engine_store_sqlite.append_event ~base_dir ~event with
+        (match store.Trpg_store.append_event ~event with
         | Ok () -> Ok event
         | Error e -> Error e)
 
-let derive_state ~base_dir ~room_id ~rule_module =
+let derive_state ~store ~room_id ~rule_module =
   match validate_rule_module rule_module with
   | Error e -> Error e
   | Ok () -> (
-      match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+      match store.Trpg_store.read_events ~room_id with
       | Error e -> Error e
       | Ok events ->
           let config = extract_config_from_events events in
@@ -1204,7 +1204,7 @@ let contribution_for_actor_from_events events actor_id =
   let reasons = Hashtbl.find_opt reasons_tbl actor_id |> Option.value ~default:[] in
   (score, reasons)
 
-let append_memory_signal_event ~base_dir ~room_id ~event_tier ~importance_score
+let append_memory_signal_event ~store ~room_id ~event_tier ~importance_score
     ~summary_ko ~summary_en ~entity_refs =
   let payload =
     `Assoc
@@ -1216,7 +1216,7 @@ let append_memory_signal_event ~base_dir ~room_id ~event_tier ~importance_score
         ("entity_refs", `Assoc entity_refs);
       ]
   in
-  append_event ~base_dir ~room_id
+  append_event ~store ~room_id
     ~event_type:Trpg_engine_event.Memory_signal
     ~payload ()
 
@@ -1437,6 +1437,9 @@ let parse_world_contract_json (json : Yojson.Safe.t) :
 
 let parse_world_contract_catalog_json (json : Yojson.Safe.t) :
     (world_contract_catalog, string) Stdlib.result =
+  match json with
+  | `Null -> Error "world contracts file not found"
+  | _ ->
   let ( let* ) = Result.bind in
   let default_contract_id =
     match json |> member "default_contract_id" with
@@ -1460,26 +1463,20 @@ let parse_world_contract_catalog_json (json : Yojson.Safe.t) :
   if contracts = [] then Error "world contracts file has empty contracts[]"
   else Ok { default_contract_id; contracts }
 
-let load_world_contract_catalog ~base_dir : world_contract_catalog =
-  let path = world_contracts_path ~base_dir in
-  if not (Sys.file_exists path) then default_world_contract_catalog
-  else
-    match Yojson.Safe.from_file path with
-    | exception _ -> default_world_contract_catalog
-    | json -> (
-        match parse_world_contract_catalog_json json with
-        | Ok catalog -> catalog
-        | Error _ -> default_world_contract_catalog)
+let load_world_contract_catalog ~(store : Trpg_store.t) : world_contract_catalog =
+  match store.load_world_contracts () |> parse_world_contract_catalog_json with
+  | Ok catalog -> catalog
+  | Error _ -> default_world_contract_catalog
 
 let find_world_contract (catalog : world_contract_catalog) ~id =
   catalog.contracts
   |> List.find_opt (fun (contract : world_contract) ->
          String.equal contract.id id)
 
-let resolve_world_contract_for_session ~base_dir ~world_preset_id
+let resolve_world_contract_for_session ~store ~world_preset_id
     ~world_contract_id_opt :
     (world_contract, string) Stdlib.result =
-  let catalog = load_world_contract_catalog ~base_dir in
+  let catalog = load_world_contract_catalog ~store in
   let requested_id =
     match world_contract_id_opt with
     | Some raw when String.trim raw <> "" -> Some (String.trim raw)
@@ -1569,7 +1566,7 @@ let extract_world_preset_id_from_room_created_payload (payload : Yojson.Safe.t) 
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
-let resolve_end_rules_for_room ~base_dir ~(events : Trpg_engine_event.t list) :
+let resolve_end_rules_for_room ~store ~(events : Trpg_engine_event.t list) :
     Trpg_preset_store.end_rules =
   match
     events
@@ -1587,7 +1584,7 @@ let resolve_end_rules_for_room ~base_dir ~(events : Trpg_engine_event.t list) :
             extract_world_preset_id_from_room_created_payload room_created.payload
           with
           | Some world_preset_id -> (
-              match Trpg_preset_store.load_catalog ~base_dir with
+              match store.Trpg_store.load_catalog () with
               | Ok catalog -> (
                   match
                     Trpg_preset_store.find_world_preset catalog ~id:world_preset_id
@@ -1770,11 +1767,11 @@ let canon_contract_ref_from_state (state : Yojson.Safe.t) :
       | _ -> None)
   | _ -> None
 
-let evaluate_canon_check ~base_dir ~state ~events ~dm_reply : canon_check =
+let evaluate_canon_check ~store ~state ~events ~dm_reply : canon_check =
   match canon_contract_ref_from_state state with
   | None -> canon_check_disabled
   | Some (contract_id, strict) -> (
-      let catalog = load_world_contract_catalog ~base_dir in
+      let catalog = load_world_contract_catalog ~store in
       match find_world_contract catalog ~id:contract_id with
       | None ->
           {
@@ -1895,7 +1892,7 @@ let evaluate_canon_check ~base_dir ~state ~events ~dm_reply : canon_check =
             banned_terms_hit;
           })
 
-let append_canon_check_observability_events ~base_dir ~room_id ~turn ~phase
+let append_canon_check_observability_events ~store ~room_id ~turn ~phase
     ~(check : canon_check) =
   let ( let* ) = Result.bind in
   if not check.enabled || check.status = "pass" then Ok []
@@ -1925,14 +1922,14 @@ let append_canon_check_observability_events ~base_dir ~room_id ~turn ~phase
         ]
     in
     let* world_event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.World_event
         ~actor_id:"dm" ~payload ()
     in
     let importance_score = if check.status = "fail" then 84 else 61 in
     let memory_tier = if check.status = "fail" then "long" else "mid" in
     let* memory_event =
-      append_memory_signal_event ~base_dir ~room_id ~event_tier:memory_tier
+      append_memory_signal_event ~store ~room_id ~event_tier:memory_tier
         ~importance_score
         ~summary_ko:
           (Printf.sprintf "캐논 검사 %s: %s" check.status contract_id)
@@ -2876,7 +2873,7 @@ let skill_effect_name = function
   | SelfHeal _ -> "War Cry"
   | NoSkill -> ""
 
-let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~reply
+let append_combat_semantic_event ~store ~room_id ~phase ~turn ~actor_id ~reply
     ~state =
   let ( let* ) = Result.bind in
   match detect_combat_semantic reply with
@@ -2899,7 +2896,7 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
           ]
       in
       let* combat_event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Combat_attack ~actor_id ~payload ()
       in
       let* hp_event_opt =
@@ -2918,7 +2915,7 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
                 ]
             in
             let* hp_event =
-              append_event ~base_dir ~room_id
+              append_event ~store ~room_id
                 ~event_type:Trpg_engine_event.Hp_changed
                 ~actor_id:target_actor_id ~payload:hp_payload ()
             in
@@ -2941,7 +2938,7 @@ let append_combat_semantic_event ~base_dir ~room_id ~phase ~turn ~actor_id ~repl
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
       in
       Ok [ event ]
@@ -2982,7 +2979,7 @@ let default_importance_for_memory_tier = function
   | Memory_mid -> 62
   | Memory_long -> 82
 
-let append_structured_action_memory_signal ~base_dir ~room_id ~turn ~phase
+let append_structured_action_memory_signal ~store ~room_id ~turn ~phase
     ~actor_id ~(sa : structured_action) ~floor_tier ~floor_reasons =
   let ( let* ) = Result.bind in
   let requested_tier, importance_score, hint_reason =
@@ -3026,7 +3023,7 @@ let append_structured_action_memory_signal ~base_dir ~room_id ~turn ~phase
         summary_seed
     in
     let* event =
-      append_memory_signal_event ~base_dir ~room_id
+      append_memory_signal_event ~store ~room_id
         ~event_tier:(string_of_memory_tier effective_tier)
         ~importance_score
         ~summary_ko
@@ -3050,7 +3047,7 @@ let append_structured_action_memory_signal ~base_dir ~room_id ~turn ~phase
     in
     Ok (Some event)
 
-let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
+let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
     (sa : structured_action) =
   let ( let* ) = Result.bind in
   let finalize ~events ~target_id ~damage_opt =
@@ -3058,7 +3055,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
       memory_floor_for_structured_action ~state ~sa ~target_id ~damage_opt
     in
     let* memory_event_opt =
-      append_structured_action_memory_signal ~base_dir ~room_id ~turn ~phase
+      append_structured_action_memory_signal ~store ~room_id ~turn ~phase
         ~actor_id ~sa ~floor_tier ~floor_reasons
     in
     Ok
@@ -3085,7 +3082,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
           ]
       in
       let* combat_event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Combat_attack ~actor_id ~payload ()
       in
       let* hp_event_opt =
@@ -3104,7 +3101,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
                 ]
             in
             let* hp_event =
-              append_event ~base_dir ~room_id
+              append_event ~store ~room_id
                 ~event_type:Trpg_engine_event.Hp_changed
                 ~actor_id:target_actor_id ~payload:hp_payload ()
             in
@@ -3129,7 +3126,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:None ~damage_opt:None
@@ -3148,7 +3145,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
             ]
         in
         let* event =
-          append_event ~base_dir ~room_id
+          append_event ~store ~room_id
             ~event_type:Trpg_engine_event.Flag_set ~actor_id ~payload ()
         in
         finalize ~events:[ event ] ~target_id:None ~damage_opt:None
@@ -3166,7 +3163,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Scene_transition ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:None ~damage_opt:None
@@ -3184,7 +3181,7 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Quest_update ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:None ~damage_opt:None
@@ -3203,12 +3200,12 @@ let apply_structured_action ~base_dir ~room_id ~turn ~phase ~actor_id ~state
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Narration_posted ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:sa.target_id ~damage_opt:None
 
-let ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state =
+let ensure_round_npc_spawn_event ~store ~room_id ~turn ~state =
   let has_live_npc =
     party_fields_of_state state
     |> List.exists (fun (_, actor_json) ->
@@ -3250,7 +3247,7 @@ let ensure_round_npc_spawn_event ~base_dir ~room_id ~turn ~state =
     in
     let ( let* ) = Result.bind in
     let* event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Actor_spawned
         ~actor_id:npc_id ~payload ()
     in
@@ -3608,7 +3605,7 @@ let choose_second_player_target ~state ~npc_actor_id ~exclude_actor_id ~turn =
       let idx = (if hash < 0 then -hash else hash) mod len in
       Some (fst (List.nth live_players idx))
 
-let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
+let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
   let ( let* ) = Result.bind in
   let spawn_npc_for_pressure state =
     let existing = party_fields_of_state state in
@@ -3644,7 +3641,7 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
         ]
     in
     let* spawn_event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Actor_spawned ~actor_id:npc_id
         ~payload:spawn_payload ()
     in
@@ -3723,7 +3720,7 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
               ]
           in
           (match
-             append_event ~base_dir ~room_id
+             append_event ~store ~room_id
                ~event_type:Trpg_engine_event.Hp_changed
                ~actor_id:npc_actor_id ~payload:heal_payload ()
            with
@@ -3747,7 +3744,7 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
           ]
       in
       let* attack_event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Combat_attack ~actor_id:npc_actor_id
           ~payload:attack_payload ()
       in
@@ -3763,7 +3760,7 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
           ]
       in
       let* hp_event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Hp_changed ~actor_id:target_actor_id
           ~payload:hp_payload ()
       in
@@ -3798,7 +3795,7 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
                     ]
                 in
                 let* second_attack_ev =
-                  append_event ~base_dir ~room_id
+                  append_event ~store ~room_id
                     ~event_type:Trpg_engine_event.Combat_attack
                     ~actor_id:npc_actor_id ~payload:second_attack_payload ()
                 in
@@ -3814,7 +3811,7 @@ let append_npc_counterattack_events ~base_dir ~room_id ~phase ~turn ~state =
                     ]
                 in
                 let* second_hp_ev =
-                  append_event ~base_dir ~room_id
+                  append_event ~store ~room_id
                     ~event_type:Trpg_engine_event.Hp_changed
                     ~actor_id:second_target_id ~payload:second_hp_payload ()
                 in
@@ -4806,13 +4803,13 @@ let build_dm_section_en (ctx : prompt_context) =
   in
   join_nonempty "\n" parts
 
-let build_keeper_prompt ~dm_persona_override ~room_id ~phase ~turn ~role
-    ~actor_id ~state_json ~lang =
+let build_keeper_prompt ~(store : Trpg_store.t) ~dm_persona_override ~room_id
+    ~phase ~turn ~role ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
   let ctx0 = extract_prompt_context ~actor_id ~dm_persona_override state_json in
   (* Phase 1-3: Inject BDI fragment from actor's memory state *)
   let bdi_frag =
-    let room_dir = Filename.concat (Filename.concat "." room_id) "" in
+    let room_dir = store.room_dir ~room_id in
     let bdi = Trpg_bdi.load ~room_dir ~actor_id in
     Trpg_bdi.to_prompt_fragment bdi ~max_len:800
   in
@@ -5110,7 +5107,7 @@ let decide_unavailable_append ~sampling_state ~turn ~actor_id ~keeper_name ~stag
     `Append)
 
 let rec append_timeout_and_unavailable_events
-    ~base_dir
+    ~store
     ~room_id
     ~phase
     ~turn
@@ -5138,7 +5135,7 @@ let rec append_timeout_and_unavailable_events
   in
   let* timeout_event =
     append_event
-      ~base_dir
+      ~store
       ~room_id
       ~event_type:Trpg_engine_event.Turn_timeout
       ~actor_id
@@ -5147,7 +5144,7 @@ let rec append_timeout_and_unavailable_events
   in
   let* unavailable_result =
     append_unavailable_event
-      ~base_dir
+      ~store
       ~room_id
       ~phase
       ~turn
@@ -5163,7 +5160,7 @@ let rec append_timeout_and_unavailable_events
   Ok (timeout_event, unavailable_result)
 
 and append_unavailable_event
-    ~base_dir
+    ~store
     ~room_id
     ~phase
     ~turn
@@ -5196,7 +5193,7 @@ and append_unavailable_event
           @ extra_payload_fields)
       in
       append_event
-        ~base_dir
+        ~store
         ~room_id
         ~event_type:Trpg_engine_event.Keeper_unavailable
         ~actor_id
@@ -5205,7 +5202,7 @@ and append_unavailable_event
       |> Result.map (fun event -> `Appended event)
 
 let append_keeper_reply_event
-    ~base_dir
+    ~store
     ~room_id
     ~phase
     ~turn
@@ -5240,7 +5237,7 @@ let append_keeper_reply_event
             ] )
   in
   append_event
-    ~base_dir
+    ~store
     ~room_id
     ~event_type
     ~actor_id
@@ -5249,7 +5246,7 @@ let append_keeper_reply_event
 
 let handle_dice_roll ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
@@ -5286,14 +5283,14 @@ let handle_dice_roll ctx args : result =
     in
     let* event =
       append_event
-        ~base_dir
+        ~store
         ~room_id
         ~event_type:Trpg_engine_event.Dice_rolled
         ~actor_id
         ~payload
         ()
     in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     Ok
       (`Assoc
         [
@@ -5316,7 +5313,7 @@ let handle_dice_roll ctx args : result =
 
 let handle_turn_advance ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* phase_opt_raw = get_optional_string args "phase" in
@@ -5332,12 +5329,12 @@ let handle_turn_advance ctx args : result =
               Ok (Some (Trpg_engine_types.string_of_phase phase))
           | Error e -> Error e)
     in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let* current_turn = read_state_turn derived in
     let next_turn = max 1 (current_turn + 1) in
     let* turn_event =
       append_event
-        ~base_dir
+        ~store
         ~room_id
         ~event_type:Trpg_engine_event.Turn_started
         ~payload:(`Assoc [ ("turn", `Int next_turn) ])
@@ -5345,7 +5342,7 @@ let handle_turn_advance ctx args : result =
     in
     let* join_window_event =
       append_event
-        ~base_dir
+        ~store
         ~room_id
         ~event_type:Trpg_engine_event.Join_window_opened
         ~payload:
@@ -5363,7 +5360,7 @@ let handle_turn_advance ctx args : result =
       | Some p ->
           let* ev =
             append_event
-              ~base_dir
+              ~store
               ~room_id
               ~event_type:Trpg_engine_event.Phase_changed
               ~payload:(`Assoc [ ("phase", `String p) ])
@@ -5371,7 +5368,7 @@ let handle_turn_advance ctx args : result =
           in
           Ok (Some ev)
     in
-    let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* next_derived = derive_state ~store ~room_id ~rule_module in
     let events_json =
       [ Some turn_event; Some join_window_event; phase_event_opt ]
       |> List.filter_map (fun x -> x)
@@ -5391,7 +5388,7 @@ let handle_turn_advance ctx args : result =
 
 let handle_stream ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* after_seq_opt = get_optional_int args "after_seq" in
@@ -5407,8 +5404,8 @@ let handle_stream ctx args : result =
     in
     let* events =
       if after_seq > 0 then
-        Trpg_engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq
-      else Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+        store.read_events_after ~room_id ~after_seq
+      else store.read_events ~room_id
     in
     let events =
       match parsed_event_type with
@@ -5516,9 +5513,9 @@ let default_party_from_catalog ~seed catalog party_size =
 let assoc_put key value fields =
   (key, value) :: List.remove_assoc key fields
 
-let append_pending_interventions ~base_dir ~room_id ~phase ~turn =
+let append_pending_interventions ~(store : Trpg_store.t) ~room_id ~phase ~turn =
   let ( let* ) = Result.bind in
-  let* events = Trpg_engine_store_sqlite.read_events ~base_dir ~room_id in
+  let* events = store.read_events ~room_id in
   let pending = derive_pending_interventions events in
   let rec loop applied_payloads applied_events = function
     | [] -> Ok (List.rev applied_payloads, List.rev applied_events)
@@ -5542,7 +5539,7 @@ let append_pending_interventions ~base_dir ~room_id ~phase ~turn =
                 ]
         in
         let* ev =
-          append_event ~base_dir ~room_id
+          append_event ~store ~room_id
             ~event_type:Trpg_engine_event.Intervention_applied
             ~payload:applied_payload ()
         in
@@ -5560,7 +5557,7 @@ let handle_preset_list ctx args : result =
     let result_json =
       let* include_characters = include_characters in
       let* include_skills = include_skills in
-      let* catalog = Trpg_preset_store.load_catalog ~base_dir:ctx.config.base_path in
+      let* catalog = ctx.store.load_catalog () in
       let payload =
         `Assoc
           [
@@ -5614,7 +5611,7 @@ let handle_pool_generate ctx args : result =
     let seed =
       Option.value ~default:(entropy_seed ~session_id ~salt:"pool.generate") seed_opt
     in
-    let* catalog = Trpg_preset_store.load_catalog ~base_dir:ctx.config.base_path in
+    let* catalog = ctx.store.load_catalog () in
     let* dm_preset = resolve_dm_preset ~seed catalog dm_preset_id in
     (* +17 offset decorrelates world preset selection from DM selection using the same base seed *)
     let* world_preset = resolve_world_preset ~seed:(seed + 17) catalog world_preset_id in
@@ -5649,7 +5646,7 @@ let handle_pool_generate ctx args : result =
 
 let handle_party_select ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* session_id = get_required_string args "session_id" in
     let* room_id_opt = get_optional_string args "room_id" in
@@ -5689,7 +5686,7 @@ let handle_party_select ctx args : result =
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Party_selected ~payload ()
       in
       Ok
@@ -5707,7 +5704,7 @@ let handle_party_select ctx args : result =
 
 let handle_session_start ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* session_id = get_required_string args "session_id" in
     let* room_id_opt = get_optional_string args "room_id" in
@@ -5735,14 +5732,14 @@ let handle_session_start ctx args : result =
       entropy_seed ~session_id
         ~salt:(Printf.sprintf "session.start|%s|%s" room_id phase)
     in
-    let* catalog = Trpg_preset_store.load_catalog ~base_dir in
+    let* catalog = store.Trpg_store.load_catalog () in
     let* dm_preset = resolve_dm_preset ~seed:fallback_seed catalog dm_preset_id in
     let* world_preset =
       (* +19 offset decorrelates world preset selection from DM selection *)
       resolve_world_preset ~seed:(fallback_seed + 19) catalog world_preset_id
     in
     let* world_contract =
-      resolve_world_contract_for_session ~base_dir
+      resolve_world_contract_for_session ~store
         ~world_preset_id:world_preset.id ~world_contract_id_opt
     in
     let* party =
@@ -5755,7 +5752,7 @@ let handle_session_start ctx args : result =
           else Ok fallback_party
     in
     let* existing_events =
-      Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+      store.read_events ~room_id
     in
     let has_existing_bootstrap_event =
       List.exists
@@ -5807,7 +5804,7 @@ let handle_session_start ctx args : result =
         ]
     in
     let* room_created =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Room_created
         ~actor_id:ctx.agent_name ~payload:room_created_payload ()
     in
@@ -5826,7 +5823,7 @@ let handle_session_start ctx args : result =
         ]
     in
     let* session_started =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Session_started
         ~actor_id:ctx.agent_name ~payload:session_started_payload ()
     in
@@ -5839,18 +5836,18 @@ let handle_session_start ctx args : result =
         ]
     in
     let* party_selected =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Party_selected
         ~actor_id:ctx.agent_name ~payload:party_selected_payload ()
     in
     let* phase_event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Phase_changed
         ~payload:(`Assoc [ ("phase", `String phase) ])
         ()
     in
     let* room_started =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Room_started
         ~payload:(`Assoc [ ("phase", `String phase) ])
         ()
@@ -6017,14 +6014,14 @@ let actor_patch_from_update_args args =
 
 let handle_actor_spawn ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
     if actor_exists_in_state state actor_id then
       Error (Printf.sprintf "actor already exists: %s" actor_id)
@@ -6039,11 +6036,11 @@ let handle_actor_spawn ctx args : result =
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Actor_spawned
           ~actor_id ~payload ()
       in
-      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* next_derived = derive_state ~store ~room_id ~rule_module in
       Ok
         (`Assoc
           [
@@ -6058,14 +6055,14 @@ let handle_actor_spawn ctx args : result =
 
 let handle_actor_update ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
     if not (actor_exists_in_state state actor_id) then
       Error (Printf.sprintf "unknown actor_id: %s" actor_id)
@@ -6080,11 +6077,11 @@ let handle_actor_update ctx args : result =
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Actor_updated
           ~actor_id ~payload ()
       in
-      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* next_derived = derive_state ~store ~room_id ~rule_module in
       Ok
         (`Assoc
           [
@@ -6099,7 +6096,7 @@ let handle_actor_update ctx args : result =
 
 let handle_actor_delete ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
@@ -6107,7 +6104,7 @@ let handle_actor_delete ctx args : result =
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
     if not (actor_exists_in_state state actor_id) then
       Error (Printf.sprintf "unknown actor_id: %s" actor_id)
@@ -6121,11 +6118,11 @@ let handle_actor_delete ctx args : result =
           ]
       in
       let* event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Actor_deleted
           ~actor_id ~payload ()
       in
-      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* next_derived = derive_state ~store ~room_id ~rule_module in
       Ok
         (`Assoc
           [
@@ -6180,7 +6177,7 @@ let parse_keeper_list (j : Yojson.Safe.t) :
 
 let handle_actor_match ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* keepers_json =
@@ -6196,7 +6193,7 @@ let handle_actor_match ctx args : result =
       let* rule_opt = get_optional_string args "rule_module" in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let* () = validate_rule_module rule_module in
-      let* derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* derived = derive_state ~store ~room_id ~rule_module in
       let state = state_of_derived derived in
       let party = state_party_fields state in
       let target_actors =
@@ -6260,7 +6257,7 @@ let handle_actor_match ctx args : result =
 
 let handle_actor_claim ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
@@ -6270,9 +6267,9 @@ let handle_actor_claim ctx args : result =
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
-    let* events = Trpg_engine_store_sqlite.read_events ~base_dir ~room_id in
+    let* events = store.read_events ~room_id in
     if not (actor_exists_in_state state actor_id) then
       Error (Printf.sprintf "unknown actor_id: %s" actor_id)
     else if not (actor_alive_in_state state actor_id) then
@@ -6340,11 +6337,11 @@ let handle_actor_claim ctx args : result =
                   ]
               in
               let* event =
-                append_event ~base_dir ~room_id
+                append_event ~store ~room_id
                   ~event_type:Trpg_engine_event.Actor_claimed
                   ~actor_id ~payload ()
               in
-              let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+              let* next_derived = derive_state ~store ~room_id ~rule_module in
               (* Compute optional match_score when keeper metadata is provided *)
               let match_score_field =
                 match (keeper_style_opt, keeper_desc_opt) with
@@ -6383,7 +6380,7 @@ let handle_actor_claim ctx args : result =
 
 let handle_actor_release ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
@@ -6392,7 +6389,7 @@ let handle_actor_release ctx args : result =
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
     let normalized_keeper = normalize_keeper_name keeper_name in
     match owner_for_actor state actor_id with
@@ -6414,11 +6411,11 @@ let handle_actor_release ctx args : result =
             ]
         in
         let* event =
-          append_event ~base_dir ~room_id
+          append_event ~store ~room_id
             ~event_type:Trpg_engine_event.Actor_released
             ~actor_id ~payload ()
         in
-        let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+        let* next_derived = derive_state ~store ~room_id ~rule_module in
         Ok
           (`Assoc
             [
@@ -6435,7 +6432,7 @@ let handle_actor_release ctx args : result =
 
 let handle_join_eligibility ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
@@ -6443,9 +6440,9 @@ let handle_join_eligibility ctx args : result =
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
-    let* events = Trpg_engine_store_sqlite.read_events ~base_dir ~room_id in
+    let* events = store.read_events ~room_id in
     let gate = join_gate_of_state state in
     let actor_exists = actor_exists_in_state state actor_id in
     let actor_role =
@@ -6511,7 +6508,7 @@ let handle_join_eligibility ctx args : result =
 
 let handle_mid_join_request ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* actor_id = get_required_string args "actor_id" in
@@ -6519,9 +6516,9 @@ let handle_mid_join_request ctx args : result =
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
-    let* derived = derive_state ~base_dir ~room_id ~rule_module in
+    let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
-    let* events = Trpg_engine_store_sqlite.read_events ~base_dir ~room_id in
+    let* events = store.read_events ~room_id in
     let gate = join_gate_of_state state in
     let actor_exists = actor_exists_in_state state actor_id in
     let actor_role =
@@ -6555,7 +6552,7 @@ let handle_mid_join_request ctx args : result =
         ]
     in
     let* requested_event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Mid_join_requested ~actor_id
         ~payload:requested_payload ()
     in
@@ -6572,12 +6569,12 @@ let handle_mid_join_request ctx args : result =
           ]
       in
       let* rejected_event =
-        append_event ~base_dir ~room_id
+        append_event ~store ~room_id
           ~event_type:Trpg_engine_event.Mid_join_rejected ~actor_id
           ~payload:rejected_payload ()
       in
       let* memory_event =
-        append_memory_signal_event ~base_dir ~room_id ~event_tier:"short"
+        append_memory_signal_event ~store ~room_id ~event_tier:"short"
           ~importance_score
           ~summary_ko:(Printf.sprintf "중간 참여 거절: %s (%s)" actor_id reason_code)
           ~summary_en:(Printf.sprintf "Mid-join rejected: %s (%s)" actor_id reason_code)
@@ -6588,7 +6585,7 @@ let handle_mid_join_request ctx args : result =
               ("reason_code", `String reason_code);
             ]
       in
-      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* next_derived = derive_state ~store ~room_id ~rule_module in
       Ok
         (`Assoc
           [
@@ -6645,11 +6642,11 @@ let handle_mid_join_request ctx args : result =
               ]
           in
           let* spawn_event =
-            append_event ~base_dir ~room_id
+            append_event ~store ~room_id
               ~event_type:Trpg_engine_event.Actor_spawned ~actor_id
               ~payload:spawn_payload ()
           in
-          let* d = derive_state ~base_dir ~room_id ~rule_module in
+          let* d = derive_state ~store ~room_id ~rule_module in
           Ok (Some spawn_event, state_of_derived d)
       in
       let normalized_keeper = normalize_keeper_name keeper_name in
@@ -6686,11 +6683,11 @@ let handle_mid_join_request ctx args : result =
                     ]
                 in
                 let* claim_event =
-                  append_event ~base_dir ~room_id
+                  append_event ~store ~room_id
                     ~event_type:Trpg_engine_event.Actor_claimed ~actor_id
                     ~payload:claim_payload ()
                 in
-                let* d = derive_state ~base_dir ~room_id ~rule_module in
+                let* d = derive_state ~store ~room_id ~rule_module in
                 Ok (`Proceed (false, Some claim_event, state_of_derived d)))
       in
       match claim_resolution with
@@ -6732,11 +6729,11 @@ let handle_mid_join_request ctx args : result =
                   ]
               in
               let* penalty_event =
-                append_event ~base_dir ~room_id
+                append_event ~store ~room_id
                   ~event_type:Trpg_engine_event.Actor_updated ~actor_id
                   ~payload ()
               in
-              let* d = derive_state ~base_dir ~room_id ~rule_module in
+              let* d = derive_state ~store ~room_id ~rule_module in
               Ok (Some penalty_event, state_of_derived d)
           in
           let granted_payload =
@@ -6752,12 +6749,12 @@ let handle_mid_join_request ctx args : result =
               ]
           in
           let* granted_event =
-            append_event ~base_dir ~room_id
+            append_event ~store ~room_id
               ~event_type:Trpg_engine_event.Mid_join_granted ~actor_id
               ~payload:granted_payload ()
           in
           let* memory_event =
-            append_memory_signal_event ~base_dir ~room_id ~event_tier:"mid"
+            append_memory_signal_event ~store ~room_id ~event_tier:"mid"
               ~importance_score:72
               ~summary_ko:
                 (Printf.sprintf "중간 참여 승인: %s (%s)" actor_id keeper_name)
@@ -6770,7 +6767,7 @@ let handle_mid_join_request ctx args : result =
                   ("effective_score", `Int effective_score);
                 ]
           in
-          let* final_derived = derive_state ~base_dir ~room_id ~rule_module in
+          let* final_derived = derive_state ~store ~room_id ~rule_module in
           let events =
             [
               Some requested_event;
@@ -6813,7 +6810,7 @@ let handle_mid_join_request ctx args : result =
 
 let handle_intervention_submit ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* session_id_opt = get_optional_string args "session_id" in
@@ -6844,7 +6841,7 @@ let handle_intervention_submit ctx args : result =
         ]
     in
     let* event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Intervention_submitted
         ~actor_id:ctx.agent_name ~payload ()
     in
@@ -7086,7 +7083,7 @@ let build_round_roll_audit (events : Trpg_engine_event.t list) : Yojson.Safe.t l
 
 let handle_round_run ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* dm_keeper_raw = get_required_string args "dm_keeper" in
@@ -7144,9 +7141,9 @@ let handle_round_run ctx args : result =
       with_keeper_reservation
         ~keepers:assigned_keepers
         (fun () ->
-      let* derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* derived = derive_state ~store ~room_id ~rule_module in
       let* existing_events_before =
-        Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+        store.read_events ~room_id
       in
       let session_events_before =
         events_since_last_session_marker existing_events_before
@@ -7159,7 +7156,7 @@ let handle_round_run ctx args : result =
         has_event_type session_events_before Trpg_engine_event.Session_outcome
       in
       let end_rules =
-        resolve_end_rules_for_room ~base_dir ~events:existing_events_before
+        resolve_end_rules_for_room ~store ~events:existing_events_before
       in
       let latest_outcome_payload =
         ref (latest_session_outcome_payload session_events_before)
@@ -7252,7 +7249,7 @@ let handle_round_run ctx args : result =
         in
         let statuses = dead_statuses @ live_statuses @ [ dm_status ] in
         let canon_check =
-          evaluate_canon_check ~base_dir ~state ~events:existing_events_before
+          evaluate_canon_check ~store ~state ~events:existing_events_before
             ~dm_reply:None
         in
         let dm_style =
@@ -7340,7 +7337,7 @@ let handle_round_run ctx args : result =
       else
       let* join_window_closed_event =
         append_event
-          ~base_dir
+          ~store
           ~room_id
           ~event_type:Trpg_engine_event.Join_window_closed
           ~payload:
@@ -7355,14 +7352,14 @@ let handle_round_run ctx args : result =
 
       let* phase_event =
         append_event
-          ~base_dir
+          ~store
           ~room_id
           ~event_type:Trpg_engine_event.Phase_changed
           ~payload:(`Assoc [ ("phase", `String phase) ])
           ()
       in
       let* interventions_applied, intervention_events =
-        append_pending_interventions ~base_dir ~room_id ~phase ~turn:turn_before
+        append_pending_interventions ~store ~room_id ~phase ~turn:turn_before
       in
       let base_state_for_prompt =
         inject_interventions_into_state state interventions_applied
@@ -7393,13 +7390,13 @@ let handle_round_run ctx args : result =
       let* () =
         if phase = "round" then
           let* spawn_event_opt =
-            ensure_round_npc_spawn_event ~base_dir ~room_id ~turn:turn_before
+            ensure_round_npc_spawn_event ~store ~room_id ~turn:turn_before
               ~state:base_state_for_prompt
           in
           (match spawn_event_opt with
           | Some spawn_event ->
               appended_events := !appended_events @ [ spawn_event ];
-              (match derive_state ~base_dir ~room_id ~rule_module with
+              (match derive_state ~store ~room_id ~rule_module with
               | Ok derived_after_spawn ->
                   state_for_players_ref :=
                     inject_interventions_into_state
@@ -7431,7 +7428,7 @@ let handle_round_run ctx args : result =
         let record_unavailable_status ~status ~error ~stage =
           let* unavailable_result =
             append_unavailable_event
-              ~base_dir
+              ~store
               ~room_id
               ~phase
               ~turn:turn_before
@@ -7485,7 +7482,7 @@ let handle_round_run ctx args : result =
               match role with
               | `Player -> Ok None
               | `Dm ->
-                  ensure_round_npc_spawn_event ~base_dir ~room_id ~turn:turn_before
+                  ensure_round_npc_spawn_event ~store ~room_id ~turn:turn_before
                     ~state:state_json
             in
             (match spawn_event_opt with
@@ -7498,13 +7495,13 @@ let handle_round_run ctx args : result =
               | `Dm -> (
                   match spawn_event_opt with
                   | Some _ -> (
-                      match derive_state ~base_dir ~room_id ~rule_module with
+                      match derive_state ~store ~room_id ~rule_module with
                       | Ok derived_after_spawn -> state_of_derived derived_after_spawn
                       | Error _ -> state_json )
                   | None -> state_json )
             in
             let* reply_event =
-              append_keeper_reply_event ~base_dir ~room_id ~phase ~turn:turn_before
+              append_keeper_reply_event ~store ~room_id ~phase ~turn:turn_before
                 ~role ~actor_id ~keeper_name ~reply:fallback_reply
             in
             fallback_count := !fallback_count + 1;
@@ -7535,7 +7532,7 @@ let handle_round_run ctx args : result =
                       ]
                   in
                   let* event =
-                    append_event ~base_dir ~room_id
+                    append_event ~store ~room_id
                       ~event_type:Trpg_engine_event.Narration_posted
                       ~actor_id ~payload ()
                   in
@@ -7554,7 +7551,7 @@ let handle_round_run ctx args : result =
                       ]
                   in
                   let* event =
-                    append_event ~base_dir ~room_id
+                    append_event ~store ~room_id
                       ~event_type:Trpg_engine_event.Narration_posted
                       ~actor_id ~payload ()
                   in
@@ -7564,7 +7561,7 @@ let handle_round_run ctx args : result =
             let* pressure_events =
               match role with
               | `Dm ->
-                  append_npc_counterattack_events ~base_dir ~room_id ~phase
+                  append_npc_counterattack_events ~store ~room_id ~phase
                     ~turn:turn_before ~state:state_for_pressure
               | `Player -> Ok []
             in
@@ -7586,7 +7583,7 @@ let handle_round_run ctx args : result =
         (* Phase 1: BDI state update after successful keeper reply.
            Observation-only — errors are logged but never block the main path. *)
         let update_bdi_after_reply ~reply_text ~sa =
-          let room_dir = Filename.concat base_dir room_id in
+          let room_dir = store.Trpg_store.room_dir ~room_id in
           let bdi0 = Trpg_bdi.load ~room_dir ~actor_id in
           let bdi1 = Trpg_bdi.decay_beliefs ~current_turn:turn_before bdi0 in
           (* Update belief: the keeper's reply reflects what the character now knows *)
@@ -7630,7 +7627,7 @@ let handle_round_run ctx args : result =
           let _save_result = Trpg_bdi.save ~room_dir bdi3 in
           (* Emit Bdi_updated event — ignore errors *)
           let _event_result =
-            append_event ~base_dir ~room_id
+            append_event ~store ~room_id
               ~event_type:Trpg_engine_event.Bdi_updated
               ~actor_id
               ~payload:(Trpg_bdi.to_yojson bdi3)
@@ -7686,7 +7683,7 @@ let handle_round_run ctx args : result =
                 ~response_text:reply_text
             in
             let _event_result =
-              append_event ~base_dir ~room_id
+              append_event ~store ~room_id
                 ~event_type:Trpg_engine_event.Evaluation_scored
                 ~actor_id
                 ~payload:(Trpg_harness.result_to_yojson result)
@@ -7728,6 +7725,7 @@ let handle_round_run ctx args : result =
         | Ok () ->
         let base_prompt =
           build_keeper_prompt
+            ~store
             ~dm_persona_override
             ~room_id
             ~phase
@@ -7941,7 +7939,7 @@ let handle_round_run ctx args : result =
         | Error (`Timeout stage) ->
             let* timeout_event, unavailable_result =
               append_timeout_and_unavailable_events
-                ~base_dir
+                ~store
                 ~room_id
               ~phase
               ~turn:turn_before
@@ -8015,7 +8013,7 @@ let handle_round_run ctx args : result =
             | Some (reply_text, sa) ->
                 let* reply_event =
                   append_keeper_reply_event
-                    ~base_dir ~room_id ~phase ~turn:turn_before
+                    ~store ~room_id ~phase ~turn:turn_before
                     ~role ~actor_id ~keeper_name ~reply:reply_text
                 in
                 success_count := !success_count + 1;
@@ -8026,7 +8024,7 @@ let handle_round_run ctx args : result =
                 | `Player -> player_success_count := !player_success_count + 1);
                 appended_events := !appended_events @ [ reply_event ];
                 let* action_events =
-                  apply_structured_action ~base_dir ~room_id
+                  apply_structured_action ~store ~room_id
                     ~turn:turn_before ~phase ~actor_id ~state:state_json sa
                 in
                 appended_events := !appended_events @ action_events;
@@ -8063,7 +8061,7 @@ let handle_round_run ctx args : result =
         | Ok (reply, sa) ->
             let* reply_event =
               append_keeper_reply_event
-                ~base_dir
+                ~store
                 ~room_id
                 ~phase
                 ~turn:turn_before
@@ -8080,7 +8078,7 @@ let handle_round_run ctx args : result =
             | `Player -> player_success_count := !player_success_count + 1);
             appended_events := !appended_events @ [ reply_event ];
             let* action_events =
-              apply_structured_action ~base_dir ~room_id
+              apply_structured_action ~store ~room_id
                 ~turn:turn_before ~phase ~actor_id ~state:state_json sa
             in
             appended_events := !appended_events @ action_events;
@@ -8126,7 +8124,7 @@ let handle_round_run ctx args : result =
       in
       let state_for_dm_prompt =
         if player_quorum_met then
-          match derive_state ~base_dir ~room_id ~rule_module with
+          match derive_state ~store ~room_id ~rule_module with
           | Ok derived_after_players ->
               inject_interventions_into_state
                 (state_of_derived derived_after_players)
@@ -8165,7 +8163,7 @@ let handle_round_run ctx args : result =
           if existing_npc_attacks > 0 then Ok ()
           else
             let state_for_pressure =
-              match derive_state ~base_dir ~room_id ~rule_module with
+              match derive_state ~store ~room_id ~rule_module with
               | Ok derived_after_dm ->
                   inject_interventions_into_state
                     (state_of_derived derived_after_dm)
@@ -8173,7 +8171,7 @@ let handle_round_run ctx args : result =
               | Error _ -> state_for_dm_prompt
             in
             let* pressure_events =
-              append_npc_counterattack_events ~base_dir ~room_id ~phase
+              append_npc_counterattack_events ~store ~room_id ~phase
                 ~turn:turn_before ~state:state_for_pressure
             in
             appended_events := !appended_events @ pressure_events;
@@ -8186,7 +8184,7 @@ let handle_round_run ctx args : result =
         if advanced then
           let* turn_event =
             append_event
-              ~base_dir
+              ~store
               ~room_id
               ~event_type:Trpg_engine_event.Turn_started
               ~payload:(`Assoc [ ("turn", `Int next_turn) ])
@@ -8196,7 +8194,7 @@ let handle_round_run ctx args : result =
           Ok ()
         else Ok ()
       in
-      let* next_derived = derive_state ~base_dir ~room_id ~rule_module in
+      let* next_derived = derive_state ~store ~room_id ~rule_module in
       let next_state = state_of_derived next_derived in
       let computed_outcome =
         if outcome_already_emitted then None
@@ -8210,7 +8208,7 @@ let handle_round_run ctx args : result =
               let stagnation_threshold = 5 in
               let all_events =
                 match
-                  Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+                  store.read_events ~room_id
                 with
                 | Ok evs -> evs
                 | Error _ -> []
@@ -8248,14 +8246,14 @@ let handle_round_run ctx args : result =
               if room_already_ended then Ok None
               else
                 let* room_end_event =
-                  append_event ~base_dir ~room_id
+                  append_event ~store ~room_id
                     ~event_type:Trpg_engine_event.Room_ended
                     ~payload:room_end_payload ()
                 in
                 Ok (Some room_end_event)
             in
             let* outcome_event =
-              append_event ~base_dir ~room_id
+              append_event ~store ~room_id
                 ~event_type:Trpg_engine_event.Session_outcome
                 ~payload:outcome_payload ()
             in
@@ -8271,7 +8269,7 @@ let handle_round_run ctx args : result =
               | Draw -> 72
             in
             let* memory_event =
-              append_memory_signal_event ~base_dir ~room_id ~event_tier:"long"
+              append_memory_signal_event ~store ~room_id ~event_tier:"long"
                 ~importance_score
                 ~summary_ko:(Printf.sprintf "세션 결과 확정: %s (%s)" outcome_str reason)
                 ~summary_en:(Printf.sprintf "Session outcome finalized: %s (%s)" outcome_str reason)
@@ -8284,7 +8282,7 @@ let handle_round_run ctx args : result =
             in
             appended_events := !appended_events @ [ memory_event ];
             latest_outcome_payload := Some outcome_payload;
-            derive_state ~base_dir ~room_id ~rule_module
+            derive_state ~store ~room_id ~rule_module
       in
       let* _final_derived, final_state =
         let state_after_outcome = state_of_derived final_derived in
@@ -8297,7 +8295,7 @@ let handle_round_run ctx args : result =
         else
           let* join_window_opened_event =
             append_event
-              ~base_dir
+              ~store
               ~room_id
               ~event_type:Trpg_engine_event.Join_window_opened
               ~payload:
@@ -8310,16 +8308,16 @@ let handle_round_run ctx args : result =
               ()
           in
           appended_events := !appended_events @ [ join_window_opened_event ];
-          let* reopened_derived = derive_state ~base_dir ~room_id ~rule_module in
+          let* reopened_derived = derive_state ~store ~room_id ~rule_module in
           Ok (reopened_derived, state_of_derived reopened_derived)
       in
       let canon_check =
         let session_events_after = existing_events_before @ !appended_events in
-        evaluate_canon_check ~base_dir ~state:final_state
+        evaluate_canon_check ~store ~state:final_state
           ~events:session_events_after ~dm_reply:!dm_reply_ref
       in
       let* canon_events =
-        append_canon_check_observability_events ~base_dir ~room_id
+        append_canon_check_observability_events ~store ~room_id
           ~turn:turn_after ~phase ~check:canon_check
       in
       appended_events := !appended_events @ canon_events;
@@ -8438,7 +8436,7 @@ let handle_round_run ctx args : result =
 
 let handle_scene_transition ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* from_scene = get_required_string args "from_scene" in
@@ -8457,7 +8455,7 @@ let handle_scene_transition ctx args : result =
         ]
     in
     let* event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Scene_transition ~payload ()
     in
     Ok
@@ -8471,7 +8469,7 @@ let handle_scene_transition ctx args : result =
 
 let handle_quest_update ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* quest_id = get_required_string args "quest_id" in
@@ -8497,7 +8495,7 @@ let handle_quest_update ctx args : result =
         ]
     in
     let* event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.Quest_update ~payload ()
     in
     Ok
@@ -8511,7 +8509,7 @@ let handle_quest_update ctx args : result =
 
 let handle_world_event ctx args : result =
   let ( let* ) = Result.bind in
-  let base_dir = ctx.config.base_path in
+  let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
     let* evt_type = get_required_string args "event_type" in
@@ -8538,7 +8536,7 @@ let handle_world_event ctx args : result =
         ]
     in
     let* event =
-      append_event ~base_dir ~room_id
+      append_event ~store ~room_id
         ~event_type:Trpg_engine_event.World_event ~payload ()
     in
     Ok

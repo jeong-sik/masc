@@ -10,6 +10,7 @@ import {
   refreshDashboard,
   refreshBoard,
   refreshTrpg,
+  refreshGoals,
   setupSSEReaction,
   startPeriodicRefresh,
   stopPeriodicRefresh,
@@ -26,6 +27,7 @@ import { Activity } from './components/activity'
 import { Agents } from './components/agents'
 import { Tasks } from './components/tasks'
 import { Journal } from './components/journal'
+import { Goals } from './components/goals'
 import { Trpg } from './components/trpg'
 import { ControlDock } from './components/control-dock'
 import { KeeperDetailOverlay } from './components/keeper-detail'
@@ -50,6 +52,7 @@ const RAIL_TABS: { id: TabId; label: string }[] = [
   { id: 'activity', label: 'Activity' },
   { id: 'agents', label: 'Agents' },
   { id: 'tasks', label: 'Tasks' },
+  { id: 'goals', label: 'Goals' },
   { id: 'journal', label: 'Journal' },
   { id: 'trpg', label: 'TRPG' },
 ]
@@ -135,6 +138,8 @@ function TabContent() {
       return html`<${Agents} />`
     case 'tasks':
       return html`<${Tasks} />`
+    case 'goals':
+      return html`<${Goals} />`
     case 'journal':
       return html`<${Journal} />`
     case 'trpg':
@@ -171,6 +176,7 @@ export function App() {
     const tab = route.value.tab
     if (tab === 'board') refreshBoard()
     if (tab === 'trpg') refreshTrpg()
+    if (tab === 'goals') refreshGoals()
   }, [route.value.tab])
 
   return html`

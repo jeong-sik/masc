@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.74.0] - 2026-02-24
+
+### Added
+- **Keeper Autonomy Engine** — Karpathy Autonomy Slider (L1-L5) for keeper agents with goal-driven autonomous action (#450)
+- **Generator-Verifier Loop** — Capable model generates action plan, cheap model verifies before execution (#450)
+- **Execution Engine** — Approved plans auto-execute via LLM cascade + sandboxed tool_loop with Eval Gate (#450)
+- **L2 Board Suggestions** — L2_Suggestive keepers post goal-based suggestions to Board automatically (#450)
+- **Keeper MCP Tools** — `masc_keeper_autonomy`, `masc_keeper_goals`, `masc_keeper_trajectory`, `masc_keeper_eval` (#450)
+- **Goals Dashboard Tab** — Horizon-grouped goals with priority/status filters and progress tracking (#450)
+- **Keeper Autonomy Meter** — L1-L5 gauge, self-model viewer, goal progress in keeper detail view (#450)
+- **SSE Autonomy Events** — `keeper_autonomy_start/complete` events for real-time dashboard updates (#450)
+
 ## [2.72.0] - 2026-02-23
 
 ### Added

@@ -15,8 +15,9 @@ import type {
   TrpgState,
   BoardSortMode,
   KeeperLifecycleState,
+  Goal,
 } from './types'
-import { fetchDashboard, fetchBoard, fetchTrpgState, type DashboardMode } from './api'
+import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, type DashboardMode } from './api'
 import { lastEvent } from './sse'
 
 // --- Core state signals ---
@@ -41,6 +42,11 @@ export const boardSortMode = signal<BoardSortMode>('hot')
 
 export const trpgState = signal<TrpgState | null>(null)
 export const trpgRoom = signal<string>('')
+
+// --- Goals state ---
+
+export const goals = signal<Goal[]>([])
+export const goalsLoading = signal(false)
 
 // --- Loading flags ---
 
@@ -376,6 +382,20 @@ export async function refreshTrpg(): Promise<void> {
     console.error('TRPG fetch error:', err)
   } finally {
     trpgLoading.value = false
+  }
+}
+
+// --- Goals fetcher ---
+
+export async function refreshGoals(): Promise<void> {
+  goalsLoading.value = true
+  try {
+    const data = await fetchGoals()
+    goals.value = Array.isArray(data) ? data : []
+  } catch (err) {
+    console.error('Goals fetch error:', err)
+  } finally {
+    goalsLoading.value = false
   }
 }
 

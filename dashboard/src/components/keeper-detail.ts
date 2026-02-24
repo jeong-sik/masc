@@ -9,7 +9,7 @@ import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
-import type { Keeper, KeeperMetricPoint, TrpgCharacterStats } from '../types'
+import type { Keeper, KeeperMetricPoint, TrpgCharacterStats, AutonomyLevel } from '../types'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -21,6 +21,64 @@ export function openKeeperDetail(k: Keeper) {
 
 export function closeKeeperDetail() {
   selectedKeeper.value = null
+}
+
+// ── Autonomy helpers ─────────────────────────────────────
+
+const AUTONOMY_LEVELS: { level: AutonomyLevel; label: string; color: string }[] = [
+  { level: 'L1_Reactive', label: 'L1 Reactive', color: '#6b7280' },
+  { level: 'L2_Suggestive', label: 'L2 Suggestive', color: '#3b82f6' },
+  { level: 'L3_Guided', label: 'L3 Guided', color: '#f59e0b' },
+  { level: 'L4_Autonomous', label: 'L4 Autonomous', color: '#f97316' },
+  { level: 'L5_Independent', label: 'L5 Independent', color: '#ef4444' },
+]
+
+function autonomyIndex(level: AutonomyLevel | undefined): number {
+  if (!level) return 0
+  const idx = AUTONOMY_LEVELS.findIndex(a => a.level === level)
+  return idx >= 0 ? idx : 0
+}
+
+function AutonomyMeter({ keeper }: { keeper: Keeper }) {
+  const idx = autonomyIndex(keeper.autonomy_level)
+  const info = AUTONOMY_LEVELS[idx] ?? AUTONOMY_LEVELS[0]
+  if (!info) return null
+  const pct = ((idx + 1) / AUTONOMY_LEVELS.length) * 100
+
+  return html`
+    <div class="keeper-signal-list">
+      <div style="margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="font-size:13px; font-weight:600; color:${info.color};">${info.label}</span>
+          <span style="font-size:11px; color:#888;">${idx + 1} / ${AUTONOMY_LEVELS.length}</span>
+        </div>
+        <div style="width:100%; height:6px; background:#1a1a2e; border-radius:3px; overflow:hidden;">
+          <div style="width:${pct}%; height:100%; background:${info.color}; border-radius:3px; transition:width 0.3s;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:2px;">
+          ${AUTONOMY_LEVELS.map((a, i) => html`
+            <span style="width:8px; height:8px; border-radius:50%; background:${i <= idx ? a.color : '#333'}; display:inline-block;"></span>
+          `)}
+        </div>
+      </div>
+      <div class="keeper-signal-row">
+        <span>Autonomous actions</span>
+        <strong>${keeper.autonomous_action_count ?? 0}</strong>
+      </div>
+      ${keeper.last_autonomous_action_at
+        ? html`<div class="keeper-signal-row">
+            <span>Last autonomous action</span>
+            <strong><${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></strong>
+          </div>`
+        : null}
+      ${keeper.active_goal_ids && keeper.active_goal_ids.length > 0
+        ? html`<div class="keeper-signal-row">
+            <span>Active goals</span>
+            <strong>${keeper.active_goal_ids.length}</strong>
+          </div>`
+        : null}
+    </div>
+  `
 }
 
 // ── Sub-components ────────────────────────────────────────
@@ -474,6 +532,15 @@ export function KeeperDetailOverlay() {
                 </div>`
               : null}
           <//>
+
+          ${'' /* Autonomy Level (if available) */}
+          ${keeper.autonomy_level
+            ? html`
+              <${Card} title="Autonomy">
+                <${AutonomyMeter} keeper=${keeper} />
+              <//>
+            `
+            : null}
 
           ${'' /* TRPG Stats (if available) */}
           ${keeper.trpg_stats

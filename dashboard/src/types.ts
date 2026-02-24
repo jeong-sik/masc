@@ -144,6 +144,33 @@ export interface KeeperGuardrailEvent {
   ts_unix: number
 }
 
+// --- Keeper Autonomy ---
+
+export type AutonomyLevel = 'L1_Reactive' | 'L2_Suggestive' | 'L3_Guided' | 'L4_Autonomous' | 'L5_Independent'
+
+export interface Goal {
+  id: string
+  horizon: 'short' | 'mid' | 'long'
+  title: string
+  metric?: string | null
+  target_value?: string | null
+  due_date?: string | null
+  priority: number
+  status: string
+  parent_goal_id?: string | null
+  last_review_note?: string | null
+  last_review_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface KeeperAutonomyInfo {
+  autonomy_level: AutonomyLevel
+  active_goal_ids: string[]
+  last_autonomous_action_at?: string | null
+  autonomous_action_count: number
+}
+
 // --- Keeper / Lodge ---
 
 export interface Keeper {
@@ -157,6 +184,11 @@ export interface Keeper {
   active_model?: string
   next_model_hint?: string | null
   status: string
+  // Autonomy fields (Phase 2)
+  autonomy_level?: AutonomyLevel
+  active_goal_ids?: string[]
+  last_autonomous_action_at?: string | null
+  autonomous_action_count?: number
   created_at?: string
   updated_at?: string
   last_heartbeat?: string
@@ -267,6 +299,14 @@ export interface TrpgRound {
 export interface TrpgEvent {
   type: string
   actor?: string
+  actor_id?: string
+  actor_name?: string
+  seq?: number
+  room_id?: string
+  phase?: string
+  category?: string
+  visibility?: string
+  event_id?: string
   content: string
   dice_roll?: DiceRoll
   timestamp: string
@@ -453,6 +493,7 @@ export type TabId =
   | 'activity'
   | 'agents'
   | 'tasks'
+  | 'goals'
   | 'journal'
   | 'trpg'
   | 'council'
@@ -463,6 +504,7 @@ export const VALID_TABS: TabId[] = [
   'activity',
   'agents',
   'tasks',
+  'goals',
   'journal',
   'trpg',
   'council',

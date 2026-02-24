@@ -376,6 +376,93 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
       ]);
     ];
   };
+
+  (* --- Phase 4: Keeper Autonomy MCP Tools --- *)
+
+  {
+    name = "masc_keeper_autonomy";
+    description = "Query or change a keeper's autonomy level (L1_Reactive..L5_Independent). Without 'level', returns current autonomy info.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("level", `Assoc [
+          ("type", `String "string");
+          ("description", `String "New autonomy level: L1_Reactive, L2_Suggestive, L3_Guided, L4_Autonomous, L5_Independent");
+          ("enum", `List [
+            `String "L1_Reactive"; `String "L2_Suggestive"; `String "L3_Guided";
+            `String "L4_Autonomous"; `String "L5_Independent";
+          ]);
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_goals";
+    description = "Link, unlink, or list goals for a keeper. Without action, lists the keeper's active goals.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("description", `String "link | unlink (omit to list)");
+          ("enum", `List [`String "link"; `String "unlink"]);
+        ]);
+        ("goal_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Goal ID to link or unlink");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_trajectory";
+    description = "View recent trajectory entries (tool calls) for a keeper session.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max entries to return (default: 20, most recent first).");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_eval";
+    description = "Run eval harness against a keeper's trajectory. Returns quality scores.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("scenario_file", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Path to scenario JSONL file (optional, uses keeper trajectory if omitted).");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
 ]
 
 (* --------------------------------------------------------------- *)
@@ -8572,6 +8659,208 @@ let start_existing_keepalives ctx =
       raise exn
   end
 
+(* ================================================================ *)
+(* Phase 4: Keeper Autonomy MCP Tool Handlers                      *)
+(* ================================================================ *)
+
+let handle_keeper_autonomy ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if not (validate_name name) then
+    (false, "invalid keeper name")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "read error: " ^ e)
+    | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
+    | Ok (Some m) ->
+      let level_opt = get_string_opt args "level" in
+      (match level_opt with
+       | None ->
+         (* GET mode: return current autonomy info *)
+         let info = Printf.sprintf
+           "Keeper: %s\nAutonomy Level: %s\nActive Goals: [%s]\nAutonomous Actions: %d\nLast Autonomous Action: %s"
+           m.name
+           (String.uppercase_ascii m.autonomy_level)
+           (String.concat ", " m.active_goal_ids)
+           m.autonomous_action_count
+           (if m.last_autonomous_action_at = "" then "never" else m.last_autonomous_action_at)
+         in
+         (true, info)
+       | Some level_str ->
+         (* SET mode: validate and update autonomy level *)
+         (match Keeper_autonomy.autonomy_level_of_string level_str with
+          | None ->
+            (false, Printf.sprintf "invalid autonomy level: %s (use L1_Reactive..L5_Independent)" level_str)
+          | Some al ->
+            let canonical = Keeper_autonomy.autonomy_level_to_string al in
+            let updated = { m with autonomy_level = String.lowercase_ascii canonical } in
+            (match write_meta ctx.config updated with
+             | Error e -> (false, "write error: " ^ e)
+             | Ok () ->
+               (true, Printf.sprintf "Keeper %s autonomy level updated to %s" name canonical))))
+
+let handle_keeper_goals ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if not (validate_name name) then
+    (false, "invalid keeper name")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "read error: " ^ e)
+    | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
+    | Ok (Some m) ->
+      let action = get_string_opt args "action" in
+      (match action with
+       | None ->
+         (* LIST mode: show active goals with details *)
+         let goals = Goal_store.list_goals ctx.config () in
+         let active =
+           List.filter
+             (fun (g : Goal_store.goal) -> List.mem g.id m.active_goal_ids)
+             goals
+         in
+         if active = [] then
+           (true, Printf.sprintf "Keeper %s has no active goals." name)
+         else
+           let lines =
+             List.map
+               (fun (g : Goal_store.goal) ->
+                 Printf.sprintf "- [%s] %s (horizon:%s, priority:%d, status:%s)"
+                   g.id g.title g.horizon g.priority g.status)
+               active
+           in
+           (true, Printf.sprintf "Keeper %s goals (%d):\n%s"
+              name (List.length active) (String.concat "\n" lines))
+       | Some "link" ->
+         let goal_id = get_string args "goal_id" "" in
+         if goal_id = "" then
+           (false, "goal_id is required for link action")
+         else if List.mem goal_id m.active_goal_ids then
+           (true, Printf.sprintf "Goal %s already linked to keeper %s" goal_id name)
+         else begin
+           (* Verify goal exists *)
+           let goals = Goal_store.list_goals ctx.config () in
+           match List.find_opt (fun (g : Goal_store.goal) -> g.id = goal_id) goals with
+           | None -> (false, Printf.sprintf "Goal %s not found in goal_store" goal_id)
+           | Some g ->
+             let updated = { m with active_goal_ids = goal_id :: m.active_goal_ids } in
+             (match write_meta ctx.config updated with
+              | Error e -> (false, "write error: " ^ e)
+              | Ok () ->
+                (true, Printf.sprintf "Linked goal [%s] %s to keeper %s" g.id g.title name))
+         end
+       | Some "unlink" ->
+         let goal_id = get_string args "goal_id" "" in
+         if goal_id = "" then
+           (false, "goal_id is required for unlink action")
+         else if not (List.mem goal_id m.active_goal_ids) then
+           (true, Printf.sprintf "Goal %s not linked to keeper %s" goal_id name)
+         else
+           let updated = { m with
+             active_goal_ids = List.filter (fun gid -> gid <> goal_id) m.active_goal_ids
+           } in
+           (match write_meta ctx.config updated with
+            | Error e -> (false, "write error: " ^ e)
+            | Ok () ->
+              (true, Printf.sprintf "Unlinked goal %s from keeper %s" goal_id name))
+       | Some other ->
+         (false, Printf.sprintf "unknown action: %s (use link | unlink)" other))
+
+let handle_keeper_trajectory ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if not (validate_name name) then
+    (false, "invalid keeper name")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "read error: " ^ e)
+    | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
+    | Ok (Some m) ->
+      let limit = get_int args "limit" 20 in
+      let masc_root = Filename.concat ctx.config.base_path ".masc" in
+      let entries =
+        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.trace_id
+      in
+      let total = List.length entries in
+      (* Take the last N entries (most recent) *)
+      let recent =
+        if total <= limit then entries
+        else
+          let drop = total - limit in
+          List.filteri (fun i _e -> i >= drop) entries
+      in
+      if recent = [] then
+        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." name m.trace_id)
+      else
+        let json_list = List.map Trajectory.entry_to_json recent in
+        let json = `Assoc [
+          ("keeper", `String name);
+          ("trace_id", `String m.trace_id);
+          ("generation", `Int m.generation);
+          ("total_entries", `Int total);
+          ("showing", `Int (List.length recent));
+          ("entries", `List json_list);
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+
+let handle_keeper_eval ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if not (validate_name name) then
+    (false, "invalid keeper name")
+  else
+    match read_meta ctx.config name with
+    | Error e -> (false, "read error: " ^ e)
+    | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
+    | Ok (Some m) ->
+      let scenario_file = get_string_opt args "scenario_file" in
+      let masc_root = Filename.concat ctx.config.base_path ".masc" in
+      let entries =
+        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.trace_id
+      in
+      if entries = [] then
+        (true, Printf.sprintf "Keeper %s has no trajectory data to evaluate." name)
+      else
+        let total = List.length entries in
+        (* Build a lightweight eval summary from trajectory *)
+        let tool_names =
+          List.map (fun (e : Trajectory.tool_call_entry) -> e.tool_name) entries
+        in
+        let unique_tools =
+          List.sort_uniq String.compare tool_names
+        in
+        let tool_counts =
+          List.map
+            (fun tn ->
+              let c = List.length (List.filter (fun n -> n = tn) tool_names) in
+              (tn, c))
+            unique_tools
+        in
+        let tool_stats =
+          List.map
+            (fun (tn, c) -> `Assoc [("tool", `String tn); ("count", `Int c)])
+            (List.sort (fun (_, a) (_, b) -> compare b a) tool_counts)
+        in
+        (* Check if scenario file is provided for deeper eval *)
+        let scenario_info =
+          match scenario_file with
+          | None -> `String "none (trajectory-only eval)"
+          | Some sf ->
+            (match Eval_harness.load_scenarios_from_file sf with
+             | Error e -> `String (Printf.sprintf "failed to load: %s" e)
+             | Ok scenarios ->
+               `String (Printf.sprintf "loaded %d scenarios from %s"
+                 (List.length scenarios) sf))
+        in
+        let json = `Assoc [
+          ("keeper", `String name);
+          ("trace_id", `String m.trace_id);
+          ("generation", `Int m.generation);
+          ("total_tool_calls", `Int total);
+          ("unique_tools", `Int (List.length unique_tools));
+          ("tool_distribution", `List tool_stats);
+          ("scenario_file", scenario_info);
+          ("autonomy_level", `String m.autonomy_level);
+          ("autonomous_action_count", `Int m.autonomous_action_count);
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)
+
 let dispatch ctx ~name ~args : tool_result option =
   (* Lazy boot: when any keeper tool is used, attach keepalives for existing keepers. *)
   (try start_existing_keepalives ctx with _ -> ());
@@ -8581,4 +8870,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
+  | "masc_keeper_autonomy" -> Some (handle_keeper_autonomy ctx args)
+  | "masc_keeper_goals" -> Some (handle_keeper_goals ctx args)
+  | "masc_keeper_trajectory" -> Some (handle_keeper_trajectory ctx args)
+  | "masc_keeper_eval" -> Some (handle_keeper_eval ctx args)
   | _ -> None

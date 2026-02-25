@@ -202,6 +202,8 @@
    ;; Keeper Autonomy Engine (Phase 2: autonomy slider + verifier)
    keeper_autonomy
    keeper_verifier
+   ;; Autonomy Adjuster — Feedback Closure (Phase 4)
+   autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
    llm_client
    context_manager

@@ -68,6 +68,12 @@
  (modules test_lodge_selection)
  (libraries masc_mcp alcotest eio eio_main str yojson))
 
+; Autonomy Adjuster tests (feedback closure for Lodge agent selection)
+(test
+ (name test_autonomy_adjuster)
+ (modules test_autonomy_adjuster)
+ (libraries masc_mcp alcotest eio eio_main str yojson))
+
 ; Gardener module tests (Self-Organizing Ecosystem)
 (test
  (name test_gardener)

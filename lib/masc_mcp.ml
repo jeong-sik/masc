@@ -204,6 +204,13 @@ module Trajectory = Trajectory
 module Eval_gate = Eval_gate
 module Eval_harness = Eval_harness
 
+(* Keeper Autonomy Engine (Phase 2: autonomy slider + verifier) *)
+module Keeper_autonomy = Keeper_autonomy
+module Keeper_verifier = Keeper_verifier
+
+(* Autonomy Adjuster — Feedback Closure (Phase 4) *)
+module Autonomy_adjuster = Autonomy_adjuster
+
 module Tool_goals = Tool_goals
 module Tool_trpg = Tool_trpg
 module Trpg_store = Trpg_store

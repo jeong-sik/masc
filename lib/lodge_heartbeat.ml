@@ -2314,6 +2314,7 @@ let rec execute_agent_action ~agent_name ~action =
         Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
       else begin
         let vr = Post_verifier.verify ~content in
+        Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
         if not (Post_verifier.is_acceptable vr) then begin
           let reason = Post_verifier.verdict_to_string vr.overall in
           Eio.traceln "   🚫 [%s] Post rejected by verifier: %s" agent_name reason;
@@ -2346,6 +2347,7 @@ let rec execute_agent_action ~agent_name ~action =
         Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id
       else begin
         let vr = Post_verifier.verify ~content in
+        Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
         if not (Post_verifier.is_acceptable vr) then begin
           let reason = Post_verifier.verdict_to_string vr.overall in
           Eio.traceln "   🚫 [%s] Comment rejected by verifier: %s" agent_name reason;

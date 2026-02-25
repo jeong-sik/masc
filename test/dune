@@ -62,11 +62,11 @@
  (modules test_planning_eio)
  (libraries masc_mcp alcotest str yojson))
 
-; Lodge_selection module tests (Thompson Sampling)
+; Lodge_selection module tests (Thompson Sampling + Health Gate)
 (test
  (name test_lodge_selection)
  (modules test_lodge_selection)
- (libraries masc_mcp alcotest str yojson))
+ (libraries masc_mcp alcotest eio eio_main str yojson))
 
 ; Gardener module tests (Self-Organizing Ecosystem)
 (test

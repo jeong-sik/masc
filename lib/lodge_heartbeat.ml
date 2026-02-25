@@ -2313,20 +2313,31 @@ let rec execute_agent_action ~agent_name ~action =
       else if is_duplicate_post ~agent_name ~content then
         Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
       else begin
-        match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
-        | Ok post ->
-            let post_id = Board.Post_id.to_string post.id in
-            Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
-            record_agent_activity ~name:agent_name;
-            record_rate_action ~agent_name `Post;
-            record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
-            record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
-            Lodge_memory.store {
-              agent_name; action_type = "post"; content; context = "LLM decision";
-              board_id = Some post_id; timestamp = Time_compat.now ();
-            }
-        | Error e ->
-            Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
+        let vr = Post_verifier.verify ~content in
+        if not (Post_verifier.is_acceptable vr) then begin
+          let reason = Post_verifier.verdict_to_string vr.overall in
+          Eio.traceln "   🚫 [%s] Post rejected by verifier: %s" agent_name reason;
+          Agent_health.record_failure ~agent_name ~reason
+        end else begin
+          (match vr.overall with
+           | Post_verifier.Warn reason ->
+               Eio.traceln "   ⚠️ [%s] Post verifier warning: %s" agent_name reason
+           | _ -> ());
+          match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
+          | Ok post ->
+              let post_id = Board.Post_id.to_string post.id in
+              Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
+              record_agent_activity ~name:agent_name;
+              record_rate_action ~agent_name `Post;
+              record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
+              record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
+              Lodge_memory.store {
+                agent_name; action_type = "post"; content; context = "LLM decision";
+                board_id = Some post_id; timestamp = Time_compat.now ();
+              }
+          | Error e ->
+              Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
+        end
       end
   | ActionComment (post_id, content) ->
       if String.length content < 3 then
@@ -2334,21 +2345,32 @@ let rec execute_agent_action ~agent_name ~action =
       else if not (can_agent_comment ~agent_name ~post_id) then
         Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id
       else begin
-        match Board.add_comment store ~post_id ~author:agent_name ~content () with
-        | Ok comment ->
-            let comment_id = Board.Comment_id.to_string comment.id in
-            Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
-            record_agent_comment ~agent_name ~post_id;
-            record_agent_activity ~name:agent_name;
-            record_rate_action ~agent_name `Comment;
-            record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
-            record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
-            Lodge_memory.store {
-              agent_name; action_type = "comment"; content; context = post_id;
-              board_id = Some post_id; timestamp = Time_compat.now ();
-            }
-        | Error e ->
-            Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
+        let vr = Post_verifier.verify ~content in
+        if not (Post_verifier.is_acceptable vr) then begin
+          let reason = Post_verifier.verdict_to_string vr.overall in
+          Eio.traceln "   🚫 [%s] Comment rejected by verifier: %s" agent_name reason;
+          Agent_health.record_failure ~agent_name ~reason
+        end else begin
+          (match vr.overall with
+           | Post_verifier.Warn reason ->
+               Eio.traceln "   ⚠️ [%s] Comment verifier warning: %s" agent_name reason
+           | _ -> ());
+          match Board.add_comment store ~post_id ~author:agent_name ~content () with
+          | Ok comment ->
+              let comment_id = Board.Comment_id.to_string comment.id in
+              Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
+              record_agent_comment ~agent_name ~post_id;
+              record_agent_activity ~name:agent_name;
+              record_rate_action ~agent_name `Comment;
+              record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
+              record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
+              Lodge_memory.store {
+                agent_name; action_type = "comment"; content; context = post_id;
+                board_id = Some post_id; timestamp = Time_compat.now ();
+              }
+          | Error e ->
+              Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
+        end
       end
   | ActionUpvote post_id ->
       (match Board.vote store ~voter:agent_name ~post_id ~direction:Board.Up with

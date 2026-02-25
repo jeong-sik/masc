@@ -95,6 +95,7 @@
    notify
    orchestrator
    planning_eio
+   post_verifier
    process_eio
    progress
    pulse

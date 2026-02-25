@@ -2640,13 +2640,25 @@ let tick ~config ~pending_triggers =
 
   (* Run check-ins: each selected agent gets LLM decision + execution *)
   let checkins = List.map (fun (name, trigger) ->
+    (* Health gate: skip agents with open circuit breakers *)
+    if not (Agent_health.is_healthy ~agent_name:name) then
+      (name, trigger, Skipped "agent unhealthy (circuit breaker open)")
     (* Rate limit check *)
-    if not (check_rate_limit ~agent_name:name `Post) then
+    else if not (check_rate_limit ~agent_name:name `Post) then
       (name, trigger, Skipped "rate limit: too many posts today")
     else begin
       let trigger_reason = string_of_trigger trigger in
       let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
-      execute_agent_action ~agent_name:name ~action;
+      (try
+        execute_agent_action ~agent_name:name ~action;
+        (* Record health outcome — skip is neutral, not a failure *)
+        (match action with
+         | ActionSkip -> ()
+         | _ -> Agent_health.record_success ~agent_name:name)
+      with exn ->
+        Agent_health.record_failure ~agent_name:name
+          ~reason:(Printexc.to_string exn);
+        Printf.printf "[lodge] Agent %s action failed: %s\n%!" name (Printexc.to_string exn));
       record_checkin ~agent_name:name;
       let summary = match action with
         | ActionPost content -> Printf.sprintf "Posted: %s" (utf8_truncate content 40)
@@ -2787,10 +2799,20 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
           if not (is_agent_active ~name) then begin
             let recent_posts = Board.list_posts (Board.global ()) ~limit:10 () in
             let on_tick ~name ~state:_ =
-              let trigger_reason = "self-heartbeat continuation" in
-              let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
-              execute_agent_action ~agent_name:name ~action;
-              record_agent_activity ~name
+              if not (Agent_health.is_healthy ~agent_name:name) then
+                Printf.printf "[lodge] Skipping self-heartbeat for %s (unhealthy)\n%!" name
+              else begin
+                let trigger_reason = "self-heartbeat continuation" in
+                let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+                (try
+                  execute_agent_action ~agent_name:name ~action;
+                  Agent_health.record_success ~agent_name:name;
+                  record_agent_activity ~name
+                with exn ->
+                  Agent_health.record_failure ~agent_name:name
+                    ~reason:(Printexc.to_string exn);
+                  Printf.printf "[lodge] Self-heartbeat %s failed: %s\n%!" name (Printexc.to_string exn))
+              end
             in
             start_agent_heartbeat ~sw ~clock ~name ~on_tick
           end

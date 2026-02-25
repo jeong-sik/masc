@@ -6,6 +6,7 @@
    ag_ui
    agent_card
    agent_ecosystem
+   agent_health
    agent_identity
    agent_neo4j
    agent_registry_eio

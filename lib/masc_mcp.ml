@@ -90,6 +90,7 @@ module Orchestrator = Orchestrator
 module Agent_card = Agent_card
 module Agent_identity = Agent_identity
 module Agent_ecosystem = Agent_ecosystem
+module Agent_health = Agent_health
 module Agent_neo4j = Agent_neo4j
 module Agent_registry_eio = Agent_registry_eio
 module Agent_planner = Agent_planner

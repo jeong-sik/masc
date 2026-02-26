@@ -3663,6 +3663,24 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
   };
 
   {
+    name = "masc_governance_report";
+    description = "Generate a governance summary report from the audit trail. Aggregates per-agent action counts, cost estimates, token usage, and failure rates over a time period. Use for periodic governance review and cost tracking.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("since", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Start of period as Unix timestamp string (optional, defaults to all time)");
+        ]);
+        ("until", `Assoc [
+          ("type", `String "string");
+          ("description", `String "End of period as Unix timestamp string (optional, defaults to now)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
     name = "masc_governance_set";
     description = "Configure governance policies for the room. Enables audit logging, anomaly detection, and agent isolation. Enterprise security for production use.";
     input_schema = `Assoc [

@@ -291,22 +291,33 @@ let role_to_string = function
   | Admin -> "admin"
   | Unassigned -> "unassigned"
 
-let role_of_string = function
-  | "writer" | "write" | "author" | "implementer" -> Writer
-  | "reviewer" | "review" | "qa" | "auditor" -> Reviewer
-  | "admin" | "administrator" | "orchestrator" -> Admin
-  | _ -> Unassigned
+(** Parse a role string, returning [None] for unrecognized values.
+    "unassigned" maps to [Some Unassigned]; truly unknown strings return [None]. *)
+let role_of_string_opt = function
+  | "writer" | "write" | "author" | "implementer" -> Some Writer
+  | "reviewer" | "review" | "qa" | "auditor" -> Some Reviewer
+  | "admin" | "administrator" | "orchestrator" -> Some Admin
+  | "unassigned" -> Some Unassigned
+  | _ -> None
+
+(** Parse a role string, defaulting to [Unassigned] for unrecognized values.
+    Prefer [role_of_string_opt] when the caller can surface parse errors. *)
+let role_of_string s =
+  role_of_string_opt s |> Option.value ~default:Unassigned
 
 let role_to_yojson r = `String (role_to_string r)
 
 let role_of_yojson = function
-  | `String s -> Ok (role_of_string s)
+  | `String s ->
+    (match role_of_string_opt s with
+     | Some r -> Ok r
+     | None -> Error (Printf.sprintf "role_of_yojson: unknown role %S" s))
   | _ -> Error "role_of_yojson: expected string"
 
 (** Get role from identity metadata *)
 let get_role identity =
   match List.assoc_opt "role" identity.metadata with
-  | Some s -> role_of_string s
+  | Some s -> role_of_string_opt s |> Option.value ~default:Unassigned
   | None -> Unassigned
 
 (** Set role in identity metadata *)
@@ -317,9 +328,13 @@ let set_role identity role =
 (** Check if agent role satisfies a required role.
     Admin can satisfy any requirement. Unassigned requirement is satisfied by any role. *)
 let role_satisfies ~(required : role) ~(agent_role : role) : bool =
-  match required with
-  | Unassigned -> true  (* No requirement *)
-  | _ -> agent_role = required || agent_role = Admin
+  match required, agent_role with
+  | Unassigned, _ -> true        (* No requirement — any role passes *)
+  | _, Admin -> true             (* Admin satisfies any requirement *)
+  | Writer, Writer -> true
+  | Reviewer, Reviewer -> true
+  | Admin, _ -> false            (* Only Admin satisfies Admin requirement — handled above *)
+  | _ -> false
 
 (** {1 MAGI Archetype System} *)
 

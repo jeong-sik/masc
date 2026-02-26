@@ -267,12 +267,17 @@ let add_task_handler (room_config: Room.config) (data: string) : string =
     let response = Pb.AddTaskResponse.make ~task_id:result ~success () in
     encode_add_task_response response
 
-(** ClaimTask handler - assign task to agent. *)
+(** ClaimTask handler - assign task to agent.
+    TODO(A-3): ClaimTaskRequest proto lacks an agent_role field.
+    Add `string agent_role = 3` to proto/masc.proto and regenerate
+    to enable role-based claim filtering over gRPC. Until then the
+    call defaults to Unassigned, so role-gated tasks will be rejected. *)
 let claim_task_handler (room_config: Room.config) (data: string) : string =
   match decode_claim_task_request data with
   | None -> make_error_response "Invalid ClaimTaskRequest"
   | Some req ->
-    let result = Room.claim_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id () in
+    let agent_role = Agent_identity.Unassigned in
+    let result = Room.claim_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id ~agent_role () in
     let success, message = match result with
       | Ok msg -> (true, msg)
       | Error e -> (false, Types.masc_error_to_string e)

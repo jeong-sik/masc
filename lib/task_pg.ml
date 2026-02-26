@@ -70,6 +70,16 @@ let create_idx_created_q =
   (Caqti_type.unit ->. Caqti_type.unit)
   "CREATE INDEX IF NOT EXISTS idx_tasks_created ON masc_tasks (created_at DESC)"
 
+(** Migration: add required_role column (idempotent via IF NOT EXISTS trick).
+    PostgreSQL lacks IF NOT EXISTS for ALTER TABLE ADD COLUMN before v11,
+    so we catch the duplicate-column error gracefully. *)
+let add_required_role_column_q =
+  (Caqti_type.unit ->. Caqti_type.unit)
+  "DO $$ BEGIN \
+     ALTER TABLE masc_tasks ADD COLUMN required_role TEXT NOT NULL DEFAULT 'unassigned'; \
+   EXCEPTION WHEN duplicate_column THEN NULL; \
+   END $$"
+
 (** {1 Initialization} *)
 
 let create pool =
@@ -80,6 +90,7 @@ let create pool =
     let* () = C.exec create_idx_priority_q () in
     let* () = C.exec create_idx_assignee_q () in
     let* () = C.exec create_idx_created_q () in
+    let* () = C.exec add_required_role_column_q () in
     Ok ()
   ) pool in
   match init_result with
@@ -131,34 +142,39 @@ let status_of_db ~status ~assignee ~claimed_at ~started_at ~completed_at ~cancel
 
 (** {1 Queries} *)
 
-(* Row type for task: 12 fields packed as t4(t3, t3, t3, t3)
+(* Row type for task: 13 fields packed as t2(t4(t3,t3,t3,t3), string)
    Core: id, title, description
    Meta: priority, status, assignee
    Timestamps: claimed_at, started_at, completed_at
-   Extra: created_at, notes, files *)
+   Extra: created_at, notes, files
+   Role: required_role *)
 let task_row_t = Caqti_type.(
-  t4
-    (t3 string string string)                              (* id, title, description *)
-    (t3 int string (option string))                        (* priority, status, assignee *)
-    (t3 (option string) (option string) (option string))   (* claimed_at, started_at, completed_at *)
-    (t3 string (option string) string)                     (* created_at, notes, files *)
+  t2
+    (t4
+      (t3 string string string)                              (* id, title, description *)
+      (t3 int string (option string))                        (* priority, status, assignee *)
+      (t3 (option string) (option string) (option string))   (* claimed_at, started_at, completed_at *)
+      (t3 string (option string) string))                    (* created_at, notes, files *)
+    string                                                   (* required_role *)
 )
 
-(* Insert type: 10 fields packed as t4(t3, t3, t2, t2) *)
+(* Insert type: 11 fields packed as t2(t4(t3, t3, t2, t2), string) *)
 let insert_task_t = Caqti_type.(
-  t4
-    (t3 string string string)                              (* id, title, description *)
-    (t3 int string (option string))                        (* priority, status, assignee *)
-    (t2 (option string) (option string))                   (* claimed_at, started_at *)
-    (t2 (option string) string)                            (* completed_at, created_at *)
+  t2
+    (t4
+      (t3 string string string)                              (* id, title, description *)
+      (t3 int string (option string))                        (* priority, status, assignee *)
+      (t2 (option string) (option string))                   (* claimed_at, started_at *)
+      (t2 (option string) string))                           (* completed_at, created_at *)
+    string                                                   (* required_role *)
 )
 
 let insert_task_q =
   (insert_task_t ->. Caqti_type.unit)
   "INSERT INTO masc_tasks \
    (id, title, description, priority, status, assignee, claimed_at, started_at, \
-    completed_at, created_at, updated_at, files) \
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, '[]') \
+    completed_at, created_at, updated_at, files, required_role) \
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, '[]', $11) \
    ON CONFLICT (id) DO UPDATE SET \
      title = EXCLUDED.title, \
      description = EXCLUDED.description, \
@@ -169,11 +185,12 @@ let insert_task_q =
      started_at = EXCLUDED.started_at, \
      completed_at = EXCLUDED.completed_at, \
      updated_at = EXCLUDED.created_at, \
+     required_role = EXCLUDED.required_role, \
      version = masc_tasks.version + 1"
 
 let task_columns =
   "id, title, description, priority, status, assignee, \
-   claimed_at, started_at, completed_at, created_at, notes, files"
+   claimed_at, started_at, completed_at, created_at, notes, files, required_role"
 
 let get_task_q =
   (Caqti_type.string ->? task_row_t)
@@ -210,29 +227,34 @@ let update_status_q =
 (** {1 Operations} *)
 
 (** Convert nested tuple row to task *)
-let row_to_task ((id, title, description), (priority, status, assignee),
-                 (claimed_at, started_at, completed_at), (created_at, notes, files_json)) : task =
+let row_to_task (((id, title, description), (priority, status, assignee),
+                 (claimed_at, started_at, completed_at), (created_at, notes, files_json)),
+                 required_role_str) : task =
   let files = try
     match Yojson.Safe.from_string files_json with
     | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
     | _ -> []
   with _ -> [] in
+  let required_role = Agent_identity.role_of_string required_role_str in
   {
     id; title; description; priority; files; created_at;
     worktree = None;  (* Worktree loaded separately if needed *)
-    required_role = Agent_identity.Unassigned;
+    required_role;
     task_status = status_of_db ~status ~assignee ~claimed_at ~started_at
                     ~completed_at ~cancelled_at:None ~cancelled_by:None ~notes ~reason:None;
   }
 
-let add_task t ~id ~title ~description ~priority ~created_at =
+let add_task t ~id ~title ~description ~priority ~created_at
+    ?(required_role = Agent_identity.Unassigned) () =
   let status_str, assignee, claimed_at, started_at, completed_at, _, _, _ =
     status_to_db Todo in
+  let required_role_str = Agent_identity.role_to_string required_role in
   let params = (
-    (id, title, description),
-    (priority, status_str, assignee),
-    (claimed_at, started_at),
-    (completed_at, created_at)
+    ((id, title, description),
+     (priority, status_str, assignee),
+     (claimed_at, started_at),
+     (completed_at, created_at)),
+    required_role_str
   ) in
   let result = Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
@@ -293,11 +315,13 @@ let migrate_from_backlog t (backlog : backlog) =
   let results = List.map (fun (task : task) ->
     let status_str, assignee, claimed_at, started_at, completed_at, _, _, _ =
       status_to_db task.task_status in
+    let required_role_str = Agent_identity.role_to_string task.required_role in
     let params = (
-      (task.id, task.title, task.description),
-      (task.priority, status_str, assignee),
-      (claimed_at, started_at),
-      (completed_at, task.created_at)
+      ((task.id, task.title, task.description),
+       (task.priority, status_str, assignee),
+       (claimed_at, started_at),
+       (completed_at, task.created_at)),
+      required_role_str
     ) in
     let result = Caqti_eio.Pool.use (fun conn ->
       let module C = (val conn : Caqti_eio.CONNECTION) in

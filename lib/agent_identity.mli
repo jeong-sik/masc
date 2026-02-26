@@ -83,7 +83,15 @@ val equal_role : role -> role -> bool
 val show_role : role -> string
 
 val role_to_string : role -> string
+
+(** Parse a role string, returning [None] for unrecognized values.
+    "unassigned" maps to [Some Unassigned]; truly unknown strings return [None]. *)
+val role_of_string_opt : string -> role option
+
+(** Parse a role string, defaulting to [Unassigned] for unrecognized values.
+    Prefer [role_of_string_opt] when the caller can surface parse errors. *)
 val role_of_string : string -> role
+
 val role_to_yojson : role -> Yojson.Safe.t
 val role_of_yojson : Yojson.Safe.t -> (role, string) result
 

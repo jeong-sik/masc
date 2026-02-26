@@ -653,6 +653,7 @@ let add_task config ~title ~priority ~description =
     files = [];
     created_at = now_iso ();
     worktree = None;  (* Linked when worktree is created *)
+    required_role = Agent_identity.Unassigned;
   } in
 
   let new_backlog = {
@@ -664,6 +665,37 @@ let add_task config ~title ~priority ~description =
 
   let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
   Printf.sprintf "✅ Added %s: %s" task_id title
+
+(** Add task with a required role constraint *)
+let add_task_with_role config ~title ~priority ~description ~required_role =
+  ensure_initialized config;
+
+  let backlog = read_backlog config in
+  let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+
+  let new_task = {
+    id = task_id;
+    title;
+    description;
+    task_status = Todo;
+    priority;
+    files = [];
+    created_at = now_iso ();
+    worktree = None;
+    required_role;
+  } in
+
+  let new_backlog = {
+    tasks = backlog.tasks @ [new_task];
+    last_updated = now_iso ();
+    version = backlog.version + 1;
+  } in
+  write_backlog config new_backlog;
+
+  let role_str = Agent_identity.role_to_string required_role in
+  let _ = broadcast config ~from_agent:"system"
+    ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
+  Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str
 
 (** Add multiple tasks in a batch *)
 let batch_add_tasks config tasks =
@@ -685,6 +717,7 @@ let batch_add_tasks config tasks =
           files = [];
           created_at = now_iso ();
           worktree = None;
+          required_role = Agent_identity.Unassigned;
         }
       ) tasks in
       let new_backlog = {
@@ -757,8 +790,11 @@ let claim_task config ~agent_name ~task_id =
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
-(** Result-returning version of claim_task for type-safe error handling *)
-let claim_task_r config ~agent_name ~task_id : string Types.masc_result =
+(** Result-returning version of claim_task for type-safe error handling.
+    When [agent_role] is provided and the task has a [required_role],
+    the claim is rejected if the roles do not match. *)
+let claim_task_r config ~agent_name ~task_id
+    ?(agent_role = Agent_identity.Unassigned) () : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else match validate_agent_name_r agent_name, validate_task_id_r task_id with
   | Error e, _ -> Error e
@@ -768,39 +804,53 @@ let claim_task_r config ~agent_name ~task_id : string Types.masc_result =
     with_file_lock config backlog_path (fun () ->
       try
         let backlog = read_backlog config in
-        let found = ref false in
-        let already_claimed = ref None in
-        let new_tasks = List.map (fun task ->
-          if task.id = task_id then begin
-            found := true;
-            match task.task_status with
-            | Todo -> { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
-            | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
-                already_claimed := Some assignee; task
-          end else task
-        ) backlog.tasks in
-        if not !found then Error (Types.TaskNotFound task_id)
-        else match !already_claimed with
-          | Some other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
-          | None ->
-              let new_backlog = {
-                tasks = new_tasks;
-                last_updated = now_iso ();
-                version = backlog.version + 1;
-              } in
-              write_backlog config new_backlog;
-              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-              if Sys.file_exists agent_file then begin
-                let json = read_json config agent_file in
-                match agent_of_yojson json with
-                | Ok agent ->
-                    let updated = { agent with status = Busy; current_task = Some task_id } in
-                    write_json config agent_file (agent_to_yojson updated)
-                | Error _ -> ()
-              end;
-              let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
-              log_event config (Printf.sprintf "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}" agent_name task_id (now_iso ()));
-              Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
+        (* Check role constraint before attempting claim *)
+        let target_task = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
+        (match target_task with
+        | None -> Error (Types.TaskNotFound task_id)
+        | Some task ->
+          if not (Agent_identity.role_satisfies
+                    ~required:task.required_role ~agent_role) then
+            Error (Types.TaskRoleMismatch {
+              task_id;
+              required = Agent_identity.role_to_string task.required_role;
+              actual = Agent_identity.role_to_string agent_role;
+            })
+          else begin
+            let found = ref false in
+            let already_claimed = ref None in
+            let new_tasks = List.map (fun t ->
+              if t.id = task_id then begin
+                found := true;
+                match t.task_status with
+                | Todo -> { t with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
+                | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
+                    already_claimed := Some assignee; t
+              end else t
+            ) backlog.tasks in
+            if not !found then Error (Types.TaskNotFound task_id)
+            else match !already_claimed with
+              | Some other -> Error (Types.TaskAlreadyClaimed { task_id; by = other })
+              | None ->
+                  let new_backlog = {
+                    tasks = new_tasks;
+                    last_updated = now_iso ();
+                    version = backlog.version + 1;
+                  } in
+                  write_backlog config new_backlog;
+                  let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+                  if Sys.file_exists agent_file then begin
+                    let json = read_json config agent_file in
+                    match agent_of_yojson json with
+                    | Ok agent ->
+                        let updated = { agent with status = Busy; current_task = Some task_id } in
+                        write_json config agent_file (agent_to_yojson updated)
+                    | Error _ -> ()
+                  end;
+                  let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+                  log_event config (Printf.sprintf "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}" agent_name task_id (now_iso ()));
+                  Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
+          end)
       with e -> Error (Types.IoError (Printexc.to_string e))
     )
 

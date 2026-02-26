@@ -1,15 +1,12 @@
 //! Endgame detection and overlay rendering.
 //!
-//! Three detection paths:
-//! 1. **TPK** — all `Actor` entities have `is_dead = true`
-//! 2. **Quest complete** — `NarrativeReceived` with `phase == "endgame"`
-//! 3. **Round runner signal** — `RoundRunner.game_ended` atomic flag
+//! Canonical detection path:
+//! 1. **Session outcome** — `session.outcome` SSE event
 
 use bevy::prelude::*;
 use std::sync::atomic::Ordering;
 
-use crate::game::components::Actor;
-use crate::game::events::{NarrativeReceived, SessionOutcome};
+use crate::game::events::SessionOutcome;
 use crate::game::round_runner::RoundRunner;
 
 /// Tracks whether the endgame overlay has been shown (prevents re-trigger).
@@ -25,22 +22,19 @@ enum EndgameTone {
     Draw,
 }
 
-/// Monitors multiple signals and triggers the endgame overlay once.
+/// Monitors canonical session outcome and triggers the endgame overlay once.
 pub fn detect_endgame(
-    actors: Query<&Actor>,
     runner: Option<Res<RoundRunner>>,
-    mut narratives: MessageReader<NarrativeReceived>,
     mut outcomes: MessageReader<SessionOutcome>,
     mut endgame: ResMut<EndgameState>,
 ) {
     if endgame.triggered {
         // Drain the reader even when already triggered to avoid stale buffers.
-        for _ in narratives.read() {}
         for _ in outcomes.read() {}
         return;
     }
 
-    // Path 0: Canonical session outcome.
+    // Canonical session outcome.
     if let Some(SessionOutcome(payload)) = outcomes.read().next() {
         endgame.triggered = true;
         let tone = match payload.outcome.as_str() {
@@ -56,41 +50,6 @@ pub fn detect_endgame(
         show_endgame_overlay(message, tone);
         if let Some(runner) = &runner {
             runner.game_ended.store(true, Ordering::SeqCst);
-        }
-        for _ in narratives.read() {}
-    }
-
-    // Path 1: TPK — all actors dead.
-    let actor_count = actors.iter().count();
-    if actor_count > 0 {
-        let dead_count = actors.iter().filter(|a| a.is_dead).count();
-        if dead_count == actor_count {
-            endgame.triggered = true;
-            show_endgame_overlay("파티가 전멸했습니다.", EndgameTone::Defeat);
-            if let Some(runner) = &runner {
-                runner.game_ended.store(true, Ordering::SeqCst);
-            }
-            // Drain remaining narratives.
-            for _ in narratives.read() {}
-            for _ in outcomes.read() {}
-            return;
-        }
-    }
-
-    // Path 2: Quest complete — endgame narrative phase.
-    for NarrativeReceived(payload) in narratives.read() {
-        if payload.phase == "endgame" {
-            endgame.triggered = true;
-            show_endgame_overlay(&payload.text, EndgameTone::Victory);
-            return;
-        }
-    }
-
-    // Path 3: Round runner detected game ended via response JSON.
-    if let Some(runner) = &runner {
-        if runner.game_ended.load(Ordering::SeqCst) {
-            endgame.triggered = true;
-            show_endgame_overlay("모험이 끝났습니다.", EndgameTone::Victory);
         }
     }
 }

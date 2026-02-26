@@ -1303,6 +1303,14 @@ type session_outcome =
   | Defeat
   | Draw
 
+type outcome_source =
+  | Outcome_source_flag
+  | Outcome_source_dm_signal
+  | Outcome_source_all_players_dead
+  | Outcome_source_max_turn
+  | Outcome_source_stagnation
+  | Outcome_source_unknown
+
 let string_of_session_outcome = function
   | Victory -> "victory"
   | Defeat -> "defeat"
@@ -1312,6 +1320,55 @@ let summary_of_session_outcome = function
   | Victory -> "Victory condition met."
   | Defeat -> "Defeat condition met."
   | Draw -> "Draw condition met."
+
+let string_of_outcome_source = function
+  | Outcome_source_flag -> "flag"
+  | Outcome_source_dm_signal -> "dm_signal"
+  | Outcome_source_all_players_dead -> "all_players_dead"
+  | Outcome_source_max_turn -> "max_turn"
+  | Outcome_source_stagnation -> "stagnation"
+  | Outcome_source_unknown -> "unknown"
+
+let outcome_source_of_reason reason =
+  let trimmed = String.trim reason in
+  if starts_with trimmed "flag:" then Outcome_source_flag
+  else if starts_with trimmed "dm_signal:" then Outcome_source_dm_signal
+  else if trimmed = "all_players_dead" then Outcome_source_all_players_dead
+  else if trimmed = "max_turn_reached" then Outcome_source_max_turn
+  else if trimmed = "stagnation" then Outcome_source_stagnation
+  else Outcome_source_unknown
+
+let outcome_source_from_payload_opt (payload : Yojson.Safe.t) : string option =
+  match payload |> member "outcome_source" with
+  | `String raw ->
+      let source = String.trim raw in
+      if source = "" then None else Some source
+  | _ -> None
+
+let outcome_source_from_payload (payload : Yojson.Safe.t) : string =
+  match outcome_source_from_payload_opt payload with
+  | Some source -> source
+  | None ->
+      let reason =
+        match payload |> member "reason" with
+        | `String raw -> raw
+        | _ -> ""
+      in
+      string_of_outcome_source (outcome_source_of_reason reason)
+
+let ensure_outcome_payload_source (payload : Yojson.Safe.t) : Yojson.Safe.t =
+  let source = outcome_source_from_payload payload in
+  match payload with
+  | `Assoc fields ->
+      `Assoc
+        (("outcome_source", `String source)
+        :: List.remove_assoc "outcome_source" fields)
+  | _ -> payload
+
+let stagnation_level_from_payload (payload : Yojson.Safe.t) : int =
+  match payload |> member "stagnation_level" with
+  | `Int n when n > 0 -> n
+  | _ -> 0
 
 let default_end_rules_local : Trpg_preset_store.end_rules =
   {
@@ -2037,6 +2094,44 @@ let detect_stagnation ~(events : Trpg_engine_event.t list) ~threshold =
     not (List.exists (fun (ev : Trpg_engine_event.t) ->
              is_meaningful_event_type ev.event_type) recent_events)
 
+let stagnation_detection_turn_threshold = 5
+let stagnation_escalation_threshold = 3
+
+let latest_stagnation_pressure_level ~(events : Trpg_engine_event.t list) : int =
+  let latest_meaningful_seq =
+    events
+    |> List.fold_left
+         (fun acc (ev : Trpg_engine_event.t) ->
+           if is_meaningful_event_type ev.event_type then max acc ev.seq else acc)
+         0
+  in
+  let latest_pressure_seq, latest_pressure_level =
+    events
+    |> List.fold_left
+         (fun (best_seq, best_level) (ev : Trpg_engine_event.t) ->
+           if ev.event_type <> Trpg_engine_event.World_event then
+             (best_seq, best_level)
+           else
+             let event_type =
+               match ev.payload |> member "event_type" with
+               | `String raw -> String.lowercase_ascii (String.trim raw)
+               | _ -> ""
+             in
+             if event_type <> "stagnation_pressure" then
+               (best_seq, best_level)
+             else
+               let level =
+                 match ev.payload |> member "stagnation_level" with
+                 | `Int n when n > 0 -> n
+                 | _ -> 1
+               in
+               if ev.seq >= best_seq then (ev.seq, level)
+               else (best_seq, best_level))
+         (0, 0)
+  in
+  if latest_pressure_seq = 0 || latest_meaningful_seq > latest_pressure_seq then 0
+  else latest_pressure_level
+
 let has_event_type (events : Trpg_engine_event.t list) event_type =
   List.exists
     (fun (ev : Trpg_engine_event.t) -> ev.event_type = event_type)
@@ -2064,7 +2159,8 @@ let latest_session_outcome_payload (events : Trpg_engine_event.t list) :
   events
   |> List.fold_left
        (fun acc (ev : Trpg_engine_event.t) ->
-         if ev.event_type = Trpg_engine_event.Session_outcome then Some ev.payload
+         if ev.event_type = Trpg_engine_event.Session_outcome then
+           Some (ensure_outcome_payload_source ev.payload)
          else acc)
        None
 
@@ -7442,6 +7538,18 @@ let handle_round_run ctx args : result =
       let latest_outcome_payload =
         ref (latest_session_outcome_payload session_events_before)
       in
+      let response_outcome_source =
+        ref
+          (match !latest_outcome_payload with
+          | Some payload -> outcome_source_from_payload payload
+          | None -> "none")
+      in
+      let response_stagnation_level =
+        ref
+          (match !latest_outcome_payload with
+          | Some payload -> stagnation_level_from_payload payload
+          | None -> 0)
+      in
       let* turn_before = read_state_turn derived in
       let unavailable_sampling =
         make_unavailable_sampling_state ~events:existing_events_before
@@ -7604,6 +7712,11 @@ let handle_round_run ctx args : result =
                     ("canon_warning_count", `Int (List.length canon_check.warnings));
                     ("memory_signals", `Int 0);
                     ("memory_guardrail_escalations", `Int 0);
+                    ("stagnation_level", `Int !response_stagnation_level);
+                    ("stagnation_turn_threshold", `Int stagnation_detection_turn_threshold);
+                    ( "stagnation_escalation_threshold",
+                      `Int stagnation_escalation_threshold );
+                    ("outcome_source", `String !response_outcome_source);
                     ("roll_audit_count", `Int 0);
                     ("roll_audit", `List []);
                   ] );
@@ -7612,6 +7725,8 @@ let handle_round_run ctx args : result =
                 match !latest_outcome_payload with
                 | Some payload -> payload
                 | None -> `Null );
+              ("outcome_source", `String !response_outcome_source);
+              ("stagnation_level", `Int !response_stagnation_level);
               ("events", `List []);
               ("room_status", `String room_status);
               ("state", state);
@@ -7652,6 +7767,9 @@ let handle_round_run ctx args : result =
         ref (join_window_closed_event :: phase_event :: intervention_events)
       in
       let statuses = ref [] in
+      let outcome_source_ref = ref "none" in
+      let stagnation_level_ref = ref 0 in
+      let stagnation_pressure_emitted = ref false in
       let success_count = ref 0 in
       let fallback_count = ref 0 in
       let schema_failures = ref 0 in
@@ -8629,17 +8747,23 @@ let handle_round_run ctx args : result =
       in
       let* next_derived = derive_state ~store ~room_id ~rule_module in
       let next_state = state_of_derived next_derived in
-      let computed_outcome =
-        if outcome_already_emitted then None
+      let* computed_outcome =
+        if outcome_already_emitted then (
+          outcome_source_ref := !response_outcome_source;
+          stagnation_level_ref := !response_stagnation_level;
+          Ok None )
         else
           match
             evaluate_session_outcome ~end_rules
               ~max_turn_override:outcome_max_turn_override ~state:next_state
               ~dm_reply:!dm_reply_ref
           with
-          | Some _ as outcome -> outcome
+          | Some ((_, reason) as outcome) ->
+              outcome_source_ref :=
+                string_of_outcome_source (outcome_source_of_reason reason);
+              stagnation_level_ref := 0;
+              Ok (Some outcome)
           | None ->
-              let stagnation_threshold = 5 in
               let all_events =
                 match
                   store.read_events ~room_id
@@ -8648,22 +8772,83 @@ let handle_round_run ctx args : result =
                 | Error _ -> []
               in
               let all_events = all_events @ !appended_events in
-              if detect_stagnation ~events:all_events ~threshold:stagnation_threshold
-              then Some (Draw, "stagnation")
-              else None
+              if
+                detect_stagnation ~events:all_events
+                  ~threshold:stagnation_detection_turn_threshold
+              then
+                let prior_level =
+                  latest_stagnation_pressure_level ~events:all_events
+                in
+                let next_level = prior_level + 1 in
+                stagnation_level_ref := next_level;
+                if next_level >= stagnation_escalation_threshold then (
+                  outcome_source_ref := "stagnation";
+                  Ok (Some (Draw, "stagnation")) )
+                else
+                  let pressure_payload =
+                    `Assoc
+                      [
+                        ("event_type", `String "stagnation_pressure");
+                        ("severity", `String "major");
+                        ( "description",
+                          `String
+                            (Printf.sprintf
+                               "Stagnation guard triggered (%d/%d): forcing higher stakes choices."
+                               next_level stagnation_escalation_threshold) );
+                        ("phase", `String phase);
+                        ("turn", `Int turn_after);
+                        ("stagnation_level", `Int next_level);
+                        ( "stagnation_turn_threshold",
+                          `Int stagnation_detection_turn_threshold );
+                        ( "stagnation_escalation_threshold",
+                          `Int stagnation_escalation_threshold );
+                      ]
+                  in
+                  let* pressure_event =
+                    append_event ~store ~room_id
+                      ~event_type:Trpg_engine_event.World_event
+                      ~payload:pressure_payload ()
+                  in
+                  stagnation_pressure_emitted := true;
+                  appended_events := !appended_events @ [ pressure_event ];
+                  statuses :=
+                    `Assoc
+                      [
+                        ("actor_id", `String "system");
+                        ("role", `String "system");
+                        ("keeper", `String "system");
+                        ("status", `String "stagnation_pressure");
+                        ("reason", `String "stagnation_guard");
+                        ("stage", `String "stagnation_guard");
+                        ("stagnation_level", `Int next_level);
+                      ]
+                    :: !statuses;
+                  Ok None
+              else (
+                stagnation_level_ref := 0;
+                Ok None )
       in
       let* final_derived =
         match computed_outcome with
-        | None -> Ok next_derived
+        | None ->
+            if !stagnation_pressure_emitted then
+              derive_state ~store ~room_id ~rule_module
+            else Ok next_derived
         | Some (outcome, reason) ->
             let outcome_str = string_of_session_outcome outcome in
             let summary = summary_of_session_outcome outcome in
+            let outcome_source =
+              if !outcome_source_ref = "none" then
+                string_of_outcome_source (outcome_source_of_reason reason)
+              else !outcome_source_ref
+            in
             let room_end_payload =
               `Assoc
                 [
                   ("room_id", `String room_id);
                   ("reason", `String reason);
                   ("outcome", `String outcome_str);
+                  ("outcome_source", `String outcome_source);
                 ]
             in
             let outcome_payload =
@@ -8674,6 +8859,8 @@ let handle_round_run ctx args : result =
                   ("summary", `String summary);
                   ("turn", `Int turn_after);
                   ("phase", `String phase);
+                  ("outcome_source", `String outcome_source);
+                  ("stagnation_level", `Int !stagnation_level_ref);
                 ]
             in
             let* room_end_event_opt =
@@ -8715,7 +8902,9 @@ let handle_round_run ctx args : result =
                   ]
             in
             appended_events := !appended_events @ [ memory_event ];
-            latest_outcome_payload := Some outcome_payload;
+            response_outcome_source := outcome_source;
+            response_stagnation_level := !stagnation_level_ref;
+            latest_outcome_payload := Some (ensure_outcome_payload_source outcome_payload);
             derive_state ~store ~room_id ~rule_module
       in
       let* _final_derived, final_state =
@@ -8797,6 +8986,20 @@ let handle_round_run ctx args : result =
           ~explicit:(Option.bind dm_persona_override dm_persona_id_of_string)
           ~dm_style
       in
+      let resolved_outcome_source =
+        match !latest_outcome_payload with
+        | Some payload -> outcome_source_from_payload payload
+        | None ->
+            if !outcome_source_ref <> "none" then !outcome_source_ref
+            else !response_outcome_source
+      in
+      let resolved_stagnation_level =
+        match !latest_outcome_payload with
+        | Some payload -> stagnation_level_from_payload payload
+        | None -> !stagnation_level_ref
+      in
+      response_outcome_source := resolved_outcome_source;
+      response_stagnation_level := resolved_stagnation_level;
       let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
       Ok
         (`Assoc
@@ -8850,6 +9053,11 @@ let handle_round_run ctx args : result =
                   ("canon_warning_count", `Int (List.length canon_check.warnings));
                   ("memory_signals", `Int memory_signal_count);
                   ("memory_guardrail_escalations", `Int memory_guardrail_escalations);
+                  ("stagnation_level", `Int resolved_stagnation_level);
+                  ("stagnation_turn_threshold", `Int stagnation_detection_turn_threshold);
+                  ( "stagnation_escalation_threshold",
+                    `Int stagnation_escalation_threshold );
+                  ("outcome_source", `String resolved_outcome_source);
                   ("roll_audit_count", `Int roll_audit_count);
                   ("roll_audit", `List roll_audit);
                 ] );
@@ -8858,6 +9066,8 @@ let handle_round_run ctx args : result =
               match !latest_outcome_payload with
               | Some payload -> payload
               | None -> `Null );
+            ("outcome_source", `String resolved_outcome_source);
+            ("stagnation_level", `Int resolved_stagnation_level);
             ("events", `List events_json);
             ( "room_status",
               match final_state |> member "status" with

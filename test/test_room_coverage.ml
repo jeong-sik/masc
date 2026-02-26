@@ -426,7 +426,7 @@ let test_claim_task_r_success () =
   with_test_env (fun config ->
     let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
 
-    let result = Room.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" in
+    let result = Room.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
     | Ok msg -> Alcotest.(check bool) "claim success" true (str_contains msg "claimed")
     | Error _ -> Alcotest.fail "Expected Ok"
@@ -437,7 +437,7 @@ let test_claim_task_r_already_claimed () =
     let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Room.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
 
-    let result = Room.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" in
+    let result = Room.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
     | Error Types.TaskAlreadyClaimed _ -> Alcotest.(check bool) "already claimed" true true
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed"
@@ -557,6 +557,7 @@ let test_append_archive_tasks () =
       files = [];
       created_at = "2026-01-01T00:00:00Z";
       worktree = None;
+      required_role = Agent_identity.Unassigned;
     } in
     Room.append_archive_tasks config [task];
 

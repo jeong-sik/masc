@@ -259,6 +259,68 @@ let to_display_string identity =
 let same_agent a b =
   a.session_key = b.session_key || a.agent_name = b.agent_name
 
+(** {1 Role System} *)
+
+(** Agent role in task workflows.
+    Controls which tasks an agent can claim via required_role filtering. *)
+type role =
+  | Writer     (** Produces artifacts: code, docs, designs *)
+  | Reviewer   (** Reviews artifacts: code review, QA, ethics *)
+  | Admin      (** Administrative: orchestration, assignment *)
+  | Unassigned (** No specific role (legacy/default) *)
+
+let pp_role fmt r =
+  Format.fprintf fmt "%s"
+    (match r with
+     | Writer -> "Writer"
+     | Reviewer -> "Reviewer"
+     | Admin -> "Admin"
+     | Unassigned -> "Unassigned")
+
+let equal_role a b =
+  match a, b with
+  | Writer, Writer | Reviewer, Reviewer | Admin, Admin | Unassigned, Unassigned -> true
+  | _ -> false
+
+let show_role r =
+  Format.asprintf "%a" pp_role r
+
+let role_to_string = function
+  | Writer -> "writer"
+  | Reviewer -> "reviewer"
+  | Admin -> "admin"
+  | Unassigned -> "unassigned"
+
+let role_of_string = function
+  | "writer" | "write" | "author" | "implementer" -> Writer
+  | "reviewer" | "review" | "qa" | "auditor" -> Reviewer
+  | "admin" | "administrator" | "orchestrator" -> Admin
+  | _ -> Unassigned
+
+let role_to_yojson r = `String (role_to_string r)
+
+let role_of_yojson = function
+  | `String s -> Ok (role_of_string s)
+  | _ -> Error "role_of_yojson: expected string"
+
+(** Get role from identity metadata *)
+let get_role identity =
+  match List.assoc_opt "role" identity.metadata with
+  | Some s -> role_of_string s
+  | None -> Unassigned
+
+(** Set role in identity metadata *)
+let set_role identity role =
+  let filtered = List.filter (fun (k, _) -> k <> "role") identity.metadata in
+  { identity with metadata = ("role", role_to_string role) :: filtered }
+
+(** Check if agent role satisfies a required role.
+    Admin can satisfy any requirement. Unassigned requirement is satisfied by any role. *)
+let role_satisfies ~(required : role) ~(agent_role : role) : bool =
+  match required with
+  | Unassigned -> true  (* No requirement *)
+  | _ -> agent_role = required || agent_role = Admin
+
 (** {1 MAGI Archetype System} *)
 
 (** MAGI archetypes for agent specialization *)

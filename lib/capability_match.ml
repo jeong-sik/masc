@@ -21,6 +21,7 @@ type agent_profile = {
   capabilities: string list;   (** Technical capabilities: ["code-review"; "testing"] *)
   model: string option;        (** LLM model, if relevant *)
   activity_level: float;       (** 0.0-1.0, higher = more active *)
+  role: Agent_identity.role;   (** Agent's role for task filtering *)
 } [@@deriving show, eq]
 
 (** Task requirements extracted from task content *)
@@ -30,6 +31,7 @@ type task_profile = {
   description: string;
   priority: int;
   keywords: string list;       (** Auto-extracted from title + description *)
+  required_role: Agent_identity.role;  (** Role required to claim this task *)
 } [@@deriving show, eq]
 
 (** Match result between one agent and one task *)
@@ -86,6 +88,7 @@ let task_profile_of_task (task : Types.task) : task_profile =
     description = task.description;
     priority = task.priority;
     keywords = extract_keywords text;
+    required_role = task.required_role;
   }
 
 (** Build an agent profile from GraphQL agent data (JSON) *)
@@ -99,6 +102,10 @@ let agent_profile_of_json (json : Yojson.Safe.t) : agent_profile option =
       | `String s -> String.split_on_char ',' s |> List.map String.trim
       | _ -> []
     in
+    let role = match json |> U.member "role" |> U.to_string_option with
+      | Some s -> Agent_identity.role_of_string s
+      | None -> Agent_identity.Unassigned
+    in
     Some {
       name;
       traits = json |> U.member "traits" |> to_string_list |> List.map normalize_word;
@@ -107,6 +114,7 @@ let agent_profile_of_json (json : Yojson.Safe.t) : agent_profile option =
       model = json |> U.member "model" |> U.to_string_option;
       activity_level =
         (try json |> U.member "activityLevel" |> U.to_float with _ -> 0.5);
+      role;
     }
   with _ -> None
 
@@ -119,6 +127,7 @@ let agent_profile_of_identity (id : Agent_identity.t) : agent_profile =
     capabilities = List.map normalize_word id.capabilities;
     model = None;
     activity_level = 0.5;
+    role = Agent_identity.get_role id;
   }
 
 (* ---------- Scoring ---------- *)
@@ -150,16 +159,21 @@ let keyword_overlap (reference : string list) (candidate : string list) : float 
     ) candidate in
     float_of_int (List.length matching) /. float_of_int (List.length reference)
 
-(** Compute match score between an agent and a task *)
+(** Compute match score between an agent and a task.
+    When the task has a required_role, agents without a matching role
+    receive a total_score of 0.0 (filtered out). *)
 let score (agent : agent_profile) (task : task_profile) : match_score =
+  let role_ok = Agent_identity.role_satisfies
+    ~required:task.required_role ~agent_role:agent.role in
   let trait_score = keyword_overlap task.keywords agent.traits in
   let interest_score = keyword_overlap task.keywords agent.interests in
   let capability_score = keyword_overlap task.keywords agent.capabilities in
-  let total_score =
+  let base_score =
     trait_score *. 0.4
     +. interest_score *. 0.4
     +. capability_score *. 0.2
   in
+  let total_score = if role_ok then base_score else 0.0 in
   {
     agent_name = agent.name;
     task_id = task.task_id;

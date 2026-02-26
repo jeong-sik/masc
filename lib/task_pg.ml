@@ -220,6 +220,7 @@ let row_to_task ((id, title, description), (priority, status, assignee),
   {
     id; title; description; priority; files; created_at;
     worktree = None;  (* Worktree loaded separately if needed *)
+    required_role = Agent_identity.Unassigned;
     task_status = status_of_db ~status ~assignee ~claimed_at ~started_at
                     ~completed_at ~cancelled_at:None ~cancelled_by:None ~notes ~reason:None;
   }

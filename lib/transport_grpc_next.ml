@@ -272,7 +272,7 @@ let claim_task_handler (room_config: Room.config) (data: string) : string =
   match decode_claim_task_request data with
   | None -> make_error_response "Invalid ClaimTaskRequest"
   | Some req ->
-    let result = Room.claim_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id in
+    let result = Room.claim_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id () in
     let success, message = match result with
       | Ok msg -> (true, msg)
       | Error e -> (false, Types.masc_error_to_string e)

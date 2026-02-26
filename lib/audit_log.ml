@@ -31,6 +31,7 @@ type action =
   | AuthFailure
   | CircuitOpen
   | CircuitClose
+  | SearchRefinement
   | Custom of string
 
 type audit_entry = {
@@ -40,6 +41,8 @@ type audit_entry = {
   room_id: string option;
   details: Yojson.Safe.t;
   outcome: outcome;
+  cost_estimate: float option;
+  token_count: int option;
 }
 
 (** {1 Serialization} *)
@@ -57,7 +60,27 @@ let action_to_string = function
   | AuthFailure -> "auth_failure"
   | CircuitOpen -> "circuit_open"
   | CircuitClose -> "circuit_close"
+  | SearchRefinement -> "search_refinement"
   | Custom name -> "custom:" ^ name
+
+let string_to_action = function
+  | "join" -> Join
+  | "leave" -> Leave
+  | "claim_task" -> ClaimTask
+  | "done_task" -> DoneTask
+  | "cancel_task" -> CancelTask
+  | "broadcast" -> Broadcast
+  | "suspend" -> Suspend
+  | "auth_success" -> AuthSuccess
+  | "auth_failure" -> AuthFailure
+  | "circuit_open" -> CircuitOpen
+  | "circuit_close" -> CircuitClose
+  | "search_refinement" -> SearchRefinement
+  | s when String.length s > 10 && String.sub s 0 10 = "tool_call:" ->
+      ToolCall (String.sub s 10 (String.length s - 10))
+  | s when String.length s > 7 && String.sub s 0 7 = "custom:" ->
+      Custom (String.sub s 7 (String.length s - 7))
+  | s -> Custom s
 
 let outcome_to_json = function
   | Success -> `Assoc [("status", `String "success")]
@@ -67,14 +90,61 @@ let outcome_to_json = function
     ]
 
 let entry_to_json (e : audit_entry) : Yojson.Safe.t =
-  `Assoc [
+  let base = [
     ("timestamp", `Float e.timestamp);
     ("agent_id", `String e.agent_id);
     ("action", `String (action_to_string e.action));
     ("room_id", match e.room_id with Some r -> `String r | None -> `Null);
     ("details", e.details);
     ("outcome", outcome_to_json e.outcome);
-  ]
+  ] in
+  let with_cost = match e.cost_estimate with
+    | Some c -> base @ [("cost_estimate", `Float c)]
+    | None -> base
+  in
+  let with_tokens = match e.token_count with
+    | Some t -> with_cost @ [("token_count", `Int t)]
+    | None -> with_cost
+  in
+  `Assoc with_tokens
+
+(** Parse a JSON object back into an audit_entry *)
+let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
+  try
+    let module U = Yojson.Safe.Util in
+    let timestamp = json |> U.member "timestamp" |> U.to_float in
+    let agent_id = json |> U.member "agent_id" |> U.to_string in
+    let action = json |> U.member "action" |> U.to_string |> string_to_action in
+    let room_id = json |> U.member "room_id" |> U.to_string_option in
+    let details =
+      try json |> U.member "details"
+      with _ -> `Null
+    in
+    let outcome =
+      let o = json |> U.member "outcome" in
+      let status = o |> U.member "status" |> U.to_string in
+      if status = "success" then Success
+      else
+        let reason = try o |> U.member "reason" |> U.to_string with _ -> "unknown" in
+        Failure reason
+    in
+    let cost_estimate =
+      try
+        match json |> U.member "cost_estimate" with
+        | `Float f -> Some f
+        | `Int i -> Some (float_of_int i)
+        | _ -> None
+      with _ -> None
+    in
+    let token_count =
+      try
+        match json |> U.member "token_count" with
+        | `Int i -> Some i
+        | _ -> None
+      with _ -> None
+    in
+    Some { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count }
+  with _ -> None
 
 (** {1 File Operations} *)
 
@@ -83,6 +153,25 @@ let mutex = Mutex.create ()
 let get_audit_path (config : Room.config) =
   let masc_dir = Room_utils.masc_dir config in
   Filename.concat masc_dir "audit.jsonl"
+
+(** Read all audit entries from the JSONL file *)
+let read_entries (config : Room.config) : audit_entry list =
+  let path = get_audit_path config in
+  if not (Sys.file_exists path) then []
+  else
+    let ic = open_in path in
+    let entries = ref [] in
+    (try
+      while true do
+        let line = input_line ic in
+        if String.trim line <> "" then
+          match entry_of_json (Yojson.Safe.from_string line) with
+          | Some e -> entries := e :: !entries
+          | None -> ()
+      done
+    with End_of_file -> ());
+    close_in ic;
+    List.rev !entries
 
 (** Recursively create directory (no shell, safe) *)
 let rec ensure_dir_safe dir =
@@ -123,6 +212,8 @@ let log_action
     ~action
     ?(room_id : string option)
     ?(details : Yojson.Safe.t = `Null)
+    ?(cost_estimate : float option)
+    ?(token_count : int option)
     ~outcome
     () =
   let entry = {
@@ -132,70 +223,73 @@ let log_action
     room_id;
     details;
     outcome;
+    cost_estimate;
+    token_count;
   } in
   append_entry config entry
 
 (** Convenience functions for common events *)
 
-let log_join config ~agent_id ~room_id =
+let log_join config ~agent_id ~room_id ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:Join ~room_id
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_leave config ~agent_id ~room_id =
+let log_leave config ~agent_id ~room_id ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:Leave ~room_id
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_claim_task config ~agent_id ~room_id ~task_id =
+let log_claim_task config ~agent_id ~room_id ~task_id ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:ClaimTask ~room_id
     ~details:(`Assoc [("task_id", `String task_id)])
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_done_task config ~agent_id ~room_id ~task_id =
+let log_done_task config ~agent_id ~room_id ~task_id ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:DoneTask ~room_id
     ~details:(`Assoc [("task_id", `String task_id)])
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_cancel_task config ~agent_id ~room_id ~task_id ~reason =
+let log_cancel_task config ~agent_id ~room_id ~task_id ~reason ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:CancelTask ~room_id
     ~details:(`Assoc [
       ("task_id", `String task_id);
       ("reason", `String reason);
     ])
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_broadcast config ~agent_id ~room_id ~message_preview =
+let log_broadcast config ~agent_id ~room_id ~message_preview ?cost_estimate ?token_count () =
   (* Truncate message for privacy/size *)
   let preview = if String.length message_preview > 100
     then String.sub message_preview 0 100 ^ "..."
     else message_preview in
   log_action config ~agent_id ~action:Broadcast ~room_id
     ~details:(`Assoc [("preview", `String preview)])
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_suspend config ~agent_id ~target_agent ~reason ~rooms_affected =
+let log_suspend config ~agent_id ~target_agent ~reason ~rooms_affected ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:Suspend
     ~details:(`Assoc [
       ("target_agent", `String target_agent);
       ("reason", `String reason);
       ("rooms_affected", `Int rooms_affected);
     ])
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_tool_call config ~agent_id ~tool_name ~success ~error_msg =
+let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate ?token_count () =
   let outcome = if success then Success else Failure (Option.value error_msg ~default:"unknown") in
-  log_action config ~agent_id ~action:(ToolCall tool_name) ~outcome ()
+  log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ~outcome ()
 
-let log_auth_attempt config ~agent_id ~success ~method_name =
+let log_auth_attempt config ~agent_id ~success ~method_name ?cost_estimate ?token_count () =
   let action = if success then AuthSuccess else AuthFailure in
   log_action config ~agent_id ~action
     ~details:(`Assoc [("method", `String method_name)])
+    ?cost_estimate ?token_count
     ~outcome:(if success then Success else Failure "auth_failed") ()
 
-let log_circuit_breaker config ~agent_id ~opened ~reason =
+let log_circuit_breaker config ~agent_id ~opened ~reason ?cost_estimate ?token_count () =
   let action = if opened then CircuitOpen else CircuitClose in
   log_action config ~agent_id ~action
     ~details:(`Assoc [("reason", `String reason)])
-    ~outcome:Success ()
+    ?cost_estimate ?token_count ~outcome:Success ()
 
 (** {1 Rotation & Cleanup} *)
 

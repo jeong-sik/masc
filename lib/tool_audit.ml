@@ -167,9 +167,136 @@ let handle_audit_stats ctx args =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
+(** {1 Governance Report} *)
+
+type agent_summary = {
+  agent_id : string;
+  action_count : int;
+  action_types : (string * int) list;
+  total_cost : float;
+  total_tokens : int;
+  failure_rate : float;
+}
+
+type governance_report = {
+  period_start : string;
+  period_end : string;
+  agents : agent_summary list;
+  total_actions : int;
+  total_cost : float;
+  total_tokens : int;
+  overall_failure_rate : float;
+}
+
+let governance_summary ?(since="") ?(until_time="") (entries : Audit_log.audit_entry list) : governance_report =
+  (* Filter by time range if provided *)
+  let since_ts = if since = "" then 0.0
+    else (try float_of_string since with _ -> 0.0)
+  in
+  let until_ts = if until_time = "" then infinity
+    else (try float_of_string until_time with _ -> infinity)
+  in
+  let filtered = List.filter (fun (e : Audit_log.audit_entry) ->
+    e.timestamp >= since_ts && e.timestamp <= until_ts
+  ) entries in
+  (* Group by agent_id *)
+  let agent_ids =
+    List.map (fun (e : Audit_log.audit_entry) -> e.agent_id) filtered
+    |> List.sort_uniq String.compare
+  in
+  let summarize_agent agent_id =
+    let agent_entries = List.filter (fun (e : Audit_log.audit_entry) ->
+      e.agent_id = agent_id
+    ) filtered in
+    let action_count = List.length agent_entries in
+    (* Count actions by type *)
+    let type_counts = Hashtbl.create 16 in
+    List.iter (fun (e : Audit_log.audit_entry) ->
+      let key = Audit_log.action_to_string e.action in
+      let cur = try Hashtbl.find type_counts key with Not_found -> 0 in
+      Hashtbl.replace type_counts key (cur + 1)
+    ) agent_entries;
+    let action_types = Hashtbl.fold (fun k v acc -> (k, v) :: acc) type_counts [] in
+    let action_types = List.sort (fun (a, _) (b, _) -> String.compare a b) action_types in
+    (* Sum costs *)
+    let total_cost = List.fold_left (fun acc (e : Audit_log.audit_entry) ->
+      acc +. (Option.value e.cost_estimate ~default:0.0)
+    ) 0.0 agent_entries in
+    (* Sum tokens *)
+    let total_tokens = List.fold_left (fun acc (e : Audit_log.audit_entry) ->
+      acc + (Option.value e.token_count ~default:0)
+    ) 0 agent_entries in
+    (* Calculate failure rate *)
+    let failure_count = List.fold_left (fun acc (e : Audit_log.audit_entry) ->
+      match e.outcome with
+      | Audit_log.Failure _ -> acc + 1
+      | Audit_log.Success -> acc
+    ) 0 agent_entries in
+    let failure_rate =
+      if action_count = 0 then 0.0
+      else float_of_int failure_count /. float_of_int action_count
+    in
+    { agent_id; action_count; action_types; total_cost; total_tokens; failure_rate }
+  in
+  let agents = List.map summarize_agent agent_ids in
+  let total_actions = List.fold_left (fun acc (a : agent_summary) -> acc + a.action_count) 0 agents in
+  let total_cost = List.fold_left (fun acc (a : agent_summary) -> acc +. a.total_cost) 0.0 agents in
+  let total_tokens = List.fold_left (fun acc (a : agent_summary) -> acc + a.total_tokens) 0 agents in
+  let total_failures = List.fold_left (fun acc (e : Audit_log.audit_entry) ->
+    match e.outcome with
+    | Audit_log.Failure _ -> acc + 1
+    | Audit_log.Success -> acc
+  ) 0 filtered in
+  let overall_failure_rate =
+    if total_actions = 0 then 0.0
+    else float_of_int total_failures /. float_of_int total_actions
+  in
+  let period_start = if since <> "" then since
+    else match filtered with
+      | [] -> ""
+      | first :: _ -> Printf.sprintf "%.0f" first.timestamp
+  in
+  let period_end = if until_time <> "" then until_time
+    else match List.rev filtered with
+      | [] -> ""
+      | last :: _ -> Printf.sprintf "%.0f" last.timestamp
+  in
+  { period_start; period_end; agents; total_actions; total_cost; total_tokens; overall_failure_rate }
+
+let agent_summary_to_json (a : agent_summary) : Yojson.Safe.t =
+  `Assoc [
+    ("agent_id", `String a.agent_id);
+    ("action_count", `Int a.action_count);
+    ("action_types", `Assoc (List.map (fun (k, v) -> (k, `Int v)) a.action_types));
+    ("total_cost", `Float a.total_cost);
+    ("total_tokens", `Int a.total_tokens);
+    ("failure_rate", `Float a.failure_rate);
+  ]
+
+let report_to_json (report : governance_report) : Yojson.Safe.t =
+  `Assoc [
+    ("period_start", `String report.period_start);
+    ("period_end", `String report.period_end);
+    ("agents", `List (List.map agent_summary_to_json report.agents));
+    ("total_actions", `Int report.total_actions);
+    ("total_cost", `Float report.total_cost);
+    ("total_tokens", `Int report.total_tokens);
+    ("overall_failure_rate", `Float report.overall_failure_rate);
+  ]
+
+(* Handle masc_governance_report *)
+let handle_governance_report ctx args =
+  let since = get_string args "since" "" in
+  let until_time = get_string args "until" "" in
+  let entries = Audit_log.read_entries ctx.config in
+  let report = governance_summary ~since ~until_time entries in
+  let json = report_to_json report in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (* Dispatch handler *)
 let dispatch ctx ~name ~args =
   match name with
   | "masc_audit_query" -> Some (handle_audit_query ctx args)
   | "masc_audit_stats" -> Some (handle_audit_stats ctx args)
+  | "masc_governance_report" -> Some (handle_governance_report ctx args)
   | _ -> None

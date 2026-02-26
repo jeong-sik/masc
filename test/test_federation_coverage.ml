@@ -596,6 +596,7 @@ let make_task () : Masc_mcp.Types.task = {
   files = [];
   created_at = "2026-01-01T00:00:00Z";
   worktree = None;
+  required_role = Masc_mcp.Agent_identity.Unassigned;
 }
 
 let make_delegation_request () : Federation.delegation_request = {

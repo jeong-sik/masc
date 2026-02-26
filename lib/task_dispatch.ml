@@ -83,7 +83,7 @@ let add_task config ~title ~priority ~description =
       let backlog = Room.read_backlog config in
       let task_id = Printf.sprintf "task-%03d" (Room.next_task_number config backlog) in
       let created_at = now_iso () in
-      match Task_pg.add_task t ~id:task_id ~title ~description ~priority ~created_at with
+      match Task_pg.add_task t ~id:task_id ~title ~description ~priority ~created_at () with
       | Ok _ ->
           let _ = Room.broadcast config ~from_agent:"system"
             ~content:(Printf.sprintf "📋 New quest: %s" title) in

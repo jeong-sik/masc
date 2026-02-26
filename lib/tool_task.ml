@@ -61,7 +61,11 @@ let handle_batch_add_tasks ctx args =
 
 let handle_claim ctx args =
   let task_id = get_string args "task_id" "" in
-  result_to_response (Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id)
+  let agent_role = match get_string args "agent_role" "" with
+    | "" -> Agent_identity.Unassigned
+    | s -> Agent_identity.role_of_string s
+  in
+  result_to_response (Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role ())
 
 let handle_claim_next ctx _args =
   (true, Room.claim_next ctx.config ~agent_name:ctx.agent_name)

@@ -313,6 +313,7 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
+  required_role: Agent_identity.role; [@default Agent_identity.Unassigned]  (** Role required to claim this task *)
 } [@@deriving show]
 
 (* Manual yojson for task *)
@@ -331,10 +332,15 @@ let task_to_yojson t =
     | None -> base
     | Some wt -> base @ [("worktree", worktree_info_to_yojson wt)]
   in
+  (* Add required_role if not Unassigned *)
+  let with_role = match t.required_role with
+    | Agent_identity.Unassigned -> with_worktree
+    | role -> with_worktree @ [("required_role", Agent_identity.role_to_yojson role)]
+  in
   (* Merge status fields into task *)
   match status_json with
-  | `Assoc status_fields -> `Assoc (with_worktree @ status_fields)
-  | _ -> `Assoc with_worktree
+  | `Assoc status_fields -> `Assoc (with_role @ status_fields)
+  | _ -> `Assoc with_role
 
 let task_of_yojson json =
   let open Yojson.Safe.Util in
@@ -353,8 +359,13 @@ let task_of_yojson json =
           | Ok wt -> Some wt
           | Error _ -> None  (* Graceful fallback for backwards compat *)
     in
+    (* Parse optional required_role field — defaults to Unassigned for backward compat *)
+    let required_role = match json |> member "required_role" |> to_string_option with
+      | Some s -> Agent_identity.role_of_string s
+      | None -> Agent_identity.Unassigned
+    in
     match task_status_of_yojson json with
-    | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at; worktree }
+    | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at; worktree; required_role }
     | Error e -> Error e
   with e -> Error (Printexc.to_string e)
 
@@ -730,6 +741,7 @@ type masc_error =
   | TaskAlreadyClaimed of { task_id: string; by: string }
   | TaskNotClaimed of string
   | TaskInvalidState of string  (* For cancelled tasks or invalid state transitions *)
+  | TaskRoleMismatch of { task_id: string; required: string; actual: string }
   | PortalNotOpen of string
   | PortalAlreadyOpen of { agent: string; target: string }
   | PortalClosed of string
@@ -775,6 +787,8 @@ let rec masc_error_to_string = function
   | TaskAlreadyClaimed { task_id; by } -> Printf.sprintf "❌ Task %s already claimed by %s" task_id by
   | TaskNotClaimed id -> Printf.sprintf "❌ Task %s is not claimed" id
   | TaskInvalidState msg -> Printf.sprintf "❌ Invalid task state: %s" msg
+  | TaskRoleMismatch { task_id; required; actual } ->
+      Printf.sprintf "❌ Role mismatch for %s: requires %s, agent has %s" task_id required actual
   | PortalNotOpen agent -> Printf.sprintf "❌ No portal open for %s. Use masc_portal_open first." agent
   | PortalAlreadyOpen { agent; target } -> Printf.sprintf "⚠ Portal already open: %s ↔ %s" agent target
   | PortalClosed agent -> Printf.sprintf "❌ Portal is closed for %s. Use masc_portal_open to reopen." agent

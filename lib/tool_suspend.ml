@@ -140,13 +140,13 @@ let handle_suspend ctx args =
       ~agent_id:caller
       ~target_agent
       ~reason
-      ~rooms_affected;
+      ~rooms_affected ();
 
     (* Log circuit breaker event *)
     Audit_log.log_circuit_breaker ctx.config
       ~agent_id:target_agent
       ~opened:true
-      ~reason:("Suspended by " ^ caller);
+      ~reason:("Suspended by " ^ caller) ();
 
     Log.Session.warn "[Suspend] Agent '%s' suspended by '%s': %s (%.1fh, %d rooms)"
       target_agent caller reason duration_hours rooms_affected;

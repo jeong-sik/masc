@@ -2484,7 +2484,7 @@ Time: %s
         (List.length threads) (Yojson.Safe.pretty_to_string json))
 
   | _ ->
-      (false, Printf.sprintf "❌ Unknown tool: %s" name)
+      (false, Printf.sprintf "Unknown tool: %s" name)
 
 (** {1 Eio-Native JSON-RPC Handlers} *)
 

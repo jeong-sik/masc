@@ -32,6 +32,9 @@ jobs:
           opam pin add neo4j_packstream https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
           opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 
+      - name: Refresh apt index
+        run: sudo apt-get update
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do

@@ -158,12 +158,12 @@
                     <select id="room-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
                         <option value="default" selected>default (기본 방)</option>
                     </select>
-                    <input id="room-input-inline" class="inline-input" type="text" placeholder="방 이름 입력" maxlength="64" title="이동할 방 이름을 직접 입력" />
-                    <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방으로 이동합니다">이동</button>
+                    <input id="room-input-inline" class="inline-input" type="text" placeholder="방 ID 입력 (없으면 빈 방)" maxlength="64" title="방 ID를 직접 입력해 엽니다. 세션은 자동 시작되지 않습니다." />
+                    <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방을 엽니다 (세션 시작 아님)">방 열기</button>
                     <button id="room-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
                     <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
                     <span id="room-status" class="widget-pill">현재 게임: default</span>
-                    <span id="top-controls-help" class="widget-pill">방 전환은 셀렉트/입력+이동 · 새 게임은 세션 시작 · 멈춤/재개는 진행 중 세션 제어</span>
+                    <span id="top-controls-help" class="widget-pill">방 전환(세션 시작 아님) · 새 게임에서 세션 시작 · 멈춤/재개는 진행 중 세션 제어</span>
                 </div>
                 <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
                 <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="false" title="AI 턴 자동 진행을 시작합니다">자동 진행: OFF</button>

@@ -383,7 +383,7 @@ fn bind_room_hub_buttons(doc: &web_sys::Document) {
                 let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                     return;
                 };
-                apply_room_switch_from_ui(&doc, &room_copy);
+                apply_room_switch_from_ui(&doc, &room_copy, false);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
                 target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
@@ -631,6 +631,40 @@ fn remember_known_rooms(extra_rooms: &[String]) {
     save_known_rooms(&rooms);
 }
 
+fn is_known_room_id(room_id: &str) -> bool {
+    let Some(room) = crate::config::sanitize_room_id(room_id) else {
+        return false;
+    };
+    if room.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
+        return true;
+    }
+    let mut known = load_known_rooms();
+    known.extend(load_recent_rooms());
+    known.push(crate::config::current_room_id());
+    known
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(&room))
+}
+
+fn confirm_unknown_room_switch(doc: &web_sys::Document, room_id: &str) -> bool {
+    let room_label = room_display_label(room_id);
+    let message = format!(
+        "'{}' 방은 현재 목록에 없습니다.\n빈 방으로 이동합니다. (세션은 시작되지 않음)\n계속할까요?",
+        room_label
+    );
+    let proceed = web_sys::window()
+        .and_then(|window| window.confirm_with_message(&message).ok())
+        .unwrap_or(true);
+    if !proceed {
+        if let Some(pill) = doc.get_element_by_id("room-status") {
+            let current = crate::config::current_room_id();
+            let current_label = room_display_label(&current);
+            pill.set_text_content(Some(&format!("현재 게임: {} · 이동 취소", current_label)));
+        }
+    }
+    proceed
+}
+
 fn inline_selector_rooms(selected_room: &str, known_rooms: &[String]) -> Vec<String> {
     let is_generated = |room: &str| {
         let key = room.to_ascii_lowercase();
@@ -710,13 +744,32 @@ pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     sync_room_hub_selection(doc, &selected);
 }
 
-fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
+fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str, manual_input: bool) {
     let Some(room) = crate::config::sanitize_room_id(raw_room) else {
         log::warn!("Ignoring invalid room id from UI: {}", raw_room);
         return;
     };
+    let unknown_room = !is_known_room_id(&room);
+    if manual_input && unknown_room && !confirm_unknown_room_switch(doc, &room) {
+        return;
+    }
+
     remember_known_rooms(std::slice::from_ref(&room));
     set_current_room_id(doc, &room);
+    if unknown_room {
+        if let Some(pill) = doc.get_element_by_id("room-status") {
+            let room_label = room_display_label(&room);
+            pill.set_text_content(Some(&format!(
+                "현재 게임: {} · 빈 방(세션 없음, 새 게임 필요)",
+                room_label
+            )));
+            let _ = pill.set_attribute("data-lifecycle", TrpgLifecycleState::Lobby.css_class());
+            let _ = pill.set_attribute(
+                "title",
+                "해당 방에 세션이 없을 수 있습니다. 새 게임에서 시작할 수 있습니다.",
+            );
+        }
+    }
     if let Some(dashboard) = doc.get_element_by_id("dashboard") {
         let _ = dashboard.set_attribute("data-auto-round", "0");
     }
@@ -946,7 +999,7 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
         if selected.trim().is_empty() {
             return;
         }
-        apply_room_switch_from_ui(&doc, &selected);
+        apply_room_switch_from_ui(&doc, &selected, false);
     }) as Box<dyn FnMut()>);
     let _ = select_el.dyn_ref::<web_sys::EventTarget>().map(|target| {
         target.add_event_listener_with_callback("change", select_cb.as_ref().unchecked_ref())
@@ -962,7 +1015,7 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                 .get_element_by_id("room-input-inline")
                 .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
                 .unwrap_or_default();
-            apply_room_switch_from_ui(&doc, &typed);
+            apply_room_switch_from_ui(&doc, &typed, true);
         }) as Box<dyn FnMut()>);
         let _ = apply_btn.dyn_ref::<web_sys::EventTarget>().map(|target| {
             target.add_event_listener_with_callback("click", apply_cb.as_ref().unchecked_ref())
@@ -982,7 +1035,7 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                 .get_element_by_id("room-input-inline")
                 .and_then(|el| el.dyn_ref::<web_sys::HtmlInputElement>().map(|i| i.value()))
                 .unwrap_or_default();
-            apply_room_switch_from_ui(&doc, &typed);
+            apply_room_switch_from_ui(&doc, &typed, true);
         }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
         let _ = input_el.dyn_ref::<web_sys::EventTarget>().map(|target| {
             target.add_event_listener_with_callback("keydown", key_cb.as_ref().unchecked_ref())

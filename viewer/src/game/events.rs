@@ -360,6 +360,8 @@ pub struct SessionOutcomePayload {
     #[serde(default)]
     pub reason: String,
     #[serde(default)]
+    pub outcome_source: String,
+    #[serde(default)]
     pub summary: String,
     #[serde(default)]
     pub turn: u32,

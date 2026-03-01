@@ -144,6 +144,24 @@ fn value_to_string_vec(v: Option<&Value>) -> Vec<String> {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+fn infer_outcome_source_from_reason(reason: &str) -> &'static str {
+    let normalized = reason.trim().to_ascii_lowercase();
+    if normalized.starts_with("flag:") {
+        "flag"
+    } else if normalized.starts_with("dm_signal:") {
+        "dm_signal"
+    } else if normalized == "all_players_dead" {
+        "all_players_dead"
+    } else if normalized == "max_turn_reached" {
+        "max_turn"
+    } else if normalized == "stagnation" {
+        "stagnation"
+    } else {
+        "unknown"
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 fn canonical_weather_id(raw: &str) -> Option<&'static str> {
     let key = raw.trim().to_ascii_lowercase();
     if key.is_empty() {
@@ -896,6 +914,12 @@ fn map_trpg_event(
                 .unwrap_or("draw");
             let summary = payload.get("summary").and_then(Value::as_str).unwrap_or("");
             let reason = payload.get("reason").and_then(Value::as_str).unwrap_or("");
+            let outcome_source = payload
+                .get("outcome_source")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| infer_outcome_source_from_reason(reason));
             let turn = value_to_u32(payload.get("turn"), state.last_turn);
             if turn > 0 {
                 state.last_turn = turn;
@@ -904,6 +928,7 @@ fn map_trpg_event(
                 json!({
                     "outcome": outcome,
                     "reason": reason,
+                    "outcome_source": outcome_source,
                     "summary": summary,
                     "turn": turn
                 }),
@@ -1821,7 +1846,7 @@ mod tests {
     fn decode_stream_maps_session_outcome_event() {
         let body = r#"{
             "events": [
-                {"seq": 7, "type": "session.outcome", "payload": {"outcome": "victory", "reason": "objective_complete", "summary": "Relic recovered and party extracted.", "turn": 9}}
+                {"seq": 7, "type": "session.outcome", "payload": {"outcome": "victory", "reason": "flag:objective_complete", "outcome_source": "flag", "summary": "Relic recovered and party extracted.", "turn": 9}}
             ]
         }"#;
 
@@ -1835,6 +1860,7 @@ mod tests {
         let payload: Value =
             serde_json::from_str(&outcome.1).expect("session.outcome payload json");
         assert_eq!(payload["outcome"], "victory");
+        assert_eq!(payload["outcome_source"], "flag");
         assert_eq!(payload["turn"], 9);
 
         let narrative = mapped

@@ -604,6 +604,12 @@ fn set_session_control_status(doc: &web_sys::Document, text: &str, tone: &str) {
     } else {
         format!("widget-pill {}", tone.trim())
     };
+    let unchanged = el.text_content().as_deref() == Some(display_text.as_str())
+        && el.get_attribute("class").as_deref() == Some(class_name.as_str())
+        && el.get_attribute("title").as_deref() == Some(full_text.as_str());
+    if unchanged {
+        return;
+    }
     el.set_text_content(Some(&display_text));
     let _ = el.set_attribute("class", &class_name);
     let _ = el.set_attribute("title", &full_text);
@@ -1391,7 +1397,11 @@ pub(super) fn generate_room_id() -> String {
 #[cfg(target_arch = "wasm32")]
 pub(super) fn set_new_game_status(doc: &web_sys::Document, message: &str) {
     if let Some(el) = doc.get_element_by_id("new-game-status") {
-        el.set_inner_html(&html_escape(message));
+        let escaped = html_escape(message);
+        if el.inner_html() == escaped {
+            return;
+        }
+        el.set_inner_html(&escaped);
     }
 }
 

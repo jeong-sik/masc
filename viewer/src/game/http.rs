@@ -163,7 +163,8 @@ fn normalize_room_status(raw: &str) -> String {
 fn room_requires_new_game(raw_status: &str) -> bool {
     matches!(
         normalize_room_status(raw_status).as_str(),
-        "" | "idle" | "lobby" | "ended" | "unavailable"
+        "" | "idle" | "lobby" | "ended" | "completed" | "done" | "retired" | "closed"
+            | "unavailable"
     )
 }
 
@@ -1192,6 +1193,7 @@ fn parse_party_characters(
 /// When the fetched room is not resumable, surface guidance for starting a new
 /// session. The new-game panel itself should remain user-triggered.
 fn prompt_new_game_for_inactive_room(room_status: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
     let _ = room_status;
 
     #[cfg(target_arch = "wasm32")]
@@ -1200,7 +1202,40 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
             return;
         };
 
-        // Set a status message appropriate to the room state.
+        let mut should_bootstrap = false;
+        // Show the new-game panel
+        if let Some(panel) = document.get_element_by_id("new-game-panel") {
+            let was_visible = panel
+                .dyn_ref::<web_sys::HtmlElement>()
+                .and_then(|html_el| html_el.style().get_property_value("display").ok())
+                .map(|display| {
+                    matches!(
+                        display.trim().to_ascii_lowercase().as_str(),
+                        "flex" | "block" | "grid" | "inline-flex"
+                    )
+                })
+                .unwrap_or(false);
+            if let Some(html_el) = panel.dyn_ref::<web_sys::HtmlElement>() {
+                let _ = html_el.style().set_property("display", "flex");
+            }
+            if !was_visible {
+                should_bootstrap = true;
+            }
+        }
+
+        // Pre-populate room ID input with a fresh generated ID
+        if let Some(input) = document
+            .get_element_by_id("new-game-room-id")
+            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            if input.value().trim().is_empty() {
+                let ts = js_sys::Date::now() as i64;
+                let rand = (js_sys::Math::random() * 1000.0).floor() as i64;
+                input.set_value(&format!("adventure-{}-{:03}", ts, rand));
+            }
+        }
+
+        // Set a status message appropriate to the room state
         if let Some(el) = document.get_element_by_id("new-game-status") {
             let msg = match normalize_room_status(room_status).as_str() {
                 "ended" => "이 게임은 종료되었습니다. 새 게임을 시작하세요.",
@@ -1210,6 +1245,15 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
                 _ => "진행 중인 게임이 없습니다. 새 게임을 시작하세요.",
             };
             el.set_inner_html(msg);
+        }
+
+        // Trigger bootstrap once when auto-opening the panel for an inactive room.
+        if should_bootstrap {
+            if let Some(btn) = document.get_element_by_id("new-game-toggle") {
+                if let Some(html_btn) = btn.dyn_ref::<web_sys::HtmlElement>() {
+                    html_btn.click();
+                }
+            }
         }
     }
 }
@@ -1538,6 +1582,9 @@ mod tests {
     #[test]
     fn ended_room_requires_new_game() {
         assert!(room_requires_new_game("ended"));
+        assert!(room_requires_new_game("completed"));
+        assert!(room_requires_new_game("done"));
+        assert!(room_requires_new_game("closed"));
     }
 
     #[test]

@@ -112,8 +112,9 @@ pub fn apply_hp_change(mut events: MessageReader<HpChanged>, mut actors: Query<&
                     continue;
                 }
 
-                // Validate: actor.hp + amount should equal remaining_hp
-                let expected = (actor.hp + payload.amount).clamp(0, actor.max_hp);
+                // Validate: actor.hp + amount should equal remaining_hp.
+                // Use saturating_add to guard against extreme server values.
+                let expected = actor.hp.saturating_add(payload.amount).clamp(0, actor.max_hp);
                 if expected != payload.remaining_hp {
                     log::warn!(
                         "HP mismatch for {}: hp={} + amount={} = expected {} but server sent remaining_hp={}",

@@ -659,25 +659,27 @@ fn round_response_has_prompt_meta_artifact_failures(resp: &str) -> bool {
     invalid_count > 0
 }
 
+/// Lightweight struct for game-end detection.  Serde ignores unmapped fields
+/// so this avoids the heap-heavy `serde_json::Value` DOM in the WASM poll loop.
+#[derive(serde::Deserialize)]
+struct EndStatusCheck {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    game_over: Option<bool>,
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn round_response_game_ended(resp: &str) -> bool {
-    let parsed = match serde_json::from_str::<serde_json::Value>(resp) {
-        Ok(value) => value,
-        Err(_) => return false,
+    let Ok(parsed) = serde_json::from_str::<EndStatusCheck>(resp) else {
+        return false;
     };
-    if let Some(status) = parsed.get("status").and_then(serde_json::Value::as_str) {
+    if let Some(status) = parsed.status.as_deref() {
         if status == "ended" || status == "completed" {
             return true;
         }
     }
-    if parsed
-        .get("game_over")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-    {
-        return true;
-    }
-    false
+    parsed.game_over.unwrap_or(false)
 }
 
 #[cfg(target_arch = "wasm32")]

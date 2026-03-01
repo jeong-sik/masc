@@ -74,6 +74,7 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
 
     for DiceRolled(payload) in events.read() {
         // Phase 3-2: Dice roll arithmetic validation
+        // Skip when total==0 (serde default: server omitted the field).
         let expected_total = payload.d20 + payload.bonus;
         if payload.total != expected_total && payload.total != 0 {
             log::warn!(

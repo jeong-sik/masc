@@ -181,6 +181,105 @@ let test_select_content_alert_priority () =
   check bool "content alert agent selected" true
     (List.exists (fun r -> r.Lodge_selection.agent_name = "agent-r") results)
 
+(** {1 Quality Signal Tests (Phase 3)} *)
+
+module Pv = Masc_mcp.Post_verifier
+module Ah = Masc_mcp.Agent_health
+
+let float_eq ?(eps = 0.001) a b = Float.abs (a -. b) < eps
+
+(* Reset agent stats for test isolation *)
+let fresh_agent name =
+  Lodge_selection.init_agent name;
+  let s = Lodge_selection.get_stats name in
+  s.alpha <- 1.0;
+  s.beta <- 1.0;
+  s.selections <- 0;
+  s.last_selected_at <- 0.0;
+  s.total_votes_up <- 0;
+  s.total_votes_down <- 0;
+  s.posts_created <- 0;
+  s.comments_created <- 0;
+  s.skips <- 0;
+  s.updated_at <- 0.0;
+  s
+
+let test_quality_pass_boosts_alpha () =
+  let s = fresh_agent "qs-pass" in
+  let orig_alpha = s.alpha in
+  let orig_beta = s.beta in
+  Lodge_selection.record_quality_signal ~agent_name:"qs-pass" ~verdict:Pv.Pass;
+  check bool "alpha +0.3" true (float_eq s.alpha (orig_alpha +. 0.3));
+  check bool "beta unchanged" true (float_eq s.beta orig_beta)
+
+let test_quality_warn_nudges_beta () =
+  let s = fresh_agent "qs-warn" in
+  let orig_alpha = s.alpha in
+  let orig_beta = s.beta in
+  Lodge_selection.record_quality_signal ~agent_name:"qs-warn"
+    ~verdict:(Pv.Warn "filler_content");
+  check bool "alpha unchanged" true (float_eq s.alpha orig_alpha);
+  check bool "beta +0.1" true (float_eq s.beta (orig_beta +. 0.1))
+
+let test_quality_fail_penalizes_beta () =
+  let s = fresh_agent "qs-fail" in
+  let orig_alpha = s.alpha in
+  let orig_beta = s.beta in
+  Lodge_selection.record_quality_signal ~agent_name:"qs-fail"
+    ~verdict:(Pv.Fail "too_short");
+  check bool "alpha unchanged" true (float_eq s.alpha orig_alpha);
+  check bool "beta +0.5" true (float_eq s.beta (orig_beta +. 0.5))
+
+let test_quality_signal_floor () =
+  let s = fresh_agent "qs-floor" in
+  s.alpha <- 0.05;
+  s.beta <- 0.05;
+  Lodge_selection.record_quality_signal ~agent_name:"qs-floor"
+    ~verdict:(Pv.Fail "bad");
+  check bool "alpha >= 0.1" true (s.alpha >= 0.1);
+  check bool "beta >= 0.1" true (s.beta >= 0.1)
+
+let test_quality_cumulative () =
+  let s = fresh_agent "qs-cumul" in
+  Lodge_selection.record_quality_signal ~agent_name:"qs-cumul" ~verdict:Pv.Pass;
+  Lodge_selection.record_quality_signal ~agent_name:"qs-cumul" ~verdict:Pv.Pass;
+  Lodge_selection.record_quality_signal ~agent_name:"qs-cumul" ~verdict:Pv.Pass;
+  check bool "3x Pass → alpha ~1.9" true (float_eq s.alpha 1.9);
+  check bool "beta unchanged" true (float_eq s.beta 1.0)
+
+(** {1 Health Gate Tests (Phase 3)} *)
+
+let test_unhealthy_excluded_from_thompson () =
+  let _ = fresh_agent "hg-healthy" in
+  let _ = fresh_agent "hg-sick" in
+  for _ = 1 to 10 do
+    Ah.record_failure ~agent_name:"hg-sick" ~reason:"test_fail"
+  done;
+  let results = Lodge_selection.select_with_feedback
+    ~agents:["hg-healthy"; "hg-sick"]
+    ~max_n:2
+    ~pending_triggers:[]
+    ~tick_interval_s:60.0
+  in
+  let has_sick = List.exists (fun r ->
+    r.Lodge_selection.agent_name = "hg-sick") results in
+  check bool "unhealthy excluded" false has_sick
+
+let test_mentioned_bypasses_health () =
+  let _ = fresh_agent "hg-mentioned" in
+  for _ = 1 to 10 do
+    Ah.record_failure ~agent_name:"hg-mentioned" ~reason:"test_fail"
+  done;
+  let results = Lodge_selection.select_with_feedback
+    ~agents:["hg-mentioned"]
+    ~max_n:1
+    ~pending_triggers:[("hg-mentioned", Lodge_selection.Mentioned "by-test")]
+    ~tick_interval_s:60.0
+  in
+  let selected = List.exists (fun r ->
+    r.Lodge_selection.agent_name = "hg-mentioned") results in
+  check bool "mentioned bypasses health gate" true selected
+
 (** {1 Selection Entropy Tests} *)
 
 let test_selection_entropy_empty () =
@@ -192,6 +291,7 @@ let test_selection_entropy_empty () =
 (** {1 Test Runner} *)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "Lodge_selection" [
     "beta_sampling", [
       test_case "sample in [0,1] range" `Quick test_sample_beta_range;
@@ -219,6 +319,17 @@ let () =
       test_case "respects max_n" `Quick test_select_respects_max_n;
       test_case "mentioned priority" `Quick test_select_mentioned_priority;
       test_case "content alert priority" `Quick test_select_content_alert_priority;
+    ];
+    "quality_signal", [
+      test_case "pass boosts alpha" `Quick test_quality_pass_boosts_alpha;
+      test_case "warn nudges beta" `Quick test_quality_warn_nudges_beta;
+      test_case "fail penalizes beta" `Quick test_quality_fail_penalizes_beta;
+      test_case "signal floor" `Quick test_quality_signal_floor;
+      test_case "cumulative signals" `Quick test_quality_cumulative;
+    ];
+    "health_gate", [
+      test_case "unhealthy excluded" `Quick test_unhealthy_excluded_from_thompson;
+      test_case "mentioned bypasses health" `Quick test_mentioned_bypasses_health;
     ];
     "monitoring", [
       test_case "selection entropy" `Quick test_selection_entropy_empty;

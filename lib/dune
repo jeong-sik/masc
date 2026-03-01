@@ -6,6 +6,7 @@
    ag_ui
    agent_card
    agent_ecosystem
+   agent_health
    agent_identity
    agent_neo4j
    agent_registry_eio
@@ -94,6 +95,7 @@
    notify
    orchestrator
    planning_eio
+   post_verifier
    process_eio
    progress
    pulse
@@ -200,6 +202,8 @@
    ;; Keeper Autonomy Engine (Phase 2: autonomy slider + verifier)
    keeper_autonomy
    keeper_verifier
+   ;; Autonomy Adjuster — Feedback Closure (Phase 4)
+   autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
    llm_client
    context_manager

@@ -78,6 +78,7 @@ module Mind_eio = Mind_eio
 module Noosphere_eio = Noosphere_eio
 module Metrics_store_eio = Metrics_store_eio
 module Planning_eio = Planning_eio
+module Post_verifier = Post_verifier
 module Process_eio = Process_eio
 module Eio_context = Eio_context
 module Run_eio = Run_eio
@@ -90,6 +91,7 @@ module Orchestrator = Orchestrator
 module Agent_card = Agent_card
 module Agent_identity = Agent_identity
 module Agent_ecosystem = Agent_ecosystem
+module Agent_health = Agent_health
 module Agent_neo4j = Agent_neo4j
 module Agent_registry_eio = Agent_registry_eio
 module Agent_planner = Agent_planner
@@ -201,6 +203,13 @@ module Tool_keeper = Tool_keeper
 module Trajectory = Trajectory
 module Eval_gate = Eval_gate
 module Eval_harness = Eval_harness
+
+(* Keeper Autonomy Engine (Phase 2: autonomy slider + verifier) *)
+module Keeper_autonomy = Keeper_autonomy
+module Keeper_verifier = Keeper_verifier
+
+(* Autonomy Adjuster — Feedback Closure (Phase 4) *)
+module Autonomy_adjuster = Autonomy_adjuster
 
 module Tool_goals = Tool_goals
 module Tool_trpg = Tool_trpg

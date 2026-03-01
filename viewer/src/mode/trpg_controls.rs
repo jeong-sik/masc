@@ -2845,8 +2845,7 @@ async fn start_new_game_flow(doc: &web_sys::Document) -> Result<String, String> 
             "dm_preset_id": dm_preset_id,
             "world_preset_id": world_preset_id,
             "party": party,
-            "phase": "briefing",
-            "force": true
+            "phase": "briefing"
         }),
     )
     .await?;

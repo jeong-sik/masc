@@ -671,10 +671,18 @@ pub fn apply_session_outcome(
         }
         progress.room_status = "ended".to_string();
         let reason = payload.reason.trim();
-        progress.last_result = if reason.is_empty() {
+        let source = payload.outcome_source.trim();
+        let detail = if reason.is_empty() {
+            source.to_string()
+        } else if source.is_empty() {
+            reason.to_string()
+        } else {
+            format!("{reason} · source={source}")
+        };
+        progress.last_result = if detail.is_empty() {
             payload.outcome.clone()
         } else {
-            format!("{} ({})", payload.outcome, reason)
+            format!("{} ({})", payload.outcome, detail)
         };
 
         // Reset combat state when session ends

@@ -287,6 +287,18 @@ Persists context + checkpoints. Auto-handoff is applied when needed.";
           ("type", `String "number");
           ("description", `String "Optional: override Ollama timeout (sec) for this keeper message call");
         ]);
+        ("no_skill_route", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Optional: do not emit SKILL/SKILL_REASON headers in reply");
+        ]);
+        ("no_state_block", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Optional: do not emit [STATE]...[/STATE] block in reply");
+        ]);
+        ("require_existing", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Optional: fail if keeper does not already exist");
+        ]);
         ("new_goal", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: replace keeper goal (persisted)");
@@ -3671,6 +3683,21 @@ let ensure_skill_route_header ~(route : keeper_skill_route) (raw : string) : str
     in
     if already_tagged then raw
     else Printf.sprintf "%s\n%s" (skill_route_header route) raw
+
+let strip_skill_route_lines (raw : string) : string =
+  let lines = String.split_on_char '\n' raw in
+  let keep line =
+    let trimmed = String.trim line in
+    if trimmed = "" then true
+    else
+      match strip_prefix_ci ~prefix:"SKILL:" trimmed with
+      | Some _ -> false
+      | None -> (
+          match strip_prefix_ci ~prefix:"SKILL_REASON:" trimmed with
+          | Some _ -> false
+          | None -> true)
+  in
+  lines |> List.filter keep |> String.concat "\n"
 
 let parse_skill_line (line : string) : (string * string list) option =
   match strip_prefix_ci ~prefix:"SKILL:" line with
@@ -7302,6 +7329,8 @@ let handle_keeper_msg ctx args : tool_result =
     let inline_long_goal = parse_goal_horizon_opt args "long_goal" in
     let inline_instructions = get_string_opt args "instructions" in
     let turn_instructions = get_string_opt args "turn_instructions" in
+    let no_skill_route = get_bool args "no_skill_route" false in
+    let no_state_block = get_bool args "no_state_block" false in
     let inline_will = parse_self_model_opt args "will" in
     let inline_needs = parse_self_model_opt args "needs" in
     let inline_desires = parse_self_model_opt args "desires" in
@@ -7638,22 +7667,44 @@ let handle_keeper_msg ctx args : tool_result =
                   if trimmed = "" then "No continuity snapshot available." else trimmed)
             in
             let base_turn_system_prompt =
-              match skill_selection_mode with
-              | SkillSelectHeuristic ->
-                  skill_route_system_prompt_heuristic
-                    ~base_system_prompt:ctx_work.system_prompt
-                    ~route:fallback_skill_route
-              | SkillSelectAgent ->
-                  skill_route_system_prompt_agent
-                    ~base_system_prompt:ctx_work.system_prompt
-                    ~fallback_route:fallback_skill_route
-                    ~soul_profile:meta.soul_profile
+              if no_skill_route then
+                ctx_work.system_prompt
+              else
+                match skill_selection_mode with
+                | SkillSelectHeuristic ->
+                    skill_route_system_prompt_heuristic
+                      ~base_system_prompt:ctx_work.system_prompt
+                      ~route:fallback_skill_route
+                | SkillSelectAgent ->
+                    skill_route_system_prompt_agent
+                      ~base_system_prompt:ctx_work.system_prompt
+                      ~fallback_route:fallback_skill_route
+                      ~soul_profile:meta.soul_profile
             in
             let turn_system_prompt =
               append_continuity_context_prompt
                 ~base_prompt:base_turn_system_prompt
                 continuity_snapshot
                 ~continuity_summary
+            in
+            let turn_system_prompt =
+              let policy_guards = [
+                (no_skill_route,
+                 "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
+                (no_state_block,
+                 "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn.");
+              ] in
+              let policy_lines =
+                List.filter_map
+                  (fun (active, line) -> if active then Some line else None)
+                  policy_guards
+              in
+              match policy_lines with
+              | [] -> turn_system_prompt
+              | _ ->
+                  Printf.sprintf "%s\n\n%s"
+                    turn_system_prompt
+                    (String.concat "\n" policy_lines)
             in
             let turn_system_prompt =
               match turn_instructions with
@@ -8063,19 +8114,32 @@ let handle_keeper_msg ctx args : tool_result =
 	                    "Request processed. (generation=%d, trace=%s, model=%s)"
 	                    meta.generation meta.trace_id final_model_used
 	              in
-	              let effective_skill_route =
-	                match skill_selection_mode with
-	                | SkillSelectHeuristic -> fallback_skill_route
-	                | SkillSelectAgent ->
-	                    (match agent_selected_skill_route_from_reply safe_reply_raw with
-	                     | Some parsed -> parsed
-	                     | None -> fallback_skill_route)
-	              in
-		              let safe_reply =
-		                ensure_skill_route_header
-		                  ~route:effective_skill_route
-		                  safe_reply_raw
+		              let effective_skill_route =
+		                match skill_selection_mode with
+		                | SkillSelectHeuristic -> fallback_skill_route
+		                | SkillSelectAgent ->
+		                    (match agent_selected_skill_route_from_reply safe_reply_raw with
+		                     | Some parsed -> parsed
+		                     | None -> fallback_skill_route)
 		              in
+			              let safe_reply_with_skill =
+			                if no_skill_route then
+                            strip_skill_route_lines safe_reply_raw
+                          else
+			                    ensure_skill_route_header
+			                      ~route:effective_skill_route
+			                      safe_reply_raw
+			              in
+                          let safe_reply =
+                            if no_state_block then
+                              let stripped =
+                                strip_state_blocks_text safe_reply_with_skill
+                                |> String.trim
+                              in
+                              if stripped = "" then safe_reply_with_skill else stripped
+                            else
+                              safe_reply_with_skill
+                          in
               let repetition_risk =
                 repetition_risk_score
                   ~messages:ctx_work.messages

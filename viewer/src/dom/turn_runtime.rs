@@ -1657,6 +1657,17 @@ pub fn update_turn_runtime_dom(
                 })
                 .unwrap_or_default()
         };
+        if let Some(dm_pill) = document.get_element_by_id("dm-keeper-pill") {
+            if inferred_dm.is_empty() {
+                dm_pill.set_text_content(Some("DM: 미지정"));
+                let _ = dm_pill.set_attribute("class", "widget-pill status-warn");
+                let _ = dm_pill.set_attribute("title", "현재 DM keeper가 지정되지 않았습니다.");
+            } else {
+                dm_pill.set_text_content(Some(&format!("DM: {}", inferred_dm)));
+                let _ = dm_pill.set_attribute("class", "widget-pill status-ok");
+                let _ = dm_pill.set_attribute("title", "현재 DM keeper");
+            }
+        }
         if let Some(dm_input) = document
             .get_element_by_id("round-run-dm")
             .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())

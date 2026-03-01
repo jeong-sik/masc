@@ -19,6 +19,12 @@ const RECENT_ROOMS_STORAGE_KEY: &str = "masc_viewer_recent_rooms";
 pub(super) const KNOWN_ROOMS_STORAGE_KEY: &str = "masc_viewer_known_rooms";
 pub(super) const ROOM_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_room_hub_visible";
 pub(super) const ROOM_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_room_hub_running_only";
+const INLINE_SELECTOR_MAX_OPTIONS: usize = 5;
+const ROOM_AUTO_FOCUS_DEFAULT_ROOM_ONLY: bool = true;
+const ROOM_AUTO_FOCUS_SCORE_RUNNING: u8 = 4;
+const ROOM_AUTO_FOCUS_SCORE_LOBBY: u8 = 3;
+const ROOM_AUTO_FOCUS_SCORE_STOPPED: u8 = 2;
+const ROOM_AUTO_FOCUS_SCORE_LOADING: u8 = 1;
 
 pub(super) fn load_recent_rooms() -> Vec<String> {
     let raw = web_sys::window()
@@ -66,6 +72,173 @@ pub(super) fn room_lane_label(status: &str) -> &'static str {
     TrpgLifecycleState::from_status(status).lane()
 }
 
+fn auto_focus_score(status: &str) -> Option<u8> {
+    match TrpgLifecycleState::from_status(status) {
+        TrpgLifecycleState::Running => Some(ROOM_AUTO_FOCUS_SCORE_RUNNING),
+        TrpgLifecycleState::Lobby => Some(ROOM_AUTO_FOCUS_SCORE_LOBBY),
+        TrpgLifecycleState::Stopped => Some(ROOM_AUTO_FOCUS_SCORE_STOPPED),
+        TrpgLifecycleState::Loading => Some(ROOM_AUTO_FOCUS_SCORE_LOADING),
+        _ => None,
+    }
+}
+
+fn select_room_for_ended_default(current_room: &str, rooms: &[RoomSnapshot]) -> Option<String> {
+    if ROOM_AUTO_FOCUS_DEFAULT_ROOM_ONLY
+        && !current_room.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID)
+    {
+        return None;
+    }
+
+    let current_is_ended = rooms
+        .iter()
+        .find(|room| room.id.eq_ignore_ascii_case(current_room))
+        .map(|room| TrpgLifecycleState::from_status(&room.status) == TrpgLifecycleState::Ended)
+        .unwrap_or(false);
+    if !current_is_ended {
+        return None;
+    }
+
+    rooms
+        .iter()
+        .filter(|room| !room.id.eq_ignore_ascii_case(current_room))
+        .filter_map(|room| {
+            auto_focus_score(&room.status).map(|score| (score, room.turn, room.id.clone()))
+        })
+        .max_by_key(|(score, turn, _)| (*score, *turn))
+        .map(|(_, _, id)| id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{inline_selector_rooms, select_room_for_ended_default, RoomSnapshot};
+
+    fn snapshot(id: &str, status: &str, turn: u32) -> RoomSnapshot {
+        RoomSnapshot {
+            id: id.to_string(),
+            status: status.to_string(),
+            turn,
+            phase: "phase".to_string(),
+            agent_count: 0,
+            task_count: 0,
+        }
+    }
+
+    #[test]
+    fn ended_default_prefers_running_over_lobby() {
+        let rooms = vec![
+            snapshot("default", "ended", 11),
+            snapshot("lobby-room", "lobby", 99),
+            snapshot("running-room", "running", 1),
+        ];
+        assert_eq!(
+            select_room_for_ended_default("default", &rooms),
+            Some("running-room".to_string())
+        );
+    }
+
+    #[test]
+    fn ended_default_uses_turn_as_tiebreaker_within_same_lane() {
+        let rooms = vec![
+            snapshot("default", "ended", 4),
+            snapshot("run-a", "running", 2),
+            snapshot("run-b", "running", 7),
+        ];
+        assert_eq!(
+            select_room_for_ended_default("default", &rooms),
+            Some("run-b".to_string())
+        );
+    }
+
+    #[test]
+    fn non_default_room_never_auto_switches() {
+        let rooms = vec![
+            snapshot("custom", "ended", 4),
+            snapshot("run-b", "running", 7),
+        ];
+        assert_eq!(select_room_for_ended_default("custom", &rooms), None);
+    }
+
+    #[test]
+    fn default_room_without_ended_status_does_not_switch() {
+        let rooms = vec![
+            snapshot("default", "running", 4),
+            snapshot("run-b", "running", 7),
+        ];
+        assert_eq!(select_room_for_ended_default("default", &rooms), None);
+    }
+
+    #[test]
+    fn ended_default_returns_none_when_no_eligible_target_exists() {
+        let rooms = vec![
+            snapshot("default", "ended", 4),
+            snapshot("archived", "ended", 1),
+            snapshot("broken", "unavailable", 0),
+        ];
+        assert_eq!(select_room_for_ended_default("default", &rooms), None);
+    }
+
+    #[test]
+    fn inline_selector_rooms_keeps_known_rooms_when_selected_is_default() {
+        let known = vec![
+            "default".to_string(),
+            "alpha-room".to_string(),
+            "beta-room".to_string(),
+        ];
+        let rooms = inline_selector_rooms("default", &known);
+        assert_eq!(
+            rooms,
+            vec![
+                "default".to_string(),
+                "alpha-room".to_string(),
+                "beta-room".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_selector_rooms_prioritizes_selected_room_and_dedups() {
+        let known = vec![
+            "alpha-room".to_string(),
+            "beta-room".to_string(),
+            "default".to_string(),
+        ];
+        let rooms = inline_selector_rooms("beta-room", &known);
+        assert_eq!(rooms, vec!["beta-room".to_string(), "default".to_string(), "alpha-room".to_string()]);
+    }
+
+    #[test]
+    fn inline_selector_rooms_caps_option_count() {
+        let known = (0..20)
+            .map(|idx| format!("room-{idx:02}"))
+            .collect::<Vec<_>>();
+        let rooms = inline_selector_rooms("current-room", &known);
+        assert_eq!(rooms.len(), 5);
+        assert_eq!(rooms[0], "current-room");
+        assert_eq!(rooms[1], "default");
+    }
+
+    #[test]
+    fn inline_selector_rooms_prioritizes_non_generated_ids() {
+        let known = vec![
+            "adventure-1771512523460".to_string(),
+            "room-current-1772042447265-497".to_string(),
+            "alpha-room".to_string(),
+            "beta-room".to_string(),
+        ];
+        let rooms = inline_selector_rooms("current-room", &known);
+        assert_eq!(
+            rooms,
+            vec![
+                "current-room".to_string(),
+                "default".to_string(),
+                "alpha-room".to_string(),
+                "beta-room".to_string(),
+                "adventure-1771512523460".to_string()
+            ]
+        );
+    }
+}
+
 fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_room: &str) {
     let Some(hub) = doc.get_element_by_id("room-hub") else {
         return;
@@ -76,7 +249,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     let mut stopped = Vec::new();
     let mut lobby = Vec::new();
     let mut unavailable = Vec::new();
-    let mut ended = Vec::new();
+    let mut ended_hidden_count = 0usize;
 
     for room in rooms {
         let lane = room_lane_label(&room.status);
@@ -118,7 +291,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
             "running" => running.push(card),
             "stopped" => stopped.push(card),
             "unavailable" => unavailable.push(card),
-            "ended" => ended.push(card),
+            "ended" => ended_hidden_count += 1,
             _ => lobby.push(card),
         }
     }
@@ -137,23 +310,26 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         )
     };
 
-    let previous_count =
-        running.len() + stopped.len() + lobby.len() + unavailable.len() + ended.len();
+    let previous_count = running.len() + stopped.len() + lobby.len() + unavailable.len();
+    let hidden_ended_note = if ended_hidden_count > 0 {
+        format!(" · 종료 {}개 숨김", ended_hidden_count)
+    } else {
+        String::new()
+    };
     let lanes_html = if running_only {
         format!(
             "{}{}",
             lane_html("현재 게임", current, "current"),
-            lane_html("이전 세션 · 진행 중", running, "running")
+            lane_html("진행 중", running, "running")
         )
     } else {
         format!(
-            "{}{}{}{}{}{}",
+            "{}{}{}{}{}",
             lane_html("현재 게임", current, "current"),
-            lane_html("이전 세션 · 진행 중", running, "running"),
-            lane_html("이전 세션 · 멈춤", stopped, "stopped"),
-            lane_html("이전 세션 · 로비", lobby, "lobby"),
-            lane_html("이전 세션 · 오류", unavailable, "unavailable"),
-            lane_html("이전 세션 · 종료", ended, "ended")
+            lane_html("진행 중", running, "running"),
+            lane_html("멈춤", stopped, "stopped"),
+            lane_html("로비", lobby, "lobby"),
+            lane_html("오류", unavailable, "unavailable")
         )
     };
     let current_text = crate::config::sanitize_room_id(selected_room)
@@ -161,7 +337,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     let html = format!(
         concat!(
             "<div class=\"room-hub-tools\">",
-            "<span class=\"room-hub-summary\">현재 게임: <code>{current}</code> · 이전 세션 {previous_count}개</span>",
+            "<span class=\"room-hub-summary\">현재 게임: <code>{current}</code> · 표시 {previous_count}개{hidden_ended}</span>",
             "<button id=\"room-hub-running-toggle\" class=\"room-hub-filter\" type=\"button\" aria-pressed=\"{pressed}\">",
             "진행 중만",
             "</button>",
@@ -170,6 +346,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         ),
         current = html_escape(&current_text),
         previous_count = previous_count,
+        hidden_ended = hidden_ended_note,
         pressed = if running_only { "true" } else { "false" },
         lanes = lanes_html
     );
@@ -397,7 +574,24 @@ fn save_room_hub_running_only(enabled: bool) {
     }
 }
 
+fn sync_room_hub_top_offset(doc: &web_sys::Document) {
+    let top_px = doc
+        .get_element_by_id("top-bar")
+        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().map(|bar| bar.offset_height()))
+        .map(|height| height.max(84))
+        .unwrap_or(84);
+    if let Some(hub) = doc
+        .get_element_by_id("room-hub")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = hub
+            .style()
+            .set_property("--room-hub-top", &format!("{}px", top_px));
+    }
+}
+
 fn set_room_hub_visible(doc: &web_sys::Document, visible: bool) {
+    sync_room_hub_top_offset(doc);
     set_element_display(doc, "room-hub", if visible { "grid" } else { "none" });
     if let Some(toggle) = doc.get_element_by_id("room-hub-toggle") {
         let _ = toggle.set_attribute("aria-pressed", if visible { "true" } else { "false" });
@@ -427,15 +621,46 @@ fn remember_known_rooms(extra_rooms: &[String]) {
     save_known_rooms(&rooms);
 }
 
+fn inline_selector_rooms(selected_room: &str, known_rooms: &[String]) -> Vec<String> {
+    let is_generated = |room: &str| {
+        let key = room.to_ascii_lowercase();
+        key.starts_with("adventure-")
+            || key.starts_with("room-current-")
+            || key.starts_with("persist-")
+    };
+
+    let mut rooms = Vec::with_capacity(known_rooms.len() + 2);
+    rooms.push(selected_room.to_string());
+    rooms.push(crate::config::DEFAULT_ROOM_ID.to_string());
+    rooms.extend(known_rooms.iter().cloned());
+
+    let deduped = unique_non_empty(rooms);
+    let mut prioritized = Vec::with_capacity(deduped.len());
+    let mut generated = Vec::new();
+
+    for room in deduped {
+        if room == selected_room || room.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
+            prioritized.push(room);
+            continue;
+        }
+        if is_generated(&room) {
+            generated.push(room);
+        } else {
+            prioritized.push(room);
+        }
+    }
+    prioritized.extend(generated);
+    if prioritized.len() > INLINE_SELECTOR_MAX_OPTIONS {
+        prioritized.truncate(INLINE_SELECTOR_MAX_OPTIONS);
+    }
+    prioritized
+}
+
 pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     let selected = crate::config::sanitize_room_id(selected_room)
         .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
-    // Keep inline selector deterministic to avoid stale/duplicated room IDs from
-    // local storage history. Full room browsing is handled by the room-hub lanes.
-    let rooms = unique_non_empty(vec![
-        selected.clone(),
-        crate::config::DEFAULT_ROOM_ID.to_string(),
-    ]);
+    let rooms = inline_selector_rooms(&selected, &load_recent_rooms());
+    sync_room_hub_top_offset(doc);
 
     if let Some(select) = doc
         .get_element_by_id("room-selector-inline")
@@ -456,7 +681,9 @@ pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
         .get_element_by_id("room-input-inline")
         .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
-        input.set_value(&selected);
+        if input.value().trim().eq_ignore_ascii_case(&selected) {
+            input.set_value("");
+        }
     }
     if let Some(pill) = doc.get_element_by_id("room-status") {
         let lifecycle = TrpgLifecycleState::Loading;
@@ -485,6 +712,12 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
     crate::game::round_runner::set_auto_round_running(false);
     clear_trpg_dom(doc);
     sync_room_hub_selection(doc, &room);
+    if let Some(input) = doc
+        .get_element_by_id("room-input-inline")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value("");
+    }
     let doc_for_refresh = doc.clone();
     wasm_bindgen_futures::spawn_local(async move {
         if let Ok(rows) = refresh_actor_admin_list(&doc_for_refresh).await {
@@ -493,6 +726,12 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str) {
                 &format!("room {} 액터 {}명", actor_admin_room_id(), rows.len()),
                 "status-ok",
             );
+        }
+    });
+    let doc_for_rooms = doc.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = refresh_rooms_from_server(&doc_for_rooms).await {
+            log::warn!("room 목록 동기화 실패(방 이동 직후): {}", e);
         }
     });
     log::info!("Viewer room switched to {}", room);
@@ -573,7 +812,27 @@ pub(super) async fn refresh_rooms_from_server(
     }
 
     remember_known_rooms(&room_ids);
-    let current = crate::config::current_room_id();
+    let mut current = crate::config::current_room_id();
+    if let Some(replacement) = select_room_for_ended_default(&current, &snapshots) {
+        log::info!(
+            "Current room {} is ended; auto-switching to {}",
+            current,
+            replacement
+        );
+        set_current_room_id(doc, &replacement);
+        clear_trpg_dom(doc);
+        current = replacement;
+    }
+    let ended_ids = snapshots
+        .iter()
+        .filter(|row| TrpgLifecycleState::from_status(&row.status) == TrpgLifecycleState::Ended)
+        .map(|row| row.id.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    let mut recent_rooms = load_recent_rooms();
+    recent_rooms.retain(|room| {
+        room.eq_ignore_ascii_case(&current) || !ended_ids.contains(&room.to_ascii_lowercase())
+    });
+    save_recent_rooms(&recent_rooms);
     sync_room_controls(doc, &current);
     render_room_hub(doc, &snapshots, &current);
     bind_room_hub_buttons(doc);
@@ -582,6 +841,18 @@ pub(super) async fn refresh_rooms_from_server(
         .find(|row| row.id == current)
         .map(|row| row.status.as_str())
         .unwrap_or("idle");
+
+    // Auto-round is a gameplay convenience for active rounds only.
+    // Keep it off in lobby/ended/unavailable to avoid confusing "auto running"
+    // signals when the room cannot actually advance.
+    if TrpgLifecycleState::from_status(current_status) != TrpgLifecycleState::Running {
+        if let Some(dashboard) = doc.get_element_by_id("dashboard") {
+            let _ = dashboard.set_attribute("data-auto-round", "0");
+        }
+        render_auto_round_toggle(doc);
+        crate::game::round_runner::set_auto_round_running(false);
+    }
+
     sync_session_pause_buttons(doc, current_status);
     Ok(snapshots)
 }
@@ -724,10 +995,28 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                 match refresh_rooms_from_server(&doc_for_fetch).await {
                     Ok(rooms) => {
                         let current = crate::config::current_room_id();
+                        let ended_count = rooms
+                            .iter()
+                            .filter(|row| {
+                                TrpgLifecycleState::from_status(&row.status)
+                                    == TrpgLifecycleState::Ended
+                            })
+                            .count();
+                        let current_is_ended = rooms
+                            .iter()
+                            .find(|row| row.id.eq_ignore_ascii_case(&current))
+                            .map(|row| {
+                                TrpgLifecycleState::from_status(&row.status)
+                                    == TrpgLifecycleState::Ended
+                            })
+                            .unwrap_or(false);
+                        let visible_count =
+                            rooms.len().saturating_sub(ended_count) + usize::from(current_is_ended);
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
                             pill.set_text_content(Some(&format!(
-                                "현재 게임: {} · {}개 방",
+                                "현재 게임: {} · 표시 {} / 전체 {}",
                                 current,
+                                visible_count,
                                 rooms.len()
                             )));
                         }

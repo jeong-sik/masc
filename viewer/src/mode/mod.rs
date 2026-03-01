@@ -425,10 +425,28 @@ fn enter_trpg() {
             match refresh_rooms_from_server(&doc_for_rooms).await {
                 Ok(rooms) => {
                     let room_now = crate::config::current_room_id();
+                    let ended_count = rooms
+                        .iter()
+                        .filter(|row| {
+                            TrpgLifecycleState::from_status(&row.status)
+                                == TrpgLifecycleState::Ended
+                        })
+                        .count();
+                    let current_is_ended = rooms
+                        .iter()
+                        .find(|row| row.id.eq_ignore_ascii_case(&room_now))
+                        .map(|row| {
+                            TrpgLifecycleState::from_status(&row.status)
+                                == TrpgLifecycleState::Ended
+                        })
+                        .unwrap_or(false);
+                    let visible_count =
+                        rooms.len().saturating_sub(ended_count) + usize::from(current_is_ended);
                     if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
                         pill.set_text_content(Some(&format!(
-                            "현재 게임: {} · {}개 방",
+                            "현재 게임: {} · 표시 {} / 전체 {}",
                             room_now,
+                            visible_count,
                             rooms.len()
                         )));
                     }
@@ -452,7 +470,7 @@ fn enter_trpg() {
 fn bind_auto_round_toggle(doc: &web_sys::Document) {
     if let Some(dashboard) = doc.get_element_by_id("dashboard") {
         if dashboard.get_attribute("data-auto-round").is_none() {
-            let _ = dashboard.set_attribute("data-auto-round", "1");
+            let _ = dashboard.set_attribute("data-auto-round", "0");
         }
     }
     render_auto_round_toggle(doc);
@@ -822,36 +840,77 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 #[cfg(target_arch = "wasm32")]
 fn sync_session_pause_buttons(doc: &web_sys::Document, room_status: &str) {
     let lifecycle = TrpgLifecycleState::from_status(room_status);
-    let (pause_disabled, resume_disabled, title) = match lifecycle {
-        TrpgLifecycleState::Running => (false, true, "세션이 진행 중입니다."),
+    let (pause_disabled, resume_disabled, title, status_text, status_tone) = match lifecycle {
+        TrpgLifecycleState::Running => (
+            false,
+            true,
+            "세션이 진행 중입니다.",
+            "세션 진행 중입니다.",
+            "status-ok",
+        ),
         TrpgLifecycleState::Lobby => (
             false,
             true,
             "세션이 로비 상태입니다. 필요 시 멈춤 가능합니다.",
+            "세션 시작 전 로비 상태입니다. 새 게임에서 시작하세요.",
+            "status-info",
         ),
-        TrpgLifecycleState::Stopped => (true, false, "세션이 멈춤 상태입니다."),
-        TrpgLifecycleState::Ended => (true, true, "종료된 세션은 재개할 수 없습니다."),
-        TrpgLifecycleState::Unavailable => (true, true, "엔진 연결 오류 상태입니다."),
-        _ => (true, true, "세션 시작 후 제어할 수 있습니다."),
+        TrpgLifecycleState::Stopped => (
+            true,
+            false,
+            "세션이 멈춤 상태입니다.",
+            "세션이 멈춰 있습니다. 재개 버튼으로 계속 진행할 수 있습니다.",
+            "status-warn",
+        ),
+        TrpgLifecycleState::Ended => (
+            true,
+            true,
+            "종료된 세션은 재개할 수 없습니다.",
+            "세션이 종료되었습니다. 새 게임 버튼으로 다시 시작하세요.",
+            "status-info",
+        ),
+        TrpgLifecycleState::Unavailable => (
+            true,
+            true,
+            "엔진 연결 오류 상태입니다.",
+            "세션 상태를 가져오지 못했습니다. 엔진/키퍼 연결을 확인하세요.",
+            "status-error",
+        ),
+        _ => (
+            true,
+            true,
+            "세션 시작 후 제어할 수 있습니다.",
+            "세션 상태 동기화 중입니다.",
+            "status-info",
+        ),
     };
 
+    let mut is_busy = false;
     if let Some(btn) = doc
         .get_element_by_id("session-pause-btn")
         .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
     {
-        if btn.get_attribute("aria-busy").as_deref() != Some("true") {
+        let busy = btn.get_attribute("aria-busy").as_deref() == Some("true");
+        if !busy {
             btn.set_disabled(pause_disabled);
         }
+        is_busy = is_busy || busy;
         btn.set_title(title);
     }
     if let Some(btn) = doc
         .get_element_by_id("session-resume-btn")
         .and_then(|el| el.dyn_into::<web_sys::HtmlButtonElement>().ok())
     {
-        if btn.get_attribute("aria-busy").as_deref() != Some("true") {
+        let busy = btn.get_attribute("aria-busy").as_deref() == Some("true");
+        if !busy {
             btn.set_disabled(resume_disabled);
         }
+        is_busy = is_busy || busy;
         btn.set_title(title);
+    }
+
+    if !is_busy {
+        set_session_control_status(doc, status_text, status_tone);
     }
 }
 
@@ -860,7 +919,7 @@ fn auto_round_enabled_from_dom(doc: &web_sys::Document) -> bool {
     let value = doc
         .get_element_by_id("dashboard")
         .and_then(|el| el.get_attribute("data-auto-round"))
-        .unwrap_or_else(|| "1".to_string())
+        .unwrap_or_else(|| "0".to_string())
         .to_ascii_lowercase();
     matches!(value.as_str(), "1" | "true" | "on")
 }

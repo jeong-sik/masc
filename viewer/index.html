@@ -148,7 +148,7 @@
     </div>
 
     <!-- ═══ Dashboard (Active Mode View) ═══ -->
-    <div id="dashboard" style="display: none;" data-auto-round="1">
+    <div id="dashboard" style="display: none;" data-auto-round="0">
         <!-- Top Bar -->
         <header id="top-bar">
             <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
@@ -158,19 +158,21 @@
                     <select id="room-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
                         <option value="default" selected>default</option>
                     </select>
-                    <input id="room-input-inline" class="inline-input" type="text" value="default" placeholder="방 이름 입력" maxlength="64" title="이동할 방 이름을 직접 입력" />
+                    <input id="room-input-inline" class="inline-input" type="text" placeholder="방 이름 입력" maxlength="64" title="이동할 방 이름을 직접 입력" />
                     <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방으로 이동합니다">이동</button>
                     <button id="room-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
                     <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
                     <span id="room-status" class="widget-pill">현재 게임: default</span>
+                    <span id="top-controls-help" class="widget-pill">방 전환은 셀렉트/입력+이동 · 새 게임은 세션 시작 · 멈춤/재개는 진행 중 세션 제어</span>
                 </div>
                 <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
-                <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="true" title="AI 턴 자동 진행을 멈춥니다">자동 진행: ON</button>
+                <button id="auto-round-toggle" class="inline-toggle" type="button" aria-pressed="false" title="AI 턴 자동 진행을 시작합니다">자동 진행: OFF</button>
                 <div class="session-control-inline">
                     <button id="session-pause-btn" class="inline-toggle" type="button" title="현재 세션을 멈춥니다">멈춤</button>
                     <button id="session-resume-btn" class="inline-toggle" type="button" title="멈춘 세션을 재개합니다">재개</button>
                     <span id="session-control-status" class="widget-pill">세션 제어 대기</span>
                 </div>
+                <span id="dm-keeper-pill" class="widget-pill status-warn" title="현재 DM keeper">DM: 미지정</span>
                 <button id="view-options-toggle" class="inline-toggle" type="button" aria-pressed="false" title="화면 표시 옵션 열기/닫기">화면 옵션</button>
                 <div id="view-options-popover" class="view-options-popover" style="display:none">
                     <label><input id="opt-show-ops" type="checkbox" checked /> 운영 HUD</label>

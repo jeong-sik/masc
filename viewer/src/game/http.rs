@@ -167,6 +167,35 @@ fn room_requires_new_game(raw_status: &str) -> bool {
     )
 }
 
+fn initial_progress_event_type(room_status: &str, state_unavailable: bool) -> Option<&'static str> {
+    if state_unavailable {
+        return None;
+    }
+    let status = normalize_room_status(room_status);
+    if matches!(
+        status.as_str(),
+        "ended" | "completed" | "done" | "retired" | "closed"
+    ) {
+        Some("room.ended")
+    } else if room_requires_new_game(status.as_str()) {
+        None
+    } else {
+        Some("room.started")
+    }
+}
+
+fn should_emit_initial_turn_advanced(
+    room_turn: u32,
+    room_status: &str,
+    state_unavailable: bool,
+) -> bool {
+    room_turn > 0
+        && matches!(
+            initial_progress_event_type(room_status, state_unavailable),
+            Some("room.started")
+        )
+}
+
 fn queue_initial_state_fetch(commands: &mut Commands) {
     let buffer: Arc<Mutex<Option<GameStateResponse>>> = Arc::new(Mutex::new(None));
     let shared = buffer.clone();
@@ -284,16 +313,7 @@ pub fn apply_initial_state(
 
     let actor_ids: Vec<String> = state.characters.iter().map(|ch| ch.id.clone()).collect();
     if let Some(room) = &state.room {
-        if !state_unavailable {
-            let status = normalize_room_status(&room.status);
-            let room_event = if matches!(
-                status.as_str(),
-                "ended" | "completed" | "done" | "retired" | "closed"
-            ) {
-                "room.ended"
-            } else {
-                "room.started"
-            };
+        if let Some(room_event) = initial_progress_event_type(&room.status, state_unavailable) {
             let selected_players = actor_ids
                 .iter()
                 .filter(|id| id.as_str() != "dm")
@@ -312,7 +332,7 @@ pub fn apply_initial_state(
                 dm_keeper: "".to_string(),
                 selected_player_ids: selected_players,
             }));
-            if room.turn > 0 {
+            if should_emit_initial_turn_advanced(room.turn, &room.status, state_unavailable) {
                 turn_writer.write(TurnAdvanced(TurnAdvancePayload {
                     turn: room.turn,
                     phase: room.phase.clone(),
@@ -364,7 +384,7 @@ pub fn apply_initial_state(
 
         prompt_new_game_for_inactive_room(room_state.status.trim());
         log::info!(
-            "Room '{}' is not resumable (status: '{}') — skipping actor spawn, showing new-game panel",
+            "Room '{}' is not resumable (status: '{}') — skipping actor spawn, showing new-game guidance",
             room_state.id,
             room_state.status,
         );
@@ -1151,8 +1171,8 @@ fn parse_party_characters(
         .collect()
 }
 
-/// When the fetched room is not resumable, auto-show the new-game panel
-/// and pre-fill a fresh room ID so the user can start a new session.
+/// When the fetched room is not resumable, surface guidance for starting a new
+/// session. The new-game panel itself should remain user-triggered.
 fn prompt_new_game_for_inactive_room(room_status: &str) {
     let _ = room_status;
 
@@ -1162,26 +1182,7 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
             return;
         };
 
-        // Show the new-game panel
-        if let Some(panel) = document.get_element_by_id("new-game-panel") {
-            if let Some(html_el) = panel.dyn_ref::<web_sys::HtmlElement>() {
-                let _ = html_el.style().set_property("display", "flex");
-            }
-        }
-
-        // Pre-populate room ID input with a fresh generated ID
-        if let Some(input) = document
-            .get_element_by_id("new-game-room-id")
-            .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-        {
-            if input.value().trim().is_empty() {
-                let ts = js_sys::Date::now() as i64;
-                let rand = (js_sys::Math::random() * 1000.0).floor() as i64;
-                input.set_value(&format!("adventure-{}-{:03}", ts, rand));
-            }
-        }
-
-        // Set a status message appropriate to the room state
+        // Set a status message appropriate to the room state.
         if let Some(el) = document.get_element_by_id("new-game-status") {
             let msg = match normalize_room_status(room_status).as_str() {
                 "ended" => "이 게임은 종료되었습니다. 새 게임을 시작하세요.",
@@ -1191,14 +1192,6 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
                 _ => "진행 중인 게임이 없습니다. 새 게임을 시작하세요.",
             };
             el.set_inner_html(msg);
-        }
-
-        // Programmatically click the toggle button to trigger data bootstrap
-        // (the click handler in mode.rs shows the panel AND loads keepers/presets)
-        if let Some(btn) = document.get_element_by_id("new-game-toggle") {
-            if let Some(html_btn) = btn.dyn_ref::<web_sys::HtmlElement>() {
-                html_btn.click();
-            }
         }
     }
 }
@@ -1527,6 +1520,38 @@ mod tests {
     #[test]
     fn ended_room_requires_new_game() {
         assert!(room_requires_new_game("ended"));
+    }
+
+    #[test]
+    fn initial_progress_event_is_hidden_for_idle_and_lobby() {
+        assert_eq!(initial_progress_event_type("lobby", false), None);
+        assert_eq!(initial_progress_event_type("idle", false), None);
+    }
+
+    #[test]
+    fn initial_progress_event_marks_ended_room_as_ended_event() {
+        assert_eq!(initial_progress_event_type("ended", false), Some("room.ended"));
+    }
+
+    #[test]
+    fn initial_progress_event_marks_completed_room_as_ended_event() {
+        assert_eq!(
+            initial_progress_event_type("completed", false),
+            Some("room.ended")
+        );
+    }
+
+    #[test]
+    fn initial_progress_event_is_suppressed_when_room_state_unavailable() {
+        assert_eq!(initial_progress_event_type("running", true), None);
+    }
+
+    #[test]
+    fn initial_turn_advanced_requires_turn_and_resumable_status() {
+        assert!(should_emit_initial_turn_advanced(3, "running", false));
+        assert!(!should_emit_initial_turn_advanced(0, "running", false));
+        assert!(!should_emit_initial_turn_advanced(3, "ended", false));
+        assert!(!should_emit_initial_turn_advanced(3, "running", true));
     }
 
     #[test]

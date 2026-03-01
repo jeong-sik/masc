@@ -24,7 +24,12 @@ impl TurnPhase {
             "outcome_narration" | "outcome" => Self::OutcomeNarration,
             "state_update" => Self::StateUpdate,
             "transition" => Self::Transition,
-            _ => Self::DmNarration,
+            other => {
+                if !other.is_empty() {
+                    log::warn!("Unknown TurnPhase string: {:?}, defaulting to DmNarration", other);
+                }
+                Self::DmNarration
+            }
         }
     }
 

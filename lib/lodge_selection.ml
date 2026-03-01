@@ -302,6 +302,25 @@ let record_action ~agent_name ~action =
    | `Skip -> s.skips <- s.skips + 1);
   s.updated_at <- Time_compat.now ()
 
+(** {1 Quality Signal Integration} *)
+
+(** Record Post Verifier result into Thompson Sampling priors.
+    Uses weaker signals than votes (0.3-0.5 vs 1.0) since verification
+    is heuristic rather than human-validated.
+
+    - Pass: small α boost (reward good content)
+    - Warn: small β nudge (mild quality concern)
+    - Fail: moderate β penalty (content rejected) *)
+let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
+  let s = get_stats agent_name in
+  (match verdict with
+   | Post_verifier.Pass -> s.alpha <- s.alpha +. 0.3
+   | Post_verifier.Warn _ -> s.beta <- s.beta +. 0.1
+   | Post_verifier.Fail _ -> s.beta <- s.beta +. 0.5);
+  s.alpha <- Float.max 0.1 s.alpha;
+  s.beta <- Float.max 0.1 s.beta;
+  s.updated_at <- Time_compat.now ()
+
 (** {1 Selection Algorithm} *)
 
 let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
@@ -353,6 +372,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   let max_starvation = Env_config.LodgeSelection.max_starvation_ticks in
   let starved = List.filter_map (fun name ->
     if List.mem name !selected_names then None
+    else if not (Agent_health.is_healthy ~agent_name:name) then None
     else begin
       let s = get_stats name in
       let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
@@ -385,6 +405,11 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
 
     let candidates = List.filter_map (fun name ->
       if List.mem name !selected_names then None
+      else if not (Agent_health.is_healthy ~agent_name:name) then begin
+        (* Unhealthy agents excluded from Thompson selection *)
+        Printf.printf "[lodge_selection] Skipping %s (unhealthy) from Thompson pool\n%!" name;
+        None
+      end
       else begin
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in

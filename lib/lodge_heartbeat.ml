@@ -2313,20 +2313,32 @@ let rec execute_agent_action ~agent_name ~action =
       else if is_duplicate_post ~agent_name ~content then
         Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name
       else begin
-        match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
-        | Ok post ->
-            let post_id = Board.Post_id.to_string post.id in
-            Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
-            record_agent_activity ~name:agent_name;
-            record_rate_action ~agent_name `Post;
-            record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
-            record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
-            Lodge_memory.store {
-              agent_name; action_type = "post"; content; context = "LLM decision";
-              board_id = Some post_id; timestamp = Time_compat.now ();
-            }
-        | Error e ->
-            Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
+        let vr = Post_verifier.verify ~content in
+        Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
+        if not (Post_verifier.is_acceptable vr) then begin
+          let reason = Post_verifier.verdict_to_string vr.overall in
+          Eio.traceln "   🚫 [%s] Post rejected by verifier: %s" agent_name reason;
+          Agent_health.record_failure ~agent_name ~reason
+        end else begin
+          (match vr.overall with
+           | Post_verifier.Warn reason ->
+               Eio.traceln "   ⚠️ [%s] Post verifier warning: %s" agent_name reason
+           | _ -> ());
+          match Board.create_post store ~author:agent_name ~content ~ttl_hours:168 () with
+          | Ok post ->
+              let post_id = Board.Post_id.to_string post.id in
+              Printf.printf "   📝 [%s] Posted: %s\n%!" agent_name post_id;
+              record_agent_activity ~name:agent_name;
+              record_rate_action ~agent_name `Post;
+              record_agent_memory ~agent_name ~content ~action_type:(`Post "LLM decision");
+              record_to_neo4j ~agent_name ~action_type:`Post ~content ~target_id:post_id;
+              Lodge_memory.store {
+                agent_name; action_type = "post"; content; context = "LLM decision";
+                board_id = Some post_id; timestamp = Time_compat.now ();
+              }
+          | Error e ->
+              Eio.traceln "   ❌ [%s] Post failed: %s" agent_name (Board.show_board_error e)
+        end
       end
   | ActionComment (post_id, content) ->
       if String.length content < 3 then
@@ -2334,21 +2346,33 @@ let rec execute_agent_action ~agent_name ~action =
       else if not (can_agent_comment ~agent_name ~post_id) then
         Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id
       else begin
-        match Board.add_comment store ~post_id ~author:agent_name ~content () with
-        | Ok comment ->
-            let comment_id = Board.Comment_id.to_string comment.id in
-            Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
-            record_agent_comment ~agent_name ~post_id;
-            record_agent_activity ~name:agent_name;
-            record_rate_action ~agent_name `Comment;
-            record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
-            record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
-            Lodge_memory.store {
-              agent_name; action_type = "comment"; content; context = post_id;
-              board_id = Some post_id; timestamp = Time_compat.now ();
-            }
-        | Error e ->
-            Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
+        let vr = Post_verifier.verify ~content in
+        Lodge_selection.record_quality_signal ~agent_name ~verdict:vr.overall;
+        if not (Post_verifier.is_acceptable vr) then begin
+          let reason = Post_verifier.verdict_to_string vr.overall in
+          Eio.traceln "   🚫 [%s] Comment rejected by verifier: %s" agent_name reason;
+          Agent_health.record_failure ~agent_name ~reason
+        end else begin
+          (match vr.overall with
+           | Post_verifier.Warn reason ->
+               Eio.traceln "   ⚠️ [%s] Comment verifier warning: %s" agent_name reason
+           | _ -> ());
+          match Board.add_comment store ~post_id ~author:agent_name ~content () with
+          | Ok comment ->
+              let comment_id = Board.Comment_id.to_string comment.id in
+              Printf.printf "   💬 [%s] Commented on %s: %s\n%!" agent_name post_id comment_id;
+              record_agent_comment ~agent_name ~post_id;
+              record_agent_activity ~name:agent_name;
+              record_rate_action ~agent_name `Comment;
+              record_agent_memory ~agent_name ~content ~action_type:(`Comment post_id);
+              record_to_neo4j ~agent_name ~action_type:`Comment ~content ~target_id:comment_id;
+              Lodge_memory.store {
+                agent_name; action_type = "comment"; content; context = post_id;
+                board_id = Some post_id; timestamp = Time_compat.now ();
+              }
+          | Error e ->
+              Eio.traceln "   ❌ [%s] Comment failed: %s" agent_name (Board.show_board_error e)
+        end
       end
   | ActionUpvote post_id ->
       (match Board.vote store ~voter:agent_name ~post_id ~direction:Board.Up with
@@ -2640,13 +2664,25 @@ let tick ~config ~pending_triggers =
 
   (* Run check-ins: each selected agent gets LLM decision + execution *)
   let checkins = List.map (fun (name, trigger) ->
+    (* Health gate: skip agents with open circuit breakers *)
+    if not (Agent_health.is_healthy ~agent_name:name) then
+      (name, trigger, Skipped "agent unhealthy (circuit breaker open)")
     (* Rate limit check *)
-    if not (check_rate_limit ~agent_name:name `Post) then
+    else if not (check_rate_limit ~agent_name:name `Post) then
       (name, trigger, Skipped "rate limit: too many posts today")
     else begin
       let trigger_reason = string_of_trigger trigger in
       let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
-      execute_agent_action ~agent_name:name ~action;
+      (try
+        execute_agent_action ~agent_name:name ~action;
+        (* Record health outcome — skip is neutral, not a failure *)
+        (match action with
+         | ActionSkip -> ()
+         | _ -> Agent_health.record_success ~agent_name:name)
+      with exn ->
+        Agent_health.record_failure ~agent_name:name
+          ~reason:(Printexc.to_string exn);
+        Printf.printf "[lodge] Agent %s action failed: %s\n%!" name (Printexc.to_string exn));
       record_checkin ~agent_name:name;
       let summary = match action with
         | ActionPost content -> Printf.sprintf "Posted: %s" (utf8_truncate content 40)
@@ -2787,10 +2823,20 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
           if not (is_agent_active ~name) then begin
             let recent_posts = Board.list_posts (Board.global ()) ~limit:10 () in
             let on_tick ~name ~state:_ =
-              let trigger_reason = "self-heartbeat continuation" in
-              let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
-              execute_agent_action ~agent_name:name ~action;
-              record_agent_activity ~name
+              if not (Agent_health.is_healthy ~agent_name:name) then
+                Printf.printf "[lodge] Skipping self-heartbeat for %s (unhealthy)\n%!" name
+              else begin
+                let trigger_reason = "self-heartbeat continuation" in
+                let action = decide_agent_action ~agent_name:name ~trigger_reason ~recent_posts in
+                (try
+                  execute_agent_action ~agent_name:name ~action;
+                  Agent_health.record_success ~agent_name:name;
+                  record_agent_activity ~name
+                with exn ->
+                  Agent_health.record_failure ~agent_name:name
+                    ~reason:(Printexc.to_string exn);
+                  Printf.printf "[lodge] Self-heartbeat %s failed: %s\n%!" name (Printexc.to_string exn))
+              end
             in
             start_agent_heartbeat ~sw ~clock ~name ~on_tick
           end

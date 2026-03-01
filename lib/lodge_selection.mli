@@ -109,6 +109,14 @@ val record_action :
   action:[`Post | `Comment | `Skip] ->
   unit
 
+(** Record a quality signal from Post_verifier into Thompson α/β.
+    Called after every content verification to feed quality into selection.
+    Pass → α +0.3 (reward), Warn → β +0.1 (mild penalty), Fail → β +0.5 (penalty). *)
+val record_quality_signal :
+  agent_name:string ->
+  verdict:Post_verifier.verdict ->
+  unit
+
 (** {1 Persistence} *)
 
 (** Load stats from persistent storage (.masc/lodge_stats.jsonl) *)

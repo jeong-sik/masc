@@ -3610,13 +3610,65 @@ let last_actor_reply ~state ~actor_id =
               | _ -> None)
   | _ -> None
 
+let is_ascii_digit_string (s : string) : bool =
+  let trimmed = String.trim s in
+  trimmed <> ""
+  && String.for_all
+       (function
+         | '0' .. '9' -> true
+         | _ -> false)
+       trimmed
+
 let normalize_reply_for_comparison (raw : string) : string =
-  raw
-  |> String.trim
-  |> String.lowercase_ascii
-  |> String.split_on_char ' '
-  |> List.filter (fun s -> s <> "")
-  |> String.concat " "
+  let normalized =
+    raw
+    |> String.trim
+    |> String.lowercase_ascii
+    |> String.map (function
+         | '\n' | '\r' | '\t' -> ' '
+         | '.'
+         | ','
+         | '!'
+         | '?'
+         | ':'
+         | ';'
+         | '"'
+         | '\''
+         | '('
+         | ')'
+         | '['
+         | ']'
+         | '{'
+         | '}'
+         | '/'
+         | '\\'
+         | '|'
+         | '-'
+         | '_'
+         | '+'
+         | '='
+         | '*'
+         | '&'
+         | '^'
+         | '%'
+         | '$'
+         | '#'
+         | '@'
+         | '~'
+         | '`' ->
+             ' '
+         | ch -> ch)
+  in
+  let tokens =
+    normalized |> String.split_on_char ' ' |> List.filter (fun s -> s <> "")
+  in
+  let tokens =
+    match tokens with
+    | "turn" :: n :: rest when is_ascii_digit_string n -> rest
+    | "턴" :: n :: rest when is_ascii_digit_string n -> rest
+    | _ -> tokens
+  in
+  String.concat " " tokens
 
 let recent_actor_replies ~state ~actor_id ~limit =
   if limit <= 0 then []
@@ -3652,7 +3704,14 @@ let is_repetitive_reply ~state ~actor_id ~(reply : string) : bool =
   else
     recent_actor_replies ~state ~actor_id ~limit:3
     |> List.map normalize_reply_for_comparison
-    |> List.exists (fun recent -> recent <> "" && recent = normalized_reply)
+    |> List.exists (fun recent ->
+           recent <> ""
+           &&
+           (recent = normalized_reply
+           || (String.length recent >= 24
+              && contains_substring recent normalized_reply)
+           || (String.length normalized_reply >= 24
+              && contains_substring normalized_reply recent)))
 
 let pick_deterministic_text ~actor_id ~turn ~salt xs =
   match xs with
@@ -4693,8 +4752,7 @@ let jaccard_similarity a b =
   if union = 0 then 0.0 else Float.of_int inter /. Float.of_int union
 
 let tokenize_words s =
-  s |> String.lowercase_ascii |> String.split_on_char ' '
-  |> List.concat_map (String.split_on_char '\n')
+  s |> normalize_reply_for_comparison |> String.split_on_char ' '
   |> List.filter (fun w -> String.length w > 0)
 
 (** Check if a new narration entry is too similar to recent entries.

@@ -779,7 +779,8 @@ let claim_task config ~agent_name ~task_id =
               | Ok agent ->
                   let updated = { agent with status = Busy; current_task = Some task_id } in
                   write_json config agent_file (agent_to_yojson updated)
-              | Error _ -> ()
+              | Error msg ->
+                  Printf.eprintf "[room] agent state write failed: %s\n%!" msg
             end;
             let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
             log_event config (Printf.sprintf
@@ -845,7 +846,8 @@ let claim_task_r config ~agent_name ~task_id
                     | Ok agent ->
                         let updated = { agent with status = Busy; current_task = Some task_id } in
                         write_json config agent_file (agent_to_yojson updated)
-                    | Error _ -> ()
+                    | Error msg ->
+                        Printf.eprintf "[room] agent state write failed: %s\n%!" msg
                   end;
                   let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
                   log_event config (Printf.sprintf "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}" agent_name task_id (now_iso ()));
@@ -945,7 +947,8 @@ let transition_task_r config ~agent_name ~task_id ~action
                                         agent
                                 in
                                 write_json config agent_file (agent_to_yojson updated)
-                            | Error _ -> ()
+                            | Error msg ->
+                                Printf.eprintf "[room] agent state write failed: %s\n%!" msg
                           end;
                           log_event config (Printf.sprintf
                             "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
@@ -1006,7 +1009,8 @@ let complete_task config ~agent_name ~task_id ~notes =
               | Ok agent ->
                   let updated = { agent with status = Active; current_task = None } in
                   write_json config agent_file (agent_to_yojson updated)
-              | Error _ -> ()
+              | Error msg ->
+                  Printf.eprintf "[room] agent state write failed: %s\n%!" msg
             end;
             let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
                       else Printf.sprintf "✅ Completed %s - %s" task_id notes in
@@ -1056,7 +1060,8 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                 let json = read_json config agent_file in
                 match agent_of_yojson json with
                 | Ok agent -> let updated = { agent with status = Active; current_task = None } in write_json config agent_file (agent_to_yojson updated)
-                | Error _ -> ()
+                | Error msg ->
+                    Printf.eprintf "[room] agent state write failed: %s\n%!" msg
               end;
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
@@ -1197,7 +1202,8 @@ let claim_next config ~agent_name =
             | Ok agent ->
                 let updated = { agent with status = Busy; current_task = Some task.id } in
                 write_json config agent_file (agent_to_yojson updated)
-            | Error _ -> ()
+            | Error msg ->
+                Printf.eprintf "[room] agent state write failed: %s\n%!" msg
           end;
 
           let _ = broadcast config ~from_agent:agent_name
@@ -1957,7 +1963,8 @@ let get_agents_status config =
               ("last_seen", `String agent.last_seen);
               ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
             ] :: !agents
-        | Error _ -> ()
+        | Error msg ->
+            Printf.eprintf "[room] agent state write failed: %s\n%!" msg
       end
     );
     `Assoc [

@@ -101,6 +101,9 @@ pub fn reset_turn_progress(mut progress: ResMut<TurnProgressState>) {
 }
 
 /// Apply HP change events to Actor components.
+/// Validates that `amount` and `remaining_hp` are arithmetically consistent
+/// with the actor's current HP. Logs a warning on mismatch (server-side bug
+/// indicator) but still applies `remaining_hp` as the authoritative value.
 pub fn apply_hp_change(mut events: MessageReader<HpChanged>, mut actors: Query<&mut Actor>) {
     for HpChanged(payload) in events.read() {
         for mut actor in &mut actors {
@@ -108,6 +111,16 @@ pub fn apply_hp_change(mut events: MessageReader<HpChanged>, mut actors: Query<&
                 if payload.amount == 0 && actor.hp == payload.remaining_hp {
                     continue;
                 }
+
+                // Validate: actor.hp + amount should equal remaining_hp
+                let expected = (actor.hp + payload.amount).clamp(0, actor.max_hp);
+                if expected != payload.remaining_hp {
+                    log::warn!(
+                        "HP mismatch for {}: hp={} + amount={} = expected {} but server sent remaining_hp={}",
+                        actor.id, actor.hp, payload.amount, expected, payload.remaining_hp,
+                    );
+                }
+
                 actor.hp = payload.remaining_hp.clamp(0, actor.max_hp);
                 actor.is_dead = actor.hp <= 0;
             }
@@ -150,7 +163,7 @@ pub fn apply_turn_advance(
 pub fn apply_turn_progress(
     mut events: MessageReader<TurnProgressUpdated>,
     mut progress: ResMut<TurnProgressState>,
-    mut room_state: ResMut<RoomState>,
+    room_state: Res<RoomState>,
 ) {
     for TurnProgressUpdated(payload) in events.read() {
         if payload.turn > 0 {
@@ -242,18 +255,10 @@ pub fn apply_turn_progress(
             _ => {}
         }
 
-        // Infer UI Phase from event type
-        let inferred_phase = match payload.event_type.as_str() {
-            "turn.started" => Some(TurnPhase::ActionDeclaration),
-            "turn.action.proposed" | "intervention.submitted" => Some(TurnPhase::DiceResolution),
-            "dice.rolled" => Some(TurnPhase::OutcomeNarration),
-            "narration.posted" => Some(TurnPhase::DmNarration),
-            _ => None,
-        };
-
-        if let Some(p) = inferred_phase {
-            room_state.phase = p;
-        }
+        // Phase inference removed: apply_phase_changed is the canonical
+        // source for room_state.phase. Inferring phase from event types here
+        // caused conflicts when phase.changed events arrived at different
+        // timing than progress events.
     }
 
     if progress.turn == 0 {
@@ -361,21 +366,43 @@ pub fn apply_actor_spawned(
         if existing.iter().any(|a| a.id == payload.actor_id) {
             continue;
         }
+        // Use nested actor data from server when available; fall back to
+        // payload-level fields / sensible defaults for older event formats.
+        let data = payload.actor.as_ref();
+        let server_max_hp = data.and_then(|d| d.max_hp).unwrap_or(10);
+        let server_hp = data
+            .and_then(|d| d.hp)
+            .unwrap_or(server_max_hp)
+            .min(server_max_hp);
         let actor = Actor {
             id: payload.actor_id.clone(),
-            name: if payload.name.is_empty() {
-                payload.actor_id.clone()
-            } else {
-                payload.name.clone()
-            },
+            name: data
+                .map(|d| &d.name)
+                .filter(|n| !n.is_empty())
+                .cloned()
+                .unwrap_or_else(|| {
+                    if payload.name.is_empty() {
+                        payload.actor_id.clone()
+                    } else {
+                        payload.name.clone()
+                    }
+                }),
             class: payload.class.clone(),
-            archetype: payload.class.clone(),
-            persona: String::new(),
-            traits: Vec::new(),
-            hp: 100,
-            max_hp: 100,
-            mp: 50,
-            max_mp: 50,
+            archetype: data
+                .map(|d| &d.archetype)
+                .filter(|a| !a.is_empty())
+                .cloned()
+                .unwrap_or_else(|| payload.class.clone()),
+            persona: data
+                .map(|d| d.persona.clone())
+                .unwrap_or_default(),
+            traits: data
+                .map(|d| d.traits.clone())
+                .unwrap_or_default(),
+            hp: server_hp,
+            max_hp: server_max_hp,
+            mp: 0,
+            max_mp: 0,
             stats: Stats {
                 atk: 10,
                 def: 10,
@@ -383,8 +410,13 @@ pub fn apply_actor_spawned(
                 luck: 10,
             },
             area: String::new(),
-            is_dead: false,
-            inventory: Vec::new(),
+            is_dead: data
+                .and_then(|d| d.alive)
+                .map(|alive| !alive)
+                .unwrap_or(false),
+            inventory: data
+                .map(|d| d.inventory.clone())
+                .unwrap_or_default(),
             buffs: Vec::new(),
             debuffs: Vec::new(),
             skills: Vec::new(),
@@ -457,10 +489,21 @@ pub fn apply_actor_released(
 }
 
 /// Mark room as ended when RoomEnded event fires.
-pub fn apply_room_ended(mut events: MessageReader<RoomEnded>, mut room_state: ResMut<RoomState>) {
+pub fn apply_room_ended(
+    mut events: MessageReader<RoomEnded>,
+    mut room_state: ResMut<RoomState>,
+    mut combat_state: ResMut<CombatState>,
+) {
     for RoomEnded(payload) in events.read() {
         if room_state.id == payload.room_id || payload.room_id.is_empty() {
             room_state.status = "ended".to_string();
+
+            // Reset combat state when room ends
+            if combat_state.active {
+                combat_state.active = false;
+                combat_state.area.clear();
+                combat_state.enemies.clear();
+            }
         }
     }
 }
@@ -477,9 +520,15 @@ pub fn apply_scene_transitioned(
 
 // --- Session / Turn lifecycle systems ---
 
-pub fn apply_party_selected(mut events: MessageReader<PartySelected>) {
-    for PartySelected(_p) in events.read() {
-        // Log-only: no ECS state mutation needed
+pub fn apply_party_selected(
+    mut events: MessageReader<PartySelected>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for PartySelected(p) in events.read() {
+        if !p.selected_player_ids.is_empty() {
+            progress.player_order = p.selected_player_ids.clone();
+            rebuild_actor_order(&mut progress);
+        }
     }
 }
 
@@ -540,9 +589,20 @@ pub fn apply_turn_started(
     }
 }
 
-pub fn apply_turn_action_resolved(mut events: MessageReader<TurnActionResolved>) {
-    for TurnActionResolved(_p) in events.read() {
-        // Log-only: action result is rendered by DOM system
+pub fn apply_turn_action_resolved(
+    mut events: MessageReader<TurnActionResolved>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for TurnActionResolved(p) in events.read() {
+        complete_actor(&mut progress, &p.actor_id, "ok");
+        let reason = if p.result.is_empty() {
+            p.action.clone()
+        } else {
+            format!("{}: {}", p.action, p.result)
+        };
+        set_actor_reason(&mut progress, &p.actor_id, &reason);
+        progress.last_result = p.result.clone();
+        progress.last_event = "turn.action.resolved".to_string();
     }
 }
 
@@ -600,6 +660,7 @@ pub fn apply_session_outcome(
     mut events: MessageReader<SessionOutcome>,
     mut room_state: ResMut<RoomState>,
     mut progress: ResMut<TurnProgressState>,
+    mut combat_state: ResMut<CombatState>,
 ) {
     for SessionOutcome(payload) in events.read() {
         room_state.status = "ended".to_string();
@@ -614,23 +675,54 @@ pub fn apply_session_outcome(
         } else {
             format!("{} ({})", payload.outcome, reason)
         };
+
+        // Reset combat state when session ends
+        if combat_state.active {
+            combat_state.active = false;
+            combat_state.area.clear();
+            combat_state.enemies.clear();
+        }
     }
 }
 
-pub fn apply_intervention_submitted(mut events: MessageReader<InterventionSubmitted>) {
-    for InterventionSubmitted(_p) in events.read() {
-        // Log-only: rendered by DOM system
+pub fn apply_intervention_submitted(
+    mut events: MessageReader<InterventionSubmitted>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for InterventionSubmitted(p) in events.read() {
+        progress.last_event = format!("intervention.submitted:{}", p.intervention_type);
+        if !p.target.is_empty() {
+            set_actor_reason(&mut progress, &p.target, &p.description);
+        }
     }
 }
 
-pub fn apply_intervention_applied(mut events: MessageReader<InterventionApplied>) {
-    for InterventionApplied(_p) in events.read() {
-        // Log-only: rendered by DOM system
+pub fn apply_intervention_applied(
+    mut events: MessageReader<InterventionApplied>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for InterventionApplied(p) in events.read() {
+        progress.last_event = format!("intervention.applied:{}", p.intervention_type);
+        progress.last_result = p.description.clone();
+        if !p.target.is_empty() {
+            set_actor_reason(
+                &mut progress,
+                &p.target,
+                &format!("[{}] {}", p.intervention_type, p.description),
+            );
+        }
     }
 }
 
-pub fn apply_keeper_unavailable(mut events: MessageReader<KeeperUnavailable>) {
-    for KeeperUnavailable(_p) in events.read() {
-        // Log-only: warning rendered by DOM system
+pub fn apply_keeper_unavailable(
+    mut events: MessageReader<KeeperUnavailable>,
+    mut progress: ResMut<TurnProgressState>,
+) {
+    for KeeperUnavailable(p) in events.read() {
+        log::warn!("Keeper unavailable: {} — {}", p.keeper, p.reason);
+        progress.last_event = format!("keeper.unavailable:{}", p.keeper);
+        if progress.dm_keeper == p.keeper {
+            progress.dm_keeper.clear();
+        }
     }
 }

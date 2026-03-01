@@ -342,10 +342,7 @@ fn spawn_round_loop(control: RoundRunnerControl) {
                             continue;
                         }
                     }
-                    if resp.contains("\"status\":\"ended\"")
-                        || resp.contains("\"status\":\"completed\"")
-                        || resp.contains("\"game_over\":true")
-                    {
+                    if round_response_game_ended(&resp) {
                         game_ended.store(true, Ordering::SeqCst);
                         log::info!("RoundRunner: game ended signal in response");
                     } else if round_response_has_prompt_meta_artifact_failures(&resp) {
@@ -662,6 +659,27 @@ fn round_response_has_prompt_meta_artifact_failures(resp: &str) -> bool {
     invalid_count > 0
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+fn round_response_game_ended(resp: &str) -> bool {
+    let parsed = match serde_json::from_str::<serde_json::Value>(resp) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    if let Some(status) = parsed.get("status").and_then(serde_json::Value::as_str) {
+        if status == "ended" || status == "completed" {
+            return true;
+        }
+    }
+    if parsed
+        .get("game_over")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        return true;
+    }
+    false
+}
+
 #[cfg(target_arch = "wasm32")]
 fn parse_player_keeper_pairs(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
@@ -824,8 +842,8 @@ async fn sleep_ms(ms: i32) {
 mod tests {
     use super::{
         compute_round_execution_policy, is_transient_round_conflict, parse_http_status,
-        round_response_api_error, round_response_has_prompt_meta_artifact_failures,
-        stall_retry_delay_ms,
+        round_response_api_error, round_response_game_ended,
+        round_response_has_prompt_meta_artifact_failures, stall_retry_delay_ms,
     };
 
     #[test]
@@ -911,5 +929,40 @@ mod tests {
         let (timeout_sec, local_fallback) = compute_round_execution_policy(Some(8.0), 2);
         assert_eq!(timeout_sec, 8.0);
         assert!(local_fallback);
+    }
+
+    #[test]
+    fn game_ended_detects_status_ended() {
+        let payload = r#"{"ok":true,"status":"ended"}"#;
+        assert!(round_response_game_ended(payload));
+    }
+
+    #[test]
+    fn game_ended_detects_status_completed() {
+        let payload = r#"{"ok":true,"status":"completed"}"#;
+        assert!(round_response_game_ended(payload));
+    }
+
+    #[test]
+    fn game_ended_detects_game_over_true() {
+        let payload = r#"{"ok":true,"game_over":true,"status":"running"}"#;
+        assert!(round_response_game_ended(payload));
+    }
+
+    #[test]
+    fn game_ended_returns_false_for_running_game() {
+        let payload = r#"{"ok":true,"status":"running"}"#;
+        assert!(!round_response_game_ended(payload));
+    }
+
+    #[test]
+    fn game_ended_returns_false_for_invalid_json() {
+        assert!(!round_response_game_ended("not json at all"));
+    }
+
+    #[test]
+    fn game_ended_returns_false_for_game_over_false() {
+        let payload = r#"{"ok":true,"game_over":false}"#;
+        assert!(!round_response_game_ended(payload));
     }
 }

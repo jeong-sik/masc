@@ -73,11 +73,29 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
     let fallback_room_id = current_room_id(&document);
 
     for DiceRolled(payload) in events.read() {
+        // Phase 3-2: Dice roll arithmetic validation
+        let expected_total = payload.d20 + payload.bonus;
+        if payload.total != expected_total && payload.total != 0 {
+            log::warn!(
+                "Dice roll arithmetic mismatch for {}: total={} but d20({}) + bonus({}) = {}",
+                payload.character,
+                payload.total,
+                payload.d20,
+                payload.bonus,
+                expected_total
+            );
+        }
+
         let Ok(entry) = document.create_element("div") else {
             continue;
         };
 
-        let tier = tier_class(&payload.result);
+        // Prefer server-provided tier over the legacy `result` field.
+        let effective_tier = payload
+            .tier
+            .as_deref()
+            .unwrap_or(&payload.result);
+        let tier = tier_class(effective_tier);
         entry.set_class_name(&format!("dice-entry {}", tier));
 
         let room_id = if payload.room_id.trim().is_empty() {
@@ -145,7 +163,8 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
             payload.bonus,
             payload.total,
             payload.dc,
-            tier_label(&payload.result),
+            // Use server label if available, otherwise derive from tier.
+            payload.label.as_deref().unwrap_or_else(|| tier_label(effective_tier)),
             note_html,
         ));
 

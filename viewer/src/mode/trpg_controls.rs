@@ -672,6 +672,22 @@ fn ui_state_blocks_new_session_start(state: TrpgUiState) -> bool {
     )
 }
 
+fn sync_new_game_panel_top_offset(doc: &web_sys::Document) {
+    let top_px = doc
+        .get_element_by_id("top-bar")
+        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().map(|bar| bar.offset_height()))
+        .map(|height| height.max(44))
+        .unwrap_or(44);
+    if let Some(panel) = doc
+        .get_element_by_id("new-game-panel")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = panel
+            .style()
+            .set_property("--new-game-panel-top", &format!("{}px", top_px));
+    }
+}
+
 fn set_new_game_preflight_state(doc: &web_sys::Document, state: &str) {
     if let Some(panel) = doc.get_element_by_id("new-game-panel") {
         let normalized = match state {
@@ -3445,6 +3461,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
+        sync_new_game_panel_top_offset(&doc);
         set_element_display(&doc, "new-game-panel", "flex");
         if let Some(room_input) = doc
             .get_element_by_id("new-game-room-id")

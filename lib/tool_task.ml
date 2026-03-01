@@ -108,7 +108,8 @@ let handle_done ctx args =
            ("action", `String "done");
            ("notes", `String notes);
          ])
-   | Error _ -> ());
+   | Error err ->
+       Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));
   (* Record metrics on successful completion *)
   (match result with
    | Ok _ ->
@@ -127,7 +128,8 @@ let handle_done ctx args =
        ignore (Metrics_store_eio.record ctx.config metric);
        (* Feed success into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up
-   | Error _ -> ());
+   | Error err ->
+       Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
   result_to_response result
 
 let handle_cancel_task ctx args =
@@ -163,7 +165,8 @@ let handle_cancel_task ctx args =
        ignore (Metrics_store_eio.record ctx.config metric);
        (* Feed failure into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down
-   | Error _ -> ());
+   | Error err ->
+       Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
   result_to_response result
 
 let handle_transition ctx args =
@@ -203,7 +206,8 @@ let handle_transition ctx args =
            ("action", `String action);
            ("notes", `String notes);
          ])
-   | Error _ -> ());
+   | Error err ->
+       Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));
   (* Record metrics *)
   (match result, action_lc with
    | Ok _, "done" ->

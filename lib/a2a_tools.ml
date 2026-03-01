@@ -734,6 +734,7 @@ let submit_heartbeat_result
            ("worker", `String worker_name);
            ("action", `String action_type);
          ])
-   | Error _ -> ());
+   | Error msg ->
+       Printf.eprintf "[a2a] notification failed: %s\n%!" msg);
 
   result

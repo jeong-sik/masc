@@ -3425,7 +3425,8 @@ let maybe_emit_interesting_alert
           ("reply_preview", `String (short_preview ~max_len:360 reply));
         ]
       in
-      (try append_jsonl_line (keeper_alerts_path ctx.config) alert_json with _ -> ());
+      (try append_jsonl_line (keeper_alerts_path ctx.config) alert_json with exn ->
+      Printf.eprintf "[keeper] alert JSONL write failed: %s\n%!" (Printexc.to_string exn));
       let board_result =
         run_alert_channel_with_retry ctx
           ~channel:"board"
@@ -3496,7 +3497,8 @@ let maybe_emit_interesting_alert
                 ("failed_channels",
                   `List (List.map alert_channel_result_to_json attempted_failures));
               ])
-         with _ -> ());
+         with exn ->
+           Printf.eprintf "[keeper] failed-channels JSONL write failed: %s\n%!" (Printexc.to_string exn));
       if deadlettered then
         (try
            append_jsonl_line
@@ -3509,7 +3511,8 @@ let maybe_emit_interesting_alert
                 ("channels",
                   `List (List.map alert_channel_result_to_json channels));
               ])
-         with _ -> ());
+         with exn ->
+           Printf.eprintf "[keeper] deadletter JSONL write failed: %s\n%!" (Printexc.to_string exn));
       {
         enabled = true;
         triggered = true;
@@ -5982,7 +5985,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("goal_id", `String pa.goal_id);
                    ("action", `String pa.action_description);
                    ("autonomy_level", `String (Keeper_autonomy.autonomy_level_to_string level));
-                 ]) with _ -> ());
+                 ]) with exn ->
+                   Printf.eprintf "[keeper] SSE keeper_autonomy_start broadcast failed: %s\n%!" (Printexc.to_string exn));
                  (* 5-2: Execute the approved plan *)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
@@ -5998,7 +6002,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    (String.concat ", " tools_used)
                    exec_cost in
                  (try ignore (Goal_store.review_goal config
-                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with _ -> ());
+                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with exn ->
+                   Printf.eprintf "[keeper] goal review failed: %s\n%!" (Printexc.to_string exn));
                  (* 5-4: Post execution report to Board *)
                  let report_args = `Assoc [
                    ("author", `String meta.name);
@@ -6024,7 +6029,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("result", `String outcome);
                    ("tools_used", `List (List.map (fun t -> `String t) tools_used));
                    ("cost_usd", `Float exec_cost);
-                 ]) with _ -> ());
+                 ]) with exn ->
+                   Printf.eprintf "[keeper] SSE keeper_autonomy_complete broadcast failed: %s\n%!" (Printexc.to_string exn));
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
@@ -6064,7 +6070,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("action", `String pa.action_description);
                    ("autonomy_level", `String (Keeper_autonomy.autonomy_level_to_string level));
                    ("caution", `String warning);
-                 ]) with _ -> ());
+                 ]) with exn ->
+                   Printf.eprintf "[keeper] SSE keeper_autonomy_start (cautioned) broadcast failed: %s\n%!" (Printexc.to_string exn));
                  (* 5-2: Execute despite caution *)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
@@ -6079,7 +6086,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    (String.concat ", " tools_used)
                    exec_cost in
                  (try ignore (Goal_store.review_goal config
-                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with _ -> ());
+                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with exn ->
+                   Printf.eprintf "[keeper] goal review (cautioned) failed: %s\n%!" (Printexc.to_string exn));
                  (* 5-4: Board report + SSE complete *)
                  let report_args = `Assoc [
                    ("author", `String meta.name);
@@ -6107,7 +6115,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("tools_used", `List (List.map (fun t -> `String t) tools_used));
                    ("cost_usd", `Float exec_cost);
                    ("warning", `String warning);
-                 ]) with _ -> ());
+                 ]) with exn ->
+                   Printf.eprintf "[keeper] SSE keeper_autonomy_complete (cautioned) broadcast failed: %s\n%!" (Printexc.to_string exn));
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
@@ -6151,7 +6160,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                (match run_autonomous_goal_turn ~config:ctx.config ~meta ~specs with
                 | Some updated_meta ->
                     (match write_meta ctx.config updated_meta with
-                     | Ok () -> () | Error _ -> ());
+                     | Ok () -> ()
+                     | Error msg ->
+                         Printf.eprintf "[keeper] write_meta failed after goal turn: %s\n%!" msg);
                     updated_meta
                 | None ->
                let primary =
@@ -6277,7 +6288,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        in
                        (match write_meta ctx.config updated with
                         | Ok () -> ()
-                        | Error _ -> ());
+                        | Error msg ->
+                            Printf.eprintf "[keeper] write_meta failed after proactive turn: %s\n%!" msg);
                        (try
                           let metrics_path = keeper_metrics_path ctx.config updated.name in
                           let metrics_json =
@@ -6338,7 +6350,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                               ]
                           in
                           append_jsonl_line metrics_path metrics_json
-                        with _ -> ());
+                        with exn ->
+                          Printf.eprintf "[keeper] metrics JSONL write failed: %s\n%!" (Printexc.to_string exn));
                        updated))
 
 (* Presence keepalive fibers keyed by keeper name. *)
@@ -6359,12 +6372,14 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     (try
        if not (Room_utils.is_initialized ctx.config) then
          ignore (Room.init ctx.config ~agent_name:None)
-     with _ -> ());
+     with exn ->
+       Printf.eprintf "[keeper] room init failed: %s\n%!" (Printexc.to_string exn));
     (* Ensure the keeper agent exists in room (skip join if already present). *)
     (try
        if not (Room.is_agent_joined ctx.config ~agent_name:m.agent_name) then
          ignore (Room.join ctx.config ~agent_name:m.agent_name ~capabilities:["keeper"] ())
-     with _ -> ());
+     with exn ->
+       Printf.eprintf "[keeper] room join failed: %s\n%!" (Printexc.to_string exn));
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let keepalive_started_ts = Time_compat.now () in
       let snapshot_interval_sec =
@@ -6384,7 +6399,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           in
           (try
              ignore (Room.heartbeat ctx.config ~agent_name:meta_current.agent_name)
-           with _ -> ());
+           with exn ->
+             Printf.eprintf "[keeper] room heartbeat failed: %s\n%!" (Printexc.to_string exn));
           let now_ts = Time_compat.now () in
           if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec then begin
             (try
@@ -6506,8 +6522,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                       ("generation", `Int meta_current.generation);
                       ("context_ratio", `Float (Context_manager.context_ratio c));
                       ("ts_unix", `Float now_ts);
-                    ]) with _ -> ()))
-             with _ -> ());
+                    ]) with exn ->
+                      Printf.eprintf "[keeper] heartbeat SSE broadcast failed: %s\n%!" (Printexc.to_string exn)))
+             with exn ->
+               Printf.eprintf "[keeper] heartbeat snapshot write failed: %s\n%!" (Printexc.to_string exn));
             last_snapshot_ts := now_ts
           end;
           let proactive_warmup_elapsed =
@@ -8263,14 +8281,16 @@ let handle_keeper_msg ctx args : tool_result =
                                 (Option.value
                                    ~default:"policy threshold exceeded"
                                    auto_rules.guardrail_reason)))
-                    with _ -> ());
+                    with exn ->
+                      Printf.eprintf "[keeper] room broadcast (guardrail_stop) failed: %s\n%!" (Printexc.to_string exn));
                    (* SSE: keeper_guardrail — dashboard real-time alert *)
                    (try Sse.broadcast (`Assoc [
                      ("type", `String "keeper_guardrail");
                      ("name", `String meta_turn.name);
                      ("reason", `String (Option.value ~default:"policy threshold exceeded"
                         auto_rules.guardrail_reason));
-                   ]) with _ -> ()));
+                   ]) with exn ->
+                     Printf.eprintf "[keeper] SSE keeper_guardrail broadcast failed: %s\n%!" (Printexc.to_string exn)));
                 let do_handoff =
                   auto_rules.handoff &&
 		                (now_ts -. meta_turn.last_handoff_ts >= float_of_int meta_turn.handoff_cooldown_sec)
@@ -8408,7 +8428,8 @@ let handle_keeper_msg ctx args : tool_result =
                      ("handoff", `Assoc [("performed", `Bool false)]);
                    ] in
                    append_jsonl_line metrics_path metrics_json
-                 with _ -> ());
+                 with exn ->
+                   Printf.eprintf "[keeper] turn metrics JSONL write failed: %s\n%!" (Printexc.to_string exn));
                 (* Harness: finalize trajectory with outcome *)
                 (let traj_outcome =
                   if trajectory_acc.Trajectory.total_cost >= gate_config.Eval_gate.max_cost_usd then
@@ -8431,7 +8452,8 @@ let handle_keeper_msg ctx args : tool_result =
                     ("saved_tokens", `Int (before_compact_tokens - after_compact_tokens));
                     ("trigger", match compaction_trigger with
                       | Some r -> `String r | None -> `Null);
-                  ]) with _ -> ()));
+                  ]) with exn ->
+                    Printf.eprintf "[keeper] SSE keeper_compaction broadcast failed: %s\n%!" (Printexc.to_string exn)));
 
                 let json = `Assoc [
                   ("name", `String meta_turn.name);
@@ -8658,7 +8680,8 @@ let handle_keeper_msg ctx args : tool_result =
                      ]);
                    ] in
                    append_jsonl_line metrics_path metrics_json
-                 with _ -> ());
+                 with exn ->
+                   Printf.eprintf "[keeper] handoff metrics JSONL write failed: %s\n%!" (Printexc.to_string exn));
                 (* SSE: keeper_handoff — generation succession event *)
                 (try Sse.broadcast (`Assoc [
                   ("type", `String "keeper_handoff");
@@ -8666,7 +8689,8 @@ let handle_keeper_msg ctx args : tool_result =
                   ("from_generation", `Int meta_turn.generation);
                   ("to_generation", `Int next_generation);
                   ("to_model", `String next_model.model_id);
-                ]) with _ -> ());
+                ]) with exn ->
+               Printf.eprintf "[keeper] SSE keeper_handoff broadcast failed: %s\n%!" (Printexc.to_string exn));
 
                 let json = `Assoc [
                   ("name", `String meta'.name);
@@ -8780,7 +8804,8 @@ let handle_keeper_down ctx args : tool_result =
         in
         if validate_name m.trace_id then
           let dir = Filename.concat (session_base_dir ctx.config) m.trace_id in
-          (try rm_rf dir with _ -> ())
+          (try rm_rf dir with exn ->
+          Printf.eprintf "[keeper] session dir cleanup failed: %s\n%!" (Printexc.to_string exn))
       end;
       let json = `Assoc [
         ("name", `String name);
@@ -9304,7 +9329,8 @@ let handle_keeper_eval ctx args : tool_result =
 
 let dispatch ctx ~name ~args : tool_result option =
   (* Lazy boot: when any keeper tool is used, attach keepalives for existing keepers. *)
-  (try start_existing_keepalives ctx with _ -> ());
+  (try start_existing_keepalives ctx with exn ->
+    Printf.eprintf "[keeper] start_existing_keepalives failed: %s\n%!" (Printexc.to_string exn));
   match name with
   | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)

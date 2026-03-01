@@ -651,6 +651,25 @@ body:not(.mode-trpg) #ops-hud {
     color: var(--status-disconnected);
 }
 
+#top-controls-help {
+    max-width: min(52vw, 560px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#dm-keeper-pill {
+    max-width: min(26vw, 260px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#dashboard[data-runtime-compact="1"] #top-controls-help,
+#dashboard[data-runtime-compact="1"] #auto-round-toggle,
+#dashboard[data-runtime-compact="1"] .session-control-inline,
+#dashboard[data-runtime-compact="1"] #dm-keeper-pill {
+    display: none !important;
+}
+
 .inline-toggle.primary {
     border-color: var(--accent-primary);
     box-shadow: inset 0 0 0 1px rgba(201, 165, 90, 0.35);
@@ -913,7 +932,7 @@ body:not(.mode-trpg) #ops-hud {
 
 .room-hub {
     position: absolute;
-    top: 84px;
+    top: var(--room-hub-top, 84px);
     left: 12px;
     right: 12px;
     z-index: 25;
@@ -1099,6 +1118,7 @@ body:not(.mode-trpg) #ops-hud {
     }
     .top-bar-right { gap: 6px 10px; }
     #session-control-status { max-width: min(25vw, 240px); }
+    #top-controls-help { max-width: min(48vw, 420px); }
 }
 
 @media (max-width: 980px) {
@@ -1120,11 +1140,14 @@ body:not(.mode-trpg) #ops-hud {
     #mode-title { flex: 0 1 auto; max-width: 160px; }
     .room-switch-inline { order: 10; flex-basis: 100%; }
     #session-control-status { max-width: min(40vw, 200px); }
+    #top-controls-help { display: none; }
+    #dm-keeper-pill { max-width: min(36vw, 180px); }
 }
 
 @media (max-width: 600px) {
     .top-bar-right { flex-basis: 100%; gap: 4px 6px; }
     #room-status { display: none; }
+    #dm-keeper-pill { display: none; }
     #session-control-status { max-width: 140px; }
     #ops-hud {
         grid-template-columns: 1fr 1fr;
@@ -2344,16 +2367,20 @@ body.wasm-dom-fallback #bevy-canvas {
 
 .phase-track {
     display: flex;
-    gap: 2px;
+    gap: 4px;
     flex: 1;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
 }
 
 .phase {
-    flex: 1;
+    flex: 0 0 auto;
+    min-width: 66px;
     text-align: center;
     padding: 6px 6px;
     font-family: var(--font-ui);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     background: var(--bg-deep);
     border-radius: var(--panel-radius);
@@ -2390,6 +2417,25 @@ body.wasm-dom-fallback #bevy-canvas {
     padding: 8px 10px;
 }
 
+.runtime-advanced-toggle-wrap {
+    margin: 0 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.runtime-advanced-toggle {
+    border-color: rgba(109, 122, 164, 0.48);
+}
+
+.runtime-advanced-hint {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.2px;
+}
+
 .turn-runtime-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2398,6 +2444,10 @@ body.wasm-dom-fallback #bevy-canvas {
 
 .turn-runtime-item.turn-runtime-item-wide {
     grid-column: 1 / -1;
+}
+
+.turn-runtime-item.runtime-detail {
+    opacity: 0.9;
 }
 
 .turn-runtime-item {
@@ -2469,6 +2519,18 @@ body.wasm-dom-fallback #bevy-canvas {
 .turn-runtime-item .v.state-unknown,
 .room-chip-state.state-unknown {
     color: var(--text-dim);
+}
+
+#dashboard[data-runtime-compact="1"] .turn-runtime-item.runtime-detail {
+    display: none;
+}
+
+#dashboard[data-show-advanced="0"] .runtime-advanced {
+    display: none !important;
+}
+
+#dashboard[data-runtime-compact="1"][data-show-advanced="0"] #turn-runtime {
+    margin-bottom: 8px;
 }
 
 #state-legend {
@@ -3431,7 +3493,7 @@ body.wasm-dom-fallback #bevy-canvas {
 
 #new-game-panel {
     position: absolute;
-    inset: 44px 0 0 0;
+    inset: var(--new-game-panel-top, 44px) 0 0 0;
     background: rgba(0, 0, 0, 0.56);
     z-index: 40;
     display: flex;

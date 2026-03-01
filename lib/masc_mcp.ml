@@ -203,6 +203,7 @@ module Tool_keeper = Tool_keeper
 module Trajectory = Trajectory
 module Eval_gate = Eval_gate
 module Eval_harness = Eval_harness
+module Anti_fake = Anti_fake
 
 (* Keeper Autonomy Engine (Phase 2: autonomy slider + verifier) *)
 module Keeper_autonomy = Keeper_autonomy

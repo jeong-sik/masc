@@ -480,3 +480,9 @@
  (name test_eval_harness)
  (modules test_eval_harness)
  (libraries masc_mcp alcotest str yojson unix))
+
+; Anti-Fake Test Quality Scoring (harness P2)
+(test
+ (name test_anti_fake)
+ (modules test_anti_fake)
+ (libraries masc_mcp alcotest yojson))

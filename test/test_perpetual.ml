@@ -107,6 +107,31 @@ let test_llm_client () = group "LLM Client" (fun () ->
    | Error _ -> assert_true "parse_model:empty_model_rejected" true
    | Ok _ -> assert_true "parse_model:empty_model_should_fail" false);
 
+  (* 3b. MLX and Custom provider parsing *)
+  (match Llm_client.model_spec_of_string "mlx:qwen3.5-35b" with
+   | Ok m ->
+     assert_equal "parse_model:mlx_id" "qwen3.5-35b" m.model_id;
+     assert_true "parse_model:mlx_provider"
+       (m.provider = Llm_client.Custom "mlx");
+     assert_equal "parse_model:mlx_url" "http://127.0.0.1:8091" m.api_url
+   | Error e -> assert_true ("parse_model:mlx_failed: " ^ e) false);
+
+  (match Llm_client.model_spec_of_string "custom:mymodel@http://localhost:9999" with
+   | Ok m ->
+     assert_equal "parse_model:custom_with_url_id" "mymodel" m.model_id;
+     assert_true "parse_model:custom_with_url_provider"
+       (m.provider = Llm_client.Custom "mymodel");
+     assert_equal "parse_model:custom_with_url_url" "http://localhost:9999" m.api_url
+   | Error e -> assert_true ("parse_model:custom_url_failed: " ^ e) false);
+
+  (match Llm_client.model_spec_of_string "custom:bare-model" with
+   | Ok m ->
+     assert_equal "parse_model:custom_bare_id" "bare-model" m.model_id;
+     assert_true "parse_model:custom_bare_provider"
+       (m.provider = Llm_client.Custom "bare-model");
+     assert_equal "parse_model:custom_bare_url" "http://127.0.0.1:8080" m.api_url
+   | Error e -> assert_true ("parse_model:custom_bare_failed: " ^ e) false);
+
   (* 4. Message constructors *)
   let msg = Llm_client.system_msg "hello" in
   assert_true "msg:system_role" (msg.role = Llm_client.System);

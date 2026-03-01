@@ -824,8 +824,37 @@ let model_spec_of_string s =
             cost_per_1k_input = 0.001;
             cost_per_1k_output = 0.002;
           }
+        | "mlx" ->
+          Ok {
+            provider = Custom "mlx";
+            model_id;
+            max_context = 128000;
+            api_url = "http://127.0.0.1:8091";
+            api_key_env = None;
+            cost_per_1k_input = 0.0;
+            cost_per_1k_output = 0.0;
+          }
+        | "custom" ->
+          (* Format: custom:model@http://host:port or custom:model *)
+          let actual_model, url =
+            match String.index_opt model_id '@' with
+            | Some at_idx ->
+              ( String.sub model_id 0 at_idx,
+                String.sub model_id (at_idx + 1)
+                  (String.length model_id - at_idx - 1) )
+            | None -> (model_id, "http://127.0.0.1:8080")
+          in
+          Ok {
+            provider = Custom actual_model;
+            model_id = actual_model;
+            max_context = 128000;
+            api_url = url;
+            api_key_env = None;
+            cost_per_1k_input = 0.0;
+            cost_per_1k_output = 0.0;
+          }
         | _ ->
           Error
             (sprintf
-               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, claude, gemini, glm, openrouter)"
+               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, claude, gemini, glm, openrouter, mlx, custom)"
                s provider)

@@ -364,6 +364,8 @@ MCP 서버 없이 독립 실행:
 | `gemini` | `gemini:pro` | Google AI GenerateContent |
 | `glm` | `glm:glm-4.7` | Z.ai ChatCompletions |
 | `openrouter` | `openrouter:meta-llama/llama-3` | OpenRouter API |
+| `mlx` | `mlx:qwen3.5-35b` | `http://127.0.0.1:8091/v1/chat/completions` |
+| `custom` | `custom:model@http://host:port` | User-specified OpenAI-compatible endpoint |
 
 ### Succession (세대 교체)
 

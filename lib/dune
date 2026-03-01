@@ -232,7 +232,9 @@
    trpg_bdi
    trpg_harness
    trpg_actor_match
-   json_util)
+   json_util
+   ;; Anti-Fake Test Quality Scoring (harness P2)
+   anti_fake)
  (libraries
    yojson
    base64

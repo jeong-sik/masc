@@ -201,6 +201,7 @@ module Tool_keeper = Tool_keeper
 module Trajectory = Trajectory
 module Eval_gate = Eval_gate
 module Eval_harness = Eval_harness
+module Anti_fake = Anti_fake
 
 module Tool_goals = Tool_goals
 module Tool_trpg = Tool_trpg

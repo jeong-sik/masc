@@ -909,6 +909,20 @@ fn parse_dice_log_entry(
         .unwrap_or("");
     let result = map_dice_result_label(raw_result);
 
+    let tier = entry
+        .get("tier")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let label = entry
+        .get("label")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let passed = entry.get("passed").and_then(Value::as_bool);
+    let stat_value = entry
+        .get("stat_value")
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok());
+
     Some(DiceRollPayload {
         turn,
         room_id: entry
@@ -928,6 +942,10 @@ fn parse_dice_log_entry(
             .get("note")
             .and_then(Value::as_str)
             .map(str::to_string),
+        tier,
+        label,
+        passed,
+        stat_value,
     })
 }
 

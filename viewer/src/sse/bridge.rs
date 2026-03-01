@@ -171,6 +171,15 @@ pub fn poll_sse_events(
                 TurnProgressPayload,
                 TurnProgressUpdated
             ),
+            // ── Dot-format aliases for original events ──
+            // Server sends "dice.rolled" via MASC API; reuse original writer.
+            "dice.rolled" => dispatch_event!(
+                event_type,
+                &data,
+                original.dice,
+                DiceRollPayload,
+                DiceRolled
+            ),
             // ── Phase 1: High-frequency events (dot format) ──
             "party.selected" => dispatch_event!(
                 event_type,

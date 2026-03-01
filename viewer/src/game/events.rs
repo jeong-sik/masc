@@ -5,20 +5,42 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DiceRollPayload {
+    #[serde(default)]
     #[allow(dead_code)] // read only in wasm32 DOM code
     pub turn: u32,
     #[serde(default)]
     #[allow(dead_code)] // read only in wasm32 DOM code
     pub room_id: String,
+    /// Server sends `actor_id`; legacy SSE sends `character`.
+    #[serde(default, alias = "actor_id")]
     pub character: String,
+    #[serde(default)]
     pub action: String,
+    /// Server sends `raw_d20`; legacy SSE sends `d20`.
+    #[serde(default, alias = "raw_d20")]
     pub d20: i32,
+    #[serde(default)]
     pub bonus: i32,
+    #[serde(default)]
     pub total: i32,
+    #[serde(default)]
     pub dc: i32,
     pub result: String,
     #[serde(default)]
     pub note: Option<String>,
+    // ── D&D 5e Lite fields (from server) ──
+    /// Roll tier classification: "critical_fail" | "fail" | "partial" | "success" | "great" | "miracle"
+    #[serde(default)]
+    pub tier: Option<String>,
+    /// Korean display label: "대참사" | "실패" | "부분 성공" | "성공" | "대성공" | "기적"
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Whether the roll passed the DC check
+    #[serde(default)]
+    pub passed: Option<bool>,
+    /// Raw stat value used for the roll
+    #[serde(default)]
+    pub stat_value: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -243,6 +265,33 @@ pub struct InterventionPayload {
     pub description: String,
 }
 
+/// Nested actor data sent by the server inside actor lifecycle events.
+/// All fields use `#[serde(default)]` for graceful degradation when the
+/// server omits them (e.g. actor.delete only sends actor_id).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ActorData {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub archetype: String,
+    #[serde(default)]
+    pub persona: String,
+    #[serde(default)]
+    pub hp: Option<i32>,
+    #[serde(default)]
+    pub max_hp: Option<i32>,
+    #[serde(default)]
+    pub alive: Option<bool>,
+    #[serde(default)]
+    pub traits: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub inventory: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ActorLifecyclePayload {
     pub actor_id: String,
@@ -252,6 +301,9 @@ pub struct ActorLifecyclePayload {
     pub class: String,
     #[serde(default)]
     pub keeper: String,
+    /// Server sends nested actor object with hp, max_hp, traits, etc.
+    #[serde(default)]
+    pub actor: Option<ActorData>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

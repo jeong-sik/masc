@@ -72,6 +72,14 @@ pub(super) fn room_lane_label(status: &str) -> &'static str {
     TrpgLifecycleState::from_status(status).lane()
 }
 
+fn room_display_label(room_id: &str) -> String {
+    if room_id.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
+        format!("{} (기본 방)", crate::config::DEFAULT_ROOM_ID)
+    } else {
+        room_id.to_string()
+    }
+}
+
 fn auto_focus_score(status: &str) -> Option<u8> {
     match TrpgLifecycleState::from_status(status) {
         TrpgLifecycleState::Running => Some(ROOM_AUTO_FOCUS_SCORE_RUNNING),
@@ -268,11 +276,12 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         let card = format!(
             concat!(
                 "<button class=\"room-chip\" data-room-id=\"{id}\" data-room-status=\"{status}\"{current}>",
-                "<span class=\"room-chip-id\">{id}<span class=\"room-chip-state {state_class}\">{state_label}</span></span>",
+                "<span class=\"room-chip-id\">{label}<span class=\"room-chip-state {state_class}\">{state_label}</span></span>",
                 "<span class=\"room-chip-meta\">turn {turn} · {phase} · a{agents}/t{tasks}</span>",
                 "</button>"
             ),
             id = html_escape(&room.id),
+            label = html_escape(&room_display_label(&room.id)),
             status = html_escape(&status_text),
             current = current_attr,
             state_class = lifecycle.css_class(),
@@ -334,6 +343,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     };
     let current_text = crate::config::sanitize_room_id(selected_room)
         .unwrap_or_else(|| crate::config::DEFAULT_ROOM_ID.to_string());
+    let current_label = room_display_label(&current_text);
     let html = format!(
         concat!(
             "<div class=\"room-hub-tools\">",
@@ -344,7 +354,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
             "</div>",
             "{lanes}"
         ),
-        current = html_escape(&current_text),
+        current = html_escape(&current_label),
         previous_count = previous_count,
         hidden_ended = hidden_ended_note,
         pressed = if running_only { "true" } else { "false" },
@@ -670,7 +680,8 @@ pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
             .iter()
             .map(|room| {
                 let safe = html_escape(room);
-                format!(r#"<option value="{safe}">{safe}</option>"#)
+                let label = html_escape(&room_display_label(room));
+                format!(r#"<option value="{safe}">{label}</option>"#)
             })
             .collect::<Vec<_>>()
             .join("");
@@ -687,9 +698,10 @@ pub(super) fn sync_room_controls(doc: &web_sys::Document, selected_room: &str) {
     }
     if let Some(pill) = doc.get_element_by_id("room-status") {
         let lifecycle = TrpgLifecycleState::Loading;
+        let selected_label = room_display_label(&selected);
         pill.set_text_content(Some(&format!(
             "현재 게임: {} · {}",
-            selected,
+            selected_label,
             lifecycle.label_ko()
         )));
         let _ = pill.set_attribute("data-lifecycle", lifecycle.css_class());
@@ -985,9 +997,10 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
             };
             if let Some(pill) = doc.get_element_by_id("room-status") {
                 let current = crate::config::current_room_id();
+                let current_label = room_display_label(&current);
                 pill.set_text_content(Some(&format!(
                     "현재 게임: {} · 목록 불러오는 중...",
-                    current
+                    current_label
                 )));
             }
             let doc_for_fetch = doc.clone();
@@ -1013,9 +1026,10 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                         let visible_count =
                             rooms.len().saturating_sub(ended_count) + usize::from(current_is_ended);
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
+                            let current_label = room_display_label(&current);
                             pill.set_text_content(Some(&format!(
                                 "현재 게임: {} · 표시 {} / 전체 {}",
-                                current,
+                                current_label,
                                 visible_count,
                                 rooms.len()
                             )));
@@ -1025,9 +1039,10 @@ pub(super) fn bind_room_controls(doc: &web_sys::Document) {
                         log::warn!("room 목록 새로고침 실패: {}", e);
                         let current = crate::config::current_room_id();
                         if let Some(pill) = doc_for_fetch.get_element_by_id("room-status") {
+                            let current_label = room_display_label(&current);
                             pill.set_text_content(Some(&format!(
                                 "현재 게임: {} · 목록 실패",
-                                current
+                                current_label
                             )));
                         }
                     }

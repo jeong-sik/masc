@@ -663,6 +663,13 @@ body:not(.mode-trpg) #ops-hud {
     text-overflow: ellipsis;
 }
 
+#dashboard[data-runtime-compact="1"] #top-controls-help,
+#dashboard[data-runtime-compact="1"] #auto-round-toggle,
+#dashboard[data-runtime-compact="1"] .session-control-inline,
+#dashboard[data-runtime-compact="1"] #dm-keeper-pill {
+    display: none !important;
+}
+
 .inline-toggle.primary {
     border-color: var(--accent-primary);
     box-shadow: inset 0 0 0 1px rgba(201, 165, 90, 0.35);
@@ -2410,6 +2417,25 @@ body.wasm-dom-fallback #bevy-canvas {
     padding: 8px 10px;
 }
 
+.runtime-advanced-toggle-wrap {
+    margin: 0 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.runtime-advanced-toggle {
+    border-color: rgba(109, 122, 164, 0.48);
+}
+
+.runtime-advanced-hint {
+    font-family: var(--font-ui);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.2px;
+}
+
 .turn-runtime-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2418,6 +2444,10 @@ body.wasm-dom-fallback #bevy-canvas {
 
 .turn-runtime-item.turn-runtime-item-wide {
     grid-column: 1 / -1;
+}
+
+.turn-runtime-item.runtime-detail {
+    opacity: 0.9;
 }
 
 .turn-runtime-item {
@@ -2489,6 +2519,18 @@ body.wasm-dom-fallback #bevy-canvas {
 .turn-runtime-item .v.state-unknown,
 .room-chip-state.state-unknown {
     color: var(--text-dim);
+}
+
+#dashboard[data-runtime-compact="1"] .turn-runtime-item.runtime-detail {
+    display: none;
+}
+
+#dashboard[data-show-advanced="0"] .runtime-advanced {
+    display: none !important;
+}
+
+#dashboard[data-runtime-compact="1"][data-show-advanced="0"] #turn-runtime {
+    margin-bottom: 8px;
 }
 
 #state-legend {

@@ -156,7 +156,7 @@
             <div class="top-bar-right">
                 <div class="room-switch-inline">
                     <select id="room-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
-                        <option value="default" selected>default</option>
+                        <option value="default" selected>default (기본 방)</option>
                     </select>
                     <input id="room-input-inline" class="inline-input" type="text" placeholder="방 이름 입력" maxlength="64" title="이동할 방 이름을 직접 입력" />
                     <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방으로 이동합니다">이동</button>
@@ -388,14 +388,18 @@
                     </div>
                     <!-- Turn Runtime: live game status grid (populated by turn_runtime.rs) -->
                     <div id="turn-runtime"></div>
-                    <div id="state-legend" class="state-legend">
+                    <div id="runtime-advanced-toggle-wrap" class="runtime-advanced-toggle-wrap">
+                        <button id="runtime-advanced-toggle" class="inline-toggle runtime-advanced-toggle" type="button" aria-pressed="false" title="상세 운영 정보를 펼치거나 접습니다">고급 정보 보기</button>
+                        <span id="runtime-advanced-hint" class="runtime-advanced-hint">상태 전이, 라운드 진단, DM 음성 설정</span>
+                    </div>
+                    <div id="state-legend" class="state-legend runtime-advanced">
                         <span class="state-chip state-running">RUNNING: 라운드 순환 중</span>
                         <span class="state-chip state-stopped">STOPPED: 일시 정지/재개 대기</span>
                         <span class="state-chip state-lobby">LOBBY: 세션 시작 전</span>
                         <span class="state-chip state-ended">ENDED: 세션 종료</span>
                         <span class="state-chip state-unavailable">UNAVAILABLE: 연결/키퍼 오류</span>
                     </div>
-                    <div id="lifecycle-diagram" class="lifecycle-diagram" aria-label="TRPG 상태 전이 다이어그램">
+                    <div id="lifecycle-diagram" class="lifecycle-diagram runtime-advanced" aria-label="TRPG 상태 전이 다이어그램">
                         <div class="lifecycle-track">
                             <span class="lifecycle-node" data-state="lobby">LOBBY</span>
                             <span class="lifecycle-edge">→</span>
@@ -411,13 +415,13 @@
                             <span class="lifecycle-node" data-state="recover">RECOVER</span>
                         </div>
                     </div>
-                    <div id="lifecycle-diagram-hint" class="lifecycle-diagram-hint">현재 상태를 불러오는 중...</div>
+                    <div id="lifecycle-diagram-hint" class="lifecycle-diagram-hint runtime-advanced">현재 상태를 불러오는 중...</div>
                     <div id="turn-flow-banner" class="turn-flow-banner is-idle" aria-live="polite">
                         <span id="turn-flow-state" class="flow-state">대기</span>
                         <span id="turn-flow-text" class="flow-text">세션 상태를 불러오는 중입니다.</span>
                         <span id="turn-flow-actions" class="flow-actions" aria-label="추천 작업"></span>
                     </div>
-                    <div id="agent-round-flow" class="agent-round-flow" aria-live="polite">
+                    <div id="agent-round-flow" class="agent-round-flow runtime-advanced" aria-live="polite">
                         <div class="agent-flow-empty">에이전트 라운드 흐름을 불러오는 중입니다.</div>
                     </div>
                     <!-- Turn Controls: advance turn (Keeper/GM only) -->
@@ -436,7 +440,7 @@
                     </div>
                     <div id="round-recovery-note" class="turn-recovery-note" style="display:none"></div>
                     <div id="round-run-summary" class="turn-run-summary" style="display:none"></div>
-                    <details id="round-sync-debug" class="round-sync-debug">
+                    <details id="round-sync-debug" class="round-sync-debug runtime-advanced">
                         <summary>라운드 동기화 디버그</summary>
                         <div id="round-sync-debug-body" class="round-sync-debug-body">
                             라운드 실행 후 동기화 상태를 표시합니다.
@@ -447,7 +451,7 @@
                     <input type="hidden" id="round-run-timeout" value="45" />
                     <input type="hidden" id="round-run-lang" value="" />
                     <input type="hidden" id="round-run-players" value="" />
-                    <details id="dm-voice-config" class="dm-voice-config">
+                    <details id="dm-voice-config" class="dm-voice-config runtime-advanced">
                         <summary>DM 음성 설정</summary>
                         <div class="dm-voice-grid">
                             <label class="new-game-field">

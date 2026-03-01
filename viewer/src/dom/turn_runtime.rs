@@ -49,6 +49,15 @@ fn room_status_label(state: TrpgLifecycleState) -> &'static str {
     state.label_ko()
 }
 
+#[cfg(target_arch = "wasm32")]
+fn room_display_label(room_id: &str) -> String {
+    if room_id.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
+        format!("{} (기본 방)", crate::config::DEFAULT_ROOM_ID)
+    } else {
+        room_id.to_string()
+    }
+}
+
 fn connection_status_class(status: &ConnectionStatus) -> &'static str {
     match status {
         ConnectionStatus::Connected => "status-active",
@@ -1097,6 +1106,123 @@ fn set_ops_hud_value(document: &web_sys::Document, id: &str, text: &str, status_
 }
 
 #[cfg(target_arch = "wasm32")]
+fn runtime_compact_lifecycle(lifecycle: TrpgLifecycleState) -> bool {
+    matches!(
+        lifecycle,
+        TrpgLifecycleState::Lobby
+            | TrpgLifecycleState::Loading
+            | TrpgLifecycleState::Ended
+            | TrpgLifecycleState::Unavailable
+            | TrpgLifecycleState::Unknown
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_runtime_advanced_toggle_ui(document: &web_sys::Document) {
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    let show_advanced = dashboard
+        .get_attribute("data-show-advanced")
+        .map(|raw| {
+            raw == "1"
+                || raw.eq_ignore_ascii_case("true")
+                || raw.eq_ignore_ascii_case("yes")
+                || raw.eq_ignore_ascii_case("on")
+        })
+        .unwrap_or(true);
+    let is_compact = dashboard
+        .get_attribute("data-runtime-compact")
+        .map(|raw| raw == "1")
+        .unwrap_or(false);
+
+    if let Some(toggle) = document.get_element_by_id("runtime-advanced-toggle") {
+        toggle.set_text_content(Some(if show_advanced {
+            "고급 정보 숨기기"
+        } else {
+            "고급 정보 보기"
+        }));
+        let _ = toggle.set_attribute("aria-pressed", if show_advanced { "true" } else { "false" });
+        let _ = toggle.set_attribute(
+            "class",
+            if show_advanced {
+                "inline-toggle runtime-advanced-toggle primary"
+            } else {
+                "inline-toggle runtime-advanced-toggle"
+            },
+        );
+        let _ = toggle.set_attribute(
+            "title",
+            if show_advanced {
+                "상태 전이/라운드 진단/DM 음성 설정을 숨깁니다."
+            } else {
+                "상태 전이/라운드 진단/DM 음성 설정을 펼칩니다."
+            },
+        );
+    }
+    if let Some(hint) = document.get_element_by_id("runtime-advanced-hint") {
+        let text = if show_advanced {
+            "상태 전이, 라운드 진단, DM 음성 설정"
+        } else if is_compact {
+            "기본 정보만 표시 중 (로비/종료 단순 모드)"
+        } else {
+            "핵심 정보만 표시 중"
+        };
+        hint.set_text_content(Some(text));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn ensure_runtime_advanced_toggle_binding(document: &web_sys::Document) {
+    let Some(toggle) = document.get_element_by_id("runtime-advanced-toggle") else {
+        return;
+    };
+    if toggle.get_attribute("data-bound").as_deref() == Some("1") {
+        return;
+    }
+    let cb = Closure::wrap(Box::new(move |evt: web_sys::Event| {
+        evt.prevent_default();
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(dashboard) = document.get_element_by_id("dashboard") else {
+            return;
+        };
+        let show_advanced = dashboard
+            .get_attribute("data-show-advanced")
+            .map(|raw| raw == "1")
+            .unwrap_or(false);
+        let _ = dashboard.set_attribute("data-show-advanced", if show_advanced { "0" } else { "1" });
+        sync_runtime_advanced_toggle_ui(&document);
+    }) as Box<dyn FnMut(_)>);
+    let _ = toggle.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+    cb.forget();
+    let _ = toggle.set_attribute("data-bound", "1");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn sync_runtime_panel_flags(document: &web_sys::Document, lifecycle: TrpgLifecycleState) {
+    let Some(dashboard) = document.get_element_by_id("dashboard") else {
+        return;
+    };
+    let was_compact = dashboard
+        .get_attribute("data-runtime-compact")
+        .map(|raw| raw == "1")
+        .unwrap_or(false);
+    let is_compact = runtime_compact_lifecycle(lifecycle);
+    let _ = dashboard.set_attribute("data-runtime-compact", if is_compact { "1" } else { "0" });
+
+    if is_compact && !was_compact {
+        let _ = dashboard.set_attribute("data-show-advanced", "0");
+    } else if dashboard.get_attribute("data-show-advanced").is_none() {
+        let _ = dashboard.set_attribute("data-show-advanced", if is_compact { "0" } else { "1" });
+    }
+
+    ensure_runtime_advanced_toggle_binding(document);
+    sync_runtime_advanced_toggle_ui(document);
+}
+
+#[cfg(target_arch = "wasm32")]
 fn round_plan_storage_key(room_id: &str) -> String {
     format!("masc.viewer.round_plan.{}", room_id.trim())
 }
@@ -1474,6 +1600,7 @@ pub fn update_turn_runtime_dom(
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
+        sync_runtime_panel_flags(&document, lifecycle);
         let Some(el) = document.get_element_by_id("turn-runtime") else {
             return;
         };
@@ -1514,9 +1641,10 @@ pub fn update_turn_runtime_dom(
         }
 
         if let Some(room_status_el) = document.get_element_by_id("room-status") {
+            let room_label = room_display_label(&room_id);
             room_status_el.set_text_content(Some(&format!(
                 "현재 게임 {} · {}",
-                room_id,
+                room_label,
                 lifecycle.label_ko()
             )));
             let _ = room_status_el.set_attribute("data-lifecycle", lifecycle.css_class());
@@ -1763,18 +1891,18 @@ pub fn update_turn_runtime_dom(
 <div class="turn-runtime-grid">
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">세션 상태</span><span class="v {lifecycle_class}">{lifecycle_label}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">설명</span><span class="v">{lifecycle_help}</span></div>
-  <div class="turn-runtime-item"><span class="k">상태</span><span class="v {room_class}">{room}</span></div>
+  <div class="turn-runtime-item runtime-detail"><span class="k">상태</span><span class="v {room_class}">{room}</span></div>
   <div class="turn-runtime-item"><span class="k">턴</span><span class="v">{turn}</span></div>
   <div class="turn-runtime-item"><span class="k">페이즈</span><span class="v">{phase}</span></div>
-  <div class="turn-runtime-item"><span class="k">입력</span><span class="v {input_class}">{input}</span></div>
-  <div class="turn-runtime-item"><span class="k">현재</span><span class="v">{current} · {current_status}</span></div>
-  <div class="turn-runtime-item"><span class="k">다음</span><span class="v">{next}</span></div>
-  <div class="turn-runtime-item"><span class="k">직전</span><span class="v">{last}</span></div>
+  <div class="turn-runtime-item runtime-detail"><span class="k">입력</span><span class="v {input_class}">{input}</span></div>
+  <div class="turn-runtime-item runtime-detail"><span class="k">현재</span><span class="v">{current} · {current_status}</span></div>
+  <div class="turn-runtime-item runtime-detail"><span class="k">다음</span><span class="v">{next}</span></div>
+  <div class="turn-runtime-item runtime-detail"><span class="k">직전</span><span class="v">{last}</span></div>
   <div class="turn-runtime-item"><span class="k">자동 진행</span><span class="v {runner_state_class}">{runner_state}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">이슈</span><span class="v {issues_class}">{issues}</span></div>
-  <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">자동 진행 응답</span><span class="v {runner_preview_class}">{runner_preview}</span></div>
+  <div class="turn-runtime-item turn-runtime-item-wide runtime-detail"><span class="k">자동 진행 응답</span><span class="v {runner_preview_class}">{runner_preview}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">다음 행동</span><span class="v">{next_action}</span></div>
-  <div class="turn-runtime-item"><span class="k">파티</span><span class="v {party_class}">{party}</span></div>
+  <div class="turn-runtime-item runtime-detail"><span class="k">파티</span><span class="v {party_class}">{party}</span></div>
 </div>
 "#,
             lifecycle_help = html_escape(lifecycle.help_text()),

@@ -85,6 +85,7 @@ module Run_eio = Run_eio
 module Hebbian_eio = Hebbian_eio
 module Spawn = Spawn
 module Spawn_eio = Spawn_eio
+module Spawn_registry = Spawn_registry
 module Glm_pool = Glm_pool
 module Bounded = Bounded
 module Orchestrator = Orchestrator

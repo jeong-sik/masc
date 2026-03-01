@@ -39,6 +39,9 @@ jobs:
           opam pin add neo4j_bolt https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
           opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 
+      - name: Refresh system package index
+        run: sudo apt-get update -qq
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do
@@ -106,6 +109,9 @@ jobs:
           opam pin add neo4j_bolt https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
           opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 
+      - name: Refresh system package index
+        run: sudo apt-get update -qq
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do
@@ -149,6 +155,9 @@ jobs:
           opam pin add neo4j_packstream https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
           opam pin add neo4j_bolt https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
           opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
+
+      - name: Refresh system package index
+        run: sudo apt-get update -qq
 
       - name: Install dependencies
         run: |

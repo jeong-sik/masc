@@ -54,6 +54,12 @@ let clamp_int low high value =
 
 let trpg_keeper_timeout_sec_default = 0.0
 let trpg_keeper_timeout_sec_env = "MASC_TRPG_KEEPER_TIMEOUT_SEC"
+let trpg_keeper_call_retries_default = 1
+let trpg_keeper_call_retries_env = "MASC_TRPG_KEEPER_CALL_RETRIES"
+let trpg_keeper_reprompt_retries_default = 2
+let trpg_keeper_reprompt_retries_env = "MASC_TRPG_KEEPER_REPROMPT_RETRIES"
+let trpg_strict_unique_player_reply_default = false
+let trpg_strict_unique_player_reply_env = "MASC_TRPG_STRICT_UNIQUE_PLAYER_REPLY"
 
 let trpg_keeper_timeout_sec () =
   match Sys.getenv_opt trpg_keeper_timeout_sec_env with
@@ -63,10 +69,46 @@ let trpg_keeper_timeout_sec () =
       | _ -> trpg_keeper_timeout_sec_default)
   | None -> trpg_keeper_timeout_sec_default
 
-let resolve_keeper_timeout_sec ~timeout_sec ~participant_count : float =
+let env_int ~default ~guard env_name =
+  match Sys.getenv_opt env_name with
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some v when guard v -> v
+      | _ -> default)
+  | None -> default
+
+let trpg_keeper_call_retries () =
+  env_int ~default:trpg_keeper_call_retries_default
+    ~guard:(fun v -> v >= 0) trpg_keeper_call_retries_env
+
+let env_bool ~default name =
+  match Sys.getenv_opt name with
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "1" | "true" | "yes" | "on" -> true
+      | "0" | "false" | "no" | "off" -> false
+      | _ -> default)
+  | None -> default
+
+let trpg_keeper_reprompt_retries () =
+  env_int ~default:trpg_keeper_reprompt_retries_default
+    ~guard:(fun v -> v >= 0) trpg_keeper_reprompt_retries_env
+
+let trpg_strict_unique_player_reply () =
+  env_bool ~default:trpg_strict_unique_player_reply_default
+    trpg_strict_unique_player_reply_env
+
+let resolve_keeper_timeout_sec ~keeper_timeout_override_sec ~timeout_sec
+    ~participant_count : float =
   let participant_count = max 1 participant_count in
   let per_actor_budget = timeout_sec /. float_of_int participant_count in
   let base = min timeout_sec per_actor_budget in
+  let base =
+    match keeper_timeout_override_sec with
+    | Some override_sec when override_sec > 0.0 ->
+        min timeout_sec (max 0.001 override_sec)
+    | _ -> base
+  in
   let floor_sec = trpg_keeper_timeout_sec () in
   if floor_sec <= 0.0 then base else min timeout_sec (max floor_sec base)
 
@@ -281,7 +323,7 @@ let schemas : Types.tool_schema list =
         "Run one TRPG round by messaging DM keeper then player keepers. \
          Records strict timeout/unavailable events. \
          Required: room_id, dm_keeper, player_keepers(object actor_id->keeper_name). \
-         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), lang(ko|en), dm_persona(grim_gothic|tactical_irony|heroic_epic), require_claim(boolean), local_fallback(boolean).";
+         Optional: phase(default round), rule_module(default dnd5e-lite), timeout_sec(default 90), keeper_timeout_sec(per-keeper override, must be <= timeout_sec), outcome_max_turn(integer: tighten session end turn cap for deterministic outcome), strict_agent_driven(boolean: disables inferred fallback and forces keeper-authored actions), strict_unique_player_reply(boolean: reject duplicated player narrative within a round), lang(ko|en), dm_persona(grim_gothic|tactical_irony|heroic_epic), require_claim(boolean), local_fallback(boolean).";
       input_schema =
         `Assoc
           [
@@ -300,9 +342,15 @@ let schemas : Types.tool_schema list =
                   ("phase", `Assoc [ ("type", `String "string") ]);
                   ("rule_module", `Assoc [ ("type", `String "string") ]);
                   ("timeout_sec", `Assoc [ ("type", `String "number") ]);
+                  ("keeper_timeout_sec", `Assoc [ ("type", `String "number") ]);
+                  ("outcome_max_turn", `Assoc [ ("type", `String "integer") ]);
                   ("dm_persona", `Assoc [ ("type", `String "string") ]);
                   ("require_claim", `Assoc [ ("type", `String "boolean") ]);
                   ("lang", `Assoc [ ("type", `String "string") ]);
+                  ( "strict_agent_driven",
+                    `Assoc [ ("type", `String "boolean") ] );
+                  ( "strict_unique_player_reply",
+                    `Assoc [ ("type", `String "boolean") ] );
                   ( "local_fallback",
                     `Assoc [ ("type", `String "boolean") ] );
                 ] );
@@ -1005,12 +1053,8 @@ let mid_join_min_score_default = 3
 let mid_join_min_score_env = "TRPG_MID_JOIN_MIN_SCORE"
 
 let mid_join_min_score () =
-  match Sys.getenv_opt mid_join_min_score_env with
-  | Some raw -> (
-      match int_of_string_opt (String.trim raw) with
-      | Some n when n > 0 -> n
-      | _ -> mid_join_min_score_default)
-  | None -> mid_join_min_score_default
+  env_int ~default:mid_join_min_score_default
+    ~guard:(fun v -> v > 0) mid_join_min_score_env
 
 type join_gate_state = {
   phase_open : bool;
@@ -1644,7 +1688,8 @@ let dm_signal_outcome reply_text =
   else if contains_substring upper "[END]" then Some (Draw, "dm_signal:[END]")
   else None
 
-let evaluate_session_outcome ~end_rules ~(state : Yojson.Safe.t) ~dm_reply :
+let evaluate_session_outcome ~end_rules ~max_turn_override
+    ~(state : Yojson.Safe.t) ~dm_reply :
     (session_outcome * string) option =
   let story_flags = story_flags_from_state state in
   let draw_flag =
@@ -1660,13 +1705,18 @@ let evaluate_session_outcome ~end_rules ~(state : Yojson.Safe.t) ~dm_reply :
     end_rules.Trpg_preset_store.defeat_if_all_players_dead
     && all_players_dead_in_state state
   in
+  let effective_max_turn =
+    match max_turn_override with
+    | Some n when n > 0 -> min end_rules.Trpg_preset_store.max_turn n
+    | _ -> end_rules.Trpg_preset_store.max_turn
+  in
   let max_turn_reached =
     let turn =
       match state |> member "turn" with
       | `Int n -> n
       | _ -> 0
     in
-    turn >= end_rules.Trpg_preset_store.max_turn
+    turn >= effective_max_turn
   in
   match draw_flag with
   | Some flag -> Some (Draw, "flag:" ^ flag)
@@ -2161,6 +2211,98 @@ let extract_structured_action_json_from_reply_line line :
         | exception Yojson.Json_error e ->
             Error (Printf.sprintf "invalid structured_action json: %s" e)
 
+let extract_first_json_object_fragment (text : string) ~(from_idx : int) :
+    string option =
+  let len = String.length text in
+  let rec find_open i =
+    if i >= len then None
+    else if text.[i] = '{' then Some i
+    else find_open (i + 1)
+  in
+  match find_open (max 0 from_idx) with
+  | None -> None
+  | Some open_idx ->
+      let rec scan i depth in_string escaped =
+        if i >= len then None
+        else
+          let ch = text.[i] in
+          if in_string then
+            if escaped then scan (i + 1) depth true false
+            else if ch = '\\' then scan (i + 1) depth true true
+            else if ch = '"' then scan (i + 1) depth false false
+            else scan (i + 1) depth true false
+          else if ch = '"' then scan (i + 1) depth true false
+          else if ch = '{' then scan (i + 1) (depth + 1) false false
+          else if ch = '}' then
+            if depth = 1 then Some (String.sub text open_idx (i - open_idx + 1))
+            else scan (i + 1) (depth - 1) false false
+          else scan (i + 1) depth false false
+      in
+      scan (open_idx + 1) 1 false false
+
+let extract_structured_action_json_inline (reply : string) :
+    Yojson.Safe.t option =
+  let key = "structured_action" in
+  let key_len = String.length key in
+  let lowered = String.lowercase_ascii reply in
+  let len = String.length lowered in
+  let rec loop from_idx =
+    if from_idx >= len then None
+    else
+      let slice = String.sub lowered from_idx (len - from_idx) in
+      match find_substring slice key with
+      | None -> None
+      | Some rel_idx ->
+          let key_idx = from_idx + rel_idx in
+          let search_idx = key_idx + key_len in
+          let candidate =
+            extract_first_json_object_fragment reply ~from_idx:search_idx
+          in
+          (match candidate with
+          | None -> loop search_idx
+          | Some raw_json -> (
+              match Yojson.Safe.from_string raw_json with
+              | `Assoc fields when fields <> [] -> Some (`Assoc fields)
+              | _ -> loop search_idx
+              | exception Yojson.Json_error _ -> loop search_idx))
+  in
+  loop 0
+
+let extract_structured_action_json_from_whole_reply (reply : string) :
+    Yojson.Safe.t option =
+  let strip_code_fence text =
+    let trimmed = String.trim text in
+    if not (starts_with trimmed "```") then trimmed
+    else
+      let lines = String.split_on_char '\n' trimmed in
+      let lines =
+        match lines with
+        | [] -> []
+        | _first :: tl -> tl
+      in
+      let lines =
+        match List.rev lines with
+        | last :: tl when starts_with (String.trim last) "```" -> List.rev tl
+        | _ -> lines
+      in
+      String.concat "\n" lines |> String.trim
+  in
+  let try_extract text =
+    match Yojson.Safe.from_string text with
+    | `Assoc fields -> (
+        match List.assoc_opt "structured_action" fields with
+        | Some (`Assoc sa_fields) when sa_fields <> [] -> Some (`Assoc sa_fields)
+        | _ -> None)
+    | _ -> None
+    | exception Yojson.Json_error _ -> None
+  in
+  let trimmed = String.trim reply in
+  match try_extract trimmed with
+  | Some json -> Some json
+  | None ->
+      let unfenced = strip_code_fence trimmed in
+      if unfenced = trimmed then None else try_extract unfenced
+
 let extract_structured_action_json_from_reply (reply : string) :
     (Yojson.Safe.t option, string) Stdlib.result =
   let rec loop = function
@@ -2171,7 +2313,15 @@ let extract_structured_action_json_from_reply (reply : string) :
         | Ok (Some _ as found) -> Ok found
         | Error e -> Error e)
   in
-  loop (String.split_on_char '\n' reply)
+  match loop (String.split_on_char '\n' reply) with
+  | Ok None -> (
+      match extract_structured_action_json_inline reply with
+      | Some json -> Ok (Some json)
+      | None -> (
+          match extract_structured_action_json_from_whole_reply reply with
+          | Some json -> Ok (Some json)
+          | None -> Ok None))
+  | other -> other
 
 let extract_structured_action_json (keeper_json : Yojson.Safe.t) :
     (Yojson.Safe.t option, string) Stdlib.result =
@@ -2229,6 +2379,65 @@ let is_dm_action_type = function
 type structured_action_validation_error =
   [ `Schema of string | `Rule of string ]
 
+let normalize_structured_description_for_quality_gate (raw : string) : string =
+  raw
+  |> String.trim
+  |> String.lowercase_ascii
+  |> String.map (function
+       | '.' | ',' | '!' | '?' | ':' | ';' | '"' | '\'' | '(' | ')' -> ' '
+       | ch -> ch)
+  |> String.split_on_char ' '
+  |> List.filter (fun token -> token <> "")
+  |> String.concat " "
+
+let low_signal_structured_descriptions =
+  [
+    "현재 전황에 맞는 구체 행동";
+    "전황에 맞는 구체 행동";
+    "일행이 은신처를 발견했다";
+    "검으로 고블린을 공격한다";
+    "상황을 살피며 다음 행동을 준비합니다.";
+    "다음 행동을 준비한다";
+    "내 기록 기준으로는 직전에 이런 질문을 했어";
+    "swing sword at the goblin";
+    "the party discovered the hideout";
+    "the party enters the cave";
+    "assess the situation and prepare the next move.";
+    "prepare the next move";
+    "the previous prompt was";
+  ]
+  |> List.map normalize_structured_description_for_quality_gate
+
+let low_signal_structured_fragments =
+  [
+    "현재 전황에 맞는 구체 행동";
+    "전황에 맞는 구체 행동";
+    "상황을 살피며 다음 행동을 준비";
+    "다음 행동을 준비";
+    "내 기록 기준으로는 직전에 이런 질문을 했어";
+    "일행이 은신처를 발견";
+    "검으로 고블린을 공격";
+    "swing sword at the goblin";
+    "the party discovered the hideout";
+    "the party enters the cave";
+    "assess the situation and prepare the next move";
+    "prepare the next move";
+    "the previous prompt was";
+  ]
+  |> List.map normalize_structured_description_for_quality_gate
+
+let contains_low_signal_structured_fragment (text : string) : bool =
+  let normalized = normalize_structured_description_for_quality_gate text in
+  normalized <> ""
+  && List.exists
+       (fun fragment ->
+         fragment <> "" && contains_substring normalized fragment)
+       low_signal_structured_fragments
+
+let is_low_signal_structured_description (text : string) : bool =
+  let normalized = normalize_structured_description_for_quality_gate text in
+  normalized <> "" && List.mem normalized low_signal_structured_descriptions
+
 let validate_structured_action_for_role ~role (sa : structured_action) :
     (structured_action, structured_action_validation_error) Stdlib.result =
   let ( let* ) = Result.bind in
@@ -2261,6 +2470,13 @@ let validate_structured_action_for_role ~role (sa : structured_action) :
     let text = String.trim sa.description in
     if text = "" then
       Error (`Schema "description is required for structured_action")
+    else if
+      is_low_signal_structured_description text
+      || contains_low_signal_structured_fragment text
+    then
+      Error
+        (`Rule
+           "description is too generic; include concrete target/threat/intent")
     else Ok text
   in
   let* flag_key =
@@ -3334,6 +3550,14 @@ let recent_actor_replies ~state ~actor_id ~limit =
         collect [] (List.rev entries)
     | _ -> []
 
+let is_repetitive_reply ~state ~actor_id ~(reply : string) : bool =
+  let normalized_reply = normalize_reply_for_comparison reply in
+  if normalized_reply = "" then false
+  else
+    recent_actor_replies ~state ~actor_id ~limit:3
+    |> List.map normalize_reply_for_comparison
+    |> List.exists (fun recent -> recent <> "" && recent = normalized_reply)
+
 let pick_deterministic_text ~actor_id ~turn ~salt xs =
   match xs with
   | [] -> None
@@ -3835,6 +4059,8 @@ let sanitize_keeper_reply (raw : string) : string =
     raw
     |> truncate_before_marker "\"visible_state_json\":"
     |> truncate_before_marker "visible_state_json:"
+    |> truncate_before_marker "\"state_snapshot_json\":"
+    |> truncate_before_marker "state_snapshot_json:"
     |> truncate_before_marker "\"[STATE]\""
     |> truncate_before_marker "[STATE]"
     |> truncate_before_marker "[/STATE]"
@@ -3866,8 +4092,10 @@ let sanitize_keeper_reply (raw : string) : string =
     || starts_with t "\"TRPG 실행 요청"
     || starts_with t "TRPG 실행 요청입니다."
     || starts_with t "TRPG execution request."
+    || starts_with t "state_snapshot_json:"
     || starts_with t "내 기록상 가장 처음 물어본 건 이거야"
     || contains_substring t "visible_state_json:"
+    || contains_substring t "state_snapshot_json:"
   in
   let rec drop_leading_noise = function
     | [] -> []
@@ -3885,7 +4113,8 @@ let sanitize_keeper_reply (raw : string) : string =
              || starts_with lowered "structured_action:"
              || starts_with t "[STATE]"
              || starts_with t "[/STATE]"
-             || starts_with t "visible_state_json:"))
+             || starts_with t "visible_state_json:"
+             || starts_with t "state_snapshot_json:"))
     |> drop_leading_noise
   in
   String.concat "\n" cleaned_lines |> String.trim
@@ -3909,9 +4138,11 @@ let is_reply_noise_text (raw : string) : bool =
   || starts_with t "\"TRPG 실행 요청"
   || starts_with t "TRPG 실행 요청입니다."
   || starts_with t "TRPG execution request."
+  || starts_with t "state_snapshot_json:"
   || starts_with t "내 기록상 가장 처음 물어본 건 이거야"
   || starts_with t "반드시 한국어로 응답하세요."
   || contains_substring t "visible_state_json:"
+  || contains_substring t "state_snapshot_json:"
 
 let extract_skill_hint_from_text (raw : string) : string option =
   let lines =
@@ -3981,10 +4212,12 @@ let parse_keeper_reply keeper_json =
       let cleaned = sanitize_keeper_reply s in
       let fallback = String.trim s in
       let prompt_echo =
-        contains_substring s "visible_state_json:"
+        (contains_substring s "visible_state_json:"
+        || contains_substring s "state_snapshot_json:")
         && (contains_substring s "TRPG 실행 요청입니다."
            || contains_substring s "TRPG execution request."
            || contains_substring s "내 기록상 가장 처음 물어본 건 이거야"
+           || contains_substring s "내 기록 기준으로는, 직전에 이런 질문을 했어"
            || contains_substring s "당신은 던전 마스터"
            || contains_substring s "You are the Dungeon Master"
            || contains_substring s "캐릭터에 맞게 행동하고"
@@ -3993,7 +4226,11 @@ let parse_keeper_reply keeper_json =
       let fallback_reply = fallback_reply_from_keeper_json keeper_json in
       let structured_action_description =
         match extract_structured_action keeper_json with
-        | Some sa when String.trim sa.description <> "" -> Some sa.description
+        | Some sa ->
+            let desc = String.trim sa.description in
+            if desc <> "" && not (is_low_signal_structured_description desc) then
+              Some desc
+            else None
         | _ -> None
       in
       let reply =
@@ -4569,15 +4806,16 @@ let trpg_structured_action_system_instructions =
    - Player actions: attack, defend, heal, investigate, social, explore, magic, use_item\n\
    - DM actions: set_flag, scene_transition, quest_update\n\n\
    Examples:\n\
-   structured_action: {\"type\":\"attack\",\"target_id\":\"goblin-1\",\"description\":\"Swing sword at the goblin\"}\n\
-   structured_action: {\"type\":\"set_flag\",\"flag_key\":\"quest.hideout.found\",\"description\":\"The party discovered the hideout\"}\n\
-   structured_action: {\"type\":\"scene_transition\",\"scene\":\"Deep cave\",\"description\":\"The party enters the cave\",\"memory_hint\":{\"tier\":\"mid\",\"reason\":\"scene pivot\"}}\n\
-   structured_action: {\"type\":\"scene_transition\",\"scene\":\"Deep cave\",\"description\":\"The party enters the cave\"}\n\n\
+   structured_action: {\"type\":\"attack\",\"target_id\":\"goblin-1\",\"description\":\"Slide under the shield wall and slash the goblin captain's knee\"}\n\
+   structured_action: {\"type\":\"set_flag\",\"flag_key\":\"quest.hideout.found\",\"description\":\"A blood-stained map shard confirms the hideout entrance behind the chapel\"}\n\
+   structured_action: {\"type\":\"scene_transition\",\"scene\":\"Deep cave\",\"description\":\"A cave-in seals the rear tunnel as the party dives into the crystal chamber\",\"memory_hint\":{\"tier\":\"mid\",\"reason\":\"scene pivot\"}}\n\
+   structured_action: {\"type\":\"quest_update\",\"quest_info\":\"Boss ritual begins at moonrise\",\"description\":\"The captured scout reveals the ritual starts before moonrise\"}\n\n\
    Rules:\n\
    1. EVERY response must have exactly one structured_action line.\n\
    2. The JSON must be valid (use double quotes for keys and string values).\n\
    3. Do NOT wrap it in markdown code blocks.\n\
-   4. Place it at the END of your narrative reply."
+   4. Place it at the END of your narrative reply.\n\
+   5. description must include concrete target/objective and immediate intent."
 
 let build_player_section_ko (ctx : prompt_context) =
   let parts =
@@ -4639,10 +4877,14 @@ let build_player_section_ko (ctx : prompt_context) =
       Printf.sprintf
         "'%s'로서 지금 즉시 행동하세요. 관찰만 하지 말고 결정적인 액션을 취하세요."
         ctx.actor_name;
+      "structured_action.description에는 대상/행동/의도를 구체적으로 포함하세요.";
+      "서사는 1~3문장으로 마무리하고, 최소 한 문장에 감각 정보(소리/빛/냄새/통증 등)를 담으세요.";
+      "직전 턴과 같은 문장을 반복하지 말고, 이번 턴의 새로운 위험/기회를 반영하세요.";
+      "금지 예시: 현재 전황에 맞는 구체 행동";
       "반드시 structured_action을 포함하세요. 예시:";
-      {|{"type":"attack","target_id":"goblin-1","description":"검으로 고블린을 공격한다"}|};
-      {|{"type":"investigate","description":"수상한 상자를 조사한다"}|};
-      {|{"type":"social","target_id":"npc-merchant","description":"상인에게 정보를 묻는다"}|};
+      {|{"type":"attack","target_id":"goblin-1","description":"깨진 기둥을 발판 삼아 고블린 궁수의 사선을 끊고 견갑을 베어낸다"}|};
+      {|{"type":"investigate","description":"핏자국이 난 성배 받침을 들어 올려 숨겨진 레버를 확인한다"}|};
+      {|{"type":"social","target_id":"npc-merchant","description":"밀수 장부를 내밀며 상인에게 은신처 위치를 지금 말하라고 압박한다"}|};
       "가능한 type: attack, defend, heal, investigate, social, explore, magic, use_item";
     ]
   in
@@ -4708,10 +4950,14 @@ let build_player_section_en (ctx : prompt_context) =
       Printf.sprintf
         "As '%s', take a decisive action NOW. Do NOT just observe or describe — ACT."
         ctx.actor_name;
+      "In structured_action.description, include concrete target/action/intent.";
+      "Keep narration to 1-3 sentences, and include at least one sensory detail.";
+      "Do not repeat your previous line; reflect a new threat or opportunity this turn.";
+      "Forbidden example: current situation appropriate concrete action";
       "You MUST include a structured_action. Examples:";
-      {|{"type":"attack","target_id":"goblin-1","description":"Swing sword at the goblin"}|};
-      {|{"type":"investigate","description":"Search the suspicious chest"}|};
-      {|{"type":"social","target_id":"npc-merchant","description":"Ask the merchant for info"}|};
+      {|{"type":"attack","target_id":"goblin-1","description":"Kick over the brazier to blind the goblin archer, then cut across his bow arm"}|};
+      {|{"type":"investigate","description":"Lift the cracked altar tile and inspect the mechanism hidden under dried blood"}|};
+      {|{"type":"social","target_id":"npc-merchant","description":"Threaten to expose the smuggling ledger unless the merchant reveals the hideout route"}|};
       "Available types: attack, defend, heal, investigate, social, explore, magic, use_item";
     ]
   in
@@ -4749,10 +4995,14 @@ let build_dm_section_ko (ctx : prompt_context) =
           Printf.sprintf "최근 서사:\n%s"
             (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
       "다음에 일어날 일을 결정하세요. 서사를 진행하고, 환경과 NPC의 반응을 묘사하세요.";
+      "structured_action.description에는 원인/장면 변화/즉각 위협 또는 기회를 포함하세요.";
+      "서사는 1~3문장으로 유지하고, 매 턴 최소 하나의 새로운 위험/기회를 제시하세요.";
+      "같은 DM 문장을 반복하지 말고, 장면의 감각 디테일(소리/온도/조명 등)을 추가하세요.";
+      "금지 예시: 일행이 은신처를 발견했다";
       "반드시 structured_action을 포함하세요. DM용 예시:";
-      {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"일행이 은신처를 발견했다"}|};
-      {|{"type":"scene_transition","scene":"동굴 깊은 곳","description":"일행이 동굴 안으로 진입한다"}|};
-      {|{"type":"quest_update","quest_info":"보스 위치 확인됨","description":"단서를 통해 보스 위치가 드러났다"}|};
+      {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"핏자국이 묻은 지도 조각이 비밀 통로를 가리켜 은신처 좌표가 확정된다"}|};
+      {|{"type":"scene_transition","scene":"동굴 깊은 곳","description":"매복병의 화살 세례를 피해 일행이 무너진 제단 아래 통로로 뛰어든다"}|};
+      {|{"type":"quest_update","quest_info":"보스 의식 시간 자정으로 특정","description":"사로잡은 정찰병의 증언으로 보스가 자정에 의식을 시작한다는 사실이 드러난다"}|};
       "DM은 set_flag, scene_transition, quest_update만 사용하세요.";
       "스토리 목표 달성 시 [WIN], 전멸 시 [LOSE]를 reply에 포함하세요.";
       "매 턴마다 이야기를 진전시키세요. 같은 상황을 반복하지 마세요.";
@@ -4792,10 +5042,14 @@ let build_dm_section_en (ctx : prompt_context) =
           Printf.sprintf "Recent narrative:\n%s"
             (lines |> List.map (fun l -> "- " ^ l) |> String.concat "\n"));
       "Determine what happens next. Advance the narrative, describe the environment and NPC reactions.";
+      "structured_action.description must include trigger, scene change, and immediate threat or opportunity.";
+      "Keep narration to 1-3 sentences and introduce at least one new threat or opportunity each turn.";
+      "Do not repeat prior DM phrasing; add sensory details (sound, temperature, light, impact).";
+      "Forbidden example: The party discovered the hideout";
       "You MUST include a structured_action. DM examples:";
-      {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"The party discovered the hideout"}|};
-      {|{"type":"scene_transition","scene":"Deep cave","description":"The party enters the cave"}|};
-      {|{"type":"quest_update","quest_info":"Boss location confirmed","description":"Clues reveal the boss location"}|};
+      {|{"type":"set_flag","flag_key":"quest.hideout.found","description":"A blood-smeared map shard points to the chapel crypt and confirms the hideout entrance"}|};
+      {|{"type":"scene_transition","scene":"Deep cave","description":"Arrow volleys force the party through a collapsing stair into the deep crystal cave"}|};
+      {|{"type":"quest_update","quest_info":"Boss ritual begins at midnight","description":"An interrogated scout confirms the boss starts the ritual at midnight"}|};
       "DM must use only: set_flag, scene_transition, quest_update.";
       "When the story goal is achieved, include [WIN] in your reply. On party wipe, include [LOSE].";
       "Advance the story every turn. Do NOT repeat the same situation.";
@@ -7090,7 +7344,27 @@ let handle_round_run ctx args : result =
     let dm_keeper = String.trim dm_keeper_raw in
     let* player_keepers = parse_player_keepers args in
     let* timeout_sec = get_optional_float args "timeout_sec" ~default:90.0 in
+    let* keeper_timeout_sec_raw =
+      get_optional_float args "keeper_timeout_sec" ~default:0.0
+    in
+    let* outcome_max_turn_opt = get_optional_int args "outcome_max_turn" in
+    let keeper_timeout_override_sec =
+      if keeper_timeout_sec_raw > 0.0 then Some keeper_timeout_sec_raw else None
+    in
+    let outcome_max_turn_override =
+      match outcome_max_turn_opt with
+      | Some n when n > 0 -> Some n
+      | _ -> None
+    in
     if timeout_sec <= 0.0 then Error "timeout_sec must be > 0"
+    else if
+      match keeper_timeout_override_sec with
+      | Some override_sec -> override_sec > timeout_sec
+      | None -> false
+    then Error "keeper_timeout_sec must be <= timeout_sec"
+    else if Option.is_some outcome_max_turn_opt
+            && Option.is_none outcome_max_turn_override
+    then Error "outcome_max_turn must be >= 1"
     else if dm_keeper = "" then Error "dm_keeper cannot be empty"
     else
       let* rule_opt = get_optional_string args "rule_module" in
@@ -7098,10 +7372,17 @@ let handle_round_run ctx args : result =
       let* lang_opt = get_optional_string args "lang" in
       let* dm_persona_opt = get_optional_string args "dm_persona" in
       let* require_claim = get_optional_bool args "require_claim" ~default:false in
+      let* strict_agent_driven =
+        get_optional_bool args "strict_agent_driven" ~default:false
+      in
+      let* strict_unique_player_reply =
+        get_optional_bool args "strict_unique_player_reply"
+          ~default:(trpg_strict_unique_player_reply ())
+      in
       let* local_fallback_requested =
         get_optional_bool args "local_fallback" ~default:false
       in
-      let local_fallback = local_fallback_requested in
+      let local_fallback = local_fallback_requested && not strict_agent_driven in
       let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
       let phase_input = Option.value ~default:"round" phase_opt in
       let prompt_lang = prompt_language_of_string_opt lang_opt in
@@ -7197,7 +7478,8 @@ let handle_round_run ctx args : result =
         let active_player_count = List.length live_player_keepers in
         let participant_count = max 1 (1 + active_player_count) in
         let keeper_timeout_sec =
-          resolve_keeper_timeout_sec ~timeout_sec ~participant_count
+          resolve_keeper_timeout_sec ~keeper_timeout_override_sec ~timeout_sec
+            ~participant_count
         in
         let player_required_successes =
           let total = active_player_count in
@@ -7382,10 +7664,12 @@ let handle_round_run ctx args : result =
       let timeout_count = ref 0 in
       let dm_reply_ref : string option ref = ref None in
       let state_for_players_ref = ref base_state_for_prompt in
+      let seen_player_reply_signatures : (string * string) list ref = ref [] in
       let active_player_count = List.length live_player_keepers in
       let participant_count = max 1 (1 + active_player_count) in
       let keeper_timeout_sec =
-        resolve_keeper_timeout_sec ~timeout_sec ~participant_count
+        resolve_keeper_timeout_sec ~keeper_timeout_override_sec ~timeout_sec
+          ~participant_count
       in
       let* () =
         if phase = "round" then
@@ -7424,8 +7708,28 @@ let handle_round_run ctx args : result =
             :: !statuses)
         dead_player_keepers;
 
+      let duplicate_player_reply_actor ~actor_id ~reply =
+        let signature = normalize_reply_for_comparison reply in
+        if signature = "" then None
+        else
+          !seen_player_reply_signatures
+          |> List.find_map (fun (prev_actor_id, prev_signature) ->
+                 if prev_signature = signature && prev_actor_id <> actor_id then
+                   Some prev_actor_id
+                 else None)
+      in
+      let register_player_reply_signature ~role ~actor_id ~reply =
+        match role with
+        | `Dm -> ()
+        | `Player ->
+            let signature = normalize_reply_for_comparison reply in
+            if signature <> "" then
+              seen_player_reply_signatures :=
+                (actor_id, signature) :: !seen_player_reply_signatures
+      in
+
       let process_one ~state_json ~role ~actor_id ~keeper_name =
-        let record_unavailable_status ~status ~error ~stage =
+        let record_unavailable_status ~reply_excerpt ~status ~error ~stage =
           let* unavailable_result =
             append_unavailable_event
               ~store
@@ -7458,6 +7762,9 @@ let handle_round_run ctx args : result =
                 ("reason", `String error);
                 ("stage", `String stage);
                 ("error", `String error);
+                ( "reply_excerpt",
+                  Option.fold ~none:`Null ~some:(fun v -> `String v)
+                    reply_excerpt );
                 ("sampled", `Bool sampled);
                 ( "sampled_reason",
                   Option.fold ~none:`Null ~some:(fun v -> `String v)
@@ -7467,11 +7774,7 @@ let handle_round_run ctx args : result =
           Ok ()
         in
         let apply_local_fallback ~stage ~reason =
-          if not local_fallback then
-            Error
-              (Printf.sprintf
-                 "local fallback disabled: actor=%s keeper=%s stage=%s reason=%s"
-                 actor_id keeper_name stage reason)
+          if not local_fallback then Ok ()
           else
             let fallback_reply =
               match role with
@@ -7719,6 +8022,7 @@ let handle_round_run ctx args : result =
         match lease_check with
         | Error lease_error ->
             record_unavailable_status
+              ~reply_excerpt:None
               ~status:"lease_denied"
               ~error:lease_error
               ~stage:"lease_check"
@@ -7800,6 +8104,41 @@ let handle_round_run ctx args : result =
           in
           if normalized_reply = "" then
             Error (`Schema "reply is empty after cleanup")
+          else if
+            is_low_signal_structured_description normalized_reply
+            || contains_low_signal_structured_fragment normalized_reply
+          then
+            Error
+              (`Rule
+                 "reply is too generic; include concrete target/threat/intent")
+          else if is_repetitive_reply ~state:state_json ~actor_id ~reply:normalized_reply then
+            Error
+              (`Rule
+                 "reply repeats recent narration; advance scene with a new concrete move")
+          else if role = `Player then
+            (match duplicate_player_reply_actor ~actor_id ~reply:normalized_reply with
+            | Some other_actor ->
+                if strict_unique_player_reply then
+                  Error
+                    (`Rule
+                       (Printf.sprintf
+                          "reply duplicates another player action this round (%s); choose a distinct move"
+                          other_actor))
+                else (
+                  statuses :=
+                    `Assoc
+                      [
+                        ("actor_id", `String actor_id);
+                        ("role", `String (role_to_string role));
+                        ("keeper", `String keeper_name);
+                        ("status", `String "duplicate_reply_warning");
+                        ("reason", `String "duplicate player reply accepted");
+                        ("duplicate_of_actor_id", `String other_actor);
+                        ("reply", `String normalized_reply);
+                      ]
+                    :: !statuses;
+                  Ok (normalized_reply, normalized_sa))
+            | None -> Ok (normalized_reply, normalized_sa))
           else Ok (normalized_reply, normalized_sa)
         in
         let synthetic_action_for_reply reply_text =
@@ -7846,52 +8185,116 @@ let handle_round_run ctx args : result =
                   })
         in
         let infer_action_from_keeper_json keeper_json =
-          let mk_result ~reason reply_text =
-            let seed_reply =
-              let trimmed = String.trim reply_text in
-              if trimmed = "" || is_reply_noise_text trimmed then
-                String.trim (synthesized_roleplay_reply ())
-              else trimmed
+          if strict_agent_driven then None
+          else
+            let mk_result ~reason reply_text =
+              let seed_reply =
+                let trimmed = String.trim reply_text in
+                if trimmed = "" || is_reply_noise_text trimmed then
+                  String.trim (synthesized_roleplay_reply ())
+                else trimmed
+              in
+              let synthetic_action = synthetic_action_for_reply seed_reply in
+              let normalized_reply, normalized_sa =
+                normalize_reply_with_action seed_reply synthetic_action
+              in
+              if
+                normalized_reply = ""
+                || is_low_signal_structured_description normalized_reply
+                || contains_low_signal_structured_fragment normalized_reply
+                || is_repetitive_reply ~state:state_json ~actor_id ~reply:normalized_reply
+                ||
+                (match role with
+                | `Dm -> false
+                | `Player ->
+                    Option.is_some
+                      (duplicate_player_reply_actor ~actor_id
+                         ~reply:normalized_reply))
+              then None
+              else Some (normalized_reply, normalized_sa, reason)
             in
-            let synthetic_action = synthetic_action_for_reply seed_reply in
-            let normalized_reply, normalized_sa =
-              normalize_reply_with_action seed_reply synthetic_action
-            in
-            if normalized_reply = "" then None
-            else Some (normalized_reply, normalized_sa, reason)
-          in
-          match parse_keeper_reply keeper_json with
-          | Ok reply_text -> mk_result ~reason:"keeper_reply_inferred" reply_text
-          | Error _ ->
-              mk_result
-                ~reason:"keeper_reply_synthesized"
-                (synthesized_roleplay_reply ())
+            match parse_keeper_reply keeper_json with
+            | Ok reply_text -> mk_result ~reason:"keeper_reply_inferred" reply_text
+            | Error _ ->
+                mk_result
+                  ~reason:"keeper_reply_synthesized"
+                  (synthesized_roleplay_reply ())
         in
-        let re_prompt_message ~stage ~reason =
+        let max_reprompt_attempts = trpg_keeper_reprompt_retries () in
+        let keeper_call_max_attempts =
+          1 + max 0 (trpg_keeper_call_retries ())
+        in
+        let is_retryable_keeper_error err =
+          let lowered = String.lowercase_ascii (String.trim err) in
+          lowered <> ""
+          && (contains_substring lowered "empty response"
+             || contains_substring lowered "temporarily unavailable"
+             || contains_substring lowered "connection reset"
+             || contains_substring lowered "network is unreachable"
+             || contains_substring lowered "read timed out"
+             || contains_substring lowered "timeout")
+        in
+        let re_prompt_message ~stage ~reason ~attempt =
           Printf.sprintf
-            "%s\n\n[RETRY REQUIRED]\n\
+            "%s\n\n[RETRY REQUIRED %d/%d]\n\
              Your previous response was rejected at stage=%s (%s).\n\
-             Return concise in-world narrative plus exactly one valid structured_action JSON line."
-            base_prompt stage
+             Return concise in-world narrative plus exactly one valid structured_action JSON line.\n\
+             Do NOT emit SKILL/SKILL_REASON/[STATE] headers. Output only narrative + structured_action."
+            base_prompt attempt max_reprompt_attempts stage
             (compact_summary_text ~max_len:180 reason)
         in
         let run_keeper_once ~stage ~message =
-          match
-            call_keeper ctx ~name:keeper_name ~message
-              ~timeout_sec:keeper_timeout_sec
-          with
-          | `Timeout -> Error (`Timeout stage)
-          | `Error err -> Error (`Unavailable (stage, err))
-          | `Ok keeper_json -> (
-              match validate_keeper_payload keeper_json with
-              | Ok (reply, sa) -> Ok (reply, sa)
-              | Error validation_error -> Error (`Validation (stage, validation_error, keeper_json))
-          )
+          let rec loop attempt =
+            match
+              call_keeper ctx ~name:keeper_name ~message
+                ~timeout_sec:keeper_timeout_sec
+            with
+            | `Timeout when attempt < keeper_call_max_attempts ->
+                statuses :=
+                  `Assoc
+                    [
+                      ("actor_id", `String actor_id);
+                      ("role", `String (role_to_string role));
+                      ("keeper", `String keeper_name);
+                      ("status", `String "keeper_call_retry");
+                      ("stage", `String stage);
+                      ("reason", `String "timeout");
+                      ("attempt", `Int attempt);
+                      ("max_attempts", `Int keeper_call_max_attempts);
+                    ]
+                  :: !statuses;
+                loop (attempt + 1)
+            | `Timeout -> Error (`Timeout stage)
+            | `Error err
+              when attempt < keeper_call_max_attempts
+                   && is_retryable_keeper_error err ->
+                statuses :=
+                  `Assoc
+                    [
+                      ("actor_id", `String actor_id);
+                      ("role", `String (role_to_string role));
+                      ("keeper", `String keeper_name);
+                      ("status", `String "keeper_call_retry");
+                      ("stage", `String stage);
+                      ("reason", `String (compact_summary_text ~max_len:180 err));
+                      ("attempt", `Int attempt);
+                      ("max_attempts", `Int keeper_call_max_attempts);
+                    ]
+                  :: !statuses;
+                loop (attempt + 1)
+            | `Error err -> Error (`Unavailable (stage, err))
+            | `Ok keeper_json -> (
+                match validate_keeper_payload keeper_json with
+                | Ok (reply, sa) -> Ok (reply, sa)
+                | Error validation_error ->
+                    Error (`Validation (stage, validation_error, keeper_json))
+              )
+          in
+          loop 1
         in
-        let keeper_result = run_keeper_once ~stage:"masc_keeper_msg" ~message:base_prompt in
-        let keeper_result =
+        let rec recover_validation_with_reprompt ~attempt keeper_result =
           match keeper_result with
-          | Error (`Validation (_stage, validation_error, keeper_json)) -> (
+          | Error (`Validation (failed_stage, validation_error, keeper_json)) -> (
               match infer_action_from_keeper_json keeper_json with
               | Some (reply_text, inferred_sa, inferred_reason) ->
                   statuses :=
@@ -7912,28 +8315,41 @@ let handle_round_run ctx args : result =
                     :: !statuses;
                   Ok (reply_text, inferred_sa)
               | None ->
-                  reprompt_count := !reprompt_count + 1;
                   (match validation_error with
                   | `Schema _ -> schema_failures := !schema_failures + 1
                   | `Rule _ ->
                       rule_validation_failures := !rule_validation_failures + 1);
-                  let stage = structured_action_error_kind validation_error in
-                  let reason = structured_action_error_message validation_error in
-                  statuses :=
-                    `Assoc
-                      [
-                        ("actor_id", `String actor_id);
-                        ("role", `String (role_to_string role));
-                        ("keeper", `String keeper_name);
-                        ("status", `String "re_prompt");
-                        ("stage", `String stage);
-                        ("reason", `String reason);
-                        ("attempt", `Int 1);
-                      ]
-                    :: !statuses;
-                  let retry_prompt = re_prompt_message ~stage ~reason in
-                  run_keeper_once ~stage:"re_prompt" ~message:retry_prompt)
+                  if attempt > max_reprompt_attempts then
+                    Error (`Validation (failed_stage, validation_error, keeper_json))
+                  else
+                    let stage = structured_action_error_kind validation_error in
+                    let reason = structured_action_error_message validation_error in
+                    reprompt_count := !reprompt_count + 1;
+                    statuses :=
+                      `Assoc
+                        [
+                          ("actor_id", `String actor_id);
+                          ("role", `String (role_to_string role));
+                          ("keeper", `String keeper_name);
+                          ("status", `String "re_prompt");
+                          ("stage", `String stage);
+                          ("reason", `String reason);
+                          ("attempt", `Int attempt);
+                          ("max_attempts", `Int max_reprompt_attempts);
+                        ]
+                      :: !statuses;
+                    let retry_prompt = re_prompt_message ~stage ~reason ~attempt in
+                    let retry_stage = Printf.sprintf "re_prompt_%d" attempt in
+                    let retry_result =
+                      run_keeper_once ~stage:retry_stage ~message:retry_prompt
+                    in
+                    recover_validation_with_reprompt ~attempt:(attempt + 1)
+                      retry_result)
           | other -> other
+        in
+        let keeper_result =
+          run_keeper_once ~stage:"masc_keeper_msg" ~message:base_prompt
+          |> recover_validation_with_reprompt ~attempt:1
         in
         match keeper_result with
         | Error (`Timeout stage) ->
@@ -7984,6 +8400,7 @@ let handle_round_run ctx args : result =
         | Error (`Unavailable (stage, keeper_error)) ->
             let* () =
               record_unavailable_status
+                ~reply_excerpt:None
                 ~status:"unavailable"
                 ~error:keeper_error
                 ~stage
@@ -8002,12 +8419,15 @@ let handle_round_run ctx args : result =
             in
             (* Server-side narrative inference: extract action from free-form text *)
             let inferred =
-              match parse_keeper_reply keeper_json with
-              | Ok reply_text ->
-                  (match infer_action_type_from_narrative ~role reply_text with
-                  | Some sa -> Some (reply_text, sa)
-                  | None -> None)
-              | Error _ -> None
+              if strict_agent_driven then None
+              else
+                match parse_keeper_reply keeper_json with
+                | Ok reply_text
+                  when not (is_low_signal_structured_description reply_text) ->
+                    (match infer_action_type_from_narrative ~role reply_text with
+                    | Some sa -> Some (reply_text, sa)
+                    | None -> None)
+                | Ok _ | Error _ -> None
             in
             (match inferred with
             | Some (reply_text, sa) ->
@@ -8032,6 +8452,7 @@ let handle_round_run ctx args : result =
                 update_bdi_after_reply ~reply_text ~sa;
                 (* Phase 2: Harness evaluation — observation-only *)
                 evaluate_keeper_response ~reply_text;
+                register_player_reply_signature ~role ~actor_id ~reply:reply_text;
                 statuses :=
                   `Assoc
                     [
@@ -8050,14 +8471,25 @@ let handle_round_run ctx args : result =
                   | `Schema _ -> "schema_invalid"
                   | `Rule _ -> "rule_invalid"
                 in
+                let reply_excerpt_opt =
+                  match parse_keeper_reply keeper_json with
+                  | Ok reply_text ->
+                      let snippet = String.trim reply_text in
+                      if snippet = "" then None
+                      else Some (compact_summary_text ~max_len:240 snippet)
+                  | Error _ -> None
+                in
                 let* () =
                   record_unavailable_status
+                    ~reply_excerpt:reply_excerpt_opt
                     ~status:status_name
                     ~error:validation_error_msg
                     ~stage
                 in
-                apply_local_fallback ~stage:"validation_fallback"
-                  ~reason:validation_error_msg)
+                if local_fallback then
+                  apply_local_fallback ~stage:"validation_fallback"
+                    ~reason:validation_error_msg
+                else Ok ())
         | Ok (reply, sa) ->
             let* reply_event =
               append_keeper_reply_event
@@ -8089,6 +8521,7 @@ let handle_round_run ctx args : result =
             update_bdi_after_reply ~reply_text:reply ~sa;
             (* Phase 2: Harness evaluation — observation-only *)
             evaluate_keeper_response ~reply_text:reply;
+            register_player_reply_signature ~role ~actor_id ~reply;
             statuses :=
               `Assoc
                 ([
@@ -8200,7 +8633,8 @@ let handle_round_run ctx args : result =
         if outcome_already_emitted then None
         else
           match
-            evaluate_session_outcome ~end_rules ~state:next_state
+            evaluate_session_outcome ~end_rules
+              ~max_turn_override:outcome_max_turn_override ~state:next_state
               ~dm_reply:!dm_reply_ref
           with
           | Some _ as outcome -> outcome

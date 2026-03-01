@@ -194,6 +194,28 @@ let shard_weather : shard = {
   description = "Weather queries";
 }
 
+
+
+let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
+
+
+
+(** Default shards for a new keeper (full access) *)
+let default_shard_names : string list = [
+  "base";
+  "board";
+  "filesystem";
+  "shell";
+  "weather";
+]
+
+let get_agent_shards (agent_name : string) : string list =
+  Hashtbl.find_opt agent_shards agent_name
+  |> Option.value ~default:default_shard_names
+
+let set_agent_shards (agent_name : string) (shards : string list) : unit =
+  Hashtbl.replace agent_shards agent_name (List.sort_uniq String.compare shards)
+
 (** All predefined shards by name *)
 let all_shards : (string, shard) Hashtbl.t =
   let tbl = Hashtbl.create 16 in
@@ -209,15 +231,6 @@ let all_shards : (string, shard) Hashtbl.t =
 (** Get a shard by name *)
 let get_shard (name : string) : shard option =
   Hashtbl.find_opt all_shards name
-
-(** Default shards for a new keeper (full access) *)
-let default_shard_names : string list = [
-  "base";
-  "board";
-  "filesystem";
-  "shell";
-  "weather";
-]
 
 (** Combine tools from multiple shard names *)
 let tools_of_shards (shard_names : string list) : Llm_client.tool_def list =
@@ -316,39 +329,63 @@ Cannot revoke 'base' shard (always present).";
 
 (** {1 MCP Execute} *)
 
-(** Execute tool_shard MCP tools.
-    Note: This is a stub. Full implementation requires agent state tracking. *)
+let active_shards_of_agent agent_name_opt =
+  match agent_name_opt with
+  | Some name -> get_agent_shards name
+  | None -> default_shard_names
+
+(** Execute tool_shard MCP tools. *)
 let execute (tool_name : string) (arguments : Yojson.Safe.t) : (bool * Yojson.Safe.t) =
   let module U = Yojson.Safe.Util in
+  let read_required_string key =
+    match U.member key arguments with
+    | `String v when String.trim v <> "" -> Some v
+    | _ -> None
+  in
   match tool_name with
   | "masc_tool_list" ->
-    let shards = list_all_shards () in
+    let agent_name = read_required_string "agent_name" in
+    let all = list_all_shards () in
+    let active_shards = active_shards_of_agent agent_name in
     let shard_list = List.map (fun (name, removable, tool_count) ->
       `Assoc [
         ("name", `String name);
         ("removable", `Bool removable);
         ("tool_count", `Int tool_count);
       ]
-    ) shards in
-    (true, `Assoc [("shards", `List shard_list)])
-
-  | "masc_tool_grant" ->
-    (* TODO: Requires agent state tracking to store active_shards *)
-    let shard_name = arguments |> U.member "shard_name" |> U.to_string in
+    ) all in
+    let active_shards =
+      List.filter_map (fun (name, _, _) ->
+        Option.map (fun () -> `String name) (if List.mem name active_shards then Some () else None)
+      ) all
+    in
     (true, `Assoc [
-      ("status", `String "granted");
-      ("shard", `String shard_name);
-      ("note", `String "Stub: agent state tracking not yet implemented");
+      ("shards", `List shard_list);
+      ("agent_name", `String (Option.value ~default:"" agent_name));
+      ("active_shards", `List active_shards);
     ])
 
-  | "masc_tool_revoke" ->
-    (* TODO: Requires agent state tracking to store active_shards *)
-    let shard_name = arguments |> U.member "shard_name" |> U.to_string in
-    (true, `Assoc [
-      ("status", `String "revoked");
-      ("shard", `String shard_name);
-      ("note", `String "Stub: agent state tracking not yet implemented");
-    ])
+  | "masc_tool_grant" | "masc_tool_revoke" ->
+    let op_fn, status_label =
+      if tool_name = "masc_tool_grant" then (grant_shard, "granted")
+      else (revoke_shard, "revoked")
+    in
+    let agent_name = read_required_string "agent_name" in
+    let shard_name = read_required_string "shard_name" in
+    (match agent_name, shard_name with
+    | Some agent_name, Some shard_name ->
+        (match op_fn (get_agent_shards agent_name) shard_name with
+        | Ok next_shards ->
+            set_agent_shards agent_name next_shards;
+            (true, `Assoc [
+              ("status", `String status_label);
+              ("agent_name", `String agent_name);
+              ("shard", `String shard_name);
+              ("active_shards", `List (List.map (fun s -> `String s) next_shards));
+            ])
+        | Error msg ->
+            (false, `Assoc [("status", `String "error"); ("message", `String msg)]))
+    | _ ->
+        (false, `Assoc [("status", `String "error"); ("message", `String "agent_name and shard_name are required")]))
 
   | _ -> (false, `String "Unknown tool")
-

@@ -26,6 +26,7 @@ module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
 module Board_dispatch = Masc_mcp.Board_dispatch
 module Board_listener = Masc_mcp.Board_listener
+module Council = Masc_mcp.Council
 module Task_dispatch = Masc_mcp.Task_dispatch
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
@@ -229,6 +230,100 @@ let bool_query_param request key ~default =
       if v = "1" || v = "true" || v = "yes" || v = "y" then true
       else if v = "0" || v = "false" || v = "no" || v = "n" then false
       else default
+
+let clamp ~min_v ~max_v v = max min_v (min max_v v)
+
+let take n lst =
+  let rec loop acc remaining xs =
+    if remaining <= 0 then List.rev acc
+    else
+      match xs with
+      | [] -> List.rev acc
+      | x :: rest -> loop (x :: acc) (remaining - 1) rest
+  in
+  loop [] n lst
+
+let drop n lst =
+  let rec loop remaining xs =
+    if remaining <= 0 then xs
+    else
+      match xs with
+      | [] -> []
+      | _ :: rest -> loop (remaining - 1) rest
+  in
+  loop n lst
+
+let iso8601_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+    tm.tm_hour tm.tm_min tm.tm_sec
+
+let board_sort_order_of_request request =
+  let to_sort = function
+    | "trending" -> Board_dispatch.Trending
+    | "recent" | "new" -> Board_dispatch.Recent
+    | "updated" | "active" -> Board_dispatch.Updated
+    | "discussed" | "comments" -> Board_dispatch.Discussed
+    | _ -> Board_dispatch.Hot
+  in
+  match query_param request "sort_by" with
+  | None -> Board_dispatch.Hot
+  | Some sort -> to_sort (String.lowercase_ascii (String.trim sort))
+
+let board_sort_label = function
+  | Board_dispatch.Hot -> "hot"
+  | Board_dispatch.Trending -> "trending"
+  | Board_dispatch.Recent -> "recent"
+  | Board_dispatch.Updated -> "updated"
+  | Board_dispatch.Discussed -> "discussed"
+
+let board_title_of_content content =
+  let trimmed = String.trim content in
+  let without_flair =
+    if String.length trimmed >= 7 && String.sub trimmed 0 7 = "[flair:" then
+      match String.index_opt trimmed ']' with
+      | Some idx when idx + 1 < String.length trimmed ->
+          String.trim (String.sub trimmed (idx + 1) (String.length trimmed - idx - 1))
+      | _ -> trimmed
+    else
+      trimmed
+  in
+  let first_line =
+    match String.split_on_char '\n' without_flair with
+    | line :: _ -> String.trim line
+    | [] -> ""
+  in
+  let line = if first_line = "" then "Untitled post" else first_line in
+  if String.length line <= 96 then line
+  else String.sub line 0 93 ^ "..."
+
+let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
+  let base_fields =
+    match Board_dispatch.post_to_yojson_with_karma p ~author_karma with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  let fields =
+    base_fields
+    |> List.remove_assoc "title"
+    |> List.remove_assoc "votes"
+    |> List.remove_assoc "comment_count"
+    |> List.remove_assoc "created_at_iso"
+    |> List.remove_assoc "updated_at_iso"
+    |> List.remove_assoc "hearth_count"
+  in
+  let score = p.votes_up - p.votes_down in
+  `Assoc
+    ( fields
+      @ [
+          ("title", `String (board_title_of_content p.content));
+          ("votes", `Int score);
+          ("comment_count", `Int p.reply_count);
+          ("created_at_iso", `String (iso8601_of_unix p.created_at));
+          ("updated_at_iso", `String (iso8601_of_unix p.updated_at));
+          ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
+        ] )
 
 let dashboard_compact_mode request =
   match query_param request "mode" with
@@ -1765,6 +1860,241 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
       ("timeouts", `Int !keeper_msg_timeouts);
     ]);
   ]
+
+let json_int_opt = function
+  | Some v -> `Int v
+  | None -> `Null
+
+let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
+  let delta = now_ts -. event_ts in
+  if Float.is_nan delta || Float.is_infinite delta then None
+  else
+    let bounded = max 0.0 (min delta (float_of_int max_int)) in
+    Some (int_of_float bounded)
+
+let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
+  let warn_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_BOARD_AGE_WARN_SEC"
+      ~default:3600
+      ~min_v:60
+      ~max_v:604800
+  in
+  let bad_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_BOARD_AGE_BAD_SEC"
+      ~default:21600
+      ~min_v:120
+      ~max_v:1209600
+  in
+  let slo_target_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_BOARD_SLO_SEC"
+      ~default:900
+      ~min_v:30
+      ~max_v:86400
+  in
+  try
+    let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:200 () in
+    let total_posts = List.length posts in
+    let new_posts_24h =
+      List.fold_left
+        (fun acc (p : Board.post) ->
+          if p.created_at >= (now_ts -. (24.0 *. 3600.0)) then acc + 1 else acc)
+        0 posts
+    in
+    let unanswered_posts =
+      List.fold_left
+        (fun acc (p : Board.post) ->
+          if p.reply_count = 0 then acc + 1 else acc)
+        0 posts
+    in
+    let latest_activity_ts_opt =
+      List.fold_left
+        (fun acc (p : Board.post) ->
+          match acc with
+          | None -> Some p.updated_at
+          | Some prev -> Some (max prev p.updated_at))
+        None posts
+    in
+    let last_activity_age_s =
+      match latest_activity_ts_opt with
+      | None -> None
+      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
+    in
+    let alert_level =
+      match last_activity_age_s with
+      | None -> "warn"
+      | Some age when age >= bad_age_s -> "bad"
+      | Some age when age >= warn_age_s -> "warn"
+      | Some _ -> "ok"
+    in
+    let slo_breached =
+      match last_activity_age_s with
+      | Some age -> age >= slo_target_age_s
+      | None -> false
+    in
+    (`Assoc [
+      ("alert_level", `String alert_level);
+      ("posts_total", `Int total_posts);
+      ("new_posts_24h", `Int new_posts_24h);
+      ("unanswered_posts", `Int unanswered_posts);
+      ("last_activity_age_s", json_int_opt last_activity_age_s);
+      ("slo_target_age_s", `Int slo_target_age_s);
+      ("slo_breached", `Bool slo_breached);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], true)
+  with exn ->
+    Printf.eprintf "[dashboard] board_monitoring_json failed: %s\n%!"
+      (Printexc.to_string exn);
+    (`Assoc [
+      ("alert_level", `String "bad");
+      ("posts_total", `Int 0);
+      ("new_posts_24h", `Int 0);
+      ("unanswered_posts", `Int 0);
+      ("last_activity_age_s", `Null);
+      ("slo_target_age_s", `Int slo_target_age_s);
+      ("slo_breached", `Bool false);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], false)
+
+let council_monitoring_json ~(now_ts : float) ~(base_path : string)
+  : Yojson.Safe.t * bool =
+  let warn_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_COUNCIL_AGE_WARN_SEC"
+      ~default:3600
+      ~min_v:60
+      ~max_v:604800
+  in
+  let bad_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_COUNCIL_AGE_BAD_SEC"
+      ~default:21600
+      ~min_v:120
+      ~max_v:1209600
+  in
+  let slo_target_quorum_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_COUNCIL_SLO_SEC"
+      ~default:1800
+      ~min_v:30
+      ~max_v:86400
+  in
+  try
+    let cfg = Council.make_config ~base_path in
+    let debates = Council.DebateApi.list_all ~config:cfg ~status_filter:None ~limit:200 () in
+    let sessions = Council.ConsensusApi.list_active () in
+    let debates_open =
+      List.fold_left
+        (fun acc (d : Council.Debate.debate) ->
+          if d.status = Council.Debate.Open then acc + 1 else acc)
+        0 debates
+    in
+    let debates_pending =
+      List.fold_left
+        (fun acc (d : Council.Debate.debate) ->
+          if d.status = Council.Debate.Pending then acc + 1 else acc)
+        0 debates
+    in
+    let sessions_active = List.length sessions in
+    let sessions_without_quorum =
+      List.fold_left
+        (fun acc (s : Council.Consensus.session) ->
+          if List.length s.votes < s.quorum then acc + 1 else acc)
+        0 sessions
+    in
+    let oldest_open_debate_ts_opt =
+      List.fold_left
+        (fun acc (d : Council.Debate.debate) ->
+          if d.status <> Council.Debate.Open then acc
+          else
+            match acc with
+            | None -> Some d.created_at
+            | Some prev -> Some (min prev d.created_at))
+        None debates
+    in
+    let oldest_open_debate_age_s =
+      match oldest_open_debate_ts_opt with
+      | None -> None
+      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
+    in
+    let latest_activity_ts_opt =
+      let from_debates =
+        List.fold_left
+          (fun acc (d : Council.Debate.debate) ->
+            match acc with
+            | None -> Some d.created_at
+            | Some prev -> Some (max prev d.created_at))
+          None debates
+      in
+      List.fold_left
+        (fun acc (s : Council.Consensus.session) ->
+          match acc with
+          | None -> Some s.created_at
+          | Some prev -> Some (max prev s.created_at))
+        from_debates sessions
+    in
+    let last_activity_age_s =
+      match latest_activity_ts_opt with
+      | None -> None
+      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
+    in
+    let base_alert =
+      match last_activity_age_s with
+      | None -> "warn"
+      | Some age when age >= bad_age_s -> "bad"
+      | Some age when age >= warn_age_s -> "warn"
+      | Some _ -> "ok"
+    in
+    let slo_breached =
+      if sessions_without_quorum > 0 then
+        match oldest_open_debate_age_s with
+        | Some age -> age >= slo_target_quorum_age_s
+        | None -> false
+      else
+        match last_activity_age_s with
+        | Some age -> age >= slo_target_quorum_age_s
+        | None -> false
+    in
+    let alert_level =
+      if sessions_without_quorum <= 0 then base_alert
+      else
+        match oldest_open_debate_age_s with
+        | Some age when age >= bad_age_s -> "bad"
+        | _ -> "warn"
+    in
+    (`Assoc [
+      ("alert_level", `String alert_level);
+      ("debates_open", `Int debates_open);
+      ("debates_pending", `Int debates_pending);
+      ("sessions_active", `Int sessions_active);
+      ("sessions_without_quorum", `Int sessions_without_quorum);
+      ("oldest_open_debate_age_s", json_int_opt oldest_open_debate_age_s);
+      ("last_activity_age_s", json_int_opt last_activity_age_s);
+      ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("slo_breached", `Bool slo_breached);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], true)
+  with exn ->
+    Printf.eprintf "[dashboard] council_monitoring_json failed: %s\n%!"
+      (Printexc.to_string exn);
+    (`Assoc [
+      ("alert_level", `String "bad");
+      ("debates_open", `Int 0);
+      ("debates_pending", `Int 0);
+      ("sessions_active", `Int 0);
+      ("sessions_without_quorum", `Int 0);
+      ("oldest_open_debate_age_s", `Null);
+      ("last_activity_age_s", `Null);
+      ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("slo_breached", `Bool false);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], false)
 
 type keeper_gen_window_stats = {
   mutable turns: int;
@@ -3373,6 +3703,11 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let tasks = Room.get_tasks_raw config in
   let agents = Room.get_agents_raw config in
   let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+  let now_ts = Masc_mcp.Time_compat.now () in
+  let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
+  let (council_monitor_json, council_feed_ok) =
+    council_monitoring_json ~now_ts ~base_path:config.base_path
+  in
 
   let proactive_fallback_warn =
     float_of_env_default
@@ -3422,6 +3757,15 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("proactive_similarity_warn", `Float proactive_similarity_warn);
         ("proactive_similarity_bad", `Float (max proactive_similarity_warn proactive_similarity_bad));
         ("toast_cooldown_sec", `Int alert_toast_cooldown_sec);
+      ]);
+      ("monitoring", `Assoc [
+        ("board", board_monitor_json);
+        ("council", council_monitor_json);
+      ]);
+      ("data_quality", `Assoc [
+        ("board_contract_ok", `Bool board_contract_ok);
+        ("council_feed_ok", `Bool council_feed_ok);
+        ("last_sync_at", `String (Types.now_iso ()));
       ]);
     ]
   in
@@ -3948,24 +4292,122 @@ let health_handler _request reqd =
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
 
-let board_post_detail_json ~post_id =
+let board_post_detail_json ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
   | Error _ ->
       (`Not_found, {|{"error":"Post not found"}|})
   | Ok post ->
+      let author = Board.Agent_id.to_string post.author in
+      let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in
       let comments =
         match Board_dispatch.get_comments ~post_id with
         | Ok cs -> cs
         | Error _ -> []
       in
+      let post_json = board_post_dashboard_json ~author_karma post in
+      let comments_json = `List (List.map Board.comment_to_yojson comments) in
+      let json =
+        if String.equal (String.lowercase_ascii (String.trim response_format)) "flat" then
+          match post_json with
+          | `Assoc fields -> `Assoc (fields @ [ ("comments", comments_json) ])
+          | _ -> `Assoc [ ("post", post_json); ("comments", comments_json) ]
+        else
+          `Assoc [ ("post", post_json); ("comments", comments_json) ]
+      in
+      (`OK, Yojson.Safe.to_string json)
+
+let debate_status_filter_of_request request =
+  match query_param request "status" with
+  | None -> None
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "open" -> Some Council.Debate.Open
+      | "closed" -> Some Council.Debate.Closed
+      | "pending" -> Some Council.Debate.Pending
+      | _ -> None)
+
+let council_debates_json request ~base_path =
+  let config = Council.make_config ~base_path in
+  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let fetch_limit = limit + offset in
+  let status_filter = debate_status_filter_of_request request in
+  let debates = Council.DebateApi.list_all ~config ~status_filter ~limit:fetch_limit () in
+  let paged = debates |> drop offset |> take limit in
+  let items =
+    List.map
+      (fun (d : Council.Debate.debate) ->
+        `Assoc
+          [
+            ("id", `String d.id);
+            ("topic", `String d.topic);
+            ("status", `String (Council.Debate.status_to_string d.status));
+            ("argument_count", `Int (List.length d.arguments));
+            ("created_at", `Float d.created_at);
+            ("created_at_iso", `String (iso8601_of_unix d.created_at));
+          ])
+      paged
+  in
+  `Assoc
+    [
+      ("debates", `List items);
+      ("count", `Int (List.length items));
+      ("limit", `Int limit);
+      ("offset", `Int offset);
+    ]
+
+let council_sessions_json request =
+  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let sessions = Council.ConsensusApi.list_active () |> drop offset |> take limit in
+  let items =
+    List.map
+      (fun (s : Council.Consensus.session) ->
+        `Assoc
+          [
+            ("id", `String s.id);
+            ("topic", `String s.topic);
+            ("initiator", `String s.initiator);
+            ("votes", `Int (List.length s.votes));
+            ("quorum", `Int s.quorum);
+            ("threshold", `Float s.threshold);
+            ("state", Council.Consensus.voting_state_to_yojson s.state);
+            ("created_at", `Float s.created_at);
+            ("created_at_iso", `String (iso8601_of_unix s.created_at));
+          ])
+      sessions
+  in
+  `Assoc
+    [
+      ("sessions", `List items);
+      ("count", `Int (List.length items));
+      ("limit", `Int limit);
+      ("offset", `Int offset);
+    ]
+
+let council_debate_summary_json ~base_path ~debate_id =
+  let config = Council.make_config ~base_path in
+  match Council.DebateApi.status ~config ~debate_id with
+  | Error _ ->
+      (`Not_found, `Assoc [ ("error", `String "Debate not found") ])
+  | Ok (summary : Council.Debate.debate_summary) ->
+      let d : Council.Debate.debate = summary.debate in
       let json =
         `Assoc
           [
-            ("post", Board.post_to_yojson post);
-            ("comments", `List (List.map Board.comment_to_yojson comments));
+            ("id", `String d.id);
+            ("topic", `String d.topic);
+            ("status", `String (Council.Debate.status_to_string d.status));
+            ("support_count", `Int summary.support_count);
+            ("oppose_count", `Int summary.oppose_count);
+            ("neutral_count", `Int summary.neutral_count);
+            ("total_arguments", `Int summary.total_arguments);
+            ("created_at", `Float d.created_at);
+            ("created_at_iso", `String (iso8601_of_unix d.created_at));
+            ("summary_text", `String (Council.Debate.render_summary summary));
           ]
       in
-      (`OK, Yojson.Safe.to_string json)
+      (`OK, json)
 
 (** CORS preflight handler *)
 let options_handler request reqd =
@@ -5215,21 +5657,45 @@ let make_routes ~port ~host =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json = council_debates_json req ~base_path in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/council/sessions" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = council_sessions_json req in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let hearth = query_param req "hearth" in
-         let posts = Board_dispatch.list_posts ?hearth () in
+         let sort_by = board_sort_order_of_request req in
+         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+         let fetch_limit = limit + offset in
+         let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
          let karma_map = Board_dispatch.get_all_karma () in
          let get_karma author =
            try List.assoc author karma_map with Not_found -> 0
          in
-         let posts_json = List.map (fun p ->
-           Board_dispatch.post_to_yojson_with_karma p
-             ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
-         ) posts in
+         let paged = posts |> drop offset |> take limit in
+         let posts_json =
+           List.map
+             (fun (p : Board.post) ->
+               let author = Board.Agent_id.to_string p.author in
+               board_post_dashboard_json ~author_karma:(get_karma author) p)
+             paged
+         in
          let json = `Assoc [
            ("posts", `List posts_json);
-           ("count", `Int (List.length posts));
+           ("count", `Int (List.length posts_json));
+           ("limit", `Int limit);
+           ("offset", `Int offset);
+           ("sort_by", `String (board_sort_label sort_by));
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -5464,9 +5930,28 @@ let make_extended_handler routes =
               ) hearths));
             ] in
             Http.Response.json (Yojson.Safe.to_string json) reqd
+        | `GET, p
+          when String.length p > 32
+               && String.length p >= 24 + 8
+               && String.sub p 0 24 = "/api/v1/council/debates/"
+               && String.ends_with ~suffix:"/summary" p ->
+            (match !server_state with
+             | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
+             | Some state ->
+                 let prefix_len = 24 in
+                 let suffix_len = 8 in
+                 let debate_id_len = String.length p - prefix_len - suffix_len in
+                 if debate_id_len <= 0 then
+                   Http.Response.json ~status:`Bad_request {|{"error":"debate_id missing"}|} reqd
+                 else
+                   let debate_id = String.sub p prefix_len debate_id_len in
+                   let base_path = state.Mcp_server.room_config.base_path in
+                   let (status, json) = council_debate_summary_json ~base_path ~debate_id in
+                   Http.Response.json ~status (Yojson.Safe.to_string json) reqd)
         | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
             let post_id = String.sub p 14 (String.length p - 14) in
-            let (status, body) = board_post_detail_json ~post_id in
+            let format = Option.value ~default:"nested" (query_param request "format") in
+            let (status, body) = board_post_detail_json ~response_format:format ~post_id in
             Http.Response.json ~status body reqd
         | _ -> Http.Router.dispatch routes request reqd
     with exn ->
@@ -6283,17 +6768,39 @@ let run_server ~sw ~env ~port ~base_path =
                   (Yojson.Safe.to_string (trpg_error_json msg))
                   ~status:`Internal_server_error ~extra_headers:cors)
 
+      | `GET, "/api/v1/council/debates" ->
+          let state = get_server_state () in
+          let base_path = state.Mcp_server.room_config.base_path in
+          let json = council_debates_json httpun_request ~base_path in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
+      | `GET, "/api/v1/council/sessions" ->
+          let json = council_sessions_json httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/board" ->
           let hearth = query_param httpun_request "hearth" in
-          let posts = Board_dispatch.list_posts ?hearth () in
+          let sort_by = board_sort_order_of_request httpun_request in
+          let limit = int_query_param httpun_request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+          let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+          let fetch_limit = limit + offset in
+          let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
           let karma_map = Board_dispatch.get_all_karma () in
           let get_karma author =
             try List.assoc author karma_map with Not_found -> 0
           in
-          let posts_json = List.map (fun p ->
-            Board_dispatch.post_to_yojson_with_karma p ~author_karma:(get_karma (Board.Agent_id.to_string p.author))
-          ) posts in
-          let json = `Assoc [("posts", `List posts_json); ("count", `Int (List.length posts))] in
+          let paged = posts |> drop offset |> take limit in
+          let posts_json = List.map (fun (p : Board.post) ->
+            let author = Board.Agent_id.to_string p.author in
+            board_post_dashboard_json ~author_karma:(get_karma author) p
+          ) paged in
+          let json = `Assoc [
+            ("posts", `List posts_json);
+            ("count", `Int (List.length posts_json));
+            ("limit", `Int limit);
+            ("offset", `Int offset);
+            ("sort_by", `String (board_sort_label sort_by));
+          ] in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/board/hearths" ->
@@ -6310,9 +6817,29 @@ let run_server ~sw ~env ~port ~base_path =
           let json = `Assoc [("flairs", `List flairs)] in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, p
+        when String.length p > 32
+             && String.length p >= 24 + 8
+             && String.sub p 0 24 = "/api/v1/council/debates/"
+             && String.ends_with ~suffix:"/summary" p ->
+          let prefix_len = 24 in
+          let suffix_len = 8 in
+          let debate_id_len = String.length p - prefix_len - suffix_len in
+          if debate_id_len <= 0 then
+            h2_respond_json h2_reqd {|{"error":"debate_id missing"}|}
+              ~status:`Bad_request ~extra_headers:cors
+          else
+            let debate_id = String.sub p prefix_len debate_id_len in
+            let state = get_server_state () in
+            let base_path = state.Mcp_server.room_config.base_path in
+            let (status, json) = council_debate_summary_json ~base_path ~debate_id in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              ~status ~extra_headers:cors
+
       | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
           let post_id = String.sub p 14 (String.length p - 14) in
-          let (status, body) = board_post_detail_json ~post_id in
+          let format = Option.value ~default:"nested" (query_param httpun_request "format") in
+          let (status, body) = board_post_detail_json ~response_format:format ~post_id in
           h2_respond_json h2_reqd body ~status ~extra_headers:cors
 
       | `GET, "/api/v1/karma" ->

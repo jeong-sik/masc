@@ -11,7 +11,7 @@ import {
   fetchDebateStatus,
   startDebate,
 } from '../api'
-import type { CouncilDebate, CouncilSession } from '../types'
+import type { CouncilDebate, CouncilDebateSummary, CouncilSession } from '../types'
 
 const debates = signal<CouncilDebate[]>([])
 const sessions = signal<CouncilSession[]>([])
@@ -20,7 +20,7 @@ const loading = signal(false)
 const starting = signal(false)
 const errorText = signal('')
 const selectedDebateId = signal<string | null>(null)
-const selectedDebateDetail = signal('')
+const selectedDebateDetail = signal<CouncilDebateSummary | null>(null)
 const detailLoading = signal(false)
 
 async function refreshCouncil() {
@@ -60,11 +60,12 @@ async function submitDebate() {
 async function loadDebateDetail(debateId: string) {
   selectedDebateId.value = debateId
   detailLoading.value = true
-  selectedDebateDetail.value = ''
+  selectedDebateDetail.value = null
   try {
     selectedDebateDetail.value = await fetchDebateStatus(debateId)
   } catch (err) {
-    selectedDebateDetail.value = err instanceof Error ? err.message : 'Failed to load debate status'
+    errorText.value = err instanceof Error ? err.message : 'Failed to load debate status'
+    selectedDebateDetail.value = null
   } finally {
     detailLoading.value = false
   }
@@ -97,6 +98,7 @@ function SessionRow({ session }: { session: CouncilSession }) {
         <div class="council-sub">
           <span>ID: ${session.id.slice(0, 10)}</span>
           <span>Initiator: ${session.initiator}</span>
+          ${session.state ? html`<span>State: ${session.state}</span>` : null}
         </div>
       </div>
       <span class="council-state vote">${session.votes}/${session.quorum}</span>
@@ -158,7 +160,20 @@ export function Council() {
         ${detailLoading.value
           ? html`<div class="loading-indicator">Loading debate detail...</div>`
           : selectedDebateDetail.value
-            ? html`<pre class="council-detail">${selectedDebateDetail.value}</pre>`
+            ? html`
+                <div class="council-sub" style="margin-bottom: 8px;">
+                  <span>Status: ${selectedDebateDetail.value.status}</span>
+                  <span>Total arguments: ${selectedDebateDetail.value.total_arguments}</span>
+                </div>
+                <div class="council-sub" style="margin-bottom: 8px;">
+                  <span>Support: ${selectedDebateDetail.value.support_count}</span>
+                  <span>Oppose: ${selectedDebateDetail.value.oppose_count}</span>
+                  <span>Neutral: ${selectedDebateDetail.value.neutral_count}</span>
+                </div>
+                ${selectedDebateDetail.value.summary_text
+                  ? html`<pre class="council-detail">${selectedDebateDetail.value.summary_text}</pre>`
+                  : null}
+              `
             : html`<div class="empty-state">Select a debate to view summary</div>`}
       <//>
     </div>

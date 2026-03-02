@@ -8,7 +8,10 @@ interface TimeAgoProps {
 
 function formatTimeAgo(ts: string | number): string {
   const now = Date.now()
-  const then = typeof ts === 'number' ? ts : new Date(ts).getTime()
+  const then =
+    typeof ts === 'number'
+      ? (ts < 1_000_000_000_000 ? ts * 1000 : ts)
+      : new Date(ts).getTime()
   const diffSec = Math.floor((now - then) / 1000)
 
   if (diffSec < 60) return `${diffSec}s ago`
@@ -22,7 +25,11 @@ function formatTimeAgo(ts: string | number): string {
 
 export function TimeAgo({ timestamp }: TimeAgoProps) {
   const text = formatTimeAgo(timestamp)
-  return html`<span class="time-ago" title=${typeof timestamp === 'string' ? timestamp : new Date(timestamp).toISOString()}>${text}</span>`
+  const title =
+    typeof timestamp === 'string'
+      ? timestamp
+      : new Date(timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp).toISOString()
+  return html`<span class="time-ago" title=${title}>${text}</span>`
 }
 
 export { formatTimeAgo }

@@ -362,7 +362,7 @@ export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<vo
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
-    const data = await fetchBoard()
+    const data = await fetchBoard(boardSortMode.value)
     boardPosts.value = data.posts ?? []
   } catch (err) {
     console.error('Board fetch error:', err)

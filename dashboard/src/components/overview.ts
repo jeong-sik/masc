@@ -138,6 +138,8 @@ export function Overview() {
   const agentList = agents.value
   const keeperList = keepers.value
   const byStatus = tasksByStatus.value
+  const boardMonitor = status?.monitoring?.board
+  const councilMonitor = status?.monitoring?.council
 
   return html`
     <div class="stats-grid">
@@ -148,6 +150,43 @@ export function Overview() {
       <${StatCard} label="In Progress" value=${byStatus.inProgress.length} color="#fbbf24" />
       <${StatCard} label="Done" value=${byStatus.done.length} color="#4ade80" />
     </div>
+
+    ${boardMonitor || councilMonitor
+      ? html`
+        <${Card} title="Operations SLO" class="section">
+          <div class="grid-2col">
+            <div class="stat-card">
+              <div class="stat-label">Board Feed</div>
+              <div class="stat-value" style=${`color: ${monitorLevelColor(boardMonitor?.alert_level)}`}>
+                ${monitorLevelLabel(boardMonitor?.alert_level)}
+              </div>
+              <div class="council-sub">
+                <span>Freshness: ${formatDuration(boardMonitor?.last_activity_age_s)}</span>
+                <span>SLO: ≤ ${formatDuration(boardMonitor?.slo_target_age_s)}</span>
+                <span>SLO Breach: ${boardMonitor?.slo_breached ? 'Yes' : 'No'}</span>
+                <span>Posts (24h): ${boardMonitor?.new_posts_24h ?? 0}</span>
+                <span>Unanswered: ${boardMonitor?.unanswered_posts ?? 0}</span>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-label">Council Feed</div>
+              <div class="stat-value" style=${`color: ${monitorLevelColor(councilMonitor?.alert_level)}`}>
+                ${monitorLevelLabel(councilMonitor?.alert_level)}
+              </div>
+              <div class="council-sub">
+                <span>Freshness: ${formatDuration(councilMonitor?.last_activity_age_s)}</span>
+                <span>Open Debates: ${councilMonitor?.debates_open ?? 0}</span>
+                <span>Pending Debates: ${councilMonitor?.debates_pending ?? 0}</span>
+                <span>Quorum Risk: ${councilMonitor?.sessions_without_quorum ?? 0}</span>
+                <span>SLO: ≤ ${formatDuration(councilMonitor?.slo_target_quorum_age_s)}</span>
+                <span>SLO Breach: ${councilMonitor?.slo_breached ? 'Yes' : 'No'}</span>
+              </div>
+            </div>
+          </div>
+        <//>
+      `
+      : null}
 
     <div class="grid-2col">
       <${Card} title="Agents" class="section">
@@ -192,6 +231,9 @@ export function Overview() {
             ${status.paused ? html`<span class="pill pill-stale">Paused</span>` : null}
             ${status.tempo ? html`<span>Tempo: ${status.tempo}</span>` : null}
             ${status.tempo_interval_s != null ? html`<span>Interval: ${status.tempo_interval_s}s</span>` : null}
+            ${status.data_quality?.board_contract_ok === false ? html`<span class="pill pill-stale">Board Contract: Degraded</span>` : null}
+            ${status.data_quality?.council_feed_ok === false ? html`<span class="pill pill-stale">Council Feed: Degraded</span>` : null}
+            ${status.data_quality?.last_sync_at ? html`<span>Data Sync: <${TimeAgo} timestamp=${status.data_quality.last_sync_at} /></span>` : null}
           </div>
         <//>
       `
@@ -204,4 +246,30 @@ function formatUptime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function formatDuration(seconds?: number | null): string {
+  if (seconds == null || !Number.isFinite(seconds)) return 'No data'
+  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`
+  const m = Math.floor(seconds / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  const remM = m % 60
+  return remM > 0 ? `${h}h ${remM}m` : `${h}h`
+}
+
+function monitorLevelLabel(level?: string): string {
+  const v = (level ?? '').toLowerCase()
+  if (v === 'ok') return 'Healthy'
+  if (v === 'warn') return 'Warning'
+  if (v === 'bad') return 'Degraded'
+  return 'Unknown'
+}
+
+function monitorLevelColor(level?: string): string {
+  const v = (level ?? '').toLowerCase()
+  if (v === 'ok') return '#4ade80'
+  if (v === 'warn') return '#fbbf24'
+  if (v === 'bad') return '#fb7185'
+  return '#94a3b8'
 }

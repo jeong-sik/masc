@@ -49,7 +49,7 @@ let broadcast_decision_event ~event_type ~agent ?(data=`Null) () =
     ("type", `String event_type);
     ("agent", `String agent);
     ("data", data);
-    ("timestamp", `Float (Unix.gettimeofday ()));
+    ("timestamp", `Float (Time_compat.now ()));
   ] in
   let notification = `Assoc [
     ("jsonrpc", `String "2.0");

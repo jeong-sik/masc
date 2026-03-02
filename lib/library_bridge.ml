@@ -34,7 +34,7 @@ let record_to_library
     end else
       library_root ()
   in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let now = Unix.localtime (Time_compat.now ()) in
   let date_str = Printf.sprintf "%04d%02d%02d"
     (now.Unix.tm_year + 1900) (now.Unix.tm_mon + 1) now.Unix.tm_mday in
   let iso_date = Printf.sprintf "%04d-%02d-%02d"

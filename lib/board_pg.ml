@@ -957,7 +957,7 @@ let migrate_from_store t (store : Board.store) =
           C.exec upsert_vote_q (target_type, target_id, voter, (dir_str, now))
         ) t.pool with
         | Ok () -> incr votes_ok
-        | Error _ -> ())
+        | Error err -> Printf.eprintf "[board_pg] vote migration: %s\n%!" (Caqti_error.show err))
     | _ -> ()  (* Skip malformed keys *)
   ) store.vote_log;
 

@@ -14,11 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `masc_consume_notifications` — pop and return (TOCTOU-safe)
 - Session queue cap (1000 events) with oldest-drop policy
 - Broadcast events pushed to notification queues (polling-only agent support)
+- **TRPG Actor Streamlining** — simplified actor creation with profile fields (#478)
+- **Transport Error Classification** — pre-JSON-RPC error detection for proxy/CDN HTML pages (#473)
+- **Preflight Accessibility** — ARIA attributes and keyboard navigation for new-game wizard (#473)
+- **Board/Council Contracts** — repaired execution IA and dashboard typing (#475)
+
+### Changed
+- Dashboard context ratio and input event typing tightened (#471)
 
 ### Fixed
 - TOCTOU race in consume handler (single lock block)
 - Timestamp consistency: `Time_compat.now()` for all event timestamps
 - Silent None drop in session registry bridge (stderr warning added)
+- Infinite comment re-fetch loop in dashboard (#476)
+
+### Refactored
+- `PreflightRow` struct replacing opaque 4-tuple, `is_html_body()` DRY extraction, config-derived URL hint (#477)
 
 ## [2.74.0] - 2026-02-24
 

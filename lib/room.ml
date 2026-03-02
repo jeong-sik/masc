@@ -1184,8 +1184,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
         | Todo -> true
         | _ -> false
       ) sorted in
-      let excluded = List.filter (fun task_id -> task_id <> "") exclude_task_ids in
-      let eligible = List.filter (fun t -> not (List.mem t.id excluded)) unclaimed in
+      let eligible = List.filter (fun t -> not (List.mem t.id exclude_task_ids)) unclaimed in
 
       match unclaimed, eligible with
       | [], _ ->

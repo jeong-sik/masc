@@ -11,6 +11,7 @@ import type {
   TrpgEvent,
   Agent,
   CouncilDebate,
+  CouncilDebateSummary,
   CouncilSession,
   BoardSortMode,
 } from './types'
@@ -149,13 +150,6 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   return extractMcpText(parsed)
 }
 
-function parseJsonList<T>(text: string): T[] {
-  const trimmed = text.trim()
-  if (!trimmed) return []
-  const parsed = JSON.parse(trimmed) as unknown
-  return Array.isArray(parsed) ? (parsed as T[]) : []
-}
-
 // --- Dashboard (batch) ---
 
 export type DashboardMode = 'compact' | 'full'
@@ -166,15 +160,113 @@ export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<Dashboa
 
 // --- Board ---
 
-export function fetchBoard(sortBy?: BoardSortMode): Promise<{ posts: BoardPost[] }> {
-  const params = new URLSearchParams()
-  if (sortBy) params.set('sort_by', sortBy)
-  const qs = params.toString()
-  return get(`/api/v1/board${qs ? `?${qs}` : ''}`)
+function toIsoTimestamp(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value
+  if (typeof value !== 'number' || Number.isNaN(value)) return new Date().toISOString()
+  const ms = value < 1_000_000_000_000 ? value * 1000 : value
+  return new Date(ms).toISOString()
 }
 
-export function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
-  return get(`/api/v1/board/${postId}`)
+function derivePostTitle(content: string): string {
+  const trimmed = content.trim()
+  const withoutFlair = trimmed.startsWith('[flair:') ? trimmed.replace(/^\[flair:[^\]]+\]\s*/i, '') : trimmed
+  const firstLine = withoutFlair.split('\n')[0]?.trim() || 'Untitled post'
+  if (firstLine.length <= 96) return firstLine
+  return `${firstLine.slice(0, 93)}...`
+}
+
+function normalizeBoardPost(raw: unknown): BoardPost | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const author = asString(raw.author, '').trim()
+  const content = asString(raw.content, '').trim()
+  if (!id || !author) return null
+
+  const score = asNumber(raw.score, 0)
+  const votesUp = asNumber(raw.votes_up, 0)
+  const votesDown = asNumber(raw.votes_down, 0)
+  const votes = asNumber(raw.votes, score || (votesUp - votesDown))
+  const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
+  const flairValue = (() => {
+    const flair = raw.flair
+    if (typeof flair === 'string' && flair.trim()) return flair.trim()
+    if (isRecord(flair)) {
+      const name = asString(flair.name, '').trim()
+      if (name) return name
+    }
+    const fallback = asString(raw.flair_name, '').trim()
+    return fallback || undefined
+  })()
+  const createdAt =
+    asString(raw.created_at_iso, '').trim() || toIsoTimestamp(raw.created_at)
+  const updatedAt =
+    asString(raw.updated_at_iso, '').trim()
+    || (raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : createdAt)
+  const titleRaw = asString(raw.title, '').trim()
+  const title = titleRaw || derivePostTitle(content)
+
+  return {
+    id,
+    author,
+    title,
+    content,
+    tags: [],
+    votes,
+    vote_balance: score,
+    comment_count: commentCount,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    flair: flairValue,
+    hearth_count: asNumber(raw.hearth_count, 0),
+  }
+}
+
+function normalizeBoardComment(raw: unknown): BoardComment | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const postId = asString(raw.post_id, '').trim()
+  const author = asString(raw.author, '').trim()
+  if (!id || !author) return null
+  return {
+    id,
+    post_id: postId,
+    author,
+    content: asString(raw.content, ''),
+    created_at: toIsoTimestamp(raw.created_at),
+  }
+}
+
+export async function fetchBoard(sortBy?: BoardSortMode): Promise<{ posts: BoardPost[] }> {
+  const params = new URLSearchParams()
+  if (sortBy) params.set('sort_by', sortBy)
+  params.set('limit', '100')
+  const qs = params.toString()
+  const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
+  const posts = Array.isArray(raw.posts)
+    ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
+    : []
+  return { posts }
+}
+
+export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?format=flat`)
+  const postRaw = isRecord(raw.post) ? raw.post : raw
+  const post = normalizeBoardPost(postRaw) ?? {
+    id: postId,
+    author: 'unknown',
+    title: 'Post',
+    content: '',
+    tags: [],
+    votes: 0,
+    comment_count: 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  const commentsRaw = Array.isArray(raw.comments) ? raw.comments : []
+  const comments = commentsRaw
+    .map(normalizeBoardComment)
+    .filter((row): row is BoardComment => row !== null)
+  return { ...post, comments }
 }
 
 export function fetchBoardHearths(): Promise<{ hearths: BoardHearth[] }> {
@@ -188,6 +280,7 @@ export function fetchBoardFlairs(): Promise<{ flairs: BoardFlair[] }> {
 export function votePost(postId: string, direction: 'up' | 'down'): Promise<unknown> {
   return post('/api/v1/tools/masc_board_vote', {
     post_id: postId,
+    direction,
     vote: direction,
     voter: defaultBoardVoter(),
   })
@@ -196,6 +289,7 @@ export function votePost(postId: string, direction: 'up' | 'down'): Promise<unkn
 export function voteBoardTool(postId: string, vote: 'up' | 'down', voter: string): Promise<unknown> {
   return post('/api/v1/tools/masc_board_vote', {
     post_id: postId,
+    direction: vote,
     vote,
     voter,
   })
@@ -1108,13 +1202,45 @@ export async function fetchTaskHistory(taskId: string, limit = 20): Promise<stri
 }
 
 export async function fetchDebates(): Promise<CouncilDebate[]> {
-  const text = await callMcpTool('masc_debates', {})
-  return parseJsonList<CouncilDebate>(text)
+  const raw = await get<{ debates?: unknown[] }>('/api/v1/council/debates?limit=100')
+  if (!Array.isArray(raw.debates)) return []
+  return raw.debates
+    .map((item): CouncilDebate | null => {
+      if (!isRecord(item)) return null
+      const id = asString(item.id, '').trim()
+      const topic = asString(item.topic, '').trim()
+      if (!id || !topic) return null
+      return {
+        id,
+        topic,
+        status: asString(item.status, 'open'),
+        argument_count: asNumber(item.argument_count, 0),
+        created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
+      }
+    })
+    .filter((row): row is CouncilDebate => row !== null)
 }
 
 export async function fetchCouncilSessions(): Promise<CouncilSession[]> {
-  const text = await callMcpTool('masc_sessions', {})
-  return parseJsonList<CouncilSession>(text)
+  const raw = await get<{ sessions?: unknown[] }>('/api/v1/council/sessions?limit=100')
+  if (!Array.isArray(raw.sessions)) return []
+  return raw.sessions
+    .map((item): CouncilSession | null => {
+      if (!isRecord(item)) return null
+      const id = asString(item.id, '').trim()
+      const topic = asString(item.topic, '').trim()
+      if (!id || !topic) return null
+      return {
+        id,
+        topic,
+        initiator: asString(item.initiator, 'system'),
+        votes: asNumber(item.votes, 0),
+        quorum: asNumber(item.quorum, 0),
+        state: asString(item.state, 'open'),
+        created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
+      }
+    })
+    .filter((row): row is CouncilSession => row !== null)
 }
 
 export async function startDebate(topic: string): Promise<CouncilDebate | null> {
@@ -1126,8 +1252,23 @@ export async function startDebate(topic: string): Promise<CouncilDebate | null> 
   }
 }
 
-export function fetchDebateStatus(debateId: string): Promise<string> {
-  return callMcpTool('masc_debate_status', { debate_id: debateId })
+export async function fetchDebateStatus(debateId: string): Promise<CouncilDebateSummary | null> {
+  const safeId = encodeURIComponent(debateId)
+  const raw = await get<Record<string, unknown>>(`/api/v1/council/debates/${safeId}/summary`)
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  if (!id) return null
+  return {
+    id,
+    topic: asString(raw.topic, ''),
+    status: asString(raw.status, 'open'),
+    support_count: asNumber(raw.support_count, 0),
+    oppose_count: asNumber(raw.oppose_count, 0),
+    neutral_count: asNumber(raw.neutral_count, 0),
+    total_arguments: asNumber(raw.total_arguments, 0),
+    created_at: toIsoTimestamp(raw.created_at_iso ?? raw.created_at),
+    summary_text: asString(raw.summary_text, ''),
+  }
 }
 
 export function sendKeeperMessage(name: string, message: string, models?: string[]): Promise<string> {

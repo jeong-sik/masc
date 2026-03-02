@@ -295,7 +295,10 @@ let register_evolution_callback cb =
 let handle_vote args =
   let post_id = get_string args "post_id" "" in
   let voter = get_string args "voter" "anonymous" in
-  let direction_str = get_string args "direction" "up" in
+  let direction_str =
+    let from_direction = get_string args "direction" "" in
+    if from_direction <> "" then from_direction else get_string args "vote" "up"
+  in
 
   let direction = if direction_str = "down" then Board.Down else Board.Up in
 

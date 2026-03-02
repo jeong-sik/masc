@@ -24,11 +24,13 @@ const SORT_MODES: { id: BoardSortMode; label: string }[] = [
 
 const detailComments = signal<BoardComment[]>([])
 const detailLoading = signal(false)
+const detailPostId = signal<string | null>(null)
 const commentText = signal('')
 const commentAuthor = signal('dashboard-user')
 const commentSubmitting = signal(false)
 
 async function loadPostDetail(postId: string) {
+  detailPostId.value = postId
   detailLoading.value = true
   detailComments.value = []
   try {
@@ -164,7 +166,7 @@ function CommentForm({ postId }: { postId: string }) {
 
 function PostDetail({ post }: { post: BoardPost }) {
   // Load comments on first render
-  if (detailComments.value.length === 0 && !detailLoading.value) {
+  if (detailPostId.value !== post.id && !detailLoading.value) {
     loadPostDetail(post.id)
   }
 

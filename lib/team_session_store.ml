@@ -57,10 +57,11 @@ let save_session config (session : Team_session_types.session) =
 
 let load_session config session_id : Team_session_types.session option =
   let path = session_json_path config session_id in
-  if path_exists config path then
-    Team_session_types.session_of_yojson (read_json config path)
-  else
+  if not (path_exists config path) then
     None
+  else
+    with_file_lock config path (fun () ->
+        Team_session_types.session_of_yojson (read_json config path))
 
 let load_session_or_error config session_id =
   match load_session config session_id with
@@ -118,12 +119,20 @@ let list_sessions config : Team_session_types.session list =
     |> List.filter_map (fun session_id -> load_session config session_id)
 
 let update_session config session_id f =
-  match load_session config session_id with
-  | None -> Error (Printf.sprintf "team session not found: %s" session_id)
-  | Some session ->
-      let updated = f session in
-      save_session config updated;
-      Ok updated
+  let path = session_json_path config session_id in
+  with_file_lock config path (fun () ->
+      if not (path_exists config path) then
+        Error (Printf.sprintf "team session not found: %s" session_id)
+      else
+        match Team_session_types.session_of_yojson (read_json config path) with
+        | None ->
+            Error
+              (Printf.sprintf "team session parse failed: %s" session_id)
+        | Some session ->
+            let updated = f session in
+            write_json config path
+              (Team_session_types.session_to_yojson updated);
+            Ok updated)
 
 let mark_report_generated config session_id =
   update_session config session_id (fun s ->

@@ -16,6 +16,7 @@ let with_finalize_lock f = Eio.Mutex.use_rw ~protect:true finalize_mutex f
 let () = Random.self_init ()
 
 let now_iso () = Types.now_iso ()
+let is_cancelled exn = match exn with Eio.Cancel.Cancelled _ -> true | _ -> false
 
 let clamp_int ~min_v ~max_v v = max min_v (min max_v v)
 
@@ -228,6 +229,7 @@ let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
       in
       try loop ()
       with exn ->
+        if is_cancelled exn then raise exn;
         let reason = Printexc.to_string exn in
         ignore
           (finalize_session ~config ~session_id

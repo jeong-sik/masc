@@ -233,7 +233,10 @@ let session_of_yojson json =
         created_at_iso = json |> member "created_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
         updated_at_iso = json |> member "updated_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
       }
-  with _ -> None
+  with exn ->
+    Printf.eprintf "[team_session] session_of_yojson parse failed: %s\n%!"
+      (Printexc.to_string exn);
+    None
 
 let event_entry_to_yojson (e : event_entry) =
   `Assoc

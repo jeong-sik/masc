@@ -1,31 +1,15 @@
 // Tab navigation bar — controls hash-based routing
 
 import { html } from 'htm/preact'
-import type { TabId } from '../../types'
 import { route, navigate } from '../../router'
-
-interface TabDef {
-  id: TabId
-  label: string
-  icon: string
-}
-
-const TABS: TabDef[] = [
-  { id: 'overview', label: 'Overview', icon: '\uD83C\uDFE0' },
-  { id: 'council', label: 'Decisions', icon: '\uD83C\uDFDB\uFE0F' },
-  { id: 'board', label: 'Discussions', icon: '\uD83D\uDCAC' },
-  { id: 'execution', label: 'Execution', icon: '\uD83D\uDEE0\uFE0F' },
-  { id: 'activity', label: 'Activity', icon: '\uD83D\uDCCA' },
-  { id: 'journal', label: 'Journal', icon: '\uD83D\uDCD3' },
-  { id: 'trpg', label: 'TRPG', icon: '\u2694\uFE0F' },
-]
+import { DASHBOARD_NAV_ITEMS } from '../../config/navigation'
 
 export function TabNav() {
   const currentTab = route.value.tab
 
   return html`
     <div class="main-tab-bar">
-      ${TABS.map(t => html`
+      ${DASHBOARD_NAV_ITEMS.map(t => html`
         <button
           class="main-tab-btn ${currentTab === t.id ? 'active' : ''}"
           onClick=${() => navigate(t.id)}

@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import {
   fetchCouncilSessions,
@@ -11,6 +12,7 @@ import {
   fetchDebateStatus,
   startDebate,
 } from '../api'
+import { serverStatus } from '../store'
 import type { CouncilDebate, CouncilDebateSummary, CouncilSession } from '../types'
 
 const debates = signal<CouncilDebate[]>([])
@@ -106,13 +108,32 @@ function SessionRow({ session }: { session: CouncilSession }) {
   `
 }
 
+function CouncilFeedNotice() {
+  const quality = serverStatus.value?.data_quality
+  if (!quality) return null
+  if (quality.council_feed_ok !== false && !quality.last_sync_at) return null
+
+  return html`
+    <div class="feed-health-banner ${quality.council_feed_ok === false ? 'degraded' : 'ok'}">
+      <span class="feed-health-title">
+        ${quality.council_feed_ok === false ? 'Council feed degraded' : 'Council feed synced'}
+      </span>
+      ${quality.last_sync_at
+        ? html`<span class="feed-health-meta">Last sync: <${TimeAgo} timestamp=${quality.last_sync_at} /></span>`
+        : html`<span class="feed-health-meta">No sync timestamp</span>`}
+    </div>
+  `
+}
+
 export function Council() {
   useEffect(() => {
     refreshCouncil()
   }, [])
+  const councilFeedDegraded = serverStatus.value?.data_quality?.council_feed_ok === false
 
   return html`
     <div>
+      <${CouncilFeedNotice} />
       <${Card} title="Council Command" class="section">
         <div class="council-create">
           <input
@@ -142,7 +163,13 @@ export function Council() {
         <${Card} title="Debates" class="section">
           <div class="council-list">
             ${debates.value.length === 0
-              ? html`<div class="empty-state">No debates yet</div>`
+              ? html`
+                  <div class="empty-state">
+                    ${councilFeedDegraded
+                      ? 'No debates loaded (council feed degraded).'
+                      : 'No debates yet'}
+                  </div>
+                `
               : debates.value.map(d => html`<${DebateRow} key=${d.id} debate=${d} />`)}
           </div>
         <//>
@@ -150,7 +177,13 @@ export function Council() {
         <${Card} title="Voting Sessions" class="section">
           <div class="council-list">
             ${sessions.value.length === 0
-              ? html`<div class="empty-state">No active sessions</div>`
+              ? html`
+                  <div class="empty-state">
+                    ${councilFeedDegraded
+                      ? 'No sessions loaded (council feed degraded).'
+                      : 'No active sessions'}
+                  </div>
+                `
               : sessions.value.map(s => html`<${SessionRow} key=${s.id} session=${s} />`)}
           </div>
         <//>

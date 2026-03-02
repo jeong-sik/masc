@@ -50,6 +50,7 @@ module Board = Board
 module Board_pg = Board_pg
 module Board_dispatch = Board_dispatch
 module Board_listener = Board_listener
+module Council = Council
 module Social = Social
 module Task_pg = Task_pg
 module Task_dispatch = Task_dispatch

@@ -1061,6 +1061,7 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("flair", flair_json);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);
+    ("updated_at", `Float p.updated_at);
     ("expires_at", `Float p.expires_at);
     ("votes_up", `Int p.votes_up);
     ("votes_down", `Int p.votes_down);

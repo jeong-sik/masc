@@ -192,6 +192,9 @@ export function Overview() {
             ${status.paused ? html`<span class="pill pill-stale">Paused</span>` : null}
             ${status.tempo ? html`<span>Tempo: ${status.tempo}</span>` : null}
             ${status.tempo_interval_s != null ? html`<span>Interval: ${status.tempo_interval_s}s</span>` : null}
+            ${status.data_quality?.board_contract_ok === false ? html`<span class="pill pill-stale">Board Contract: Degraded</span>` : null}
+            ${status.data_quality?.council_feed_ok === false ? html`<span class="pill pill-stale">Council Feed: Degraded</span>` : null}
+            ${status.data_quality?.last_sync_at ? html`<span>Data Sync: <${TimeAgo} timestamp=${status.data_quality.last_sync_at} /></span>` : null}
           </div>
         <//>
       `

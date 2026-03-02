@@ -26,6 +26,7 @@ import { Board } from './components/board'
 import { Activity } from './components/activity'
 import { Agents } from './components/agents'
 import { Tasks } from './components/tasks'
+import { Execution } from './components/execution'
 import { Journal } from './components/journal'
 import { Goals } from './components/goals'
 import { Trpg } from './components/trpg'
@@ -47,11 +48,10 @@ function ConnectionStatus() {
 
 const RAIL_TABS: { id: TabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'council', label: 'Council' },
-  { id: 'board', label: 'Board' },
+  { id: 'council', label: 'Decisions' },
+  { id: 'board', label: 'Discussions' },
+  { id: 'execution', label: 'Execution' },
   { id: 'activity', label: 'Activity' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'tasks', label: 'Tasks' },
   { id: 'goals', label: 'Goals' },
   { id: 'journal', label: 'Journal' },
   { id: 'trpg', label: 'TRPG' },
@@ -132,6 +132,8 @@ function TabContent() {
       return html`<${Council} />`
     case 'board':
       return html`<${Board} />`
+    case 'execution':
+      return html`<${Execution} />`
     case 'activity':
       return html`<${Activity} />`
     case 'agents':
@@ -187,7 +189,7 @@ export function App() {
             MASC Dashboard
             <span class="version-badge">SPA</span>
           </h1>
-          <p class="header-subtitle">Real-time multi-agent operations console</p>
+          <p class="header-subtitle">Decision and execution operations console</p>
         </div>
         <div class="header-right">
           <${ConnectionStatus} />

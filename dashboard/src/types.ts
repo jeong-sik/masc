@@ -382,6 +382,7 @@ export interface CouncilDebate {
   topic: string
   status: string
   argument_count: number
+  created_at?: string
 }
 
 export interface CouncilSession {
@@ -390,6 +391,21 @@ export interface CouncilSession {
   initiator: string
   votes: number
   quorum: number
+  threshold?: number
+  state?: string
+  created_at?: string
+}
+
+export interface CouncilDebateSummary {
+  id: string
+  topic: string
+  status: string
+  support_count: number
+  oppose_count: number
+  neutral_count: number
+  total_arguments: number
+  created_at?: string
+  summary_text?: string
 }
 
 // --- Dashboard batch response ---
@@ -423,6 +439,11 @@ export interface ServerStatus {
     proactive_similarity_warn: number
     proactive_similarity_bad: number
     toast_cooldown_sec: number
+  }
+  data_quality?: {
+    board_contract_ok?: boolean
+    council_feed_ok?: boolean
+    last_sync_at?: string
   }
 }
 
@@ -489,6 +510,7 @@ export interface RouteState {
 
 export type TabId =
   | 'overview'
+  | 'execution'
   | 'board'
   | 'activity'
   | 'agents'
@@ -500,6 +522,7 @@ export type TabId =
 
 export const VALID_TABS: TabId[] = [
   'overview',
+  'execution',
   'board',
   'activity',
   'agents',

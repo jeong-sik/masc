@@ -435,7 +435,7 @@ let handle_read_resource_eio state id params =
                     ] in
                     ("application/json", Some (Yojson.Safe.to_string json))
                   end else
-                    ("application/json", Some (Printf.sprintf "{\"error\":\"Library document '%s' not found\"}" topic))
+                    ("application/json", Some (Yojson.Safe.to_string (`Assoc [("error", `String (Printf.sprintf "Library document '%s' not found" topic))])))
                 end else begin
                   (* Markdown single document *)
                   let path = Filename.concat library_dir (topic ^ ".md") in

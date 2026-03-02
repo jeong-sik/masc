@@ -163,6 +163,7 @@ export function Overview() {
               <div class="council-sub">
                 <span>Freshness: ${formatDuration(boardMonitor?.last_activity_age_s)}</span>
                 <span>SLO: ≤ ${formatDuration(boardMonitor?.slo_target_age_s)}</span>
+                <span>SLO Breach: ${boardMonitor?.slo_breached ? 'Yes' : 'No'}</span>
                 <span>Posts (24h): ${boardMonitor?.new_posts_24h ?? 0}</span>
                 <span>Unanswered: ${boardMonitor?.unanswered_posts ?? 0}</span>
               </div>
@@ -179,6 +180,7 @@ export function Overview() {
                 <span>Pending Debates: ${councilMonitor?.debates_pending ?? 0}</span>
                 <span>Quorum Risk: ${councilMonitor?.sessions_without_quorum ?? 0}</span>
                 <span>SLO: ≤ ${formatDuration(councilMonitor?.slo_target_quorum_age_s)}</span>
+                <span>SLO Breach: ${councilMonitor?.slo_breached ? 'Yes' : 'No'}</span>
               </div>
             </div>
           </div>

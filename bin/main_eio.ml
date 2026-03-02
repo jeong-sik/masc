@@ -1926,8 +1926,13 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       match last_activity_age_s with
       | None -> "warn"
       | Some age when age >= bad_age_s -> "bad"
-      | Some age when age >= warn_age_s || age >= slo_target_age_s -> "warn"
+      | Some age when age >= warn_age_s -> "warn"
       | Some _ -> "ok"
+    in
+    let slo_breached =
+      match last_activity_age_s with
+      | Some age -> age >= slo_target_age_s
+      | None -> false
     in
     (`Assoc [
       ("alert_level", `String alert_level);
@@ -1936,6 +1941,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("unanswered_posts", `Int unanswered_posts);
       ("last_activity_age_s", json_int_opt last_activity_age_s);
       ("slo_target_age_s", `Int slo_target_age_s);
+      ("slo_breached", `Bool slo_breached);
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], true)
@@ -1949,6 +1955,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("unanswered_posts", `Int 0);
       ("last_activity_age_s", `Null);
       ("slo_target_age_s", `Int slo_target_age_s);
+      ("slo_breached", `Bool false);
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], false)
@@ -2039,8 +2046,18 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
       match last_activity_age_s with
       | None -> "warn"
       | Some age when age >= bad_age_s -> "bad"
-      | Some age when age >= warn_age_s || age >= slo_target_quorum_age_s -> "warn"
+      | Some age when age >= warn_age_s -> "warn"
       | Some _ -> "ok"
+    in
+    let slo_breached =
+      if sessions_without_quorum > 0 then
+        match oldest_open_debate_age_s with
+        | Some age -> age >= slo_target_quorum_age_s
+        | None -> false
+      else
+        match last_activity_age_s with
+        | Some age -> age >= slo_target_quorum_age_s
+        | None -> false
     in
     let alert_level =
       if sessions_without_quorum <= 0 then base_alert
@@ -2058,6 +2075,7 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("oldest_open_debate_age_s", json_int_opt oldest_open_debate_age_s);
       ("last_activity_age_s", json_int_opt last_activity_age_s);
       ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("slo_breached", `Bool slo_breached);
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], true)
@@ -2073,6 +2091,7 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("oldest_open_debate_age_s", `Null);
       ("last_activity_age_s", `Null);
       ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("slo_breached", `Bool false);
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], false)

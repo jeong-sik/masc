@@ -415,6 +415,7 @@ export interface BoardMonitoring {
   unanswered_posts?: number
   last_activity_age_s?: number | null
   slo_target_age_s?: number
+  slo_breached?: boolean
   warn_age_s?: number
   bad_age_s?: number
 }
@@ -428,6 +429,7 @@ export interface CouncilMonitoring {
   oldest_open_debate_age_s?: number | null
   last_activity_age_s?: number | null
   slo_target_quorum_age_s?: number
+  slo_breached?: boolean
   warn_age_s?: number
   bad_age_s?: number
 }

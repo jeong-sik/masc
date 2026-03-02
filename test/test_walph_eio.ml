@@ -270,24 +270,20 @@ let test_eio_error_cutoff () =
   let _ = Masc_mcp.Room.add_task config ~title:"failing task #1" ~description:"llm fail path" ~priority:2 in
   let _ = Masc_mcp.Room.add_task config ~title:"failing task #2" ~description:"llm fail path" ~priority:2 in
 
-  let prev_zai_api_key = Sys.getenv_opt "ZAI_API_KEY" in
+  let failing_dispatch ~tool_name:_ ~model:_ ~prompt:_ ~timeout_sec:_ ~max_chars:_ () =
+    ""  (* Forces deterministic "Empty LLM response" error path *)
+  in
   let result =
-    Fun.protect
-      ~finally:(fun () ->
-        match prev_zai_api_key with
-        | Some v -> Unix.putenv "ZAI_API_KEY" v
-        | None -> Unix.putenv "ZAI_API_KEY" "")
-      (fun () ->
-        Unix.putenv "ZAI_API_KEY" "";
-        Masc_mcp.Room_walph_eio.walph_loop config
-          ~net:(Eio.Stdenv.net env)
-          ~clock:(Eio.Stdenv.clock env)
-          ~agent_name:"error-agent"
-          ~preset:"coverage"
-          ~max_iterations:10
-          ~max_consecutive_errors:2
-          ~error_backoff_sec:0
-          ())
+    Masc_mcp.Room_walph_eio.walph_loop config
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~agent_name:"error-agent"
+      ~preset:"coverage"
+      ~max_iterations:10
+      ~max_consecutive_errors:2
+      ~error_backoff_sec:0
+      ~llm_dispatch:failing_dispatch
+      ()
   in
   check bool "stop reason includes cutoff"
     true (contains result "max_consecutive_errors reached (2)");

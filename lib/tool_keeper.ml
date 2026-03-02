@@ -5991,7 +5991,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
                      ~autonomy_level:level ~trajectory_acc:(Some traj_acc) in
                  (* 5-3: Finalize trajectory *)
-                 ignore (Trajectory.finalize traj_acc Trajectory.Completed);
+                 (try ignore (Trajectory.finalize traj_acc Trajectory.Completed)
+                  with exn -> Printf.eprintf "[keeper] trajectory finalize failed: %s\n%!" (Printexc.to_string exn));
                  (* 5-3: Update goal progress *)
                  let outcome = if tools_used <> [] then "progress" else "blocked" in
                  let review_note = Printf.sprintf
@@ -6075,7 +6076,8 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
                      ~autonomy_level:level ~trajectory_acc:(Some traj_acc) in
-                 ignore (Trajectory.finalize traj_acc Trajectory.Completed);
+                 (try ignore (Trajectory.finalize traj_acc Trajectory.Completed)
+                  with exn -> Printf.eprintf "[keeper] trajectory finalize (cautioned) failed: %s\n%!" (Printexc.to_string exn));
                  (* 5-3: Update goal progress *)
                  let outcome = if tools_used <> [] then "progress" else "blocked" in
                  let review_note = Printf.sprintf
@@ -6235,7 +6237,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        in
                        let after_compact_tokens = ctx_work.token_count in
                        let compacted = after_compact_tokens < before_compact_tokens in
-                       ignore (save_checkpoint session ctx_work ~generation:meta.generation);
+                       (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
+                        with exn -> Printf.eprintf "[keeper] save_checkpoint (tool_loop) failed: %s\n%!" (Printexc.to_string exn));
                        let turn_cost = generated.total_cost_usd in
                        let proactive_reason =
                          Printf.sprintf
@@ -6701,7 +6704,8 @@ let handle_keeper_up ctx args : tool_result =
                    ~instructions
              in
              let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
-             ignore (save_checkpoint session ctx0 ~generation:0);
+             (try ignore (save_checkpoint session ctx0 ~generation:0)
+              with exn -> Printf.eprintf "[keeper] save_checkpoint (init) failed: %s\n%!" (Printexc.to_string exn));
              let meta = {
                name;
                agent_name = keeper_agent_name name;
@@ -7513,7 +7517,8 @@ let handle_keeper_msg ctx args : tool_result =
                     ~instructions
                 in
                 let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
-                ignore (save_checkpoint session ctx0 ~generation:0);
+                (try ignore (save_checkpoint session ctx0 ~generation:0)
+                 with exn -> Printf.eprintf "[keeper] save_checkpoint (ensure) failed: %s\n%!" (Printexc.to_string exn));
                 match write_meta ctx.config meta with
                 | Error e -> Error e
                 | Ok () -> Ok meta))
@@ -7609,7 +7614,8 @@ let handle_keeper_msg ctx args : tool_result =
             drift_min_turn_gap;
             updated_at = now_iso ();
           } in
-          ignore (write_meta ctx.config updated);
+          (try ignore (write_meta ctx.config updated)
+           with exn -> Printf.eprintf "[keeper] write_meta (settings) failed: %s\n%!" (Printexc.to_string exn));
           updated
       in
       start_keepalive ctx meta;
@@ -7779,7 +7785,8 @@ let handle_keeper_msg ctx args : tool_result =
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with
             | Error e ->
-              ignore (Trajectory.finalize trajectory_acc (Trajectory.Failed e));
+              (try ignore (Trajectory.finalize trajectory_acc (Trajectory.Failed e))
+               with exn -> Printf.eprintf "[keeper] trajectory finalize (error path) failed: %s\n%!" (Printexc.to_string exn));
               (false, Printf.sprintf "❌ LLM failed: %s" e)
             | Ok resp0 ->
               let used_model0 =
@@ -8255,7 +8262,8 @@ let handle_keeper_msg ctx args : tool_result =
                   meta_turn
               in
 
-              ignore (save_checkpoint session ctx_work ~generation:meta_turn.generation);
+              (try ignore (save_checkpoint session ctx_work ~generation:meta_turn.generation)
+               with exn -> Printf.eprintf "[keeper] save_checkpoint (turn) failed: %s\n%!" (Printexc.to_string exn));
 
 		              let handoff_eval =
                 let auto_rules =
@@ -8570,7 +8578,8 @@ let handle_keeper_msg ctx args : tool_result =
                 let successor_ctx = Succession.hydrate dna spec in
                 let successor_session = Context_manager.create_session
                   ~session_id:successor_trace ~base_dir in
-                ignore (save_checkpoint successor_session successor_ctx ~generation:next_generation);
+                (try ignore (save_checkpoint successor_session successor_ctx ~generation:next_generation)
+                 with exn -> Printf.eprintf "[keeper] save_checkpoint (succession) failed: %s\n%!" (Printexc.to_string exn));
 
                 let prev_trace_id = meta_turn.trace_id in
                 let trace_history = take 20 (prev_trace_id :: meta_turn.trace_history) in
@@ -8581,7 +8590,8 @@ let handle_keeper_msg ctx args : tool_result =
                   last_handoff_ts = now_ts;
                   updated_at = now_iso ();
                 } in
-                ignore (write_meta ctx.config meta');
+                (try ignore (write_meta ctx.config meta')
+                 with exn -> Printf.eprintf "[keeper] write_meta (succession) failed: %s\n%!" (Printexc.to_string exn));
 
                 (try
                    let metrics_json = `Assoc [

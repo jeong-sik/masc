@@ -646,7 +646,8 @@ let execute_spawn ~(decision : spawn_decision) : (string, string) result =
           (String.concat ", " proposed_traits)
           (String.concat ", " (List.map string_of_int proposed_hours))
         in
-        ignore (Board.create_post store ~author:"gardener" ~content:announcement ~ttl_hours:168 ());
+        (try ignore (Board.create_post store ~author:"gardener" ~content:announcement ~ttl_hours:168 ())
+         with exn -> Printf.eprintf "[gardener] Board.create_post(announcement) failed: %s\n%!" (Printexc.to_string exn));
         Ok topic
       end else begin
         let config = load_config () in
@@ -672,7 +673,8 @@ let execute_retire ~(decision : retirement_decision) : (string, string) result =
         "⚠️ [Gardener] 에이전트 은퇴 예정: %s\n이유: %s\n유예 기간: %.0f초\n활동을 재개하면 은퇴가 취소됩니다."
         agent_name reason grace_period_sec
       in
-      ignore (Board.create_post store ~author:"gardener" ~content:warning ~ttl_hours:24 ());
+      (try ignore (Board.create_post store ~author:"gardener" ~content:warning ~ttl_hours:24 ())
+       with exn -> Printf.eprintf "[gardener] Board.create_post(warning) failed: %s\n%!" (Printexc.to_string exn));
       record_retirement ();
       reset_circuit ();
       Ok agent_name

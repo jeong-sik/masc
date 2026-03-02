@@ -244,9 +244,11 @@ let call_llm_and_broadcast ~sw ~agent_type ~prompt ~mention =
         | Some nickname ->
             let msg = Printf.sprintf "@%s %s" mention response in
             let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
-            ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args);
+            (try ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args)
+             with exn -> Printf.eprintf "[auto-responder] broadcast failed: %s\n%!" (Printexc.to_string exn));
             let leave_args = `Assoc [("agent_name", `String nickname)] in
-            ignore (masc_call ~sw ~tool_name:"masc_leave" ~args:leave_args);
+            (try ignore (masc_call ~sw ~tool_name:"masc_leave" ~args:leave_args)
+             with exn -> Printf.eprintf "[auto-responder] leave failed: %s\n%!" (Printexc.to_string exn));
             let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
             Printf.eprintf "[Auto-Responder/LLM] %s: %s\n%!" nickname short_resp
       )

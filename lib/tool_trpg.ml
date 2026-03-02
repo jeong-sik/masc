@@ -8710,7 +8710,12 @@ let handle_round_run ctx args : result =
                   ~reason:"keeper_reply_synthesized"
                   (synthesized_roleplay_reply ())
         in
-        let max_reprompt_attempts = trpg_keeper_reprompt_retries () in
+        let max_reprompt_attempts =
+          let base = trpg_keeper_reprompt_retries () in
+          if strict_agent_driven then
+            match role with `Dm -> max base 3 | `Player -> base
+          else base
+        in
         let keeper_call_max_attempts =
           1 + max 0 (trpg_keeper_call_retries ())
         in
@@ -8725,13 +8730,29 @@ let handle_round_run ctx args : result =
              || contains_substring lowered "timeout")
         in
         let re_prompt_message ~stage ~reason ~attempt =
+          let role_contract =
+            match role with
+            | `Dm ->
+                "Role contract (DM):\n\
+                 - Exactly 2 lines only\n\
+                 - Line1: one Korean in-world narrative sentence\n\
+                 - Line2: structured_action: {\"type\":\"set_flag|world_event|quest_update|transition|talk\",\"description\":\"non-empty concrete intent\"}\n\
+                 - Never output empty structured_action payload/object"
+            | `Player ->
+                "Role contract (Player):\n\
+                 - Exactly 2 lines only\n\
+                 - Line1: one Korean in-world narrative sentence\n\
+                 - Line2: structured_action: {\"type\":\"attack|move|skill|defend|talk|item|cast\",\"description\":\"non-empty concrete intent\"}\n\
+                 - Never output empty structured_action payload/object"
+          in
           Printf.sprintf
             "%s\n\n[RETRY REQUIRED %d/%d]\n\
              Your previous response was rejected at stage=%s (%s).\n\
+             %s\n\
              Return concise in-world narrative plus exactly one valid structured_action JSON line.\n\
              Do NOT emit SKILL/SKILL_REASON/[STATE] headers. Output only narrative + structured_action."
             base_prompt attempt max_reprompt_attempts stage
-            (compact_summary_text ~max_len:180 reason)
+            (compact_summary_text ~max_len:180 reason) role_contract
         in
         let run_keeper_once ~stage ~message =
           let rec loop attempt =

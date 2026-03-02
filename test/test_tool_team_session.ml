@@ -153,10 +153,25 @@ let test_missing_required_args () =
   let ok2, _ = dispatch_exn ctx ~name:"masc_team_session_status" ~args:(`Assoc []) in
   let ok3, _ = dispatch_exn ctx ~name:"masc_team_session_stop" ~args:(`Assoc []) in
   let ok4, _ = dispatch_exn ctx ~name:"masc_team_session_report" ~args:(`Assoc []) in
+  let ok5, _ =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String "../escape") ])
+  in
+  let ok6, _ =
+    dispatch_exn ctx ~name:"masc_team_session_stop"
+      ~args:(`Assoc [ ("session_id", `String "../../etc/passwd") ])
+  in
+  let ok7, _ =
+    dispatch_exn ctx ~name:"masc_team_session_report"
+      ~args:(`Assoc [ ("session_id", `String "bad-id") ])
+  in
   Alcotest.(check bool) "start invalid" false ok1;
   Alcotest.(check bool) "status invalid" false ok2;
   Alcotest.(check bool) "stop invalid" false ok3;
   Alcotest.(check bool) "report invalid" false ok4;
+  Alcotest.(check bool) "status traversal invalid" false ok5;
+  Alcotest.(check bool) "stop traversal invalid" false ok6;
+  Alcotest.(check bool) "report format invalid" false ok7;
   cleanup_dir base_dir
 
 let test_dispatch_unknown () =

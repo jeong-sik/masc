@@ -20,6 +20,25 @@ let is_cancelled exn = match exn with Eio.Cancel.Cancelled _ -> true | _ -> fals
 
 let clamp_int ~min_v ~max_v v = max min_v (min max_v v)
 
+let generate_and_mark_report ~(config : Room.config)
+    (session : Team_session_types.session) : unit =
+  match Team_session_report.generate config session with
+  | Ok _ -> (
+      match Team_session_store.mark_report_generated config session.session_id with
+      | Ok _ -> ()
+      | Error e ->
+          Printf.eprintf
+            "[team_session] failed to mark report generated (%s): %s\n%!"
+            session.session_id e)
+  | Error e ->
+      Printf.eprintf "[team_session] report generation failed (%s): %s\n%!"
+        session.session_id e;
+      Team_session_store.append_event config session.session_id
+        ~event_type:"report_generation_failed"
+        ~detail:
+          (`Assoc
+            [ ("error", `String e); ("ts_iso", `String (now_iso ())) ])
+
 let done_counts_from_backlog (backlog : Types.backlog) : (string * int) list =
   let tbl = Hashtbl.create 16 in
   let bump agent =
@@ -136,9 +155,8 @@ let finalize_session ~(config : Room.config) ~(session_id : string)
           None
       | Some session ->
           if session.status <> Team_session_types.Running then begin
-            if generate_report && (not session.generated_report) then (
-              ignore (Team_session_report.generate config session);
-              ignore (Team_session_store.mark_report_generated config session_id));
+            if generate_report && (not session.generated_report) then
+              generate_and_mark_report ~config session;
             with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
             Some session
           end else
@@ -165,9 +183,8 @@ let finalize_session ~(config : Room.config) ~(session_id : string)
                     ("reason", `String reason);
                     ("ts_iso", `String (now_iso ()));
                   ]);
-            if generate_report then (
-              ignore (Team_session_report.generate config updated);
-              ignore (Team_session_store.mark_report_generated config session_id));
+            if generate_report then
+              generate_and_mark_report ~config updated;
             with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
             Some updated)
 
@@ -359,8 +376,7 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
       end else
         let response =
           if generate_report then (
-            ignore (Team_session_report.generate config session);
-            ignore (Team_session_store.mark_report_generated config session_id);
+            generate_and_mark_report ~config session;
             `Assoc
               [
                 ("session_id", `String session_id);

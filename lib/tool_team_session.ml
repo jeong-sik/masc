@@ -61,6 +61,37 @@ let parse_report_formats args =
   let parsed = Team_session_types.report_formats_of_strings raw in
   if parsed = [] then [ Team_session_types.Markdown; Team_session_types.Json ] else parsed
 
+let is_all_digits s =
+  let len = String.length s in
+  len > 0
+  && String.for_all (function '0' .. '9' -> true | _ -> false) s
+
+let is_all_hex s =
+  let len = String.length s in
+  len > 0
+  && String.for_all
+       (function
+         | '0' .. '9'
+         | 'a' .. 'f'
+         | 'A' .. 'F' ->
+             true
+         | _ -> false)
+       s
+
+let is_valid_session_id session_id =
+  match String.split_on_char '-' session_id with
+  | [ "ts"; epoch_ms; suffix ] -> is_all_digits epoch_ms && is_all_hex suffix
+  | _ -> false
+
+let get_valid_session_id args =
+  match get_string_opt args "session_id" with
+  | None -> Error "session_id is required"
+  | Some session_id ->
+      if is_valid_session_id session_id then
+        Ok session_id
+      else
+        Error "invalid session_id format"
+
 let handle_start ctx args : result =
   let goal = get_string args "goal" "" in
   if String.trim goal = "" then
@@ -83,17 +114,17 @@ let handle_start ctx args : result =
     | Error e -> (false, json_error e)
 
 let handle_status ctx args : result =
-  match get_string_opt args "session_id" with
-  | None -> (false, json_error "session_id is required")
-  | Some session_id -> (
+  match get_valid_session_id args with
+  | Error e -> (false, json_error e)
+  | Ok session_id -> (
       match Team_session_engine_eio.status_session ~config:ctx.config ~session_id with
       | Ok json -> (true, json_ok [ ("result", json) ])
       | Error e -> (false, json_error e))
 
 let handle_stop ctx args : result =
-  match get_string_opt args "session_id" with
-  | None -> (false, json_error "session_id is required")
-  | Some session_id ->
+  match get_valid_session_id args with
+  | Error e -> (false, json_error e)
+  | Ok session_id ->
       let reason = get_string args "reason" "manual_stop" in
       let generate_report = get_bool args "generate_report" true in
       (match
@@ -104,9 +135,9 @@ let handle_stop ctx args : result =
       | Error e -> (false, json_error e))
 
 let handle_report ctx args : result =
-  match get_string_opt args "session_id" with
-  | None -> (false, json_error "session_id is required")
-  | Some session_id ->
+  match get_valid_session_id args with
+  | Error e -> (false, json_error e)
+  | Ok session_id ->
       let force_regenerate = get_bool args "force_regenerate" false in
       (match
          Team_session_engine_eio.generate_report ~config:ctx.config ~session_id

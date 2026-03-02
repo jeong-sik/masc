@@ -432,7 +432,7 @@ end
 
 (** Health check endpoint - JSON response *)
 let health_handler _request reqd =
-  let json = Printf.sprintf {|{"status":"ok","server":"masc-mcp","version":"%s"}|} Version.version in
+  let json = Yojson.Safe.to_string (`Assoc [("status", `String "ok"); ("server", `String "masc-mcp"); ("version", `String Version.version)]) in
   Response.json json reqd
 
 (** Readiness probe - Kubernetes *)
@@ -511,7 +511,7 @@ let mcp_get_handler request reqd =
   match Streamable_http.handle_get ?session_id () with
   | Ok session ->
       (* Return session info, actual SSE handled elsewhere *)
-      let json = Printf.sprintf {|{"session_id":"%s","transport":"streamable_http"}|} session.id in
+      let json = Yojson.Safe.to_string (`Assoc [("session_id", `String session.id); ("transport", `String "streamable_http")]) in
       Response.json json reqd
   | Error msg ->
       Response.text ~status:`Bad_request msg reqd

@@ -220,7 +220,7 @@ let encode_broadcast_request (msg : Pb.BroadcastRequest.t) : string =
 
 (** Helper: Create error response *)
 let make_error_response msg =
-  Printf.sprintf "{\"success\":false,\"message\":\"%s\"}" msg
+  Yojson.Safe.to_string (`Assoc [("success", `Bool false); ("message", `String msg)])
 
 (** GetStatus handler - returns room status with agent/task counts. *)
 let get_status_handler (room_config: Room.config) (request_data: string) : string =

@@ -34,6 +34,15 @@ let handle_relay_status _ctx args =
   let tool_calls = get_int args "tool_calls" 0 in
   let model = get_string args "model" "claude" in
   let metrics = Relay.estimate_context ~messages ~tool_calls ~model in
+  (* Record actual tokens for calibration if provided *)
+  let actual_tokens_opt = match Yojson.Safe.Util.member "actual_tokens" args with
+    | `Int n -> Some n
+    | _ -> None
+  in
+  (match actual_tokens_opt with
+   | Some actual ->
+     Relay.record_actual_tokens ~estimated:metrics.Relay.estimated_tokens ~actual
+   | None -> ());
   let should_relay = Relay.should_relay ~config:Relay.default_config ~metrics in
   let json = `Assoc [
     ("estimated_tokens", `Int metrics.Relay.estimated_tokens);
@@ -42,6 +51,7 @@ let handle_relay_status _ctx args =
     ("message_count", `Int metrics.Relay.message_count);
     ("tool_call_count", `Int metrics.Relay.tool_call_count);
     ("should_relay", `Bool should_relay);
+    ("calibration", Relay.get_calibration_info ());
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
@@ -51,6 +61,17 @@ let handle_relay_checkpoint _ctx args =
   let todos = get_string_list args "todos" in
   let pdca_state = get_string_opt args "pdca_state" in
   let relevant_files = get_string_list args "relevant_files" in
+  let _active_goal_ids = get_string_list args "active_goal_ids" in
+  let _goal_blockers = get_string_list args "goal_blockers" in
+  let _goal_progress = match Yojson.Safe.Util.member "goal_progress" args with
+    | `List items -> List.filter_map (fun item ->
+        match item with
+        | `List [`String gid; `Float pct] -> Some (gid, pct)
+        | `List [`String gid; `Int n] -> Some (gid, float_of_int n)
+        | _ -> None
+      ) items
+    | _ -> []
+  in
   let cell = !(Mcp_server.current_cell) in
   let messages = get_int args "messages" cell.Mitosis.task_count in
   let tool_calls = get_int args "tool_calls" cell.Mitosis.tool_call_count in
@@ -60,6 +81,7 @@ let handle_relay_checkpoint _ctx args =
     ("status", `String "checkpoint_saved");
     ("usage_ratio", `Float metrics.Relay.usage_ratio);
     ("estimated_tokens", `Int metrics.Relay.estimated_tokens);
+    ("calibration", Relay.get_calibration_info ());
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
@@ -68,14 +90,32 @@ let handle_relay_now ctx args =
   let current_task = get_string_opt args "current_task" in
   let target_agent = get_string args "target_agent" "claude" in
   let generation = get_int args "generation" 0 in
+  let active_goal_ids = get_string_list args "active_goal_ids" in
+  let goal_blockers = get_string_list args "goal_blockers" in
+  let goal_progress = match Yojson.Safe.Util.member "goal_progress" args with
+    | `List items -> List.filter_map (fun item ->
+        match item with
+        | `List [`String gid; `Float pct] -> Some (gid, pct)
+        | `List [`String gid; `Int n] -> Some (gid, float_of_int n)
+        | _ -> None
+      ) items
+    | _ -> []
+  in
+  let todos = get_string_list args "todos" in
+  let pdca_state = get_string_opt args "pdca_state" in
+  let relevant_files = get_string_list args "relevant_files" in
+  let session_id = get_string_opt args "session_id" in
   let payload : Relay.handoff_payload = {
     summary;
     current_task;
-    todos = [];
-    pdca_state = None;
-    relevant_files = [];
-    session_id = None;
+    todos;
+    pdca_state;
+    relevant_files;
+    session_id;
     relay_generation = generation;
+    active_goal_ids;
+    goal_progress;
+    goal_blockers;
   } in
   let prompt = Relay.build_handoff_prompt ~payload ~generation:(generation + 1) in
   (* Use Eio-native spawn to avoid blocking HTTP server *)

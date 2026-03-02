@@ -112,6 +112,8 @@ mod tests {
         let row = PreflightRow::new(true, "test", "detail");
         let cloned = row.clone();
         assert!(cloned.ok);
+        assert_eq!(row.label, "test");
+        assert!(row.hint.is_none());
         assert_eq!(format!("{:?}", row), format!("{:?}", cloned));
     }
 

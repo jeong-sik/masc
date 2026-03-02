@@ -539,6 +539,10 @@ restart_player_keeper() {
       echo "[recovery] warn: actor.claim soft-failed actor=$actor_id keeper=$keeper_name error=$err" >&2
       return 0
     fi
+    if printf "%s" "$err" | grep -Eqi 'actor is not alive'; then
+      echo "[recovery] warn: actor.claim skipped-dead actor=$actor_id keeper=$keeper_name error=$err" >&2
+      return 0
+    fi
     echo "[recovery] fail: actor.claim failed actor=$actor_id keeper=$keeper_name error=$err" >&2
     return 1
   fi
@@ -1094,13 +1098,13 @@ if [ "$RUN_ROUND" = "1" ]; then
       fi
 
       strict_recovery_trigger=0
-      if [ "${strict_rejection_count:-0}" -gt 0 ] \
+      if [ "$advanced" != "true" ] && { [ "${strict_rejection_count:-0}" -gt 0 ] \
         || [ "${structured_noncompliance_count:-0}" -gt 0 ] \
         || [ "${progress_reason:-}" = "structured_action_invalid" ] \
         || [ "${progress_reason:-}" = "keeper_unavailable" ] \
         || [ "${progress_reason:-}" = "timeout" ] \
         || [ "${timeouts:-0}" -gt 0 ] \
-        || [ "${unavailable:-0}" -gt 0 ]; then
+        || [ "${unavailable:-0}" -gt 0 ]; }; then
         strict_recovery_trigger=1
       fi
 

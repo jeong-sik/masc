@@ -1093,7 +1093,7 @@ let react_to_content ~net ?agent_name:provided_name ?post_id content =
 
 let heartbeat ~net (args : Yojson.Safe.t) =
   let source_str = Safe_ops.json_string ~default:"hn" "source" args in
-  (* TODO: GeekNews support — for now only HN is implemented *)
+  (* GeekNews support: https://github.com/jeong-sik/masc-mcp/issues/490 *)
   let (_ : source) = source_of_string source_str |> Option.value ~default:HackerNews in
 
   (* READ *)

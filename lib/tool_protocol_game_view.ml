@@ -1471,7 +1471,7 @@ let schemas : Types.tool_schema list =
     schema "trpg.actor.spawn"
       "Canonical alias of masc_trpg_actor_spawn."
       (object_schema
-         ~required:[ "room_id"; "actor_id" ]
+         ~required:[ "room_id" ]
          [
            ("room_id", string_schema);
            ("actor_id", string_schema);
@@ -1479,6 +1479,9 @@ let schemas : Types.tool_schema list =
            ("name", string_schema);
            ("archetype", string_schema);
            ("persona", string_schema);
+           ("portrait", string_schema);
+           ("background", string_schema);
+           ("stats", object_schema []);
            ("hp", int_schema);
            ("max_hp", int_schema);
            ("alive", bool_schema);
@@ -1497,6 +1500,9 @@ let schemas : Types.tool_schema list =
            ("name", string_schema);
            ("archetype", string_schema);
            ("persona", string_schema);
+           ("portrait", string_schema);
+           ("background", string_schema);
+           ("stats", object_schema []);
            ("hp", int_schema);
            ("max_hp", int_schema);
            ("alive", bool_schema);

@@ -264,6 +264,10 @@ let get_chain_id_for_preset = function
   | "figma" -> Some "walph-figma"
   | _ -> None
 
+(** Default LLM dispatcher for Walph loop. Exposed as overridable parameter for tests. *)
+let default_llm_dispatch ~tool_name ~model ~prompt ~timeout_sec ~max_chars () =
+  Llm_direct.dispatch ~tool_name ~model ~prompt ~timeout_sec ~max_chars ()
+
 (** {1 Main Loop} *)
 
 (** Walph (Walph Wiggum variant) pattern: Keep claiming tasks until stop condition
@@ -277,7 +281,8 @@ let get_chain_id_for_preset = function
     @return Status string with loop results *)
 let walph_loop config ~net ~clock ~agent_name
     ?(preset="drain") ?(max_iterations=10) ?target
-    ?(max_consecutive_errors=5) ?(error_backoff_sec=2) () =
+    ?(max_consecutive_errors=5) ?(error_backoff_sec=2)
+    ?(llm_dispatch=default_llm_dispatch) () =
   Room.ensure_initialized config;
 
   (* Get Walph state for this specific agent *)
@@ -471,7 +476,7 @@ let walph_loop config ~net ~clock ~agent_name
 	                        (* Direct LLM call — no llm-mcp dependency *)
 	                        ignore (net, clock);  (* Previously used for llm-mcp HTTP call *)
 	                        try
-	                          let response = Llm_direct.dispatch
+	                          let response = llm_dispatch
 	                            ~tool_name:"glm"
 	                            ~model:Env_config.Llm.default_model
 	                            ~prompt:goal

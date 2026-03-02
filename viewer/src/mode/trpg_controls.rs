@@ -2025,28 +2025,35 @@ async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBo
 }
 
 async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
-    let mut rows: Vec<(bool, String, String, Option<String>)> = Vec::new();
+    use super::transport_classify::{is_html_body, PreflightRow};
+
+    let mut rows: Vec<PreflightRow> = Vec::new();
 
     // ── Step 0: Server connectivity (early-exit on failure) ──
     let health_url = crate::config::build_masc_url("health");
     let server_row = match crate::mode::mcp_rpc::http_get_text(&health_url).await {
         Ok((status, _body)) if (200..300).contains(&status) => {
-            (true, "서버 연결".to_string(), "MASC 서버 응답 정상".to_string(), None)
+            PreflightRow { ok: true, label: "서버 연결".to_string(), detail: "MASC 서버 응답 정상".to_string(), hint: None }
         }
         Ok((status, body)) => {
-            let hint = if body.to_ascii_lowercase().contains("<html") {
-                Some("프록시/CDN이 에러 페이지를 반환했습니다. 서버 프로세스를 확인하세요.".to_string())
+            let hint = if is_html_body(&body) {
+                "프록시/CDN이 에러 페이지를 반환했습니다. 서버 프로세스를 확인하세요.".to_string()
             } else {
-                Some("서버가 실행 중인지, URL이 올바른지 확인하세요.".to_string())
+                "서버가 실행 중인지, URL이 올바른지 확인하세요.".to_string()
             };
-            (false, "서버 연결".to_string(), format!("HTTP {} 응답", status), hint)
+            PreflightRow { ok: false, label: "서버 연결".to_string(), detail: format!("HTTP {} 응답", status), hint: Some(hint) }
         }
         Err(e) => {
-            let hint = Some("MASC 서버가 실행 중인지 확인하세요. (로컬: localhost:8935)".to_string());
-            (false, "서버 연결".to_string(), format!("연결 실패: {}", e), hint)
+            let base = crate::config::masc_mcp_base_url();
+            let hint = if base.is_empty() {
+                "MASC 서버가 실행 중인지 확인하세요.".to_string()
+            } else {
+                format!("MASC 서버가 실행 중인지 확인하세요. ({})", base)
+            };
+            PreflightRow { ok: false, label: "서버 연결".to_string(), detail: format!("연결 실패: {}", e), hint: Some(hint) }
         }
     };
-    let server_ok = server_row.0;
+    let server_ok = server_row.ok;
     rows.push(server_row);
 
     // If server is unreachable, skip all dependent checks (cockpit syndrome prevention).
@@ -2077,9 +2084,9 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                     preset_catalog_keys_preview_from_value(&catalog)
                 )
             };
-            (ok, "프리셋".to_string(), detail, None)
+            PreflightRow { ok, label: "프리셋".to_string(), detail, hint: None }
         }
-        Err(e) => (false, "프리셋".to_string(), format!("조회 실패: {}", e), None),
+        Err(e) => PreflightRow { ok: false, label: "프리셋".to_string(), detail: format!("조회 실패: {}", e), hint: None },
     };
     rows.push(preset_row);
 
@@ -2100,28 +2107,18 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 if count > 0 {
                     (
                         keepers,
-                        (
-                            true,
-                            "키퍼 풀".to_string(),
-                            format!("{}명 사용 가능", count),
-                            None,
-                        ),
+                        PreflightRow { ok: true, label: "키퍼 풀".to_string(), detail: format!("{}명 사용 가능", count), hint: None },
                     )
                 } else {
                     (
                         Vec::new(),
-                        (
-                            false,
-                            "키퍼 풀".to_string(),
-                            "사용 가능한 keeper가 없습니다".to_string(),
-                            None,
-                        ),
+                        PreflightRow { ok: false, label: "키퍼 풀".to_string(), detail: "사용 가능한 keeper가 없습니다".to_string(), hint: None },
                     )
                 }
             }
             Err(e) => (
                 Vec::new(),
-                (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e), None),
+                PreflightRow { ok: false, label: "키퍼 풀".to_string(), detail: format!("조회 실패: {}", e), hint: None },
             ),
         };
     rows.push(keeper_pool_row);

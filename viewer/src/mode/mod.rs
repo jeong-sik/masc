@@ -1418,20 +1418,20 @@ pub(super) fn set_new_game_preflight_status(doc: &web_sys::Document, message: &s
 #[cfg(target_arch = "wasm32")]
 pub(super) fn set_new_game_preflight_rows(
     doc: &web_sys::Document,
-    rows: &[(bool, String, String, Option<String>)],
+    rows: &[super::transport_classify::PreflightRow],
 ) {
     if let Some(el) = doc.get_element_by_id("new-game-preflight") {
         let html = rows
             .iter()
-            .map(|(ok, label, detail, hint)| {
-                let state_text = if *ok { "OK" } else { "FAIL" };
-                let state_class = if *ok {
+            .map(|row| {
+                let state_text = if row.ok { "OK" } else { "FAIL" };
+                let state_class = if row.ok {
                     "preflight-state preflight-ok"
                 } else {
                     "preflight-state preflight-fail"
                 };
-                let hint_html = match hint {
-                    Some(h) if !ok => format!(
+                let hint_html = match &row.hint {
+                    Some(h) if !row.ok => format!(
                         "<div class=\"preflight-hint\">{}</div>",
                         html_escape(h)
                     ),
@@ -1441,8 +1441,8 @@ pub(super) fn set_new_game_preflight_rows(
                     "<div class=\"preflight-row\"><span class=\"{state_class}\">{state_text}</span><span>{label}: {detail}</span>{hint_html}</div>",
                     state_class = state_class,
                     state_text = state_text,
-                    label = html_escape(label),
-                    detail = html_escape(detail),
+                    label = html_escape(&row.label),
+                    detail = html_escape(&row.detail),
                     hint_html = hint_html,
                 )
             })

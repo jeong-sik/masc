@@ -5793,7 +5793,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
          (match trajectory_acc with
           | Some acc ->
               Trajectory.record_entry acc {
-                ts = Unix.gettimeofday ();
+                ts = Time_compat.now ();
                 ts_iso = Types.now_iso ();
                 turn = acc.Trajectory.turn;
                 round = 0;
@@ -6050,7 +6050,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ~generation:meta.generation in
                  (* Record caution warning to trajectory *)
                  Trajectory.record_entry traj_acc {
-                   ts = Unix.gettimeofday ();
+                   ts = Time_compat.now ();
                    ts_iso = Types.now_iso ();
                    turn = traj_acc.Trajectory.turn;
                    round = 0;
@@ -7825,7 +7825,7 @@ let handle_keeper_msg ctx args : tool_result =
                   in
                   (* Record trajectory entry *)
                   let entry : Trajectory.tool_call_entry = {
-                    ts = Unix.gettimeofday ();
+                    ts = Time_compat.now ();
                     ts_iso = Types.now_iso ();
                     turn = trajectory_acc.Trajectory.turn;
                     round = 0;  (* updated by tool_loop caller *)

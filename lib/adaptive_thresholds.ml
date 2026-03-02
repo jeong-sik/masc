@@ -38,7 +38,7 @@ let clamp_thresholds (t : thresholds) : thresholds =
 
 (** Get current ISO 8601 timestamp string *)
 let iso_now () =
-  let t = Unix.gettimeofday () in
+  let t = Time_compat.now () in
   let tm = Unix.gmtime t in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (1900 + tm.Unix.tm_year) (1 + tm.Unix.tm_mon) tm.Unix.tm_mday

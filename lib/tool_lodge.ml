@@ -652,7 +652,7 @@ let save_agents_to_file_cache () =
   if agents = [] then ()
   else begin
     let cache_json = `Assoc [
-      ("updated_at", `Float (Unix.gettimeofday ()));
+      ("updated_at", `Float (Time_compat.now ()));
       ("agents", `List (List.map agent_config_to_yojson agents));
     ] in
     try
@@ -680,7 +680,7 @@ let load_agents_from_file_cache () : bool =
       let json = Yojson.Safe.from_string content in
       let open Yojson.Safe.Util in
       let updated_at = json |> member "updated_at" |> to_float in
-      let age_hours = (Unix.gettimeofday () -. updated_at) /. 3600.0 in
+      let age_hours = (Time_compat.now () -. updated_at) /. 3600.0 in
       let ttl = agent_cache_ttl_hours () in
       if age_hours > ttl then begin
         Printf.eprintf "[Lodge] Cache expired (%.1f hours old, TTL=%.0f)\n%!" age_hours ttl;

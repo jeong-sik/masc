@@ -16,5 +16,6 @@
    eio
    eio_main
    uuidm
-   unix)
+   unix
+   time_compat)
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

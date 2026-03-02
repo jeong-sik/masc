@@ -116,7 +116,7 @@ let combine_output ~stdout ~stderr =
 %s|} s e
 
 let execute_argv argv =
-  let timestamp () = Unix.gettimeofday () in
+  let timestamp () = Time_compat.now () in
   match argv with
   | [] ->
       { success = false;
@@ -178,7 +178,7 @@ let execute_config_change key value =
     ensure_dir config_dir;
     (* Write JSON config *)
     let json = `Assoc [("key", `String key); ("value", `String value); 
-                       ("updated_at", `Float (Unix.gettimeofday ()))] in
+                       ("updated_at", `Float (Time_compat.now ()))] in
     let oc = open_out config_file in
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc (Yojson.Safe.pretty_to_string json));
@@ -187,14 +187,14 @@ let execute_config_change key value =
       stdout = msg;
       stderr = "";
       output = msg;
-      timestamp = Unix.gettimeofday () }
+      timestamp = Time_compat.now () }
   with exn ->
     let msg = Printf.sprintf "Config error: %s" (Printexc.to_string exn) in
     { success = false;
       stdout = "";
       stderr = msg;
       output = msg;
-      timestamp = Unix.gettimeofday () }
+      timestamp = Time_compat.now () }
 
 (** Send notification to target (file-based for now) *)
 let execute_notification target message =
@@ -203,7 +203,7 @@ let execute_notification target message =
     let json = `Assoc [
       ("target", `String target);
       ("message", `String message);
-      ("timestamp", `Float (Unix.gettimeofday ()))
+      ("timestamp", `Float (Time_compat.now ()))
     ] in
     let oc = open_out_gen [Open_append; Open_creat] 0o644 notify_file in
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
@@ -215,14 +215,14 @@ let execute_notification target message =
       stdout = msg;
       stderr = "";
       output = msg;
-      timestamp = Unix.gettimeofday () }
+      timestamp = Time_compat.now () }
   with exn ->
     let msg = Printf.sprintf "Notification error: %s" (Printexc.to_string exn) in
     { success = false;
       stdout = "";
       stderr = msg;
       output = msg;
-      timestamp = Unix.gettimeofday () }
+      timestamp = Time_compat.now () }
 
 let execute_action action =
   match action with
@@ -236,7 +236,7 @@ let execute_action action =
       stdout = "";
       stderr = msg;
       output = msg;
-      timestamp = Unix.gettimeofday () }
+      timestamp = Time_compat.now () }
 
 (** {1 Decision Processing} *)
 

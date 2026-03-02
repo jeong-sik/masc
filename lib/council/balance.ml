@@ -101,7 +101,7 @@ let record_win ~(stats_table : (string, agent_stats) Hashtbl.t) ~(agent_id : str
   let updated = {
     wins = current.wins + 1;
     participations = current.participations;
-    last_win = Some (Unix.gettimeofday ());
+    last_win = Some (Time_compat.now ());
   } in
   Hashtbl.replace stats_table agent_id updated
 

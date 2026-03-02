@@ -5991,7 +5991,7 @@ let handle_stream ctx args : result =
   match result_json with Ok j -> ok_json j | Error e -> err e
 
 let entropy_seed ~session_id ~salt =
-  let now_ms = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
   Hashtbl.hash (Printf.sprintf "%s|%s|%d" session_id salt now_ms)
 
 let pick_by_seed ~seed xs =
@@ -7418,7 +7418,7 @@ let handle_intervention_submit ctx args : result =
     let* payload_opt = get_optional_object args "payload" in
     let intervention_id =
       Printf.sprintf "intrv-%Ld"
-        (Int64.of_float (Unix.gettimeofday () *. 1000.0))
+        (Int64.of_float (Time_compat.now () *. 1000.0))
     in
     let payload =
       `Assoc

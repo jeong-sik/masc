@@ -93,7 +93,7 @@ let make_event ?(run_id=None) ?(message_id=None) ?(role=None)
     snapshot;
     custom_name;
     custom_value;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   }
 
 (** Serialize AG-UI event to JSON (spec-compliant field names) *)

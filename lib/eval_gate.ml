@@ -323,7 +323,7 @@ let guarded_execute
   | Trajectory.Reject _reason ->
       (decision, None, None, 0)
   | Trajectory.Pass ->
-      let t0 = Unix.gettimeofday () in
+      let t0 = Time_compat.now () in
       let result =
         try execute ()
         with exn ->
@@ -332,7 +332,7 @@ let guarded_execute
             ("tool", `String tool_name);
           ])
       in
-      let t1 = Unix.gettimeofday () in
+      let t1 = Time_compat.now () in
       let duration_ms = int_of_float ((t1 -. t0) *. 1000.0) in
 
       let eval = post_eval ~config ~tool_name ~result ~duration_ms

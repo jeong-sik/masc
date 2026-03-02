@@ -2161,7 +2161,7 @@ let refill () = bucket := min 10 (!bucket + 1)
   (* A2A Delegation: if delegation mode is on, emit heartbeat_task for A2A Worker *)
   if Env_config.LodgeV2.delegate_llm then begin
     let request_id = Printf.sprintf "hb-%s-%d"
-      agent_name (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000) in
+      agent_name (int_of_float (Time_compat.now () *. 1000.0) mod 1000000) in
     let board_context = recent_posts
       |> List.filteri (fun i _ -> i < 3)
       |> List.map (fun (p : Board.post) ->
@@ -2204,7 +2204,7 @@ let refill () = bucket := min 10 (!bucket + 1)
 
   (* LLM cascade: config-driven via Lodge_cascade (direct API, no llm-mcp) *)
   let action_slots = Lodge_cascade.get_cascade ~cascade_name:"heartbeat_action" () in
-  let tick_id = Printf.sprintf "%s-%d" agent_name (int_of_float (Unix.gettimeofday () *. 1000.0) mod 1000000) in
+  let tick_id = Printf.sprintf "%s-%d" agent_name (int_of_float (Time_compat.now () *. 1000.0) mod 1000000) in
   let cascade_result =
     if List.length action_slots > 0 then
       Lodge_cascade.run_cascade_traced
@@ -2215,9 +2215,9 @@ let refill () = bucket := min 10 (!bucket + 1)
     else begin
       (* Fallback: no config file, try GLM directly *)
       Printf.printf "   ⚠️ [%s] No cascade config, trying GLM directly...\n%!" agent_name;
-      let start_t = Unix.gettimeofday () in
+      let start_t = Time_compat.now () in
       let r = Llm_direct.call_glm ~model:"glm-4.7" ~prompt ~timeout_sec:60 ~max_chars:4000 () in
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start_t) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start_t) *. 1000.0) in
       Lodge_cascade.{ response = r; llm_used = "glm(glm-4.7)"; duration_ms }
     end
   in
@@ -2257,7 +2257,7 @@ let refill () = bucket := min 10 (!bucket + 1)
     llm_used = cascade_result.Lodge_cascade.llm_used;
     action = action_str;
     duration_ms = cascade_result.Lodge_cascade.duration_ms;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
   };
   (* Convert index to actual post_id for COMMENT action *)
   let action = match action with
@@ -2394,7 +2394,7 @@ let rec execute_agent_action ~agent_name ~action =
       (try Unix.mkdir base_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
       (try Unix.mkdir agent_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
       (* Generate timestamped filename *)
-      let now = Unix.localtime (Unix.gettimeofday ()) in
+      let now = Unix.localtime (Time_compat.now ()) in
       let timestamp = Printf.sprintf "%04d%02d%02d_%02d%02d"
         (now.Unix.tm_year + 1900) (now.Unix.tm_mon + 1) now.Unix.tm_mday
         now.Unix.tm_hour now.Unix.tm_min in

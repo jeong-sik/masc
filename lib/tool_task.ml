@@ -65,7 +65,18 @@ let handle_claim ctx args =
     | "" -> Agent_identity.Unassigned
     | s -> Agent_identity.role_of_string s
   in
-  result_to_response (Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role ())
+  let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
+  (* Notification harness: push claim event to all active sessions *)
+  (match result with
+   | Ok _ ->
+       Subscriptions.push_event_to_sessions (`Assoc [
+         ("type", `String "masc/task_claimed");
+         ("task_id", `String task_id);
+         ("agent_name", `String ctx.agent_name);
+         ("timestamp", `Float (Unix.gettimeofday ()));
+       ])
+   | Error _ -> ());
+  result_to_response result
 
 let handle_claim_next ctx _args =
   (true, Room.claim_next ctx.config ~agent_name:ctx.agent_name)
@@ -107,7 +118,14 @@ let handle_done ctx args =
            ("task_id", `String task_id);
            ("action", `String "done");
            ("notes", `String notes);
-         ])
+         ]);
+       (* Notification harness: push done event to all active sessions *)
+       Subscriptions.push_event_to_sessions (`Assoc [
+         ("type", `String "masc/task_done");
+         ("task_id", `String task_id);
+         ("agent_name", `String ctx.agent_name);
+         ("timestamp", `Float (Unix.gettimeofday ()));
+       ])
    | Error err ->
        Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));
   (* Record metrics on successful completion *)
@@ -164,7 +182,15 @@ let handle_cancel_task ctx args =
        } in
        ignore (Metrics_store_eio.record ctx.config metric);
        (* Feed failure into Thompson Sampling quality signal *)
-       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down
+       Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
+       (* Notification harness: push cancel event to all active sessions *)
+       Subscriptions.push_event_to_sessions (`Assoc [
+         ("type", `String "masc/task_cancelled");
+         ("task_id", `String task_id);
+         ("agent_name", `String ctx.agent_name);
+         ("reason", `String reason);
+         ("timestamp", `Float (Unix.gettimeofday ()));
+       ])
    | Error err ->
        Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
   result_to_response result
@@ -205,7 +231,15 @@ let handle_transition ctx args =
            ("task_id", `String task_id);
            ("action", `String action);
            ("notes", `String notes);
-         ])
+         ]);
+       (* Notification harness: push task transition to all active sessions *)
+       Subscriptions.push_event_to_sessions (`Assoc [
+         ("type", `String "masc/task_transition");
+         ("task_id", `String task_id);
+         ("action", `String action);
+         ("agent_name", `String ctx.agent_name);
+         ("timestamp", `Float (Unix.gettimeofday ()));
+       ])
    | Error err ->
        Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));
   (* Record metrics *)

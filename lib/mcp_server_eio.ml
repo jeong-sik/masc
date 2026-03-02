@@ -1360,6 +1360,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_trpg.dispatch simple_ctx_trpg ~name ~args:arguments with
   | Some result -> result
   | None ->
+  match Tool_notifications.dispatch state.Mcp_server.session_registry ~agent_name ~name arguments with
+  | Some result -> result
+  | None ->
   (* Tool_gardener returns result directly, not option - wrap it *)
   if String.length name >= 14 && String.sub name 0 14 = "masc_gardener_" then
     Tool_gardener.dispatch () name arguments
@@ -1503,9 +1506,23 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       in
       let final_result = if institution_welcome = "" then result
         else result ^ institution_welcome in
+      (* Notification harness: push join event to all active sessions *)
+      let _pushed = Session.push_notification_to_active_agents registry
+        ~event:(`Assoc [
+          ("type", `String "masc/agent_joined");
+          ("agent_name", `String nickname);
+          ("timestamp", `Float (Unix.gettimeofday ()));
+        ]) in
       (true, final_result)
 
   | "masc_leave" ->
+      (* Notification harness: push leave event BEFORE unregistering *)
+      let _pushed = Session.push_notification_to_active_agents registry
+        ~event:(`Assoc [
+          ("type", `String "masc/agent_left");
+          ("agent_name", `String agent_name);
+          ("timestamp", `Float (Unix.gettimeofday ()));
+        ]) in
       let result = Room.leave config ~agent_name in
       unregister_sync registry ~agent_name;
       (* Clean up self-echo filter file *)

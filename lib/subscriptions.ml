@@ -145,8 +145,23 @@ module SubscriptionStore = struct
     Hashtbl.length subscriptions
 end
 
+(** Session registry bridge for notification harness.
+    When set, notify_change also pushes events to all active agent sessions
+    so agents can poll notifications without SSE subscription. *)
+let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
+
+let set_session_push_fn (fn : Yojson.Safe.t -> int) =
+  session_registry_ref := Some fn
+
+(** Push a structured event to all active agent sessions.
+    Used by modules (e.g. Tool_task) that lack direct Session.registry access. *)
+let push_event_to_sessions (event : Yojson.Safe.t) : unit =
+  match !session_registry_ref with
+  | Some push_fn -> ignore (push_fn event)
+  | None -> ()
+
 (** Notify all subscribers of a resource change *)
-let notify_change ~(resource : resource_type) ~(change : change_type) 
+let notify_change ~(resource : resource_type) ~(change : change_type)
     ~(resource_id : string) ~(data : Yojson.Safe.t) : int =
   let subs = SubscriptionStore.find_matching ~resource ~resource_id in
   let now = Time_compat.now () in
@@ -161,6 +176,19 @@ let notify_change ~(resource : resource_type) ~(change : change_type)
     } in
     SubscriptionStore.queue_notification sub.id notif
   ) subs;
+  (* Bridge: also push to session queues for notification harness *)
+  (match !session_registry_ref with
+   | Some push_fn ->
+       let event = `Assoc [
+         ("type", `String "masc/notification");
+         ("resource", `String (resource_type_to_string resource));
+         ("change", `String (change_type_to_string change));
+         ("resource_id", `String resource_id);
+         ("data", data);
+         ("timestamp", `Float now);
+       ] in
+       ignore (push_fn event)
+   | None -> ());
   List.length subs
 
 (** Subscription to JSON *)

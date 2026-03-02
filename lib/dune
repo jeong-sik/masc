@@ -176,6 +176,7 @@
    tool_protocol_game_view
    tool_experiment
    tool_suspend
+   tool_notifications
    debate
    social
    tool_social

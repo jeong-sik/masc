@@ -39,6 +39,12 @@
  (modules test_streamable_http)
  (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
+; Notification harness test (requires Eio for Session.with_lock)
+(test
+ (name test_notifications)
+ (modules test_notifications)
+ (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
+
 ; ============================================================
 ; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
 ; ============================================================

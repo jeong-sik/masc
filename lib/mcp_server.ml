@@ -469,6 +469,10 @@ let create_state ~base_path =
   (* Restore sessions from disk for persistence across restarts *)
   let agents_path = Filename.concat config.base_path ".masc/agents" in
   Session.restore_from_disk registry ~agents_path;
+  (* Wire notification harness: subscription events → session queues *)
+  Subscriptions.set_session_push_fn (fun event ->
+    Session.push_notification_to_active_agents registry ~event
+  );
   {
     room_config = config;
     session_registry = registry;
@@ -486,6 +490,10 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
   let registry = Session.create () in
   let agents_path = Filename.concat config.base_path ".masc/agents" in
   Session.restore_from_disk registry ~agents_path;
+  (* Wire notification harness: subscription events → session queues *)
+  Subscriptions.set_session_push_fn (fun event ->
+    Session.push_notification_to_active_agents registry ~event
+  );
   {
     room_config = config;
     session_registry = registry;

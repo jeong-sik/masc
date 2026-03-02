@@ -259,6 +259,19 @@ let push_message registry ~from_agent ~content ~mention =
     !targets
   )
 
+(** Push notification to all active agent sessions.
+    Unlike push_message, this does NOT exclude the sender and has no mention filter.
+    Used for system events (join, leave, task state changes) that all agents should see. *)
+let push_notification_to_active_agents registry ~(event : Yojson.Safe.t) =
+  with_lock registry (fun () ->
+    let count = ref 0 in
+    Hashtbl.iter (fun _name session ->
+      session.message_queue <- session.message_queue @ [event];
+      incr count
+    ) registry.sessions;
+    !count
+  )
+
 (** Pop message from queue (for listen) *)
 let pop_message registry ~agent_name =
   with_lock registry (fun () ->

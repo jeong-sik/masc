@@ -42,6 +42,37 @@ function jsonHeaders(): Record<string, string> {
 const DEFAULT_GET_TIMEOUT_MS = 15_000
 const DEFAULT_POST_TIMEOUT_MS = 30_000
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
+const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
+
+class ApiRequestError extends Error {
+  method: string
+  path: string
+  status?: number
+  statusText?: string
+  timeout: boolean
+
+  constructor(opts: {
+    method: string
+    path: string
+    status?: number
+    statusText?: string
+    timeout?: boolean
+    timeoutMs?: number
+  }) {
+    const method = opts.method.toUpperCase()
+    const timeout = opts.timeout === true
+    const message = timeout
+      ? `${method} ${opts.path}: timeout after ${opts.timeoutMs ?? 0}ms`
+      : `${method} ${opts.path}: ${opts.status ?? 'unknown'} ${opts.statusText ?? ''}`.trim()
+    super(message)
+    this.name = 'ApiRequestError'
+    this.method = method
+    this.path = opts.path
+    this.status = opts.status
+    this.statusText = opts.statusText
+    this.timeout = timeout
+  }
+}
 
 async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController()
@@ -55,7 +86,12 @@ async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: numb
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
-      throw new Error(`${method} ${path}: timeout after ${timeoutMs}ms`)
+      throw new ApiRequestError({
+        method,
+        path,
+        timeout: true,
+        timeoutMs,
+      })
     }
     throw err
   } finally {
@@ -76,12 +112,39 @@ function defaultBoardVoter(): string {
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetchWithTimeout(path, { headers: authHeaders() }, DEFAULT_GET_TIMEOUT_MS)
-  if (!res.ok) throw new Error(`GET ${path}: ${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    throw new ApiRequestError({
+      method: 'GET',
+      path,
+      status: res.status,
+      statusText: res.statusText,
+    })
+  }
   return res.json() as Promise<T>
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function parseStatusFromMessage(message: string): number | null {
+  const match = message.match(/\b(\d{3})\b/)
+  if (!match) return null
+  const statusToken = match[1]
+  if (!statusToken) return null
+  const status = Number.parseInt(statusToken, 10)
+  return Number.isFinite(status) ? status : null
+}
+
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof ApiRequestError) {
+    return err.timeout || (typeof err.status === 'number' && RETRYABLE_STATUS_CODES.has(err.status))
+  }
+
+  if (!(err instanceof Error)) return false
+  if (/timeout after \d+ms/i.test(err.message)) return true
+  const parsedStatus = parseStatusFromMessage(err.message)
+  return parsedStatus !== null && RETRYABLE_STATUS_CODES.has(parsedStatus)
 }
 
 async function withRetries<T>(
@@ -95,7 +158,7 @@ async function withRetries<T>(
     try {
       return await run()
     } catch (err) {
-      if (attempt >= retries) throw err
+      if (!isRetryableError(err) || attempt >= retries) throw err
       const delayMs = 250 * (attempt + 1)
       console.warn(`[dashboard/api] ${operation} failed (attempt ${attempt + 1}), retrying in ${delayMs}ms`, err)
       await sleep(delayMs)
@@ -110,7 +173,14 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   }, DEFAULT_POST_TIMEOUT_MS)
-  if (!res.ok) throw new Error(`POST ${path}: ${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    throw new ApiRequestError({
+      method: 'POST',
+      path,
+      status: res.status,
+      statusText: res.statusText,
+    })
+  }
   return res.json() as Promise<T>
 }
 
@@ -128,7 +198,14 @@ async function postRaw(
     },
     body: JSON.stringify(body),
   }, timeoutMs)
-  if (!res.ok) throw new Error(`POST ${path}: ${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    throw new ApiRequestError({
+      method: 'POST',
+      path,
+      status: res.status,
+      statusText: res.statusText,
+    })
+  }
   return res.text()
 }
 

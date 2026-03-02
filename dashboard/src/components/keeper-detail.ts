@@ -439,7 +439,7 @@ function KeeperMonologue({ keeperName }: { keeperName: string }) {
             <input 
               type="text" 
               value=${chatInput} 
-              onInput=${(e: any) => setChatInput(e.target.value)} 
+              onInput=${(e: Event) => setChatInput((e.currentTarget as HTMLInputElement).value)} 
               onKeyDown=${(e: KeyboardEvent) => e.key === "Enter" && !e.shiftKey && sendPing()}
               placeholder="Ping the agent..."
               disabled=${isSending}

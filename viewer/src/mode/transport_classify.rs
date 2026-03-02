@@ -112,4 +112,18 @@ mod tests {
         assert!(cloned.ok);
         assert_eq!(format!("{:?}", row), format!("{:?}", cloned));
     }
+
+    #[test]
+    fn preflight_row_with_hint() {
+        let row = PreflightRow {
+            ok: false,
+            label: "서버 연결".to_string(),
+            detail: "HTTP 502 응답".to_string(),
+            hint: Some("프록시 확인".to_string()),
+        };
+        assert!(!row.ok);
+        assert_eq!(row.hint.as_deref(), Some("프록시 확인"));
+        let cloned = row.clone();
+        assert_eq!(cloned.hint, row.hint);
+    }
 }

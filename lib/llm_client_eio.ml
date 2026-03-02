@@ -54,18 +54,18 @@ let model_to_string = function
 (** Build MCP JSON-RPC request for LLM call *)
 let build_request ~model ~prompt =
   let model_str = model_to_string model in
-  Printf.sprintf {|{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "%s",
-    "arguments": {
-      "prompt": %s,
-      "response_format": "verbose"
-    }
-  }
-}|} model_str (Yojson.Safe.to_string (`String prompt))
+  Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String model_str);
+      ("arguments", `Assoc [
+        ("prompt", `String prompt);
+        ("response_format", `String "verbose");
+      ]);
+    ]);
+  ])
 
 (** Parse LLM response from MCP JSON-RPC response *)
 let parse_response json_str =
@@ -280,26 +280,25 @@ Output JSON only (no markdown):
     @param timeout Timeout in seconds (default: 120)
     @param max_replans Maximum re-planning attempts (default: 2) *)
 let build_chain_request ~goal ?chain_id ?(timeout=120) ?(max_replans=2) () =
-  let chain_id_field = match chain_id with
-    | Some id -> Printf.sprintf {|"chain_id": %s,
-      |} (Yojson.Safe.to_string (`String id))
-    | None -> ""
+  let chain_id_fields = match chain_id with
+    | Some id -> [("chain_id", `String id)]
+    | None -> []
   in
-  Printf.sprintf {|{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "chain.orchestrate",
-    "arguments": {
-      %s"goal": %s,
-      "timeout": %d,
-      "max_replans": %d,
-      "trace": false,
-      "verify_on_complete": true
-    }
-  }
-}|} chain_id_field (Yojson.Safe.to_string (`String goal)) timeout max_replans
+  Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "chain.orchestrate");
+      ("arguments", `Assoc (chain_id_fields @ [
+        ("goal", `String goal);
+        ("timeout", `Int timeout);
+        ("max_replans", `Int max_replans);
+        ("trace", `Bool false);
+        ("verify_on_complete", `Bool true);
+      ]));
+    ]);
+  ])
 
 (** Call chain.orchestrate on llm-mcp server
     @param net Eio network capability

@@ -1103,7 +1103,7 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
     (opt_str "personalityHint" personality_hint)
     (opt_str "primaryValue" primary_value)
   in
-  let gql_body = Printf.sprintf {|{"query": "%s"}|} (esc mutation) in
+  let gql_body = Yojson.Safe.to_string (`Assoc [("query", `String mutation)]) in
   Printf.eprintf "[Admin] Creating agent '%s' via GraphQL...\n%!" name;
   match graphql_request ~timeout_sec:10.0 gql_body with
   | Error err ->
@@ -1304,7 +1304,7 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
     (String.escaped (utf8_truncate content 100))
     target_id timestamp
   in
-  let json_payload = Printf.sprintf {|{"query": "%s"}|} (String.escaped mutation) in
+  let json_payload = Yojson.Safe.to_string (`Assoc [("query", `String mutation)]) in
   (* Fire and forget - don't block the main loop, but log failures *)
   match graphql_request ~timeout_sec:3.0 json_payload with
   | Error err ->

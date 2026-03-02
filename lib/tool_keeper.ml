@@ -5784,8 +5784,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
            | Trajectory.Reject reason, _ ->
                Printf.eprintf "[keeper-autonomy] GATE BLOCKED %s: %s\n%!"
                  tc.call_name reason;
-               Printf.sprintf "{\"gate_blocked\":\"%s\",\"reason\":\"%s\"}"
-                 tc.call_name reason
+               Yojson.Safe.to_string (`Assoc [("gate_blocked", `String tc.call_name); ("reason", `String reason)])
            | _, Some r -> r
            | _, None -> "{\"error\":\"no result\"}"
          in
@@ -6055,7 +6054,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    turn = traj_acc.Trajectory.turn;
                    round = 0;
                    tool_name = "_caution_warning";
-                   args_json = Printf.sprintf "{\"warning\":\"%s\"}" (String.escaped warning);
+                   args_json = Yojson.Safe.to_string (`Assoc [("warning", `String warning)]);
                    gate_decision = Trajectory.Pass;
                    result = Some warning;
                    duration_ms = 0;

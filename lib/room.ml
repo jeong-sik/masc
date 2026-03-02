@@ -850,7 +850,7 @@ let claim_task_r config ~agent_name ~task_id
                         Printf.eprintf "[room] agent state write failed: %s\n%!" msg
                   end;
                   let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
-                  log_event config (Printf.sprintf "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}" agent_name task_id (now_iso ()));
+                  log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_claim"); ("agent", `String agent_name); ("task", `String task_id); ("ts", `String (now_iso ()))]));
                   Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
           end)
       with e -> Error (Types.IoError (Printexc.to_string e))
@@ -1065,7 +1065,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
               end;
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
-              log_event config (Printf.sprintf "{\"type\":\"task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"notes\":%s,\"ts\":\"%s\"}" agent_name task_id (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes) (now_iso ()));
+              log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
             end
       with e -> Error (Types.IoError (Printexc.to_string e))
@@ -1119,8 +1119,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               end;
               let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
-              log_event config (Printf.sprintf "{\"type\":\"task_cancelled\",\"agent\":\"%s\",\"task\":\"%s\",\"reason\":%s,\"ts\":\"%s\"}"
-                agent_name task_id (if reason = "" then "null" else Printf.sprintf "\"%s\"" reason) (now_iso ()));
+              log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_cancelled"); ("agent", `String agent_name); ("task", `String task_id); ("reason", if reason = "" then `Null else `String reason); ("ts", `String (now_iso ()))]));
               Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
             end
       with e -> Error (Types.IoError (Printexc.to_string e))

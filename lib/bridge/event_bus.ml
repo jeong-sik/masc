@@ -7,15 +7,31 @@ type event_type =
   | DialogueSpoken of { agent: string; text: string }
 
 let to_json = function
-  | TurnStarted name -> 
-      Printf.sprintf "{\"type\": \"TurnStarted\", \"agent\": \"%s\"}" name
+  | TurnStarted name ->
+      Yojson.Safe.to_string (`Assoc [
+        ("type", `String "TurnStarted");
+        ("agent", `String name);
+      ])
   | ActionPerformed { agent; action; target } ->
-      let target_str = match target with Some t -> t | None -> "null" in
-      Printf.sprintf "{\"type\": \"ActionPerformed\", \"agent\": \"%s\", \"action\": \"%s\", \"target\": \"%s\"}" agent action target_str
+      let target_val = match target with Some t -> `String t | None -> `Null in
+      Yojson.Safe.to_string (`Assoc [
+        ("type", `String "ActionPerformed");
+        ("agent", `String agent);
+        ("action", `String action);
+        ("target", target_val);
+      ])
   | JudgmentMade { agent; result } ->
-      Printf.sprintf "{\"type\": \"JudgmentMade\", \"agent\": \"%s\", \"result\": \"%s\"}" agent result
+      Yojson.Safe.to_string (`Assoc [
+        ("type", `String "JudgmentMade");
+        ("agent", `String agent);
+        ("result", `String result);
+      ])
   | DialogueSpoken { agent; text } ->
-      Printf.sprintf "{\"type\": \"DialogueSpoken\", \"agent\": \"%s\", \"text\": \"%s\"}" agent text
+      Yojson.Safe.to_string (`Assoc [
+        ("type", `String "DialogueSpoken");
+        ("agent", `String agent);
+        ("text", `String text);
+      ])
 
 let broadcast event =
   let json = to_json event in

@@ -364,8 +364,11 @@ module FileSystem = struct
   }
 
   let lock_info_to_json info =
-    Printf.sprintf {|{"owner":"%s","acquired_at":%f,"expires_at":%f}|}
-      info.owner info.acquired_at info.expires_at
+    Yojson.Safe.to_string (`Assoc [
+      ("owner", `String info.owner);
+      ("acquired_at", `Float info.acquired_at);
+      ("expires_at", `Float info.expires_at);
+    ])
 
   let lock_info_of_json json =
     try

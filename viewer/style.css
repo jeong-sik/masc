@@ -3637,6 +3637,13 @@ body.wasm-dom-fallback #bevy-canvas {
     color: var(--text-dim);
 }
 
+.preflight-hint {
+    font-size: 0.8em;
+    color: #9ca3af;
+    margin-left: 1.5em;
+    margin-top: 2px;
+}
+
 .new-game-assignment {
     border: 1px dashed rgba(196, 162, 101, 0.22);
     border-radius: var(--panel-radius);

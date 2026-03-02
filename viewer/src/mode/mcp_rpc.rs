@@ -8,6 +8,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
+use super::transport_classify::classify_transport_error;
+
 pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value, String> {
     let url = crate::config::build_masc_url("mcp");
     let body = json!({
@@ -55,6 +57,12 @@ pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value,
     let body_text = body_js.as_string().unwrap_or_default();
 
     let body_preview = preview_text(&body_text, 240);
+
+    // Early exit on transport-level errors (HTML proxy pages, empty 5xx, etc.)
+    if let Some(transport_err) = classify_transport_error(status, &body_text) {
+        return Err(transport_err);
+    }
+
     let rpc: Value = if body_text.trim().is_empty() {
         json!({})
     } else {
@@ -283,6 +291,36 @@ fn push_candidate(out: &mut Vec<String>, raw: &str) {
     out.push(piece.to_string());
 }
 
+/// Lightweight HTTP GET returning `(status_code, body_text)`.
+/// Used for health checks where no JSON parsing is needed.
+pub(super) async fn http_get_text(url: &str) -> Result<(u16, String), String> {
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(web_sys::RequestMode::Cors);
+
+    let request = web_sys::Request::new_with_str_and_init(url, &opts)
+        .map_err(|e| format!("request 생성 실패: {:?}", e))?;
+
+    let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("fetch 실패: {:?}", e))?;
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| "response 변환 실패".to_string())?;
+    let status = resp.status();
+
+    let body_js = JsFuture::from(
+        resp.text()
+            .map_err(|e| format!("response.text() 실패: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("본문 읽기 실패: {:?}", e))?;
+    let body_text = body_js.as_string().unwrap_or_default();
+
+    Ok((status, body_text))
+}
+
 fn preview_text(raw: &str, max_chars: usize) -> String {
     let trimmed = raw.trim();
     if trimmed.chars().count() <= max_chars {
@@ -499,4 +537,6 @@ INFO warmup done
             Some(1)
         );
     }
+
+    // classify_transport_error tests moved to transport_classify.rs (native-testable)
 }

@@ -73,7 +73,7 @@ let handle_claim ctx args =
          ("type", `String "masc/task_claimed");
          ("task_id", `String task_id);
          ("agent_name", `String ctx.agent_name);
-         ("timestamp", `Float (Unix.gettimeofday ()));
+         ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error _ -> ());
   result_to_response result
@@ -124,7 +124,7 @@ let handle_done ctx args =
          ("type", `String "masc/task_done");
          ("task_id", `String task_id);
          ("agent_name", `String ctx.agent_name);
-         ("timestamp", `Float (Unix.gettimeofday ()));
+         ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
        Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));
@@ -189,7 +189,7 @@ let handle_cancel_task ctx args =
          ("task_id", `String task_id);
          ("agent_name", `String ctx.agent_name);
          ("reason", `String reason);
-         ("timestamp", `Float (Unix.gettimeofday ()));
+         ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
        Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
@@ -238,7 +238,7 @@ let handle_transition ctx args =
          ("task_id", `String task_id);
          ("action", `String action);
          ("agent_name", `String ctx.agent_name);
-         ("timestamp", `Float (Unix.gettimeofday ()));
+         ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
        Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));

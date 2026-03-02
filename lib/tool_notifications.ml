@@ -102,7 +102,8 @@ let handle_check_notifications (registry : Session.registry) ~agent_name args : 
 
 let handle_consume_notifications (registry : Session.registry) ~agent_name args : result =
   let limit = get_int args "limit" 10 in
-  let consumed = Session.with_lock registry (fun () ->
+  (* Single lock block: compute consumed + remaining atomically to avoid TOCTOU *)
+  let (consumed, remaining_count) = Session.with_lock registry (fun () ->
     match Hashtbl.find_opt registry.sessions agent_name with
     | Some session ->
         let rec split n lst = match n, lst with
@@ -113,18 +114,12 @@ let handle_consume_notifications (registry : Session.registry) ~agent_name args 
         in
         let (taken, remaining) = split limit session.message_queue in
         session.message_queue <- remaining;
-        taken
-    | None -> []
+        (taken, List.length remaining)
+    | None -> ([], 0)
   ) in
   let json = `Assoc [
     ("consumed", `Int (List.length consumed));
-    ("remaining", `Int (
-      Session.with_lock registry (fun () ->
-        match Hashtbl.find_opt registry.sessions agent_name with
-        | Some session -> List.length session.message_queue
-        | None -> 0
-      )
-    ));
+    ("remaining", `Int remaining_count);
     ("notifications", `List consumed);
   ] in
   (true, Yojson.Safe.pretty_to_string json)

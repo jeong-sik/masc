@@ -106,7 +106,7 @@ let ensure_dirs config =
 let () = Random.self_init ()
 
 let generate_thread_id () =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rand = Random.int 1_000_000 in
   Printf.sprintf "thread-%d-%06d" ts rand
 
@@ -303,7 +303,7 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "") ?s
     : (thread, string) result =
   ensure_dirs config;
   let id = generate_thread_id () in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
 
   (* Create initial turn if content provided *)
   let turns, current_turn =
@@ -365,7 +365,7 @@ let reply ~config ~thread_id ~speaker ~content
         Error (Printf.sprintf "Cannot reply: thread %s is %s (turn %d/%d)"
           thread_id (thread_status_to_string th.status) th.current_turn th.max_turns)
       else begin
-        let now = Unix.gettimeofday () in
+        let now = Time_compat.now () in
         let turn = {
           id = generate_turn_id ~thread_id ~seq:th.current_turn;
           seq = th.current_turn;
@@ -406,7 +406,7 @@ let conclude ~config ~thread_id ~concluder ~conclusion () : (thread, string) res
         Error (Printf.sprintf "Cannot conclude: thread %s is already %s"
           thread_id (thread_status_to_string th.status))
       else begin
-        let now = Unix.gettimeofday () in
+        let now = Time_compat.now () in
 
         (* Add concluding turn *)
         let turn = {

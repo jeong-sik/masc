@@ -180,7 +180,7 @@ let handle_add ctx args =
     else begin
       (* Determine destination based on confidence *)
       let dest_dir = if confidence < 0.5 then candidates_dir () else library_root () in
-      let date = Unix.gettimeofday () |> Unix.localtime in
+      let date = Time_compat.now () |> Unix.localtime in
       let date_str = sprintf "%04d%02d%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
       let topic_slug = String.lowercase_ascii title
         |> String.map (fun c -> if c = ' ' then '-' else c)

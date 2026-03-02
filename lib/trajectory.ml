@@ -210,7 +210,7 @@ let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulat
     keeper_name;
     trace_id;
     generation;
-    started_at = Unix.gettimeofday ();
+    started_at = Time_compat.now ();
     masc_root;
   }
 
@@ -233,7 +233,7 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
     trace_id = acc.trace_id;
     generation = acc.generation;
     started_at = acc.started_at;
-    ended_at = Unix.gettimeofday ();
+    ended_at = Time_compat.now ();
     entries = List.rev acc.entries;
     total_cost_usd = acc.total_cost;
     total_turns = acc.turn;

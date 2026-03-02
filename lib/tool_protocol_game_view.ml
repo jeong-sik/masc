@@ -222,7 +222,7 @@ let broadcast_deprecated_alias ~agent_name ~legacy_tool ~canonical_tool =
               ("canonical_tool", `String canonical_tool);
               ("protocol_version", `String protocol_version);
             ] );
-        ("timestamp", `Float (Unix.gettimeofday ()));
+        ("timestamp", `Float (Time_compat.now ()));
       ]
   in
   let notification =
@@ -242,7 +242,7 @@ let broadcast_masc_event ~event_type ~agent ?(data = `Null) () =
         ("type", `String event_type);
         ("agent", `String agent);
         ("data", data);
-        ("timestamp", `Float (Unix.gettimeofday ()));
+        ("timestamp", `Float (Time_compat.now ()));
       ]
   in
   let notification =

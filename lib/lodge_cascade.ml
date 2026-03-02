@@ -205,12 +205,12 @@ let run_cascade_traced
     ~(is_valid : string -> bool)
     ~(agent_name : string)
   : cascade_result =
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
   let rotated = rotate_claude_slots slots in
   let rec try_slots = function
     | [] ->
       printf "   ❌ [%s] All LLMs failed, skipping\n%!" agent_name;
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
       { response = ""; llm_used = "none"; duration_ms }
     | slot :: rest ->
       let extra_args =
@@ -236,7 +236,7 @@ let run_cascade_traced
       if is_valid r then begin
         printf "   🧠 [%s] %s: %s\n%!" agent_name label
           (if String.length r > 80 then String.sub r 0 80 ^ "..." else r);
-        let duration_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
+        let duration_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
         { response = r; llm_used = label; duration_ms }
       end else begin
         printf "   ⚠️ [%s] %s failed (%d chars), next...\n%!" agent_name label (String.length r);

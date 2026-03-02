@@ -81,7 +81,7 @@ let check_identical_pattern ~turns ~speaker ~content ~max_identical =
 
 (** Check for cooldown violation *)
 let check_cooldown ~turns ~speaker ~cooldown_sec =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let last_turn_from_speaker =
     turns
     |> List.rev

@@ -44,7 +44,7 @@ let truncate ~max_len s =
   else s
 
 let now_iso8601 () =
-  let t = Unix.gettimeofday () in
+  let t = Time_compat.now () in
   let tm = Unix.gmtime t in
   sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.Unix.tm_year + 1900)

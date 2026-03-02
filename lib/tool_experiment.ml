@@ -224,7 +224,7 @@ let list_experiments config =
 let () = Random.self_init ()
 
 let generate_id () =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let ts = int_of_float (Time_compat.now () *. 1000.0) in
   let rand = Random.int 1_000_000 in
   Printf.sprintf "exp-%d-%06d" ts rand
 
@@ -244,7 +244,7 @@ let broadcast_experiment_event ~event_type ~agent ?(data = `Null) () =
         ("type", `String event_type);
         ("agent", `String agent);
         ("data", data);
-        ("timestamp", `Float (Unix.gettimeofday ()));
+        ("timestamp", `Float (Time_compat.now ()));
       ]
   in
   let notification =
@@ -342,7 +342,7 @@ let handle_experiment_start ctx args : result =
         status = Running;
         assignments = [];
         observations = [];
-        created_at = Unix.gettimeofday ();
+        created_at = Time_compat.now ();
       }
     in
     (try
@@ -389,7 +389,7 @@ let handle_experiment_assign ctx args : result =
             if exp.status <> Running then
               (false, Printf.sprintf "Experiment %s is not running" experiment_id)
             else
-              let now = Unix.gettimeofday () in
+              let now = Time_compat.now () in
               let assignment = { subject_id; group; timestamp = now } in
               let updated =
                 { exp with assignments = exp.assignments @ [ assignment ] }
@@ -431,7 +431,7 @@ let handle_experiment_observe ctx args : result =
         if exp.status <> Running then
           (false, Printf.sprintf "Experiment %s is not running" experiment_id)
         else
-          let now = Unix.gettimeofday () in
+          let now = Time_compat.now () in
           let obs = { subject_id; metric_name; value; timestamp = now } in
           let updated =
             { exp with observations = exp.observations @ [ obs ] }
@@ -465,7 +465,7 @@ let handle_experiment_checkpoint ctx args : result =
     match load_experiment ctx.config experiment_id with
     | None -> (false, Printf.sprintf "Experiment not found: %s" experiment_id)
     | Some exp ->
-        let elapsed = Unix.gettimeofday () -. exp.created_at in
+        let elapsed = Time_compat.now () -. exp.created_at in
         let elapsed_pct =
           if exp.window_seconds > 0.0 then
             Float.min 1.0 (elapsed /. exp.window_seconds)
@@ -657,7 +657,7 @@ let handle_experiment_status ctx args : result =
                     ("control", `Int control_count);
                   ] );
               ("total_observations", `Int (List.length exp.observations));
-              ("elapsed_seconds", `Float (Unix.gettimeofday () -. exp.created_at));
+              ("elapsed_seconds", `Float (Time_compat.now () -. exp.created_at));
               ("window_seconds", `Float exp.window_seconds);
             ]
         in

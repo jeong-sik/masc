@@ -86,7 +86,7 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5) () : (sessio
       quorum;
       threshold;
       state = Open;
-      created_at = Unix.gettimeofday ();
+      created_at = Time_compat.now ();
       closed_at = None;
     } in
     Hashtbl.replace sessions session.id session;
@@ -106,7 +106,7 @@ let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.
         agent;
         decision;
         reason;
-        timestamp = Unix.gettimeofday ();
+        timestamp = Time_compat.now ();
         archetype;
         weight;
       } in
@@ -187,7 +187,7 @@ let close_session ~session_id : (session, error) Result.t =
     let updated = { 
       session with 
       state = Closed;
-      closed_at = Some (Unix.gettimeofday ());
+      closed_at = Some (Time_compat.now ());
     } in
     Hashtbl.replace sessions session_id updated;
     Ok updated
@@ -200,7 +200,7 @@ let cancel_session ~session_id : (session, error) Result.t =
     let updated = { 
       session with 
       state = Cancelled;
-      closed_at = Some (Unix.gettimeofday ());
+      closed_at = Some (Time_compat.now ());
     } in
     Hashtbl.replace sessions session_id updated;
     Ok updated

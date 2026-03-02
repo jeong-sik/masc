@@ -254,7 +254,7 @@ let elevenlabs_direct_tts ~agent_id ~message ~voice =
         ("style", `Float 0.0);
       ]);
     ]) in
-    let timestamp = int_of_float (Unix.gettimeofday ()) in
+    let timestamp = int_of_float (Time_compat.now ()) in
     let safe_agent = String.map (fun c ->
       if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
          || (c >= '0' && c <= '9') || c = '-' || c = '_'
@@ -319,7 +319,7 @@ let elevenlabs_direct_tts ~agent_id ~message ~voice =
         ("model", `String "eleven_multilingual_v2");
         ("response_format", `String "mp3");
       ]) in
-      let timestamp = int_of_float (Unix.gettimeofday ()) in
+      let timestamp = int_of_float (Time_compat.now ()) in
       let safe_agent = String.map (fun c ->
         if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
            || (c >= '0' && c <= '9') || c = '-' || c = '_'
@@ -375,7 +375,7 @@ let elevenlabs_direct_tts ~agent_id ~message ~voice =
 let cleanup_old_audio_files () =
   let dir = ".masc/audio" in
   if Sys.file_exists dir && Sys.is_directory dir then begin
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     let cutoff = now -. 3600.0 in
     let entries = Sys.readdir dir in
     let removed = ref 0 in

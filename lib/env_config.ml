@@ -135,6 +135,15 @@ module Spawn = struct
       Higher value (600s) allows for slow network/API conditions while preventing indefinite hangs. *)
   let timeout_seconds =
     int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
+
+  (** Extended timeout for perpetual coding mode (seconds).
+      Used when perpetual_loop spawns coding agents. Default 2 hours. *)
+  let coding_timeout_seconds =
+    int_of_float (get_float ~default:7200.0 "MASC_SPAWN_CODING_TIMEOUT_SEC")
+
+  (** Grace period before timeout — sends SIGTERM for checkpoint opportunity (seconds). *)
+  let grace_period_seconds =
+    int_of_float (get_float ~default:60.0 "MASC_SPAWN_GRACE_PERIOD_SEC")
 end
 
 (** {1 Ollama Configuration} *)

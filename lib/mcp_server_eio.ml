@@ -1175,6 +1175,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         with exn ->
           Printf.eprintf "[perpetual:error] loop crashed for %s: %s\n%!"
             loop_state.Perpetual_loop.trace_id (Printexc.to_string exn)));
+    sw = Some sw;
+    proc_mgr = state.Mcp_server.proc_mgr;
   } in
   let simple_ctx_keeper : _ Tool_keeper.context = { config; sw; clock } in
   let trpg_keeper_call ~name:keeper_name ~message ~timeout_sec :

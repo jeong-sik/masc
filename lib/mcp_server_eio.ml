@@ -1051,7 +1051,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;
 
-  (* Update activity for any tool call - TODO: migrate to Session_eio when ready *)
+  (* Update activity for any tool call *)
   if agent_name <> "unknown" then begin
     Session.update_activity registry ~agent_name ();
     (* Keep read-only/fast tools non-blocking; heartbeat is best-effort. *)

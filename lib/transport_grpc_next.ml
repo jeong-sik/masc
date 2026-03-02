@@ -268,10 +268,8 @@ let add_task_handler (room_config: Room.config) (data: string) : string =
     encode_add_task_response response
 
 (** ClaimTask handler - assign task to agent.
-    TODO(A-3): ClaimTaskRequest proto lacks an agent_role field.
-    Add `string agent_role = 3` to proto/masc.proto and regenerate
-    to enable role-based claim filtering over gRPC. Until then the
-    call defaults to Unassigned, so role-gated tasks will be rejected. *)
+    agent_role defaults to Unassigned because the proto lacks the field.
+    See: https://github.com/jeong-sik/masc-mcp/issues/489 *)
 let claim_task_handler (room_config: Room.config) (data: string) : string =
   match decode_claim_task_request data with
   | None -> make_error_response "Invalid ClaimTaskRequest"

@@ -80,10 +80,10 @@ let handle_notification_count (registry : Session.registry) ~agent_name : result
     | Some session -> List.length session.message_queue
     | None -> 0
   ) in
-  (true, Printf.sprintf "{\"count\": %d}" count)
+  (true, Yojson.Safe.to_string (`Assoc [("count", `Int count)]))
 
 let handle_check_notifications (registry : Session.registry) ~agent_name args : result =
-  let limit = get_int args "limit" 10 in
+  let limit = max 0 (get_int args "limit" 10) in
   let notifications = Session.with_lock registry (fun () ->
     match Hashtbl.find_opt registry.sessions agent_name with
     | Some session ->
@@ -101,7 +101,7 @@ let handle_check_notifications (registry : Session.registry) ~agent_name args : 
   (true, Yojson.Safe.pretty_to_string json)
 
 let handle_consume_notifications (registry : Session.registry) ~agent_name args : result =
-  let limit = get_int args "limit" 10 in
+  let limit = max 0 (get_int args "limit" 10) in
   (* Single lock block: compute consumed + remaining atomically to avoid TOCTOU *)
   let (consumed, remaining_count) = Session.with_lock registry (fun () ->
     match Hashtbl.find_opt registry.sessions agent_name with

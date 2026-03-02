@@ -127,7 +127,7 @@ let handle_done ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
-       Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));
+       Printf.eprintf "[task] done transition failed: %s\n%!" (Types.masc_error_to_string err));
   (* Record metrics on successful completion *)
   (match result with
    | Ok _ ->
@@ -241,7 +241,7 @@ let handle_transition ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
-       Printf.eprintf "[task] notification failed: %s\n%!" (Types.masc_error_to_string err));
+       Printf.eprintf "[task] task transition failed: %s\n%!" (Types.masc_error_to_string err));
   (* Record metrics *)
   (match result, action_lc with
    | Ok _, "done" ->

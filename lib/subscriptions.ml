@@ -151,6 +151,9 @@ end
 let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
 
 let set_session_push_fn (fn : Yojson.Safe.t -> int) =
+  (match !session_registry_ref with
+   | Some _ -> Printf.eprintf "[subscriptions] WARNING: session push fn already set, overwriting\n%!"
+   | None -> ());
   session_registry_ref := Some fn
 
 (** Push a structured event to all active agent sessions.
@@ -158,7 +161,8 @@ let set_session_push_fn (fn : Yojson.Safe.t -> int) =
 let push_event_to_sessions (event : Yojson.Safe.t) : unit =
   match !session_registry_ref with
   | Some push_fn -> ignore (push_fn event)
-  | None -> ()
+  | None ->
+      Printf.eprintf "[subscriptions] push_event_to_sessions: registry not wired\n%!"
 
 (** Notify all subscribers of a resource change *)
 let notify_change ~(resource : resource_type) ~(change : change_type)

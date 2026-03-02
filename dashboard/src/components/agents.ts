@@ -21,7 +21,7 @@ function AgentCard({ agent }: { agent: Agent }) {
             ? html`<span class="agent-korean">${agent.koreanName}</span>`
             : null}
         </div>
-        <${MitosisRing} ratio=${(agent as any).context_ratio} />
+        <${MitosisRing} ratio=${agent.context_ratio} />
         <${StatusBadge} status=${agent.status} />
       </div>
       ${agent.current_task
@@ -74,7 +74,7 @@ function KeeperCard({ keeper }: { keeper: Keeper }) {
       <div class="live-agent-main">
         <div class="live-agent-title">
           <span class="live-agent-name">${keeper.emoji ?? ''} ${keeper.name}</span>
-          <${MitosisRing} ratio=${(keeper as any).context_ratio} />
+          <${MitosisRing} ratio=${keeper.context_ratio} />
         <${StatusBadge} status=${keeper.status} />
           ${keeper.model ? html`<span class="pill">${keeper.model}</span>` : null}
         </div>

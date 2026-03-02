@@ -25,6 +25,16 @@ type walph_state = {
   mutable current_preset : string;
   mutable iterations : int;
   mutable completed : int;
+  mutable claimed : int;
+  mutable released_on_error : int;
+  mutable errors : int;
+  mutable consecutive_errors : int;
+  mutable max_consecutive_errors : int;
+  mutable error_backoff_sec : int;
+  mutable last_error : string option;
+  mutable last_task_id : string option;
+  mutable started_at : string option;
+  mutable last_stop_reason : string option;
   mutex : Eio.Mutex.t;        (** Eio-native mutex (fiber-friendly) *)
   cond : Eio.Condition.t;     (** Eio-native condition variable *)
 }
@@ -68,6 +78,9 @@ let get_walph_state config ~agent_name =
             let s = {
               running = false; paused = false; stop_requested = false;
               current_preset = ""; iterations = 0; completed = 0;
+              claimed = 0; released_on_error = 0; errors = 0; consecutive_errors = 0;
+              max_consecutive_errors = 5; error_backoff_sec = 2;
+              last_error = None; last_task_id = None; started_at = None; last_stop_reason = None;
               mutex = Eio.Mutex.create ();
               cond = Eio.Condition.create ();
             } in
@@ -120,6 +133,39 @@ let list_walph_states config =
 let with_walph_lock state f =
   Eio.Mutex.use_rw ~protect:true state.mutex f
 
+(** JSON status payload for a single walph agent. *)
+let walph_status_json config ~agent_name =
+  match get_walph_state config ~agent_name with
+  | Error msg ->
+      `Assoc [
+        ("ok", `Bool false);
+        ("agent", `String agent_name);
+        ("error", `String msg);
+      ]
+  | Ok state ->
+      with_walph_lock state (fun () ->
+        `Assoc [
+          ("ok", `Bool true);
+          ("agent", `String agent_name);
+          ("running", `Bool state.running);
+          ("paused", `Bool state.paused);
+          ("stop_requested", `Bool state.stop_requested);
+          ("preset", `String state.current_preset);
+          ("iterations", `Int state.iterations);
+          ("claimed", `Int state.claimed);
+          ("completed", `Int state.completed);
+          ("released_on_error", `Int state.released_on_error);
+          ("errors", `Int state.errors);
+          ("consecutive_errors", `Int state.consecutive_errors);
+          ("max_consecutive_errors", `Int state.max_consecutive_errors);
+          ("error_backoff_sec", `Int state.error_backoff_sec);
+          ("last_task_id", Option.fold ~none:`Null ~some:(fun s -> `String s) state.last_task_id);
+          ("last_error", Option.fold ~none:`Null ~some:(fun s -> `String s) state.last_error);
+          ("started_at", Option.fold ~none:`Null ~some:(fun s -> `String s) state.started_at);
+          ("last_stop_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) state.last_stop_reason);
+        ]
+      )
+
 (** {1 Control Commands} *)
 
 (** Handle @walph control command (Eio-native, fiber-safe)
@@ -162,8 +208,10 @@ let walph_control config ~from_agent ~command ~args ?(target_agent=None) () =
           "ℹ️ @walph is not currently running"
     | "STATUS" ->
         if state.running then
-          Printf.sprintf "📊 @walph STATUS: %s (iter: %d, done: %d, paused: %b)"
-            state.current_preset state.iterations state.completed state.paused
+          Printf.sprintf
+            "📊 @walph STATUS: %s (iter: %d, claimed: %d, done: %d, released: %d, errs: %d/%d, paused: %b)"
+            state.current_preset state.iterations state.claimed state.completed
+            state.released_on_error state.consecutive_errors state.max_consecutive_errors state.paused
         else
           "ℹ️ @walph is idle (use @walph START <preset> to begin)"
     | "START" ->
@@ -227,7 +275,9 @@ let get_chain_id_for_preset = function
     @param max_iterations Maximum iterations before forced stop
     @param target Target file/directory for preset
     @return Status string with loop results *)
-let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations=10) ?target () =
+let walph_loop config ~net ~clock ~agent_name
+    ?(preset="drain") ?(max_iterations=10) ?target
+    ?(max_consecutive_errors=5) ?(error_backoff_sec=2) () =
   Room.ensure_initialized config;
 
   (* Get Walph state for this specific agent *)
@@ -247,6 +297,16 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
       walph_state.current_preset <- preset;
       walph_state.iterations <- 0;
       walph_state.completed <- 0;
+      walph_state.claimed <- 0;
+      walph_state.released_on_error <- 0;
+      walph_state.errors <- 0;
+      walph_state.consecutive_errors <- 0;
+      walph_state.max_consecutive_errors <- max 1 max_consecutive_errors;
+      walph_state.error_backoff_sec <- max 0 error_backoff_sec;
+      walph_state.last_error <- None;
+      walph_state.last_task_id <- None;
+      walph_state.started_at <- Some (Types.now_iso ());
+      walph_state.last_stop_reason <- None;
       Ok ()
     end
   ) in
@@ -255,14 +315,72 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
   | Error msg ->
       let _ = Room.broadcast config ~from_agent:"walph" ~content:msg in
       msg
-  | Ok () ->
-      (* Use Fun.protect to ensure running <- false even on exceptions (zombie prevention) *)
-      let stop_reason = ref "" in
+	  | Ok () ->
+	      (* Use Fun.protect to ensure running <- false even on exceptions (zombie prevention) *)
+	      let stop_reason = ref "" in
+	      let failed_task_ids : (string, unit) Hashtbl.t = Hashtbl.create 32 in
+	      let failed_task_id_list () =
+	        Hashtbl.fold (fun task_id () acc -> task_id :: acc) failed_task_ids []
+	      in
+	      let mark_failed task_id =
+	        if task_id <> "" then Hashtbl.replace failed_task_ids task_id ()
+	      in
+	      let note_claim ~task_id =
+	        with_walph_lock walph_state (fun () ->
+	          walph_state.claimed <- walph_state.claimed + 1;
+	          walph_state.last_task_id <- Some task_id
+	        )
+	      in
+	      let note_success ~task_id =
+	        with_walph_lock walph_state (fun () ->
+	          walph_state.completed <- walph_state.completed + 1;
+	          walph_state.consecutive_errors <- 0;
+	          walph_state.last_task_id <- Some task_id
+	        )
+	      in
+	      let note_error ?task_id err_msg =
+	        with_walph_lock walph_state (fun () ->
+	          walph_state.errors <- walph_state.errors + 1;
+	          walph_state.consecutive_errors <- walph_state.consecutive_errors + 1;
+	          walph_state.last_error <- Some err_msg;
+	          walph_state.last_task_id <- task_id;
+	          walph_state.consecutive_errors >= walph_state.max_consecutive_errors
+	        )
+	      in
+	      let release_claim ~task_id =
+	        match Room.transition_task_r config ~agent_name ~task_id ~action:"release" () with
+	        | Ok _ ->
+	            with_walph_lock walph_state (fun () ->
+	              walph_state.released_on_error <- walph_state.released_on_error + 1
+	            );
+	            "ok"
+	        | Error e ->
+	            let release_err = Types.masc_error_to_string e in
+	            Room.log_event config (Printf.sprintf
+	              "{\"type\":\"walph_release_error\",\"agent\":\"%s\",\"task\":\"%s\",\"error\":%s,\"ts\":\"%s\"}"
+	              agent_name task_id
+	              (Yojson.Safe.to_string (`String release_err))
+	              (Types.now_iso ()));
+	            "error"
+	      in
+	      let log_loop_error ?task_id ~error ~release_status () =
+	        Room.log_event config (Printf.sprintf
+	          "{\"type\":\"walph_loop_error\",\"agent\":\"%s\",\"preset\":\"%s\",\"task\":%s,\"error\":%s,\"release\":\"%s\",\"ts\":\"%s\"}"
+	          agent_name preset
+	          (match task_id with Some tid -> Yojson.Safe.to_string (`String tid) | None -> "null")
+	          (Yojson.Safe.to_string (`String error))
+	          release_status
+	          (Types.now_iso ()))
+	      in
+	      let maybe_backoff () =
+	        if walph_state.error_backoff_sec > 0 then
+	          Eio.Time.sleep clock (float_of_int walph_state.error_backoff_sec)
+	      in
 
-      Common.protect ~module_name:"room_walph_eio" ~finally_label:"finalizer"
-        ~finally:(fun () ->
-          (* Always reset running state, even on exception *)
-          with_walph_lock walph_state (fun () ->
+	      Common.protect ~module_name:"room_walph_eio" ~finally_label:"finalizer"
+	        ~finally:(fun () ->
+	          (* Always reset running state, even on exception *)
+	          with_walph_lock walph_state (fun () ->
             walph_state.running <- false
           ))
         (fun () ->
@@ -272,17 +390,11 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
               (match target with Some t -> " --target " ^ t | None -> "")
               max_iterations) in
 
-          (* UTF-8 safe prefix check: 📋=4bytes, ✅=3bytes, ❌=3bytes *)
-          let starts_with prefix s =
-            let plen = String.length prefix in
-            String.length s >= plen && String.sub s 0 plen = prefix
-          in
-
-          (* Run the loop *)
-          let rec loop () =
-            (* Check control state before each iteration *)
-            if not (walph_should_continue config ~agent_name) then begin
-              stop_reason := if walph_state.stop_requested then "stop requested" else "paused indefinitely";
+	          (* Run the loop *)
+	          let rec loop () =
+	            (* Check control state before each iteration *)
+	            if not (walph_should_continue config ~agent_name) then begin
+	              stop_reason := if walph_state.stop_requested then "stop requested" else "paused indefinitely";
               ()
             end else begin
               (* Check max iterations with lock *)
@@ -294,118 +406,138 @@ let walph_loop config ~net ~clock ~agent_name ?(preset="drain") ?(max_iterations
                   walph_state.iterations <- walph_state.iterations + 1;
                   false
                 end
-              ) in
-              if should_stop then ()
-              else begin
-                (* Try to claim next task *)
-                let claim_result = Room.claim_next config ~agent_name in
+	              ) in
+	              if should_stop then ()
+	              else begin
+	                (* Try to claim next task *)
+	                let claim_result =
+	                  Room.claim_next_r config ~agent_name
+	                    ~exclude_task_ids:(failed_task_id_list ()) ()
+	                in
+	                match claim_result with
+	                | Room.Claim_next_no_unclaimed ->
+	                    stop_reason := "backlog drained"
+	                | Room.Claim_next_no_eligible _ ->
+	                    stop_reason := "no eligible tasks (failed_this_run)"
+	                | Room.Claim_next_error err_msg ->
+	                    let cutoff = note_error err_msg in
+	                    log_loop_error ~error:err_msg ~release_status:"n/a" ();
+	                    let _ = Room.broadcast config ~from_agent:agent_name
+	                      ~content:(Printf.sprintf "⚠️ @walph claim error: %s" err_msg) in
+	                    if cutoff then
+	                      stop_reason := Printf.sprintf "max_consecutive_errors reached (%d)" walph_state.max_consecutive_errors
+	                    else begin
+	                      maybe_backoff ();
+	                      loop ()
+	                    end
+	                | Room.Claim_next_claimed { task_id; message = claim_message; title = task_title; _ } ->
+	                    note_claim ~task_id;
 
-                if starts_with "📋" claim_result || starts_with "No unclaimed" claim_result then begin
-                  (* No more unclaimed tasks - drain complete *)
-                  stop_reason := "backlog drained";
-                  ()
-                end else if starts_with "✅" claim_result then begin
-                  (* Extract task ID from claim result.
-                     Format: "✅ agent auto-claimed [P3] task-XXX: Title" *)
-                  let task_id =
-                    try
-                      let re = Str.regexp {|\(task-[0-9]+\)|} in
-                      if Str.string_match re claim_result 0 then
-                        Some (Str.matched_group 1 claim_result)
-                      else if Str.search_forward re claim_result 0 >= 0 then
-                        Some (Str.matched_group 1 claim_result)
-                      else None
-                    with Not_found | Invalid_argument _ -> None
-                  in
+	                    (* Execute chain if preset has one (not drain) *)
+	                    let chain_id = get_chain_id_for_preset preset in
+	                    let chain_result =
+	                      match chain_id with
+	                      | None ->
+	                        (* Drain mode: no chain, just claim/done *)
+	                        Ok "drain mode - no chain"
+	                      | Some cid ->
+	                        (* Build goal from task info and preset *)
+	                        let task_desc =
+	                          let tasks = Room.get_tasks_raw config in
+	                          match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
+	                          | Some t -> t.description
+	                          | None -> ""
+	                        in
+	                        let goal = match preset with
+	                          | "coverage" ->
+	                              Printf.sprintf "Improve test coverage for: %s. %s. Add comprehensive tests with edge cases." task_title task_desc
+	                          | "refactor" ->
+	                              Printf.sprintf "Refactor the following: %s. %s. Improve code quality, reduce complexity, follow best practices." task_title task_desc
+	                          | "docs" ->
+	                              Printf.sprintf "Create or improve documentation for: %s. %s. Include examples and clear explanations." task_title task_desc
+	                          | "review" ->
+	                              Printf.sprintf "Review PR: %s. %s. Check code quality, security, test coverage." task_title task_desc
+	                          | "figma" ->
+	                              if String.length (String.trim task_desc) > 0 then task_desc
+	                              else
+	                                Printf.sprintf
+	                                  "Vision-first Figma task: %s. Provide figma_dsl JSON in the task description."
+	                                  task_title
+	                          | _ ->
+	                              Printf.sprintf "Complete this task: %s. %s" task_title task_desc
+	                        in
+	                        let _ = Room.broadcast config ~from_agent:agent_name
+	                          ~content:(Printf.sprintf "🔗 @walph executing '%s' for '%s'..." cid task_title) in
+	                        (* Direct LLM call — no llm-mcp dependency *)
+	                        ignore (net, clock);  (* Previously used for llm-mcp HTTP call *)
+	                        try
+	                          let response = Llm_direct.dispatch
+	                            ~tool_name:"glm"
+	                            ~model:Env_config.Llm.default_model
+	                            ~prompt:goal
+	                            ~timeout_sec:60
+	                            ~max_chars:4000
+	                            ()
+	                          in
+	                          if response = "" then Error "Empty LLM response"
+	                          else Ok response
+	                        with exn -> Error (Printexc.to_string exn)
+	                    in
 
-                  (* Execute chain if preset has one (not drain) *)
-                  let chain_id = get_chain_id_for_preset preset in
-                  let chain_result =
-                    match chain_id with
-                    | None ->
-                      (* Drain mode: no chain, just claim/done *)
-                      Ok "drain mode - no chain"
-                    | Some cid ->
-                      (* Build goal from task info and preset *)
-                      let task_title, task_desc = match task_id with
-                        | Some tid ->
-                            let tasks = Room.get_tasks_raw config in
-                            (match List.find_opt (fun (t : Types.task) -> t.id = tid) tasks with
-                             | Some t -> (t.title, t.description)
-                             | None -> (tid, ""))
-                        | None -> ("unknown task", "")
-                      in
-                      let goal = match preset with
-                        | "coverage" ->
-                            Printf.sprintf "Improve test coverage for: %s. %s. Add comprehensive tests with edge cases." task_title task_desc
-                        | "refactor" ->
-                            Printf.sprintf "Refactor the following: %s. %s. Improve code quality, reduce complexity, follow best practices." task_title task_desc
-                        | "docs" ->
-                            Printf.sprintf "Create or improve documentation for: %s. %s. Include examples and clear explanations." task_title task_desc
-                        | "review" ->
-                            Printf.sprintf "Review PR: %s. %s. Check code quality, security, test coverage." task_title task_desc
-                        | "figma" ->
-                            if String.length (String.trim task_desc) > 0 then task_desc
-                            else
-                              Printf.sprintf
-                                "Vision-first Figma task: %s. Provide figma_dsl JSON in the task description."
-                                task_title
-                        | _ ->
-                            Printf.sprintf "Complete this task: %s. %s" task_title task_desc
-                      in
-                      let _ = Room.broadcast config ~from_agent:agent_name
-                        ~content:(Printf.sprintf "🔗 @walph executing '%s' for '%s'..." cid task_title) in
-                      (* Direct LLM call — no llm-mcp dependency *)
-                      ignore (net, clock);  (* Previously used for llm-mcp HTTP call *)
-                      try
-                        let response = Llm_direct.dispatch
-                          ~tool_name:"glm"
-                          ~model:Env_config.Llm.default_model
-                          ~prompt:goal
-                          ~timeout_sec:60
-                          ~max_chars:4000
-                          ()
-                        in
-                        if response = "" then Error "Empty LLM response"
-                        else Ok response
-                      with exn -> Error (Printexc.to_string exn)
-                  in
+	                    (match chain_result with
+	                     | Ok result ->
+	                         let notes_str =
+	                           Printf.sprintf "LLM result: %s"
+	                             (String.sub result 0 (min 100 (String.length result)))
+	                         in
+	                         (match Room.transition_task_r config ~agent_name ~task_id ~action:"done" ~notes:notes_str () with
+	                          | Ok _ ->
+	                              note_success ~task_id;
+	                              Room.log_event config (Printf.sprintf
+	                                "{\"type\":\"walph_task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"preset\":\"%s\",\"ts\":\"%s\"}"
+	                                agent_name task_id preset (Types.now_iso ()));
+	                              let _ = Room.broadcast config ~from_agent:agent_name
+	                                ~content:(Printf.sprintf "📊 @walph Iteration %d: %s ✅" walph_state.iterations claim_message) in
+	                              loop ()
+	                          | Error err ->
+	                              let err_msg = Types.masc_error_to_string err in
+	                              mark_failed task_id;
+	                              let release_status = release_claim ~task_id in
+	                              let cutoff = note_error ~task_id err_msg in
+	                              log_loop_error ~task_id ~error:err_msg ~release_status ();
+	                              let _ = Room.broadcast config ~from_agent:agent_name
+	                                ~content:(Printf.sprintf "⚠️ @walph done error on %s: %s (released)" task_id err_msg) in
+	                              if cutoff then
+	                                stop_reason := Printf.sprintf "max_consecutive_errors reached (%d)" walph_state.max_consecutive_errors
+	                              else begin
+	                                maybe_backoff ();
+	                                loop ()
+	                              end)
+	                     | Error err_msg ->
+	                         mark_failed task_id;
+	                         let release_status = release_claim ~task_id in
+	                         let cutoff = note_error ~task_id err_msg in
+	                         log_loop_error ~task_id ~error:err_msg ~release_status ();
+	                         let _ = Room.broadcast config ~from_agent:agent_name
+	                           ~content:(Printf.sprintf "⚠️ @walph chain error on %s: %s (released)" task_id err_msg) in
+	                         if cutoff then
+	                           stop_reason := Printf.sprintf "max_consecutive_errors reached (%d)" walph_state.max_consecutive_errors
+	                         else begin
+	                           maybe_backoff ();
+	                           loop ()
+	                         end)
+	              end
+	            end
+	          in
 
-                  (match chain_result with
-                   | Ok result ->
-                       with_walph_lock walph_state (fun () ->
-                         walph_state.completed <- walph_state.completed + 1
-                       );
-                       (* Mark task as done *)
-                       (match task_id with
-                        | Some tid ->
-                            let notes_str = Printf.sprintf "LLM result: %s" (String.sub result 0 (min 100 (String.length result))) in
-                            let _ = Room.transition_task_r config ~agent_name ~task_id:tid ~action:"done" ~notes:notes_str () in
-                            ()
-                        | None -> ());
-                       (* Broadcast progress *)
-                       let _ = Room.broadcast config ~from_agent:agent_name
-                         ~content:(Printf.sprintf "📊 @walph Iteration %d: %s ✅" walph_state.iterations claim_result) in
-                       loop ()
-                   | Error err_msg ->
-                       let _ = Room.broadcast config ~from_agent:agent_name
-                         ~content:(Printf.sprintf "⚠️ @walph chain error: %s (continuing...)" err_msg) in
-                       (* Continue even on chain error *)
-                       loop ())
-                end else begin
-                  (* Error or unexpected result *)
-                  stop_reason := Printf.sprintf "claim error: %s" claim_result;
-                  ()
-                end
-              end
-            end
-          in
+	          loop ();
+	          with_walph_lock walph_state (fun () ->
+	            walph_state.last_stop_reason <- Some !stop_reason
+	          );
 
-          loop ();
-
-          (* Final broadcast and log *)
-          let result = Printf.sprintf
-            "🛑 @walph STOPPED. Preset: %s, Iterations: %d, Tasks completed: %d, Reason: %s"
+	          (* Final broadcast and log *)
+	          let result = Printf.sprintf
+	            "🛑 @walph STOPPED. Preset: %s, Iterations: %d, Tasks completed: %d, Reason: %s"
             preset walph_state.iterations walph_state.completed !stop_reason in
 
           let _ = Room.broadcast config ~from_agent:agent_name ~content:result in

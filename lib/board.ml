@@ -278,7 +278,8 @@ let deferred_flush_fn : (store -> unit) ref = ref (fun _ -> ())
 let maybe_sweep store =
   let now = Time_compat.now () in
   if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
-    ignore (sweep store);
+    (try ignore (sweep store)
+     with exn -> Printf.eprintf "[board] sweep failed: %s\n%!" (Printexc.to_string exn));
   if now -. store.last_flush > flush_interval_sec then
     !deferred_flush_fn store
 

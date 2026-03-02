@@ -396,7 +396,9 @@ let get_context_stats ~name =
 (** Update Lodge agent status - now tracks singleton state *)
 let update_lodge_agent_status ~name ~status ?current_task:_ () =
   match status with
-  | Types.Busy -> ignore (try_activate_agent ~name)
+  | Types.Busy ->
+      (try ignore (try_activate_agent ~name)
+       with exn -> Printf.eprintf "[lodge] try_activate_agent(%s) failed: %s\n%!" name (Printexc.to_string exn))
   | Types.Inactive -> deactivate_agent ~name
   | _ -> ()
 
@@ -983,7 +985,8 @@ let spawn_agent_from_gap ~topic ~(signals : gap_signal_t list) =
         let store = Board.global () in
         let announcement = Printf.sprintf "🎉 새 에이전트 탄생: %s\n%s\n(제안: %s)"
           topic description (String.concat ", " proposers) in
-        ignore (Board.create_post store ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
+        (try ignore (Board.create_post store ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
+         with exn -> Printf.eprintf "[lodge] Board.create_post(ecosystem) failed: %s\n%!" (Printexc.to_string exn))
       end;
       success
 
@@ -1285,7 +1288,8 @@ let post_activity_report ~(result : heartbeat_result) =
     if has_actions then begin
       let store = Board.global () in
       let content = Printf.sprintf "🫀 **Lodge Activity Report**\n\n%s" result.activity_report in
-      ignore (Board.create_post store ~author:"lodge-system" ~content ~ttl_hours:24 ())
+      (try ignore (Board.create_post store ~author:"lodge-system" ~content ~ttl_hours:24 ())
+       with exn -> Printf.eprintf "[lodge] Board.create_post(lodge-system) failed: %s\n%!" (Printexc.to_string exn))
     end
 
 (** {1 Daemon Loop} *)
@@ -3117,6 +3121,7 @@ let poll_and_handle_broadcasts ~since_timestamp =
   Eio.traceln "🔔 Found %d new broadcasts since %.0f" (List.length broadcasts) since_timestamp;
   broadcasts |> List.iter (fun (post : Board.post) ->
     let sender = Board.Agent_id.to_string post.author in
-    ignore (handle_broadcast ~sender ~content:post.content)
+    (try ignore (handle_broadcast ~sender ~content:post.content)
+     with exn -> Printf.eprintf "[lodge] handle_broadcast(%s) failed: %s\n%!" sender (Printexc.to_string exn))
   );
   Time_compat.now ()  (* Return new timestamp for next poll *)

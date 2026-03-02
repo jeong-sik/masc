@@ -288,8 +288,9 @@ let store_to_thread (exp : experience) =
         | _ -> "[SKIP] "
       in
       let full_content = action_prefix ^ exp.content in
-      ignore (Council.Conversation.reply ~config ~thread_id:thread.id
+      (try ignore (Council.Conversation.reply ~config ~thread_id:thread.id
                 ~speaker:exp.agent_name ~content:full_content ())
+       with exn -> Printf.eprintf "[lodge-memory] council reply failed: %s\n%!" (Printexc.to_string exn))
 
 (** Record experience to Memory Stream (scored long-term) *)
 let store_to_stream (exp : experience) =

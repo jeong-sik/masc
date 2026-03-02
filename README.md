@@ -228,6 +228,7 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 | `docs/INTERRUPT-DESIGN.md` | 승인/중단 패턴 |
 | `docs/MITOSIS.md` | 컨텍스트 한계 대응 |
 | `docs/TRPG-MVP-BLUEPRINT.md` | TRPG 엔진/뷰어 분리 MVP 설계 |
+| `docs/TRPG-KEEPER-SPECTATOR-QUICKSTART.md` | keeper 자동 진행 관전 Quickstart |
 | `docs/TRPG-EXPERIMENT-PLAYBOOK.md` | 사회실험 템플릿 3종 실행 가이드 |
 | `docs/TRPG-DEVELOPMENT-PLAN.md` | TRPG MVP 단계별 개발 계획 |
 | `docs/MCP-TEMPLATE.md` | MCP 설정 템플릿 |

@@ -213,6 +213,99 @@ let test_bridge_not_set () =
   Subscriptions.push_event_to_sessions (make_event "masc/test");
   check bool "no crash without bridge" true true
 
+(* consume_notifications: partial consume (5 events, limit=3) *)
+let test_consume_partial () =
+  let registry = Session.create () in
+  ignore (Session.register registry ~agent_name:"agent-partial");
+  let events = List.init 5 (fun i -> make_event (Printf.sprintf "ev%d" i)) in
+  inject_events registry ~agent_name:"agent-partial" events;
+  let result = Tool_notifications.dispatch registry
+    ~agent_name:"agent-partial" ~name:"masc_consume_notifications"
+    (`Assoc [("limit", `Int 3)]) in
+  (match result with
+   | Some (true, body) ->
+       let json = Yojson.Safe.from_string body in
+       let consumed = Yojson.Safe.Util.(json |> member "consumed" |> to_int) in
+       let remaining = Yojson.Safe.Util.(json |> member "remaining" |> to_int) in
+       check int "consumed 3" 3 consumed;
+       check int "remaining 2" 2 remaining
+   | _ -> fail "expected Some (true, _)");
+  check int "queue has 2 left" 2
+    (queue_length registry ~agent_name:"agent-partial")
+
+(* consume_notifications: negative limit clamped to 0 *)
+let test_consume_negative_limit () =
+  let registry = Session.create () in
+  ignore (Session.register registry ~agent_name:"agent-neg");
+  let events = [make_event "a"; make_event "b"] in
+  inject_events registry ~agent_name:"agent-neg" events;
+  let result = Tool_notifications.dispatch registry
+    ~agent_name:"agent-neg" ~name:"masc_consume_notifications"
+    (`Assoc [("limit", `Int (-5))]) in
+  (match result with
+   | Some (true, body) ->
+       let json = Yojson.Safe.from_string body in
+       let consumed = Yojson.Safe.Util.(json |> member "consumed" |> to_int) in
+       let remaining = Yojson.Safe.Util.(json |> member "remaining" |> to_int) in
+       check int "consumed 0 with negative limit" 0 consumed;
+       check int "remaining 2" 2 remaining
+   | _ -> fail "expected Some (true, _)");
+  (* Queue should be unchanged *)
+  check int "queue unchanged" 2
+    (queue_length registry ~agent_name:"agent-neg")
+
+(* notification_count: response is valid JSON via Yojson *)
+let test_count_yojson_format () =
+  let registry = Session.create () in
+  ignore (Session.register registry ~agent_name:"agent-json");
+  let events = [make_event "ev1"] in
+  inject_events registry ~agent_name:"agent-json" events;
+  let result = Tool_notifications.dispatch registry
+    ~agent_name:"agent-json" ~name:"masc_notification_count" (`Assoc []) in
+  match result with
+  | Some (true, body) ->
+      (* Must parse as valid JSON *)
+      let json = Yojson.Safe.from_string body in
+      let count = Yojson.Safe.Util.(json |> member "count" |> to_int) in
+      check int "count is 1" 1 count;
+      (* Verify structure: must have "count" key *)
+      (match json with
+       | `Assoc fields ->
+           check bool "has count key" true (List.mem_assoc "count" fields)
+       | _ -> fail "expected JSON object")
+  | _ -> fail "expected Some (true, _)"
+
+(* Bridge: push_event_to_sessions with None registry logs warning *)
+let test_bridge_none_warning () =
+  (* Capture stderr output *)
+  let (rd, wr) = Unix.pipe () in
+  let old_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 wr Unix.stderr;
+  Unix.close wr;
+  (* Reset bridge to a fresh None state by setting a dummy, then we need
+     to trigger the None path. Since set_session_push_fn always sets Some,
+     we test the re-set warning instead. *)
+  Subscriptions.set_session_push_fn (fun _event -> 0);
+  (* Calling set again should trigger "already set" warning *)
+  Subscriptions.set_session_push_fn (fun _event -> 0);
+  (* Restore stderr and read captured output *)
+  Unix.dup2 old_stderr Unix.stderr;
+  Unix.close old_stderr;
+  let buf = Buffer.create 256 in
+  let bytes = Bytes.create 1024 in
+  let n = Unix.read rd bytes 0 1024 in
+  Unix.close rd;
+  Buffer.add_subbytes buf bytes 0 n;
+  let output = Buffer.contents buf in
+  check bool "warning contains 'already set'"
+    true (String.length output > 0 &&
+          let pat = "already set" in
+          let found = ref false in
+          for i = 0 to String.length output - String.length pat do
+            if String.sub output i (String.length pat) = pat then found := true
+          done;
+          !found)
+
 (* ── Test runner ─────────────────────────────── *)
 
 let () =
@@ -233,9 +326,15 @@ let () =
       test_case "destructive pop" `Quick (with_eio test_consume_basic);
       test_case "consume all" `Quick (with_eio test_consume_all);
       test_case "empty queue" `Quick (with_eio test_consume_empty);
+      test_case "partial consume" `Quick (with_eio test_consume_partial);
+      test_case "negative limit clamped" `Quick (with_eio test_consume_negative_limit);
+    ];
+    "notification_count_format", [
+      test_case "valid JSON response" `Quick (with_eio test_count_yojson_format);
     ];
     "bridge", [
       test_case "push distributes to all" `Quick (with_eio test_bridge_push);
       test_case "no bridge set" `Quick (with_eio test_bridge_not_set);
+      test_case "re-set warning" `Quick (with_eio test_bridge_none_warning);
     ];
   ]

@@ -1511,7 +1511,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~event:(`Assoc [
           ("type", `String "masc/agent_joined");
           ("agent_name", `String nickname);
-          ("timestamp", `Float (Unix.gettimeofday ()));
+          ("timestamp", `Float (Time_compat.now ()));
         ]) in
       (true, final_result)
 
@@ -1521,7 +1521,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~event:(`Assoc [
           ("type", `String "masc/agent_left");
           ("agent_name", `String agent_name);
-          ("timestamp", `Float (Unix.gettimeofday ()));
+          ("timestamp", `Float (Time_compat.now ()));
         ]) in
       let result = Room.leave config ~agent_name in
       unregister_sync registry ~agent_name;
@@ -1592,9 +1592,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ("from", `String agent_name);
           ("content", `String message);
           ("mention", match mention with Some m -> `String m | None -> `Null);
-          ("timestamp", `String (Types.now_iso ()));
+          ("timestamp", `Float (Time_compat.now ()));
         ] in
         Mcp_server.sse_broadcast state notification;
+        (* Notification harness: push broadcast to session queues for polling-only agents *)
+        Subscriptions.push_event_to_sessions notification;
         (* macOS notification for @mention *)
         (match mention with
          | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()

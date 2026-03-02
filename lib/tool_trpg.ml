@@ -7806,25 +7806,22 @@ let handle_round_run ctx args : result =
           Error "player_keepers must include at least one player actor assignment"
         else Ok ()
       in
+      let existing_player_keepers, missing_player_keepers =
+        List.partition
+          (fun (actor_id, _) ->
+            actor_id <> "dm" && actor_exists_in_state state actor_id)
+          player_keepers
+      in
       let* () =
-        let invalid_actor =
-          List.find_opt
-            (fun (actor_id, _) ->
-              actor_id = "dm" || not (actor_exists_in_state state actor_id))
-            player_keepers
-        in
-        match invalid_actor with
-        | Some (actor_id, _) ->
-            Error
-              (Printf.sprintf
-                 "invalid player assignment: actor_id=%s is not a playable party actor"
-                 actor_id)
-        | None -> Ok ()
+        if existing_player_keepers = [] then
+          Error
+            "invalid player assignment: no playable party actor found in player_keepers"
+        else Ok ()
       in
       let live_player_keepers, dead_player_keepers =
         List.partition
           (fun (actor_id, _) -> actor_alive_in_state state actor_id)
-          player_keepers
+          existing_player_keepers
       in
       let terminal_session = room_already_ended || outcome_already_emitted in
       if terminal_session then
@@ -7844,6 +7841,25 @@ let handle_round_run ctx args : result =
           else if room_already_ended then
             "room already ended"
           else "session outcome already emitted"
+        in
+        let missing_statuses =
+          missing_player_keepers
+          |> List.map (fun (actor_id, keeper_name) ->
+                 let reason =
+                   if actor_id = "dm" then
+                     "actor_id 'dm' is reserved for the DM and cannot be used in player_keepers"
+                   else
+                     "actor is not part of active party in state snapshot"
+                 in
+                 `Assoc
+                   [
+                     ("actor_id", `String actor_id);
+                     ("role", `String "player");
+                     ("keeper", `String keeper_name);
+                     ("status", `String "skipped_missing");
+                     ("reason", `String reason);
+                     ("stage", `String "preflight");
+                   ])
         in
         let dead_statuses =
           dead_player_keepers
@@ -7882,7 +7898,7 @@ let handle_round_run ctx args : result =
               ("stage", `String "session_guard");
             ]
         in
-        let statuses = dead_statuses @ live_statuses @ [ dm_status ] in
+        let statuses = missing_statuses @ dead_statuses @ live_statuses @ [ dm_status ] in
         let canon_check =
           evaluate_canon_check ~store ~state ~events:existing_events_before
             ~dm_reply:None
@@ -8055,6 +8071,26 @@ let handle_round_run ctx args : result =
           Ok ()
         else Ok ()
       in
+
+      List.iter
+        (fun (actor_id, keeper_name) ->
+          let reason =
+            if actor_id = "dm" then
+              "actor_id 'dm' is reserved for the DM and cannot be used in player_keepers"
+            else "actor is not part of active party in state snapshot"
+          in
+          statuses :=
+            `Assoc
+              [
+                ("actor_id", `String actor_id);
+                ("role", `String "player");
+                ("keeper", `String keeper_name);
+                ("status", `String "skipped_missing");
+                ("reason", `String reason);
+                ("stage", `String "preflight");
+              ]
+            :: !statuses)
+        missing_player_keepers;
 
       List.iter
         (fun (actor_id, keeper_name) ->

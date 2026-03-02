@@ -397,7 +397,14 @@ collect_strict_recovery_targets() {
     [
       .statuses[]?
       | select(
-          ((.status // "") == "schema_invalid" or (.status // "") == "rule_invalid")
+          (
+            (.status // "") == "schema_invalid"
+            or (.status // "") == "rule_invalid"
+            or (.status // "") == "duplicate_reply_warning"
+            or (.status // "") == "missing_structured_action"
+            or (.status // "") == "unavailable"
+            or (.status // "") == "timeout"
+          )
           and ((.keeper // "") != "")
         )
       | "\((.role // ""))|\((.actor_id // ""))|\((.keeper // ""))"
@@ -521,8 +528,13 @@ recover_keepers_from_noncompliance() {
   local keeper_name
   targets="$(collect_strict_recovery_targets "$round_payload")"
   if [ -z "$(printf "%s" "$targets" | awk 'NF {print; exit}')" ]; then
-    echo "[recovery] round=$round_no attempt=$recovery_attempt no strict target keeper found" >&2
-    return 1
+    echo "[recovery] round=$round_no attempt=$recovery_attempt no strict target keeper found; fallback to full keeper recycle" >&2
+    targets="dm|dm|$DM_KEEPER"
+    while IFS='|' read -r actor_id keeper_name; do
+      [ -z "$actor_id" ] && continue
+      [ -z "$keeper_name" ] && continue
+      targets="${targets}"$'\n'"player|${actor_id}|${keeper_name}"
+    done <<< "$CLAIMED_ACTORS"
   fi
   echo "[recovery] round=$round_no attempt=$recovery_attempt restarting keepers for strict structured_action violations"
   append_transcript_entry "keeper_recovery_start" "$(jq -cn --argjson round "$round_no" --argjson attempt "$recovery_attempt" --arg targets "$targets" '{round:$round,attempt:$attempt,targets:($targets|split("\n")|map(select(length>0)))}')"
@@ -830,9 +842,14 @@ r_start="$(call_tool_checked 3003 "trpg.session.start" "$args_start")"
 room_id="$(printf "%s" "$r_start" | payload | jq -r '.room_id')"
 world_used="$(printf "%s" "$r_start" | payload | jq -r '.world_preset.id // .world_preset.preset_id // "-"')"
 dm_used="$(printf "%s" "$r_start" | payload | jq -r '.dm_preset.id // .dm_preset.preset_id // "-"')"
-player_keepers="$(printf "%s" "$party" | jq -c --arg tag "$KEEPER_TAG" '
-  reduce .[] as $row ({}; . + {($row.actor_id): ("pk-" + $tag + "-" + $row.actor_id)})
-')"
+player_keepers_from_start="$(printf "%s" "$r_start" | payload | jq -c '.round_run_template.player_keepers // {}')"
+if [ "$(printf "%s" "$player_keepers_from_start" | jq 'type == "object" and (length > 0)')" = "true" ]; then
+  player_keepers="$player_keepers_from_start"
+else
+  player_keepers="$(printf "%s" "$party" | jq -c --arg tag "$KEEPER_TAG" '
+    reduce .[] as $row ({}; . + {($row.actor_id): ("pk-" + $tag + "-" + $row.actor_id)})
+  ')"
+fi
 PLAYER_KEEPER_NAMES="$(printf "%s" "$player_keepers" | jq -r '.[]' | awk 'NF')"
 DM_KEEPER_INSTRUCTIONS="$(build_dm_instruction)"
 PLAYER_KEEPER_INSTRUCTIONS="$(build_player_instruction)"
@@ -1006,9 +1023,20 @@ if [ "$RUN_ROUND" = "1" ]; then
         no_heuristic_violations=$((no_heuristic_violations + 1))
       fi
 
+      strict_recovery_trigger=0
+      if [ "${strict_rejection_count:-0}" -gt 0 ] \
+        || [ "${structured_noncompliance_count:-0}" -gt 0 ] \
+        || [ "${progress_reason:-}" = "structured_action_invalid" ] \
+        || [ "${progress_reason:-}" = "keeper_unavailable" ] \
+        || [ "${progress_reason:-}" = "timeout" ] \
+        || [ "${timeouts:-0}" -gt 0 ] \
+        || [ "${unavailable:-0}" -gt 0 ]; then
+        strict_recovery_trigger=1
+      fi
+
       if [ "$REQUIRE_AGENT_DRIVEN" = "1" ] \
         && [ "$STRICT_KEEPER_RECOVERY_ENABLED" = "1" ] \
-        && { [ "${strict_rejection_count:-0}" -gt 0 ] || [ "${structured_noncompliance_count:-0}" -gt 0 ] || [ "${progress_reason:-}" = "structured_action_invalid" ]; } \
+        && [ "$strict_recovery_trigger" -eq 1 ] \
         && [ "$round_recovery_attempt" -lt "$STRICT_KEEPER_RECOVERY_MAX_RETRIES" ]; then
         round_recovery_attempt=$((round_recovery_attempt + 1))
         strict_keeper_recovery_attempts=$((strict_keeper_recovery_attempts + 1))

@@ -226,18 +226,28 @@ let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
                 in
                 if should_checkpoint then begin
                   write_checkpoint config session;
-                  let updated =
-                    {
-                      session with
-                      last_checkpoint_at = Some now;
-                      last_event_at = Some now;
-                      updated_at_iso = now_iso ();
-                    }
+                  let can_persist_running_state =
+                    with_runtimes_lock (fun () ->
+                        match Hashtbl.find_opt runtimes session_id with
+                        | Some runtime ->
+                            (not runtime.stop_requested)
+                            && not runtime.finalizing
+                        | None -> false)
                   in
-                  Team_session_store.save_session config updated;
-                  Team_session_store.append_event config session_id
-                    ~event_type:"checkpoint"
-                    ~detail:(summary_json_of_session config updated)
+                  if can_persist_running_state then begin
+                    let updated =
+                      {
+                        session with
+                        last_checkpoint_at = Some now;
+                        last_event_at = Some now;
+                        updated_at_iso = now_iso ();
+                      }
+                    in
+                    Team_session_store.save_session config updated;
+                    Team_session_store.append_event config session_id
+                      ~event_type:"checkpoint"
+                      ~detail:(summary_json_of_session config updated)
+                  end
                 end;
                 let sleep_sec = min 15.0 (max 1.0 (session.planned_end_at -. now)) in
                 Eio.Time.sleep clock sleep_sec;

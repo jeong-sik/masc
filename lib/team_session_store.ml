@@ -131,8 +131,10 @@ let mark_report_generated config session_id =
 
 let make_session_id () =
   let ms = Int64.of_float (Time_compat.now () *. 1000.0) in
-  let rnd = Random.bits () land 0xFFFF in
-  Printf.sprintf "ts-%Ld-%04x" ms rnd
+  let high = Int64.of_int (Random.bits ()) in
+  let low = Int64.of_int (Random.bits ()) in
+  let rnd = Int64.logor (Int64.shift_left high 30) low in
+  Printf.sprintf "ts-%Ld-%015Lx" ms rnd
 
 let relative_artifacts_dir config session_id =
   let root = sessions_root config in

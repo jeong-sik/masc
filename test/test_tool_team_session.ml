@@ -27,6 +27,32 @@ let dispatch_exn ctx ~name ~args =
 
 let result_field json = Yojson.Safe.Util.member "result" json
 
+let session_status_of_body body =
+  let json = parse_json_exn body in
+  let result = result_field json in
+  result |> Yojson.Safe.Util.member "session" |> Yojson.Safe.Util.member "status"
+  |> Yojson.Safe.Util.to_string
+
+let wait_until_terminal ctx session_id =
+  let rec loop attempts =
+    if attempts <= 0 then
+      failwith "team session did not reach terminal state in time"
+    else
+      let ok, body =
+        dispatch_exn ctx ~name:"masc_team_session_status"
+          ~args:(`Assoc [ ("session_id", `String session_id) ])
+      in
+      if not ok then
+        failwith "status check failed while waiting for terminal state"
+      else
+        match session_status_of_body body with
+        | "running" ->
+            Eio.Time.sleep ctx.clock 0.1;
+            loop (attempts - 1)
+        | status -> status
+  in
+  loop 200
+
 let test_start_status_report_stop () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -106,6 +132,11 @@ let test_start_status_report_stop () =
   let stop_json = parse_json_exn stop_body in
   Alcotest.(check string) "stop wrapper" "ok"
     (Yojson.Safe.Util.member "status" stop_json |> Yojson.Safe.Util.to_string);
+  let final_status = wait_until_terminal ctx session_id in
+  Alcotest.(check bool) "terminal status"
+    true
+    (final_status = "interrupted" || final_status = "completed"
+   || final_status = "failed");
 
   cleanup_dir base_dir
 

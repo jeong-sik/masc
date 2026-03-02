@@ -14,39 +14,12 @@ let done_counts_from_backlog (backlog : Types.backlog) : (string * int) list =
     backlog.tasks;
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl [] |> List.sort (fun (a, _) (b, _) -> compare a b)
 
-let assoc_find_default k pairs default =
-  match List.assoc_opt k pairs with Some v -> v | None -> default
-
-let compute_done_delta ~(baseline : (string * int) list) ~(current : (string * int) list)
-    ~(agents : string list) =
-  let normalized_agents =
-    let rec dedup acc = function
-      | [] -> List.rev acc
-      | x :: xs -> if List.mem x acc then dedup acc xs else dedup (x :: acc) xs
-    in
-    dedup [] agents
-  in
-  let from_agents =
-    List.map
-      (fun agent ->
-        let base = assoc_find_default agent baseline 0 in
-        let now = assoc_find_default agent current 0 in
-        (agent, max 0 (now - base)))
-      normalized_agents
-  in
-  let extra_agents =
-    current
-    |> List.filter (fun (agent, _) -> not (List.mem_assoc agent baseline))
-    |> List.filter (fun (agent, _) -> not (List.mem_assoc agent from_agents))
-  in
-  (from_agents @ extra_agents)
-  |> List.sort (fun (a, _) (b, _) -> compare a b)
-
 let summary_metrics (session : Team_session_types.session) config =
   let backlog = Room.read_backlog config in
   let current_done = done_counts_from_backlog backlog in
   let delta_by_agent =
-    compute_done_delta ~baseline:session.baseline_done_counts ~current:current_done
+    Team_session_types.done_delta_by_agent
+      ~baseline:session.baseline_done_counts ~current:current_done
       ~agents:session.agent_names
   in
   let done_delta_total = List.fold_left (fun acc (_, n) -> acc + n) 0 delta_by_agent in

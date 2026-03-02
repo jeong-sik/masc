@@ -104,6 +104,35 @@ let report_formats_of_strings xs =
   |> List.filter_map (fun s -> report_format_of_string (String.lowercase_ascii (String.trim s)))
   |> dedup []
 
+let dedup_strings xs =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+        if List.mem x acc then loop acc rest else loop (x :: acc) rest
+  in
+  loop [] xs
+
+let assoc_find_default key pairs default =
+  match List.assoc_opt key pairs with Some v -> v | None -> default
+
+let done_delta_by_agent ~(baseline : (string * int) list) ~(current : (string * int) list)
+    ~(agents : string list) : (string * int) list =
+  let normalized_agents = dedup_strings agents in
+  let from_agents =
+    List.map
+      (fun agent ->
+        let base = assoc_find_default agent baseline 0 in
+        let now = assoc_find_default agent current 0 in
+        (agent, max 0 (now - base)))
+      normalized_agents
+  in
+  let extra_agents =
+    current
+    |> List.filter (fun (agent, _) -> not (List.mem_assoc agent from_agents))
+  in
+  (from_agents @ extra_agents)
+  |> List.sort (fun (a, _) (b, _) -> compare a b)
+
 let assoc_int_to_json pairs =
   `Assoc (List.map (fun (k, v) -> (k, `Int v)) pairs)
 

@@ -1,22 +1,21 @@
 (** Eio runtime engine for long-running team sessions. *)
 
 type runtime_state = {
-  mutable running : bool;
   mutable stop_requested : bool;
   mutable stop_reason : string option;
+  mutable finalizing : bool;
 }
 
 let runtimes : (string, runtime_state) Hashtbl.t = Hashtbl.create 16
 let runtimes_mutex = Eio.Mutex.create ()
+let finalize_mutex = Eio.Mutex.create ()
 
 let with_runtimes_lock f = Eio.Mutex.use_rw ~protect:true runtimes_mutex f
+let with_finalize_lock f = Eio.Mutex.use_rw ~protect:true finalize_mutex f
 
 let () = Random.self_init ()
 
 let now_iso () = Types.now_iso ()
-
-let has_report_format formats target =
-  List.exists (fun f -> f = target) formats
 
 let clamp_int ~min_v ~max_v v = max min_v (min max_v v)
 
@@ -34,29 +33,6 @@ let done_counts_from_backlog (backlog : Types.backlog) : (string * int) list =
     backlog.tasks;
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl [] |> List.sort (fun (a, _) (b, _) -> compare a b)
 
-let assoc_find_default key pairs default =
-  match List.assoc_opt key pairs with Some v -> v | None -> default
-
-let done_delta_by_agent ~baseline ~current ~agents =
-  let rec dedup acc = function
-    | [] -> List.rev acc
-    | x :: xs -> if List.mem x acc then dedup acc xs else dedup (x :: acc) xs
-  in
-  let normalized_agents = dedup [] agents in
-  let main =
-    List.map
-      (fun agent ->
-        let base = assoc_find_default agent baseline 0 in
-        let now = assoc_find_default agent current 0 in
-        (agent, max 0 (now - base)))
-      normalized_agents
-  in
-  let extras =
-    current
-    |> List.filter (fun (agent, _) -> not (List.mem_assoc agent main))
-  in
-  (main @ extras) |> List.sort (fun (a, _) (b, _) -> compare a b)
-
 let summary_json_of_session (config : Room.config) (session : Team_session_types.session) =
   let now = Time_compat.now () in
   let end_time = Option.value session.stopped_at ~default:now in
@@ -69,7 +45,8 @@ let summary_json_of_session (config : Room.config) (session : Team_session_types
   let backlog = Room.read_backlog config in
   let current_done = done_counts_from_backlog backlog in
   let deltas =
-    done_delta_by_agent ~baseline:session.baseline_done_counts ~current:current_done
+    Team_session_types.done_delta_by_agent
+      ~baseline:session.baseline_done_counts ~current:current_done
       ~agents:session.agent_names
   in
   let done_total = List.fold_left (fun acc (_, n) -> acc + n) 0 deltas in
@@ -94,10 +71,7 @@ let summary_json_of_session (config : Room.config) (session : Team_session_types
 
 let session_status_json (config : Room.config) (session : Team_session_types.session) =
   let runtime_running =
-    with_runtimes_lock (fun () ->
-        match Hashtbl.find_opt runtimes session.session_id with
-        | Some r -> r.running
-        | None -> false)
+    with_runtimes_lock (fun () -> Hashtbl.mem runtimes session.session_id)
   in
   let summary = summary_json_of_session config session in
   `Assoc
@@ -116,7 +90,8 @@ let write_checkpoint (config : Room.config) (session : Team_session_types.sessio
   let backlog = Room.read_backlog config in
   let current_done = done_counts_from_backlog backlog in
   let deltas =
-    done_delta_by_agent ~baseline:session.baseline_done_counts ~current:current_done
+    Team_session_types.done_delta_by_agent
+      ~baseline:session.baseline_done_counts ~current:current_done
       ~agents:session.agent_names
   in
   let done_total = List.fold_left (fun acc (_, n) -> acc + n) 0 deltas in
@@ -149,32 +124,51 @@ let write_checkpoint (config : Room.config) (session : Team_session_types.sessio
 let finalize_session ~(config : Room.config) ~(session_id : string)
     ~(final_status : Team_session_types.session_status) ~(reason : string)
     ~(generate_report : bool) : Team_session_types.session option =
-  match Team_session_store.load_session config session_id with
-  | None -> None
-  | Some session ->
-      let now = Time_compat.now () in
-      let updated =
-        {
-          session with
-          status = final_status;
-          stopped_at = Some now;
-          stop_reason = Some reason;
-          last_event_at = Some now;
-          updated_at_iso = now_iso ();
-        }
-      in
-      Team_session_store.save_session config updated;
-      Team_session_store.append_event config session_id ~event_type:"session_finalized"
-        ~detail:(`Assoc [
-          ("status", `String (Team_session_types.status_to_string final_status));
-          ("reason", `String reason);
-          ("ts_iso", `String (now_iso ()));
-        ]);
-      if generate_report then (
-        ignore (Team_session_report.generate config updated);
-        ignore (Team_session_store.mark_report_generated config session_id));
-      with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
-      Some updated
+  with_finalize_lock (fun () ->
+      with_runtimes_lock (fun () ->
+          match Hashtbl.find_opt runtimes session_id with
+          | Some runtime -> runtime.finalizing <- true
+          | None -> ());
+      match Team_session_store.load_session config session_id with
+      | None ->
+          with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
+          None
+      | Some session ->
+          if session.status <> Team_session_types.Running then begin
+            if generate_report && (not session.generated_report) then (
+              ignore (Team_session_report.generate config session);
+              ignore (Team_session_store.mark_report_generated config session_id));
+            with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
+            Some session
+          end else
+            let now = Time_compat.now () in
+            let updated =
+              {
+                session with
+                status = final_status;
+                stopped_at = Some now;
+                stop_reason = Some reason;
+                last_event_at = Some now;
+                updated_at_iso = now_iso ();
+              }
+            in
+            Team_session_store.save_session config updated;
+            Team_session_store.append_event config session_id
+              ~event_type:"session_finalized"
+              ~detail:
+                (`Assoc
+                  [
+                    ( "status",
+                      `String
+                        (Team_session_types.status_to_string final_status) );
+                    ("reason", `String reason);
+                    ("ts_iso", `String (now_iso ()));
+                  ]);
+            if generate_report then (
+              ignore (Team_session_report.generate config updated);
+              ignore (Team_session_store.mark_report_generated config session_id));
+            with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
+            Some updated)
 
 let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     ~(session_id : string) =
@@ -303,7 +297,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     write_checkpoint config session;
     with_runtimes_lock (fun () ->
         Hashtbl.replace runtimes session_id
-          { running = true; stop_requested = false; stop_reason = None });
+          { stop_requested = false; stop_reason = None; finalizing = false });
     start_runtime_loop ~sw ~clock ~config ~session_id;
     Ok
       (`Assoc
@@ -331,9 +325,12 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
           with_runtimes_lock (fun () ->
               match Hashtbl.find_opt runtimes session_id with
               | Some runtime ->
-                  runtime.stop_requested <- true;
-                  runtime.stop_reason <- Some reason;
-                  true
+                  if runtime.finalizing then
+                    false
+                  else (
+                    runtime.stop_requested <- true;
+                    runtime.stop_reason <- Some reason;
+                    true)
               | None -> false)
         in
         if accepted then
@@ -345,12 +342,14 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
                 ("reason", `String reason);
               ])
         else
-          let final_status =
-            if generate_report then Team_session_types.Interrupted else Team_session_types.Completed
-          in
+          let reloaded = Team_session_store.load_session config session_id in
           let updated =
-            finalize_session ~config ~session_id ~final_status ~reason
-              ~generate_report
+            match reloaded with
+            | Some s when s.status <> Team_session_types.Running -> Some s
+            | _ ->
+                finalize_session ~config ~session_id
+                  ~final_status:Team_session_types.Interrupted ~reason
+                  ~generate_report
           in
           (match updated with
           | Some s -> Ok (session_status_json config s)
@@ -381,7 +380,7 @@ let generate_report ~(config : Room.config) ~(session_id : string)
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
   | Some session ->
       let report_json_exists = Room_utils.path_exists config (Team_session_store.report_json_path config session_id) in
-      let report_md_exists = Sys.file_exists (Team_session_store.report_md_path config session_id) in
+      let report_md_exists = Room_utils.path_exists config (Team_session_store.report_md_path config session_id) in
       if (not force_regenerate) && session.generated_report && report_json_exists && report_md_exists then
         Ok
           (`Assoc
@@ -427,7 +426,7 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
           else begin
             with_runtimes_lock (fun () ->
                 Hashtbl.replace runtimes session.session_id
-                  { running = true; stop_requested = false; stop_reason = None });
+                  { stop_requested = false; stop_reason = None; finalizing = false });
             Team_session_store.append_event config session.session_id
               ~event_type:"recovered_after_restart"
               ~detail:(`Assoc [

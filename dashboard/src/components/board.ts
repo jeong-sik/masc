@@ -32,9 +32,10 @@ const commentSubmitting = signal(false)
 async function loadPostDetail(postId: string) {
   detailPostId.value = postId
   detailLoading.value = true
-  detailComments.value = []
   try {
     const data = await fetchBoardPost(postId)
+    // Guard: discard stale response if user navigated to a different post
+    if (detailPostId.value !== postId) return
     detailComments.value = data.comments ?? []
   } catch {
     // Post detail may not be available; comments remain empty

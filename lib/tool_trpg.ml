@@ -4140,7 +4140,7 @@ let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
                ~actor_id:npc_actor_id ~payload:heal_payload ()
            with
           | Ok ev -> pre_attack_events := [ ev ]
-          | Error _ -> ())
+          | Error msg -> Printf.eprintf "[trpg] npc heal: %s\n%!" msg)
       | _ -> ());
       let narration_with_skill =
         if skill_name_str = "" then narration

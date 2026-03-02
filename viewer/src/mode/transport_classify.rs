@@ -11,6 +11,13 @@ pub(super) struct PreflightRow {
     pub hint: Option<String>,
 }
 
+impl PreflightRow {
+    /// Convenience constructor for the common case where `hint` is `None`.
+    pub(super) fn new(ok: bool, label: &str, detail: impl Into<String>) -> Self {
+        Self { ok, label: label.to_string(), detail: detail.into(), hint: None }
+    }
+}
+
 /// Returns `true` when the body looks like an HTML error page (proxy, CDN, etc.).
 pub(super) fn is_html_body(body: &str) -> bool {
     let lower = body.to_ascii_lowercase();
@@ -102,12 +109,7 @@ mod tests {
 
     #[test]
     fn preflight_row_debug_and_clone() {
-        let row = PreflightRow {
-            ok: true,
-            label: "test".to_string(),
-            detail: "detail".to_string(),
-            hint: None,
-        };
+        let row = PreflightRow::new(true, "test", "detail");
         let cloned = row.clone();
         assert!(cloned.ok);
         assert_eq!(format!("{:?}", row), format!("{:?}", cloned));

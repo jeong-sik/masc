@@ -5688,6 +5688,124 @@ let append_keeper_reply_event
     ~payload
     ()
 
+let deterministic_raw_d20 ~turn ~actor_id ~salt =
+  let hash = Hashtbl.hash (actor_id ^ ":" ^ string_of_int turn ^ ":" ^ salt) in
+  1 + ((if hash < 0 then -hash else hash) mod 20)
+
+let action_type_requires_round_dice = function
+  | Attack | Defend -> true
+  | Heal | Investigate | Social | Explore | Magic | UseItem | SetFlag
+  | SceneTransition | QuestUpdate ->
+      false
+
+let resolved_effects_of_events (events : Trpg_engine_event.t list) : Yojson.Safe.t list =
+  let rec collect seen acc = function
+    | [] -> List.rev acc
+    | (event : Trpg_engine_event.t) :: tl ->
+        let event_name = Trpg_engine_event.string_of_event_type event.event_type in
+        if List.mem event_name seen then collect seen acc tl
+        else collect (event_name :: seen) (`String ("event:" ^ event_name) :: acc) tl
+  in
+  collect [] [] events
+
+let append_round_observability_events
+    ~store
+    ~room_id
+    ~phase
+    ~turn
+    ~role
+    ~actor_id
+    ~keeper_name
+    ~reply
+    ~(sa : structured_action)
+    ~action_events
+    ~resolution_source
+    ~fallback
+    =
+  let ( let* ) = Result.bind in
+  let* dice_event_opt =
+    if
+      role = `Player
+      && action_type_requires_round_dice sa.sa_type
+      && not
+           (List.exists
+              (fun (event : Trpg_engine_event.t) ->
+                event.event_type = Trpg_engine_event.Dice_rolled)
+              action_events)
+    then
+      let raw_d20 =
+        deterministic_raw_d20 ~turn ~actor_id
+          ~salt:(string_of_action_type sa.sa_type)
+      in
+      let stat_value = 12 in
+      let dc = 10 in
+      let bonus = Trpg_rule_dnd5e_lite.stat_bonus stat_value in
+      let total = raw_d20 + bonus in
+      let c = Trpg_rule_dnd5e_lite.classify_roll ~raw_d20 ~total in
+      let payload =
+        `Assoc
+          [
+            ("phase", `String phase);
+            ("turn", `Int turn);
+            ("actor_id", `String actor_id);
+            ("keeper", `String keeper_name);
+            ("action", `String sa.description);
+            ("action_type", `String (string_of_action_type sa.sa_type));
+            ("stat_value", `Int stat_value);
+            ("dc", `Int dc);
+            ("raw_d20", `Int raw_d20);
+            ("bonus", `Int bonus);
+            ("total", `Int total);
+            ("tier", `String (Trpg_rule_dnd5e_lite.roll_tier_to_string c.tier));
+            ("label", `String c.label);
+            ("passed", `Bool c.passed);
+            ("resolved_by", `String "deterministic_round_run");
+            ("source", `String "round_run");
+          ]
+      in
+      let* event =
+        append_event ~store ~room_id
+          ~event_type:Trpg_engine_event.Dice_rolled ~actor_id ~payload ()
+      in
+      Ok (Some event)
+    else Ok None
+  in
+  let observed_events =
+    match dice_event_opt with
+    | Some dice_event -> action_events @ [ dice_event ]
+    | None -> action_events
+  in
+  let resolved_effects =
+    let effects = resolved_effects_of_events observed_events in
+    if effects = [] then
+      [ `String ("action.applied:" ^ string_of_action_type sa.sa_type) ]
+    else effects
+  in
+  let payload =
+    `Assoc
+      [
+        ("phase", `String phase);
+        ("turn", `Int turn);
+        ("role", `String (role_to_string role));
+        ("actor_id", `String actor_id);
+        ("keeper", `String keeper_name);
+        ("reply", `String reply);
+        ("action_type", `String (string_of_action_type sa.sa_type));
+        ("next_scene_or_state", `String "turn.continue");
+        ("resolved_effects", `List resolved_effects);
+        ("resolution_source", `String resolution_source);
+        ("fallback", `Bool fallback);
+      ]
+  in
+  let* resolved_event =
+    append_event ~store ~room_id
+      ~event_type:Trpg_engine_event.Turn_action_resolved ~actor_id ~payload ()
+  in
+  Ok
+    (match dice_event_opt with
+    | Some dice_event -> [ dice_event; resolved_event ]
+    | None -> [ resolved_event ])
+
 let handle_dice_roll ctx args : result =
   let ( let* ) = Result.bind in
   let store = ctx.store in
@@ -8052,6 +8170,46 @@ let handle_round_run ctx args : result =
               append_keeper_reply_event ~store ~room_id ~phase ~turn:turn_before
                 ~role ~actor_id ~keeper_name ~reply:fallback_reply
             in
+            let fallback_sa =
+              match role with
+              | `Player ->
+                  {
+                    sa_type = Attack;
+                    target_id = None;
+                    description = fallback_reply;
+                    flag_key = None;
+                    scene = None;
+                    quest_info = None;
+                    memory_hint = None;
+                    raw_payload =
+                      `Assoc
+                        [
+                          ("type", `String "attack");
+                          ("description", `String fallback_reply);
+                          ("inferred", `Bool true);
+                          ("source", `String "round_fallback");
+                        ];
+                  }
+              | `Dm ->
+                  {
+                    sa_type = SetFlag;
+                    target_id = None;
+                    description = fallback_reply;
+                    flag_key = Some "story.recovered";
+                    scene = None;
+                    quest_info = None;
+                    memory_hint = None;
+                    raw_payload =
+                      `Assoc
+                        [
+                          ("type", `String "set_flag");
+                          ("description", `String fallback_reply);
+                          ("flag_key", `String "story.recovered");
+                          ("inferred", `Bool true);
+                          ("source", `String "round_fallback");
+                        ];
+                  }
+            in
             fallback_count := !fallback_count + 1;
             (* NOTE: fallback does NOT increment success_count.
                Fallbacks are placeholder responses — counting them as success
@@ -8106,6 +8264,13 @@ let handle_round_run ctx args : result =
                   Ok [ event ]
             in
             appended_events := !appended_events @ action_events;
+            let* observability_events =
+              append_round_observability_events ~store ~room_id ~phase
+                ~turn:turn_before ~role ~actor_id ~keeper_name ~reply:fallback_reply
+                ~sa:fallback_sa ~action_events ~resolution_source:"fallback"
+                ~fallback:true
+            in
+            appended_events := !appended_events @ observability_events;
             let* pressure_events =
               match role with
               | `Dm ->
@@ -8693,6 +8858,13 @@ let handle_round_run ctx args : result =
                     ~turn:turn_before ~phase ~actor_id ~state:state_json sa
                 in
                 appended_events := !appended_events @ action_events;
+                let* observability_events =
+                  append_round_observability_events ~store ~room_id ~phase
+                    ~turn:turn_before ~role ~actor_id ~keeper_name
+                    ~reply:reply_text ~sa ~action_events
+                    ~resolution_source:"inferred" ~fallback:false
+                in
+                appended_events := !appended_events @ observability_events;
                 (* Phase 1: Update BDI state after inferred reply *)
                 update_bdi_after_reply ~reply_text ~sa;
                 (* Phase 2: Harness evaluation — observation-only *)
@@ -8759,6 +8931,12 @@ let handle_round_run ctx args : result =
                 ~turn:turn_before ~phase ~actor_id ~state:state_json sa
             in
             appended_events := !appended_events @ action_events;
+            let* observability_events =
+              append_round_observability_events ~store ~room_id ~phase
+                ~turn:turn_before ~role ~actor_id ~keeper_name ~reply ~sa
+                ~action_events ~resolution_source:"keeper" ~fallback:false
+            in
+            appended_events := !appended_events @ observability_events;
             let memory_status_fields =
               memory_status_fields_of_action_events action_events
             in

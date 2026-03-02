@@ -4,6 +4,7 @@ type runtime_state = {
   mutable stop_requested : bool;
   mutable stop_reason : string option;
   mutable finalizing : bool;
+  mutable generate_report_on_finalize : bool;
 }
 
 let runtimes : (string, runtime_state) Hashtbl.t = Hashtbl.create 16
@@ -202,17 +203,20 @@ let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
               let runtime_snapshot =
                 with_runtimes_lock (fun () -> Hashtbl.find_opt runtimes session_id)
               in
-              let stop_requested, stop_reason =
+              let stop_requested, stop_reason, generate_report_on_finalize =
                 match runtime_snapshot with
-                | Some r -> (r.stop_requested, Option.value r.stop_reason ~default:"stop_requested")
-                | None -> (true, "runtime_missing")
+                | Some r ->
+                    ( r.stop_requested,
+                      Option.value r.stop_reason ~default:"stop_requested",
+                      r.generate_report_on_finalize )
+                | None -> (true, "runtime_missing", true)
               in
               let now = Time_compat.now () in
               if stop_requested then
                 ignore
                   (finalize_session ~config ~session_id
                      ~final_status:Team_session_types.Interrupted ~reason:stop_reason
-                     ~generate_report:true)
+                     ~generate_report:generate_report_on_finalize)
               else if now >= session.planned_end_at then
                 ignore
                   (finalize_session ~config ~session_id
@@ -225,29 +229,30 @@ let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
                   | Some ts -> (now -. ts) >= float_of_int session.checkpoint_interval_sec
                 in
                 if should_checkpoint then begin
-                  write_checkpoint config session;
-                  let can_persist_running_state =
-                    with_runtimes_lock (fun () ->
-                        match Hashtbl.find_opt runtimes session_id with
-                        | Some runtime ->
-                            (not runtime.stop_requested)
-                            && not runtime.finalizing
-                        | None -> false)
-                  in
-                  if can_persist_running_state then begin
-                    let updated =
-                      {
-                        session with
-                        last_checkpoint_at = Some now;
-                        last_event_at = Some now;
-                        updated_at_iso = now_iso ();
-                      }
-                    in
-                    Team_session_store.save_session config updated;
-                    Team_session_store.append_event config session_id
-                      ~event_type:"checkpoint"
-                      ~detail:(summary_json_of_session config updated)
-                  end
+                  with_finalize_lock (fun () ->
+                      write_checkpoint config session;
+                      let can_persist_running_state =
+                        with_runtimes_lock (fun () ->
+                            match Hashtbl.find_opt runtimes session_id with
+                            | Some runtime ->
+                                (not runtime.stop_requested)
+                                && not runtime.finalizing
+                            | None -> false)
+                      in
+                      if can_persist_running_state then begin
+                        let updated =
+                          {
+                            session with
+                            last_checkpoint_at = Some now;
+                            last_event_at = Some now;
+                            updated_at_iso = now_iso ();
+                          }
+                        in
+                        Team_session_store.save_session config updated;
+                        Team_session_store.append_event config session_id
+                          ~event_type:"checkpoint"
+                          ~detail:(summary_json_of_session config updated)
+                      end)
                 end;
                 let sleep_sec = min 15.0 (max 1.0 (session.planned_end_at -. now)) in
                 Eio.Time.sleep clock sleep_sec;
@@ -326,7 +331,12 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     write_checkpoint config session;
     with_runtimes_lock (fun () ->
         Hashtbl.replace runtimes session_id
-          { stop_requested = false; stop_reason = None; finalizing = false });
+          {
+            stop_requested = false;
+            stop_reason = None;
+            finalizing = false;
+            generate_report_on_finalize = true;
+          });
     start_runtime_loop ~sw ~clock ~config ~session_id;
     Ok
       (`Assoc
@@ -359,6 +369,7 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
                   else (
                     runtime.stop_requested <- true;
                     runtime.stop_reason <- Some reason;
+                    runtime.generate_report_on_finalize <- generate_report;
                     true)
               | None -> false)
         in
@@ -454,7 +465,12 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
           else begin
             with_runtimes_lock (fun () ->
                 Hashtbl.replace runtimes session.session_id
-                  { stop_requested = false; stop_reason = None; finalizing = false });
+                  {
+                    stop_requested = false;
+                    stop_reason = None;
+                    finalizing = false;
+                    generate_report_on_finalize = true;
+                  });
             Team_session_store.append_event config session.session_id
               ~event_type:"recovered_after_restart"
               ~detail:(`Assoc [

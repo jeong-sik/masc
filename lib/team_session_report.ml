@@ -51,13 +51,16 @@ let summary_metrics (session : Team_session_types.session) config =
    active_agents)
 
 let recent_event_lines events limit =
-  let rev = List.rev events in
-  let rec take n acc = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: xs -> take (n - 1) (x :: acc) xs
+  let recent_chronological =
+    let rev = List.rev events in
+    let rec take n acc = function
+      | [] -> acc
+      | _ when n <= 0 -> acc
+      | x :: xs -> take (n - 1) (x :: acc) xs
+    in
+    take limit [] rev
   in
-  take limit [] rev
+  recent_chronological
   |> List.filter_map (fun json ->
          let open Yojson.Safe.Util in
          match (member "ts_iso" json, member "event_type" json) with

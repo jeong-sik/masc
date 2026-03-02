@@ -7,6 +7,7 @@ export interface Agent {
   name: string
   status: 'active' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
+  context_ratio?: number
   last_seen?: string
   emoji?: string
   koreanName?: string

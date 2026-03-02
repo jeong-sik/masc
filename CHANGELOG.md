@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.76.0] - 2026-03-02
+
+### Added
+- **TRPG Spectator Workflow Redesign** — dashboard flow updated for keeper-observer gameplay (#484)
+- **Walph Stability Phase 1** — error isolation, state visibility, and loop guard hardening (#483)
+
+### Changed
+- Viewer preflight row construction standardized with explicit constructor path (#485)
+- Library TODO debt reduced with three P2/P3 follow-up cleanups (#491)
+
+### Refactored
+- Wrapped bare `ignore()` patterns with `try/with` + logging guards across lib modules (#488)
+
 ## [2.75.0] - 2026-03-02
 
 ### Added

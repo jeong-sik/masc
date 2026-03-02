@@ -615,6 +615,111 @@
   gap: 16px;
 }
 
+.trpg-screen-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px 0;
+}
+
+.trpg-screen-tab {
+  border: 1px solid rgba(138, 163, 211, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #cfe0ff;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.trpg-screen-tab:hover {
+  border-color: rgba(138, 163, 211, 0.45);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.trpg-screen-tab.active {
+  border-color: rgba(74, 222, 128, 0.45);
+  background: rgba(74, 222, 128, 0.12);
+}
+
+.trpg-screen-tab-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6f0ff;
+}
+
+.trpg-screen-tab-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #9db7e5;
+}
+
+.trpg-guide-box {
+  border: 1px solid rgba(138, 163, 211, 0.24);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+}
+
+.trpg-guide-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #d9ebff;
+}
+
+.trpg-guide-text {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #c4d7f8;
+  line-height: 1.45;
+}
+
+.trpg-guide-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8ca8d5;
+  font-family: monospace;
+}
+
+.trpg-control-lock {
+  border: 1px solid rgba(138, 163, 211, 0.26);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.trpg-control-lock.locked {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.trpg-control-lock.unlocked {
+  border-color: rgba(74, 222, 128, 0.4);
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.trpg-control-lock-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e6f0ff;
+}
+
+.trpg-control-lock-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #c4d7f8;
+}
+
+.trpg-control-lock-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8ca8d5;
+  font-family: monospace;
+}
+
 /* TRPG Actors */
 .trpg-actor-list { display: flex; flex-direction: column; gap: 8px; }
 .trpg-actor {
@@ -2109,6 +2214,7 @@ button.council-row.selected {
 @media (max-width: 900px) {
   .task-board { grid-template-columns: 1fr; }
   .trpg-layout { grid-template-columns: 1fr; }
+  .trpg-screen-tabs { grid-template-columns: 1fr; }
   .council-create { grid-template-columns: 1fr; }
   .control-row { grid-template-columns: 1fr; }
   .agent-mention-row { grid-template-columns: 1fr; }

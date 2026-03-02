@@ -34,6 +34,13 @@ const joinActorName = signal('')
 const joinStatus = signal<'idle' | 'checking' | 'requesting' | 'ok' | 'error'>('idle')
 const joinEligibility = signal<Record<string, unknown> | null>(null)
 const lastRoundRun = signal<TrpgRoundRunResult | null>(null)
+type TrpgScreen = 'overview' | 'timeline' | 'control'
+const trpgScreen = signal<TrpgScreen>('overview')
+const timelineActorFilter = signal('all')
+const timelineTypeFilter = signal('all')
+const timelinePhaseFilter = signal('all')
+const CONTROL_UNLOCK_WINDOW_MS = 120_000
+const controlUnlockUntilMs = signal<number | null>(null)
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -119,6 +126,75 @@ function recNumber(obj: Record<string, unknown>, key: string, fallback = 0): num
 function recBool(obj: Record<string, unknown>, key: string, fallback = false): boolean {
   const value = obj[key]
   return typeof value === 'boolean' ? value : fallback
+}
+
+function eventActorLabel(event: TrpgEvent): string {
+  const raw = event.actor_name ?? event.actor ?? event.actor_id ?? 'system'
+  const trimmed = raw.trim()
+  return trimmed === '' ? 'system' : trimmed
+}
+
+function eventTimeLabel(event: TrpgEvent): string {
+  const ts = event.timestamp?.trim() ?? ''
+  return ts || '-'
+}
+
+function setTrpgScreen(next: TrpgScreen): void {
+  trpgScreen.value = next
+}
+
+function isControlLocked(nowMs: number): boolean {
+  const unlockUntil = controlUnlockUntilMs.value
+  return unlockUntil == null || unlockUntil <= nowMs
+}
+
+function controlRemainingSeconds(nowMs: number): number {
+  const unlockUntil = controlUnlockUntilMs.value
+  if (unlockUntil == null || unlockUntil <= nowMs) return 0
+  return Math.max(0, Math.ceil((unlockUntil - nowMs) / 1000))
+}
+
+function relockControl(): void {
+  controlUnlockUntilMs.value = null
+}
+
+function browserConfirm(message: string): boolean {
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
+  return window.confirm(message)
+}
+
+function unlockControl(room: string, phase: string): void {
+  const ok = browserConfirm(
+    [
+      '관전 모드 잠금을 해제하시겠습니까?',
+      `ROOM: ${room || '-'}`,
+      `PHASE: ${phase || '-'}`,
+      '해제 시간: 120초 (시간 경과 또는 위험 액션 실행 후 자동 재잠금)',
+    ].join('\n'),
+  )
+  if (!ok) return
+  controlUnlockUntilMs.value = Date.now() + CONTROL_UNLOCK_WINDOW_MS
+  showToast('조작 잠금이 120초 동안 해제되었습니다.', 'warning')
+}
+
+function ensureUnlocked(nowMs: number): boolean {
+  if (isControlLocked(nowMs)) {
+    showToast('관전 모드 잠금 상태입니다. 먼저 잠금을 해제하세요.', 'warning')
+    return false
+  }
+  return true
+}
+
+function confirmRiskAction(actionLabel: string, room: string, phase: string): boolean {
+  return browserConfirm(
+    [
+      `[위험 액션 확인] ${actionLabel}`,
+      `ROOM: ${room || '-'}`,
+      `PHASE: ${phase || '-'}`,
+      '이 액션은 즉시 실행되며 되돌리기 어렵습니다.',
+      '계속 진행하시겠습니까?',
+    ].join('\n'),
+  )
 }
 
 // ── Sub-components ───────────────────────────────────────
@@ -229,24 +305,109 @@ function AsciiMap({ mapStr }: { mapStr: string }) {
   return html`<pre class="trpg-map">${mapStr}</pre>`
 }
 
-function StoryLog({ events }: { events: TrpgEvent[] }) {
+function StoryLog({ events, emptyLabel = '아직 이벤트가 없습니다.' }: { events: TrpgEvent[]; emptyLabel?: string }) {
   if (events.length === 0) {
-    return html`<div class="empty-state" style="font-size:13px">No story events yet</div>`
+    return html`<div class="empty-state" style="font-size:13px">${emptyLabel}</div>`
   }
 
   return html`
     <div class="trpg-story">
-      ${events.slice(-30).map((e: TrpgEvent, i: number) => html`
+      ${events.map((e: TrpgEvent, i: number) => html`
         <div key=${i} class="trpg-event ${e.type ?? ''}">
-          ${e.actor ? html`<strong>${e.actor}</strong>${' '}` : null}
+          <div class="trpg-event-meta-row">
+            <span class="trpg-event-meta">${eventTimeLabel(e)}</span>
+            <span class="trpg-event-meta">${e.phase ?? 'phase:-'}</span>
+            <span class="trpg-event-meta">${e.type ?? 'type:-'}</span>
+          </div>
+          <div class="trpg-event-main">
+            <strong>${eventActorLabel(e)}</strong>
+            ${' '}
           ${e.dice_roll
             ? html`<span class="trpg-dice">[${e.dice_roll.notation}: ${e.dice_roll.rolls?.join(',')} = ${e.dice_roll.total}${e.dice_roll.modifier ? ` +${e.dice_roll.modifier}` : ''}]</span>${' '}`
             : null}
-          <span class="trpg-event-text">${e.content ?? ''}</span>
-          <span style="float:right; font-size:10px; color:#555;"><${TimeAgo} timestamp=${e.timestamp} /></span>
+            <span class="trpg-event-text">${e.content ?? ''}</span>
+            <span class="trpg-event-ts"><${TimeAgo} timestamp=${e.timestamp} /></span>
+          </div>
         </div>
       `)}
     </div>
+  `
+}
+
+function TimelinePanel({ events }: { events: TrpgEvent[] }) {
+  const actorFilter = timelineActorFilter.value
+  const typeFilter = timelineTypeFilter.value
+  const phaseFilter = timelinePhaseFilter.value
+
+  const actorOptions = Array.from(
+    new Set(
+      events
+        .map(eventActorLabel)
+        .map(v => v.trim())
+        .filter(v => v !== ''),
+    ),
+  ).sort((a, b) => a.localeCompare(b))
+  const typeOptions = Array.from(
+    new Set(
+      events
+        .map(e => (e.type ?? '').trim())
+        .filter(v => v !== ''),
+    ),
+  ).sort((a, b) => a.localeCompare(b))
+  const phaseOptions = Array.from(
+    new Set(
+      events
+        .map(e => (e.phase ?? '').trim())
+        .filter(v => v !== ''),
+    ),
+  ).sort((a, b) => a.localeCompare(b))
+
+  const filteredEvents = events.filter(event => {
+    if (actorFilter !== 'all' && eventActorLabel(event) !== actorFilter) return false
+    if (typeFilter !== 'all' && (event.type ?? '') !== typeFilter) return false
+    if (phaseFilter !== 'all' && (event.phase ?? '') !== phaseFilter) return false
+    return true
+  })
+
+  return html`
+    <div class="trpg-story-toolbar">
+      <div class="trpg-story-filter">
+        <label>Actor</label>
+        <select value=${actorFilter} onChange=${(e: Event) => { timelineActorFilter.value = (e.target as HTMLSelectElement).value }}>
+          <option value="all">all</option>
+          ${actorOptions.map(actor => html`<option value=${actor}>${actor}</option>`)}
+        </select>
+      </div>
+      <div class="trpg-story-filter">
+        <label>Type</label>
+        <select value=${typeFilter} onChange=${(e: Event) => { timelineTypeFilter.value = (e.target as HTMLSelectElement).value }}>
+          <option value="all">all</option>
+          ${typeOptions.map(type => html`<option value=${type}>${type}</option>`)}
+        </select>
+      </div>
+      <div class="trpg-story-filter">
+        <label>Phase</label>
+        <select value=${phaseFilter} onChange=${(e: Event) => { timelinePhaseFilter.value = (e.target as HTMLSelectElement).value }}>
+          <option value="all">all</option>
+          ${phaseOptions.map(phase => html`<option value=${phase}>${phase}</option>`)}
+        </select>
+      </div>
+      <button
+        class="trpg-run-btn secondary"
+        style="align-self:flex-end;"
+        onClick=${() => {
+          timelineActorFilter.value = 'all'
+          timelineTypeFilter.value = 'all'
+          timelinePhaseFilter.value = 'all'
+        }}
+      >
+        필터 초기화
+      </button>
+      <span style="margin-left:auto; font-size:11px; color:#9ca3af; align-self:flex-end;">
+        표시 ${filteredEvents.length} / 전체 ${events.length}
+      </span>
+    </div>
+    <${StoryLog} events=${filteredEvents.slice(-120)} emptyLabel="필터 조건에 맞는 이벤트가 없습니다." />
   `
 }
 
@@ -313,7 +474,7 @@ function RoundHistory({ state }: { state: TrpgState }) {
 
 // ── Controls ─────────────────────────────────────────────
 
-function ControlBox({ state }: { state: TrpgState }) {
+function ControlBox({ state, nowMs }: { state: TrpgState; nowMs: number }) {
   const room = trpgRoom.value || state.session?.room || ''
   const status = runStatus.value
   const actors = state.party ?? []
@@ -324,7 +485,10 @@ function ControlBox({ state }: { state: TrpgState }) {
   }
 
   const handleRunRound = async () => {
-    if (!room) { showToast('No room set', 'error'); return }
+    if (!room) { showToast('Room ID가 비어 있습니다.', 'error'); return }
+    if (!ensureUnlocked(nowMs)) return
+    const phase = state.current_round?.phase ?? state.session?.status ?? 'unknown'
+    if (!confirmRiskAction('라운드 실행', room, phase)) return
     runStatus.value = 'running'
     try {
       const result = await runTrpgRound(room)
@@ -334,40 +498,48 @@ function ControlBox({ state }: { state: TrpgState }) {
       const advanced = summary ? recBool(summary, 'advanced', false) : false
       const reason = summary ? recString(summary, 'progress_reason', '') : ''
       showToast(
-        advanced ? 'Round advanced' : `Round stalled${reason ? `: ${reason}` : ''}`,
+        advanced ? '라운드가 정상 진행되었습니다.' : `라운드가 정체되었습니다${reason ? `: ${reason}` : ''}`,
         advanced ? 'success' : 'warning',
       )
       refreshTrpg()
     } catch (err) {
       lastRoundRun.value = null
       runStatus.value = 'error'
-      const message = err instanceof Error ? err.message : 'Round failed'
+      const message = err instanceof Error ? err.message : '라운드 실행에 실패했습니다.'
       showToast(message, 'error')
+    } finally {
+      relockControl()
     }
   }
 
   const handleAdvanceTurn = async () => {
     if (!room) return
+    if (!ensureUnlocked(nowMs)) return
+    const phase = state.current_round?.phase ?? state.session?.status ?? 'unknown'
+    if (!confirmRiskAction('턴 강제 진행', room, phase)) return
     try {
       await advanceTrpgTurn(room)
-      showToast('Turn advanced', 'success')
+      showToast('턴을 다음 단계로 이동했습니다.', 'success')
       refreshTrpg()
     } catch {
-      showToast('Advance failed', 'error')
+      showToast('턴 이동에 실패했습니다.', 'error')
+    } finally {
+      relockControl()
     }
   }
 
   const handleRollDice = async () => {
     if (!room) return
+    if (!ensureUnlocked(nowMs)) return
     const actorId = selectedActorId.value.trim()
     if (!actorId) {
-      showToast('Select actor first', 'warning')
+      showToast('먼저 Actor를 선택하세요.', 'warning')
       return
     }
     const statValue = Number.parseInt(diceStatValue.value, 10)
     const dc = Number.parseInt(diceDc.value, 10)
     if (Number.isNaN(statValue) || Number.isNaN(dc)) {
-      showToast('Stat/DC must be numbers', 'warning')
+      showToast('stat/dc는 숫자여야 합니다.', 'warning')
       return
     }
     const rawParsed = Number.parseInt(diceRawD20.value, 10)
@@ -383,10 +555,10 @@ function ControlBox({ state }: { state: TrpgState }) {
         dc,
         rawD20,
       })
-      showToast('Dice rolled', 'success')
+      showToast('주사위 판정을 기록했습니다.', 'success')
       refreshTrpg()
     } catch {
-      showToast('Dice roll failed', 'error')
+      showToast('주사위 판정 기록에 실패했습니다.', 'error')
     }
   }
 
@@ -411,7 +583,7 @@ function ControlBox({ state }: { state: TrpgState }) {
             value=${selectedActorId.value}
             onChange=${(e: Event) => { selectedActorId.value = (e.target as HTMLSelectElement).value }}
           >
-            <option value="">Select actor</option>
+            <option value="">Actor 선택</option>
             ${actors.map(a => html`<option value=${a.id}>${a.name} (${a.id})</option>`)}
           </select>
         </div>
@@ -464,7 +636,7 @@ function ControlBox({ state }: { state: TrpgState }) {
               onClick=${handleRunRound}
               disabled=${status === 'running'}
             >
-              ${status === 'running' ? 'Running...' : 'Run Round'}
+              ${status === 'running' ? '실행 중...' : 'Run Round'}
             </button>
             <button class="trpg-run-btn secondary" onClick=${handleAdvanceTurn}>
               Next Turn
@@ -474,13 +646,13 @@ function ControlBox({ state }: { state: TrpgState }) {
       </div>
 
       ${status !== 'idle'
-        ? html`<div class="trpg-run-status ${status}">${status === 'running' ? 'Processing...' : status === 'ok' ? 'Done' : 'Failed'}</div>`
+        ? html`<div class="trpg-run-status ${status}">${status === 'running' ? '처리 중...' : status === 'ok' ? '완료' : '실패'}</div>`
         : null}
     </div>
   `
 }
 
-function JoinGatePanel({ state }: { state: TrpgState }) {
+function JoinGatePanel({ state, nowMs }: { state: TrpgState; nowMs: number }) {
   const room = trpgRoom.value || state.session?.room || ''
   const gate = state.join_gate
   const eligibilityRaw = joinEligibility.value
@@ -490,7 +662,7 @@ function JoinGatePanel({ state }: { state: TrpgState }) {
     const actorId = joinActorId.value.trim()
     const keeper = joinKeeper.value.trim()
     if (!room || !actorId) {
-      showToast('Room/Actor is required', 'warning')
+      showToast('Room/Actor가 필요합니다.', 'warning')
       return
     }
     joinStatus.value = 'checking'
@@ -498,10 +670,10 @@ function JoinGatePanel({ state }: { state: TrpgState }) {
       const res = await fetchTrpgJoinEligibility(room, actorId, keeper || undefined)
       joinEligibility.value = res as unknown as Record<string, unknown>
       joinStatus.value = 'ok'
-      showToast('Eligibility updated', 'success')
+      showToast('참가 가능 여부를 갱신했습니다.', 'success')
     } catch (err) {
       joinStatus.value = 'error'
-      const message = err instanceof Error ? err.message : 'Eligibility check failed'
+      const message = err instanceof Error ? err.message : '참가 가능 여부 확인에 실패했습니다.'
       showToast(message, 'error')
     }
   }
@@ -511,9 +683,12 @@ function JoinGatePanel({ state }: { state: TrpgState }) {
     const keeper = joinKeeper.value.trim()
     const name = joinActorName.value.trim()
     if (!room || !actorId || !keeper) {
-      showToast('Room/Actor/Keeper is required', 'warning')
+      showToast('Room/Actor/Keeper가 필요합니다.', 'warning')
       return
     }
+    if (!ensureUnlocked(nowMs)) return
+    const phase = state.current_round?.phase ?? state.session?.status ?? 'unknown'
+    if (!confirmRiskAction('Mid-Join 승인 요청', room, phase)) return
     joinStatus.value = 'requesting'
     try {
       const result = await requestTrpgMidJoin({
@@ -527,16 +702,18 @@ function JoinGatePanel({ state }: { state: TrpgState }) {
       const granted = isRecord(result) ? recBool(result, 'granted', false) : false
       const reasonCode = isRecord(result) ? recString(result, 'reason_code', '') : ''
       if (granted) {
-        showToast('Mid-join granted', 'success')
+        showToast('Mid-Join이 승인되었습니다.', 'success')
       } else {
-        showToast(`Mid-join rejected${reasonCode ? `: ${reasonCode}` : ''}`, 'warning')
+        showToast(`Mid-Join이 거절되었습니다${reasonCode ? `: ${reasonCode}` : ''}`, 'warning')
       }
       joinStatus.value = granted ? 'ok' : 'error'
       refreshTrpg()
     } catch (err) {
       joinStatus.value = 'error'
-      const message = err instanceof Error ? err.message : 'Mid-join request failed'
+      const message = err instanceof Error ? err.message : 'Mid-Join 요청에 실패했습니다.'
       showToast(message, 'error')
+    } finally {
+      relockControl()
     }
   }
 
@@ -765,6 +942,188 @@ function RoundRunInsight() {
   `
 }
 
+function ControlSafetyPanel({ state, nowMs }: { state: TrpgState; nowMs: number }) {
+  const room = trpgRoom.value || state.session?.room || ''
+  const phase = state.current_round?.phase ?? state.session?.status ?? 'unknown'
+  const locked = isControlLocked(nowMs)
+  const remains = controlRemainingSeconds(nowMs)
+
+  return html`
+    <${Card} title="조작 안전 잠금" style="margin-bottom:16px;">
+      <div class="trpg-control-lock ${locked ? 'locked' : 'unlocked'}">
+        <div class="trpg-control-lock-title">
+          ${locked ? '잠금 상태: 관전 전용' : '잠금 해제됨'}
+        </div>
+        <div class="trpg-control-lock-desc">
+          ${locked
+            ? '조작 액션은 실행되지 않습니다. 필요할 때만 잠금을 해제하세요.'
+            : `위험 액션 실행 또는 ${remains}초 후 자동으로 다시 잠깁니다.`}
+        </div>
+        <div class="trpg-control-lock-meta">room: ${room || '-'} · phase: ${phase || '-'}</div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          ${locked
+            ? html`<button class="trpg-run-btn recommend" onClick=${() => unlockControl(room, phase)}>잠금 해제 (120초)</button>`
+            : html`<button class="trpg-run-btn secondary" onClick=${() => { relockControl(); showToast('조작 잠금으로 전환했습니다.', 'success') }}>즉시 다시 잠금</button>`}
+        </div>
+      </div>
+    <//>
+  `
+}
+
+function TrpgScreenTabs({ active }: { active: TrpgScreen }) {
+  const tabs: Array<{ id: TrpgScreen; label: string; desc: string }> = [
+    { id: 'overview', label: 'Overview', desc: '관전 요약' },
+    { id: 'timeline', label: 'Timeline', desc: '이벤트 흐름' },
+    { id: 'control', label: 'Control', desc: '운영/개입' },
+  ]
+
+  return html`
+    <div class="trpg-screen-tabs" role="tablist" aria-label="TRPG 화면 선택">
+      ${tabs.map(tab => html`
+        <button
+          class="trpg-screen-tab ${active === tab.id ? 'active' : ''}"
+          role="tab"
+          aria-selected=${active === tab.id}
+          onClick=${() => setTrpgScreen(tab.id)}
+        >
+          <span class="trpg-screen-tab-label">${tab.label}</span>
+          <span class="trpg-screen-tab-desc">${tab.desc}</span>
+        </button>
+      `)}
+    </div>
+  `
+}
+
+function OverviewView({ state }: { state: TrpgState }) {
+  const party = state.party ?? []
+  const events = state.story_log ?? []
+
+  return html`
+    <div class="trpg-layout">
+      <div>
+        <${Card} title="관전 가이드">
+          <div class="trpg-guide-box">
+            <div class="trpg-guide-title">권장 운영 순서</div>
+            <div class="trpg-guide-text">1) Overview에서 상태 파악 → 2) Timeline에서 원인 확인 → 3) 필요 시 Control에서 최소 개입</div>
+            <div class="trpg-guide-meta">관전자 기본 모드 / 위험 액션은 Control 잠금 해제 후 실행</div>
+          </div>
+        <//>
+
+        <${Card} title=${`최근 스토리 (${Math.min(events.length, 20)})`} style="margin-top:16px;">
+          <${StoryLog} events=${events.slice(-20)} />
+        <//>
+
+        ${state.map
+          ? html`
+            <${Card} title="맵" style="margin-top:16px;">
+              <${AsciiMap} mapStr=${state.map} />
+            <//>
+          `
+          : null}
+      </div>
+
+      <div class="trpg-sidebar">
+        <${Card} title="현재 라운드">
+          <${NextAction} state=${state} />
+        <//>
+
+        <${Card} title="기여도" style="margin-top:16px;">
+          <${ContributionLedger} state=${state} />
+        <//>
+
+        <${Card} title=${`파티 (${party.length})`} style="margin-top:16px;">
+          <div class="trpg-actor-list">
+            ${party.map((a: TrpgActor) => html`<${ActorCard} key=${a.id ?? a.name} actor=${a} />`)}
+            ${party.length === 0
+              ? html`<div class="empty-state" style="font-size:13px">등록된 actor가 없습니다.</div>`
+              : null}
+          </div>
+        <//>
+
+        ${state.history && state.history.length > 0
+          ? html`
+            <${Card} title=${`히스토리 (${state.history.length})`} style="margin-top:16px;">
+              <${RoundHistory} state=${state} />
+            <//>
+          `
+          : null}
+      </div>
+    </div>
+  `
+}
+
+function TimelineView({ state }: { state: TrpgState }) {
+  const events = state.story_log ?? []
+
+  return html`
+    <div class="trpg-layout">
+      <div>
+        <${Card} title=${`이벤트 타임라인 (${events.length})`}>
+          <${TimelinePanel} events=${events} />
+        <//>
+      </div>
+
+      <div class="trpg-sidebar">
+        <${Card} title="최근 라운드 결과">
+          <${RoundRunInsight} />
+        <//>
+
+        <${Card} title="현재 라운드" style="margin-top:16px;">
+          <${NextAction} state=${state} />
+        <//>
+      </div>
+    </div>
+  `
+}
+
+function ControlView({ state, nowMs }: { state: TrpgState; nowMs: number }) {
+  const party = state.party ?? []
+
+  return html`
+    <div>
+      <${ControlSafetyPanel} state=${state} nowMs=${nowMs} />
+      <div class="trpg-layout">
+        <div>
+          <${Card} title="조작 패널">
+            <${ControlBox} state=${state} nowMs=${nowMs} />
+          <//>
+
+          <${Card} title="Mid-Join Gate" style="margin-top:16px;">
+            <${JoinGatePanel} state=${state} nowMs=${nowMs} />
+          <//>
+
+          <${Card} title="최근 라운드 결과" style="margin-top:16px;">
+            <${RoundRunInsight} />
+          <//>
+        </div>
+
+        <div class="trpg-sidebar">
+          <${Card} title="기여도" style="margin-top:0;">
+            <${ContributionLedger} state=${state} />
+          <//>
+
+          <${Card} title=${`파티 (${party.length})`} style="margin-top:16px;">
+            <div class="trpg-actor-list">
+              ${party.map((a: TrpgActor) => html`<${ActorCard} key=${a.id ?? a.name} actor=${a} />`)}
+              ${party.length === 0
+                ? html`<div class="empty-state" style="font-size:13px">등록된 actor가 없습니다.</div>`
+                : null}
+            </div>
+          <//>
+
+          ${state.history && state.history.length > 0
+            ? html`
+              <${Card} title=${`히스토리 (${state.history.length})`} style="margin-top:16px;">
+                <${RoundHistory} state=${state} />
+              <//>
+            `
+            : null}
+        </div>
+      </div>
+    </div>
+  `
+}
+
 // ── Main TRPG component ──────────────────────────────────
 
 export function Trpg() {
@@ -788,16 +1147,24 @@ export function Trpg() {
   const party = state.party ?? []
   const events = state.story_log ?? []
   const outcome = state.outcome
+  const screen = trpgScreen.value
+  const nowMs = Date.now()
 
   return html`
     <div>
+      <div style="display:flex; gap:8px; align-items:center; justify-content:space-between; margin-bottom:8px;">
+        <div style="font-size:11px; color:#8ea9d6;">
+          room: ${trpgRoom.value || state.session?.room || '-'} · phase: ${state.current_round?.phase ?? state.session?.status ?? '-'}
+        </div>
+        <button class="trpg-run-btn secondary" onClick=${() => refreshTrpg()}>새로고침</button>
+      </div>
+
       <${SessionOutcome} outcome=${outcome} />
 
-      ${'' /* Summary stats */}
       <div class="stats-grid" style="margin-bottom:16px;">
         <div class="stat-card">
           <div class="stat-label">Session</div>
-          <div class="stat-value" style="font-size:16px;">${state.session?.status ?? 'Active'}</div>
+          <div class="stat-value" style="font-size:16px;">${state.session?.status ?? 'active'}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Round</div>
@@ -813,67 +1180,13 @@ export function Trpg() {
         </div>
       </div>
 
-      ${'' /* Next action banner */}
-      <${NextAction} state=${state} />
+      <${TrpgScreenTabs} active=${screen} />
 
-      ${'' /* 2-column layout: main (story + map) | sidebar (party + controls) */}
-      <div class="trpg-layout">
-        <div>
-          ${'' /* Story log */}
-          <${Card} title="Story Log (${events.length})">
-            <${StoryLog} events=${events} />
-          <//>
-
-          ${'' /* ASCII map */}
-          ${state.map
-            ? html`
-              <${Card} title="Map" style="margin-top:16px;">
-                <${AsciiMap} mapStr=${state.map} />
-              <//>`
-            : null}
-        </div>
-
-        <div class="trpg-sidebar">
-          ${'' /* Controls */}
-          <${Card} title="Controls">
-            <${ControlBox} state=${state} />
-          <//>
-
-          <${Card} title="Last Round Result" style="margin-top:16px;">
-            <${RoundRunInsight} />
-          <//>
-
-          ${'' /* Mid-join gate */}
-          <${Card} title="Mid-Join Gate" style="margin-top:16px;">
-            <${JoinGatePanel} state=${state} />
-          <//>
-
-          ${'' /* Contribution ledger */}
-          <${Card} title="Contribution" style="margin-top:16px;">
-            <${ContributionLedger} state=${state} />
-          <//>
-
-          ${'' /* Party list */}
-          <${Card} title="Party (${party.length})" style="margin-top:16px;">
-            <div class="trpg-actor-list">
-              ${party.map((a: TrpgActor) =>
-                html`<${ActorCard} key=${a.id ?? a.name} actor=${a} />`
-              )}
-              ${party.length === 0
-                ? html`<div class="empty-state" style="font-size:13px">No actors</div>`
-                : null}
-            </div>
-          <//>
-
-          ${'' /* Round history */}
-          ${state.history && state.history.length > 0
-            ? html`
-              <${Card} title="History (${state.history.length})" style="margin-top:16px;">
-                <${RoundHistory} state=${state} />
-              <//>`
-            : null}
-        </div>
-      </div>
+      ${screen === 'overview'
+        ? html`<${OverviewView} state=${state} />`
+        : screen === 'timeline'
+          ? html`<${TimelineView} state=${state} />`
+          : html`<${ControlView} state=${state} nowMs=${nowMs} />`}
     </div>
   `
 }

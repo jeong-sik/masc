@@ -1861,6 +1861,211 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
     ]);
   ]
 
+let json_int_opt = function
+  | Some v -> `Int v
+  | None -> `Null
+
+let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
+  let warn_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_BOARD_AGE_WARN_SEC"
+      ~default:3600
+      ~min_v:60
+      ~max_v:604800
+  in
+  let bad_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_BOARD_AGE_BAD_SEC"
+      ~default:21600
+      ~min_v:120
+      ~max_v:1209600
+  in
+  let slo_target_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_BOARD_SLO_SEC"
+      ~default:900
+      ~min_v:30
+      ~max_v:86400
+  in
+  try
+    let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:200 () in
+    let total_posts = List.length posts in
+    let new_posts_24h =
+      List.fold_left
+        (fun acc (p : Board.post) ->
+          if p.created_at >= (now_ts -. (24.0 *. 3600.0)) then acc + 1 else acc)
+        0 posts
+    in
+    let unanswered_posts =
+      List.fold_left
+        (fun acc (p : Board.post) ->
+          if p.reply_count = 0 then acc + 1 else acc)
+        0 posts
+    in
+    let latest_activity_ts_opt =
+      List.fold_left
+        (fun acc (p : Board.post) ->
+          match acc with
+          | None -> Some p.updated_at
+          | Some prev -> Some (max prev p.updated_at))
+        None posts
+    in
+    let last_activity_age_s =
+      match latest_activity_ts_opt with
+      | None -> None
+      | Some ts -> Some (max 0 (int_of_float (now_ts -. ts)))
+    in
+    let alert_level =
+      match last_activity_age_s with
+      | None -> "warn"
+      | Some age when age >= bad_age_s -> "bad"
+      | Some age when age >= warn_age_s -> "warn"
+      | Some _ -> "ok"
+    in
+    (`Assoc [
+      ("alert_level", `String alert_level);
+      ("posts_total", `Int total_posts);
+      ("new_posts_24h", `Int new_posts_24h);
+      ("unanswered_posts", `Int unanswered_posts);
+      ("last_activity_age_s", json_int_opt last_activity_age_s);
+      ("slo_target_age_s", `Int slo_target_age_s);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], true)
+  with _ ->
+    (`Assoc [
+      ("alert_level", `String "bad");
+      ("posts_total", `Int 0);
+      ("new_posts_24h", `Int 0);
+      ("unanswered_posts", `Int 0);
+      ("last_activity_age_s", `Null);
+      ("slo_target_age_s", `Int slo_target_age_s);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], false)
+
+let council_monitoring_json ~(now_ts : float) ~(base_path : string)
+  : Yojson.Safe.t * bool =
+  let warn_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_COUNCIL_AGE_WARN_SEC"
+      ~default:3600
+      ~min_v:60
+      ~max_v:604800
+  in
+  let bad_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_COUNCIL_AGE_BAD_SEC"
+      ~default:21600
+      ~min_v:120
+      ~max_v:1209600
+  in
+  let slo_target_quorum_age_s =
+    int_of_env_default
+      "MASC_DASHBOARD_COUNCIL_SLO_SEC"
+      ~default:1800
+      ~min_v:30
+      ~max_v:86400
+  in
+  try
+    let cfg = Council.make_config ~base_path in
+    let debates = Council.DebateApi.list_all ~config:cfg ~status_filter:None ~limit:200 () in
+    let sessions = Council.ConsensusApi.list_active () in
+    let debates_open =
+      List.fold_left
+        (fun acc (d : Council.Debate.debate) ->
+          if d.status = Council.Debate.Open then acc + 1 else acc)
+        0 debates
+    in
+    let debates_pending =
+      List.fold_left
+        (fun acc (d : Council.Debate.debate) ->
+          if d.status = Council.Debate.Pending then acc + 1 else acc)
+        0 debates
+    in
+    let sessions_active = List.length sessions in
+    let sessions_without_quorum =
+      List.fold_left
+        (fun acc (s : Council.Consensus.session) ->
+          if List.length s.votes < s.quorum then acc + 1 else acc)
+        0 sessions
+    in
+    let oldest_open_debate_ts_opt =
+      List.fold_left
+        (fun acc (d : Council.Debate.debate) ->
+          if d.status <> Council.Debate.Open then acc
+          else
+            match acc with
+            | None -> Some d.created_at
+            | Some prev -> Some (min prev d.created_at))
+        None debates
+    in
+    let oldest_open_debate_age_s =
+      match oldest_open_debate_ts_opt with
+      | None -> None
+      | Some ts -> Some (max 0 (int_of_float (now_ts -. ts)))
+    in
+    let latest_activity_ts_opt =
+      let from_debates =
+        List.fold_left
+          (fun acc (d : Council.Debate.debate) ->
+            match acc with
+            | None -> Some d.created_at
+            | Some prev -> Some (max prev d.created_at))
+          None debates
+      in
+      List.fold_left
+        (fun acc (s : Council.Consensus.session) ->
+          match acc with
+          | None -> Some s.created_at
+          | Some prev -> Some (max prev s.created_at))
+        from_debates sessions
+    in
+    let last_activity_age_s =
+      match latest_activity_ts_opt with
+      | None -> None
+      | Some ts -> Some (max 0 (int_of_float (now_ts -. ts)))
+    in
+    let base_alert =
+      match last_activity_age_s with
+      | None -> "warn"
+      | Some age when age >= bad_age_s -> "bad"
+      | Some age when age >= warn_age_s -> "warn"
+      | Some _ -> "ok"
+    in
+    let alert_level =
+      if sessions_without_quorum <= 0 then base_alert
+      else
+        match oldest_open_debate_age_s with
+        | Some age when age >= bad_age_s -> "bad"
+        | _ -> "warn"
+    in
+    (`Assoc [
+      ("alert_level", `String alert_level);
+      ("debates_open", `Int debates_open);
+      ("debates_pending", `Int debates_pending);
+      ("sessions_active", `Int sessions_active);
+      ("sessions_without_quorum", `Int sessions_without_quorum);
+      ("oldest_open_debate_age_s", json_int_opt oldest_open_debate_age_s);
+      ("last_activity_age_s", json_int_opt last_activity_age_s);
+      ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], true)
+  with _ ->
+    (`Assoc [
+      ("alert_level", `String "bad");
+      ("debates_open", `Int 0);
+      ("debates_pending", `Int 0);
+      ("sessions_active", `Int 0);
+      ("sessions_without_quorum", `Int 0);
+      ("oldest_open_debate_age_s", `Null);
+      ("last_activity_age_s", `Null);
+      ("slo_target_quorum_age_s", `Int slo_target_quorum_age_s);
+      ("warn_age_s", `Int warn_age_s);
+      ("bad_age_s", `Int bad_age_s);
+    ], false)
+
 type keeper_gen_window_stats = {
   mutable turns: int;
   mutable input_tokens: int;
@@ -3468,6 +3673,11 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let tasks = Room.get_tasks_raw config in
   let agents = Room.get_agents_raw config in
   let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+  let now_ts = Masc_mcp.Time_compat.now () in
+  let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
+  let (council_monitor_json, council_feed_ok) =
+    council_monitoring_json ~now_ts ~base_path:config.base_path
+  in
 
   let proactive_fallback_warn =
     float_of_env_default
@@ -3518,9 +3728,13 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("proactive_similarity_bad", `Float (max proactive_similarity_warn proactive_similarity_bad));
         ("toast_cooldown_sec", `Int alert_toast_cooldown_sec);
       ]);
+      ("monitoring", `Assoc [
+        ("board", board_monitor_json);
+        ("council", council_monitor_json);
+      ]);
       ("data_quality", `Assoc [
-        ("board_contract_ok", `Bool true);
-        ("council_feed_ok", `Bool true);
+        ("board_contract_ok", `Bool board_contract_ok);
+        ("council_feed_ok", `Bool council_feed_ok);
         ("last_sync_at", `String (Types.now_iso ()));
       ]);
     ]

@@ -408,6 +408,30 @@ export interface CouncilDebateSummary {
   summary_text?: string
 }
 
+export interface BoardMonitoring {
+  alert_level?: 'ok' | 'warn' | 'bad' | string
+  posts_total?: number
+  new_posts_24h?: number
+  unanswered_posts?: number
+  last_activity_age_s?: number | null
+  slo_target_age_s?: number
+  warn_age_s?: number
+  bad_age_s?: number
+}
+
+export interface CouncilMonitoring {
+  alert_level?: 'ok' | 'warn' | 'bad' | string
+  debates_open?: number
+  debates_pending?: number
+  sessions_active?: number
+  sessions_without_quorum?: number
+  oldest_open_debate_age_s?: number | null
+  last_activity_age_s?: number | null
+  slo_target_quorum_age_s?: number
+  warn_age_s?: number
+  bad_age_s?: number
+}
+
 // --- Dashboard batch response ---
 
 export interface DashboardData {
@@ -439,6 +463,10 @@ export interface ServerStatus {
     proactive_similarity_warn: number
     proactive_similarity_bad: number
     toast_cooldown_sec: number
+  }
+  monitoring?: {
+    board?: BoardMonitoring
+    council?: CouncilMonitoring
   }
   data_quality?: {
     board_contract_ok?: boolean

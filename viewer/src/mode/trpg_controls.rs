@@ -2025,7 +2025,42 @@ async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBo
 }
 
 async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
-    let mut rows: Vec<(bool, String, String)> = Vec::new();
+    let mut rows: Vec<(bool, String, String, Option<String>)> = Vec::new();
+
+    // ── Step 0: Server connectivity (early-exit on failure) ──
+    let health_url = crate::config::build_masc_url("health");
+    let server_row = match crate::mode::mcp_rpc::http_get_text(&health_url).await {
+        Ok((status, _body)) if (200..300).contains(&status) => {
+            (true, "서버 연결".to_string(), "MASC 서버 응답 정상".to_string(), None)
+        }
+        Ok((status, body)) => {
+            let hint = if body.to_ascii_lowercase().contains("<html") {
+                Some("프록시/CDN이 에러 페이지를 반환했습니다. 서버 프로세스를 확인하세요.".to_string())
+            } else {
+                Some("서버가 실행 중인지, URL이 올바른지 확인하세요.".to_string())
+            };
+            (false, "서버 연결".to_string(), format!("HTTP {} 응답", status), hint)
+        }
+        Err(e) => {
+            let hint = Some("MASC 서버가 실행 중인지 확인하세요. (로컬: localhost:8935)".to_string());
+            (false, "서버 연결".to_string(), format!("연결 실패: {}", e), hint)
+        }
+    };
+    let server_ok = server_row.0;
+    rows.push(server_row);
+
+    // If server is unreachable, skip all dependent checks (cockpit syndrome prevention).
+    if !server_ok {
+        set_new_game_preflight_rows(doc, &rows);
+        set_new_game_preflight_state(doc, "fail");
+        set_new_game_flow_stage(
+            doc,
+            NewGameFlowStage::Failed,
+            Some("MASC 서버에 연결할 수 없습니다"),
+        );
+        sync_new_game_wizard_ui(doc);
+        return Err("MASC 서버 연결 실패".to_string());
+    }
 
     let preset_row = match fetch_preset_catalog().await {
         Ok(catalog) => {
@@ -2042,9 +2077,9 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                     preset_catalog_keys_preview_from_value(&catalog)
                 )
             };
-            (ok, "프리셋".to_string(), detail)
+            (ok, "프리셋".to_string(), detail, None)
         }
-        Err(e) => (false, "프리셋".to_string(), format!("조회 실패: {}", e)),
+        Err(e) => (false, "프리셋".to_string(), format!("조회 실패: {}", e), None),
     };
     rows.push(preset_row);
 
@@ -2069,6 +2104,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                             true,
                             "키퍼 풀".to_string(),
                             format!("{}명 사용 가능", count),
+                            None,
                         ),
                     )
                 } else {
@@ -2078,13 +2114,14 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                             false,
                             "키퍼 풀".to_string(),
                             "사용 가능한 keeper가 없습니다".to_string(),
+                            None,
                         ),
                     )
                 }
             }
             Err(e) => (
                 Vec::new(),
-                (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e)),
+                (false, "키퍼 풀".to_string(), format!("조회 실패: {}", e), None),
             ),
         };
     rows.push(keeper_pool_row);
@@ -2102,6 +2139,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
             false,
             "선택 키퍼".to_string(),
             "DM/플레이어 keeper를 선택하세요.".to_string(),
+            None,
         )
     } else {
         let mut blockers = Vec::new();
@@ -2201,7 +2239,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 ));
             }
             let detail = detail_parts.join(" · ");
-            (true, "선택 키퍼".to_string(), detail)
+            (true, "선택 키퍼".to_string(), detail, None)
         } else {
             (
                 false,
@@ -2212,6 +2250,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                     selected_keepers.len(),
                     summarize_preflight_items(&blockers, 3)
                 ),
+                None,
             )
         }
     };
@@ -2235,12 +2274,14 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                     true,
                     "점유 충돌".to_string(),
                     format!("선택 keeper {}명 모두 비점유", selected_keepers.len()),
+                    None,
                 )
             } else {
                 (
                     false,
                     "점유 충돌".to_string(),
                     format!("이미 점유 중: {}", summarize_preflight_items(&conflicts, 3)),
+                    None,
                 )
             }
         }
@@ -2248,6 +2289,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
             true,
             "점유 충돌".to_string(),
             "신규 room으로 판단되어 충돌 검사를 건너뜁니다.".to_string(),
+            None,
         ),
     };
     rows.push(occupancy_row);
@@ -2266,18 +2308,20 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 true,
                 "룸 상태".to_string(),
                 format!("room {} · {}", room_id, status),
+                None,
             )
         }
         Err(_) => (
             true,
             "룸 상태".to_string(),
             format!("room {} · 신규 room (아직 초기화 전)", room_id),
+            None,
         ),
     };
     rows.push(room_row);
 
     set_new_game_preflight_rows(doc, &rows);
-    let all_ok = rows.iter().all(|(ok, _, _)| *ok);
+    let all_ok = rows.iter().all(|(ok, _, _, _)| *ok);
     set_new_game_preflight_state(doc, if all_ok { "ok" } else { "fail" });
     if all_ok {
         set_new_game_flow_stage(doc, NewGameFlowStage::Idle, Some("사전 점검 통과"));

@@ -184,6 +184,11 @@ let test_source_heartbeat_preferred_hours () =
     true (file_contains_pattern "lib/lodge_heartbeat.ml"
       {|[heartbeat] preferred_hours parse:|})
 
+let test_source_heartbeat_interests () =
+  check bool "lodge_heartbeat.ml has interests parse logging"
+    true (file_contains_pattern "lib/lodge_heartbeat.ml"
+      {|[heartbeat] interests parse:|})
+
 let test_source_main_keeper_log_parse () =
   check bool "main_eio.ml has keeper log parse logging"
     true (file_contains_pattern "bin/main_eio.ml"
@@ -229,6 +234,8 @@ let () =
         `Quick test_source_heartbeat_traits;
       test_case "MA-M4b: heartbeat preferred_hours logging present"
         `Quick test_source_heartbeat_preferred_hours;
+      test_case "MA-M4c: heartbeat interests logging present"
+        `Quick test_source_heartbeat_interests;
       test_case "MA-M5: keeper log parse logging present"
         `Quick test_source_main_keeper_log_parse;
       test_case "MA-M7: trpg npc heal logging present"

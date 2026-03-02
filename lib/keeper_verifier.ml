@@ -134,6 +134,7 @@ type pipeline_result =
   | Approved of Keeper_autonomy.proposed_action * string  (** action + plan *)
   | Cautioned of Keeper_autonomy.proposed_action * string * string  (** action + plan + warning *)
   | Rejected of Keeper_autonomy.proposed_action * string  (** action + reason *)
+  | PerpetualRequested of Keeper_autonomy.perpetual_agent_request
 
 let pipeline_result_to_json = function
   | NothingToDo reason ->
@@ -157,6 +158,11 @@ let pipeline_result_to_json = function
         ("action", Keeper_autonomy.proposed_action_to_json pa);
         ("reason", `String reason);
       ]
+  | PerpetualRequested req ->
+      `Assoc [
+        ("result", `String "perpetual_requested");
+        ("request", Keeper_autonomy.perpetual_agent_request_to_json req);
+      ]
 
 (** Full pipeline: evaluate next action → generate plan → verify → decide.
 
@@ -175,6 +181,7 @@ let run_pipeline
   | NoGoals -> NothingToDo "no active goals"
   | NoActionNeeded -> NothingToDo "no action needed for current goals"
   | Skip reason -> NothingToDo reason
+  | StartPerpetualAgent req -> PerpetualRequested req
   | Propose pa ->
       (* Step 2: Check if autonomy level allows auto-execution *)
       if not (Keeper_autonomy.should_auto_execute ~autonomy_level pa) then

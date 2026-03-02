@@ -5950,6 +5950,32 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    autonomous_action_count = meta.autonomous_action_count + 1;
                    updated_at = now_iso ();
                  }
+             | StartPerpetualAgent req ->
+                 Printf.eprintf "[keeper-autonomy] %s L2 perpetual suggest: %s\n%!"
+                   meta.name req.goal_title;
+                 let board_args = `Assoc [
+                   ("author", `String meta.name);
+                   ("title", `String (Printf.sprintf "[L2 제안] Perpetual Agent: %s" req.goal_title));
+                   ("content", `String (Printf.sprintf
+                     "**장기 목표 감지**: %s\n\n이 목표는 Perpetual Agent가 적합합니다.\n- Models: %s\n- Coding mode: %b\n- Agent: %s\n\nL3+ 자율성에서 자동 시작됩니다."
+                     req.goal_title
+                     (String.concat ", " req.models)
+                     req.coding_mode
+                     req.coding_agent));
+                   ("tags", `List [
+                     `String "keeper-autonomy";
+                     `String "perpetual-suggestion";
+                     `String meta.name;
+                   ]);
+                 ] in
+                 let (ok, _msg) = Tool_board.handle_tool "masc_board_post" board_args in
+                 if not ok then
+                   Printf.eprintf "[keeper-autonomy] %s L2 perpetual board post failed\n%!" meta.name;
+                 Some { meta with
+                   last_autonomous_action_at = now_iso ();
+                   autonomous_action_count = meta.autonomous_action_count + 1;
+                   updated_at = now_iso ();
+                 }
              | _ -> None)
         | _ ->
             (* L3+: full pipeline — evaluate, plan, verify, decide *)
@@ -5966,6 +5992,59 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
              | NothingToDo reason ->
                  Printf.eprintf "[keeper-autonomy] %s: nothing to do (%s)\n%!" meta.name reason;
                  None
+             | PerpetualRequested req ->
+                 Printf.eprintf "[keeper-autonomy] %s PERPETUAL: starting for %s\n%!"
+                   meta.name req.goal_title;
+                 let perp_args = `Assoc [
+                   ("goal", `String req.goal_title);
+                   ("models", `List (List.map (fun m -> `String m) req.models));
+                   ("coding_mode", `Bool req.coding_mode);
+                   ("coding_agent", `String req.coding_agent);
+                 ] in
+                 let perp_ctx = {
+                   Tool_perpetual.agent_name = meta.name;
+                   start_loop = None;
+                   sw = None;
+                   proc_mgr = None;
+                 } in
+                 (match Tool_perpetual.dispatch perp_ctx ~name:"masc_perpetual_start" ~args:perp_args with
+                  | Some (true, result_json) ->
+                      Printf.eprintf "[keeper-autonomy] %s perpetual started: %s\n%!"
+                        meta.name result_json;
+                      (* Update goal with perpetual agent info *)
+                      (try ignore (Goal_store.review_goal config
+                        ~goal_id:req.goal_id ~outcome:"progress"
+                        ~note:(Printf.sprintf "Perpetual agent started (models: %s)"
+                          (String.concat ", " req.models)) ()) with exn ->
+                        Printf.eprintf "[keeper] goal review failed: %s\n%!" (Printexc.to_string exn));
+                      (* Post to Board *)
+                      let board_args = `Assoc [
+                        ("author", `String meta.name);
+                        ("title", `String (Printf.sprintf "[L%d Perpetual] %s"
+                          (Keeper_autonomy.autonomy_level_to_int level) req.goal_title));
+                        ("content", `String (Printf.sprintf
+                          "Perpetual Agent started for long-horizon goal.\n\n- Goal: %s (id=%s)\n- Models: %s\n- Coding mode: %b"
+                          req.goal_title req.goal_id
+                          (String.concat ", " req.models) req.coding_mode));
+                        ("tags", `List [
+                          `String "keeper-autonomy";
+                          `String "perpetual-start";
+                          `String meta.name;
+                        ]);
+                      ] in
+                      ignore (Tool_board.handle_tool "masc_board_post" board_args);
+                      Some { meta with
+                        last_autonomous_action_at = now_iso ();
+                        autonomous_action_count = meta.autonomous_action_count + 1;
+                        updated_at = now_iso ();
+                      }
+                  | Some (false, err) ->
+                      Printf.eprintf "[keeper-autonomy] %s perpetual start failed: %s\n%!"
+                        meta.name err;
+                      None
+                  | None ->
+                      Printf.eprintf "[keeper-autonomy] %s perpetual dispatch returned None\n%!" meta.name;
+                      None)
              | Approved (pa, plan) ->
                  Printf.eprintf "[keeper-autonomy] %s APPROVED: %s\n%!"
                    meta.name pa.action_description;

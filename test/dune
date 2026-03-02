@@ -493,6 +493,12 @@
  (modules test_eval_harness)
  (libraries masc_mcp alcotest str yojson unix))
 
+; Silent failure logging tests (Phase 2A)
+(test
+ (name test_silent_failures_p2a)
+ (modules test_silent_failures_p2a)
+ (libraries masc_mcp alcotest unix yojson))
+
 ; Anti-Fake Test Quality Scoring (harness P2)
 (test
  (name test_anti_fake)

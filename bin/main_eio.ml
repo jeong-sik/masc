@@ -2332,7 +2332,7 @@ let keeper_metrics_24h_json
             end
           end
         end
-      with _ -> ())
+      with exn -> Printf.eprintf "[main] keeper log parse: %s\n%!" (Printexc.to_string exn))
     lines;
   let rows =
     buckets
@@ -6008,7 +6008,7 @@ let run_server ~sw ~env ~port ~base_path =
        Printf.eprintf
          "[keeper-bootstrap] scanned=%d started=%d stale=%d\n%!"
          stats.scanned stats.started stats.stale
-   with _ -> ());
+   with exn -> Printf.eprintf "[main] keeper bootstrap failed: %s\n%!" (Printexc.to_string exn));
 
   (* Initialize Task backend - share pool with Board if PostgreSQL available *)
   (match Board_dispatch.get_pg_pool () with

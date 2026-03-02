@@ -6534,7 +6534,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           in
           let meta_after_proactive =
             if proactive_warmup_elapsed
-            then (try maybe_emit_proactive ctx meta_current with _ -> meta_current)
+            then (try maybe_emit_proactive ctx meta_current with exn -> Printf.eprintf "[keeper] proactive emission failed: %s\n%!" (Printexc.to_string exn); meta_current)
             else meta_current
           in
           let base = float_of_int (max 30 (min 300 meta_after_proactive.presence_keepalive_sec)) in

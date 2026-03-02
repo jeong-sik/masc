@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
@@ -42,7 +43,6 @@ const timelinePhaseFilter = signal('all')
 const CONTROL_UNLOCK_WINDOW_MS = 120_000
 const controlUnlockUntilMs = signal<number | null>(null)
 const realtimeNowMs = signal(Date.now())
-let realtimeTickerStarted = false
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -143,15 +143,6 @@ function eventTimeLabel(event: TrpgEvent): string {
 
 function setTrpgScreen(next: TrpgScreen): void {
   trpgScreen.value = next
-}
-
-function ensureRealtimeTicker(): void {
-  if (realtimeTickerStarted) return
-  if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return
-  realtimeTickerStarted = true
-  window.setInterval(() => {
-    realtimeNowMs.value = Date.now()
-  }, 1000)
 }
 
 function isControlLocked(nowMs: number): boolean {
@@ -1156,6 +1147,16 @@ export function Trpg() {
   const state = trpgState.value
   const loading = trpgLoading.value
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return undefined
+    const ticker = window.setInterval(() => {
+      realtimeNowMs.value = Date.now()
+    }, 1000)
+    return () => {
+      window.clearInterval(ticker)
+    }
+  }, [])
+
   if (loading && !state) {
     return html`<div class="loading-indicator">Loading TRPG state...</div>`
   }
@@ -1174,7 +1175,6 @@ export function Trpg() {
   const events = state.story_log ?? []
   const outcome = state.outcome
   const screen = trpgScreen.value
-  ensureRealtimeTicker()
   const nowMs = realtimeNowMs.value
 
   return html`

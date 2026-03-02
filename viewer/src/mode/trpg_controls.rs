@@ -4,7 +4,7 @@
 //! All items are `#[cfg(target_arch = "wasm32")]` gated at the module level
 //! (the parent `mod trpg_controls` declaration carries the gate).
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -40,6 +40,14 @@ pub(super) struct ActorAdminRow {
     actor_id: String,
     name: String,
     role: String,
+    portrait: String,
+    background: String,
+    str_score: Option<i32>,
+    dex_score: Option<i32>,
+    con_score: Option<i32>,
+    int_score: Option<i32>,
+    wis_score: Option<i32>,
+    cha_score: Option<i32>,
     hp: i32,
     max_hp: i32,
     keeper: String,
@@ -1740,6 +1748,27 @@ fn actor_admin_input_i64(doc: &web_sys::Document, id: &str) -> Option<i64> {
     }
 }
 
+fn actor_admin_collect_stats(doc: &web_sys::Document) -> Option<Value> {
+    let mut stats = Map::new();
+    for (key, input_id) in [
+        ("str", "actor-admin-str"),
+        ("dex", "actor-admin-dex"),
+        ("con", "actor-admin-con"),
+        ("int", "actor-admin-int"),
+        ("wis", "actor-admin-wis"),
+        ("cha", "actor-admin-cha"),
+    ] {
+        if let Some(v) = actor_admin_input_i64(doc, input_id) {
+            stats.insert(key.to_string(), Value::Number(v.max(0).into()));
+        }
+    }
+    if stats.is_empty() {
+        None
+    } else {
+        Some(Value::Object(stats))
+    }
+}
+
 async fn fetch_room_state_payload(room_id: &str) -> Result<Value, String> {
     let url = crate::config::build_masc_url(&format!("api/v1/trpg/state?room_id={}", room_id));
     let opts = web_sys::RequestInit::new();
@@ -1798,6 +1827,12 @@ fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
     let actor_control = parse_actor_control_map(state_root);
     let control_keeper =
         |actor_id: &str| -> String { actor_control.get(actor_id).cloned().unwrap_or_default() };
+    let read_stat = |stats: Option<&Map<String, Value>>, key: &str| -> Option<i32> {
+        stats
+            .and_then(|obj| obj.get(key))
+            .and_then(Value::as_i64)
+            .map(|v| v as i32)
+    };
 
     let mut rows = Vec::new();
     if let Some(characters) = state.get("characters").and_then(Value::as_array) {
@@ -1826,6 +1861,19 @@ fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
                 .unwrap_or("player")
                 .trim()
                 .to_string();
+            let portrait = ch
+                .get("portrait")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let background = ch
+                .get("background")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let stats = ch.get("stats").and_then(Value::as_object);
             let hp = ch.get("hp").and_then(Value::as_i64).unwrap_or(0) as i32;
             let max_hp = ch.get("max_hp").and_then(Value::as_i64).unwrap_or(0) as i32;
             let keeper = ch
@@ -1843,6 +1891,14 @@ fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
                 actor_id: actor_id.clone(),
                 name,
                 role,
+                portrait,
+                background,
+                str_score: read_stat(stats, "str"),
+                dex_score: read_stat(stats, "dex"),
+                con_score: read_stat(stats, "con"),
+                int_score: read_stat(stats, "int"),
+                wis_score: read_stat(stats, "wis"),
+                cha_score: read_stat(stats, "cha"),
                 hp,
                 max_hp,
                 keeper: final_keeper.clone(),
@@ -1869,6 +1925,19 @@ fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
                 .unwrap_or("player")
                 .trim()
                 .to_string();
+            let portrait = row
+                .get("portrait")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let background = row
+                .get("background")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let stats = row.get("stats").and_then(Value::as_object);
             let hp = row.get("hp").and_then(Value::as_i64).unwrap_or(0) as i32;
             let max_hp = row.get("max_hp").and_then(Value::as_i64).unwrap_or(0) as i32;
             let keeper = control_keeper(actor_id);
@@ -1876,6 +1945,14 @@ fn parse_actor_admin_rows(state_root: &Value) -> Vec<ActorAdminRow> {
                 actor_id: actor_id.to_string(),
                 name,
                 role,
+                portrait,
+                background,
+                str_score: read_stat(stats, "str"),
+                dex_score: read_stat(stats, "dex"),
+                con_score: read_stat(stats, "con"),
+                int_score: read_stat(stats, "int"),
+                wis_score: read_stat(stats, "wis"),
+                cha_score: read_stat(stats, "cha"),
                 hp,
                 max_hp,
                 keeper: keeper.clone(),
@@ -1906,10 +1983,19 @@ fn render_actor_admin_rows(doc: &web_sys::Document, rows: &[ActorAdminRow]) {
             } else {
                 "<span class=\"actor-claim-badge is-free\">비점유</span>".to_string()
             };
+            let str_score = row.str_score.map(|v| v.to_string()).unwrap_or_default();
+            let dex_score = row.dex_score.map(|v| v.to_string()).unwrap_or_default();
+            let con_score = row.con_score.map(|v| v.to_string()).unwrap_or_default();
+            let int_score = row.int_score.map(|v| v.to_string()).unwrap_or_default();
+            let wis_score = row.wis_score.map(|v| v.to_string()).unwrap_or_default();
+            let cha_score = row.cha_score.map(|v| v.to_string()).unwrap_or_default();
             format!(
                 concat!(
                     "<button class=\"actor-admin-row\" ",
                     "data-actor-id=\"{id}\" data-name=\"{name}\" data-role=\"{role}\" ",
+                    "data-portrait=\"{portrait}\" data-background=\"{background}\" ",
+                    "data-str=\"{str_score}\" data-dex=\"{dex_score}\" data-con=\"{con_score}\" ",
+                    "data-int=\"{int_score}\" data-wis=\"{wis_score}\" data-cha=\"{cha_score}\" ",
                     "data-keeper=\"{keeper}\" data-hp=\"{hp}\" data-max-hp=\"{max_hp}\" ",
                     "data-claimed=\"{claimed}\">",
                     "{id} · {role} · HP {hp}/{max_hp} {claim_badge}",
@@ -1918,6 +2004,14 @@ fn render_actor_admin_rows(doc: &web_sys::Document, rows: &[ActorAdminRow]) {
                 id = html_escape(&row.actor_id),
                 name = html_escape(&row.name),
                 role = html_escape(&row.role),
+                portrait = html_escape(&row.portrait),
+                background = html_escape(&row.background),
+                str_score = str_score,
+                dex_score = dex_score,
+                con_score = con_score,
+                int_score = int_score,
+                wis_score = wis_score,
+                cha_score = cha_score,
                 keeper = html_escape(&row.keeper),
                 hp = row.hp,
                 max_hp = row.max_hp,
@@ -1946,6 +2040,14 @@ fn bind_actor_admin_row_clicks(doc: &web_sys::Document) {
         let id = el.get_attribute("data-actor-id").unwrap_or_default();
         let name = el.get_attribute("data-name").unwrap_or_default();
         let role = el.get_attribute("data-role").unwrap_or_default();
+        let portrait = el.get_attribute("data-portrait").unwrap_or_default();
+        let background = el.get_attribute("data-background").unwrap_or_default();
+        let str_score = el.get_attribute("data-str").unwrap_or_default();
+        let dex_score = el.get_attribute("data-dex").unwrap_or_default();
+        let con_score = el.get_attribute("data-con").unwrap_or_default();
+        let int_score = el.get_attribute("data-int").unwrap_or_default();
+        let wis_score = el.get_attribute("data-wis").unwrap_or_default();
+        let cha_score = el.get_attribute("data-cha").unwrap_or_default();
         let keeper = el.get_attribute("data-keeper").unwrap_or_default();
         let hp = el.get_attribute("data-hp").unwrap_or_default();
         let max_hp = el.get_attribute("data-max-hp").unwrap_or_default();
@@ -1966,6 +2068,18 @@ fn bind_actor_admin_row_clicks(doc: &web_sys::Document) {
             {
                 input.set_value(&name);
             }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-portrait")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&portrait);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-background")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&background);
+            }
             if let Some(select) = doc
                 .get_element_by_id("actor-admin-role")
                 .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
@@ -1973,6 +2087,42 @@ fn bind_actor_admin_row_clicks(doc: &web_sys::Document) {
                 if !role.trim().is_empty() {
                     select.set_value(&role);
                 }
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-str")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&str_score);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-dex")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&dex_score);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-con")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&con_score);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-int")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&int_score);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-wis")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&wis_score);
+            }
+            if let Some(input) = doc
+                .get_element_by_id("actor-admin-cha")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value(&cha_score);
             }
             if let Some(input) = doc
                 .get_element_by_id("actor-admin-keeper")
@@ -2339,10 +2489,7 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
 
 async fn actor_admin_spawn(doc: &web_sys::Document) -> Result<String, String> {
     let room_id = actor_admin_room_id();
-    let actor_id = actor_admin_input_value(doc, "actor-admin-id");
-    if actor_id.is_empty() {
-        return Err("Actor ID를 입력하세요.".to_string());
-    }
+    let actor_id_input = actor_admin_input_value(doc, "actor-admin-id");
     let role = {
         let role_raw = actor_admin_select_value(doc, "actor-admin-role");
         if role_raw.is_empty() {
@@ -2352,22 +2499,61 @@ async fn actor_admin_spawn(doc: &web_sys::Document) -> Result<String, String> {
         }
     };
     let name = actor_admin_input_value(doc, "actor-admin-name");
+    let portrait = actor_admin_input_value(doc, "actor-admin-portrait");
+    let background = actor_admin_input_value(doc, "actor-admin-background");
+    let stats = actor_admin_collect_stats(doc);
     let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
     let max_hp = actor_admin_input_i64(doc, "actor-admin-max-hp").unwrap_or(20);
     let hp = actor_admin_input_i64(doc, "actor-admin-hp").unwrap_or(max_hp);
 
     let mut args = json!({
         "room_id": room_id,
-        "actor_id": actor_id,
         "role": role,
         "hp": hp.max(0),
         "max_hp": max_hp.max(1),
         "alive": hp > 0
     });
+    if !actor_id_input.is_empty() {
+        args["actor_id"] = Value::String(actor_id_input.clone());
+    }
     if !name.is_empty() {
         args["name"] = Value::String(name);
     }
-    mcp_tool_call("trpg.actor.spawn", args).await?;
+    if !portrait.is_empty() {
+        args["portrait"] = Value::String(portrait);
+    }
+    if !background.is_empty() {
+        args["background"] = Value::String(background);
+    }
+    if let Some(stats) = stats {
+        args["stats"] = stats;
+    }
+    let spawn_payload = mcp_tool_call("trpg.actor.spawn", args).await?;
+    let actor_id = spawn_payload
+        .get("actor_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            if actor_id_input.is_empty() {
+                None
+            } else {
+                Some(actor_id_input.clone())
+            }
+        })
+        .ok_or_else(|| "액터 생성 응답에서 actor_id를 확인하지 못했습니다.".to_string())?;
+    if let Some(input) = doc
+        .get_element_by_id("actor-admin-id")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        if actor_id_input.is_empty() {
+            // Keep quick-create flow frictionless: don't leave generated IDs in the input.
+            input.set_value("");
+        } else {
+            input.set_value(&actor_id);
+        }
+    }
     if !keeper.is_empty() {
         if let Err(err) = mcp_tool_call(
             "trpg.actor.claim",
@@ -2390,9 +2576,12 @@ async fn actor_admin_update(doc: &web_sys::Document) -> Result<String, String> {
     let room_id = actor_admin_room_id();
     let actor_id = actor_admin_input_value(doc, "actor-admin-id");
     if actor_id.is_empty() {
-        return Err("수정할 Actor ID를 입력하세요.".to_string());
+        return Err("수정할 Actor ID를 입력하세요. 목록에서 액터를 클릭하면 자동 입력됩니다.".to_string());
     }
     let name = actor_admin_input_value(doc, "actor-admin-name");
+    let portrait = actor_admin_input_value(doc, "actor-admin-portrait");
+    let background = actor_admin_input_value(doc, "actor-admin-background");
+    let stats = actor_admin_collect_stats(doc);
     let role = actor_admin_select_value(doc, "actor-admin-role");
     let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
     let hp = actor_admin_input_i64(doc, "actor-admin-hp");
@@ -2409,6 +2598,18 @@ async fn actor_admin_update(doc: &web_sys::Document) -> Result<String, String> {
     }
     if !role.is_empty() {
         args["role"] = Value::String(role);
+        has_patch = true;
+    }
+    if !portrait.is_empty() {
+        args["portrait"] = Value::String(portrait);
+        has_patch = true;
+    }
+    if !background.is_empty() {
+        args["background"] = Value::String(background);
+        has_patch = true;
+    }
+    if let Some(stats) = stats {
+        args["stats"] = stats;
         has_patch = true;
     }
     if let Some(hp) = hp {
@@ -2449,7 +2650,10 @@ async fn actor_admin_release(doc: &web_sys::Document) -> Result<String, String> 
     let room_id = actor_admin_room_id();
     let actor_id = actor_admin_input_value(doc, "actor-admin-id");
     if actor_id.is_empty() {
-        return Err("점유 해제할 Actor ID를 입력하세요.".to_string());
+        return Err(
+            "점유 해제할 Actor ID를 입력하세요. 목록에서 액터를 클릭하면 자동 입력됩니다."
+                .to_string(),
+        );
     }
 
     let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
@@ -2490,7 +2694,7 @@ async fn actor_admin_delete(doc: &web_sys::Document) -> Result<String, String> {
     let room_id = actor_admin_room_id();
     let actor_id = actor_admin_input_value(doc, "actor-admin-id");
     if actor_id.is_empty() {
-        return Err("삭제할 Actor ID를 입력하세요.".to_string());
+        return Err("삭제할 Actor ID를 입력하세요. 목록에서 액터를 클릭하면 자동 입력됩니다.".to_string());
     }
     let reason = actor_admin_input_value(doc, "actor-admin-delete-reason");
     let mut args = json!({

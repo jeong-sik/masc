@@ -572,8 +572,8 @@ let schemas : Types.tool_schema list =
       name = "masc_trpg_actor_spawn";
       description =
         "Spawn an actor entity in room state. \
-         Required: room_id, actor_id. \
-         Optional: role(dm|player|npc), name, archetype, persona, hp, max_hp, alive, traits, skills, inventory.";
+         Required: room_id. \
+         Optional: actor_id (auto-generated when omitted), role(dm|player|npc), name, archetype, persona, portrait, background, stats(object), hp, max_hp, alive, traits, skills, inventory.";
       input_schema =
         `Assoc
           [
@@ -587,6 +587,9 @@ let schemas : Types.tool_schema list =
                   ("name", `Assoc [ ("type", `String "string") ]);
                   ("archetype", `Assoc [ ("type", `String "string") ]);
                   ("persona", `Assoc [ ("type", `String "string") ]);
+                  ("portrait", `Assoc [ ("type", `String "string") ]);
+                  ("background", `Assoc [ ("type", `String "string") ]);
+                  ("stats", `Assoc [ ("type", `String "object") ]);
                   ("hp", `Assoc [ ("type", `String "integer") ]);
                   ("max_hp", `Assoc [ ("type", `String "integer") ]);
                   ("alive", `Assoc [ ("type", `String "boolean") ]);
@@ -594,7 +597,7 @@ let schemas : Types.tool_schema list =
                   ("skills", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("inventory", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                 ] );
-            ("required", `List [ `String "room_id"; `String "actor_id" ]);
+            ("required", `List [ `String "room_id" ]);
           ];
     };
     {
@@ -602,7 +605,7 @@ let schemas : Types.tool_schema list =
       description =
         "Update an existing actor entity in room state. \
          Required: room_id, actor_id. \
-         Optional: role(dm|player|npc), name, archetype, persona, hp, max_hp, alive, traits, skills, inventory.";
+         Optional: role(dm|player|npc), name, archetype, persona, portrait, background, stats(object), hp, max_hp, alive, traits, skills, inventory.";
       input_schema =
         `Assoc
           [
@@ -616,6 +619,9 @@ let schemas : Types.tool_schema list =
                   ("name", `Assoc [ ("type", `String "string") ]);
                   ("archetype", `Assoc [ ("type", `String "string") ]);
                   ("persona", `Assoc [ ("type", `String "string") ]);
+                  ("portrait", `Assoc [ ("type", `String "string") ]);
+                  ("background", `Assoc [ ("type", `String "string") ]);
+                  ("stats", `Assoc [ ("type", `String "object") ]);
                   ("hp", `Assoc [ ("type", `String "integer") ]);
                   ("max_hp", `Assoc [ ("type", `String "integer") ]);
                   ("alive", `Assoc [ ("type", `String "boolean") ]);
@@ -1015,6 +1021,36 @@ let state_party_fields state =
 
 let actor_exists_in_state state actor_id =
   state_party_fields state |> List.mem_assoc actor_id
+
+let sanitize_actor_id_seed (s : string) =
+  let src = String.lowercase_ascii (String.trim s) in
+  let out = Buffer.create (String.length src) in
+  let prev_dash = ref true in
+  String.iter
+    (fun c ->
+      if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') then (
+        Buffer.add_char out c;
+        prev_dash := false)
+      else if not !prev_dash then (
+        Buffer.add_char out '-';
+        prev_dash := true))
+    src;
+  let collapsed = Buffer.contents out in
+  let len = String.length collapsed in
+  if len > 0 && collapsed.[len - 1] = '-' then
+    let trimmed = String.sub collapsed 0 (len - 1) in
+    if trimmed = "" then "actor" else trimmed
+  else if collapsed = "" then "actor"
+  else collapsed
+
+let next_available_actor_id state base_actor_id =
+  if not (actor_exists_in_state state base_actor_id) then base_actor_id
+  else
+    let rec loop n =
+      let candidate = Printf.sprintf "%s-%d" base_actor_id n in
+      if actor_exists_in_state state candidate then loop (n + 1) else candidate
+    in
+    loop 2
 
 let actor_alive_in_state state actor_id =
   match state_party_fields state |> List.assoc_opt actor_id with
@@ -6319,6 +6355,9 @@ let actor_payload_from_spawn_args args ~actor_id =
   let* name_opt = get_optional_string args "name" in
   let* archetype_opt = get_optional_string args "archetype" in
   let* persona_opt = get_optional_string args "persona" in
+  let* portrait_opt = get_optional_string args "portrait" in
+  let* background_opt = get_optional_string args "background" in
+  let* stats_opt = get_optional_object args "stats" in
   let* hp_opt = get_optional_int args "hp" in
   let* max_hp_opt = get_optional_int args "max_hp" in
   let* alive = get_optional_bool args "alive" ~default:true in
@@ -6339,6 +6378,10 @@ let actor_payload_from_spawn_args args ~actor_id =
             ("role", `String role);
             ("archetype", Option.fold ~none:`Null ~some:(fun v -> `String v) archetype_opt);
             ("persona", Option.fold ~none:`Null ~some:(fun v -> `String v) persona_opt);
+            ("portrait", Option.fold ~none:`Null ~some:(fun v -> `String v) portrait_opt);
+            ( "background",
+              Option.fold ~none:`Null ~some:(fun v -> `String v) background_opt );
+            ("stats", Option.value ~default:`Null stats_opt);
             ("hp", `Int hp);
             ("max_hp", `Int max_hp);
             ("alive", `Bool alive);
@@ -6360,6 +6403,9 @@ let actor_patch_from_update_args args =
   let* name_opt = get_optional_string args "name" in
   let* archetype_opt = get_optional_string args "archetype" in
   let* persona_opt = get_optional_string args "persona" in
+  let* portrait_opt = get_optional_string args "portrait" in
+  let* background_opt = get_optional_string args "background" in
+  let* stats_opt = get_optional_object args "stats" in
   let* hp_opt = get_optional_int args "hp" in
   let* max_hp_opt = get_optional_int args "max_hp" in
   let* traits_opt = get_optional_string_list_option args "traits" in
@@ -6405,10 +6451,17 @@ let actor_patch_from_update_args args =
     | Some values -> fields := (key, json_of_strings values) :: !fields
     | None -> ()
   in
+  let add_opt_json key = function
+    | Some value -> fields := (key, value) :: !fields
+    | None -> ()
+  in
   add_opt_string "role" role_opt;
   add_opt_string "name" name_opt;
   add_opt_string "archetype" archetype_opt;
   add_opt_string "persona" persona_opt;
+  add_opt_string "portrait" portrait_opt;
+  add_opt_string "background" background_opt;
+  add_opt_json "stats" stats_opt;
   add_opt_int "hp" hp_opt;
   add_opt_int "max_hp" max_hp_opt;
   add_opt_bool "alive" alive_opt;
@@ -6417,7 +6470,7 @@ let actor_patch_from_update_args args =
   add_opt_strings "inventory" inventory_opt;
   if !fields = [] then
     Error
-      "at least one update field is required: role,name,archetype,persona,hp,max_hp,alive,traits,skills,inventory"
+      "at least one update field is required: role,name,archetype,persona,portrait,background,stats,hp,max_hp,alive,traits,skills,inventory"
   else Ok (`Assoc (List.rev !fields))
 
 let handle_actor_spawn ctx args : result =
@@ -6425,12 +6478,28 @@ let handle_actor_spawn ctx args : result =
   let store = ctx.store in
   let result_json =
     let* room_id = get_required_string args "room_id" in
-    let* actor_id = get_required_string args "actor_id" in
+    let* actor_id_opt = get_optional_string args "actor_id" in
+    let* name_opt = get_optional_string args "name" in
+    let* role_opt = get_optional_string args "role" in
     let* rule_opt = get_optional_string args "rule_module" in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_opt in
     let* () = validate_rule_module rule_module in
     let* derived = derive_state ~store ~room_id ~rule_module in
     let state = state_of_derived derived in
+    let actor_id =
+      match actor_id_opt with
+      | Some explicit -> explicit
+      | None ->
+          let seed =
+            match name_opt with
+            | Some name -> name
+            | None ->
+                role_opt |> Option.value ~default:"player"
+                |> String.lowercase_ascii
+          in
+          let base_actor_id = sanitize_actor_id_seed seed in
+          next_available_actor_id state base_actor_id
+    in
     if actor_exists_in_state state actor_id then
       Error (Printf.sprintf "actor already exists: %s" actor_id)
     else

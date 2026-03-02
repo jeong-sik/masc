@@ -259,6 +259,34 @@ let push_message registry ~from_agent ~content ~mention =
     !targets
   )
 
+(** Push notification to all active agent sessions.
+    Unlike push_message, this does NOT exclude the sender and has no mention filter.
+    Used for system events (join, leave, task state changes) that all agents should see. *)
+(* Max notification queue size per session. Oldest events are dropped when exceeded. *)
+let max_notification_queue = 1000
+
+let push_notification_to_active_agents registry ~(event : Yojson.Safe.t) =
+  with_lock registry (fun () ->
+    let count = ref 0 in
+    Hashtbl.iter (fun name session ->
+      let queue = session.message_queue @ [event] in
+      let len = List.length queue in
+      if len > max_notification_queue then begin
+        (* Drop oldest events to stay within cap *)
+        let drop = len - max_notification_queue in
+        let rec drop_n n lst = match n, lst with
+          | 0, rest | _, ([] as rest) -> rest
+          | n, _ :: rest -> drop_n (n - 1) rest
+        in
+        session.message_queue <- drop_n drop queue;
+        Printf.eprintf "[session] notification queue capped for %s: dropped %d oldest events\n%!" name drop
+      end else
+        session.message_queue <- queue;
+      incr count
+    ) registry.sessions;
+    !count
+  )
+
 (** Pop message from queue (for listen) *)
 let pop_message registry ~agent_name =
   with_lock registry (fun () ->

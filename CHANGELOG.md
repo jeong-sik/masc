@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.75.0] - 2026-03-02
+
+### Added
+- **Notification Harness** — 3 MCP tools for in-turn event polling (#472)
+  - `masc_notification_count` — pending count (lightweight)
+  - `masc_check_notifications` — peek without consuming
+  - `masc_consume_notifications` — pop and return (TOCTOU-safe)
+- Session queue cap (1000 events) with oldest-drop policy
+- Broadcast events pushed to notification queues (polling-only agent support)
+
+### Fixed
+- TOCTOU race in consume handler (single lock block)
+- Timestamp consistency: `Time_compat.now()` for all event timestamps
+- Silent None drop in session registry bridge (stderr warning added)
+
 ## [2.74.0] - 2026-02-24
 
 ### Added

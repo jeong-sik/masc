@@ -899,9 +899,10 @@ let spawn_with_cascade ~ctx ~preferred_agent ~total_timeout_seconds ~prompt =
           | Ok () ->
               begin match readiness_check agent with
               | Error reason ->
-                  ignore (Circuit_breaker.record_failure_global
+                  (try ignore (Circuit_breaker.record_failure_global
                     ~agent_id:(breaker_agent_id agent)
-                    ~reason);
+                    ~reason)
+                   with exn -> Printf.eprintf "[mitosis] circuit_breaker record_failure failed: %s\n%!" (Printexc.to_string exn));
                   let result = failed_spawn_result ~msg:reason ~exit_code:125 in
                   let attempts' = (agent, result) :: attempts in
                   loop attempts' (attempts_agent_left - 1) rest
@@ -921,12 +922,14 @@ let spawn_with_cascade ~ctx ~preferred_agent ~total_timeout_seconds ~prompt =
                   in
                   let result = spawn_fn ~prompt in
                   if result.Spawn.success then
-                    ignore (Circuit_breaker.record_success_global
+                    (try ignore (Circuit_breaker.record_success_global
                       ~agent_id:(breaker_agent_id agent))
+                     with exn -> Printf.eprintf "[mitosis] circuit_breaker record_success failed: %s\n%!" (Printexc.to_string exn))
                   else if should_penalize_failure result then
-                    ignore (Circuit_breaker.record_failure_global
+                    (try ignore (Circuit_breaker.record_failure_global
                       ~agent_id:(breaker_agent_id agent)
-                      ~reason:(normalized_spawn_reason result));
+                      ~reason:(normalized_spawn_reason result))
+                     with exn -> Printf.eprintf "[mitosis] circuit_breaker record_failure (spawn) failed: %s\n%!" (Printexc.to_string exn));
                   let attempts' = (agent, result) :: attempts in
                   if result.Spawn.success then
                     (result, agent, List.rev attempts')
@@ -1413,11 +1416,12 @@ let run_sync_handoff ctx args : result =
   | Mitosis.Handoff (spawn_result, new_cell, new_pool, handoff_dna) ->
       (* P0-5: Record handoff in generational metrics *)
       let dna_size = String.length handoff_dna in
-      ignore (Generational_metrics.record_handoff
+      (try ignore (Generational_metrics.record_handoff
         ~from_generation:cell.Mitosis.generation
         ~to_generation:new_cell.Mitosis.generation
         ~dna_size
-        ~context_ratio);
+        ~context_ratio)
+       with exn -> Printf.eprintf "[mitosis] record_handoff failed: %s\n%!" (Printexc.to_string exn));
       let effective_agent =
         if !selected_agent = "" then normalize_agent_name target_agent else !selected_agent
       in
@@ -1558,11 +1562,12 @@ let handle_mitosis_handoff ctx args : result =
         ])
       in
       Eio.Fiber.fork ~sw (fun () ->
-        ignore (write_saga_state
+        (try ignore (write_saga_state
           ~base_path
           ~saga_id
           ~status:"running"
-          ~payload:(`Assoc [("message", `String "handoff saga running")]));
+          ~payload:(`Assoc [("message", `String "handoff saga running")]))
+         with exn -> Printf.eprintf "[mitosis] write_saga_state(running) failed: %s\n%!" (Printexc.to_string exn));
         let started = Time_compat.now () in
         try
           let run_once () =
@@ -1575,7 +1580,7 @@ let handle_mitosis_handoff ctx args : result =
               run_handoff_verifier ~ctx ~args:args_sync ~parsed_result:parsed
             in
             let final_ok = ok && gate_pass in
-            ignore (write_saga_state
+            (try ignore (write_saga_state
               ~base_path
               ~saga_id
               ~status:(if final_ok then "completed" else "failed")
@@ -1587,13 +1592,14 @@ let handle_mitosis_handoff ctx args : result =
                 ("result", parsed);
                 ("verification", match verification with Some v -> v | None -> `Null);
               ]))
+             with exn -> Printf.eprintf "[mitosis] write_saga_state(result) failed: %s\n%!" (Printexc.to_string exn))
           in
           (match ctx.clock with
            | Some (Clock clock) ->
                (try
                   Eio.Time.with_timeout_exn clock saga_timeout_sec run_once
                 with Eio.Time.Timeout ->
-                  ignore (write_saga_state
+                  (try ignore (write_saga_state
                     ~base_path
                     ~saga_id
                     ~status:"failed"
@@ -1604,17 +1610,19 @@ let handle_mitosis_handoff ctx args : result =
                       ("elapsed_sec", `Float (Time_compat.now () -. started));
                       ("error", `String "verification_saga_timeout");
                       ("timeout_sec", `Float saga_timeout_sec);
-                    ])))
+                    ]))
+                   with exn -> Printf.eprintf "[mitosis] write_saga_state(timeout) failed: %s\n%!" (Printexc.to_string exn)))
            | None ->
                run_once ())
         with exn ->
-          ignore (write_saga_state
+          (try ignore (write_saga_state
             ~base_path
             ~saga_id
             ~status:"error"
             ~payload:(`Assoc [
               ("error", `String (Printexc.to_string exn));
-            ])));
+            ]))
+           with exn2 -> Printf.eprintf "[mitosis] write_saga_state(error) failed: %s\n%!" (Printexc.to_string exn2)));
       let json = `Assoc [
         ("action", `String "accepted");
         ("async", `Bool true);

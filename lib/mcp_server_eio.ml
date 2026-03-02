@@ -112,7 +112,9 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
   (* Ensure session exists *)
   (match Hashtbl.find_opt registry.Session.sessions agent_name with
    | Some _ -> ()
-   | None -> ignore (Session.register registry ~agent_name));
+   | None ->
+       (try ignore (Session.register registry ~agent_name)
+        with exn -> Printf.eprintf "[mcp_server] session register (SSE) failed: %s\n%!" (Printexc.to_string exn)));
 
   Session.update_activity registry ~agent_name ~is_listening:(Some true) ();
 
@@ -1033,7 +1035,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         (* Persist nickname so subsequent calls can use it. *)
         write_mcp_session_agent nickname;
         write_term_session_agent nickname;
-        ignore (Session.register registry ~agent_name:nickname);
+        (try ignore (Session.register registry ~agent_name:nickname)
+         with exn -> Printf.eprintf "[mcp_server] session register (nickname) failed: %s\n%!" (Printexc.to_string exn));
         nickname
       end
     end else
@@ -1042,7 +1045,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then
-    ignore (Session.register registry ~agent_name);
+    (try ignore (Session.register registry ~agent_name)
+     with exn -> Printf.eprintf "[mcp_server] session register (tool) failed: %s\n%!" (Printexc.to_string exn));
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;

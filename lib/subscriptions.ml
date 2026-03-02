@@ -160,7 +160,9 @@ let set_session_push_fn (fn : Yojson.Safe.t -> int) =
     Used by modules (e.g. Tool_task) that lack direct Session.registry access. *)
 let push_event_to_sessions (event : Yojson.Safe.t) : unit =
   match !session_registry_ref with
-  | Some push_fn -> ignore (push_fn event)
+  | Some push_fn ->
+      (try ignore (push_fn event)
+       with exn -> Printf.eprintf "[subscriptions] push_event failed: %s\n%!" (Printexc.to_string exn))
   | None ->
       Printf.eprintf "[subscriptions] push_event_to_sessions: registry not wired\n%!"
 
@@ -191,7 +193,8 @@ let notify_change ~(resource : resource_type) ~(change : change_type)
          ("data", data);
          ("timestamp", `Float now);
        ] in
-       ignore (push_fn event)
+       (try ignore (push_fn event)
+        with exn -> Printf.eprintf "[subscriptions] push_sub_event failed: %s\n%!" (Printexc.to_string exn))
    | None -> ());
   List.length subs
 

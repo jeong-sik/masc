@@ -143,7 +143,8 @@ let handle_done ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric);
+       (try ignore (Metrics_store_eio.record ctx.config metric)
+        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(done) failed: %s\n%!" (Printexc.to_string exn));
        (* Feed success into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up
    | Error err ->
@@ -180,7 +181,8 @@ let handle_cancel_task ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric);
+       (try ignore (Metrics_store_eio.record ctx.config metric)
+        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(cancel) failed: %s\n%!" (Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        (* Notification harness: push cancel event to all active sessions *)
@@ -257,7 +259,8 @@ let handle_transition ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric);
+       (try ignore (Metrics_store_eio.record ctx.config metric)
+        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(transition-done) failed: %s\n%!" (Printexc.to_string exn));
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up
    | Ok _, "cancel" ->
        let metric : Metrics_store_eio.task_metric = {
@@ -272,7 +275,8 @@ let handle_transition ctx args =
          handoff_from = None;
          handoff_to = None;
        } in
-       ignore (Metrics_store_eio.record ctx.config metric);
+       (try ignore (Metrics_store_eio.record ctx.config metric)
+        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(transition-cancel) failed: %s\n%!" (Printexc.to_string exn));
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down
    | _ -> ());
   result_to_response result

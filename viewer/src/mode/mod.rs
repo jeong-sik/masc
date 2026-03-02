@@ -1418,24 +1418,32 @@ pub(super) fn set_new_game_preflight_status(doc: &web_sys::Document, message: &s
 #[cfg(target_arch = "wasm32")]
 pub(super) fn set_new_game_preflight_rows(
     doc: &web_sys::Document,
-    rows: &[(bool, String, String)],
+    rows: &[(bool, String, String, Option<String>)],
 ) {
     if let Some(el) = doc.get_element_by_id("new-game-preflight") {
         let html = rows
             .iter()
-            .map(|(ok, label, detail)| {
+            .map(|(ok, label, detail, hint)| {
                 let state_text = if *ok { "OK" } else { "FAIL" };
                 let state_class = if *ok {
                     "preflight-state preflight-ok"
                 } else {
                     "preflight-state preflight-fail"
                 };
+                let hint_html = match hint {
+                    Some(h) if !ok => format!(
+                        "<div class=\"preflight-hint\">{}</div>",
+                        html_escape(h)
+                    ),
+                    _ => String::new(),
+                };
                 format!(
-                    "<div class=\"preflight-row\"><span class=\"{state_class}\">{state_text}</span><span>{label}: {detail}</span></div>",
+                    "<div class=\"preflight-row\"><span class=\"{state_class}\">{state_text}</span><span>{label}: {detail}</span>{hint_html}</div>",
                     state_class = state_class,
                     state_text = state_text,
                     label = html_escape(label),
                     detail = html_escape(detail),
+                    hint_html = hint_html,
                 )
             })
             .collect::<Vec<_>>()
@@ -1719,6 +1727,8 @@ pub(super) fn set_round_run_fields(
         let _ = summary.set_attribute("style", "display:block");
     }
 }
+
+mod transport_classify;
 
 #[cfg(target_arch = "wasm32")]
 mod mcp_rpc;

@@ -313,12 +313,20 @@
                     <div class="actor-admin-head">액터 관리 (현재 room)</div>
                     <div class="actor-admin-grid">
                         <label class="new-game-field">
-                            <span>Actor ID</span>
-                            <input id="actor-admin-id" type="text" maxlength="64" placeholder="warrior-1" />
+                            <span>Actor ID (선택)</span>
+                            <input id="actor-admin-id" type="text" maxlength="64" placeholder="비워두면 자동 생성 (예: night-fox)" />
                         </label>
                         <label class="new-game-field">
                             <span>이름</span>
                             <input id="actor-admin-name" type="text" maxlength="64" placeholder="그림자 전사" />
+                        </label>
+                        <label class="new-game-field">
+                            <span>초상화 URL</span>
+                            <input id="actor-admin-portrait" type="text" maxlength="240" placeholder="https://.../portrait.png" />
+                        </label>
+                        <label class="new-game-field actor-admin-field-wide">
+                            <span>배경</span>
+                            <input id="actor-admin-background" type="text" maxlength="240" placeholder="망명 기사 · 폐허 수색 전문가" />
                         </label>
                         <label class="new-game-field">
                             <span>역할</span>
@@ -327,6 +335,30 @@
                                 <option value="npc">npc</option>
                                 <option value="dm">dm</option>
                             </select>
+                        </label>
+                        <label class="new-game-field">
+                            <span>STR</span>
+                            <input id="actor-admin-str" type="number" min="0" step="1" placeholder="10" />
+                        </label>
+                        <label class="new-game-field">
+                            <span>DEX</span>
+                            <input id="actor-admin-dex" type="number" min="0" step="1" placeholder="10" />
+                        </label>
+                        <label class="new-game-field">
+                            <span>CON</span>
+                            <input id="actor-admin-con" type="number" min="0" step="1" placeholder="10" />
+                        </label>
+                        <label class="new-game-field">
+                            <span>INT</span>
+                            <input id="actor-admin-int" type="number" min="0" step="1" placeholder="10" />
+                        </label>
+                        <label class="new-game-field">
+                            <span>WIS</span>
+                            <input id="actor-admin-wis" type="number" min="0" step="1" placeholder="10" />
+                        </label>
+                        <label class="new-game-field">
+                            <span>CHA</span>
+                            <input id="actor-admin-cha" type="number" min="0" step="1" placeholder="10" />
                         </label>
                         <label class="new-game-field">
                             <span>Keeper</span>

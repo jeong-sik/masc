@@ -2174,6 +2174,133 @@ let test_actor_spawn_claim_release_flow () =
     (count_from_json (parse_json_exn stream_released));
   cleanup_dir base_dir
 
+let test_actor_spawn_auto_generates_actor_id () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
+  let ctx : Tool_trpg.context =
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+  in
+  let room_id = "room-actor-auto-id" in
+
+  let ok_spawn1, spawn1_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("name", `String "Night Fox");
+            ("role", `String "npc");
+          ])
+  in
+  Alcotest.(check bool) "auto spawn 1 ok" true ok_spawn1;
+  let spawn1_json = parse_json_exn spawn1_body in
+  let actor_id1 = spawn1_json |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string in
+  Alcotest.(check string) "auto actor_id from name" "night-fox" actor_id1;
+  Alcotest.(check bool) "state contains actor_id1" true
+    ((spawn1_json |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.member "party"
+    |> Yojson.Safe.Util.member actor_id1)
+    <> `Null);
+
+  let ok_spawn2, spawn2_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("name", `String "Night Fox");
+            ("role", `String "npc");
+          ])
+  in
+  Alcotest.(check bool) "auto spawn 2 ok" true ok_spawn2;
+  let actor_id2 =
+    parse_json_exn spawn2_body |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "collision adds suffix" "night-fox-2" actor_id2;
+
+  let ok_spawn3, spawn3_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:(`Assoc [ ("room_id", `String room_id) ])
+  in
+  Alcotest.(check bool) "auto spawn 3 with defaults ok" true ok_spawn3;
+  let actor_id3 =
+    parse_json_exn spawn3_body |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "default role seed is player" "player" actor_id3;
+  cleanup_dir base_dir
+
+let test_actor_spawn_profile_fields () =
+  let base_dir = make_temp_dir () in
+  let config = Room.default_config base_dir in
+  let _ = Room.init config ~agent_name:(Some "tester") in
+  let store = Trpg_store.make_sqlite ~base_dir in
+  let ctx : Tool_trpg.context =
+    { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
+  in
+  let room_id = "room-actor-profile-fields" in
+  let actor_id = "pc-luna" in
+
+  let ok_spawn, spawn_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_spawn"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("name", `String "Luna");
+            ("portrait", `String "https://example.com/luna.png");
+            ("background", `String "폐허 수색 전문가");
+            ("stats", `Assoc [ ("str", `Int 10); ("dex", `Int 16); ("wis", `Int 14) ]);
+          ])
+  in
+  Alcotest.(check bool) "spawn profile fields ok" true ok_spawn;
+  let spawn_json = parse_json_exn spawn_body in
+  let actor_state =
+    spawn_json |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.member "party"
+    |> Yojson.Safe.Util.member actor_id
+  in
+  Alcotest.(check string)
+    "portrait preserved"
+    "https://example.com/luna.png"
+    (actor_state |> Yojson.Safe.Util.member "portrait" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "background preserved"
+    "폐허 수색 전문가"
+    (actor_state |> Yojson.Safe.Util.member "background" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check int)
+    "stats.dex preserved"
+    16
+    (actor_state |> Yojson.Safe.Util.member "stats" |> Yojson.Safe.Util.member "dex"
+   |> Yojson.Safe.Util.to_int);
+
+  let ok_update, update_body =
+    dispatch_exn ctx ~name:"masc_trpg_actor_update"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String room_id);
+            ("actor_id", `String actor_id);
+            ("background", `String "폭풍 마법 학파 출신");
+            ("stats", `Assoc [ ("str", `Int 11); ("int", `Int 15) ]);
+          ])
+  in
+  Alcotest.(check bool) "update profile fields ok" true ok_update;
+  let actor_state_after =
+    parse_json_exn update_body |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.member "party"
+    |> Yojson.Safe.Util.member actor_id
+  in
+  Alcotest.(check string)
+    "background updated"
+    "폭풍 마법 학파 출신"
+    (actor_state_after |> Yojson.Safe.Util.member "background" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check int)
+    "stats.int updated"
+    15
+    (actor_state_after |> Yojson.Safe.Util.member "stats" |> Yojson.Safe.Util.member "int"
+   |> Yojson.Safe.Util.to_int);
+  cleanup_dir base_dir
+
 let test_actor_update_delete_flow () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
@@ -3129,6 +3256,14 @@ let () =
             "spawn + claim + release flow"
             `Quick
             test_actor_spawn_claim_release_flow;
+          Alcotest.test_case
+            "auto actor_id generation on spawn"
+            `Quick
+            test_actor_spawn_auto_generates_actor_id;
+          Alcotest.test_case
+            "spawn/update profile fields"
+            `Quick
+            test_actor_spawn_profile_fields;
           Alcotest.test_case
             "update + delete flow"
             `Quick

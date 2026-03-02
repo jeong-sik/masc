@@ -1125,8 +1125,21 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
       with e -> Error (Types.IoError (Printexc.to_string e))
     )
 
-(** Claim next highest priority unclaimed task *)
-let claim_next config ~agent_name =
+(** Structured result for claim_next_r (avoids brittle string parsing). *)
+type claim_next_result =
+  | Claim_next_claimed of {
+      task_id : string;
+      title : string;
+      priority : int;
+      message : string;
+    }
+  | Claim_next_no_unclaimed
+  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_error of string
+
+(** Claim next highest priority unclaimed task.
+    Optional [exclude_task_ids] prevents re-claiming known bad tasks in the same loop run. *)
+let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
@@ -1170,11 +1183,14 @@ let claim_next config ~agent_name =
         | Todo -> true
         | _ -> false
       ) sorted in
+      let eligible = List.filter (fun t -> not (List.mem t.id exclude_task_ids)) unclaimed in
 
-      match unclaimed with
-      | [] ->
-          "📋 No unclaimed tasks available"
-      | task :: _ ->
+      match unclaimed, eligible with
+      | [], _ ->
+          Claim_next_no_unclaimed
+      | _ :: _, [] ->
+          Claim_next_no_eligible { excluded_count = List.length exclude_task_ids }
+      | _ :: _, task :: _ ->
           (* Claim this task *)
           let new_tasks = List.map (fun t ->
             if t.id = task.id then
@@ -1212,10 +1228,24 @@ let claim_next config ~agent_name =
             "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
             agent_name task.id task.priority (now_iso ()));
 
-          Printf.sprintf "✅ %s auto-claimed [P%d] %s: %s" agent_name task.priority task.id task.title
+          Claim_next_claimed {
+            task_id = task.id;
+            title = task.title;
+            priority = task.priority;
+            message =
+              Printf.sprintf "✅ %s auto-claimed [P%d] %s: %s" agent_name task.priority task.id task.title;
+          }
     with e ->
-      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
+      Claim_next_error (Printexc.to_string e)
   )
+
+(** Claim next highest priority unclaimed task (legacy string API). *)
+let claim_next config ~agent_name =
+  match claim_next_r config ~agent_name () with
+  | Claim_next_claimed { message; _ } -> message
+  | Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
+  | Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
+  | Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
 
 (* ======== Walph Control System ======== *)
 
@@ -1431,16 +1461,38 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
               (match target with Some t -> " --target " ^ t | None -> "")
               max_iterations) in
 
-          (* UTF-8 safe prefix check: 📋=4bytes, ✅=3bytes, ❌=3bytes *)
-          let starts_with prefix s =
-            let plen = String.length prefix in
-            String.length s >= plen && String.sub s 0 plen = prefix
-          in
+	          let failed_task_ids : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+	          let failed_task_id_list () =
+	            Hashtbl.fold (fun task_id () acc -> task_id :: acc) failed_task_ids []
+	          in
+	          let mark_failed task_id =
+	            Hashtbl.replace failed_task_ids task_id ()
+	          in
+	          let release_on_error ~task_id ~error =
+	            let release_result =
+	              transition_task_r config ~agent_name ~task_id ~action:"release" ()
+	            in
+	            let release_status =
+	              match release_result with
+	              | Ok _ -> "ok"
+	              | Error e ->
+	                  Printf.eprintf "[room] walph release failed: %s\n%!"
+	                    (Types.masc_error_to_string e);
+	                  "error"
+	            in
+	            log_event config
+	              (Printf.sprintf
+	                 "{\"type\":\"walph_task_released\",\"agent\":\"%s\",\"task\":\"%s\",\"error\":%s,\"release\":\"%s\",\"ts\":\"%s\"}"
+	                 agent_name task_id
+	                 (Yojson.Safe.to_string (`String error))
+	                 release_status
+	                 (now_iso ()))
+	          in
 
-          (* Run the loop *)
-          let rec loop () =
-            (* Check control state before each iteration *)
-            if not (walph_should_continue config) then begin
+	          (* Run the loop *)
+	          let rec loop () =
+	            (* Check control state before each iteration *)
+	            if not (walph_should_continue config) then begin
               stop_reason := if walph_state.stop_requested then "stop requested" else "paused indefinitely";
               ()
             end else begin
@@ -1453,35 +1505,60 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
                   walph_state.iterations <- walph_state.iterations + 1;
                   false
                 end
-              ) in
-              if should_stop then ()
-              else begin
-                (* Try to claim next task *)
-                let claim_result = claim_next config ~agent_name in
-
-                if starts_with "📋" claim_result || starts_with "No unclaimed" claim_result then begin
-                  (* No more unclaimed tasks - drain complete *)
-                  stop_reason := "backlog drained";
-                  ()
-                end else if starts_with "✅" claim_result then begin
-                  with_walph_lock walph_state (fun () ->
-                    walph_state.completed <- walph_state.completed + 1
-                  );
-
-                  (* Broadcast progress *)
-                  let _ = broadcast config ~from_agent:agent_name
-                    ~content:(Printf.sprintf "📊 @walph Iteration %d: %s" walph_state.iterations claim_result) in
-
-                  (* Continue loop *)
-                  loop ()
-                end else begin
-                  (* Error or unexpected result *)
-                  stop_reason := Printf.sprintf "claim error: %s" claim_result;
-                  ()
-                end
-              end
-            end
-          in
+	              ) in
+	              if should_stop then ()
+	              else begin
+	                (* Try to claim next task *)
+	                let claim_result =
+	                  claim_next_r config ~agent_name
+	                    ~exclude_task_ids:(failed_task_id_list ()) ()
+	                in
+	                match claim_result with
+	                | Claim_next_no_unclaimed ->
+	                    stop_reason := "backlog drained"
+	                | Claim_next_no_eligible _ ->
+	                    stop_reason := "no eligible tasks (failed_this_run)"
+	                | Claim_next_error err ->
+	                    stop_reason := Printf.sprintf "claim error: %s" err
+	                | Claim_next_claimed { task_id; message = claim_message; _ } ->
+	                    if preset = "drain" then begin
+	                      let done_result =
+	                        transition_task_r config ~agent_name ~task_id ~action:"done"
+	                          ~notes:"walph drain mode auto-complete" ()
+	                      in
+	                      match done_result with
+	                      | Ok _ ->
+	                          with_walph_lock walph_state (fun () ->
+	                            walph_state.completed <- walph_state.completed + 1
+	                          );
+	                          log_event config
+	                            (Printf.sprintf
+	                               "{\"type\":\"walph_task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"preset\":\"%s\",\"ts\":\"%s\"}"
+	                               agent_name task_id preset (now_iso ()));
+	                          let _ = broadcast config ~from_agent:agent_name
+	                            ~content:(Printf.sprintf "📊 @walph Iteration %d: %s ✅" walph_state.iterations claim_message) in
+	                          loop ()
+	                      | Error err ->
+	                          let err_msg = Types.masc_error_to_string err in
+	                          mark_failed task_id;
+	                          release_on_error ~task_id ~error:err_msg;
+	                          let _ = broadcast config ~from_agent:agent_name
+	                            ~content:(Printf.sprintf "⚠️ @walph done error on %s: %s (released)" task_id err_msg) in
+	                          loop ()
+	                    end else begin
+	                      (* Sync walph does not execute LLM chains; release safely instead of leaving claim stuck. *)
+	                      let err_msg =
+	                        Printf.sprintf "preset %s requires eio walph runner" preset
+	                      in
+	                      mark_failed task_id;
+	                      release_on_error ~task_id ~error:err_msg;
+	                      let _ = broadcast config ~from_agent:agent_name
+	                        ~content:(Printf.sprintf "⚠️ @walph unsupported preset in sync loop for %s: %s (released)" task_id err_msg) in
+	                      loop ()
+	                    end
+	              end
+	            end
+	          in
 
           loop ();
 

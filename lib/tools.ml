@@ -3748,6 +3748,20 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
           ("minimum", `Int 1);
           ("maximum", `Int 100);
         ]);
+        ("max_consecutive_errors", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Stop loop after this many consecutive errors (default: 5)");
+          ("default", `Int 5);
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+        ]);
+        ("error_backoff_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Sleep seconds after an error before retrying (default: 2)");
+          ("default", `Int 2);
+          ("minimum", `Int 0);
+          ("maximum", `Int 300);
+        ]);
         ("target", `Assoc [
           ("type", `String "string");
           ("description", `String "Target file or directory for preset (e.g., src/utils.ts)");
@@ -3795,6 +3809,22 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
         ]);
       ]);
       ("required", `List [`String "message"; `String "agent_name"]);
+    ];
+  };
+
+  (* Walph status: detailed per-agent runtime counters *)
+  {
+    name = "masc_walph_status";
+    description = "Get detailed status for the current agent's Walph loop, including iterations, claimed/done counts, error counters, backoff settings, and last stop reason.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent requesting the status");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
     ];
   };
 

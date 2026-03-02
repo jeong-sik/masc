@@ -36,8 +36,11 @@ let get_int args key default =
 let handle_walph_loop ctx args =
   let preset = get_string args "preset" "drain" in
   let max_iterations = get_int args "max_iterations" 10 in
+  let max_consecutive_errors = get_int args "max_consecutive_errors" 5 in
+  let error_backoff_sec = get_int args "error_backoff_sec" 2 in
   let target = get_string_opt args "target" in
-  (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset ~max_iterations ?target ())
+  (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name
+    ~preset ~max_iterations ~max_consecutive_errors ~error_backoff_sec ?target ())
 
 (* Handle masc_walph_control *)
 let handle_walph_control ctx args =
@@ -97,10 +100,16 @@ let handle_walph_natural ctx args =
         (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"drain" ~max_iterations:10 ())
   end
 
+(* Handle masc_walph_status *)
+let handle_walph_status ctx _args =
+  let json = Room_walph_eio.walph_status_json ctx.config ~agent_name:ctx.agent_name in
+  (true, Yojson.Safe.to_string json)
+
 (* Dispatch handler *)
 let dispatch ctx ~name ~args =
   match name with
   | "masc_walph_loop" -> Some (handle_walph_loop ctx args)
   | "masc_walph_control" -> Some (handle_walph_control ctx args)
   | "masc_walph_natural" -> Some (handle_walph_natural ctx args)
+  | "masc_walph_status" -> Some (handle_walph_status ctx args)
   | _ -> None

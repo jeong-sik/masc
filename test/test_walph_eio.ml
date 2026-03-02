@@ -8,6 +8,7 @@
 *)
 
 open Alcotest
+open Yojson.Safe.Util
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -17,6 +18,13 @@ let rec rm_rf path =
       Unix.rmdir path
     end else
       Unix.unlink path
+
+let contains text pattern =
+  try
+    let _ = Str.search_forward (Str.regexp_string pattern) text 0 in
+    true
+  with Not_found ->
+    false
 
 (** Test fixture: Create isolated config with Eio environment *)
 let with_test_config name f =
@@ -238,6 +246,60 @@ let test_eio_list_walph_states () =
   check bool "has agent-b" true (List.mem "agent-b" agent_names);
   check bool "has agent-c" true (List.mem "agent-c" agent_names)
 
+(** Test: walph_status_json exposes extended counters/metadata *)
+let test_eio_status_json_fields () =
+  with_test_config "status_json" @@ fun _env _fs config ->
+  let _state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"status-agent" in
+  let json = Masc_mcp.Room_walph_eio.walph_status_json config ~agent_name:"status-agent" in
+  check bool "ok=true" true (json |> member "ok" |> to_bool);
+  check string "agent field" "status-agent" (json |> member "agent" |> to_string);
+  ignore (json |> member "claimed" |> to_int);
+  ignore (json |> member "released_on_error" |> to_int);
+  ignore (json |> member "errors" |> to_int);
+  ignore (json |> member "consecutive_errors" |> to_int);
+  ignore (json |> member "max_consecutive_errors" |> to_int);
+  ignore (json |> member "error_backoff_sec" |> to_int);
+  ignore (json |> member "last_error");
+  ignore (json |> member "last_task_id");
+  ignore (json |> member "started_at");
+  ignore (json |> member "last_stop_reason")
+
+(** Test: loop cuts off after max_consecutive_errors on deterministic claim failures *)
+let test_eio_error_cutoff () =
+  with_test_config "error_cutoff" @@ fun env _fs config ->
+  let _ = Masc_mcp.Room.add_task config ~title:"failing task #1" ~description:"llm fail path" ~priority:2 in
+  let _ = Masc_mcp.Room.add_task config ~title:"failing task #2" ~description:"llm fail path" ~priority:2 in
+
+  let prev_zai_api_key = Sys.getenv_opt "ZAI_API_KEY" in
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        match prev_zai_api_key with
+        | Some v -> Unix.putenv "ZAI_API_KEY" v
+        | None -> Unix.putenv "ZAI_API_KEY" "")
+      (fun () ->
+        Unix.putenv "ZAI_API_KEY" "";
+        Masc_mcp.Room_walph_eio.walph_loop config
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~agent_name:"error-agent"
+          ~preset:"coverage"
+          ~max_iterations:10
+          ~max_consecutive_errors:2
+          ~error_backoff_sec:0
+          ())
+  in
+  check bool "stop reason includes cutoff"
+    true (contains result "max_consecutive_errors reached (2)");
+
+  let status = Masc_mcp.Room_walph_eio.walph_status_json config ~agent_name:"error-agent" in
+  check int "errors=2" 2 (status |> member "errors" |> to_int);
+  check int "consecutive_errors=2" 2 (status |> member "consecutive_errors" |> to_int);
+  check int "released_on_error=2" 2 (status |> member "released_on_error" |> to_int);
+  check string "last_stop_reason"
+    "max_consecutive_errors reached (2)"
+    (status |> member "last_stop_reason" |> to_string)
+
 (* ============================================
    Test Registration
    ============================================ *)
@@ -252,6 +314,8 @@ let eio_tests = [
   "preset mapping (incl. review)", `Quick, test_eio_preset_mapping;
   "multi-agent with review preset", `Quick, test_eio_multi_agent_with_review;
   "list walph states", `Quick, test_eio_list_walph_states;
+  "status json fields", `Quick, test_eio_status_json_fields;
+  "error cutoff", `Quick, test_eio_error_cutoff;
 ]
 
 let () =

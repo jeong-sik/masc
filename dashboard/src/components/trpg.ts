@@ -41,6 +41,8 @@ const timelineTypeFilter = signal('all')
 const timelinePhaseFilter = signal('all')
 const CONTROL_UNLOCK_WINDOW_MS = 120_000
 const controlUnlockUntilMs = signal<number | null>(null)
+const realtimeNowMs = signal(Date.now())
+let realtimeTickerStarted = false
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -141,6 +143,15 @@ function eventTimeLabel(event: TrpgEvent): string {
 
 function setTrpgScreen(next: TrpgScreen): void {
   trpgScreen.value = next
+}
+
+function ensureRealtimeTicker(): void {
+  if (realtimeTickerStarted) return
+  if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return
+  realtimeTickerStarted = true
+  window.setInterval(() => {
+    realtimeNowMs.value = Date.now()
+  }, 1000)
 }
 
 function isControlLocked(nowMs: number): boolean {
@@ -311,9 +322,9 @@ function StoryLog({ events, emptyLabel = '아직 이벤트가 없습니다.' }: 
   }
 
   return html`
-    <div class="trpg-story">
+    <div class="trpg-story" role="list" aria-label="TRPG story events">
       ${events.map((e: TrpgEvent, i: number) => html`
-        <div key=${i} class="trpg-event ${e.type ?? ''}">
+        <div key=${i} class="trpg-event ${e.type ?? ''}" role="listitem">
           <div class="trpg-event-meta-row">
             <span class="trpg-event-meta">${eventTimeLabel(e)}</span>
             <span class="trpg-event-meta">${e.phase ?? 'phase:-'}</span>
@@ -335,6 +346,7 @@ function StoryLog({ events, emptyLabel = '아직 이벤트가 없습니다.' }: 
 }
 
 function TimelinePanel({ events }: { events: TrpgEvent[] }) {
+  const NONE_VALUE = '__none__'
   const actorFilter = timelineActorFilter.value
   const typeFilter = timelineTypeFilter.value
   const phaseFilter = timelinePhaseFilter.value
@@ -354,6 +366,7 @@ function TimelinePanel({ events }: { events: TrpgEvent[] }) {
         .filter(v => v !== ''),
     ),
   ).sort((a, b) => a.localeCompare(b))
+  const hasEmptyType = events.some(e => (e.type ?? '').trim() === '')
   const phaseOptions = Array.from(
     new Set(
       events
@@ -361,11 +374,22 @@ function TimelinePanel({ events }: { events: TrpgEvent[] }) {
         .filter(v => v !== ''),
     ),
   ).sort((a, b) => a.localeCompare(b))
+  const hasEmptyPhase = events.some(e => (e.phase ?? '').trim() === '')
 
   const filteredEvents = events.filter(event => {
     if (actorFilter !== 'all' && eventActorLabel(event) !== actorFilter) return false
-    if (typeFilter !== 'all' && (event.type ?? '') !== typeFilter) return false
-    if (phaseFilter !== 'all' && (event.phase ?? '') !== phaseFilter) return false
+    const type = (event.type ?? '').trim()
+    const phase = (event.phase ?? '').trim()
+    if (typeFilter === NONE_VALUE) {
+      if (type !== '') return false
+    } else if (typeFilter !== 'all' && type !== typeFilter) {
+      return false
+    }
+    if (phaseFilter === NONE_VALUE) {
+      if (phase !== '') return false
+    } else if (phaseFilter !== 'all' && phase !== phaseFilter) {
+      return false
+    }
     return true
   })
 
@@ -382,6 +406,7 @@ function TimelinePanel({ events }: { events: TrpgEvent[] }) {
         <label>Type</label>
         <select value=${typeFilter} onChange=${(e: Event) => { timelineTypeFilter.value = (e.target as HTMLSelectElement).value }}>
           <option value="all">all</option>
+          ${hasEmptyType ? html`<option value=${NONE_VALUE}>(none)</option>` : null}
           ${typeOptions.map(type => html`<option value=${type}>${type}</option>`)}
         </select>
       </div>
@@ -389,6 +414,7 @@ function TimelinePanel({ events }: { events: TrpgEvent[] }) {
         <label>Phase</label>
         <select value=${phaseFilter} onChange=${(e: Event) => { timelinePhaseFilter.value = (e.target as HTMLSelectElement).value }}>
           <option value="all">all</option>
+          ${hasEmptyPhase ? html`<option value=${NONE_VALUE}>(none)</option>` : null}
           ${phaseOptions.map(phase => html`<option value=${phase}>${phase}</option>`)}
         </select>
       </div>
@@ -1148,7 +1174,8 @@ export function Trpg() {
   const events = state.story_log ?? []
   const outcome = state.outcome
   const screen = trpgScreen.value
-  const nowMs = Date.now()
+  ensureRealtimeTicker()
+  const nowMs = realtimeNowMs.value
 
   return html`
     <div>

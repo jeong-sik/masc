@@ -2221,6 +2221,8 @@ button.council-row.selected {
 }
 @media (max-width: 600px) {
   .trpg-control-grid { grid-template-columns: 1fr; }
+  .trpg-story-toolbar { flex-direction: column; align-items: stretch; }
+  .trpg-story-filter { min-width: 0; }
   .trpg-annot-chip { grid-template-columns: 1fr; }
   .keeper-kpis { grid-template-columns: 1fr; }
   .agents-grid { grid-template-columns: 1fr; }

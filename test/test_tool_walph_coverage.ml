@@ -46,6 +46,30 @@ let () = test "dispatch_walph_control" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+(* Test walph_status dispatch *)
+let () = test "dispatch_walph_status" (fun () ->
+  Eio_main.run @@ fun env ->
+  let tmp = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc-walph-test-status-%d" (int_of_float (Unix.gettimeofday () *. 1000000.0))) in
+  Unix.mkdir tmp 0o755;
+  let config = Room.default_config tmp in
+  let _ = Room.init config ~agent_name:None in
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let ctx = { Tool_walph.config; agent_name = "test-agent"; net; clock } in
+  let args = `Assoc [] in
+  match Tool_walph.dispatch ctx ~name:"masc_walph_status" ~args with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      (match json with
+       | `Assoc kv ->
+           assert (List.mem_assoc "ok" kv);
+           assert (List.mem_assoc "agent" kv)
+       | _ -> failwith "status result is not JSON object")
+  | None -> failwith "dispatch returned None"
+)
+
 (* Test walph_natural with stop command *)
 let () = test "walph_natural_stop" (fun () ->
   Eio_main.run @@ fun env ->

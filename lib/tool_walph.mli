@@ -19,6 +19,9 @@ val handle_walph_control : ('a, 'b) context -> Yojson.Safe.t -> bool * string
 (** Handle masc_walph_natural *)
 val handle_walph_natural : ('a, 'b) context -> Yojson.Safe.t -> bool * string
 
+(** Handle masc_walph_status *)
+val handle_walph_status : ('a, 'b) context -> Yojson.Safe.t -> bool * string
+
 (** Helper: get string from args *)
 val get_string : Yojson.Safe.t -> string -> string -> string
 

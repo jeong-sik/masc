@@ -558,7 +558,9 @@ let test_masc_walph_loop_schema () =
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has preset" true (List.mem_assoc "preset" props)
+          Alcotest.(check bool) "has preset" true (List.mem_assoc "preset" props);
+          Alcotest.(check bool) "has max_consecutive_errors" true (List.mem_assoc "max_consecutive_errors" props);
+          Alcotest.(check bool) "has error_backoff_sec" true (List.mem_assoc "error_backoff_sec" props)
       | None -> Alcotest.fail "masc_walph_loop missing properties"
 
 let test_masc_walph_control_schema () =
@@ -578,6 +580,15 @@ let test_masc_walph_natural_schema () =
       | Some props ->
           Alcotest.(check bool) "has message" true (List.mem_assoc "message" props)
       | None -> Alcotest.fail "masc_walph_natural missing properties"
+
+let test_masc_walph_status_schema () =
+  match find_tool "masc_walph_status" with
+  | None -> Alcotest.fail "masc_walph_status not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props)
+      | None -> Alcotest.fail "masc_walph_status missing properties"
 
 (* ============================================================ *)
 (* 17. Hat Tool Tests                                            *)
@@ -776,6 +787,7 @@ let () =
       Alcotest.test_case "walph_loop" `Quick test_masc_walph_loop_schema;
       Alcotest.test_case "walph_control" `Quick test_masc_walph_control_schema;
       Alcotest.test_case "walph_natural" `Quick test_masc_walph_natural_schema;
+      Alcotest.test_case "walph_status" `Quick test_masc_walph_status_schema;
     ];
     "hat_tools", [
       Alcotest.test_case "hat_wear" `Quick test_masc_hat_wear_schema;

@@ -1865,6 +1865,13 @@ let json_int_opt = function
   | Some v -> `Int v
   | None -> `Null
 
+let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
+  let delta = now_ts -. event_ts in
+  if Float.is_nan delta || Float.is_infinite delta then None
+  else
+    let bounded = max 0.0 (min delta (float_of_int max_int)) in
+    Some (int_of_float bounded)
+
 let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
   let warn_age_s =
     int_of_env_default
@@ -1913,13 +1920,13 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
     let last_activity_age_s =
       match latest_activity_ts_opt with
       | None -> None
-      | Some ts -> Some (max 0 (int_of_float (now_ts -. ts)))
+      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
     in
     let alert_level =
       match last_activity_age_s with
       | None -> "warn"
       | Some age when age >= bad_age_s -> "bad"
-      | Some age when age >= warn_age_s -> "warn"
+      | Some age when age >= warn_age_s || age >= slo_target_age_s -> "warn"
       | Some _ -> "ok"
     in
     (`Assoc [
@@ -1932,7 +1939,9 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], true)
-  with _ ->
+  with exn ->
+    Printf.eprintf "[dashboard] board_monitoring_json failed: %s\n%!"
+      (Printexc.to_string exn);
     (`Assoc [
       ("alert_level", `String "bad");
       ("posts_total", `Int 0);
@@ -2003,7 +2012,7 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
     let oldest_open_debate_age_s =
       match oldest_open_debate_ts_opt with
       | None -> None
-      | Some ts -> Some (max 0 (int_of_float (now_ts -. ts)))
+      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
     in
     let latest_activity_ts_opt =
       let from_debates =
@@ -2024,13 +2033,13 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
     let last_activity_age_s =
       match latest_activity_ts_opt with
       | None -> None
-      | Some ts -> Some (max 0 (int_of_float (now_ts -. ts)))
+      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
     in
     let base_alert =
       match last_activity_age_s with
       | None -> "warn"
       | Some age when age >= bad_age_s -> "bad"
-      | Some age when age >= warn_age_s -> "warn"
+      | Some age when age >= warn_age_s || age >= slo_target_quorum_age_s -> "warn"
       | Some _ -> "ok"
     in
     let alert_level =
@@ -2052,7 +2061,9 @@ let council_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("warn_age_s", `Int warn_age_s);
       ("bad_age_s", `Int bad_age_s);
     ], true)
-  with _ ->
+  with exn ->
+    Printf.eprintf "[dashboard] council_monitoring_json failed: %s\n%!"
+      (Printexc.to_string exn);
     (`Assoc [
       ("alert_level", `String "bad");
       ("debates_open", `Int 0);

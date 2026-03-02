@@ -242,6 +242,20 @@ let test_round_run_success_path () =
   let player_json = parse_json_exn stream_player in
   Alcotest.(check int) "player action proposed count" 2 (count_from_json player_json);
 
+  let _, stream_resolved =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String "room-round-success");
+            ("event_type", `String "turn.action.resolved");
+          ])
+  in
+  Alcotest.(check int)
+    "turn.action.resolved count"
+    3
+    (count_from_json (parse_json_exn stream_resolved));
+
   let _, stream_dm =
     dispatch_exn ctx ~name:"masc_trpg_stream"
       ~args:
@@ -602,6 +616,19 @@ let test_round_run_emits_combat_semantic_events () =
     "combat.attack count includes player + npc pressure"
     true
     (count_from_json (parse_json_exn stream_attack) >= 2);
+  let _, stream_dice =
+    dispatch_exn ctx ~name:"masc_trpg_stream"
+      ~args:
+        (`Assoc
+          [
+            ("room_id", `String "room-round-combat");
+            ("event_type", `String "dice.rolled");
+          ])
+  in
+  Alcotest.(check bool)
+    "dice.rolled emitted for combat action"
+    true
+    (count_from_json (parse_json_exn stream_dice) >= 1);
   cleanup_dir base_dir
 
 let test_round_run_reinforces_pressure_after_wave_clear () =

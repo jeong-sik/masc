@@ -1416,9 +1416,9 @@ pub(super) fn set_new_game_preflight_status(doc: &web_sys::Document, message: &s
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn set_new_game_preflight_rows(
+fn set_new_game_preflight_rows(
     doc: &web_sys::Document,
-    rows: &[super::transport_classify::PreflightRow],
+    rows: &[transport_classify::PreflightRow],
 ) {
     if let Some(el) = doc.get_element_by_id("new-game-preflight") {
         let html = rows

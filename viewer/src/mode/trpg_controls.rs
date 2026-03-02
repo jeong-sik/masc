@@ -2282,12 +2282,12 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
     selected_keepers = unique_non_empty(selected_keepers);
 
     let selected_keeper_row = if selected_keepers.is_empty() {
-        (
-            false,
-            "선택 키퍼".to_string(),
-            "DM/플레이어 keeper를 선택하세요.".to_string(),
-            None,
-        )
+        PreflightRow {
+            ok: false,
+            label: "선택 키퍼".to_string(),
+            detail: "DM/플레이어 keeper를 선택하세요.".to_string(),
+            hint: None,
+        }
     } else {
         let mut blockers = Vec::new();
         let mut warnings = Vec::new();
@@ -2386,19 +2386,24 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 ));
             }
             let detail = detail_parts.join(" · ");
-            (true, "선택 키퍼".to_string(), detail, None)
+            PreflightRow {
+                ok: true,
+                label: "선택 키퍼".to_string(),
+                detail,
+                hint: None,
+            }
         } else {
-            (
-                false,
-                "선택 키퍼".to_string(),
-                format!(
+            PreflightRow {
+                ok: false,
+                label: "선택 키퍼".to_string(),
+                detail: format!(
                     "준비 실패 {} / {} · {}",
                     blockers.len(),
                     selected_keepers.len(),
                     summarize_preflight_items(&blockers, 3)
                 ),
-                None,
-            )
+                hint: None,
+            }
         }
     };
     rows.push(selected_keeper_row);
@@ -2417,27 +2422,27 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 })
                 .collect::<Vec<_>>();
             if conflicts.is_empty() {
-                (
-                    true,
-                    "점유 충돌".to_string(),
-                    format!("선택 keeper {}명 모두 비점유", selected_keepers.len()),
-                    None,
-                )
+                PreflightRow {
+                    ok: true,
+                    label: "점유 충돌".to_string(),
+                    detail: format!("선택 keeper {}명 모두 비점유", selected_keepers.len()),
+                    hint: None,
+                }
             } else {
-                (
-                    false,
-                    "점유 충돌".to_string(),
-                    format!("이미 점유 중: {}", summarize_preflight_items(&conflicts, 3)),
-                    None,
-                )
+                PreflightRow {
+                    ok: false,
+                    label: "점유 충돌".to_string(),
+                    detail: format!("이미 점유 중: {}", summarize_preflight_items(&conflicts, 3)),
+                    hint: None,
+                }
             }
         }
-        Err(_) => (
-            true,
-            "점유 충돌".to_string(),
-            "신규 room으로 판단되어 충돌 검사를 건너뜁니다.".to_string(),
-            None,
-        ),
+        Err(_) => PreflightRow {
+            ok: true,
+            label: "점유 충돌".to_string(),
+            detail: "신규 room으로 판단되어 충돌 검사를 건너뜁니다.".to_string(),
+            hint: None,
+        },
     };
     rows.push(occupancy_row);
 
@@ -2451,24 +2456,24 @@ async fn run_new_game_preflight(doc: &web_sys::Document) -> Result<(), String> {
                 .unwrap_or("unknown")
                 .trim()
                 .to_string();
-            (
-                true,
-                "룸 상태".to_string(),
-                format!("room {} · {}", room_id, status),
-                None,
-            )
+            PreflightRow {
+                ok: true,
+                label: "룸 상태".to_string(),
+                detail: format!("room {} · {}", room_id, status),
+                hint: None,
+            }
         }
-        Err(_) => (
-            true,
-            "룸 상태".to_string(),
-            format!("room {} · 신규 room (아직 초기화 전)", room_id),
-            None,
-        ),
+        Err(_) => PreflightRow {
+            ok: true,
+            label: "룸 상태".to_string(),
+            detail: format!("room {} · 신규 room (아직 초기화 전)", room_id),
+            hint: None,
+        },
     };
     rows.push(room_row);
 
     set_new_game_preflight_rows(doc, &rows);
-    let all_ok = rows.iter().all(|(ok, _, _, _)| *ok);
+    let all_ok = rows.iter().all(|row| row.ok);
     set_new_game_preflight_state(doc, if all_ok { "ok" } else { "fail" });
     if all_ok {
         set_new_game_flow_stage(doc, NewGameFlowStage::Idle, Some("사전 점검 통과"));

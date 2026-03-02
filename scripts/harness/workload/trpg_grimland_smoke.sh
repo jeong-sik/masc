@@ -23,6 +23,10 @@ REQUIRE_SESSION_OUTCOME="${REQUIRE_SESSION_OUTCOME:-0}"
 OUTCOME_MAX_TURN="${OUTCOME_MAX_TURN:-}"
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH:-}"
 STRICT_DIALOGUE_MODE="${STRICT_DIALOGUE_MODE:-0}"
+REQUIRE_CLAIM_EXPLICIT=0
+if [ -n "${REQUIRE_CLAIM+x}" ]; then
+  REQUIRE_CLAIM_EXPLICIT=1
+fi
 REQUIRE_CLAIM="${REQUIRE_CLAIM:-false}"
 KEEPER_AUTO_HANDOFF="${KEEPER_AUTO_HANDOFF:-1}"
 KEEPER_HANDOFF_THRESHOLD="${KEEPER_HANDOFF_THRESHOLD:-0.82}"
@@ -444,11 +448,36 @@ restart_dm_keeper() {
   return 0
 }
 
+extract_actor_owner_from_error() {
+  local err_msg="$1"
+  printf "%s" "$err_msg" \
+    | sed -nE 's/.*owner=([^", }]+).*/\1/p' \
+    | head -n1
+}
+
+release_actor_with_owner() {
+  local actor_id="$1"
+  local owner="$2"
+  local raw
+  local err
+  [ -z "$actor_id" ] && return 1
+  [ -z "$owner" ] && return 1
+  raw="$(call_tool 3972 "trpg.actor.release" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$owner" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')")"
+  err="$(tool_error_message "$raw")"
+  if [ -n "$err" ]; then
+    echo "[recovery] warn: actor.release(owner) failed actor=$actor_id owner=$owner error=$err" >&2
+    return 1
+  fi
+  echo "[recovery] info: actor.release(owner) succeeded actor=$actor_id owner=$owner" >&2
+  return 0
+}
+
 restart_player_keeper() {
   local actor_id="$1"
   local keeper_name="$2"
   local raw
   local err
+  local owner
   if [ -z "$actor_id" ]; then
     echo "[recovery] fail: missing actor_id for keeper=$keeper_name" >&2
     return 1
@@ -457,6 +486,10 @@ restart_player_keeper() {
   err="$(tool_error_message "$raw")"
   if [ -n "$err" ]; then
     echo "[recovery] warn: actor.release failed actor=$actor_id keeper=$keeper_name error=$err" >&2
+    owner="$(extract_actor_owner_from_error "$err")"
+    if [ -n "$owner" ] && [ "$owner" != "$keeper_name" ]; then
+      release_actor_with_owner "$actor_id" "$owner" || true
+    fi
   fi
   raw="$(call_tool 3973 "masc_keeper_down" "$(jq -cn --arg name "$keeper_name" '{name:$name,remove_meta:true,remove_session:true}')")"
   err="$(tool_error_message "$raw")"
@@ -485,7 +518,18 @@ restart_player_keeper() {
   raw="$(call_tool 3975 "trpg.actor.claim" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$keeper_name" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')")"
   err="$(tool_error_message "$raw")"
   if [ -n "$err" ]; then
-    if printf "%s" "$err" | grep -Eqi 'join gate failed|insufficient_contribution|owner=auto-pilot'; then
+    owner="$(extract_actor_owner_from_error "$err")"
+    if [ -n "$owner" ] && [ "$owner" != "$keeper_name" ]; then
+      echo "[recovery] warn: actor.claim owner mismatch actor=$actor_id keeper=$keeper_name owner=$owner; retrying reclaim" >&2
+      if release_actor_with_owner "$actor_id" "$owner"; then
+        raw="$(call_tool 3975 "trpg.actor.claim" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$keeper_name" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')")"
+        err="$(tool_error_message "$raw")"
+        if [ -z "$err" ]; then
+          return 0
+        fi
+      fi
+    fi
+    if printf "%s" "$err" | grep -Eqi 'join gate failed|insufficient_contribution'; then
       echo "[recovery] warn: actor.claim soft-failed actor=$actor_id keeper=$keeper_name error=$err" >&2
       return 0
     fi
@@ -746,6 +790,10 @@ fi
 KEEPER_MODELS_JSON="$(build_models_json)"
 KEEPER_AUTO_HANDOFF_JSON="$(bool_to_json "$KEEPER_AUTO_HANDOFF")"
 KEEPER_DRIFT_ENABLED_JSON="$(bool_to_json "$KEEPER_DRIFT_ENABLED")"
+if [ "$REQUIRE_AGENT_DRIVEN" = "1" ] && [ "$REQUIRE_CLAIM_EXPLICIT" -ne 1 ] && [ "$(bool_to_json "$REQUIRE_CLAIM")" != "true" ]; then
+  REQUIRE_CLAIM="true"
+  echo "[bootstrap] auto-enable require_claim=true (REQUIRE_AGENT_DRIVEN=1)"
+fi
 REQUIRE_CLAIM_JSON="$(bool_to_json "$REQUIRE_CLAIM")"
 if [ "$(printf "%s" "$KEEPER_MODELS_JSON" | jq 'length')" -eq 0 ]; then
   echo "FAIL: KEEPER_MODELS is required (예: KEEPER_MODELS='gemini:gemini-2.5-flash')" >&2

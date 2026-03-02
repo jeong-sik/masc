@@ -60,6 +60,8 @@ unavailable_total=0
 stall_reason_lines=""
 last_progress_reason=""
 last_progress_detail=""
+last_dm_progress_detail=""
+last_dm_non_ok_statuses='[]'
 stream_count=0
 session_outcome_seen="false"
 last_outcome=""
@@ -671,6 +673,8 @@ emit_grimland_summary() {
     --arg dm_keeper "$DM_KEEPER" \
     --arg last_progress_reason "$last_progress_reason" \
     --arg last_progress_detail "$last_progress_detail" \
+    --arg last_dm_progress_detail "$last_dm_progress_detail" \
+    --argjson last_dm_non_ok_statuses "$last_dm_non_ok_statuses" \
     --arg last_validation_failure_reason "$last_validation_failure_reason" \
     --arg last_validation_failure_stage "$last_validation_failure_stage" \
     --arg stall_reason_top "$stall_reason_top" \
@@ -733,6 +737,8 @@ emit_grimland_summary() {
       unavailable_total:$unavailable_total,
       last_progress_reason:($last_progress_reason | if . == "" then null else . end),
       last_progress_detail:($last_progress_detail | if . == "" then null else . end),
+      dm_progress_detail:($last_dm_progress_detail | if . == "" then null else . end),
+      dm_non_ok_statuses:$last_dm_non_ok_statuses,
       last_validation_failure_reason:($last_validation_failure_reason | if . == "" then null else . end),
       last_validation_failure_stage:($last_validation_failure_stage | if . == "" then null else . end),
       last_outcome:($last_outcome | if . == "" then null else . end),
@@ -1001,6 +1007,8 @@ if [ "$RUN_ROUND" = "1" ]; then
       regen_succeeded="$(printf "%s" "$p_round" | jq -r '.summary.regen_succeeded // false')"
       progress_reason="$(printf "%s" "$p_round" | jq -r '.summary.progress_reason // empty')"
       progress_detail="$(printf "%s" "$p_round" | jq -r '.summary.progress_detail // empty')"
+      dm_progress_detail="$(printf "%s" "$p_round" | jq -r '.summary.dm_progress_detail // empty')"
+      dm_non_ok_statuses="$(printf "%s" "$p_round" | jq -c '.summary.dm_non_ok_statuses // []')"
       validation_failure_reason="$(printf "%s" "$p_round" | jq -r '.summary.validation_failure_reason // empty')"
       validation_failure_stage="$(printf "%s" "$p_round" | jq -r '.summary.validation_failure_stage // empty')"
       recovery_mode="$(printf "%s" "$p_round" | jq -r '.summary.recovery_mode // empty')"
@@ -1014,6 +1022,12 @@ if [ "$RUN_ROUND" = "1" ]; then
       fi
       if [ -n "$progress_detail" ]; then
         last_progress_detail="$progress_detail"
+      fi
+      if [ -n "$dm_progress_detail" ]; then
+        last_dm_progress_detail="$dm_progress_detail"
+      fi
+      if [ "$(printf "%s" "$dm_non_ok_statuses" | jq 'type == "array" and length > 0')" = "true" ]; then
+        last_dm_non_ok_statuses="$dm_non_ok_statuses"
       fi
       if [ -n "$validation_failure_reason" ]; then
         last_validation_failure_reason="$validation_failure_reason"

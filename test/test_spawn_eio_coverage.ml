@@ -132,6 +132,14 @@ let test_masc_mcp_tools_all_strings () =
   check bool "all strings" true
     (List.for_all (fun t -> String.length t > 0) Spawn_eio.masc_mcp_tools)
 
+let test_masc_mcp_tools_contains_team_session_turn () =
+  check bool "contains team_session_turn" true
+    (List.mem "mcp__masc__masc_team_session_turn" Spawn_eio.masc_mcp_tools)
+
+let test_masc_mcp_tools_contains_portal_send () =
+  check bool "contains portal_send" true
+    (List.mem "mcp__masc__masc_portal_send" Spawn_eio.masc_mcp_tools)
+
 (* ============================================================
    masc_lifecycle_suffix Tests
    ============================================================ *)
@@ -392,6 +400,10 @@ let () =
       test_case "not empty" `Quick test_masc_mcp_tools_not_empty;
       test_case "contains status" `Quick test_masc_mcp_tools_contains_status;
       test_case "all strings" `Quick test_masc_mcp_tools_all_strings;
+      test_case "contains team_session_turn" `Quick
+        test_masc_mcp_tools_contains_team_session_turn;
+      test_case "contains portal_send" `Quick
+        test_masc_mcp_tools_contains_portal_send;
     ];
     "masc_lifecycle_suffix", [
       test_case "not empty" `Quick test_masc_lifecycle_suffix_not_empty;

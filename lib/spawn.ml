@@ -53,6 +53,19 @@ let masc_mcp_tools = [
   "mcp__masc__masc_memento_mori";
   "mcp__masc__masc_relay_status";
   "mcp__masc__masc_relay_checkpoint";
+  (* Team session + communication tools *)
+  "mcp__masc__masc_portal_open";
+  "mcp__masc__masc_portal_send";
+  "mcp__masc__masc_portal_status";
+  "mcp__masc__masc_team_session_start";
+  "mcp__masc__masc_team_session_status";
+  "mcp__masc__masc_team_session_turn";
+  "mcp__masc__masc_team_session_events";
+  "mcp__masc__masc_team_session_stop";
+  "mcp__masc__masc_team_session_report";
+  "mcp__masc__masc_team_session_prove";
+  "mcp__masc__masc_team_session_list";
+  "mcp__masc__masc_team_session_compare";
   (* TRPG tools *)
   "mcp__masc__masc_trpg_dice_roll";
   "mcp__masc__masc_trpg_turn_advance";

@@ -121,6 +121,17 @@
 - `proof_json_path`
 - `proof_md_path`
 
+`proof.criteria` 필수 게이트(요약):
+
+- `session_started_event`
+- `checkpoint_recorded`
+- `turn_or_communication_recorded`
+- `multi_actor_turn_coverage` (고유 turn actor 수가 `min_agents` 기준 충족)
+- `turn_actor_authorized` (turn actor가 세션 참여자/생성자 범위 내)
+- `report_artifacts`
+
+위 필수 게이트 중 하나라도 실패하면 `verdict=insufficient_evidence` 입니다.
+
 ## Artifact Layout
 
 기본 경로: `.masc/team-sessions/<session_id>/`
@@ -178,3 +189,26 @@
 - `list`는 호출자 기준 접근 가능한 세션만 반환합니다.
 - 종료 직후에도 `force_regenerate=true`로 보고서를 다시 생성할 수 있습니다.
 - `prove`는 보고서가 없을 때 자동 생성 옵션(`generate_report_if_missing`)으로 증명 산출의 일관성을 보장합니다.
+
+## Real Spawn Harness (4-Agent)
+
+실제 `masc_spawn`으로 4개 독립 에이전트를 띄워 팀 세션 멀티턴 증거를 검증합니다.
+
+```bash
+scripts/harness_team_session_real_spawn.sh
+```
+
+주요 환경 변수:
+
+- `MCP_URL` (default: `http://127.0.0.1:8935/mcp`)
+- `SPAWN_RUNTIME_AGENT` (default: `codex`)
+- `PARTICIPANTS_CSV` (default: `proof-a,proof-b,proof-c,proof-d`)
+- `SESSION_DURATION_SEC` (default: `600`)
+- `SPAWN_TIMEOUT_SEC` (default: `240`)
+- `GOAL` (세션 목표 문자열)
+
+PASS 기준:
+
+- `team_turn` 이벤트의 고유 actor 수가 참여자 수 이상
+- `masc_team_session_prove`의 `verdict=proved`
+- `proof.evidence.unique_turn_actors_count >= required_turn_actors`

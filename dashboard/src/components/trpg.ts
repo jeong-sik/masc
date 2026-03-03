@@ -14,6 +14,8 @@ import {
   runTrpgRound,
   rollTrpgDice,
   advanceTrpgTurn,
+  spawnTrpgActor,
+  claimTrpgActor,
   fetchTrpgJoinEligibility,
   requestTrpgMidJoin,
   type TrpgRoundRunResult,
@@ -34,6 +36,16 @@ const joinRole = signal<'player' | 'npc' | 'dm'>('player')
 const joinActorName = signal('')
 const joinStatus = signal<'idle' | 'checking' | 'requesting' | 'ok' | 'error'>('idle')
 const joinEligibility = signal<Record<string, unknown> | null>(null)
+const spawnActorId = signal('')
+const spawnActorName = signal('')
+const spawnRole = signal<'player' | 'npc' | 'dm'>('player')
+const spawnKeeper = signal('')
+const spawnPortrait = signal('')
+const spawnBackground = signal('')
+const spawnHp = signal('20')
+const spawnMaxHp = signal('20')
+const spawnStatsJson = signal('')
+const spawnStatus = signal<'idle' | 'spawning' | 'ok' | 'error'>('idle')
 const lastRoundRun = signal<TrpgRoundRunResult | null>(null)
 type TrpgScreen = 'overview' | 'timeline' | 'control'
 const trpgScreen = signal<TrpgScreen>('overview')
@@ -128,6 +140,40 @@ function recNumber(obj: Record<string, unknown>, key: string, fallback = 0): num
 function recBool(obj: Record<string, unknown>, key: string, fallback = false): boolean {
   const value = obj[key]
   return typeof value === 'boolean' ? value : fallback
+}
+
+const BASE_STAT_KEYS = new Set(['str', 'dex', 'con', 'int', 'wis', 'cha'])
+
+function parseSpawnStats(raw: string): Record<string, number> {
+  const trimmed = raw.trim()
+  if (!trimmed) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch (err) {
+    throw new Error(`능력치 JSON 파싱 실패: ${err instanceof Error ? err.message : 'invalid json'}`)
+  }
+  if (!isRecord(parsed)) {
+    throw new Error('능력치 JSON은 object여야 합니다. 예: {"luck":7}')
+  }
+  const stats: Record<string, number> = {}
+  Object.entries(parsed).forEach(([key, value]) => {
+    const statKey = key.trim()
+    if (!statKey) return
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      stats[statKey] = Math.max(0, Math.trunc(value))
+      return
+    }
+    if (typeof value === 'string') {
+      const parsedNumber = Number.parseFloat(value.trim())
+      if (Number.isFinite(parsedNumber)) {
+        stats[statKey] = Math.max(0, Math.trunc(parsedNumber))
+        return
+      }
+    }
+    throw new Error(`능력치 '${statKey}' 값은 숫자여야 합니다.`)
+  })
+  return stats
 }
 
 function eventActorLabel(event: TrpgEvent): string {
@@ -241,11 +287,33 @@ function KeeperChip({ keeper, role }: { keeper?: string; role: string }) {
 function ActorCard({ actor }: { actor: TrpgActor }) {
   const archetype = actor.archetype?.trim()
   const persona = actor.persona?.trim()
+  const portrait = actor.portrait?.trim()
+  const background = actor.background?.trim()
   const traits = actor.traits ?? []
   const skills = actor.skills ?? []
+  const customStats = Object.entries(actor.stats_raw ?? {})
+    .filter(([_, value]) => Number.isFinite(value))
+    .filter(([key]) => !BASE_STAT_KEYS.has(key.toLowerCase()))
 
   return html`
     <div class="trpg-actor">
+      ${portrait
+        ? html`
+          <div class="trpg-actor-portrait-wrap">
+            <img
+              class="trpg-actor-portrait"
+              src=${portrait}
+              alt=${`${actor.name} portrait`}
+              loading="lazy"
+              onError=${(e: Event) => {
+                const target = e.target as HTMLImageElement | null
+                if (!target) return
+                target.style.display = 'none'
+              }}
+            />
+          </div>
+        `
+        : null}
       <div class="trpg-actor-header">
         <span class="trpg-actor-name">${actor.name}</span>
         <${StatusBadge} status=${actor.status ?? 'idle'} />
@@ -268,7 +336,20 @@ function ActorCard({ actor }: { actor: TrpgActor }) {
         `
         : null}
       ${archetype ? html`<div class="trpg-actor-meta">Archetype: ${prettyToken(archetype)}</div>` : null}
+      ${background ? html`<div class="trpg-actor-meta">Background: ${background}</div>` : null}
       ${persona ? html`<div class="trpg-actor-persona">${persona}</div>` : null}
+      ${customStats.length > 0
+        ? html`
+          <div class="trpg-annot-group">
+            <div class="trpg-annot-title">Custom Stats</div>
+            <div class="trpg-custom-stats">
+              ${customStats.map(([key, value]) => html`
+                <span class="trpg-custom-stat-chip">${prettyToken(key)} ${value}</span>
+              `)}
+            </div>
+          </div>
+        `
+        : null}
       ${traits.length > 0
         ? html`
           <div class="trpg-annot-group">
@@ -669,11 +750,209 @@ function ControlBox({ state, nowMs }: { state: TrpgState; nowMs: number }) {
   `
 }
 
+function ActorSpawnPanel({ state }: { state: TrpgState }) {
+  const room = trpgRoom.value || state.session?.room || ''
+  const status = spawnStatus.value
+
+  const handleSpawnActor = async () => {
+    if (!room) {
+      showToast('Room ID가 비어 있습니다.', 'warning')
+      return
+    }
+
+    const actorIdInput = spawnActorId.value.trim()
+    const name = spawnActorName.value.trim()
+    if (!name && !actorIdInput) {
+      showToast('이름 또는 Actor ID를 입력하세요.', 'warning')
+      return
+    }
+
+    const hpRaw = Number.parseInt(spawnHp.value.trim(), 10)
+    const maxHpRaw = Number.parseInt(spawnMaxHp.value.trim(), 10)
+    const maxHp = Number.isFinite(maxHpRaw) ? Math.max(1, maxHpRaw) : 20
+    const hp = Number.isFinite(hpRaw) ? Math.max(0, Math.min(maxHp, hpRaw)) : maxHp
+
+    let stats: Record<string, number> = {}
+    try {
+      stats = parseSpawnStats(spawnStatsJson.value)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '능력치 JSON 오류', 'error')
+      return
+    }
+
+    spawnStatus.value = 'spawning'
+    try {
+      const spawnRes = await spawnTrpgActor(room, {
+        actor_id: actorIdInput || undefined,
+        name: name || undefined,
+        role: spawnRole.value,
+        portrait: spawnPortrait.value.trim() || undefined,
+        background: spawnBackground.value.trim() || undefined,
+        hp,
+        max_hp: maxHp,
+        alive: hp > 0,
+        stats: Object.keys(stats).length > 0 ? stats : undefined,
+      })
+      const actorId = typeof spawnRes.actor_id === 'string' ? spawnRes.actor_id.trim() : ''
+      if (!actorId) {
+        throw new Error('생성 응답에 actor_id가 없습니다.')
+      }
+
+      const keeper = spawnKeeper.value.trim()
+      if (keeper) {
+        await claimTrpgActor(room, actorId, keeper)
+      }
+
+      selectedActorId.value = actorId
+      joinActorId.value = actorId
+      if (!actorIdInput) spawnActorId.value = ''
+      spawnStatus.value = 'ok'
+      showToast(`Actor 생성 완료: ${actorId}`, 'success')
+      await refreshTrpg()
+    } catch (err) {
+      spawnStatus.value = 'error'
+      showToast(err instanceof Error ? err.message : 'Actor 생성에 실패했습니다.', 'error')
+    }
+  }
+
+  return html`
+    <div class="trpg-control-box">
+      <div class="trpg-control-grid">
+        <div class="trpg-control-field">
+          <label>Name</label>
+          <input
+            id="trpg-spawn-name-input"
+            name="trpg-spawn-name-input"
+            type="text"
+            value=${spawnActorName.value}
+            onInput=${(e: Event) => { spawnActorName.value = (e.target as HTMLInputElement).value }}
+            placeholder="Night Fox"
+          />
+        </div>
+        <div class="trpg-control-field">
+          <label>Role</label>
+          <select
+            value=${spawnRole.value}
+            onChange=${(e: Event) => { spawnRole.value = (e.target as HTMLSelectElement).value as 'player' | 'npc' | 'dm' }}
+          >
+            <option value="player">player</option>
+            <option value="npc">npc</option>
+            <option value="dm">dm</option>
+          </select>
+        </div>
+        <div class="trpg-control-field">
+          <label>Keeper (optional)</label>
+          <input
+            id="trpg-spawn-keeper-input"
+            name="trpg-spawn-keeper-input"
+            type="text"
+            value=${spawnKeeper.value}
+            onInput=${(e: Event) => { spawnKeeper.value = (e.target as HTMLInputElement).value }}
+            placeholder="keeper-name"
+          />
+        </div>
+        <div class="trpg-control-field">
+          <label>Actions</label>
+          <div style="display:flex; gap:6px;">
+            <button class="trpg-run-btn recommend" onClick=${handleSpawnActor} disabled=${status === 'spawning'}>
+              ${status === 'spawning' ? 'Spawning...' : 'Spawn Actor'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <details class="trpg-control-details">
+        <summary>상세 입력 (선택)</summary>
+        <div class="trpg-control-grid">
+          <div class="trpg-control-field">
+            <label>Actor ID (optional)</label>
+            <input
+              id="trpg-spawn-actor-id-input"
+              name="trpg-spawn-actor-id-input"
+              type="text"
+              value=${spawnActorId.value}
+              onInput=${(e: Event) => { spawnActorId.value = (e.target as HTMLInputElement).value }}
+              placeholder="auto when blank"
+            />
+          </div>
+          <div class="trpg-control-field">
+            <label>Portrait URL</label>
+            <input
+              id="trpg-spawn-portrait-input"
+              name="trpg-spawn-portrait-input"
+              type="text"
+              value=${spawnPortrait.value}
+              onInput=${(e: Event) => { spawnPortrait.value = (e.target as HTMLInputElement).value }}
+              placeholder="https://.../portrait.png"
+            />
+          </div>
+          <div class="trpg-control-field">
+            <label>HP</label>
+            <input
+              id="trpg-spawn-hp-input"
+              name="trpg-spawn-hp-input"
+              type="number"
+              min="0"
+              value=${spawnHp.value}
+              onInput=${(e: Event) => { spawnHp.value = (e.target as HTMLInputElement).value }}
+              placeholder="20"
+            />
+          </div>
+          <div class="trpg-control-field">
+            <label>Max HP</label>
+            <input
+              id="trpg-spawn-max-hp-input"
+              name="trpg-spawn-max-hp-input"
+              type="number"
+              min="1"
+              value=${spawnMaxHp.value}
+              onInput=${(e: Event) => { spawnMaxHp.value = (e.target as HTMLInputElement).value }}
+              placeholder="20"
+            />
+          </div>
+          <div class="trpg-control-field" style="grid-column:1 / -1;">
+            <label>Background</label>
+            <input
+              id="trpg-spawn-background-input"
+              name="trpg-spawn-background-input"
+              type="text"
+              value=${spawnBackground.value}
+              onInput=${(e: Event) => { spawnBackground.value = (e.target as HTMLInputElement).value }}
+              placeholder="망명 기사 · 폐허 수색 전문가"
+            />
+          </div>
+          <div class="trpg-control-field" style="grid-column:1 / -1;">
+            <label>Stats JSON</label>
+            <input
+              id="trpg-spawn-stats-json-input"
+              name="trpg-spawn-stats-json-input"
+              type="text"
+              value=${spawnStatsJson.value}
+              onInput=${(e: Event) => { spawnStatsJson.value = (e.target as HTMLInputElement).value }}
+              placeholder='{"luck":7,"stealth":12,"str":10}'
+            />
+          </div>
+        </div>
+      </details>
+
+      ${status !== 'idle'
+        ? html`<div class="trpg-run-status ${status === 'spawning' ? 'running' : status}">${status === 'spawning' ? '생성 중...' : status === 'ok' ? '생성 완료' : '생성 실패'}</div>`
+        : null}
+    </div>
+  `
+}
+
 function JoinGatePanel({ state, nowMs }: { state: TrpgState; nowMs: number }) {
   const room = trpgRoom.value || state.session?.room || ''
   const gate = state.join_gate
   const eligibilityRaw = joinEligibility.value
   const eligibility = isRecord(eligibilityRaw) ? eligibilityRaw : null
+  const joinCandidates = (state.party ?? []).filter(actor => actor.role !== 'dm')
+  const selectedJoinActorId = joinActorId.value.trim()
+  const hasJoinCandidate = joinCandidates.some(actor => actor.id === selectedJoinActorId)
+  const joinActorSelectValue = hasJoinCandidate
+    ? selectedJoinActorId
+    : (selectedJoinActorId ? '__manual__' : '')
 
   const checkEligibility = async () => {
     const actorId = joinActorId.value.trim()
@@ -744,14 +1023,36 @@ function JoinGatePanel({ state, nowMs }: { state: TrpgState; nowMs: number }) {
       <div class="trpg-control-grid">
         <div class="trpg-control-field">
           <label>Actor ID</label>
-          <input
-            id="trpg-join-actor-input"
-            name="trpg-join-actor-input"
-            type="text"
-            value=${joinActorId.value}
-            onInput=${(e: Event) => { joinActorId.value = (e.target as HTMLInputElement).value }}
-            placeholder="player-xyz"
-          />
+          <select
+            value=${joinActorSelectValue}
+            onChange=${(e: Event) => {
+              const value = (e.target as HTMLSelectElement).value
+              if (value === '__manual__') {
+                if (hasJoinCandidate || !selectedJoinActorId) joinActorId.value = ''
+                return
+              }
+              joinActorId.value = value
+            }}
+          >
+            <option value="">Actor 선택</option>
+            ${joinCandidates.map(actor => html`
+              <option value=${actor.id}>${actor.name} (${actor.id})</option>
+            `)}
+            <option value="__manual__">직접 입력</option>
+          </select>
+          ${joinActorSelectValue === '__manual__'
+            ? html`
+              <input
+                id="trpg-join-actor-input"
+                name="trpg-join-actor-input"
+                type="text"
+                value=${joinActorId.value}
+                onInput=${(e: Event) => { joinActorId.value = (e.target as HTMLInputElement).value }}
+                placeholder="player-xyz"
+                style="margin-top:6px;"
+              />
+            `
+            : null}
         </div>
         <div class="trpg-control-field">
           <label>Keeper</label>
@@ -1103,6 +1404,10 @@ function ControlView({ state, nowMs }: { state: TrpgState; nowMs: number }) {
         <div>
           <${Card} title="조작 패널">
             <${ControlBox} state=${state} nowMs=${nowMs} />
+          <//>
+
+          <${Card} title="Actor Spawn" style="margin-top:16px;">
+            <${ActorSpawnPanel} state=${state} />
           <//>
 
           <${Card} title="Mid-Join Gate" style="margin-top:16px;">

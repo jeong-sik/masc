@@ -2278,7 +2278,9 @@ let test_actor_spawn_profile_fields () =
             ("name", `String "Luna");
             ("portrait", `String "https://example.com/luna.png");
             ("background", `String "폐허 수색 전문가");
-            ("stats", `Assoc [ ("str", `Int 10); ("dex", `Int 16); ("wis", `Int 14) ]);
+            ( "stats",
+              `Assoc
+                [ ("str", `Int 10); ("dex", `Int 16); ("wis", `Int 14); ("luck", `Int 7) ] );
           ])
   in
   Alcotest.(check bool) "spawn profile fields ok" true ok_spawn;
@@ -2300,6 +2302,11 @@ let test_actor_spawn_profile_fields () =
     16
     (actor_state |> Yojson.Safe.Util.member "stats" |> Yojson.Safe.Util.member "dex"
    |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int)
+    "stats.luck preserved"
+    7
+    (actor_state |> Yojson.Safe.Util.member "stats" |> Yojson.Safe.Util.member "luck"
+   |> Yojson.Safe.Util.to_int);
 
   let ok_update, update_body =
     dispatch_exn ctx ~name:"masc_trpg_actor_update"
@@ -2309,7 +2316,7 @@ let test_actor_spawn_profile_fields () =
             ("room_id", `String room_id);
             ("actor_id", `String actor_id);
             ("background", `String "폭풍 마법 학파 출신");
-            ("stats", `Assoc [ ("str", `Int 11); ("int", `Int 15) ]);
+            ("stats", `Assoc [ ("str", `Int 11); ("int", `Int 15); ("luck", `Int 9) ]);
           ])
   in
   Alcotest.(check bool) "update profile fields ok" true ok_update;
@@ -2325,6 +2332,11 @@ let test_actor_spawn_profile_fields () =
     "stats.int updated"
     15
     (actor_state_after |> Yojson.Safe.Util.member "stats" |> Yojson.Safe.Util.member "int"
+   |> Yojson.Safe.Util.to_int);
+  Alcotest.(check int)
+    "stats.luck updated"
+    9
+    (actor_state_after |> Yojson.Safe.Util.member "stats" |> Yojson.Safe.Util.member "luck"
    |> Yojson.Safe.Util.to_int);
   cleanup_dir base_dir
 

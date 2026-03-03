@@ -284,9 +284,12 @@ export interface TrpgActor {
   keeper?: string
   archetype?: string
   persona?: string
+  portrait?: string
+  background?: string
   traits?: string[]
   skills?: string[]
   stats?: TrpgCharacterStats
+  stats_raw?: Record<string, number>
   status: string
 }
 

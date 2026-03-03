@@ -519,6 +519,12 @@ let trpg_parse_optional_string_list key json =
   | `Null -> Ok []
   | _ -> Error (`Bad_request, Printf.sprintf "%s must be array of strings" key)
 
+let trpg_parse_optional_object key json =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as obj -> Ok (Some obj)
+  | `Null -> Ok None
+  | _ -> Error (`Bad_request, Printf.sprintf "%s must be object" key)
+
 let trpg_validate_actor_role role =
   match role with
   | "dm" | "player" | "npc" -> Ok ()
@@ -756,6 +762,36 @@ let trpg_state_party_fields state =
 let trpg_actor_exists state actor_id =
   trpg_state_party_fields state |> List.mem_assoc actor_id
 
+let trpg_sanitize_actor_id_seed (s : string) =
+  let src = String.lowercase_ascii (String.trim s) in
+  let out = Buffer.create (String.length src) in
+  let prev_dash = ref true in
+  String.iter
+    (fun c ->
+      if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') then (
+        Buffer.add_char out c;
+        prev_dash := false)
+      else if not !prev_dash then (
+        Buffer.add_char out '-';
+        prev_dash := true))
+    src;
+  let collapsed = Buffer.contents out in
+  let len = String.length collapsed in
+  if len > 0 && collapsed.[len - 1] = '-' then
+    let trimmed = String.sub collapsed 0 (len - 1) in
+    if trimmed = "" then "actor" else trimmed
+  else if collapsed = "" then "actor"
+  else collapsed
+
+let trpg_next_available_actor_id state base_actor_id =
+  if not (trpg_actor_exists state base_actor_id) then base_actor_id
+  else
+    let rec loop n =
+      let candidate = Printf.sprintf "%s-%d" base_actor_id n in
+      if trpg_actor_exists state candidate then loop (n + 1) else candidate
+    in
+    loop 2
+
 let trpg_actor_alive state actor_id =
   match trpg_state_party_fields state |> List.assoc_opt actor_id with
   | Some (`Assoc fields) -> (
@@ -924,43 +960,96 @@ let trpg_actor_spawn_json ~base_dir ~body_str : trpg_api_result =
     let* room_id = trpg_parse_required_string "room_id" json in
     let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
-    let* actor_id = trpg_parse_required_string "actor_id" json in
-    let* name = trpg_parse_required_string "name" json in
-    let* role = trpg_parse_required_string "role" json in
+    let* actor_id_opt = trpg_parse_optional_string "actor_id" json in
+    let* name_opt = trpg_parse_optional_string "name" json in
+    let* role_opt = trpg_parse_optional_string "role" json in
+    let role =
+      role_opt |> Option.value ~default:"player" |> String.lowercase_ascii
+    in
     let* () = trpg_validate_actor_role role in
     let* archetype = trpg_parse_optional_string "archetype" json in
     let* persona = trpg_parse_optional_string "persona" json in
+    let* portrait = trpg_parse_optional_string "portrait" json in
+    let* background = trpg_parse_optional_string "background" json in
+    let* stats_opt = trpg_parse_optional_object "stats" json in
     let* hp_opt = trpg_parse_optional_int "hp" json in
-    let hp = Option.value ~default:100 hp_opt in
     let* max_hp_opt = trpg_parse_optional_int "max_hp" json in
-    let max_hp = Option.value ~default:hp max_hp_opt in
+    let max_hp = Option.value ~default:10 max_hp_opt in
+    let* () =
+      if max_hp <= 0 then
+        Error (`Bad_request, "max_hp must be > 0")
+      else Ok ()
+    in
+    let hp = Option.value ~default:max_hp hp_opt in
+    let* () =
+      if hp < 0 then Error (`Bad_request, "hp must be >= 0") else Ok ()
+    in
+    let hp = min hp max_hp in
     let* alive = trpg_parse_optional_bool "alive" json ~default:true in
     let* traits = trpg_parse_optional_string_list "traits" json in
     let* skills = trpg_parse_optional_string_list "skills" json in
     let* inventory = trpg_parse_optional_string_list "inventory" json in
-    (* Check actor doesn't already exist *)
     let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
     let state = trpg_state_from_derived derived in
+    let actor_id =
+      match actor_id_opt with
+      | Some explicit -> explicit
+      | None ->
+          let seed = name_opt |> Option.value ~default:role in
+          let base_actor_id = trpg_sanitize_actor_id_seed seed in
+          trpg_next_available_actor_id state base_actor_id
+    in
+    let name = Option.value ~default:actor_id name_opt in
     if trpg_actor_exists state actor_id then
       Error (`Bad_request, Printf.sprintf "actor '%s' already exists" actor_id)
     else
-      (* Build actor payload *)
-      let payload =
-        `Assoc
-          ([ ("name", `String name); ("role", `String role) ]
-          @ (match archetype with Some a -> [ ("archetype", `String a) ] | None -> [])
-          @ (match persona with Some p -> [ ("persona", `String p) ] | None -> [])
-          @ [ ("hp", `Int hp); ("max_hp", `Int max_hp); ("alive", `Bool alive) ]
-          @ (if traits <> [] then
-               [ ("traits", `List (List.map (fun s -> `String s) traits)) ]
-             else [])
-          @ (if skills <> [] then
-               [ ("skills", `List (List.map (fun s -> `String s) skills)) ]
-             else [])
-          @ (if inventory <> [] then
-               [ ("inventory", `List (List.map (fun s -> `String s) inventory)) ]
-             else []))
+      let actor_fields = ref [] in
+      let add_field key value = actor_fields := (key, value) :: !actor_fields in
+      let add_opt_string key = function
+        | Some value -> add_field key (`String value)
+        | None -> ()
       in
+      let add_opt_json key = function
+        | Some value -> add_field key value
+        | None -> ()
+      in
+      add_field "inventory" (`List (List.map (fun s -> `String s) inventory));
+      add_field "skills" (`List (List.map (fun s -> `String s) skills));
+      add_field "traits" (`List (List.map (fun s -> `String s) traits));
+      add_field "alive" (`Bool alive);
+      add_field "max_hp" (`Int max_hp);
+      add_field "hp" (`Int hp);
+      add_opt_json "stats" stats_opt;
+      add_opt_string "background" background;
+      add_opt_string "portrait" portrait;
+      add_opt_string "persona" persona;
+      add_opt_string "archetype" archetype;
+      add_field "role" (`String role);
+      add_field "name" (`String name);
+      let actor_json = `Assoc (List.rev !actor_fields) in
+      let payload_fields =
+        [
+          ("actor_id", `String actor_id);
+          ("name", `String name);
+          ("role", `String role);
+          ("hp", `Int hp);
+          ("max_hp", `Int max_hp);
+          ("alive", `Bool alive);
+          ("traits", `List (List.map (fun s -> `String s) traits));
+          ("skills", `List (List.map (fun s -> `String s) skills));
+          ("inventory", `List (List.map (fun s -> `String s) inventory));
+          ("actor", actor_json);
+        ]
+      in
+      let payload_fields =
+        payload_fields
+        @ (match archetype with Some v -> [ ("archetype", `String v) ] | None -> [])
+        @ (match persona with Some v -> [ ("persona", `String v) ] | None -> [])
+        @ (match portrait with Some v -> [ ("portrait", `String v) ] | None -> [])
+        @ (match background with Some v -> [ ("background", `String v) ] | None -> [])
+        @ (match stats_opt with Some stats -> [ ("stats", stats) ] | None -> [])
+      in
+      let payload = `Assoc payload_fields in
       let* _event =
         trpg_append_event ~base_dir ~room_id
           ~event_type:Masc_mcp.Trpg_engine_event.Actor_spawned ~actor_id ~payload ()

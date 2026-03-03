@@ -7490,42 +7490,86 @@ let json_member_bool_value json key =
 let first_some a b = match a with Some _ -> a | None -> b
 let option_filter f = function Some value when f value -> Some value | _ -> None
 
+let status_non_ok_detail (status_json : Yojson.Safe.t) : string option =
+  let status_name =
+    status_json |> member "status" |> to_string_option
+    |> Option.value ~default:""
+    |> String.trim |> String.lowercase_ascii
+  in
+  if status_name = "" || status_name = "ok" then None
+  else
+    let actor_id =
+      status_json |> member "actor_id" |> to_string_option
+      |> Option.value ~default:"-" |> String.trim
+    in
+    let stage =
+      status_json |> member "stage" |> to_string_option
+      |> Option.value ~default:"" |> String.trim
+    in
+    let reason =
+      json_member_nonempty_string status_json "reason"
+      |> first_some (json_member_nonempty_string status_json "error")
+      |> first_some (json_member_nonempty_string status_json "reply")
+      |> Option.map (compact_summary_text ~max_len:120)
+    in
+    let head = Printf.sprintf "%s=%s" actor_id status_name in
+    let with_stage =
+      if stage = "" then head else Printf.sprintf "%s @%s" head stage
+    in
+    Some
+      (match reason with
+      | Some detail when detail <> "" ->
+          Printf.sprintf "%s (%s)" with_stage detail
+      | _ -> with_stage)
+
 let status_first_non_ok_detail (statuses : Yojson.Safe.t list) : string option =
   let rec loop = function
     | [] -> None
+    | status_json :: tl -> (
+        match status_non_ok_detail status_json with
+        | Some detail -> Some detail
+        | None -> loop tl )
+  in
+  loop statuses
+
+let status_first_non_ok_detail_for_role ~role (statuses : Yojson.Safe.t list) :
+    string option =
+  let wanted_role = String.lowercase_ascii (String.trim role) in
+  let rec loop = function
+    | [] -> None
     | status_json :: tl ->
-        let status_name =
-          status_json |> member "status" |> to_string_option
+        let role_name =
+          status_json |> member "role" |> to_string_option
           |> Option.value ~default:""
           |> String.trim |> String.lowercase_ascii
         in
-        if status_name = "" || status_name = "ok" then loop tl
+        if role_name <> wanted_role then loop tl
         else
-          let actor_id =
-            status_json |> member "actor_id" |> to_string_option
-            |> Option.value ~default:"-" |> String.trim
-          in
-          let stage =
-            status_json |> member "stage" |> to_string_option
-            |> Option.value ~default:"" |> String.trim
-          in
-          let reason =
-            json_member_nonempty_string status_json "reason"
-            |> first_some (json_member_nonempty_string status_json "error")
-            |> first_some (json_member_nonempty_string status_json "reply")
-            |> Option.map (compact_summary_text ~max_len:120)
-          in
-          let head = Printf.sprintf "%s=%s" actor_id status_name in
-          let with_stage =
-            if stage = "" then head else Printf.sprintf "%s @%s" head stage
-          in
-          Some
-            (match reason with
-            | Some detail when detail <> "" ->
-                Printf.sprintf "%s (%s)" with_stage detail
-            | _ -> with_stage)
+          match status_non_ok_detail status_json with
+          | Some detail -> Some detail
+          | None -> loop tl
   in
   loop statuses
+
+let status_non_ok_detail_list_for_role ~role ~max_items
+    (statuses : Yojson.Safe.t list) : string list =
+  let wanted_role = String.lowercase_ascii (String.trim role) in
+  let rec loop acc remaining = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | status_json :: tl ->
+        let role_name =
+          status_json |> member "role" |> to_string_option
+          |> Option.value ~default:""
+          |> String.trim |> String.lowercase_ascii
+        in
+        if role_name <> wanted_role then loop acc remaining tl
+        else
+          match status_non_ok_detail status_json with
+          | Some detail -> loop (detail :: acc) (remaining - 1) tl
+          | None -> loop acc remaining tl
+  in
+  loop [] max_items statuses
 
 let count_event_type_in_list event_type (events : Trpg_engine_event.t list) =
   List.fold_left
@@ -7806,25 +7850,22 @@ let handle_round_run ctx args : result =
           Error "player_keepers must include at least one player actor assignment"
         else Ok ()
       in
+      let existing_player_keepers, missing_player_keepers =
+        List.partition
+          (fun (actor_id, _) ->
+            actor_id <> "dm" && actor_exists_in_state state actor_id)
+          player_keepers
+      in
       let* () =
-        let invalid_actor =
-          List.find_opt
-            (fun (actor_id, _) ->
-              actor_id = "dm" || not (actor_exists_in_state state actor_id))
-            player_keepers
-        in
-        match invalid_actor with
-        | Some (actor_id, _) ->
-            Error
-              (Printf.sprintf
-                 "invalid player assignment: actor_id=%s is not a playable party actor"
-                 actor_id)
-        | None -> Ok ()
+        if existing_player_keepers = [] then
+          Error
+            "invalid player assignment: no playable party actor found in player_keepers"
+        else Ok ()
       in
       let live_player_keepers, dead_player_keepers =
         List.partition
           (fun (actor_id, _) -> actor_alive_in_state state actor_id)
-          player_keepers
+          existing_player_keepers
       in
       let terminal_session = room_already_ended || outcome_already_emitted in
       if terminal_session then
@@ -7844,6 +7885,25 @@ let handle_round_run ctx args : result =
           else if room_already_ended then
             "room already ended"
           else "session outcome already emitted"
+        in
+        let missing_statuses =
+          missing_player_keepers
+          |> List.map (fun (actor_id, keeper_name) ->
+                 let reason =
+                   if actor_id = "dm" then
+                     "actor_id 'dm' is reserved for the DM and cannot be used in player_keepers"
+                   else
+                     "actor is not part of active party in state snapshot"
+                 in
+                 `Assoc
+                   [
+                     ("actor_id", `String actor_id);
+                     ("role", `String "player");
+                     ("keeper", `String keeper_name);
+                     ("status", `String "skipped_missing");
+                     ("reason", `String reason);
+                     ("stage", `String "preflight");
+                   ])
         in
         let dead_statuses =
           dead_player_keepers
@@ -7882,7 +7942,7 @@ let handle_round_run ctx args : result =
               ("stage", `String "session_guard");
             ]
         in
-        let statuses = dead_statuses @ live_statuses @ [ dm_status ] in
+        let statuses = missing_statuses @ dead_statuses @ live_statuses @ [ dm_status ] in
         let canon_check =
           evaluate_canon_check ~store ~state ~events:existing_events_before
             ~dm_reply:None
@@ -8055,6 +8115,26 @@ let handle_round_run ctx args : result =
           Ok ()
         else Ok ()
       in
+
+      List.iter
+        (fun (actor_id, keeper_name) ->
+          let reason =
+            if actor_id = "dm" then
+              "actor_id 'dm' is reserved for the DM and cannot be used in player_keepers"
+            else "actor is not part of active party in state snapshot"
+          in
+          statuses :=
+            `Assoc
+              [
+                ("actor_id", `String actor_id);
+                ("role", `String "player");
+                ("keeper", `String keeper_name);
+                ("status", `String "skipped_missing");
+                ("reason", `String reason);
+                ("stage", `String "preflight");
+              ]
+            :: !statuses)
+        missing_player_keepers;
 
       List.iter
         (fun (actor_id, keeper_name) ->
@@ -8630,9 +8710,22 @@ let handle_round_run ctx args : result =
                   ~reason:"keeper_reply_synthesized"
                   (synthesized_roleplay_reply ())
         in
-        let max_reprompt_attempts = trpg_keeper_reprompt_retries () in
+        let max_reprompt_attempts =
+          let base = trpg_keeper_reprompt_retries () in
+          if strict_agent_driven then
+            match role with `Dm -> max base 3 | `Player -> base
+          else base
+        in
         let keeper_call_max_attempts =
-          1 + max 0 (trpg_keeper_call_retries ())
+          let configured_retries = max 0 (trpg_keeper_call_retries ()) in
+          let strict_min_retries =
+            if strict_agent_driven then
+              match role with
+              | `Player -> 2
+              | `Dm -> 1
+            else configured_retries
+          in
+          1 + max configured_retries strict_min_retries
         in
         let is_retryable_keeper_error err =
           let lowered = String.lowercase_ascii (String.trim err) in
@@ -8645,13 +8738,29 @@ let handle_round_run ctx args : result =
              || contains_substring lowered "timeout")
         in
         let re_prompt_message ~stage ~reason ~attempt =
+          let role_contract =
+            match role with
+            | `Dm ->
+                "Role contract (DM):\n\
+                 - Exactly 2 lines only\n\
+                 - Line1: one Korean in-world narrative sentence\n\
+                 - Line2: structured_action: {\"type\":\"set_flag|world_event|quest_update|transition|talk\",\"description\":\"non-empty concrete intent\"}\n\
+                 - Never output empty structured_action payload/object"
+            | `Player ->
+                "Role contract (Player):\n\
+                 - Exactly 2 lines only\n\
+                 - Line1: one Korean in-world narrative sentence\n\
+                 - Line2: structured_action: {\"type\":\"attack|move|skill|defend|talk|item|cast\",\"description\":\"non-empty concrete intent\"}\n\
+                 - Never output empty structured_action payload/object"
+          in
           Printf.sprintf
             "%s\n\n[RETRY REQUIRED %d/%d]\n\
              Your previous response was rejected at stage=%s (%s).\n\
+             %s\n\
              Return concise in-world narrative plus exactly one valid structured_action JSON line.\n\
              Do NOT emit SKILL/SKILL_REASON/[STATE] headers. Output only narrative + structured_action."
             base_prompt attempt max_reprompt_attempts stage
-            (compact_summary_text ~max_len:180 reason)
+            (compact_summary_text ~max_len:180 reason) role_contract
         in
         let run_keeper_once ~stage ~message =
           let rec loop attempt =
@@ -9251,6 +9360,12 @@ let handle_round_run ctx args : result =
       appended_events := !appended_events @ canon_events;
       let statuses = List.rev !statuses in
       let progress_detail = status_first_non_ok_detail statuses in
+      let dm_progress_detail =
+        status_first_non_ok_detail_for_role ~role:"dm" statuses
+      in
+      let dm_non_ok_statuses =
+        status_non_ok_detail_list_for_role ~role:"dm" ~max_items:5 statuses
+      in
       let progress_reason =
         if advanced then "advanced"
         else if !timeout_count > 0 then "timeout"
@@ -9338,6 +9453,12 @@ let handle_round_run ctx args : result =
                     match progress_detail with
                     | Some detail -> `String detail
                     | None -> `Null );
+                  ( "dm_progress_detail",
+                    match dm_progress_detail with
+                    | Some detail -> `String detail
+                    | None -> `Null );
+                  ( "dm_non_ok_statuses",
+                    `List (List.map (fun detail -> `String detail) dm_non_ok_statuses) );
                   ("recovery_applied", `Bool recovery_applied);
                   ("recovery_mode", `String recovery_mode);
                     ("effective_timeout_sec", `Float timeout_sec);

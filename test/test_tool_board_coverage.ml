@@ -96,11 +96,13 @@ let test_format_timestamp_relative () =
   cleanup ();
   let now = Time_compat.now () in
   let s = Tool_board.format_timestamp_relative now in
-  Alcotest.(check bool) "recent timestamp is 'just now' or contains 's'" true
-    (String.length s > 0);
+  Alcotest.(check string) "recent timestamp" "just now" s;
   let old = now -. 86400.0 in
   let s2 = Tool_board.format_timestamp_relative old in
-  Alcotest.(check bool) "1-day old timestamp has content" true (String.length s2 > 0)
+  Alcotest.(check bool) "1-day old has 'd'" true (String.contains s2 'd');
+  let minutes_ago = now -. 120.0 in
+  let s3 = Tool_board.format_timestamp_relative minutes_ago in
+  Alcotest.(check bool) "2min ago has 'm'" true (String.contains s3 'm')
 
 (** {2 Group 2: JSON helper functions} *)
 
@@ -153,10 +155,13 @@ let test_post_create_success () =
 let test_post_create_empty_content () =
   Eio_main.run @@ fun _env ->
   cleanup ();
-  let ok, _body = dispatch "masc_board_post"
+  let ok, body = dispatch "masc_board_post"
     (make_args [("content", `String ""); ("author", `String "tester")]) in
-  (* Board_dispatch.create_post may reject empty content *)
-  ignore ok
+  (* Empty content: either rejected (ok=false) or accepted (ok=true) — verify consistent response *)
+  Alcotest.(check bool) "response has body" true (String.length body > 0);
+  if not ok then
+    Alcotest.(check bool) "error mentions reason" true
+      (String.length body > 0)
 
 let test_post_list_empty () =
   Eio_main.run @@ fun _env ->
@@ -214,22 +219,22 @@ let test_post_get_success () =
   let ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "Get me"); ("author", `String "tester")]) in
   Alcotest.(check bool) "create ok" true ok;
-  (* Extract post_id from the creation response *)
-  let post_id = try
-    let json = Yojson.Safe.from_string body in
-    json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
-  with _ ->
-    (* Response may be formatted text, not JSON. Find post via list *)
-    let _, list_body = dispatch "masc_board_list" (make_args []) in
-    (* Just try to get the first post *)
-    ignore list_body; ""
+  (* Response is "✅ Post created:\n{json}" — extract JSON after first newline *)
+  let post_id =
+    match String.index_opt body '\n' with
+    | Some idx ->
+      let json_str = String.sub body (idx + 1) (String.length body - idx - 1) in
+      (try
+        let json = Yojson.Safe.from_string json_str in
+        json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
+      with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ json_str))
+    | None -> Alcotest.fail ("No newline in create response: " ^ body)
   in
-  if post_id <> "" then begin
-    let ok2, body2 = dispatch "masc_board_get"
-      (make_args [("post_id", `String post_id)]) in
-    Alcotest.(check bool) "get ok" true ok2;
-    Alcotest.(check bool) "get has content" true (String.length body2 > 0)
-  end
+  Alcotest.(check bool) "post_id not empty" true (String.length post_id > 0);
+  let ok2, body2 = dispatch "masc_board_get"
+    (make_args [("post_id", `String post_id)]) in
+  Alcotest.(check bool) "get ok" true ok2;
+  Alcotest.(check bool) "get has content" true (String.length body2 > 0)
 
 let test_post_get_not_found () =
   Eio_main.run @@ fun _env ->

@@ -263,7 +263,7 @@ let test_review_blocked_outcome () =
   let result_json = parse_json_exn body in
   let status = result_json |> Yojson.Safe.Util.member "goal"
     |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string in
-  Alcotest.(check string) "status blocked" "paused" status;
+  Alcotest.(check string) "blocked outcome maps to paused status" "paused" status;
   cleanup_dir base_dir
 
 (** {2 Group 8: Helper Functions} *)

@@ -443,29 +443,291 @@ let bool_of_criterion evidence =
   | `Bool b -> b
   | _ -> false
 
-let turn_actor_of_event (json : Yojson.Safe.t) =
+let criterion name passed detail =
+  `Assoc [ ("name", `String name); ("passed", `Bool passed); ("detail", `String detail) ]
+
+let has_event_type (json : Yojson.Safe.t) expected =
   match Yojson.Safe.Util.member "event_type" json with
-  | `String "team_turn" -> (
-      match
-        Yojson.Safe.Util.member "detail" json
-        |> Yojson.Safe.Util.member "actor"
-      with
-      | `String actor ->
-          let actor = String.trim actor in
-          if actor = "" then None else Some actor
-      | _ -> None)
+  | `String e -> String.equal e expected
+  | _ -> false
+
+let count_event_type events expected =
+  List.fold_left
+    (fun acc json -> if has_event_type json expected then acc + 1 else acc)
+    0 events
+
+let turn_actor_of_event (json : Yojson.Safe.t) =
+  if has_event_type json "team_turn" then
+    match
+      Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "actor"
+    with
+    | `String actor ->
+        let actor = String.trim actor in
+        if actor = "" then None else Some actor
+    | _ -> None
+  else
+    None
+
+let turn_kind_of_event (json : Yojson.Safe.t) =
+  if has_event_type json "team_turn" then
+    match
+      Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "kind"
+    with
+    | `String kind -> Some (String.lowercase_ascii (String.trim kind))
+    | _ -> None
+  else
+    None
+
+let team_step_spawn_agent (json : Yojson.Safe.t) =
+  if has_event_type json "team_step_spawn" then
+    match
+      Yojson.Safe.Util.member "detail" json
+      |> Yojson.Safe.Util.member "spawn_agent"
+    with
+    | `String agent ->
+        let agent = String.trim agent in
+        if agent = "" then None else Some agent
+    | _ -> None
+  else
+    None
+
+let team_step_spawn_success (json : Yojson.Safe.t) =
+  if has_event_type json "team_step_spawn" then
+    match
+      Yojson.Safe.Util.member "detail" json
+      |> Yojson.Safe.Util.member "success"
+    with
+    | `Bool b -> Some b
+    | _ -> None
+  else
+    None
+
+let count_turn_kind events expected_kind =
+  List.fold_left
+    (fun acc json ->
+      match turn_kind_of_event json with
+      | Some kind when String.equal kind expected_kind -> acc + 1
+      | _ -> acc)
+    0 events
+
+let count_spawn_success events =
+  List.fold_left
+    (fun acc json ->
+      match team_step_spawn_success json with
+      | Some true -> acc + 1
+      | _ -> acc)
+    0 events
+
+let find_criterion criteria name =
+  criteria
+  |> List.find_opt (fun item ->
+         match Yojson.Safe.Util.member "name" item with
+         | `String n -> String.equal n name
+         | _ -> false)
+  |> Option.value ~default:(criterion name false "missing")
+  |> bool_of_criterion
+
+let all_criteria_pass criteria =
+  List.for_all bool_of_criterion criteria
+
+let make_standard_criteria ~event_started ~checkpoints_count ~turn_events
+    ~communication_total ~goal_recorded ~participants_count
+    ~unique_turn_actors_count ~required_turn_actors
+    ~unauthorized_turn_actors ~report_json_exists ~report_md_exists
+    ~done_delta_total =
+  [
+    criterion "session_started_event" event_started "session_started 이벤트 존재";
+    criterion "checkpoint_recorded" (checkpoints_count > 0)
+      (Printf.sprintf "checkpoints=%d" checkpoints_count);
+    criterion "turn_or_communication_recorded"
+      (turn_events > 0 || communication_total > 0)
+      (Printf.sprintf "turn_events=%d communication_total=%d" turn_events
+         communication_total);
+    criterion "goal_recorded" goal_recorded "goal 문자열 존재";
+    criterion "participants_recorded" (participants_count > 0)
+      (Printf.sprintf "participants=%d" participants_count);
+    criterion "multi_actor_turn_coverage"
+      (unique_turn_actors_count >= required_turn_actors)
+      (Printf.sprintf "unique_turn_actors=%d required_turn_actors=%d"
+         unique_turn_actors_count required_turn_actors);
+    criterion "turn_actor_authorized" (unauthorized_turn_actors = [])
+      (if unauthorized_turn_actors = [] then
+         "all turn actors are session participants"
+       else
+         Printf.sprintf "unauthorized=%s"
+           (String.concat "," unauthorized_turn_actors));
+    criterion "report_artifacts" (report_json_exists && report_md_exists)
+      (Printf.sprintf "report_json=%b report_md=%b" report_json_exists
+         report_md_exists);
+    criterion "outcome_traceable" (done_delta_total >= 0)
+      (Printf.sprintf "done_delta_total=%d" done_delta_total);
+  ]
+
+let make_strong_criteria ~required_spawn_agents ~spawn_events
+    ~spawn_success_count ~unique_spawn_agents_count ~required_turn_actors
+    ~min_turn_events ~turn_events ~min_communication ~communication_total
+    ~vote_events ~run_deliverables =
+  [
+    criterion "spawn_evidence_present" (spawn_events >= required_spawn_agents)
+      (Printf.sprintf "spawn_events=%d required_spawn_agents=%d" spawn_events
+         required_spawn_agents);
+    criterion "spawn_success_observed"
+      (spawn_success_count >= required_spawn_agents)
+      (Printf.sprintf "spawn_success=%d required_spawn_agents=%d"
+         spawn_success_count required_spawn_agents);
+    criterion "spawn_actor_diversity"
+      (unique_spawn_agents_count >= required_turn_actors)
+      (Printf.sprintf "unique_spawn_agents=%d required_turn_actors=%d"
+         unique_spawn_agents_count required_turn_actors);
+    criterion "turn_volume_threshold" (turn_events >= min_turn_events)
+      (Printf.sprintf "turn_events=%d min_turn_events=%d" turn_events
+         min_turn_events);
+    criterion "communication_volume_threshold"
+      (communication_total >= min_communication)
+      (Printf.sprintf "communication_total=%d min_communication=%d"
+         communication_total min_communication);
+    criterion "vote_evidence_present" (vote_events >= 1)
+      (Printf.sprintf "vote_events=%d required>=1" vote_events);
+    criterion "deliverable_evidence_present" (run_deliverables >= 1)
+      (Printf.sprintf "run_deliverables=%d required>=1" run_deliverables);
+  ]
+
+let mandatory_ok_for_level ~proof_level criteria =
+  match proof_level with
+  | Team_session_types.Proof_standard ->
+      find_criterion criteria "session_started_event"
+      && find_criterion criteria "checkpoint_recorded"
+      && find_criterion criteria "turn_or_communication_recorded"
+      && find_criterion criteria "multi_actor_turn_coverage"
+      && find_criterion criteria "turn_actor_authorized"
+      && find_criterion criteria "report_artifacts"
+  | Team_session_types.Proof_strong -> all_criteria_pass criteria
+
+let verdict_for_level ~proof_level ~mandatory_ok =
+  match proof_level with
+  | Team_session_types.Proof_standard ->
+      if mandatory_ok then "proved" else "insufficient_evidence"
+  | Team_session_types.Proof_strong ->
+      if mandatory_ok then "proved_strong" else "insufficient_evidence_strong"
+
+let proof_profile_summary ~proof_level ~required_spawn_agents ~min_turn_events
+    ~min_communication =
+  `Assoc
+    [
+      ("proof_level", `String (Team_session_types.proof_level_to_string proof_level));
+      ("required_spawn_agents", `Int required_spawn_agents);
+      ("min_turn_events", `Int min_turn_events);
+      ("min_communication_events", `Int min_communication);
+    ]
+
+let required_spawn_agents_for_session (session : Team_session_types.session) =
+  let participants = max 1 (List.length session.agent_names) in
+  max 1 (min 4 participants)
+
+let min_turn_events_for_session required_turn_actors =
+  max 4 (required_turn_actors * 3)
+
+let min_communication_for_session required_turn_actors =
+  max 1 (required_turn_actors * 3)
+
+let default_proof_level = Team_session_types.Proof_standard
+
+let proof_level_of_optional_string = function
+  | None -> default_proof_level
+  | Some s -> Team_session_types.proof_level_of_string (String.lowercase_ascii (String.trim s))
+
+let parse_proof_level_json_value (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "proof_level" json with
+  | `String s -> proof_level_of_optional_string (Some s)
+  | _ -> default_proof_level
+
+let parse_proof_level_arg s = proof_level_of_optional_string (Some s)
+
+let parse_proof_level_opt = function
+  | None -> default_proof_level
+  | Some s -> parse_proof_level_arg s
+
+let parse_proof_level_default () = default_proof_level
+
+let normalize_proof_level = function
+  | Team_session_types.Proof_standard -> Team_session_types.Proof_standard
+  | Team_session_types.Proof_strong -> Team_session_types.Proof_strong
+
+let resolve_proof_level ?proof_level () =
+  match proof_level with
+  | Some p -> normalize_proof_level p
+  | None -> default_proof_level
+
+let parse_proof_level ?proof_level () = resolve_proof_level ?proof_level ()
+
+let proof_level_to_string = Team_session_types.proof_level_to_string
+
+let parse_event_bool path json =
+  match Yojson.Safe.Util.member path json with
+  | `Bool b -> Some b
   | _ -> None
 
-let dedup_preserve_order xs =
-  let rec loop acc = function
-    | [] -> List.rev acc
-    | x :: rest ->
-        if List.mem x acc then loop acc rest
-        else loop (x :: acc) rest
-  in
-  loop [] xs
+let parse_event_string path json =
+  match Yojson.Safe.Util.member path json with
+  | `String s ->
+      let t = String.trim s in
+      if t = "" then None else Some t
+  | _ -> None
+
+let parse_event_detail json = Yojson.Safe.Util.member "detail" json
+
+let parse_spawn_agent json = parse_event_detail json |> parse_event_string "spawn_agent"
+
+let parse_spawn_success json = parse_event_detail json |> parse_event_bool "success"
+
+let spawn_agent_of_event json =
+  if has_event_type json "team_step_spawn" then parse_spawn_agent json else None
+
+let spawn_success_of_event json =
+  if has_event_type json "team_step_spawn" then parse_spawn_success json else None
+
+let collect_spawn_agents events =
+  events |> List.filter_map spawn_agent_of_event |> Team_session_types.dedup_strings
+
+let proof_level_name proof_level = proof_level_to_string proof_level
+
+let proof_kind_summary proof_level =
+  match proof_level with
+  | Team_session_types.Proof_standard -> "standard"
+  | Team_session_types.Proof_strong -> "strong"
+
+let proof_profile_title proof_level =
+  match proof_level with
+  | Team_session_types.Proof_standard -> "Standard Proof"
+  | Team_session_types.Proof_strong -> "Strong Proof"
+
+let proof_profile_description proof_level =
+  match proof_level with
+  | Team_session_types.Proof_standard ->
+      "Baseline evidence requirements for team session traceability."
+  | Team_session_types.Proof_strong ->
+      "Strict evidence requirements for multi-agent spawned collaboration."
+
+let proof_profile_meta proof_level =
+  `Assoc
+    [
+      ("name", `String (proof_profile_title proof_level));
+      ("level", `String (proof_kind_summary proof_level));
+      ("description", `String (proof_profile_description proof_level));
+    ]
+
+let proof_profile proof_level = proof_profile_meta proof_level
+
+let proof_metadata ~proof_level ~required_spawn_agents ~min_turn_events
+    ~min_communication =
+  `Assoc
+    [
+      ("profile", proof_profile proof_level);
+      ("thresholds", proof_profile_summary ~proof_level ~required_spawn_agents ~min_turn_events ~min_communication);
+    ]
 
 let proof_markdown ~(session : Team_session_types.session)
+    ~(proof_level : Team_session_types.proof_level)
     ~(score_pct : float) ~(verdict : string) ~(criteria : Yojson.Safe.t list)
     ~(checkpoints_count : int) ~(events_count : int) ~(turn_events : int)
     ~(report_exists : bool) ~(unique_turn_actors_count : int)
@@ -478,7 +740,9 @@ let proof_markdown ~(session : Team_session_types.session)
              item |> member "name" |> to_string_option
              |> Option.value ~default:"unknown"
            in
-           let passed = item |> member "passed" |> to_bool_option |> Option.value ~default:false in
+           let passed =
+             item |> member "passed" |> to_bool_option |> Option.value ~default:false
+           in
            let detail =
              item |> member "detail" |> to_string_option
              |> Option.value ~default:""
@@ -493,6 +757,8 @@ let proof_markdown ~(session : Team_session_types.session)
       "";
       "## Verdict";
       Printf.sprintf "- Session ID: %s" session.session_id;
+      Printf.sprintf "- Proof level: %s"
+        (Team_session_types.proof_level_to_string proof_level);
       Printf.sprintf "- Verdict: %s" verdict;
       Printf.sprintf "- Score(%%): %.1f" score_pct;
       Printf.sprintf "- Generated at: %s" proof_generated_at_iso;
@@ -506,35 +772,27 @@ let proof_markdown ~(session : Team_session_types.session)
       Printf.sprintf "- Report artifacts exist: %b" report_exists;
       "";
       "## Criteria";
-      (if criteria_lines = [] then "- (no criteria)" else String.concat "\n" criteria_lines);
+      (if criteria_lines = [] then "- (no criteria)"
+       else String.concat "\n" criteria_lines);
     ]
 
-let generate_proof config (session : Team_session_types.session) :
+let generate_proof ?(proof_level = default_proof_level) config
+    (session : Team_session_types.session) :
     (Yojson.Safe.t * string, string) result =
   try
-    let events = Team_session_store.read_events ~max_events:5000 config session.session_id in
+    let proof_level = resolve_proof_level ~proof_level () in
+    let events =
+      Team_session_store.read_events ~max_events:5000 config session.session_id
+    in
     let checkpoints_count =
       Team_session_store.list_checkpoint_paths config session.session_id
       |> List.length
     in
-    let event_exists event_type =
-      List.exists
-        (fun json ->
-          match Yojson.Safe.Util.member "event_type" json with
-          | `String e when String.equal e event_type -> true
-          | _ -> false)
-        events
-    in
-    let turn_events =
-      List.fold_left
-        (fun acc json ->
-          match Yojson.Safe.Util.member "event_type" json with
-          | `String "team_turn" -> acc + 1
-          | _ -> acc)
-        0 events
-    in
+    let event_started = List.exists (fun json -> has_event_type json "session_started") events in
+    let turn_events = count_event_type events "team_turn" in
     let turn_actors =
-      events |> List.filter_map turn_actor_of_event |> dedup_preserve_order
+      events |> List.filter_map turn_actor_of_event
+      |> Team_session_types.dedup_strings
     in
     let unique_turn_actors_count = List.length turn_actors in
     let required_turn_actors =
@@ -557,7 +815,6 @@ let generate_proof config (session : Team_session_types.session) :
       Room_utils.path_exists config
         (Team_session_store.report_md_path config session.session_id)
     in
-    let report_exists = report_json_exists && report_md_exists in
     let communication_total = session.broadcast_count + session.portal_count in
     let done_delta_total =
       match session.final_done_delta_total with
@@ -569,75 +826,49 @@ let generate_proof config (session : Team_session_types.session) :
             ~current:current_done ~agents:session.agent_names
           |> List.fold_left (fun acc (_, n) -> acc + n) 0
     in
+    let participants_count = List.length session.agent_names in
+    let goal_recorded = String.trim session.goal <> "" in
+    let standard_criteria =
+      make_standard_criteria ~event_started ~checkpoints_count ~turn_events
+        ~communication_total ~goal_recorded ~participants_count
+        ~unique_turn_actors_count ~required_turn_actors
+        ~unauthorized_turn_actors ~report_json_exists ~report_md_exists
+        ~done_delta_total
+    in
+    let required_spawn_agents = required_spawn_agents_for_session session in
+    let spawn_events = count_event_type events "team_step_spawn" in
+    let spawn_success_count = count_spawn_success events in
+    let unique_spawn_agents =
+      collect_spawn_agents events |> Team_session_types.dedup_strings
+    in
+    let unique_spawn_agents_count = List.length unique_spawn_agents in
+    let min_turn_events = min_turn_events_for_session required_turn_actors in
+    let min_communication = min_communication_for_session required_turn_actors in
+    let vote_events =
+      count_event_type events "team_vote_created"
+      + count_event_type events "team_vote_cast"
+    in
+    let run_deliverables = count_event_type events "team_run_deliverable" in
     let criteria =
-      [
-        ( "session_started_event",
-          event_exists "session_started",
-          "session_started 이벤트 존재" );
-        ( "checkpoint_recorded",
-          checkpoints_count > 0,
-          Printf.sprintf "checkpoints=%d" checkpoints_count );
-        ( "turn_or_communication_recorded",
-          turn_events > 0 || communication_total > 0,
-          Printf.sprintf "turn_events=%d communication_total=%d" turn_events
-            communication_total );
-        ( "goal_recorded",
-          String.trim session.goal <> "",
-          "goal 문자열 존재" );
-        ( "participants_recorded",
-          session.agent_names <> [],
-          Printf.sprintf "participants=%d" (List.length session.agent_names) );
-        ( "multi_actor_turn_coverage",
-          unique_turn_actors_count >= required_turn_actors,
-          Printf.sprintf "unique_turn_actors=%d required_turn_actors=%d"
-            unique_turn_actors_count required_turn_actors );
-        ( "turn_actor_authorized",
-          unauthorized_turn_actors = [],
-          if unauthorized_turn_actors = [] then
-            "all turn actors are session participants"
-          else
-            Printf.sprintf "unauthorized=%s"
-              (String.concat "," unauthorized_turn_actors) );
-        ( "report_artifacts",
-          report_exists,
-          Printf.sprintf "report_json=%b report_md=%b" report_json_exists
-            report_md_exists );
-        ( "outcome_traceable",
-          done_delta_total >= 0,
-          Printf.sprintf "done_delta_total=%d" done_delta_total );
-      ]
-      |> List.map (fun (name, passed, detail) ->
-             `Assoc
-               [
-                 ("name", `String name);
-                 ("passed", `Bool passed);
-                 ("detail", `String detail);
-               ])
+      match proof_level with
+      | Team_session_types.Proof_standard -> standard_criteria
+      | Team_session_types.Proof_strong ->
+          standard_criteria
+          @ make_strong_criteria ~required_spawn_agents ~spawn_events
+              ~spawn_success_count ~unique_spawn_agents_count
+              ~required_turn_actors ~min_turn_events ~turn_events
+              ~min_communication ~communication_total ~vote_events
+              ~run_deliverables
     in
     let total = max 1 (List.length criteria) in
     let passed =
-      List.fold_left (fun acc item -> if bool_of_criterion item then acc + 1 else acc) 0
-        criteria
+      List.fold_left
+        (fun acc item -> if bool_of_criterion item then acc + 1 else acc)
+        0 criteria
     in
     let score_pct = (100.0 *. float_of_int passed) /. float_of_int total in
-    let mandatory_ok =
-      let find name =
-        criteria
-        |> List.find_opt (fun item ->
-               match Yojson.Safe.Util.member "name" item with
-               | `String n -> String.equal n name
-               | _ -> false)
-        |> Option.value ~default:(`Assoc [ ("passed", `Bool false) ])
-        |> bool_of_criterion
-      in
-      find "session_started_event" && find "checkpoint_recorded"
-      && find "turn_or_communication_recorded" && find "multi_actor_turn_coverage"
-      && find "turn_actor_authorized" && find "report_artifacts"
-    in
-    let verdict =
-      if mandatory_ok then "proved"
-      else "insufficient_evidence"
-    in
+    let mandatory_ok = mandatory_ok_for_level ~proof_level criteria in
+    let verdict = verdict_for_level ~proof_level ~mandatory_ok in
     let generated_at_iso = Types.now_iso () in
     let proof_json =
       `Assoc
@@ -646,9 +877,13 @@ let generate_proof config (session : Team_session_types.session) :
           ("session_id", `String session.session_id);
           ("goal", `String session.goal);
           ("status", `String (Team_session_types.status_to_string session.status));
+          ("proof_level", `String (Team_session_types.proof_level_to_string proof_level));
           ("verdict", `String verdict);
           ("score_pct", `Float score_pct);
           ("criteria", `List criteria);
+          ( "proof_profile",
+            proof_metadata ~proof_level ~required_spawn_agents
+              ~min_turn_events ~min_communication );
           ( "evidence",
             `Assoc
               [
@@ -658,6 +893,12 @@ let generate_proof config (session : Team_session_types.session) :
                 ("unique_turn_actors", `List (List.map (fun a -> `String a) turn_actors));
                 ("unique_turn_actors_count", `Int unique_turn_actors_count);
                 ("required_turn_actors", `Int required_turn_actors);
+                ("spawn_events", `Int spawn_events);
+                ("spawn_success_count", `Int spawn_success_count);
+                ("unique_spawn_agents", `List (List.map (fun a -> `String a) unique_spawn_agents));
+                ("unique_spawn_agents_count", `Int unique_spawn_agents_count);
+                ("vote_events", `Int vote_events);
+                ("run_deliverables", `Int run_deliverables);
                 ("broadcast_count", `Int session.broadcast_count);
                 ("portal_count", `Int session.portal_count);
                 ("done_delta_total", `Int done_delta_total);
@@ -668,8 +909,9 @@ let generate_proof config (session : Team_session_types.session) :
         ]
     in
     let markdown =
-      proof_markdown ~session ~score_pct ~verdict ~criteria ~checkpoints_count
-        ~events_count:(List.length events) ~turn_events ~report_exists
+      proof_markdown ~session ~proof_level ~score_pct ~verdict ~criteria
+        ~checkpoints_count ~events_count:(List.length events) ~turn_events
+        ~report_exists:(report_json_exists && report_md_exists)
         ~unique_turn_actors_count ~required_turn_actors
         ~proof_generated_at_iso:generated_at_iso
     in

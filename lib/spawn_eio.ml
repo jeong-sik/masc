@@ -64,16 +64,26 @@ let masc_mcp_tools = [
   "mcp__masc__masc_portal_send";
   "mcp__masc__masc_portal_status";
   "mcp__masc__masc_team_session_start";
+  "mcp__masc__masc_team_session_step";
   "mcp__masc__masc_team_session_status";
   "mcp__masc__masc_team_session_turn";
   "mcp__masc__masc_team_session_events";
+  "mcp__masc__masc_team_session_finalize";
   "mcp__masc__masc_team_session_stop";
   "mcp__masc__masc_team_session_report";
   "mcp__masc__masc_team_session_prove";
   "mcp__masc__masc_team_session_list";
   "mcp__masc__masc_team_session_compare";
+  "mcp__masc__masc_a2a_delegate";
   "mcp__masc__masc_a2a_subscribe";
   "mcp__masc__masc_poll_events";
+  "mcp__masc__masc_vote_create";
+  "mcp__masc__masc_vote_cast";
+  "mcp__masc__masc_vote_status";
+  "mcp__masc__masc_run_init";
+  "mcp__masc__masc_run_log";
+  "mcp__masc__masc_run_deliverable";
+  "mcp__masc__masc_run_get";
   "mcp__masc__masc_spawn";
   "mcp__masc__masc_heartbeat_list";
 ]

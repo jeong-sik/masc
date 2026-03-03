@@ -165,6 +165,13 @@ let test_start_status_report_stop () =
   Alcotest.(check bool) "markdown exists" true (Sys.file_exists md_path);
   Alcotest.(check bool) "json report exists" true
     (Room_utils.path_exists config json_path);
+  let report_doc = Room_utils.read_json config json_path in
+  let report_schema_version =
+    report_doc |> Yojson.Safe.Util.member "schema_version"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "report schema version" "1.0.0"
+    report_schema_version;
 
   let stop_ok, stop_body =
     dispatch_exn ctx ~name:"masc_team_session_stop"
@@ -493,6 +500,13 @@ let test_turn_events_and_prove () =
     (Room_utils.path_exists config proof_json_path);
   Alcotest.(check bool) "proof md exists" true (Sys.file_exists proof_md_path);
   Alcotest.(check string) "verdict proved" "proved" verdict;
+  let proof_doc = Room_utils.read_json config proof_json_path in
+  let proof_schema_version =
+    proof_doc |> Yojson.Safe.Util.member "schema_version"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "proof schema version" "1.0.0"
+    proof_schema_version;
   cleanup_dir base_dir
 
 let test_missing_required_args () =

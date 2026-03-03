@@ -178,6 +178,30 @@ let test_streamable_sse_q_zero () =
     (Http_negotiation.accepts_streamable_mcp
       (Some "application/json, text/event-stream;q=0"))
 
+let test_classify_streamable () =
+  let mode =
+    Http_negotiation.classify_mcp_accept ~allow_legacy:false
+      (Some "application/json, text/event-stream")
+  in
+  check bool "streamable mode" true
+    (match mode with Http_negotiation.Streamable -> true | _ -> false)
+
+let test_classify_legacy_accepted () =
+  let mode =
+    Http_negotiation.classify_mcp_accept ~allow_legacy:true
+      (Some "text/event-stream")
+  in
+  check bool "legacy accepted mode" true
+    (match mode with Http_negotiation.Legacy_accepted -> true | _ -> false)
+
+let test_classify_rejected () =
+  let mode =
+    Http_negotiation.classify_mcp_accept ~allow_legacy:false
+      (Some "text/event-stream")
+  in
+  check bool "rejected mode" true
+    (match mode with Http_negotiation.Rejected -> true | _ -> false)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -223,5 +247,10 @@ let () =
       test_case "reversed" `Quick test_streamable_both_reversed;
       test_case "json q=0" `Quick test_streamable_json_q_zero;
       test_case "sse q=0" `Quick test_streamable_sse_q_zero;
+    ];
+    "classify_mcp_accept", [
+      test_case "streamable" `Quick test_classify_streamable;
+      test_case "legacy accepted" `Quick test_classify_legacy_accepted;
+      test_case "rejected" `Quick test_classify_rejected;
     ];
   ]

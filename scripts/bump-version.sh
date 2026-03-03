@@ -1,47 +1,75 @@
-#!/bin/bash
-# Usage: ./scripts/bump-version.sh 2.2.3
+#!/usr/bin/env bash
+# Usage: ./scripts/bump-version.sh 2.77.0
 
-set -e
+set -euo pipefail
 
 NEW_VERSION="${1:-}"
 if [ -z "$NEW_VERSION" ]; then
-  echo "Usage: $0 <new-version>"
-  echo "Example: $0 2.2.3"
+  echo "Usage: $0 <new-version>" >&2
+  echo "Example: $0 2.77.0" >&2
+  exit 1
+fi
+
+if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Error: version must be SemVer (x.y.z)" >&2
   exit 1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+TODAY="$(date +%Y-%m-%d)"
 
-echo "🔄 Bumping version to $NEW_VERSION"
+echo "🔄 Bumping release version to $NEW_VERSION"
 
-# 1. Update dune-project
-sed -i '' "s/(version [^)]*)/(version $NEW_VERSION)/" "$ROOT_DIR/dune-project"
+# 1) SSOT: dune-project
+sed -i '' -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
+  "$ROOT_DIR/dune-project"
 echo "✅ dune-project"
 
-# 2. Update bin/main_eio.ml (health + CLI)
-sed -i '' "s/\"version\":\"[0-9.]*\"/\"version\":\"$NEW_VERSION\"/g" "$ROOT_DIR/bin/main_eio.ml"
-sed -i '' "s/~version:\"[0-9.]*\"/~version:\"$NEW_VERSION\"/g" "$ROOT_DIR/bin/main_eio.ml"
-echo "✅ bin/main_eio.ml"
+# 2) README badge
+sed -i '' -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
+  "$ROOT_DIR/README.md"
+echo "✅ README.md badge"
 
-# 3. Update bin/main.ml (CLI)
-sed -i '' "s/~version:\"[0-9.]*\"/~version:\"$NEW_VERSION\"/g" "$ROOT_DIR/bin/main.ml"
-echo "✅ bin/main.ml"
-
-# 4. Update lib/mcp_server.ml
-sed -i '' "s/\"version\", \`String \"[0-9.]*\"/\"version\", \`String \"$NEW_VERSION\"/" "$ROOT_DIR/lib/mcp_server.ml"
-echo "✅ lib/mcp_server.ml"
-
-# 5. Update lib/http_server_eio.ml
-sed -i '' "s/\"version\":\"[0-9.]*\"/\"version\":\"$NEW_VERSION\"/g" "$ROOT_DIR/lib/http_server_eio.ml"
-echo "✅ lib/http_server_eio.ml"
-
-# 6. Update opam file if exists
+# 3) opam metadata (if tracked)
 if [ -f "$ROOT_DIR/masc_mcp.opam" ]; then
-  sed -i '' "s/^version: .*/version: \"$NEW_VERSION\"/" "$ROOT_DIR/masc_mcp.opam"
+  sed -i '' -E "s/^version: \".*\"/version: \"$NEW_VERSION\"/" \
+    "$ROOT_DIR/masc_mcp.opam"
   echo "✅ masc_mcp.opam"
 fi
 
+# 4) CHANGELOG stub (prepend if missing)
+if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then
+  tmp_file="$(mktemp)"
+  awk -v ver="$NEW_VERSION" -v d="$TODAY" '
+    NR == 1 { print; next }
+    NR == 2 {
+      print;
+      print "";
+      print "## [" ver "] - " d;
+      print "";
+      print "### Changed";
+      print "- TBD";
+      print "";
+      print "### Deprecated";
+      print "- TBD";
+      next
+    }
+    { print }
+  ' "$ROOT_DIR/CHANGELOG.md" > "$tmp_file"
+  mv "$tmp_file" "$ROOT_DIR/CHANGELOG.md"
+  echo "✅ CHANGELOG.md stub added"
+else
+  echo "ℹ️ CHANGELOG already has $NEW_VERSION entry"
+fi
+
 echo ""
-echo "📦 Version bumped to $NEW_VERSION"
-echo "   Run: dune build && git add -A && git commit -m 'chore: bump to $NEW_VERSION'"
+echo "Release version layers:"
+echo "  1) release SemVer: $NEW_VERSION"
+echo "  2) protocol matrix: see /health.protocol + mcp-protocol-version"
+echo "  3) artifact schema: report/proof JSON schema_version"
+echo ""
+echo "Next:"
+echo "  dune build --root ."
+echo "  git add dune-project README.md CHANGELOG.md masc_mcp.opam"
+echo "  git commit -m \"chore(release): bump version to $NEW_VERSION\""

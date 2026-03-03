@@ -26,6 +26,18 @@ curl http://127.0.0.1:8935/health
 
 ## 시나리오별 설정
 
+### Streamable HTTP 호환 모드 (중요)
+
+`POST /mcp`는 기본적으로 `Accept: application/json, text/event-stream`를 요구합니다.
+
+```bash
+# 레거시 클라이언트 임시 호환 (마이그레이션 기간에만 사용)
+export MASC_ALLOW_LEGACY_ACCEPT=1
+./start-masc-mcp.sh --http
+```
+
+`/sse`, `/messages` 엔드포인트는 deprecated이며 신규 클라이언트는 `/mcp`를 사용해야 합니다.
+
 ### 시나리오 1: 로컬 싱글 머신 (Claude + Gemini)
 
 ```bash
@@ -184,6 +196,7 @@ curl -s http://127.0.0.1:8935/health | jq
 # Room 상태
 curl -s -X POST http://127.0.0.1:8935/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"masc_status"}}'
 ```
 

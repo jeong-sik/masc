@@ -858,6 +858,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Use identity.agent_name as the canonical source. *)
   let raw_agent_name = arg_get_string "agent_name" "" in
   let has_explicit_agent_name = raw_agent_name <> "" && raw_agent_name <> "unknown" in
+  let identity_session_prefix =
+    let len = min 8 (String.length identity.session_key) in
+    if len = 0 then "anon" else String.sub identity.session_key 0 len
+  in
+  let generated_fallback_agent_name =
+    Printf.sprintf "agent-%s" identity_session_prefix
+  in
   let agent_name =
     (* Priority: explicit arg > identity > legacy file-based *)
     if has_explicit_agent_name then
@@ -869,18 +876,21 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       match read_mcp_session_agent () with
       | Some name -> name
       | None ->
-          let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
-          let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
-          (try
-            let ic = open_in term_file in
-            let name =
-              Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-                ~finally:(fun () -> close_in_noerr ic)
-                (fun () -> input_line ic)
-            in
-            if name <> "" then name else raise Not_found
-          with Sys_error _ | End_of_file | Not_found ->
-            Printf.sprintf "agent-%s" (String.sub identity.session_key 0 8))
+          if Option.is_some mcp_session_id then
+            generated_fallback_agent_name
+          else
+            let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
+            let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+            (try
+              let ic = open_in term_file in
+              let name =
+                Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+                  ~finally:(fun () -> close_in_noerr ic)
+                  (fun () -> input_line ic)
+              in
+              if name <> "" then name else raise Not_found
+            with Sys_error _ | End_of_file | Not_found ->
+              generated_fallback_agent_name)
   in
 
   let token =
@@ -890,25 +900,29 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   let read_term_session_agent () =
-    match Sys.getenv_opt "TERM_SESSION_ID" with
-    | None -> None
-    | Some sid ->
-        let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
-        try
-          let ic = open_in file in
-          let name =
-            Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-              ~finally:(fun () -> close_in_noerr ic)
-              (fun () -> input_line ic)
-          in
-          if name = "" then None else Some name
-        with Sys_error _ | End_of_file -> None
+    if Option.is_some mcp_session_id then
+      None
+    else
+      match Sys.getenv_opt "TERM_SESSION_ID" with
+      | None -> None
+      | Some sid ->
+          let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+          try
+            let ic = open_in file in
+            let name =
+              Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+                ~finally:(fun () -> close_in_noerr ic)
+                (fun () -> input_line ic)
+            in
+            if name = "" then None else Some name
+          with Sys_error _ | End_of_file -> None
   in
 
   let persisted_agent_name () =
     match read_mcp_session_agent () with
     | Some n -> Some n
-    | None -> read_term_session_agent ()
+    | None ->
+        if Option.is_some mcp_session_id then None else read_term_session_agent ()
   in
 
   (* If no explicit agent_name was provided and we already have a persisted
@@ -986,18 +1000,21 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   let write_term_session_agent nickname =
-    match Sys.getenv_opt "TERM_SESSION_ID" with
-    | None -> ()
-    | Some sid ->
-        let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
-        (try
-          let oc = open_out file in
-          Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-            ~finally:(fun () -> close_out_noerr oc)
-            (fun () -> output_string oc nickname)
-        with e ->
-          Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!"
-            file (Printexc.to_string e))
+    if Option.is_some mcp_session_id then
+      ()
+    else
+      match Sys.getenv_opt "TERM_SESSION_ID" with
+      | None -> ()
+      | Some sid ->
+          let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+          (try
+            let oc = open_out file in
+            Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+              ~finally:(fun () -> close_out_noerr oc)
+              (fun () -> output_string oc nickname)
+          with e ->
+            Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!"
+              file (Printexc.to_string e))
   in
 
   (* Tools that require agent to be joined first *)
@@ -1537,15 +1554,17 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       write_mcp_session_agent nickname;
       Printf.eprintf "[DEBUG] masc_join: saved nickname=%s to MCP session (original=%s)\n%!" nickname agent_name;
       (* Also save to TERM_SESSION_ID file (terminal persistence) *)
-      let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
-      let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
-      (try
-        let oc = open_out agent_file in
-        Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-          ~finally:(fun () -> close_out_noerr oc)
-          (fun () -> output_string oc nickname)
-      with e ->
-        Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!" agent_file (Printexc.to_string e));
+      if Option.is_none mcp_session_id then begin
+        let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+        let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+        (try
+          let oc = open_out agent_file in
+          Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
+            ~finally:(fun () -> close_out_noerr oc)
+            (fun () -> output_string oc nickname)
+        with e ->
+          Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!" agent_file (Printexc.to_string e))
+      end;
       (* Cultural Inheritance: append institution welcome to join response *)
       let institution_welcome = match state.Mcp_server.fs with
         | Some fs ->
@@ -1578,9 +1597,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       let result = Room.leave config ~agent_name in
       unregister_sync registry ~agent_name;
       (* Clean up self-echo filter file *)
-      let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
-      let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
-      Safe_ops.remove_file_logged ~context:"masc_leave" agent_file;
+      if Option.is_none mcp_session_id then begin
+        let session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "default" in
+        let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
+        Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
+      end;
       (true, result)
 
 
@@ -2442,11 +2463,12 @@ Time: %s
       let initial_content = arg_get_string "initial_content" "" in
       let max_turns = arg_get_int "max_turns" 50 in
       let source_post_id = arg_get_string_opt "post_id" in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if topic = "" then (false, "❌ topic required")
       else begin
         let convo_config : Council.Conversation.config = {
           base_path = config.base_path;
-          room = "default";
+          room = current_room;
         } in
         match Council.Conversation.start ~config:convo_config ~topic ~initiator
                 ~max_turns ~initial_content ?source_post_id () with
@@ -2473,12 +2495,13 @@ Time: %s
       let confidence = arg_get_float_opt "confidence" in
       let reply_to = arg_get_string_opt "reply_to" in
       let mentions = arg_get_string_list "mentions" in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" || content = "" then
         (false, "❌ thread_id and content required")
       else begin
         let convo_config : Council.Conversation.config = {
           base_path = config.base_path;
-          room = "default";
+          room = current_room;
         } in
         (* Check loop guard first *)
         match Council.Conversation.get ~config:convo_config ~thread_id with
@@ -2505,12 +2528,13 @@ Time: %s
       let thread_id = arg_get_string "thread_id" "" in
       let concluder = arg_get_string "concluder" agent_name in
       let conclusion = arg_get_string "conclusion" "" in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" || conclusion = "" then
         (false, "❌ thread_id and conclusion required")
       else begin
         let convo_config : Council.Conversation.config = {
           base_path = config.base_path;
-          room = "default";
+          room = current_room;
         } in
         match Council.Conversation.conclude ~config:convo_config ~thread_id
                 ~concluder ~conclusion () with
@@ -2523,11 +2547,12 @@ Time: %s
 
   | "masc_convo_get" ->
       let thread_id = arg_get_string "thread_id" "" in
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" then (false, "❌ thread_id required")
       else begin
         let convo_config : Council.Conversation.config = {
           base_path = config.base_path;
-          room = "default";
+          room = current_room;
         } in
         match Council.Conversation.get ~config:convo_config ~thread_id with
         | Some thread ->
@@ -2537,9 +2562,10 @@ Time: %s
       end
 
   | "masc_convo_list" ->
+      let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       let convo_config : Council.Conversation.config = {
         base_path = config.base_path;
-        room = "default";
+        room = current_room;
       } in
       let threads = Council.Conversation.list_active ~config:convo_config in
       let json = `List (List.map (fun th ->

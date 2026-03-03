@@ -35,6 +35,29 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some prev -> Unix.putenv key prev
+      | None -> Unix.putenv key "")
+    f
+
+let write_text_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let extract_json_from_text text =
+  try
+    let idx = String.index text '{' in
+    Yojson.Safe.from_string (String.sub text idx (String.length text - idx))
+  with Not_found ->
+    Alcotest.failf "expected JSON payload in text: %s" text
+
 (* ===== Unit Tests for Type Re-exports ===== *)
 
 let test_create_state () =
@@ -450,6 +473,107 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
 
   cleanup_dir base_path
 
+let test_execute_tool_mcp_session_ignores_term_persistence () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-term-isolation-regression" in
+  let term_sid = "mcp-eio-term-isolation" in
+  let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_sid in
+
+  with_env "TERM_SESSION_ID" term_sid (fun () ->
+    write_text_file term_file "intruder-sage-tiger";
+
+    let (ok_init, _init_msg) =
+      Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+        ~name:"masc_init"
+        ~arguments:(`Assoc [])
+    in
+    Alcotest.(check bool) "init success" true ok_init;
+
+    let (ok_broadcast, _broadcast_msg) =
+      Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+        ~name:"masc_broadcast"
+        ~arguments:(`Assoc [("message", `String "term isolation check")])
+    in
+    Alcotest.(check bool) "broadcast success" true ok_broadcast;
+
+    let agents = Masc_mcp.Room.get_agents_raw state.room_config in
+    let names = List.map (fun (a : Masc_mcp.Types.agent) -> a.name) agents in
+    Alcotest.(check bool)
+      "mcp session must not reuse TERM_SESSION_ID persisted nickname"
+      false
+      (List.mem "intruder-sage-tiger" names);
+
+    (try Unix.unlink term_file with Unix.Unix_error _ -> ()));
+
+  cleanup_dir base_path
+
+let test_convo_start_uses_current_room () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-convo-room-regression" in
+  let room_id = "convo-proof-room" in
+
+  let (ok_init, _init_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init"
+      ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+
+  let (ok_create, _create_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_room_create"
+      ~arguments:(`Assoc [("name", `String room_id)])
+  in
+  Alcotest.(check bool) "room create success" true ok_create;
+
+  let (ok_enter, _enter_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_room_enter"
+      ~arguments:(`Assoc [
+        ("room_id", `String room_id);
+        ("agent_type", `String "codex");
+      ])
+  in
+  Alcotest.(check bool) "room enter success" true ok_enter;
+
+  let (ok_start, start_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_convo_start"
+      ~arguments:(`Assoc [
+        ("topic", `String "room-scoped convo");
+        ("initiator", `String "proof-a");
+      ])
+  in
+  Alcotest.(check bool) "convo start success" true ok_start;
+  let start_json = extract_json_from_text start_msg in
+  let thread_id = Yojson.Safe.Util.(start_json |> member "id" |> to_string) in
+
+  let (ok_get, get_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_convo_get"
+      ~arguments:(`Assoc [("thread_id", `String thread_id)])
+  in
+  Alcotest.(check bool) "convo get success" true ok_get;
+  let get_json = Yojson.Safe.from_string get_msg in
+  let convo_room = Yojson.Safe.Util.(get_json |> member "room" |> to_string) in
+  Alcotest.(check string) "conversation stored in current room" room_id convo_room;
+
+  cleanup_dir base_path
+
 let test_handle_request_tools_call_trpg () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -558,6 +682,8 @@ let eio_tests = [
   "execute trpg validation", `Quick, test_execute_tool_trpg_validation;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
+  "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
+  "convo start uses current room", `Quick, test_convo_start_uses_current_room;
 ]
 
 let () =

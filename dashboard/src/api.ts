@@ -167,10 +167,17 @@ async function withRetries<T>(
   }
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<T> {
   const res = await fetchWithTimeout(path, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: {
+      ...jsonHeaders(),
+      ...(extraHeaders ?? {}),
+    },
     body: JSON.stringify(body),
   }, DEFAULT_POST_TIMEOUT_MS)
   if (!res.ok) {
@@ -1203,6 +1210,7 @@ export interface TrpgSpawnActorRequest {
   actor_id?: string
   name?: string
   role?: 'dm' | 'player' | 'npc'
+  idempotencyKey?: string
   keeper_name?: string
   archetype?: string
   persona?: string
@@ -1228,6 +1236,7 @@ export function spawnTrpgActor(
   room: string,
   actor: TrpgSpawnActorRequest,
 ): Promise<TrpgSpawnActorResponse> {
+  const idempotencyKey = actor.idempotencyKey?.trim()
   const body: Record<string, unknown> = {
     room_id: room,
   }
@@ -1245,7 +1254,8 @@ export function spawnTrpgActor(
   if (Array.isArray(actor.skills) && actor.skills.length > 0) body.skills = actor.skills
   if (Array.isArray(actor.inventory) && actor.inventory.length > 0) body.inventory = actor.inventory
   if (actor.stats && Object.keys(actor.stats).length > 0) body.stats = actor.stats
-  return post('/api/v1/trpg/actors/spawn', body)
+  if (idempotencyKey) body.idempotency_key = idempotencyKey
+  return post('/api/v1/trpg/actors/spawn', body, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined)
 }
 
 export function claimTrpgActor(room: string, actorId: string, keeper: string): Promise<unknown> {

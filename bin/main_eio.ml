@@ -753,22 +753,35 @@ let trpg_read_state_int derived_json field =
 
 (* ─── Actor state query helpers ─────────────────────────────── *)
 
+type trpg_actor_spawn_cached = {
+  fingerprint : string;
+  response_json : Yojson.Safe.t;
+}
+
 type trpg_actor_spawn_guard_state = {
   mutex : Mutex.t;
   room_mutexes : (string, Mutex.t) Hashtbl.t;
+  idempotency_cache : (string, trpg_actor_spawn_cached) Hashtbl.t;
+  mutable cache_writes : int;
 }
 
 let trpg_actor_spawn_guard : trpg_actor_spawn_guard_state =
-  { mutex = Mutex.create (); room_mutexes = Hashtbl.create 64 }
+  {
+    mutex = Mutex.create ();
+    room_mutexes = Hashtbl.create 64;
+    idempotency_cache = Hashtbl.create 2048;
+    cache_writes = 0;
+  }
+
+let trpg_with_actor_spawn_guard_lock f =
+  Mutex.lock trpg_actor_spawn_guard.mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock trpg_actor_spawn_guard.mutex) f
 
 let trpg_with_actor_spawn_room_lock ~room_id f =
   let room_key = String.trim room_id in
   let room_key = if room_key = "" then "default" else room_key in
   let room_mutex =
-    Mutex.lock trpg_actor_spawn_guard.mutex;
-    Fun.protect
-      ~finally:(fun () -> Mutex.unlock trpg_actor_spawn_guard.mutex)
-      (fun () ->
+    trpg_with_actor_spawn_guard_lock (fun () ->
         match Hashtbl.find_opt trpg_actor_spawn_guard.room_mutexes room_key with
         | Some m -> m
         | None ->
@@ -778,6 +791,28 @@ let trpg_with_actor_spawn_room_lock ~room_id f =
   in
   Mutex.lock room_mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock room_mutex) f
+
+let trpg_actor_spawn_cache_key ~room_id ~idempotency_key =
+  room_id ^ "\x1f" ^ idempotency_key
+
+let trpg_actor_spawn_cache_lookup ~room_id ~idempotency_key =
+  let key = trpg_actor_spawn_cache_key ~room_id ~idempotency_key in
+  trpg_with_actor_spawn_guard_lock (fun () ->
+      Hashtbl.find_opt trpg_actor_spawn_guard.idempotency_cache key)
+
+let trpg_actor_spawn_cache_store ~room_id ~idempotency_key ~fingerprint
+    ~response_json =
+  let key = trpg_actor_spawn_cache_key ~room_id ~idempotency_key in
+  trpg_with_actor_spawn_guard_lock (fun () ->
+      Hashtbl.replace trpg_actor_spawn_guard.idempotency_cache key
+        { fingerprint; response_json };
+      trpg_actor_spawn_guard.cache_writes <-
+        trpg_actor_spawn_guard.cache_writes + 1;
+      if trpg_actor_spawn_guard.cache_writes >= 1024
+         && Hashtbl.length trpg_actor_spawn_guard.idempotency_cache > 4096
+      then (
+        Hashtbl.reset trpg_actor_spawn_guard.idempotency_cache;
+        trpg_actor_spawn_guard.cache_writes <- 0))
 
 let trpg_normalize_keeper_name s = s |> String.trim |> String.lowercase_ascii
 
@@ -837,6 +872,16 @@ let trpg_state_actor_control_fields state =
           | _ -> None)
         fields
   | _ -> []
+
+let rec trpg_canonicalize_json (value : Yojson.Safe.t) : Yojson.Safe.t =
+  match value with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.map (fun (k, v) -> (k, trpg_canonicalize_json v))
+        |> List.sort (fun (a, _) (b, _) -> String.compare a b))
+  | `List items -> `List (List.map trpg_canonicalize_json items)
+  | other -> other
 
 let trpg_owner_for_actor state actor_id =
   trpg_state_actor_control_fields state |> List.assoc_opt actor_id
@@ -980,7 +1025,55 @@ let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
 
 (* ─── Actor REST wrappers ───────────────────────────────────── *)
 
-let trpg_actor_spawn_json ~base_dir ~body_str : trpg_api_result =
+let trpg_actor_spawn_extract_idempotency_key ~(header_key : string option)
+    (json : Yojson.Safe.t) : string option =
+  let normalize = function
+    | None -> None
+    | Some raw ->
+        let trimmed = String.trim raw in
+        if trimmed = "" then None else Some trimmed
+  in
+  match normalize header_key with
+  | Some _ as key -> key
+  | None -> (
+      match Yojson.Safe.Util.member "idempotency_key" json with
+      | `String raw -> normalize (Some raw)
+      | _ -> None)
+
+let trpg_actor_spawn_request_fingerprint ~room_id ~rule_module ~actor_id_opt
+    ~name_opt ~role ~archetype ~persona ~portrait ~background ~stats_opt ~hp
+    ~max_hp ~alive ~traits ~skills ~inventory =
+  let fields =
+    ref
+      [
+        ("room_id", `String room_id);
+        ("rule_module", `String rule_module);
+        ("role", `String role);
+        ("hp", `Int hp);
+        ("max_hp", `Int max_hp);
+        ("alive", `Bool alive);
+        ("traits", `List (List.map (fun s -> `String s) traits));
+        ("skills", `List (List.map (fun s -> `String s) skills));
+        ("inventory", `List (List.map (fun s -> `String s) inventory));
+      ]
+  in
+  let add_opt_string key = function
+    | Some value -> fields := (key, `String value) :: !fields
+    | None -> ()
+  in
+  add_opt_string "actor_id" actor_id_opt;
+  add_opt_string "name" name_opt;
+  add_opt_string "archetype" archetype;
+  add_opt_string "persona" persona;
+  add_opt_string "portrait" portrait;
+  add_opt_string "background" background;
+  (match stats_opt with
+  | Some stats -> fields := ("stats", trpg_canonicalize_json stats) :: !fields
+  | None -> ());
+  `Assoc !fields |> trpg_canonicalize_json |> Yojson.Safe.to_string
+
+let trpg_actor_spawn_json ~base_dir ~(idempotency_key : string option) ~body_str
+    : trpg_api_result =
   try
     let json = Yojson.Safe.from_string body_str in
     let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
@@ -1022,80 +1115,124 @@ let trpg_actor_spawn_json ~base_dir ~body_str : trpg_api_result =
     let* traits = trpg_parse_optional_string_list "traits" json in
     let* skills = trpg_parse_optional_string_list "skills" json in
     let* inventory = trpg_parse_optional_string_list "inventory" json in
+    let idempotency_key =
+      trpg_actor_spawn_extract_idempotency_key ~header_key:idempotency_key json
+    in
+    let request_fingerprint =
+      trpg_actor_spawn_request_fingerprint ~room_id ~rule_module ~actor_id_opt
+        ~name_opt ~role ~archetype ~persona ~portrait ~background ~stats_opt ~hp
+        ~max_hp ~alive ~traits ~skills ~inventory
+    in
     trpg_with_actor_spawn_room_lock ~room_id (fun () ->
-      let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
-      let state = trpg_state_from_derived derived in
-      let actor_id =
-        match actor_id_opt with
-        | Some explicit -> explicit
-        | None ->
-            let seed = name_opt |> Option.value ~default:role in
-            let base_actor_id = trpg_sanitize_actor_id_seed seed in
-            trpg_next_available_actor_id state base_actor_id
-      in
-      let name = Option.value ~default:actor_id name_opt in
-      if trpg_actor_exists state actor_id then
-        Error (`Bad_request, Printf.sprintf "actor '%s' already exists" actor_id)
-      else
-        let actor_fields = ref [] in
-        let add_field key value = actor_fields := (key, value) :: !actor_fields in
-        let add_opt_string key = function
-          | Some value -> add_field key (`String value)
-          | None -> ()
+      let run_spawn_once () =
+        let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+        let state = trpg_state_from_derived derived in
+        let actor_id =
+          match actor_id_opt with
+          | Some explicit -> explicit
+          | None ->
+              let seed = name_opt |> Option.value ~default:role in
+              let base_actor_id = trpg_sanitize_actor_id_seed seed in
+              trpg_next_available_actor_id state base_actor_id
         in
-        let add_opt_json key = function
-          | Some value -> add_field key value
-          | None -> ()
-        in
-        add_field "inventory" (`List (List.map (fun s -> `String s) inventory));
-        add_field "skills" (`List (List.map (fun s -> `String s) skills));
-        add_field "traits" (`List (List.map (fun s -> `String s) traits));
-        add_field "alive" (`Bool alive);
-        add_field "max_hp" (`Int max_hp);
-        add_field "hp" (`Int hp);
-        add_opt_json "stats" stats_opt;
-        add_opt_string "background" background;
-        add_opt_string "portrait" portrait;
-        add_opt_string "persona" persona;
-        add_opt_string "archetype" archetype;
-        add_field "role" (`String role);
-        add_field "name" (`String name);
-        let actor_json = `Assoc (List.rev !actor_fields) in
-        let payload_fields =
-          [
-            ("actor_id", `String actor_id);
-            ("name", `String name);
-            ("role", `String role);
-            ("hp", `Int hp);
-            ("max_hp", `Int max_hp);
-            ("alive", `Bool alive);
-            ("traits", `List (List.map (fun s -> `String s) traits));
-            ("skills", `List (List.map (fun s -> `String s) skills));
-            ("inventory", `List (List.map (fun s -> `String s) inventory));
-            ("actor", actor_json);
-          ]
-        in
-        let payload_fields =
-          payload_fields
-          @ (match archetype with Some v -> [ ("archetype", `String v) ] | None -> [])
-          @ (match persona with Some v -> [ ("persona", `String v) ] | None -> [])
-          @ (match portrait with Some v -> [ ("portrait", `String v) ] | None -> [])
-          @ (match background with Some v -> [ ("background", `String v) ] | None -> [])
-          @ (match stats_opt with Some stats -> [ ("stats", stats) ] | None -> [])
-        in
-        let payload = `Assoc payload_fields in
-        let* _event =
-          trpg_append_event ~base_dir ~room_id
-            ~event_type:Masc_mcp.Trpg_engine_event.Actor_spawned ~actor_id ~payload ()
-        in
-        let* derived2 = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
-        Ok
-          (`Assoc
+        let name = Option.value ~default:actor_id name_opt in
+        if trpg_actor_exists state actor_id then
+          Error (`Bad_request, Printf.sprintf "actor '%s' already exists" actor_id)
+        else
+          let actor_fields = ref [] in
+          let add_field key value = actor_fields := (key, value) :: !actor_fields in
+          let add_opt_string key = function
+            | Some value -> add_field key (`String value)
+            | None -> ()
+          in
+          let add_opt_json key = function
+            | Some value -> add_field key value
+            | None -> ()
+          in
+          add_field "inventory" (`List (List.map (fun s -> `String s) inventory));
+          add_field "skills" (`List (List.map (fun s -> `String s) skills));
+          add_field "traits" (`List (List.map (fun s -> `String s) traits));
+          add_field "alive" (`Bool alive);
+          add_field "max_hp" (`Int max_hp);
+          add_field "hp" (`Int hp);
+          add_opt_json "stats" stats_opt;
+          add_opt_string "background" background;
+          add_opt_string "portrait" portrait;
+          add_opt_string "persona" persona;
+          add_opt_string "archetype" archetype;
+          add_field "role" (`String role);
+          add_field "name" (`String name);
+          let actor_json = `Assoc (List.rev !actor_fields) in
+          let payload_fields =
             [
-              ("ok", `Bool true);
               ("actor_id", `String actor_id);
-              ("state", trpg_state_from_derived derived2);
-            ]))
+              ("name", `String name);
+              ("role", `String role);
+              ("hp", `Int hp);
+              ("max_hp", `Int max_hp);
+              ("alive", `Bool alive);
+              ("traits", `List (List.map (fun s -> `String s) traits));
+              ("skills", `List (List.map (fun s -> `String s) skills));
+              ("inventory", `List (List.map (fun s -> `String s) inventory));
+              ("actor", actor_json);
+            ]
+          in
+          let payload_fields =
+            payload_fields
+            @
+            (match archetype with
+            | Some v -> [ ("archetype", `String v) ]
+            | None -> [])
+            @
+            (match persona with
+            | Some v -> [ ("persona", `String v) ]
+            | None -> [])
+            @
+            (match portrait with
+            | Some v -> [ ("portrait", `String v) ]
+            | None -> [])
+            @
+            (match background with
+            | Some v -> [ ("background", `String v) ]
+            | None -> [])
+            @ (match stats_opt with Some stats -> [ ("stats", stats) ] | None -> [])
+          in
+          let payload = `Assoc payload_fields in
+          let* _event =
+            trpg_append_event ~base_dir ~room_id
+              ~event_type:Masc_mcp.Trpg_engine_event.Actor_spawned ~actor_id
+              ~payload ()
+          in
+          let* derived2 = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("actor_id", `String actor_id);
+                ("state", trpg_state_from_derived derived2);
+              ])
+      in
+      let run_and_maybe_store () =
+        let result = run_spawn_once () in
+        (match (result, idempotency_key) with
+        | Ok response_json, Some key ->
+            trpg_actor_spawn_cache_store ~room_id ~idempotency_key:key
+              ~fingerprint:request_fingerprint ~response_json
+        | _ -> ());
+        result
+      in
+      match idempotency_key with
+      | Some key -> (
+          match trpg_actor_spawn_cache_lookup ~room_id ~idempotency_key:key with
+          | Some cached when String.equal cached.fingerprint request_fingerprint ->
+              Ok cached.response_json
+          | Some _ ->
+              Error
+                ( `Bad_request,
+                  "idempotency key reused with different payload: code=idempotency_payload_mismatch"
+                )
+          | None -> run_and_maybe_store ())
+      | None -> run_spawn_once ())
   with Yojson.Json_error e ->
     Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
 
@@ -5766,10 +5903,15 @@ let make_routes ~port ~host =
          handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/trpg/actors/spawn" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+       with_public_read (fun state req reqd ->
          let base_dir = state.Mcp_server.room_config.base_path in
          Http.Request.read_body_async reqd (fun body_str ->
-           match trpg_actor_spawn_json ~base_dir ~body_str with
+           match
+             trpg_actor_spawn_json ~base_dir
+               ~idempotency_key:
+                 (get_header_any_case req.Httpun.Request.headers "idempotency-key")
+               ~body_str
+           with
            | Ok json ->
                respond_json_with_cors ~status:`Created request reqd
                  (Yojson.Safe.to_string json)
@@ -6920,7 +7062,12 @@ let run_server ~sw ~env ~port ~base_path =
           let state = get_server_state () in
           let base_dir = state.Mcp_server.room_config.base_path in
           h2_read_body h2_reqd (fun body_str ->
-            match trpg_actor_spawn_json ~base_dir ~body_str with
+            match
+              trpg_actor_spawn_json ~base_dir
+                ~idempotency_key:
+                  (get_header_any_case httpun_request.headers "idempotency-key")
+                ~body_str
+            with
             | Ok json ->
                 h2_respond_json h2_reqd (Yojson.Safe.to_string json)
                   ~status:`Created ~extra_headers:cors

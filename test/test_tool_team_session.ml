@@ -85,7 +85,11 @@ let wait_until_terminal ctx session_id =
   in
   loop 200
 
-let start_session_exn ctx ~goal =
+let rec start_session_exn ctx ~goal =
+  start_session_custom_exn ctx ~goal ~min_agents:1 ~agents:[]
+
+and start_session_custom_exn ctx ~goal ~min_agents ~agents =
+  let agent_json = `List (List.map (fun a -> `String a) agents) in
   let start_ok, start_body =
     dispatch_exn ctx ~name:"masc_team_session_start"
       ~args:
@@ -94,7 +98,7 @@ let start_session_exn ctx ~goal =
             ("goal", `String goal);
             ("duration_seconds", `Int 90);
             ("checkpoint_interval_sec", `Int 10);
-            ("min_agents", `Int 1);
+            ("min_agents", `Int min_agents);
             ("orchestration_mode", `String "assist");
             ("communication_mode", `String "hybrid");
             ("model_cascade", `List [ `String "glm:glm-5" ]);
@@ -102,6 +106,7 @@ let start_session_exn ctx ~goal =
             ("instruction_profile", `String "strict");
             ("alert_channel", `String "both");
             ("report_formats", `List [ `String "markdown"; `String "json" ]);
+            ("agents", agent_json);
           ])
   in
   Alcotest.(check bool) "start ok" true start_ok;
@@ -509,6 +514,128 @@ let test_turn_events_and_prove () =
     proof_schema_version;
   cleanup_dir base_dir
 
+let test_prove_requires_multi_actor_turn_coverage () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+  in
+  let participants = [ "tester"; "ally1"; "ally2" ] in
+
+  (* Case 1: single-actor turns should be insufficient when min_agents=3 *)
+  let session_single =
+    start_session_custom_exn ctx ~goal:"prove-single-actor-insufficient"
+      ~min_agents:3 ~agents:participants
+    |> get_session_id
+  in
+  let single_turn_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_single);
+            ("turn_kind", `String "note");
+            ("message", `String "only tester turn");
+          ])
+  in
+  Alcotest.(check bool) "single actor turn recorded" true single_turn_ok;
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_single);
+             ("reason", `String "single_actor_done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_single);
+  let prove_single_ok, prove_single_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_single);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "single actor prove ok" true prove_single_ok;
+  let prove_single = parse_json_exn prove_single_body |> result_field in
+  let verdict_single =
+    prove_single |> Yojson.Safe.Util.member "proof"
+    |> Yojson.Safe.Util.member "verdict"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "single actor verdict" "insufficient_evidence"
+    verdict_single;
+
+  (* Case 2: multi-actor turns satisfy min_agents coverage *)
+  let session_multi =
+    start_session_custom_exn ctx ~goal:"prove-multi-actor-pass" ~min_agents:3
+      ~agents:participants
+    |> get_session_id
+  in
+  let record_ok actor msg =
+    match
+      Team_session_engine_eio.record_turn ~config ~session_id:session_multi
+        ~actor ~turn_kind:Team_session_types.Turn_note ~message:(Some msg)
+        ~target_agent:None ~task_title:None ~task_description:None
+        ~task_priority:3
+    with
+    | Ok _ -> true
+    | Error _ -> false
+  in
+  Alcotest.(check bool) "tester note" true (record_ok "tester" "tester turn");
+  Alcotest.(check bool) "ally1 note" true (record_ok "ally1" "ally1 turn");
+  Alcotest.(check bool) "ally2 note" true (record_ok "ally2" "ally2 turn");
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_multi);
+             ("reason", `String "multi_actor_done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_multi);
+  let prove_multi_ok, prove_multi_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_multi);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "multi actor prove ok" true prove_multi_ok;
+  let prove_multi = parse_json_exn prove_multi_body |> result_field in
+  let verdict_multi =
+    prove_multi |> Yojson.Safe.Util.member "proof"
+    |> Yojson.Safe.Util.member "verdict"
+    |> Yojson.Safe.Util.to_string
+  in
+  let evidence_multi =
+    prove_multi |> Yojson.Safe.Util.member "proof"
+    |> Yojson.Safe.Util.member "evidence"
+  in
+  let required_turn_actors =
+    evidence_multi |> Yojson.Safe.Util.member "required_turn_actors"
+    |> Yojson.Safe.Util.to_int
+  in
+  let unique_turn_actors =
+    evidence_multi |> Yojson.Safe.Util.member "unique_turn_actors_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check string) "multi actor verdict" "proved" verdict_multi;
+  Alcotest.(check int) "required turn actors = min_agents" 3
+    required_turn_actors;
+  Alcotest.(check bool) "unique turn actors >= required" true
+    (unique_turn_actors >= required_turn_actors);
+  cleanup_dir base_dir
+
 let test_missing_required_args () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -763,6 +890,8 @@ let () =
           Alcotest.test_case "list-and-compare" `Quick test_list_and_compare;
           Alcotest.test_case "turn-events-prove" `Quick
             test_turn_events_and_prove;
+          Alcotest.test_case "prove-requires-multi-actor-turn-coverage" `Quick
+            test_prove_requires_multi_actor_turn_coverage;
           Alcotest.test_case "missing-required-args" `Quick
             test_missing_required_args;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

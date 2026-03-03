@@ -443,10 +443,33 @@ let bool_of_criterion evidence =
   | `Bool b -> b
   | _ -> false
 
+let turn_actor_of_event (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "event_type" json with
+  | `String "team_turn" -> (
+      match
+        Yojson.Safe.Util.member "detail" json
+        |> Yojson.Safe.Util.member "actor"
+      with
+      | `String actor ->
+          let actor = String.trim actor in
+          if actor = "" then None else Some actor
+      | _ -> None)
+  | _ -> None
+
+let dedup_preserve_order xs =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+        if List.mem x acc then loop acc rest
+        else loop (x :: acc) rest
+  in
+  loop [] xs
+
 let proof_markdown ~(session : Team_session_types.session)
     ~(score_pct : float) ~(verdict : string) ~(criteria : Yojson.Safe.t list)
     ~(checkpoints_count : int) ~(events_count : int) ~(turn_events : int)
-    ~(report_exists : bool) ~(proof_generated_at_iso : string) =
+    ~(report_exists : bool) ~(unique_turn_actors_count : int)
+    ~(required_turn_actors : int) ~(proof_generated_at_iso : string) =
   let criteria_lines =
     criteria
     |> List.map (fun item ->
@@ -478,6 +501,8 @@ let proof_markdown ~(session : Team_session_types.session)
       Printf.sprintf "- Events count: %d" events_count;
       Printf.sprintf "- Checkpoints count: %d" checkpoints_count;
       Printf.sprintf "- Turn events count: %d" turn_events;
+      Printf.sprintf "- Unique turn actors: %d (required >= %d)"
+        unique_turn_actors_count required_turn_actors;
       Printf.sprintf "- Report artifacts exist: %b" report_exists;
       "";
       "## Criteria";
@@ -507,6 +532,22 @@ let generate_proof config (session : Team_session_types.session) :
           | `String "team_turn" -> acc + 1
           | _ -> acc)
         0 events
+    in
+    let turn_actors =
+      events |> List.filter_map turn_actor_of_event |> dedup_preserve_order
+    in
+    let unique_turn_actors_count = List.length turn_actors in
+    let required_turn_actors =
+      let participants = max 1 (List.length session.agent_names) in
+      max 1 (min session.min_agents participants)
+    in
+    let unauthorized_turn_actors =
+      List.filter
+        (fun actor ->
+          not
+            (String.equal actor session.created_by
+            || List.exists (String.equal actor) session.agent_names))
+        turn_actors
     in
     let report_json_exists =
       Room_utils.path_exists config
@@ -546,6 +587,17 @@ let generate_proof config (session : Team_session_types.session) :
         ( "participants_recorded",
           session.agent_names <> [],
           Printf.sprintf "participants=%d" (List.length session.agent_names) );
+        ( "multi_actor_turn_coverage",
+          unique_turn_actors_count >= required_turn_actors,
+          Printf.sprintf "unique_turn_actors=%d required_turn_actors=%d"
+            unique_turn_actors_count required_turn_actors );
+        ( "turn_actor_authorized",
+          unauthorized_turn_actors = [],
+          if unauthorized_turn_actors = [] then
+            "all turn actors are session participants"
+          else
+            Printf.sprintf "unauthorized=%s"
+              (String.concat "," unauthorized_turn_actors) );
         ( "report_artifacts",
           report_exists,
           Printf.sprintf "report_json=%b report_md=%b" report_json_exists
@@ -579,7 +631,8 @@ let generate_proof config (session : Team_session_types.session) :
         |> bool_of_criterion
       in
       find "session_started_event" && find "checkpoint_recorded"
-      && find "turn_or_communication_recorded" && find "report_artifacts"
+      && find "turn_or_communication_recorded" && find "multi_actor_turn_coverage"
+      && find "turn_actor_authorized" && find "report_artifacts"
     in
     let verdict =
       if mandatory_ok then "proved"
@@ -602,6 +655,9 @@ let generate_proof config (session : Team_session_types.session) :
                 ("events_count", `Int (List.length events));
                 ("checkpoints_count", `Int checkpoints_count);
                 ("turn_events", `Int turn_events);
+                ("unique_turn_actors", `List (List.map (fun a -> `String a) turn_actors));
+                ("unique_turn_actors_count", `Int unique_turn_actors_count);
+                ("required_turn_actors", `Int required_turn_actors);
                 ("broadcast_count", `Int session.broadcast_count);
                 ("portal_count", `Int session.portal_count);
                 ("done_delta_total", `Int done_delta_total);
@@ -614,6 +670,7 @@ let generate_proof config (session : Team_session_types.session) :
     let markdown =
       proof_markdown ~session ~score_pct ~verdict ~criteria ~checkpoints_count
         ~events_count:(List.length events) ~turn_events ~report_exists
+        ~unique_turn_actors_count ~required_turn_actors
         ~proof_generated_at_iso:generated_at_iso
     in
     Ok (proof_json, markdown)

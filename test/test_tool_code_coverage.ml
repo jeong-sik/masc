@@ -8,7 +8,7 @@ module Tool_code = Masc_mcp.Tool_code
 module Room = Masc_mcp.Room
 
 (* msg_contains: case-insensitive substring check *)
-let _msg_contains ~needle haystack =
+let msg_contains ~needle haystack =
   let lc = String.lowercase_ascii haystack in
   let ln = String.lowercase_ascii needle in
   try ignore (Str.search_forward (Str.regexp_string ln) lc 0); true
@@ -120,8 +120,13 @@ let test_code_read_no_path () =
 let test_code_read_path_traversal () =
   let ctx, base_dir = make_ctx () in
   let args = `Assoc [("path", `String "../../../etc/passwd")] in
-  let (ok, _msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
   Alcotest.(check bool) "path traversal blocked" false ok;
+  (* validate_path rejects: either "Path traversal" or "Not in a git repository" *)
+  let has_security_msg =
+    msg_contains ~needle:"traversal" msg ||
+    msg_contains ~needle:"git" msg in
+  Alcotest.(check bool) "error mentions security boundary" true has_security_msg;
   cleanup_dir base_dir
 
 let test_code_read_with_offset_limit () =

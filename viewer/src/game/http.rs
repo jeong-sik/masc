@@ -516,6 +516,7 @@ async fn fetch_game_state() -> Result<GameStateResponse, JsValue> {
     opts.set_mode(web_sys::RequestMode::Cors);
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    config::apply_auth_headers(&request.headers())?;
     request.headers().set("Accept", "application/json")?;
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;

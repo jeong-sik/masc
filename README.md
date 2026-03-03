@@ -208,6 +208,8 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 | `MASC_ORCHESTRATOR_ENABLED` | 0 | Orchestrator 활성화 |
 | `MASC_GUARDIAN_ENABLED` | false | 내부 수호자 루프 활성화 |
 | `MASC_GUARDIAN_MODE` | masc | `masc` / `lodge` / `both` |
+| `MASC_HTTP_AUTH_STRICT` | false | `true`면 public allowlist 외 GET도 read auth 적용 |
+| `MASC_TOOL_AUTH_STRICT` | false | `true`면 unknown external tool deny, unknown internal(`masc_*`/`decision.*`/`experiment.*`/`trpg.*`/`client.*`)는 worker 권한 기준 검사 |
 | `MASC_GUARDIAN_ZOMBIE_INTERVAL_SEC` | 60 | 좀비 정리 주기 (초) |
 | `MASC_GUARDIAN_GC_INTERVAL_SEC` | 3600 | GC 주기 (초, 0=비활성) |
 | `MASC_GUARDIAN_GC_DAYS` | 7 | GC 기준 일수 |
@@ -243,6 +245,8 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 - 자동 시작은 환경별로 선택
 - 로그는 실행 방식에 따라 다름 (stdout/stderr 확인)
 - SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다: `curl -N http://127.0.0.1:8935/sse`
+- Viewer는 URL query의 `token`/`auth_token`/`masc_token`을 초기 읽기 후 주소창에서 제거하고 로컬스토리지에 저장하지 않습니다.
+- auth strict 플래그는 운영 중 동적 토글보다 프로세스 재시작과 함께 고정 적용을 권장합니다.
 
 ## Agent Identity System
 

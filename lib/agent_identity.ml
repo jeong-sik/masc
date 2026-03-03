@@ -87,13 +87,21 @@ let from_mcp_params params =
     try Some (params |> U.member key |> U.to_string)
     with _ -> None
   in
+  let fallback_agent_name session_key =
+    let prefix_len = min 8 (String.length session_key) in
+    let prefix =
+      if prefix_len = 0 then "anon"
+      else String.sub session_key 0 prefix_len
+    in
+    Printf.sprintf "agent-%s" prefix
+  in
   let session_key = match get_opt "_session_key" with
     | Some k -> k
     | None -> generate_session_key ()
   in
   let agent_name = match get_opt "_agent_name", get_opt "agent_name" with
     | Some n, _ | _, Some n -> n
-    | None, None -> Printf.sprintf "agent-%s" (String.sub session_key 0 8)
+    | None, None -> fallback_agent_name session_key
   in
   let channel = match get_opt "_channel" with
     | Some c -> Some (channel_of_string c)

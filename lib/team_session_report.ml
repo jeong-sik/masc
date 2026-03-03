@@ -1,5 +1,8 @@
 (** Team session report generation (Markdown + JSON). *)
 
+let report_schema_version = "1.0.0"
+let proof_schema_version = "1.0.0"
+
 let team_health_json (session : Team_session_types.session) active_agents =
   let active_count = List.length active_agents in
   let required = max 1 session.min_agents in
@@ -364,6 +367,7 @@ let generate config (session : Team_session_types.session) :
     let report_json =
       `Assoc
         [
+          ("schema_version", `String report_schema_version);
           ("session", Team_session_types.session_to_yojson session);
           ("goal", `String session.goal);
           ("duration", `Int session.duration_seconds);
@@ -585,6 +589,7 @@ let generate_proof config (session : Team_session_types.session) :
     let proof_json =
       `Assoc
         [
+          ("schema_version", `String proof_schema_version);
           ("session_id", `String session.session_id);
           ("goal", `String session.goal);
           ("status", `String (Team_session_types.status_to_string session.status));

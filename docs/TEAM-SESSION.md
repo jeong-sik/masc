@@ -147,6 +147,7 @@
 
 `report.json` 핵심 키:
 
+- `schema_version` (`1.0.0`)
 - `session`
 - `goal`
 - `duration`
@@ -157,6 +158,16 @@
 - `incidents`
 - `mcp_improvements`
 - `evidence`
+
+`proof.json` 핵심 키:
+
+- `schema_version` (`1.0.0`)
+- `session_id`
+- `verdict`
+- `score_pct`
+- `criteria`
+- `evidence`
+- `generated_at_iso`
 
 ## 운영 메모
 

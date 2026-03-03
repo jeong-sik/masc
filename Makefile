@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test clean coverage coverage-summary coverage-html doc install-deps dev-setup fmt fmt-check ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target
 all: build
@@ -65,7 +65,7 @@ run:
 # Build release binary
 release:
 	dune build --root . --release
-	@echo "Release binary at _build/default/bin/main.exe"
+	@echo "Release binary at _build/default/bin/main_eio.exe"
 
 # Build viewer (Bevy + WASM via trunk) with NO_COLOR normalization.
 viewer-build:
@@ -78,6 +78,10 @@ viewer-serve:
 # GAME-VIEW contract harness (decision/experiment/trpg gate checks)
 harness-game-view-contract:
 	scripts/harness_game_view_precondition.sh
+
+# MCP streamable transport contract harness (Accept policy + deprecation headers)
+harness-streamable-http-contract:
+	scripts/harness_streamable_http_contract.sh
 
 # TRPG session bootstrap contract harness (preset/pool/party/session/intervention)
 harness-trpg-session-contract:

@@ -28,6 +28,21 @@ let cleanup_test_room dir =
   in
   try rm_rf dir with _ -> ()
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  try
+    let result = f () in
+    (match previous with
+     | Some v -> Unix.putenv name v
+     | None -> Unix.putenv name "");
+    result
+  with exn ->
+    (match previous with
+     | Some v -> Unix.putenv name v
+     | None -> Unix.putenv name "");
+    raise exn
+
 (* ============================================ *)
 (* Token generation tests                       *)
 (* ============================================ *)
@@ -119,6 +134,19 @@ let test_verify_wrong_token () =
       fail (Printf.sprintf "wrong error type: %s" (Types.masc_error_to_string e))
   | Error _, _ ->
       fail "create_token should succeed"
+
+let test_resolve_agent_from_token () =
+  let dir = setup_test_room () in
+  let create_result = Auth.create_token dir ~agent_name:"resolver" ~role:Types.Worker in
+  let resolve_result =
+    match create_result with
+    | Ok (raw_token, _) -> Auth.resolve_agent_from_token dir ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match resolve_result with
+  | Ok agent_name -> check string "resolved agent" "resolver" agent_name
+  | Error e -> fail (Types.masc_error_to_string e)
 
 let test_list_credentials () =
   let dir = setup_test_room () in
@@ -219,6 +247,59 @@ let test_permission_denied_for_reader () =
   | Error (Types.Forbidden _) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
+let test_authorize_unknown_masc_tool_strict_worker_allowed () =
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:true in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
+            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+              ~tool_name:"masc_unknown_tool")
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_authorize_unknown_masc_tool_strict_reader_denied () =
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:true in
+  let create_result = Auth.create_token dir ~agent_name:"reader_agent" ~role:Types.Reader in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
+            Auth.authorize_tool dir ~agent_name:"reader_agent" ~token:(Some raw_token)
+              ~tool_name:"masc_unknown_tool")
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> fail "reader should be denied in strict mode for unknown masc tool"
+  | Error (Types.Forbidden _) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
+
+let test_authorize_unknown_non_masc_tool_strict_denied () =
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:true in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
+            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+              ~tool_name:"external_unknown_tool")
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> fail "unknown non-masc tool should be denied in strict mode"
+  | Error (Types.Forbidden _) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
+
 (* ============================================ *)
 (* Enable/disable tests                         *)
 (* ============================================ *)
@@ -254,6 +335,7 @@ let () =
       test_case "create credential" `Quick test_create_credential;
       test_case "verify token" `Quick test_verify_token;
       test_case "verify wrong token" `Quick test_verify_wrong_token;
+      test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;
     ];
@@ -267,6 +349,12 @@ let () =
       test_case "auth enabled requires token" `Quick test_auth_enabled_requires_token;
       test_case "auth enabled with valid token" `Quick test_auth_enabled_with_valid_token;
       test_case "permission denied for reader" `Quick test_permission_denied_for_reader;
+      test_case "strict unknown masc tool allows worker"
+        `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
+      test_case "strict unknown masc tool denies reader"
+        `Quick test_authorize_unknown_masc_tool_strict_reader_denied;
+      test_case "strict unknown non-masc tool denied"
+        `Quick test_authorize_unknown_non_masc_tool_strict_denied;
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;

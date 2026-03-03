@@ -255,8 +255,9 @@ fn attempt_reconnect(
             // Compute the URL, attaching lastEventId if we have one
             let base_url = config::sse_endpoint_by_name(&mode_name).unwrap_or_default();
             let url = reconnect::url_with_last_event_id(&base_url, &last_event_id);
+            let authed_url = config::attach_auth_query(&url);
             create_event_source(
-                &url,
+                &authed_url,
                 messages,
                 es_handle,
                 reconnect_state,
@@ -283,6 +284,7 @@ pub fn setup_masc_sse(
             return;
         }
     };
+    let url = config::attach_auth_query(&url);
 
     let messages = Arc::new(Mutex::new(Vec::new()));
     let es_handle: Arc<Mutex<Option<SendEventSource>>> = Arc::new(Mutex::new(None));

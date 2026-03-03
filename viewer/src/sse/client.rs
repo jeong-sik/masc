@@ -1321,6 +1321,7 @@ async fn fetch_text(url: &str) -> Result<String, JsValue> {
     opts.set_mode(web_sys::RequestMode::Cors);
 
     let request = web_sys::Request::new_with_str_and_init(url, &opts)?;
+    config::apply_auth_headers(&request.headers())?;
     request.headers().set("Accept", "application/json")?;
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
@@ -1545,7 +1546,14 @@ fn attempt_trpg_reconnect(
         move || {
             let base_url = config::trpg_stream_poll_url(0);
             let url = reconnect::url_with_last_event_id(&base_url, &last_event_id);
-            create_legacy_event_source(&url, messages, es_handle, reconnect_state, status_proxy);
+            let authed_url = config::attach_auth_query(&url);
+            create_legacy_event_source(
+                &authed_url,
+                messages,
+                es_handle,
+                reconnect_state,
+                status_proxy,
+            );
         },
     );
 }
@@ -1582,7 +1590,7 @@ pub fn setup_sse(
         return;
     }
 
-    let url = config::trpg_stream_poll_url(0);
+    let url = config::attach_auth_query(&config::trpg_stream_poll_url(0));
 
     create_legacy_event_source(
         &url,

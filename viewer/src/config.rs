@@ -106,6 +106,199 @@ pub fn build_masc_url(path: &str) -> String {
     compose_masc_url(&masc_mcp_base_url(), path)
 }
 
+fn normalize_non_empty(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn url_has_query_param(url: &str, key: &str) -> bool {
+    let Some((_, query)) = url.split_once('?') else {
+        return false;
+    };
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('=').map(|(k, _)| k).or(Some(pair)))
+        .any(|k| k == key)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn encode_query_component(raw: &str) -> String {
+    js_sys::encode_uri_component(raw)
+        .as_string()
+        .unwrap_or_else(|| raw.to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn encode_query_component(raw: &str) -> String {
+    raw.to_string()
+}
+
+fn append_query_param(url: &str, key: &str, value: &str) -> String {
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!(
+        "{url}{sep}{key}={value}",
+        value = encode_query_component(value)
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn meta_content(name: &str) -> Option<String> {
+    let doc = web_sys::window()?.document()?;
+    let selector = format!("meta[name='{}']", name);
+    let node = doc.query_selector(&selector).ok().flatten()?;
+    let content = node.get_attribute("content")?;
+    normalize_non_empty(&content)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn runtime_agent_name_override() -> Option<String> {
+    let win = web_sys::window()?;
+
+    if let Ok(value) = js_sys::Reflect::get(
+        win.as_ref(),
+        &wasm_bindgen::JsValue::from_str("__MASC_AGENT"),
+    ) {
+        if let Some(raw) = value.as_string() {
+            if let Some(agent) = normalize_non_empty(&raw) {
+                return Some(agent);
+            }
+        }
+    }
+
+    if let Ok(search) = win.location().search() {
+        let from_query = parse_query_param(&search, "masc_agent")
+            .or_else(|| parse_query_param(&search, "agent"))
+            .or_else(|| parse_query_param(&search, "agent_name"));
+        if let Some(raw) = from_query {
+            if let Some(agent) = normalize_non_empty(&raw) {
+                if let Ok(Some(storage)) = win.local_storage() {
+                    let _ = storage.set_item("masc_agent", &agent);
+                }
+                return Some(agent);
+            }
+        }
+    }
+
+    if let Ok(Some(storage)) = win.local_storage() {
+        if let Ok(Some(raw)) = storage.get_item("masc_agent") {
+            if let Some(agent) = normalize_non_empty(&raw) {
+                return Some(agent);
+            }
+        }
+    }
+
+    meta_content("masc-agent")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn runtime_auth_token_override() -> Option<String> {
+    let win = web_sys::window()?;
+
+    if let Ok(value) = js_sys::Reflect::get(
+        win.as_ref(),
+        &wasm_bindgen::JsValue::from_str("__MASC_TOKEN"),
+    ) {
+        if let Some(raw) = value.as_string() {
+            if let Some(token) = normalize_non_empty(&raw) {
+                return Some(token);
+            }
+        }
+    }
+
+    if let Ok(value) = js_sys::Reflect::get(
+        win.as_ref(),
+        &wasm_bindgen::JsValue::from_str("__MASC_AUTH_TOKEN"),
+    ) {
+        if let Some(raw) = value.as_string() {
+            if let Some(token) = normalize_non_empty(&raw) {
+                return Some(token);
+            }
+        }
+    }
+
+    if let Ok(search) = win.location().search() {
+        let from_query = parse_query_param(&search, "masc_token")
+            .or_else(|| parse_query_param(&search, "auth_token"))
+            .or_else(|| parse_query_param(&search, "token"));
+        if let Some(raw) = from_query {
+            if let Some(token) = normalize_non_empty(&raw) {
+                if let Ok(Some(storage)) = win.local_storage() {
+                    let _ = storage.set_item("masc_token", &token);
+                }
+                return Some(token);
+            }
+        }
+    }
+
+    if let Ok(Some(storage)) = win.local_storage() {
+        if let Ok(Some(raw)) = storage.get_item("masc_token") {
+            if let Some(token) = normalize_non_empty(&raw) {
+                return Some(token);
+            }
+        }
+    }
+
+    meta_content("masc-token")
+}
+
+pub fn viewer_agent_name() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return runtime_agent_name_override();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        None
+    }
+}
+
+pub fn viewer_auth_token() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return runtime_auth_token_override();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        None
+    }
+}
+
+pub fn attach_auth_query(url: &str) -> String {
+    let mut out = url.to_string();
+    if let Some(token) = viewer_auth_token() {
+        if !url_has_query_param(&out, "token") {
+            out = append_query_param(&out, "token", &token);
+        }
+    }
+    if let Some(agent) = viewer_agent_name() {
+        if !url_has_query_param(&out, "agent") {
+            out = append_query_param(&out, "agent", &agent);
+        }
+    }
+    out
+}
+
+pub fn apply_auth_headers(headers: &web_sys::Headers) -> Result<(), wasm_bindgen::JsValue> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(token) = viewer_auth_token() {
+            headers.set("Authorization", &format!("Bearer {}", token))?;
+        }
+        if let Some(agent) = viewer_agent_name() {
+            headers.set("X-MASC-Agent", &agent)?;
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = headers;
+    }
+    Ok(())
+}
+
 // ─── Room ID Management ─────────────────────
 
 /// Get current room ID from DOM attribute (set by dashboard/lobby) or URL param.

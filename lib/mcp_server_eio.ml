@@ -915,6 +915,19 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | _ -> agent_name
   in
 
+  let is_ephemeral_agent_name name =
+    String.length name >= 6 && String.sub name 0 6 = "agent-"
+  in
+
+  let agent_name =
+    match token with
+    | Some t when is_ephemeral_agent_name agent_name ->
+        (match Auth.resolve_agent_from_token config.base_path ~token:t with
+         | Ok resolved -> resolved
+         | Error _ -> agent_name)
+    | _ -> agent_name
+  in
+
   (* Enforce tool authorization when enabled *)
   let auth_enabled = Auth.is_auth_enabled config.base_path in
   let auth_result =

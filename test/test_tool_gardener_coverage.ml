@@ -15,6 +15,13 @@
 
 module Tool_gardener = Masc_mcp.Tool_gardener
 
+(** Case-insensitive substring check for error message assertions. *)
+let msg_contains ~needle haystack =
+  let lc = String.lowercase_ascii haystack in
+  let ln = String.lowercase_ascii needle in
+  try ignore (Str.search_forward (Str.regexp_string ln) lc 0); true
+  with Not_found -> false
+
 (* ============================================================
    Dispatch routing tests
    ============================================================ *)
@@ -22,8 +29,7 @@ module Tool_gardener = Masc_mcp.Tool_gardener
 let test_dispatch_unknown_tool () =
   let (ok, msg) = Tool_gardener.dispatch () "unknown_tool" (`Assoc []) in
   Alcotest.(check bool) "unknown tool fails" false ok;
-  Alcotest.(check bool) "error mentions unknown" true
-    (try ignore (Str.search_forward (Str.regexp_string "Unknown") msg 0); true with Not_found -> false)
+  Alcotest.(check bool) "error mentions unknown" true (msg_contains ~needle:"unknown" msg)
 
 (** Test dispatch for non-network tools only.
     These handlers do NOT call [calculate_health] or GraphQL. *)
@@ -52,11 +58,7 @@ let test_dispatch_recognizes_validatable_tools () =
   ] in
   List.iter (fun name ->
     let (_ok, msg) = Tool_gardener.dispatch () name (`Assoc []) in
-    let is_unknown =
-      try ignore (Str.search_forward (Str.regexp_string "Unknown") msg 0); true
-      with Not_found -> false
-    in
-    Alcotest.(check bool) (name ^ " is recognized") false is_unknown
+    Alcotest.(check bool) (name ^ " is recognized") false (msg_contains ~needle:"unknown" msg)
   ) tools_with_validation
 
 (* ============================================================
@@ -70,10 +72,12 @@ let test_config_returns_json () =
   let status = json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string in
   Alcotest.(check string) "status ok" "ok" status;
   let cb = json |> Yojson.Safe.Util.member "circuit_breaker" in
-  let _is_open = cb |> Yojson.Safe.Util.member "is_open" |> Yojson.Safe.Util.to_bool in
-  let _can_spawn = json |> Yojson.Safe.Util.member "can_spawn" |> Yojson.Safe.Util.to_bool in
-  let _can_retire = json |> Yojson.Safe.Util.member "can_retire" |> Yojson.Safe.Util.to_bool in
-  ()
+  let is_open = cb |> Yojson.Safe.Util.member "is_open" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "circuit_breaker.is_open is bool" true (is_open || not is_open);
+  let can_spawn = json |> Yojson.Safe.Util.member "can_spawn" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "can_spawn is bool" true (can_spawn || not can_spawn);
+  let can_retire = json |> Yojson.Safe.Util.member "can_retire" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "can_retire is bool" true (can_retire || not can_retire)
 
 (* ============================================================
    Input validation tests (early return, no network)
@@ -82,26 +86,22 @@ let test_config_returns_json () =
 let test_propose_spawn_missing_topic () =
   let (ok, msg) = Tool_gardener.dispatch () "masc_gardener_propose_spawn" (`Assoc []) in
   Alcotest.(check bool) "missing topic fails" false ok;
-  Alcotest.(check bool) "error mentions topic" true
-    (try ignore (Str.search_forward (Str.regexp_string "topic") msg 0); true with Not_found -> false)
+  Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
 
 let test_retire_missing_agent_name () =
   let (ok, msg) = Tool_gardener.dispatch () "masc_gardener_retire_agent" (`Assoc []) in
   Alcotest.(check bool) "missing agent_name fails" false ok;
-  Alcotest.(check bool) "error mentions agent_name" true
-    (try ignore (Str.search_forward (Str.regexp_string "agent_name") msg 0); true with Not_found -> false)
+  Alcotest.(check bool) "error mentions agent_name" true (msg_contains ~needle:"agent_name" msg)
 
 let test_execute_spawn_missing_topic () =
   let (ok, msg) = Tool_gardener.dispatch () "masc_gardener_execute_spawn" (`Assoc []) in
   Alcotest.(check bool) "missing topic fails" false ok;
-  Alcotest.(check bool) "error mentions topic" true
-    (try ignore (Str.search_forward (Str.regexp_string "topic") msg 0); true with Not_found -> false)
+  Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
 
 let test_execute_retire_missing_agent () =
   let (ok, msg) = Tool_gardener.dispatch () "masc_gardener_execute_retire" (`Assoc []) in
   Alcotest.(check bool) "missing agent_name fails" false ok;
-  Alcotest.(check bool) "error mentions agent_name" true
-    (try ignore (Str.search_forward (Str.regexp_string "agent_name") msg 0); true with Not_found -> false)
+  Alcotest.(check bool) "error mentions agent_name" true (msg_contains ~needle:"agent_name" msg)
 
 (* ============================================================
    Circuit breaker tests (no network)

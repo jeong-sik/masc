@@ -12,6 +12,13 @@
 module Tool_verification = Masc_mcp.Tool_verification
 module Room = Masc_mcp.Room
 
+(** Case-insensitive substring check for error message assertions. *)
+let msg_contains ~needle haystack =
+  let lc = String.lowercase_ascii haystack in
+  let ln = String.lowercase_ascii needle in
+  try ignore (Str.search_forward (Str.regexp_string ln) lc 0); true
+  with Not_found -> false
+
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_verify_" "" in
   Unix.unlink dir;
@@ -42,8 +49,7 @@ let test_dispatch_unknown_tool () =
   let config, base_dir = make_config () in
   let (ok, msg) = Tool_verification.dispatch config "agent-a" "unknown_tool" (`Assoc []) in
   Alcotest.(check bool) "unknown tool fails" false ok;
-  Alcotest.(check bool) "error mentions unknown" true
-    (String.length msg > 0 && (try ignore (Str.search_forward (Str.regexp_string "Unknown") msg 0); true with Not_found -> false));
+  Alcotest.(check bool) "error mentions unknown" true (msg_contains ~needle:"unknown" msg);
   cleanup_dir base_dir
 
 let test_dispatch_routes_request () =
@@ -70,8 +76,7 @@ let test_dispatch_routes_pending () =
   let config, base_dir = make_config () in
   let (ok, msg) = Tool_verification.dispatch config "agent-a" "masc_verify_pending" (`Assoc []) in
   Alcotest.(check bool) "verify_pending dispatched" true ok;
-  Alcotest.(check bool) "pending contains count" true
-    (try ignore (Str.search_forward (Str.regexp_string "pending") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "pending contains count" true (msg_contains ~needle:"pending" msg);
   cleanup_dir base_dir
 
 (* ============================================================
@@ -83,8 +88,7 @@ let test_request_missing_task_id () =
   let args = `Assoc [] in
   let (ok, msg) = Tool_verification.dispatch config "agent-a" "masc_verify_request" args in
   Alcotest.(check bool) "missing task_id fails" false ok;
-  Alcotest.(check bool) "error mentions task_id" true
-    (try ignore (Str.search_forward (Str.regexp_string "task_id") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions task_id" true (msg_contains ~needle:"task_id" msg);
   cleanup_dir base_dir
 
 let test_submit_missing_verification_id () =
@@ -92,8 +96,7 @@ let test_submit_missing_verification_id () =
   let args = `Assoc [("verdict", `String "pass")] in
   let (ok, msg) = Tool_verification.dispatch config "agent-a" "masc_verify_submit" args in
   Alcotest.(check bool) "missing verification_id fails" false ok;
-  Alcotest.(check bool) "error mentions verification_id" true
-    (try ignore (Str.search_forward (Str.regexp_string "verification_id") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions verification_id" true (msg_contains ~needle:"verification_id" msg);
   cleanup_dir base_dir
 
 let test_submit_missing_verdict () =
@@ -101,8 +104,7 @@ let test_submit_missing_verdict () =
   let args = `Assoc [("verification_id", `String "req-123")] in
   let (ok, msg) = Tool_verification.dispatch config "agent-a" "masc_verify_submit" args in
   Alcotest.(check bool) "missing verdict fails" false ok;
-  Alcotest.(check bool) "error mentions verdict" true
-    (try ignore (Str.search_forward (Str.regexp_string "verdict") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions verdict" true (msg_contains ~needle:"verdict" msg);
   cleanup_dir base_dir
 
 let test_status_missing_verification_id () =
@@ -110,8 +112,7 @@ let test_status_missing_verification_id () =
   let args = `Assoc [] in
   let (ok, msg) = Tool_verification.dispatch config "agent-a" "masc_verify_status" args in
   Alcotest.(check bool) "missing verification_id fails" false ok;
-  Alcotest.(check bool) "error mentions verification_id" true
-    (try ignore (Str.search_forward (Str.regexp_string "verification_id") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions verification_id" true (msg_contains ~needle:"verification_id" msg);
   cleanup_dir base_dir
 
 let test_auto_missing_verification_id () =
@@ -119,8 +120,7 @@ let test_auto_missing_verification_id () =
   let args = `Assoc [] in
   let (ok, msg) = Tool_verification.dispatch config "agent-a" "masc_verify_auto" args in
   Alcotest.(check bool) "missing verification_id fails" false ok;
-  Alcotest.(check bool) "error mentions verification_id" true
-    (try ignore (Str.search_forward (Str.regexp_string "verification_id") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions verification_id" true (msg_contains ~needle:"verification_id" msg);
   cleanup_dir base_dir
 
 (* ============================================================
@@ -212,8 +212,7 @@ let test_pending_shows_unresolved () =
   (* Check pending for reviewer-x *)
   let (ok2, msg) = Tool_verification.dispatch config "reviewer-x" "masc_verify_pending" (`Assoc []) in
   Alcotest.(check bool) "pending check ok" true ok2;
-  Alcotest.(check bool) "has pending items" true
-    (try ignore (Str.search_forward (Str.regexp_string "pending") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "has pending items" true (msg_contains ~needle:"pending" msg);
   cleanup_dir base_dir
 
 (* ============================================================

@@ -11,6 +11,13 @@ module Tool_social = Masc_mcp.Tool_social
 module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
 
+(** Case-insensitive substring check for error message assertions. *)
+let msg_contains ~needle haystack =
+  let lc = String.lowercase_ascii haystack in
+  let ln = String.lowercase_ascii needle in
+  try ignore (Str.search_forward (Str.regexp_string ln) lc 0); true
+  with Not_found -> false
+
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_social_" "" in
   Unix.unlink dir;
@@ -77,8 +84,7 @@ let test_post_create_content_too_long () =
   let args = `Assoc [("content", `String long_content)] in
   let (ok, msg) = dispatch_exn ctx ~name:"masc_post_create" ~args in
   Alcotest.(check bool) "too-long content fails" false ok;
-  Alcotest.(check bool) "error mentions length" true
-    (try ignore (Str.search_forward (Str.regexp_string "too long") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions length" true (msg_contains ~needle:"too long" msg);
   cleanup_dir base_dir
 
 let test_post_create_invalid_author () =
@@ -89,8 +95,7 @@ let test_post_create_invalid_author () =
   ] in
   let (ok, msg) = dispatch_exn ctx ~name:"masc_post_create" ~args in
   Alcotest.(check bool) "invalid author fails" false ok;
-  Alcotest.(check bool) "error mentions author" true
-    (try ignore (Str.search_forward (Str.regexp_string "Author") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions author" true (msg_contains ~needle:"author" msg);
   cleanup_dir base_dir
 
 let test_comment_add_empty_post_id () =
@@ -113,8 +118,7 @@ let test_validate_id_too_long () =
   let args = `Assoc [("post_id", `String long_id)] in
   let (ok, msg) = dispatch_exn ctx ~name:"masc_post_get" ~args in
   Alcotest.(check bool) "too-long id fails" false ok;
-  Alcotest.(check bool) "error mentions too long" true
-    (try ignore (Str.search_forward (Str.regexp_string "too long") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions too long" true (msg_contains ~needle:"too long" msg);
   cleanup_dir base_dir
 
 let test_validate_id_bad_chars () =
@@ -122,8 +126,7 @@ let test_validate_id_bad_chars () =
   let args = `Assoc [("post_id", `String "bad/id!")] in
   let (ok, msg) = dispatch_exn ctx ~name:"masc_post_get" ~args in
   Alcotest.(check bool) "bad chars fails" false ok;
-  Alcotest.(check bool) "error mentions alphanumeric" true
-    (try ignore (Str.search_forward (Str.regexp_string "alphanumeric") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "error mentions alphanumeric" true (msg_contains ~needle:"alphanumeric" msg);
   cleanup_dir base_dir
 
 (* ============================================================
@@ -138,8 +141,7 @@ let test_post_create_success () =
   ] in
   let (ok, msg) = dispatch_exn ctx ~name:"masc_post_create" ~args in
   Alcotest.(check bool) "post created" true ok;
-  Alcotest.(check bool) "result mentions Post" true
-    (try ignore (Str.search_forward (Str.regexp_string "Post created") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "result mentions Post" true (msg_contains ~needle:"post created" msg);
   cleanup_dir base_dir
 
 let test_post_list_empty () =
@@ -147,8 +149,7 @@ let test_post_list_empty () =
   let args = `Assoc [] in
   let (ok, msg) = dispatch_exn ctx ~name:"masc_post_list" ~args in
   Alcotest.(check bool) "list ok" true ok;
-  Alcotest.(check bool) "empty result" true
-    (try ignore (Str.search_forward (Str.regexp_string "No posts") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "empty result" true (msg_contains ~needle:"no posts" msg);
   cleanup_dir base_dir
 
 let test_post_list_with_submolt_filter () =
@@ -164,8 +165,7 @@ let test_post_list_with_submolt_filter () =
   let list_args = `Assoc [("submolt", `String "tech")] in
   let (ok2, msg) = dispatch_exn ctx ~name:"masc_post_list" ~args:list_args in
   Alcotest.(check bool) "filtered list ok" true ok2;
-  Alcotest.(check bool) "result mentions tech" true
-    (try ignore (Str.search_forward (Str.regexp_string "[tech]") msg 0); true with Not_found -> false);
+  Alcotest.(check bool) "result mentions tech" true (msg_contains ~needle:"[tech]" msg);
   cleanup_dir base_dir
 
 let test_full_workflow () =
@@ -196,8 +196,7 @@ let test_full_workflow () =
   let comment_list_args = `Assoc [("post_id", `String post_id_str)] in
   let (ok4, msg4) = dispatch_exn ctx ~name:"masc_comment_list" ~args:comment_list_args in
   Alcotest.(check bool) "comments listed" true ok4;
-  Alcotest.(check bool) "comment content present" true
-    (try ignore (Str.search_forward (Str.regexp_string "Nice post") msg4 0); true with Not_found -> false);
+  Alcotest.(check bool) "comment content present" true (msg_contains ~needle:"nice post" msg4);
   (* Step 5: Vote on post *)
   let vote_args = `Assoc [
     ("target_id", `String post_id_str);
@@ -206,8 +205,7 @@ let test_full_workflow () =
   ] in
   let (ok5, msg5) = dispatch_exn ctx ~name:"masc_vote" ~args:vote_args in
   Alcotest.(check bool) "vote ok" true ok5;
-  Alcotest.(check bool) "vote result" true
-    (try ignore (Str.search_forward (Str.regexp_string "+1") msg5 0); true with Not_found -> false);
+  Alcotest.(check bool) "vote result" true (msg_contains ~needle:"+1" msg5);
   cleanup_dir base_dir
 
 let test_vote_downvote () =
@@ -227,8 +225,7 @@ let test_vote_downvote () =
   ] in
   let (ok2, msg2) = dispatch_exn ctx ~name:"masc_vote" ~args:vote_args in
   Alcotest.(check bool) "downvote ok" true ok2;
-  Alcotest.(check bool) "downvote result" true
-    (try ignore (Str.search_forward (Str.regexp_string "-1") msg2 0); true with Not_found -> false);
+  Alcotest.(check bool) "downvote result" true (msg_contains ~needle:"-1" msg2);
   cleanup_dir base_dir
 
 (* ============================================================

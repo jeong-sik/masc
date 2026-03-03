@@ -409,6 +409,55 @@ let test_dispatch_unknown () =
     = None);
   cleanup_dir base_dir
 
+let test_unauthorized_session_access () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let owner_ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env }
+  in
+  let intruder_ctx : _ Tool_team_session.context =
+    { config; agent_name = "intruder"; sw; clock = Eio.Stdenv.clock env }
+  in
+  let session_id = start_session_exn owner_ctx ~goal:"authz-check" |> get_session_id in
+
+  let status_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized status denied" false status_ok;
+
+  let report_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_report"
+      ~args:
+        (`Assoc
+          [ ("session_id", `String session_id); ("force_regenerate", `Bool false) ])
+  in
+  Alcotest.(check bool) "unauthorized report denied" false report_ok;
+
+  let stop_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_stop"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized stop denied" false stop_ok;
+
+  let owner_stop_ok, _ =
+    dispatch_exn owner_ctx ~name:"masc_team_session_stop"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("reason", `String "owner_cleanup");
+            ("generate_report", `Bool false);
+          ])
+  in
+  Alcotest.(check bool) "owner stop allowed" true owner_stop_ok;
+  ignore (wait_until_terminal owner_ctx session_id);
+  cleanup_dir base_dir
+
 let () =
   Alcotest.run "Tool_team_session"
     [
@@ -426,5 +475,7 @@ let () =
           Alcotest.test_case "missing-required-args" `Quick
             test_missing_required_args;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;
+          Alcotest.test_case "unauthorized-session-access" `Quick
+            test_unauthorized_session_access;
         ] );
     ]

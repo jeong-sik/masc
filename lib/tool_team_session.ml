@@ -135,6 +135,19 @@ let parse_status_filter args =
           Ok (Some (Team_session_types.status_of_string normalized))
       | _ -> Error "invalid status filter"
 
+let can_access_session ~agent_name (session : Team_session_types.session) =
+  String.equal agent_name session.created_by
+  || List.exists (String.equal agent_name) session.agent_names
+
+let ensure_session_access ctx session_id =
+  match Team_session_store.load_session ctx.config session_id with
+  | None -> Error (Printf.sprintf "team session not found: %s" session_id)
+  | Some session ->
+      if can_access_session ~agent_name:ctx.agent_name session then
+        Ok ()
+      else
+        Error "not authorized for this team session"
+
 let handle_start ctx args : result =
   let goal = get_string args "goal" "" in
   if String.trim goal = "" then
@@ -168,34 +181,43 @@ let handle_status ctx args : result =
   match get_valid_session_id args with
   | Error e -> (false, json_error e)
   | Ok session_id -> (
-      match Team_session_engine_eio.status_session ~config:ctx.config ~session_id with
-      | Ok json -> (true, json_ok [ ("result", json) ])
-      | Error e -> (false, json_error e))
+      match ensure_session_access ctx session_id with
+      | Error e -> (false, json_error e)
+      | Ok () -> (
+          match Team_session_engine_eio.status_session ~config:ctx.config ~session_id with
+          | Ok json -> (true, json_ok [ ("result", json) ])
+          | Error e -> (false, json_error e)))
 
 let handle_stop ctx args : result =
   match get_valid_session_id args with
   | Error e -> (false, json_error e)
-  | Ok session_id ->
-      let reason = get_string args "reason" "manual_stop" in
-      let generate_report = get_bool args "generate_report" true in
-      (match
-         Team_session_engine_eio.stop_session ~config:ctx.config ~session_id
-           ~reason ~generate_report
-       with
-      | Ok json -> (true, json_ok [ ("result", json) ])
-      | Error e -> (false, json_error e))
+  | Ok session_id -> (
+      match ensure_session_access ctx session_id with
+      | Error e -> (false, json_error e)
+      | Ok () ->
+          let reason = get_string args "reason" "manual_stop" in
+          let generate_report = get_bool args "generate_report" true in
+          (match
+             Team_session_engine_eio.stop_session ~config:ctx.config ~session_id
+               ~reason ~generate_report
+           with
+          | Ok json -> (true, json_ok [ ("result", json) ])
+          | Error e -> (false, json_error e)))
 
 let handle_report ctx args : result =
   match get_valid_session_id args with
   | Error e -> (false, json_error e)
-  | Ok session_id ->
-      let force_regenerate = get_bool args "force_regenerate" false in
-      (match
-         Team_session_engine_eio.generate_report ~config:ctx.config ~session_id
-           ~force_regenerate
-       with
-      | Ok json -> (true, json_ok [ ("result", json) ])
-      | Error e -> (false, json_error e))
+  | Ok session_id -> (
+      match ensure_session_access ctx session_id with
+      | Error e -> (false, json_error e)
+      | Ok () ->
+          let force_regenerate = get_bool args "force_regenerate" false in
+          (match
+             Team_session_engine_eio.generate_report ~config:ctx.config ~session_id
+               ~force_regenerate
+           with
+          | Ok json -> (true, json_ok [ ("result", json) ])
+          | Error e -> (false, json_error e)))
 
 let handle_list ctx args : result =
   let limit = get_int args "limit" 20 in

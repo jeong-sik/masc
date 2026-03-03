@@ -928,7 +928,16 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      claim/start/done calls from drifting across different nicknames. *)
   let agent_name =
     if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name) then
-      Room.resolve_agent_name config agent_name
+      let resolved = Room.resolve_agent_name config agent_name in
+      if resolved <> agent_name then
+        try
+          if Room.is_agent_joined config ~agent_name:resolved then
+            resolved
+          else
+            agent_name
+        with _ -> agent_name
+      else
+        agent_name
     else
       agent_name
   in

@@ -858,6 +858,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Use identity.agent_name as the canonical source. *)
   let raw_agent_name = arg_get_string "agent_name" "" in
   let has_explicit_agent_name = raw_agent_name <> "" && raw_agent_name <> "unknown" in
+  let identity_session_prefix =
+    let len = min 8 (String.length identity.session_key) in
+    if len = 0 then "anon" else String.sub identity.session_key 0 len
+  in
+  let generated_fallback_agent_name =
+    Printf.sprintf "agent-%s" identity_session_prefix
+  in
   let agent_name =
     (* Priority: explicit arg > identity > legacy file-based *)
     if has_explicit_agent_name then
@@ -870,7 +877,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       | Some name -> name
       | None ->
           if Option.is_some mcp_session_id then
-            Printf.sprintf "agent-%s" (String.sub identity.session_key 0 8)
+            generated_fallback_agent_name
           else
             let term_session_id = try Sys.getenv "TERM_SESSION_ID" with Not_found -> "" in
             let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
@@ -883,7 +890,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
               in
               if name <> "" then name else raise Not_found
             with Sys_error _ | End_of_file | Not_found ->
-              Printf.sprintf "agent-%s" (String.sub identity.session_key 0 8))
+              generated_fallback_agent_name)
   in
 
   let token =

@@ -14,6 +14,9 @@ KEEPER_TAG="${KEEPER_TAG:-smoke-$(date +%s)}"
 DM_KEEPER="${DM_KEEPER:-dm-$KEEPER_TAG}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-30}"
 ROUND_KEEPER_TIMEOUT_SEC="${ROUND_KEEPER_TIMEOUT_SEC:-}"
+STRICT_MIN_KEEPER_TIMEOUT_SEC="${STRICT_MIN_KEEPER_TIMEOUT_SEC:-30}"
+ROUND_RUN_RETRY_COUNT="${ROUND_RUN_RETRY_COUNT:-1}"
+ROUND_RUN_ALLOW_MUTATING_RETRY="${ROUND_RUN_ALLOW_MUTATING_RETRY:-0}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
 ROUND_LOCAL_FALLBACK="${ROUND_LOCAL_FALLBACK:-1}"
 REQUIRE_FULL_PARTY_SUCCESS="${REQUIRE_FULL_PARTY_SUCCESS:-0}"
@@ -22,7 +25,15 @@ REQUIRE_NO_HEURISTIC="${REQUIRE_NO_HEURISTIC:-0}"
 REQUIRE_SESSION_OUTCOME="${REQUIRE_SESSION_OUTCOME:-0}"
 OUTCOME_MAX_TURN="${OUTCOME_MAX_TURN:-}"
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH:-}"
+STRICT_DIALOGUE_MODE_EXPLICIT=0
+if [ -n "${STRICT_DIALOGUE_MODE+x}" ]; then
+  STRICT_DIALOGUE_MODE_EXPLICIT=1
+fi
 STRICT_DIALOGUE_MODE="${STRICT_DIALOGUE_MODE:-0}"
+REQUIRE_CLAIM_EXPLICIT=0
+if [ -n "${REQUIRE_CLAIM+x}" ]; then
+  REQUIRE_CLAIM_EXPLICIT=1
+fi
 REQUIRE_CLAIM="${REQUIRE_CLAIM:-false}"
 KEEPER_AUTO_HANDOFF="${KEEPER_AUTO_HANDOFF:-1}"
 KEEPER_HANDOFF_THRESHOLD="${KEEPER_HANDOFF_THRESHOLD:-0.82}"
@@ -52,6 +63,8 @@ unavailable_total=0
 stall_reason_lines=""
 last_progress_reason=""
 last_progress_detail=""
+last_dm_progress_detail=""
+last_dm_non_ok_statuses='[]'
 stream_count=0
 session_outcome_seen="false"
 last_outcome=""
@@ -284,6 +297,10 @@ keeper_precheck_once() {
   fi
   local response_text=""
   local snippet=""
+  local sa_json=""
+  local sa_type=""
+  local type_allowed=0
+  local has_structured_action=0
   local precheck_turn_instruction="이 턴은 형식 검증용입니다. 반드시 아래 규칙을 지키세요.
 - 정확히 2줄만 출력
 - 1줄: 한국어 서사 1문장
@@ -305,12 +322,35 @@ structured_action: {\"type\":\"$sample_type\",\"description\":\"$sample_descript
     echo "[precheck] keeper=$keeper_name role=$role status=fail reason=empty_reply sample=${snippet:-<empty>}"
     return 1
   fi
-  if ! printf "%s" "$response_text" | grep -Eq 'structured_action[[:space:]]*:[[:space:]]*\{'; then
+  if printf "%s" "$response_text" | grep -Eq 'structured_action[[:space:]]*:[[:space:]]*\{'; then
+    has_structured_action=1
+  else
     if [ "$STRICT_DIALOGUE_MODE" = "1" ]; then
       echo "[precheck] keeper=$keeper_name role=$role status=fail reason=missing_structured_action sample=${snippet:-<empty>}"
       return 1
     else
       echo "[precheck] keeper=$keeper_name role=$role status=warn reason=missing_structured_action sample=${snippet:-<empty>}"
+    fi
+  fi
+  if [ "$has_structured_action" -eq 1 ]; then
+    sa_json="$(printf "%s" "$response_text" | sed -nE 's/.*structured_action[[:space:]]*:[[:space:]]*(\{.*\}).*/\1/p' | head -n1)"
+    sa_type="$(printf "%s" "$sa_json" | jq -r '.type // empty' 2>/dev/null || true)"
+    if [ -z "$sa_type" ]; then
+      echo "[precheck] keeper=$keeper_name role=$role status=fail reason=invalid_structured_action_json sample=${snippet:-<empty>}"
+      return 1
+    fi
+    if [ "$role" = "dm" ]; then
+      case "$sa_type" in
+        set_flag|world_event|quest_update|transition|talk) type_allowed=1 ;;
+      esac
+    else
+      case "$sa_type" in
+        attack|move|skill|defend|talk|item|cast) type_allowed=1 ;;
+      esac
+    fi
+    if [ "$type_allowed" -ne 1 ]; then
+      echo "[precheck] keeper=$keeper_name role=$role status=fail reason=invalid_action_type:$sa_type sample=${snippet:-<empty>}"
+      return 1
     fi
   fi
   if printf "%s" "$response_text" | grep -Eq 'SKILL:|SKILL_REASON:|\[STATE\]|state_snapshot_json|내 기록 기준으로는|직전에 이런 질문을 했어'; then
@@ -397,7 +437,14 @@ collect_strict_recovery_targets() {
     [
       .statuses[]?
       | select(
-          ((.status // "") == "schema_invalid" or (.status // "") == "rule_invalid")
+          (
+            (.status // "") == "schema_invalid"
+            or (.status // "") == "rule_invalid"
+            or (.status // "") == "duplicate_reply_warning"
+            or (.status // "") == "missing_structured_action"
+            or (.status // "") == "unavailable"
+            or (.status // "") == "timeout"
+          )
           and ((.keeper // "") != "")
         )
       | "\((.role // ""))|\((.actor_id // ""))|\((.keeper // ""))"
@@ -437,11 +484,36 @@ restart_dm_keeper() {
   return 0
 }
 
+extract_actor_owner_from_error() {
+  local err_msg="$1"
+  printf "%s" "$err_msg" \
+    | sed -nE 's/.*owner=([^", }]+).*/\1/p' \
+    | head -n1
+}
+
+release_actor_with_owner() {
+  local actor_id="$1"
+  local owner="$2"
+  local raw
+  local err
+  [ -z "$actor_id" ] && return 1
+  [ -z "$owner" ] && return 1
+  raw="$(call_tool 3972 "trpg.actor.release" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$owner" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')")"
+  err="$(tool_error_message "$raw")"
+  if [ -n "$err" ]; then
+    echo "[recovery] warn: actor.release(owner) failed actor=$actor_id owner=$owner error=$err" >&2
+    return 1
+  fi
+  echo "[recovery] info: actor.release(owner) succeeded actor=$actor_id owner=$owner" >&2
+  return 0
+}
+
 restart_player_keeper() {
   local actor_id="$1"
   local keeper_name="$2"
   local raw
   local err
+  local owner
   if [ -z "$actor_id" ]; then
     echo "[recovery] fail: missing actor_id for keeper=$keeper_name" >&2
     return 1
@@ -450,6 +522,10 @@ restart_player_keeper() {
   err="$(tool_error_message "$raw")"
   if [ -n "$err" ]; then
     echo "[recovery] warn: actor.release failed actor=$actor_id keeper=$keeper_name error=$err" >&2
+    owner="$(extract_actor_owner_from_error "$err")"
+    if [ -n "$owner" ] && [ "$owner" != "$keeper_name" ]; then
+      release_actor_with_owner "$actor_id" "$owner" || true
+    fi
   fi
   raw="$(call_tool 3973 "masc_keeper_down" "$(jq -cn --arg name "$keeper_name" '{name:$name,remove_meta:true,remove_session:true}')")"
   err="$(tool_error_message "$raw")"
@@ -478,8 +554,23 @@ restart_player_keeper() {
   raw="$(call_tool 3975 "trpg.actor.claim" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$keeper_name" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')")"
   err="$(tool_error_message "$raw")"
   if [ -n "$err" ]; then
-    if printf "%s" "$err" | grep -Eqi 'join gate failed|insufficient_contribution|owner=auto-pilot'; then
+    owner="$(extract_actor_owner_from_error "$err")"
+    if [ -n "$owner" ] && [ "$owner" != "$keeper_name" ]; then
+      echo "[recovery] warn: actor.claim owner mismatch actor=$actor_id keeper=$keeper_name owner=$owner; retrying reclaim" >&2
+      if release_actor_with_owner "$actor_id" "$owner"; then
+        raw="$(call_tool 3975 "trpg.actor.claim" "$(jq -cn --arg room "$room_id" --arg actor "$actor_id" --arg keeper "$keeper_name" '{room_id:$room,actor_id:$actor,keeper_name:$keeper}')")"
+        err="$(tool_error_message "$raw")"
+        if [ -z "$err" ]; then
+          return 0
+        fi
+      fi
+    fi
+    if printf "%s" "$err" | grep -Eqi 'join gate failed|insufficient_contribution'; then
       echo "[recovery] warn: actor.claim soft-failed actor=$actor_id keeper=$keeper_name error=$err" >&2
+      return 0
+    fi
+    if printf "%s" "$err" | grep -Eqi 'actor is not alive'; then
+      echo "[recovery] warn: actor.claim skipped-dead actor=$actor_id keeper=$keeper_name error=$err" >&2
       return 0
     fi
     echo "[recovery] fail: actor.claim failed actor=$actor_id keeper=$keeper_name error=$err" >&2
@@ -521,8 +612,13 @@ recover_keepers_from_noncompliance() {
   local keeper_name
   targets="$(collect_strict_recovery_targets "$round_payload")"
   if [ -z "$(printf "%s" "$targets" | awk 'NF {print; exit}')" ]; then
-    echo "[recovery] round=$round_no attempt=$recovery_attempt no strict target keeper found" >&2
-    return 1
+    echo "[recovery] round=$round_no attempt=$recovery_attempt no strict target keeper found; fallback to full keeper recycle" >&2
+    targets="dm|dm|$DM_KEEPER"
+    while IFS='|' read -r actor_id keeper_name; do
+      [ -z "$actor_id" ] && continue
+      [ -z "$keeper_name" ] && continue
+      targets="${targets}"$'\n'"player|${actor_id}|${keeper_name}"
+    done <<< "$CLAIMED_ACTORS"
   fi
   echo "[recovery] round=$round_no attempt=$recovery_attempt restarting keepers for strict structured_action violations"
   append_transcript_entry "keeper_recovery_start" "$(jq -cn --argjson round "$round_no" --argjson attempt "$recovery_attempt" --arg targets "$targets" '{round:$round,attempt:$attempt,targets:($targets|split("\n")|map(select(length>0)))}')"
@@ -611,6 +707,8 @@ emit_grimland_summary() {
     --arg dm_keeper "$DM_KEEPER" \
     --arg last_progress_reason "$last_progress_reason" \
     --arg last_progress_detail "$last_progress_detail" \
+    --arg last_dm_progress_detail "$last_dm_progress_detail" \
+    --argjson last_dm_non_ok_statuses "$last_dm_non_ok_statuses" \
     --arg last_validation_failure_reason "$last_validation_failure_reason" \
     --arg last_validation_failure_stage "$last_validation_failure_stage" \
     --arg stall_reason_top "$stall_reason_top" \
@@ -673,6 +771,8 @@ emit_grimland_summary() {
       unavailable_total:$unavailable_total,
       last_progress_reason:($last_progress_reason | if . == "" then null else . end),
       last_progress_detail:($last_progress_detail | if . == "" then null else . end),
+      dm_progress_detail:($last_dm_progress_detail | if . == "" then null else . end),
+      dm_non_ok_statuses:$last_dm_non_ok_statuses,
       last_validation_failure_reason:($last_validation_failure_reason | if . == "" then null else . end),
       last_validation_failure_stage:($last_validation_failure_stage | if . == "" then null else . end),
       last_outcome:($last_outcome | if . == "" then null else . end),
@@ -728,12 +828,42 @@ if [ "$POOL_SIZE" -lt "$PARTY_SIZE" ]; then
   POOL_SIZE="$PARTY_SIZE"
 fi
 echo "[bootstrap] strict_dialogue_mode=$STRICT_DIALOGUE_MODE"
-if [ -n "$(printf "%s" "$ROUND_KEEPER_TIMEOUT_SEC" | tr -d '[:space:]')" ]; then
-  echo "[bootstrap] round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC"
-fi
 KEEPER_MODELS_JSON="$(build_models_json)"
 KEEPER_AUTO_HANDOFF_JSON="$(bool_to_json "$KEEPER_AUTO_HANDOFF")"
 KEEPER_DRIFT_ENABLED_JSON="$(bool_to_json "$KEEPER_DRIFT_ENABLED")"
+if [ "$REQUIRE_AGENT_DRIVEN" = "1" ] && [ "$STRICT_DIALOGUE_MODE_EXPLICIT" -ne 1 ] && [ "$STRICT_DIALOGUE_MODE" != "1" ]; then
+  STRICT_DIALOGUE_MODE="1"
+  echo "[bootstrap] auto-enable strict_dialogue_mode=1 (REQUIRE_AGENT_DRIVEN=1)"
+fi
+if [ "$REQUIRE_AGENT_DRIVEN" = "1" ] && [ "$REQUIRE_CLAIM_EXPLICIT" -ne 1 ] && [ "$(bool_to_json "$REQUIRE_CLAIM")" != "true" ]; then
+  REQUIRE_CLAIM="true"
+  echo "[bootstrap] auto-enable require_claim=true (REQUIRE_AGENT_DRIVEN=1)"
+fi
+round_keeper_timeout_trimmed="$(printf "%s" "$ROUND_KEEPER_TIMEOUT_SEC" | tr -d '[:space:]')"
+if [ "$REQUIRE_AGENT_DRIVEN" = "1" ]; then
+  if ! awk -v value="$STRICT_MIN_KEEPER_TIMEOUT_SEC" 'BEGIN { exit !(value+0==value && value>0) }'; then
+    echo "FAIL: STRICT_MIN_KEEPER_TIMEOUT_SEC must be a positive number" >&2
+    exit 1
+  fi
+  strict_min_keeper_timeout="$STRICT_MIN_KEEPER_TIMEOUT_SEC"
+  if awk -v min="$strict_min_keeper_timeout" -v round="$ROUND_TIMEOUT_SEC" 'BEGIN { exit !(min > round) }'; then
+    strict_min_keeper_timeout="$ROUND_TIMEOUT_SEC"
+  fi
+  if [ -z "$round_keeper_timeout_trimmed" ]; then
+    ROUND_KEEPER_TIMEOUT_SEC="$strict_min_keeper_timeout"
+    round_keeper_timeout_trimmed="$ROUND_KEEPER_TIMEOUT_SEC"
+    echo "[bootstrap] auto-enable round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC (REQUIRE_AGENT_DRIVEN=1)"
+  elif awk -v value="$ROUND_KEEPER_TIMEOUT_SEC" 'BEGIN { exit !(value+0==value && value>0) }'; then
+    if awk -v keeper="$ROUND_KEEPER_TIMEOUT_SEC" -v min="$strict_min_keeper_timeout" 'BEGIN { exit !(keeper < min) }'; then
+      ROUND_KEEPER_TIMEOUT_SEC="$strict_min_keeper_timeout"
+      round_keeper_timeout_trimmed="$ROUND_KEEPER_TIMEOUT_SEC"
+      echo "[bootstrap] auto-bump round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC (REQUIRE_AGENT_DRIVEN=1 strict-min)"
+    fi
+  fi
+fi
+if [ -n "$round_keeper_timeout_trimmed" ]; then
+  echo "[bootstrap] round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC"
+fi
 REQUIRE_CLAIM_JSON="$(bool_to_json "$REQUIRE_CLAIM")"
 if [ "$(printf "%s" "$KEEPER_MODELS_JSON" | jq 'length')" -eq 0 ]; then
   echo "FAIL: KEEPER_MODELS is required (예: KEEPER_MODELS='gemini:gemini-2.5-flash')" >&2
@@ -797,6 +927,14 @@ if ! [[ "$STRICT_KEEPER_RECOVERY_DELAY_SEC" =~ ^[0-9]+$ ]] || [ "$STRICT_KEEPER_
   echo "FAIL: STRICT_KEEPER_RECOVERY_DELAY_SEC must be a non-negative integer" >&2
   exit 1
 fi
+if ! [[ "$ROUND_RUN_RETRY_COUNT" =~ ^[0-9]+$ ]] || [ "$ROUND_RUN_RETRY_COUNT" -lt 1 ]; then
+  echo "FAIL: ROUND_RUN_RETRY_COUNT must be a positive integer" >&2
+  exit 1
+fi
+if [ "$ROUND_RUN_RETRY_COUNT" -gt 1 ] && [ "$(bool_to_json "$ROUND_RUN_ALLOW_MUTATING_RETRY")" != "true" ]; then
+  echo "[bootstrap] clamp ROUND_RUN_RETRY_COUNT=1 for mutating trpg.round.run (set ROUND_RUN_ALLOW_MUTATING_RETRY=1 to override)"
+  ROUND_RUN_RETRY_COUNT=1
+fi
 resolve_world_preset_id
 if [ -n "$WORLD_PRESET_ID" ]; then
   echo "[bootstrap] world_preset_id=$WORLD_PRESET_ID"
@@ -830,9 +968,14 @@ r_start="$(call_tool_checked 3003 "trpg.session.start" "$args_start")"
 room_id="$(printf "%s" "$r_start" | payload | jq -r '.room_id')"
 world_used="$(printf "%s" "$r_start" | payload | jq -r '.world_preset.id // .world_preset.preset_id // "-"')"
 dm_used="$(printf "%s" "$r_start" | payload | jq -r '.dm_preset.id // .dm_preset.preset_id // "-"')"
-player_keepers="$(printf "%s" "$party" | jq -c --arg tag "$KEEPER_TAG" '
-  reduce .[] as $row ({}; . + {($row.actor_id): ("pk-" + $tag + "-" + $row.actor_id)})
-')"
+player_keepers_from_start="$(printf "%s" "$r_start" | payload | jq -c '.round_run_template.player_keepers // {}')"
+if [ "$(printf "%s" "$player_keepers_from_start" | jq 'type == "object" and (length > 0)')" = "true" ]; then
+  player_keepers="$player_keepers_from_start"
+else
+  player_keepers="$(printf "%s" "$party" | jq -c --arg tag "$KEEPER_TAG" '
+    reduce .[] as $row ({}; . + {($row.actor_id): ("pk-" + $tag + "-" + $row.actor_id)})
+  ')"
+fi
 PLAYER_KEEPER_NAMES="$(printf "%s" "$player_keepers" | jq -r '.[]' | awk 'NF')"
 DM_KEEPER_INSTRUCTIONS="$(build_dm_instruction)"
 PLAYER_KEEPER_INSTRUCTIONS="$(build_player_instruction)"
@@ -901,7 +1044,7 @@ if [ "$RUN_ROUND" = "1" ]; then
       else
         args_round="$(jq -cn --argjson t "$round_template" --argjson timeout "$ROUND_TIMEOUT_SEC" --argjson local_fallback "$round_local_fallback_json" --argjson strict_agent_driven "$strict_agent_driven_json" --argjson require_claim "$REQUIRE_CLAIM_JSON" --arg outcome_max_turn "$OUTCOME_MAX_TURN_EFFECTIVE" '{room_id:$t.room_id,dm_keeper:$t.dm_keeper,player_keepers:$t.player_keepers,phase:"round",timeout_sec:$timeout,require_claim:$require_claim,local_fallback:$local_fallback,strict_agent_driven:$strict_agent_driven} | if ($outcome_max_turn|length)>0 then . + {outcome_max_turn:($outcome_max_turn|tonumber)} else . end')"
       fi
-      r_round="$(call_tool $((4000 + i + round_recovery_attempt)) "trpg.round.run" "$args_round" "$ROUND_HTTP_TIMEOUT_SEC" "1")"
+      r_round="$(call_tool $((4000 + i + round_recovery_attempt)) "trpg.round.run" "$args_round" "$ROUND_HTTP_TIMEOUT_SEC" "$ROUND_RUN_RETRY_COUNT")"
       round_err="$(tool_error_message "$r_round")"
       if [ -n "$round_err" ]; then
         round_failures=$((round_failures + 1))
@@ -928,6 +1071,8 @@ if [ "$RUN_ROUND" = "1" ]; then
       regen_succeeded="$(printf "%s" "$p_round" | jq -r '.summary.regen_succeeded // false')"
       progress_reason="$(printf "%s" "$p_round" | jq -r '.summary.progress_reason // empty')"
       progress_detail="$(printf "%s" "$p_round" | jq -r '.summary.progress_detail // empty')"
+      dm_progress_detail="$(printf "%s" "$p_round" | jq -r '.summary.dm_progress_detail // empty')"
+      dm_non_ok_statuses="$(printf "%s" "$p_round" | jq -c '.summary.dm_non_ok_statuses // []')"
       validation_failure_reason="$(printf "%s" "$p_round" | jq -r '.summary.validation_failure_reason // empty')"
       validation_failure_stage="$(printf "%s" "$p_round" | jq -r '.summary.validation_failure_stage // empty')"
       recovery_mode="$(printf "%s" "$p_round" | jq -r '.summary.recovery_mode // empty')"
@@ -941,6 +1086,12 @@ if [ "$RUN_ROUND" = "1" ]; then
       fi
       if [ -n "$progress_detail" ]; then
         last_progress_detail="$progress_detail"
+      fi
+      if [ -n "$dm_progress_detail" ]; then
+        last_dm_progress_detail="$dm_progress_detail"
+      fi
+      if [ "$(printf "%s" "$dm_non_ok_statuses" | jq 'type == "array" and length > 0')" = "true" ]; then
+        last_dm_non_ok_statuses="$dm_non_ok_statuses"
       fi
       if [ -n "$validation_failure_reason" ]; then
         last_validation_failure_reason="$validation_failure_reason"
@@ -1006,9 +1157,20 @@ if [ "$RUN_ROUND" = "1" ]; then
         no_heuristic_violations=$((no_heuristic_violations + 1))
       fi
 
+      strict_recovery_trigger=0
+      if [ "$advanced" != "true" ] && { [ "${strict_rejection_count:-0}" -gt 0 ] \
+        || [ "${structured_noncompliance_count:-0}" -gt 0 ] \
+        || [ "${progress_reason:-}" = "structured_action_invalid" ] \
+        || [ "${progress_reason:-}" = "keeper_unavailable" ] \
+        || [ "${progress_reason:-}" = "timeout" ] \
+        || [ "${timeouts:-0}" -gt 0 ] \
+        || [ "${unavailable:-0}" -gt 0 ]; }; then
+        strict_recovery_trigger=1
+      fi
+
       if [ "$REQUIRE_AGENT_DRIVEN" = "1" ] \
         && [ "$STRICT_KEEPER_RECOVERY_ENABLED" = "1" ] \
-        && { [ "${strict_rejection_count:-0}" -gt 0 ] || [ "${structured_noncompliance_count:-0}" -gt 0 ] || [ "${progress_reason:-}" = "structured_action_invalid" ]; } \
+        && [ "$strict_recovery_trigger" -eq 1 ] \
         && [ "$round_recovery_attempt" -lt "$STRICT_KEEPER_RECOVERY_MAX_RETRIES" ]; then
         round_recovery_attempt=$((round_recovery_attempt + 1))
         strict_keeper_recovery_attempts=$((strict_keeper_recovery_attempts + 1))

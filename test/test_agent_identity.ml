@@ -41,6 +41,24 @@ let test_from_mcp_params_minimal () =
     (String.sub identity.agent_name 0 6 = "agent-");
   check bool "session_key generated" true (String.length identity.session_key > 0)
 
+let test_from_mcp_params_empty_session_key () =
+  let params = `Assoc [("_session_key", `String "")] in
+  let identity = Agent_identity.from_mcp_params params in
+  check string "empty session_key falls back to agent-anon"
+    "agent-anon" identity.agent_name
+
+let test_from_mcp_params_short_session_key () =
+  let params = `Assoc [("_session_key", `String "abc")] in
+  let identity = Agent_identity.from_mcp_params params in
+  check string "short session_key uses full key"
+    "agent-abc" identity.agent_name
+
+let test_from_mcp_params_long_session_key_prefix () =
+  let params = `Assoc [("_session_key", `String "abcdefghijk")] in
+  let identity = Agent_identity.from_mcp_params params in
+  check string "long session_key trimmed to 8 chars"
+    "agent-abcdefgh" identity.agent_name
+
 let test_anonymous () =
   let identity = Agent_identity.anonymous () in
   check bool "agent_name starts with anon-" true
@@ -299,6 +317,9 @@ let () =
       test_case "from_agent_name" `Quick test_from_agent_name;
       test_case "from_mcp_params" `Quick test_from_mcp_params;
       test_case "from_mcp_params_minimal" `Quick test_from_mcp_params_minimal;
+      test_case "from_mcp_params_empty_session_key" `Quick test_from_mcp_params_empty_session_key;
+      test_case "from_mcp_params_short_session_key" `Quick test_from_mcp_params_short_session_key;
+      test_case "from_mcp_params_long_session_key_prefix" `Quick test_from_mcp_params_long_session_key_prefix;
       test_case "anonymous" `Quick test_anonymous;
       test_case "channel_roundtrip" `Quick test_channel_roundtrip;
       test_case "same_agent" `Quick test_same_agent;

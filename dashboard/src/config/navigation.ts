@@ -18,4 +18,5 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   { id: 'execution', label: 'Execution', icon: '\uD83D\uDEE0\uFE0F' },
   { id: 'journal', label: 'Journal', icon: '\uD83D\uDCD3' },
   { id: 'trpg', label: 'TRPG', icon: '\u2694\uFE0F' },
+  { id: 'mdal', label: 'MDAL', icon: '\uD83D\uDCC8' },
 ]

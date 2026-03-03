@@ -29,6 +29,7 @@ import { Execution } from './components/execution'
 import { Journal } from './components/journal'
 import { Goals } from './components/goals'
 import { Trpg } from './components/trpg'
+import { Mdal } from './components/mdal'
 import { ControlDock } from './components/control-dock'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
@@ -135,6 +136,8 @@ function TabContent() {
       return html`<${Journal} />`
     case 'trpg':
       return html`<${Trpg} />`
+    case 'mdal':
+      return html`<${Mdal} />`
     default:
       return html`<${Overview} />`
   }

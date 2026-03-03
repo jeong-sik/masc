@@ -367,6 +367,35 @@ export interface TrpgState {
   history: TrpgSession[]
 }
 
+// --- MDAL (Metric-Driven Agent Loop) ---
+
+export interface MdalIterationRecord {
+  iteration: number
+  metric_before: number
+  metric_after: number
+  delta: number
+  changes: string
+  failed_attempts: string
+  next_suggestion: string
+  elapsed_ms: number
+  cost_usd: number | null
+}
+
+export interface MdalLoop {
+  loop_id: string
+  profile: string
+  status: 'running' | 'completed' | 'stopped' | 'error'
+  current_iteration: number
+  max_iterations: number
+  baseline_metric: number
+  current_metric: number
+  target: string
+  stagnation_streak: number
+  stagnation_limit: number
+  elapsed_seconds: number
+  history: MdalIterationRecord[]
+}
+
 // --- Perpetual Agent ---
 
 export interface PerpetualStatus {
@@ -495,6 +524,10 @@ export type SSEEventType =
   | 'keeper_handoff'
   | 'keeper_compaction'
   | 'keeper_guardrail'
+  | 'mdal_started'
+  | 'mdal_iteration'
+  | 'mdal_completed'
+  | 'mdal_stopped'
 
 export interface SSEEvent {
   type: SSEEventType
@@ -520,6 +553,15 @@ export interface SSEEvent {
   saved_tokens?: number
   trigger?: string
   reason?: string
+  // MDAL event fields
+  loop_id?: string
+  profile?: string
+  baseline?: number
+  target?: string
+  iteration?: number
+  metric_before?: number
+  metric_after?: number
+  delta?: number
 }
 
 // --- Journal ---
@@ -553,6 +595,7 @@ export type TabId =
   | 'journal'
   | 'trpg'
   | 'council'
+  | 'mdal'
 
 export const VALID_TABS: TabId[] = [
   'overview',
@@ -565,4 +608,5 @@ export const VALID_TABS: TabId[] = [
   'journal',
   'trpg',
   'council',
+  'mdal',
 ]

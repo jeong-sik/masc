@@ -73,6 +73,7 @@
    rate_limit
    masc_mcp
    masc_pb
+   mdal
    mcp_protocol
    mcp_server
    mcp_server_eio
@@ -170,6 +171,7 @@
    tool_misc
    tool_board
    tool_lodge
+   tool_mdal
    lodge_daemon
    gardener_types
    gardener

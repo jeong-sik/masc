@@ -756,13 +756,14 @@ let trpg_read_state_int derived_json field =
 type trpg_actor_spawn_cached = {
   fingerprint : string;
   response_json : Yojson.Safe.t;
+  seq : int;
 }
 
 type trpg_actor_spawn_guard_state = {
   mutex : Mutex.t;
   room_mutexes : (string, Mutex.t) Hashtbl.t;
   idempotency_cache : (string, trpg_actor_spawn_cached) Hashtbl.t;
-  mutable cache_writes : int;
+  mutable next_seq : int;
 }
 
 let trpg_actor_spawn_guard : trpg_actor_spawn_guard_state =
@@ -770,7 +771,7 @@ let trpg_actor_spawn_guard : trpg_actor_spawn_guard_state =
     mutex = Mutex.create ();
     room_mutexes = Hashtbl.create 64;
     idempotency_cache = Hashtbl.create 2048;
-    cache_writes = 0;
+    next_seq = 0;
   }
 
 let trpg_with_actor_spawn_guard_lock f =
@@ -802,17 +803,30 @@ let trpg_actor_spawn_cache_lookup ~room_id ~idempotency_key =
 
 let trpg_actor_spawn_cache_store ~room_id ~idempotency_key ~fingerprint
     ~response_json =
+  let max_cache_entries = 4096 in
   let key = trpg_actor_spawn_cache_key ~room_id ~idempotency_key in
   trpg_with_actor_spawn_guard_lock (fun () ->
+      trpg_actor_spawn_guard.next_seq <- trpg_actor_spawn_guard.next_seq + 1;
       Hashtbl.replace trpg_actor_spawn_guard.idempotency_cache key
-        { fingerprint; response_json };
-      trpg_actor_spawn_guard.cache_writes <-
-        trpg_actor_spawn_guard.cache_writes + 1;
-      if trpg_actor_spawn_guard.cache_writes >= 1024
-         && Hashtbl.length trpg_actor_spawn_guard.idempotency_cache > 4096
-      then (
-        Hashtbl.reset trpg_actor_spawn_guard.idempotency_cache;
-        trpg_actor_spawn_guard.cache_writes <- 0))
+        { fingerprint; response_json; seq = trpg_actor_spawn_guard.next_seq };
+      while Hashtbl.length trpg_actor_spawn_guard.idempotency_cache
+            > max_cache_entries
+      do
+        let oldest =
+          Hashtbl.to_seq trpg_actor_spawn_guard.idempotency_cache
+          |> Seq.fold_left
+               (fun acc (k, v) ->
+                 match acc with
+                 | None -> Some (k, v.seq)
+                 | Some (_old_key, old_seq) ->
+                     if v.seq < old_seq then Some (k, v.seq) else acc)
+               None
+        in
+        match oldest with
+        | Some (old_key, _) ->
+            Hashtbl.remove trpg_actor_spawn_guard.idempotency_cache old_key
+        | None -> ()
+      done)
 
 let trpg_normalize_keeper_name s = s |> String.trim |> String.lowercase_ascii
 

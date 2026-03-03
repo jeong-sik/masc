@@ -481,6 +481,58 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
     () in
   assert_equal "cascade:model_count" 2
     (List.length config3.model_cascade);
+
+  (* 11. Default config: coding_mode is false *)
+  assert_true "config:coding_mode_default" (not config.coding_mode);
+
+  (* 12. Default config: coding_agent is "claude" *)
+  assert_equal "config:coding_agent_default" "claude" config.coding_agent;
+
+  (* 13. Default config: coding_timeout_s uses env default *)
+  assert_true "config:coding_timeout_positive" (config.coding_timeout_s > 0);
+
+  (* 14. Default config: coding_sw and coding_proc_mgr are None *)
+  assert_true "config:coding_sw_none" (config.coding_sw = None);
+  assert_true "config:coding_proc_mgr_none" (config.coding_proc_mgr = None);
+
+  (* 15. CodingSpawn event variant exists *)
+  let coding_ev = Perpetual_loop.CodingSpawn {
+    agent = "claude"; exit_code = 0; elapsed_ms = 5000
+  } in
+  (match coding_ev with
+   | Perpetual_loop.CodingSpawn { agent; exit_code; elapsed_ms } ->
+     assert_equal "coding_event:agent" "claude" agent;
+     assert_equal "coding_event:exit_code" 0 exit_code;
+     assert_equal "coding_event:elapsed_ms" 5000 elapsed_ms
+   | _ -> assert_true "coding_event:is_coding_spawn" false);
+
+  (* 16. Config with coding_mode enabled *)
+  let coding_config = { config with
+    Perpetual_loop.coding_mode = true;
+    coding_agent = "gemini";
+    coding_timeout_s = 1800;
+  } in
+  assert_true "coding_config:mode_enabled" coding_config.coding_mode;
+  assert_equal "coding_config:agent" "gemini" coding_config.coding_agent;
+  assert_equal "coding_config:timeout" 1800 coding_config.coding_timeout_s;
+
+  (* 17. Coding mode turn with no sw/proc_mgr fails gracefully *)
+  let coding_state = Perpetual_loop.create_state coding_config in
+  let events_captured = ref [] in
+  let coding_config_with_events = { coding_config with
+    on_event = (fun ev -> events_captured := ev :: !events_captured);
+  } in
+  let should_continue = Perpetual_loop.run_turn
+    ~config:coding_config_with_events ~state:coding_state in
+  assert_true "coding_turn:stops_on_missing_deps" (not should_continue);
+  assert_true "coding_turn:state_stopped" (not coding_state.running);
+  (* Should have emitted Error + Terminated events *)
+  let has_error = List.exists (function
+    | Perpetual_loop.Error _ -> true | _ -> false) !events_captured in
+  let has_terminated = List.exists (function
+    | Perpetual_loop.Terminated _ -> true | _ -> false) !events_captured in
+  assert_true "coding_turn:emitted_error" has_error;
+  assert_true "coding_turn:emitted_terminated" has_terminated;
 )
 
 (* ================================================================ *)

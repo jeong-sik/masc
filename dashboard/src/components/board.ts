@@ -7,7 +7,7 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
-import { boardPosts, boardSortMode, boardLoading, refreshBoard } from '../store'
+import { boardPosts, boardSortMode, boardLoading, refreshBoard, serverStatus } from '../store'
 import { votePost, fetchBoardPost, commentPost } from '../api'
 import { navigate, navigateToPost, route } from '../router'
 import type { BoardPost, BoardComment, BoardSortMode } from '../types'
@@ -78,6 +78,23 @@ function SortBar() {
           ${m.label}
         </button>
       `)}
+    </div>
+  `
+}
+
+function BoardFeedNotice() {
+  const quality = serverStatus.value?.data_quality
+  if (!quality) return null
+  if (quality.board_contract_ok !== false && !quality.last_sync_at) return null
+
+  return html`
+    <div class="feed-health-banner ${quality.board_contract_ok === false ? 'degraded' : 'ok'}">
+      <span class="feed-health-title">
+        ${quality.board_contract_ok === false ? 'Board feed degraded' : 'Board feed synced'}
+      </span>
+      ${quality.last_sync_at
+        ? html`<span class="feed-health-meta">Last sync: <${TimeAgo} timestamp=${quality.last_sync_at} /></span>`
+        : html`<span class="feed-health-meta">No sync timestamp</span>`}
     </div>
   `
 }
@@ -217,27 +234,41 @@ export function Board() {
   const posts = boardPosts.value
   const loading = boardLoading.value
   const postId = route.value.postId
+  const boardFeedDegraded = serverStatus.value?.data_quality?.board_contract_ok === false
 
   // Detail view: single post
   if (postId) {
     const post = posts.find(p => p.id === postId)
     return post
-      ? html`<${PostDetail} post=${post} />`
+      ? html`
+          <${BoardFeedNotice} />
+          <${PostDetail} post=${post} />
+        `
       : html`
           <div>
+            <${BoardFeedNotice} />
             <button class="back-btn" onClick=${() => navigate('board')}>← Back to Board</button>
-            <div class="empty-state">Post not found</div>
+            <div class="empty-state">
+              ${boardFeedDegraded ? 'Post not available while board feed is degraded' : 'Post not found'}
+            </div>
           </div>
         `
   }
 
   // List view
   return html`
+    <${BoardFeedNotice} />
     <${SortBar} />
     ${loading
       ? html`<div class="loading-indicator">Loading board...</div>`
       : posts.length === 0
-        ? html`<div class="empty-state">No posts yet</div>`
+        ? html`
+            <div class="empty-state">
+              ${boardFeedDegraded
+                ? 'No posts loaded (board feed degraded). Check board contract sync.'
+                : 'No posts yet'}
+            </div>
+          `
         : html`<div class="board-post-list">
             ${posts.map(p => html`<${PostCard} key=${p.id} post=${p} />`)}
           </div>`}

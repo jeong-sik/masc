@@ -456,6 +456,43 @@
 .message-time { font-size: 11px; color: #666; float: right; }
 
 /* ── Board (Posts) ─────────────────────────────────────────── */
+.feed-health-banner {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(138, 163, 211, 0.3);
+  background: rgba(71, 184, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.feed-health-banner.degraded {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.feed-health-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d8e8ff;
+}
+
+.feed-health-banner.degraded .feed-health-title {
+  color: #ffe09b;
+}
+
+.feed-health-meta {
+  font-size: 11px;
+  color: #9fb8e1;
+}
+
+.feed-health-banner.degraded .feed-health-meta {
+  color: #fcd985;
+}
+
 .board-controls {
   display: flex;
   gap: 8px;

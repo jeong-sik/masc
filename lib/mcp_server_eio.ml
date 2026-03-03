@@ -440,7 +440,7 @@ let handle_read_resource_eio state id params =
                     ] in
                     ("application/json", Some (Yojson.Safe.to_string json))
                   end else
-                    ("application/json", Some (Printf.sprintf "{\"error\":\"Library document '%s' not found\"}" topic))
+                    ("application/json", Some (Yojson.Safe.to_string (`Assoc [("error", `String (Printf.sprintf "Library document '%s' not found" topic))])))
                 end else begin
                   (* Markdown single document *)
                   let path = Filename.concat library_dir (topic ^ ".md") in
@@ -923,6 +923,19 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | _ -> agent_name
   in
 
+  let is_ephemeral_agent_name name =
+    String.length name >= 6 && String.sub name 0 6 = "agent-"
+  in
+
+  let agent_name =
+    match token with
+    | Some t when is_ephemeral_agent_name agent_name ->
+        (match Auth.resolve_agent_from_token config.base_path ~token:t with
+         | Ok resolved -> resolved
+         | Error _ -> agent_name)
+    | _ -> agent_name
+  in
+
   (* Explicit non-nickname aliases (e.g., "alpha-agent") should resolve to an
      existing generated nickname if one is already joined. This prevents
      claim/start/done calls from drifting across different nicknames. *)
@@ -941,7 +954,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     else
       agent_name
   in
-
   (* Enforce tool authorization when enabled *)
   let auth_enabled = Auth.is_auth_enabled config.base_path in
   let auth_result =
@@ -1204,6 +1216,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         with exn ->
           Printf.eprintf "[perpetual:error] loop crashed for %s: %s\n%!"
             loop_state.Perpetual_loop.trace_id (Printexc.to_string exn)));
+    sw = Some sw;
+    proc_mgr = state.Mcp_server.proc_mgr;
   } in
   let simple_ctx_keeper : _ Tool_keeper.context = { config; sw; clock } in
   let trpg_keeper_call ~name:keeper_name ~message ~timeout_sec :

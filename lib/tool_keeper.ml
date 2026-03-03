@@ -5968,9 +5968,12 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                      `String meta.name;
                    ]);
                  ] in
-                 let (ok, _msg) = Tool_board.handle_tool "masc_board_post" board_args in
-                 if not ok then
-                   Printf.eprintf "[keeper-autonomy] %s L2 perpetual board post failed\n%!" meta.name;
+                 (match Tool_board.handle_tool "masc_board_post" board_args with
+                  | (true, _) -> ()
+                  | (false, err) ->
+                      Printf.eprintf "[keeper-autonomy] %s L2 perpetual board post failed: %s\n%!" meta.name err
+                  | exception exn ->
+                      Printf.eprintf "[keeper-autonomy] %s L2 board post error: %s\n%!" meta.name (Printexc.to_string exn));
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
@@ -5995,10 +5998,16 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
              | PerpetualRequested req ->
                  Printf.eprintf "[keeper-autonomy] %s PERPETUAL: starting for %s\n%!"
                    meta.name req.goal_title;
+                 (* Keeper runs in heartbeat timer context without Eio.Switch.t,
+                    so coding_mode (= Claude Code spawn) is structurally unavailable.
+                    Force LLM-only mode to prevent guaranteed failure. *)
+                 let effective_coding_mode = false in
+                 (if req.coding_mode then
+                    Printf.eprintf "[keeper-autonomy] %s: coding_mode requested but unavailable (no Eio.Switch in heartbeat context), falling back to LLM-only\n%!" meta.name);
                  let perp_args = `Assoc [
                    ("goal", `String req.goal_title);
                    ("models", `List (List.map (fun m -> `String m) req.models));
-                   ("coding_mode", `Bool req.coding_mode);
+                   ("coding_mode", `Bool effective_coding_mode);
                    ("coding_agent", `String req.coding_agent);
                  ] in
                  let perp_ctx = {
@@ -6032,7 +6041,12 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                           `String meta.name;
                         ]);
                       ] in
-                      ignore (Tool_board.handle_tool "masc_board_post" board_args);
+                      (match Tool_board.handle_tool "masc_board_post" board_args with
+                       | (true, _) -> ()
+                       | (false, err) ->
+                           Printf.eprintf "[keeper-autonomy] %s: board post failed: %s\n%!" meta.name err
+                       | exception exn ->
+                           Printf.eprintf "[keeper-autonomy] %s: board post error: %s\n%!" meta.name (Printexc.to_string exn));
                       Some { meta with
                         last_autonomous_action_at = now_iso ();
                         autonomous_action_count = meta.autonomous_action_count + 1;

@@ -45,6 +45,18 @@ Format: 'provider:model_id'. Examples: 'gemini:gemini-3-flash-preview', 'ollama:
           ("type", `String "integer");
           ("description", `String "Max idle turns before stopping (default: 5)");
         ]);
+        ("coding_mode", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "When true, spawn Claude Code for coding tasks instead of direct LLM calls (default: false)");
+        ]);
+        ("coding_agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to spawn in coding mode (default: 'claude')");
+        ]);
+        ("coding_timeout_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Timeout per coding turn in seconds (default: 7200)");
+        ]);
       ]);
       ("required", `List [`String "goal"; `String "models"]);
     ];
@@ -113,6 +125,8 @@ type result = bool * string
 type context = {
   agent_name : string;
   start_loop : (Perpetual_loop.loop_state -> Perpetual_loop.loop_config -> unit) option;
+  sw : Eio.Switch.t option;
+  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 (* ================================================================ *)
@@ -135,6 +149,12 @@ let handle_start ctx args =
                   |> Option.value ~default:30.0 in
   let max_idle = args |> member "max_idle" |> to_int_option
                  |> Option.value ~default:5 in
+  let coding_mode = args |> member "coding_mode" |> to_bool_option
+                    |> Option.value ~default:false in
+  let coding_agent = args |> member "coding_agent" |> to_string_option
+                     |> Option.value ~default:"claude" in
+  let coding_timeout = args |> member "coding_timeout_sec" |> to_int_option
+                       |> Option.value ~default:Env_config.Spawn.coding_timeout_seconds in
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
     match Llm_client.model_spec_of_string s with
@@ -149,10 +169,18 @@ let handle_start ctx args =
       feedback_enabled = verify;
       heartbeat_interval_s = heartbeat;
       max_idle_turns = max_idle;
+      coding_mode;
+      coding_agent;
+      coding_timeout_s = coding_timeout;
+      coding_sw = ctx.sw;
+      coding_proc_mgr = ctx.proc_mgr;
       on_event = (fun ev ->
         match ev with
         | Perpetual_loop.TurnStart n ->
           Printf.eprintf "[perpetual:%s] Turn %d\n%!" config.initial_goal n
+        | Perpetual_loop.CodingSpawn { agent; exit_code; elapsed_ms } ->
+          Printf.eprintf "[perpetual:coding] agent=%s exit=%d elapsed=%dms\n%!"
+            agent exit_code elapsed_ms
         | Perpetual_loop.Error e ->
           Printf.eprintf "[perpetual:error] %s\n%!" e
         | Perpetual_loop.Terminated reason ->
@@ -207,6 +235,9 @@ let handle_status args =
            ("compact_threshold", `Float config.compact_threshold);
            ("prepare_threshold", `Float config.prepare_threshold);
            ("handoff_threshold", `Float config.handoff_threshold);
+           ("coding_mode", `Bool config.coding_mode);
+           ("coding_agent", `String config.coding_agent);
+           ("coding_timeout_s", `Int config.coding_timeout_s);
          ] @ fields)
        | other -> other)
 

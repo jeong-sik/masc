@@ -57,11 +57,29 @@ type proposed_action = {
   estimated_cost_usd : float;
 }
 
+type perpetual_agent_request = {
+  goal_id : string;
+  goal_title : string;
+  models : string list;
+  coding_mode : bool;
+  coding_agent : string;
+}
+
 type next_action =
   | NoGoals
   | NoActionNeeded
   | Propose of proposed_action
   | Skip of string
+  | StartPerpetualAgent of perpetual_agent_request
+
+let perpetual_agent_request_to_json (req : perpetual_agent_request) : Yojson.Safe.t =
+  `Assoc [
+    ("goal_id", `String req.goal_id);
+    ("goal_title", `String req.goal_title);
+    ("models", `List (List.map (fun m -> `String m) req.models));
+    ("coding_mode", `Bool req.coding_mode);
+    ("coding_agent", `String req.coding_agent);
+  ]
 
 let risk_level_to_string = function
   | `Safe -> "safe"
@@ -89,6 +107,11 @@ let next_action_to_json = function
       `Assoc [
         ("action", `String "skip");
         ("reason", `String reason);
+      ]
+  | StartPerpetualAgent req ->
+      `Assoc [
+        ("action", `String "start_perpetual_agent");
+        ("request", perpetual_agent_request_to_json req);
       ]
 
 (* ================================================================ *)
@@ -140,17 +163,26 @@ let evaluate_next_action ~config ~goal_ids ~keeper_name:_ =
     match select_top_goal config goal_ids with
     | None -> NoActionNeeded
     | Some goal ->
-        let risk = estimate_risk goal in
-        let cost = estimate_cost goal in
-        Propose {
-          goal_id = goal.id;
-          goal_title = goal.title;
-          action_description =
-            sprintf "Work toward: %s (horizon=%s, priority=%d)"
-              goal.title goal.horizon goal.priority;
-          risk_level = risk;
-          estimated_cost_usd = cost;
-        }
+        if goal.horizon = "long" then
+          StartPerpetualAgent {
+            goal_id = goal.id;
+            goal_title = goal.title;
+            models = ["ollama:glm-4.7-flash"; "gemini:gemini-2.5-flash"];
+            coding_mode = true;
+            coding_agent = "claude";
+          }
+        else
+          let risk = estimate_risk goal in
+          let cost = estimate_cost goal in
+          Propose {
+            goal_id = goal.id;
+            goal_title = goal.title;
+            action_description =
+              sprintf "Work toward: %s (horizon=%s, priority=%d)"
+                goal.title goal.horizon goal.priority;
+            risk_level = risk;
+            estimated_cost_usd = cost;
+          }
 
 (* ================================================================ *)
 (* Auto-Execution Decision                                           *)

@@ -40,6 +40,8 @@ let log_event = function
     eprintf "[idle] %d consecutive idle turns\n%!" n
   | Perpetual_loop.Terminated reason ->
     eprintf "[terminated] %s\n%!" reason
+  | Perpetual_loop.CodingSpawn { agent; exit_code; elapsed_ms } ->
+    eprintf "[coding] agent=%s exit=%d elapsed=%dms\n%!" agent exit_code elapsed_ms
 
 (* ================================================================ *)
 (* CLI Argument Parsing (simple, no cmdliner dependency)            *)

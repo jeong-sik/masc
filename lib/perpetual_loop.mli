@@ -22,6 +22,7 @@ type event =
   | Error of string
   | IdleDetected of int
   | Terminated of string
+  | CodingSpawn of { agent : string; exit_code : int; elapsed_ms : int }
 
 (** {1 Configuration} *)
 
@@ -40,6 +41,11 @@ type loop_config = {
   compact_strategies : Context_manager.compaction_strategy list;
   session_base_dir : string;                     (** Where to store session data *)
   on_event : event -> unit;                      (** Callback for monitoring *)
+  coding_mode : bool;                            (** Spawn Claude Code instead of LLM direct calls *)
+  coding_agent : string;                         (** Target agent for coding mode (default: "claude") *)
+  coding_timeout_s : int;                        (** Timeout per coding turn in seconds *)
+  coding_sw : Eio.Switch.t option;               (** Eio switch for coding mode spawning *)
+  coding_proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;  (** Process manager for coding mode *)
 }
 
 (** {1 Loop State} *)

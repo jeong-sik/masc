@@ -23,13 +23,24 @@ type proposed_action = {
   estimated_cost_usd : float;
 }
 
+(** Request to start a perpetual agent for long-horizon goals. *)
+type perpetual_agent_request = {
+  goal_id : string;
+  goal_title : string;
+  models : string list;
+  coding_mode : bool;
+  coding_agent : string;
+}
+
 (** Result of evaluating next action for a keeper. *)
 type next_action =
   | NoGoals
   | NoActionNeeded
   | Propose of proposed_action
   | Skip of string  (** reason for skipping *)
+  | StartPerpetualAgent of perpetual_agent_request
 
+val perpetual_agent_request_to_json : perpetual_agent_request -> Yojson.Safe.t
 val autonomy_level_to_string : autonomy_level -> string
 val autonomy_level_of_string : string -> autonomy_level option
 val autonomy_level_to_int : autonomy_level -> int

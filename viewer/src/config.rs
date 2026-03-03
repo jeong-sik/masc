@@ -145,6 +145,10 @@ fn append_query_param(url: &str, key: &str, value: &str) -> String {
     )
 }
 
+fn is_sensitive_auth_key(key: &str) -> bool {
+    matches!(key, "token" | "auth_token" | "masc_token")
+}
+
 #[cfg(target_arch = "wasm32")]
 fn meta_content(name: &str) -> Option<String> {
     let doc = web_sys::window()?.document()?;
@@ -195,6 +199,48 @@ fn runtime_agent_name_override() -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn strip_sensitive_query_params_from_location() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let Ok(search) = win.location().search() else {
+        return;
+    };
+    if search.trim().is_empty() {
+        return;
+    }
+
+    let mut changed = false;
+    let mut kept = Vec::new();
+    for pair in search.trim_start_matches('?').split('&') {
+        if pair.trim().is_empty() {
+            continue;
+        }
+        let key = pair.split('=').next().unwrap_or_default();
+        if is_sensitive_auth_key(key) {
+            changed = true;
+            continue;
+        }
+        kept.push(pair.to_string());
+    }
+    if !changed {
+        return;
+    }
+
+    let pathname = win.location().pathname().unwrap_or_default();
+    let hash = win.location().hash().unwrap_or_default();
+    let new_search = if kept.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", kept.join("&"))
+    };
+    let new_url = format!("{pathname}{new_search}{hash}");
+    if let Ok(history) = win.history() {
+        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&new_url));
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn runtime_auth_token_override() -> Option<String> {
     let win = web_sys::window()?;
 
@@ -226,17 +272,12 @@ fn runtime_auth_token_override() -> Option<String> {
             .or_else(|| parse_query_param(&search, "token"));
         if let Some(raw) = from_query {
             if let Some(token) = normalize_non_empty(&raw) {
-                if let Ok(Some(storage)) = win.local_storage() {
-                    let _ = storage.set_item("masc_token", &token);
-                }
-                return Some(token);
-            }
-        }
-    }
-
-    if let Ok(Some(storage)) = win.local_storage() {
-        if let Ok(Some(raw)) = storage.get_item("masc_token") {
-            if let Some(token) = normalize_non_empty(&raw) {
+                let _ = js_sys::Reflect::set(
+                    win.as_ref(),
+                    &wasm_bindgen::JsValue::from_str("__MASC_TOKEN"),
+                    &wasm_bindgen::JsValue::from_str(&token),
+                );
+                strip_sensitive_query_params_from_location();
                 return Some(token);
             }
         }
@@ -280,6 +321,31 @@ pub fn attach_auth_query(url: &str) -> String {
         }
     }
     out
+}
+
+pub fn redact_auth_query(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_string();
+    };
+
+    let mut parts = Vec::new();
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let key = pair.split('=').next().unwrap_or_default();
+        if is_sensitive_auth_key(key) {
+            parts.push(format!("{key}=***"));
+        } else {
+            parts.push(pair.to_string());
+        }
+    }
+
+    if parts.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{}", parts.join("&"))
+    }
 }
 
 pub fn apply_auth_headers(headers: &web_sys::Headers) -> Result<(), wasm_bindgen::JsValue> {
@@ -529,5 +595,20 @@ mod tests {
             sse_endpoint_by_name("Social").as_deref(),
             Some("/sse?room=social")
         );
+    }
+
+    #[test]
+    fn redact_auth_query_masks_sensitive_values() {
+        assert_eq!(
+            redact_auth_query(
+                "/api/v1/trpg/stream/sse?room_id=default&token=abc123&agent=viewer&auth_token=qwe"
+            ),
+            "/api/v1/trpg/stream/sse?room_id=default&token=***&agent=viewer&auth_token=***"
+        );
+    }
+
+    #[test]
+    fn redact_auth_query_keeps_plain_url() {
+        assert_eq!(redact_auth_query("/health"), "/health");
     }
 }

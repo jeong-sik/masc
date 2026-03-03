@@ -88,10 +88,11 @@ fn create_event_source(
     status_proxy: Arc<Mutex<ConnectionStatusProxy>>,
     mode_name: String,
 ) {
+    let safe_url = config::redact_auth_query(url);
     let es = match EventSource::new(url) {
         Ok(es) => es,
         Err(e) => {
-            log::warn!("Failed to create MASC EventSource at {}: {:?}", url, e);
+            log::warn!("Failed to create MASC EventSource at {}: {:?}", safe_url, e);
             attempt_reconnect(
                 messages,
                 es_handle,
@@ -149,7 +150,7 @@ fn create_event_source(
 
     // onopen: reset reconnect state, mark connected
     {
-        let connected_url = url.to_string();
+        let connected_url = safe_url.clone();
         let rs = reconnect_state.clone();
         let sp = status_proxy.clone();
         let callback = Closure::<dyn FnMut()>::new(move || {

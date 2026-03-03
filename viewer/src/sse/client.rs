@@ -1428,10 +1428,11 @@ fn create_legacy_event_source(
     reconnect_state: Arc<Mutex<ReconnectState>>,
     status_proxy: Arc<Mutex<ConnectionStatusProxy>>,
 ) {
+    let safe_url = config::redact_auth_query(url);
     let es = match EventSource::new(url) {
         Ok(es) => es,
         Err(e) => {
-            log::warn!("Failed to create EventSource at {}: {:?}", url, e);
+            log::warn!("Failed to create EventSource at {}: {:?}", safe_url, e);
             attempt_trpg_reconnect(messages, es_handle, reconnect_state, status_proxy);
             return;
         }
@@ -1459,7 +1460,7 @@ fn create_legacy_event_source(
     }
 
     {
-        let connected_url = url.to_string();
+        let connected_url = safe_url.clone();
         let rs = reconnect_state.clone();
         let sp = status_proxy.clone();
         let callback = Closure::<dyn FnMut()>::new(move || {

@@ -156,7 +156,13 @@ let test_tool_category_core () =
   check bool "team_session_list" true
     (Mode.tool_category "masc_team_session_list" = Mode.Core);
   check bool "team_session_compare" true
-    (Mode.tool_category "masc_team_session_compare" = Mode.Core)
+    (Mode.tool_category "masc_team_session_compare" = Mode.Core);
+  check bool "team_session_turn" true
+    (Mode.tool_category "masc_team_session_turn" = Mode.Core);
+  check bool "team_session_events" true
+    (Mode.tool_category "masc_team_session_events" = Mode.Core);
+  check bool "team_session_prove" true
+    (Mode.tool_category "masc_team_session_prove" = Mode.Core)
 
 let test_tool_category_comm () =
   check bool "broadcast" true (Mode.tool_category "masc_broadcast" = Mode.Comm);

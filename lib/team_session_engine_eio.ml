@@ -245,6 +245,10 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
               `String
                 (Team_session_store.report_md_path config session.session_id) );
             ("json", `String (Team_session_store.report_json_path config session.session_id));
+            ( "proof_markdown",
+              `String
+                (Team_session_store.proof_md_path config session.session_id) );
+            ("proof_json", `String (Team_session_store.proof_json_path config session.session_id));
           ] );
     ]
 
@@ -654,6 +658,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
           (if report_formats = [] then
              [ Team_session_types.Markdown; Team_session_types.Json ]
            else report_formats);
+        turn_count = 0;
         agent_names = selected_agents;
         broadcast_count = 0;
         portal_count = 0;
@@ -671,6 +676,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         stopped_at = None;
         last_checkpoint_at = Some now;
         last_event_at = Some now;
+        last_turn_at = None;
         stop_reason = None;
         generated_report = false;
         artifacts_dir = Team_session_store.session_dir config session_id;
@@ -859,6 +865,334 @@ let generate_report ~(config : Room.config) ~(session_id : string)
                   (Printf.sprintf
                      "report generated but failed to mark generated_report: %s" e)
             )
+
+let record_turn ~(config : Room.config) ~(session_id : string) ~(actor : string)
+    ~(turn_kind : Team_session_types.turn_kind) ~(message : string option)
+    ~(target_agent : string option) ~(task_title : string option)
+    ~(task_description : string option) ~(task_priority : int) :
+    (Yojson.Safe.t, string) result =
+  let normalize_opt = function
+    | Some s ->
+        let t = String.trim s in
+        if t = "" then None else Some t
+    | None -> None
+  in
+  match Team_session_store.load_session config session_id with
+  | None -> Error (Printf.sprintf "team session not found: %s" session_id)
+  | Some session when session.status <> Team_session_types.Running ->
+      Error "turn recording is only allowed while session is running"
+  | Some session -> (
+      let message = normalize_opt message in
+      let target_agent = normalize_opt target_agent in
+      let task_title = normalize_opt task_title in
+      let task_description =
+        match normalize_opt task_description with
+        | Some d -> d
+        | None -> ""
+      in
+      let task_priority = clamp_int ~min_v:1 ~max_v:5 task_priority in
+      let now = Time_compat.now () in
+      match turn_kind with
+      | Team_session_types.Turn_note ->
+          let updated =
+            {
+              session with
+              turn_count = session.turn_count + 1;
+              last_turn_at = Some now;
+              last_event_at = Some now;
+              updated_at_iso = now_iso ();
+            }
+          in
+          Team_session_store.save_session config updated;
+          Team_session_store.append_event config session_id ~event_type:"team_turn"
+            ~detail:
+              (`Assoc
+                [
+                  ("turn_no", `Int updated.turn_count);
+                  ("kind", `String "note");
+                  ("actor", `String actor);
+                  ( "message",
+                    Option.fold ~none:`Null ~some:(fun s -> `String s) message );
+                  ("ts_iso", `String (now_iso ()));
+                ]);
+          Ok
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ("turn_no", `Int updated.turn_count);
+                ("kind", `String "note");
+              ])
+      | Team_session_types.Turn_broadcast -> (
+          match message with
+          | None -> Error "message is required for broadcast turn"
+          | Some msg ->
+              ignore (Room.broadcast config ~from_agent:actor ~content:msg);
+              let updated =
+                {
+                  session with
+                  turn_count = session.turn_count + 1;
+                  broadcast_count = session.broadcast_count + 1;
+                  last_turn_at = Some now;
+                  last_event_at = Some now;
+                  updated_at_iso = now_iso ();
+                }
+              in
+              Team_session_store.save_session config updated;
+              Team_session_store.append_event config session_id
+                ~event_type:"team_turn"
+                ~detail:
+                  (`Assoc
+                    [
+                      ("turn_no", `Int updated.turn_count);
+                      ("kind", `String "broadcast");
+                      ("actor", `String actor);
+                      ("message", `String msg);
+                      ("broadcast", `Bool true);
+                      ("ts_iso", `String (now_iso ()));
+                    ]);
+              Ok
+                (`Assoc
+                  [
+                    ("session_id", `String session_id);
+                    ("turn_no", `Int updated.turn_count);
+                    ("kind", `String "broadcast");
+                    ("broadcast", `Bool true);
+                  ]))
+      | Team_session_types.Turn_portal -> (
+          match (target_agent, message) with
+          | Some target, Some msg -> (
+              let send_result =
+                match
+                  Room.portal_open_r config ~agent_name:actor
+                    ~target_agent:target ~initial_message:(Some msg)
+                with
+                | Ok opened -> Ok opened
+                | Error (Types.PortalAlreadyOpen _) ->
+                    Room.portal_send_r config ~agent_name:actor ~message:msg
+                | Error e -> Error e
+              in
+              match send_result with
+              | Error e ->
+                  let err = Types.masc_error_to_string e in
+                  Team_session_store.append_event config session_id
+                    ~event_type:"team_turn_failed"
+                    ~detail:
+                      (`Assoc
+                        [
+                          ("kind", `String "portal");
+                          ("actor", `String actor);
+                          ("target_agent", `String target);
+                          ("error", `String err);
+                          ("ts_iso", `String (now_iso ()));
+                        ]);
+                  Error err
+              | Ok send_msg ->
+                  let updated =
+                    {
+                      session with
+                      turn_count = session.turn_count + 1;
+                      portal_count = session.portal_count + 1;
+                      last_turn_at = Some now;
+                      last_event_at = Some now;
+                      updated_at_iso = now_iso ();
+                    }
+                  in
+                  Team_session_store.save_session config updated;
+                  Team_session_store.append_event config session_id
+                    ~event_type:"team_turn"
+                    ~detail:
+                      (`Assoc
+                        [
+                          ("turn_no", `Int updated.turn_count);
+                          ("kind", `String "portal");
+                          ("actor", `String actor);
+                          ("target_agent", `String target);
+                          ("message", `String msg);
+                          ("result", `String send_msg);
+                          ("ts_iso", `String (now_iso ()));
+                        ]);
+                  Ok
+                    (`Assoc
+                      [
+                        ("session_id", `String session_id);
+                        ("turn_no", `Int updated.turn_count);
+                        ("kind", `String "portal");
+                        ("target_agent", `String target);
+                        ("result", `String send_msg);
+                      ]))
+          | _ -> Error "target_agent and message are required for portal turn")
+      | Team_session_types.Turn_task -> (
+          match task_title with
+          | None -> Error "task_title is required for task turn"
+          | Some title ->
+              let add_result =
+                Room.add_task config ~title ~priority:task_priority
+                  ~description:task_description
+              in
+              let updated =
+                {
+                  session with
+                  turn_count = session.turn_count + 1;
+                  last_turn_at = Some now;
+                  last_event_at = Some now;
+                  updated_at_iso = now_iso ();
+                }
+              in
+              Team_session_store.save_session config updated;
+              Team_session_store.append_event config session_id
+                ~event_type:"team_turn"
+                ~detail:
+                  (`Assoc
+                    [
+                      ("turn_no", `Int updated.turn_count);
+                      ("kind", `String "task");
+                      ("actor", `String actor);
+                      ("task_title", `String title);
+                      ("task_priority", `Int task_priority);
+                      ("result", `String add_result);
+                      ("ts_iso", `String (now_iso ()));
+                    ]);
+              Ok
+                (`Assoc
+                  [
+                    ("session_id", `String session_id);
+                    ("turn_no", `Int updated.turn_count);
+                    ("kind", `String "task");
+                    ("result", `String add_result);
+                  ]))
+      | Team_session_types.Turn_checkpoint ->
+          write_checkpoint config session;
+          let updated =
+            {
+              session with
+              turn_count = session.turn_count + 1;
+              last_turn_at = Some now;
+              last_checkpoint_at = Some now;
+              last_event_at = Some now;
+              updated_at_iso = now_iso ();
+            }
+          in
+          Team_session_store.save_session config updated;
+          Team_session_store.append_event config session_id ~event_type:"team_turn"
+            ~detail:
+              (`Assoc
+                [
+                  ("turn_no", `Int updated.turn_count);
+                  ("kind", `String "checkpoint");
+                  ("actor", `String actor);
+                  ("ts_iso", `String (now_iso ()));
+                ]);
+          Ok
+            (`Assoc
+              [
+                ("session_id", `String session_id);
+                ("turn_no", `Int updated.turn_count);
+                ("kind", `String "checkpoint");
+              ]))
+
+let list_events ~(config : Room.config) ~(session_id : string)
+    ~(event_types : string list) ~(limit : int) ~(after_ts : float option) :
+    (Yojson.Safe.t, string) result =
+  match Team_session_store.load_session config session_id with
+  | None -> Error (Printf.sprintf "team session not found: %s" session_id)
+  | Some _ ->
+      let normalize_types =
+        event_types
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+        |> Team_session_types.dedup_strings
+      in
+      let max_events = clamp_int ~min_v:1 ~max_v:10000 (max 500 limit) in
+      let limit = clamp_int ~min_v:1 ~max_v:1000 limit in
+      let events = Team_session_store.read_events ~max_events config session_id in
+      let matches_type json =
+        if normalize_types = [] then
+          true
+        else
+          match Yojson.Safe.Util.member "event_type" json with
+          | `String t -> List.mem t normalize_types
+          | _ -> false
+      in
+      let matches_after_ts json =
+        match after_ts with
+        | None -> true
+        | Some ts -> (
+            match Yojson.Safe.Util.member "ts" json with
+            | `Float v -> v > ts
+            | `Int n -> float_of_int n > ts
+            | `Intlit s -> (try float_of_string s > ts with _ -> false)
+            | _ -> false)
+      in
+      let filtered =
+        events
+        |> List.filter matches_type
+        |> List.filter matches_after_ts
+        |> take_last limit
+      in
+      Ok
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("count", `Int (List.length filtered));
+            ("events", `List filtered);
+          ])
+
+let prove_session ~(config : Room.config) ~(session_id : string)
+    ~(generate_report_if_missing : bool) : (Yojson.Safe.t, string) result =
+  match Team_session_store.load_session config session_id with
+  | None -> Error (Printf.sprintf "team session not found: %s" session_id)
+  | Some session ->
+      let report_json_exists =
+        Room_utils.path_exists config
+          (Team_session_store.report_json_path config session_id)
+      in
+      let report_md_exists =
+        Room_utils.path_exists config
+          (Team_session_store.report_md_path config session_id)
+      in
+      let ensure_report_result =
+        if generate_report_if_missing && not (report_json_exists && report_md_exists)
+        then
+          match Team_session_report.generate config session with
+          | Ok (_json, _markdown) ->
+              Team_session_store.mark_report_generated config session_id
+          | Error e -> Error e
+        else Ok session
+      in
+      match ensure_report_result with
+      | Error e -> Error e
+      | Ok _ -> (
+          match Team_session_store.load_session config session_id with
+          | None -> Error (Printf.sprintf "team session not found: %s" session_id)
+          | Some refreshed -> (
+              match Team_session_report.generate_proof config refreshed with
+              | Error e -> Error e
+              | Ok (proof_json, proof_markdown) ->
+                  let proof_json_path =
+                    Team_session_store.proof_json_path config session_id
+                  in
+                  let proof_md_path =
+                    Team_session_store.proof_md_path config session_id
+                  in
+                  Room_utils.write_json config proof_json_path proof_json;
+                  Team_session_store.write_text_file proof_md_path proof_markdown;
+                  Team_session_store.append_event config session_id
+                    ~event_type:"session_proof_generated"
+                    ~detail:
+                      (`Assoc
+                        [
+                          ("proof_json_path", `String proof_json_path);
+                          ("proof_md_path", `String proof_md_path);
+                          ("ts_iso", `String (now_iso ()));
+                        ]);
+                  Ok
+                    (`Assoc
+                      [
+                        ("session_id", `String session_id);
+                        ("proof", proof_json);
+                        ("proof_json_path", `String proof_json_path);
+                        ("proof_md_path", `String proof_md_path);
+                      ])))
 
 let list_sessions ~(config : Room.config) ~(requester_agent : string option)
     ~(status_filter : Team_session_types.session_status option) ~(limit : int) :

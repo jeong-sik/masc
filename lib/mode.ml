@@ -113,7 +113,9 @@ let tool_category tool_name =
   | "masc_task_history"
   | "masc_team_session_start" | "masc_team_session_status"
   | "masc_team_session_stop" | "masc_team_session_report"
-  | "masc_team_session_list" | "masc_team_session_compare" -> Core
+  | "masc_team_session_list" | "masc_team_session_compare"
+  | "masc_team_session_turn" | "masc_team_session_events"
+  | "masc_team_session_prove" -> Core
 
   (* Communication tools *)
   | "masc_broadcast" | "masc_messages"

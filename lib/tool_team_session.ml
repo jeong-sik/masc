@@ -29,6 +29,13 @@ let get_int args key default =
   | `Intlit s -> (try int_of_string s with _ -> default)
   | _ -> default
 
+let get_float_opt args key =
+  match Yojson.Safe.Util.member key args with
+  | `Float v -> Some v
+  | `Int n -> Some (float_of_int n)
+  | `Intlit s -> (try Some (float_of_string s) with _ -> None)
+  | _ -> None
+
 let get_bool args key default =
   match Yojson.Safe.Util.member key args with
   | `Bool b -> b
@@ -92,6 +99,14 @@ let parse_report_formats args =
   let parsed = Team_session_types.report_formats_of_strings raw in
   if parsed = [] then [ Team_session_types.Markdown; Team_session_types.Json ]
   else parsed
+
+let parse_turn_kind args =
+  let raw = get_string args "turn_kind" "note" |> String.trim |> String.lowercase_ascii in
+  match Team_session_types.turn_kind_of_string raw with
+  | Some k -> Ok k
+  | None ->
+      Error
+        "invalid turn_kind (allowed: note|broadcast|portal|task|checkpoint)"
 
 let is_all_digits s =
   let len = String.length s in
@@ -247,6 +262,63 @@ let handle_compare ctx args : result =
   | Error e, _ -> (false, json_error e)
   | _, Error e -> (false, json_error e)
 
+let handle_turn ctx args : result =
+  match get_valid_session_id args with
+  | Error e -> (false, json_error e)
+  | Ok session_id -> (
+      match ensure_session_access ctx session_id with
+      | Error e -> (false, json_error e)
+      | Ok () -> (
+          match parse_turn_kind args with
+          | Error e -> (false, json_error e)
+          | Ok turn_kind ->
+              let message = get_string_opt args "message" in
+              let target_agent = get_string_opt args "target_agent" in
+              let task_title = get_string_opt args "task_title" in
+              let task_description = get_string_opt args "task_description" in
+              let task_priority = get_int args "task_priority" 3 in
+              (match
+                 Team_session_engine_eio.record_turn ~config:ctx.config
+                   ~session_id ~actor:ctx.agent_name ~turn_kind ~message
+                   ~target_agent ~task_title ~task_description ~task_priority
+               with
+              | Ok json -> (true, json_ok [ ("result", json) ])
+              | Error e -> (false, json_error e))))
+
+let handle_events ctx args : result =
+  match get_valid_session_id args with
+  | Error e -> (false, json_error e)
+  | Ok session_id -> (
+      match ensure_session_access ctx session_id with
+      | Error e -> (false, json_error e)
+      | Ok () ->
+          let event_types = get_string_list args "event_types" in
+          let limit = get_int args "limit" 200 in
+          let after_ts = get_float_opt args "after_ts" in
+          (match
+             Team_session_engine_eio.list_events ~config:ctx.config ~session_id
+               ~event_types ~limit ~after_ts
+           with
+          | Ok json -> (true, json_ok [ ("result", json) ])
+          | Error e -> (false, json_error e)))
+
+let handle_prove ctx args : result =
+  match get_valid_session_id args with
+  | Error e -> (false, json_error e)
+  | Ok session_id -> (
+      match ensure_session_access ctx session_id with
+      | Error e -> (false, json_error e)
+      | Ok () ->
+          let generate_report_if_missing =
+            get_bool args "generate_report_if_missing" true
+          in
+          (match
+             Team_session_engine_eio.prove_session ~config:ctx.config ~session_id
+               ~generate_report_if_missing
+           with
+          | Ok json -> (true, json_ok [ ("result", json) ])
+          | Error e -> (false, json_error e)))
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_team_session_start" -> Some (handle_start ctx args)
@@ -255,6 +327,9 @@ let dispatch ctx ~name ~args : result option =
   | "masc_team_session_report" -> Some (handle_report ctx args)
   | "masc_team_session_list" -> Some (handle_list ctx args)
   | "masc_team_session_compare" -> Some (handle_compare ctx args)
+  | "masc_team_session_turn" -> Some (handle_turn ctx args)
+  | "masc_team_session_events" -> Some (handle_events ctx args)
+  | "masc_team_session_prove" -> Some (handle_prove ctx args)
   | _ -> None
 
 let schemas : tool_schema list =
@@ -474,6 +549,83 @@ let schemas : tool_schema list =
                   ("target_session_id", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "base_session_id"; `String "target_session_id" ]);
+          ];
+    };
+    {
+      name = "masc_team_session_turn";
+      description =
+        "Record a team orchestration turn and optionally execute broadcast/portal/task/checkpoint action.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("session_id", `Assoc [ ("type", `String "string") ]);
+                  ( "turn_kind",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "enum",
+                          `List
+                            [
+                              `String "note";
+                              `String "broadcast";
+                              `String "portal";
+                              `String "task";
+                              `String "checkpoint";
+                            ] );
+                      ] );
+                  ("message", `Assoc [ ("type", `String "string") ]);
+                  ("target_agent", `Assoc [ ("type", `String "string") ]);
+                  ("task_title", `Assoc [ ("type", `String "string") ]);
+                  ("task_description", `Assoc [ ("type", `String "string") ]);
+                  ("task_priority", `Assoc [ ("type", `String "integer") ]);
+                ] );
+            ("required", `List [ `String "session_id" ]);
+          ];
+    };
+    {
+      name = "masc_team_session_events";
+      description =
+        "Read team session event timeline with optional event type and timestamp filters.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("session_id", `Assoc [ ("type", `String "string") ]);
+                  ( "event_types",
+                    `Assoc
+                      [
+                        ("type", `String "array");
+                        ("items", `Assoc [ ("type", `String "string") ]);
+                      ] );
+                  ("after_ts", `Assoc [ ("type", `String "number") ]);
+                  ("limit", `Assoc [ ("type", `String "integer") ]);
+                ] );
+            ("required", `List [ `String "session_id" ]);
+          ];
+    };
+    {
+      name = "masc_team_session_prove";
+      description =
+        "Generate verifiable proof artifacts (proof.json/proof.md) for a team session based on timeline evidence.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("session_id", `Assoc [ ("type", `String "string") ]);
+                  ( "generate_report_if_missing",
+                    `Assoc [ ("type", `String "boolean") ] );
+                ] );
+            ("required", `List [ `String "session_id" ]);
           ];
     };
   ]

@@ -23,6 +23,12 @@ let report_md_path config session_id =
 let report_json_path config session_id =
   Filename.concat (session_dir config session_id) "report.json"
 
+let proof_md_path config session_id =
+  Filename.concat (session_dir config session_id) "proof.md"
+
+let proof_json_path config session_id =
+  Filename.concat (session_dir config session_id) "proof.json"
+
 let now_iso () = Types.now_iso ()
 
 let ensure_session_dirs config session_id =

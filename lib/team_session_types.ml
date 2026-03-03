@@ -42,6 +42,13 @@ type report_format =
   | Markdown
   | Json
 
+type turn_kind =
+  | Turn_note
+  | Turn_broadcast
+  | Turn_portal
+  | Turn_task
+  | Turn_checkpoint
+
 type session = {
   session_id : string;
   goal : string;
@@ -60,6 +67,7 @@ type session = {
   alert_channel : alert_channel;
   auto_resume : bool;
   report_formats : report_format list;
+  turn_count : int;
   agent_names : string list;
   broadcast_count : int;
   portal_count : int;
@@ -77,6 +85,7 @@ type session = {
   stopped_at : float option;
   last_checkpoint_at : float option;
   last_event_at : float option;
+  last_turn_at : float option;
   stop_reason : string option;
   generated_report : bool;
   artifacts_dir : string;
@@ -195,6 +204,21 @@ let report_formats_of_strings xs =
   |> List.filter_map (fun s -> report_format_of_string (String.lowercase_ascii (String.trim s)))
   |> dedup []
 
+let turn_kind_to_string = function
+  | Turn_note -> "note"
+  | Turn_broadcast -> "broadcast"
+  | Turn_portal -> "portal"
+  | Turn_task -> "task"
+  | Turn_checkpoint -> "checkpoint"
+
+let turn_kind_of_string = function
+  | "broadcast" -> Some Turn_broadcast
+  | "portal" -> Some Turn_portal
+  | "task" -> Some Turn_task
+  | "checkpoint" -> Some Turn_checkpoint
+  | "note" -> Some Turn_note
+  | _ -> None
+
 let dedup_strings xs =
   let rec loop acc = function
     | [] -> List.rev acc
@@ -275,6 +299,7 @@ let session_to_yojson (s : session) =
       ("alert_channel", `String (alert_channel_to_string s.alert_channel));
       ("auto_resume", `Bool s.auto_resume);
       ("report_formats", `List (List.map (fun f -> `String (report_format_to_string f)) s.report_formats));
+      ("turn_count", `Int s.turn_count);
       ("agent_names", `List (List.map (fun a -> `String a) s.agent_names));
       ("broadcast_count", `Int s.broadcast_count);
       ("portal_count", `Int s.portal_count);
@@ -292,6 +317,7 @@ let session_to_yojson (s : session) =
       ("stopped_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.stopped_at);
       ("last_checkpoint_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.last_checkpoint_at);
       ("last_event_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.last_event_at);
+      ("last_turn_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.last_turn_at);
       ("stop_reason", Option.fold ~none:`Null ~some:(fun v -> `String v) s.stop_reason);
       ("generated_report", `Bool s.generated_report);
       ("artifacts_dir", `String s.artifacts_dir);
@@ -364,6 +390,7 @@ let session_of_yojson json =
                |> report_formats_of_strings
            | _ -> [])
           |> (fun xs -> if xs = [] then [Markdown; Json] else xs);
+        turn_count = get_int_default "turn_count" 0;
         agent_names =
           (match member "agent_names" json with
            | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
@@ -395,6 +422,7 @@ let session_of_yojson json =
         stopped_at = json |> member "stopped_at" |> to_float_option;
         last_checkpoint_at = json |> member "last_checkpoint_at" |> to_float_option;
         last_event_at = json |> member "last_event_at" |> to_float_option;
+        last_turn_at = json |> member "last_turn_at" |> to_float_option;
         stop_reason = json |> member "stop_reason" |> to_string_option;
         generated_report = json |> member "generated_report" |> to_bool_option |> Option.value ~default:false;
         artifacts_dir = json |> member "artifacts_dir" |> to_string_option |> Option.value ~default:"";

@@ -1614,11 +1614,14 @@ let get_origin (request : Httpun.Request.t) =
   | None -> "*"
 
 (** CORS headers *)
+let cors_allow_headers_value =
+  "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
+   Mcp-Protocol-Version, Last-Event-Id, X-MASC-Agent, X-MASC-Agent-Name"
+
 let cors_headers origin = [
   ("access-control-allow-origin", origin);
   ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
-  ("access-control-allow-headers",
-   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+  ("access-control-allow-headers", cors_allow_headers_value);
   ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ("access-control-allow-credentials", "true");
 ]
@@ -1627,12 +1630,14 @@ let respond_json_with_cors ?(status = `OK) request reqd body =
   let origin = get_origin request in
   Http.Response.json ~status ~extra_headers:(cors_headers origin) body reqd
 
+let auth_error_json err =
+  Yojson.Safe.to_string
+    (`Assoc [ ("error", `String (Types.masc_error_to_string err)) ])
+
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
   let origin = get_origin request in
-  let body = Yojson.Safe.to_string (`Assoc [
-    ("error", `String (Types.masc_error_to_string err));
-  ]) in
+  let body = auth_error_json err in
   let headers = Httpun.Headers.of_list (
     ("content-length", string_of_int (String.length body))
     :: cors_headers origin
@@ -1701,6 +1706,21 @@ let resolve_agent_name_for_auth ~base_path request ~token :
             | Error (Types.TokenExpired _ as e) -> Error e
             | Error _ -> Ok None))
 
+let authorize_read_request ~base_path request : (unit, Types.masc_error) result =
+  let auth_cfg = Auth.load_auth_config base_path in
+  let token = auth_token_from_request request in
+  match resolve_agent_name_for_auth ~base_path request ~token with
+  | Error err -> Error err
+  | Ok agent_name_opt ->
+      let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+      if auth_cfg.enabled && auth_cfg.require_token && token <> None && agent_name_opt = None then
+        Error
+          (Types.Unauthorized
+             "Agent name required (X-MASC-Agent or token-bound credential)")
+      else
+        Auth.check_permission base_path ~agent_name ~token
+          ~permission:Types.CanReadState
+
 let rec with_public_read handler request reqd =
   let strict = http_auth_strict_enabled () in
   let path = Http.Request.path request in
@@ -1716,23 +1736,9 @@ and with_read_auth handler request reqd =
   | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
-      let auth_cfg = Auth.load_auth_config base_path in
-      let token = auth_token_from_request request in
-      (match resolve_agent_name_for_auth ~base_path request ~token with
-       | Error err -> respond_auth_error request reqd err
-       | Ok agent_name_opt ->
-           let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-           if auth_cfg.enabled && auth_cfg.require_token && token <> None && agent_name_opt = None
-           then
-             respond_auth_error request reqd
-               (Types.Unauthorized "Agent name required (X-MASC-Agent or token-bound credential)")
-           else
-             match
-               Auth.check_permission base_path ~agent_name ~token
-                 ~permission:Types.CanReadState
-             with
-             | Ok () -> handler state request reqd
-             | Error err -> respond_auth_error request reqd err)
+      match authorize_read_request ~base_path request with
+      | Ok () -> handler state request reqd
+      | Error err -> respond_auth_error request reqd err
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -4305,8 +4311,7 @@ let cors_preflight_headers origin =
   [
     ("access-control-allow-origin", origin);
     ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
-    ("access-control-allow-headers",
-     "Content-Type, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Accept, Origin");
+    ("access-control-allow-headers", cors_allow_headers_value);
     ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
   ]
 
@@ -6282,6 +6287,11 @@ let run_server ~sw ~env ~port ~base_path =
       | Some o -> o | None -> "*"
     in
     let cors = cors_headers origin in
+    let base_path =
+      match !server_state with
+      | Some s -> s.Mcp_server.room_config.base_path
+      | None -> default_base_path ()
+    in
     let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
       let index_path = dashboard_index_path () in
@@ -6304,7 +6314,7 @@ let run_server ~sw ~env ~port ~base_path =
           h2_respond_html h2_reqd "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>" ~extra_headers:cors
     in
 
-    try
+    let dispatch_h2_route () =
       match httpun_meth, path with
       (* ─────────────────────────────────────────────────────────────────────
          Health & Metrics
@@ -6994,6 +7004,20 @@ let run_server ~sw ~env ~port ~base_path =
       | _ ->
           h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path) ~status:`Not_found ~extra_headers:cors
 
+    in
+    try
+      if
+        http_auth_strict_enabled ()
+        && httpun_meth <> `OPTIONS
+        && string_starts_with path "/api/v1/trpg/"
+      then
+        match authorize_read_request ~base_path httpun_request with
+        | Ok () -> dispatch_h2_route ()
+        | Error err ->
+            let status = http_status_of_auth_error err in
+            h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+      else
+        dispatch_h2_route ()
     with exn ->
       let msg = Printexc.to_string exn in
       Printf.eprintf "[H2] Handler error: %s\n%!" msg;

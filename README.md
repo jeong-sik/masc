@@ -209,7 +209,7 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 | `MASC_GUARDIAN_ENABLED` | false | 내부 수호자 루프 활성화 |
 | `MASC_GUARDIAN_MODE` | masc | `masc` / `lodge` / `both` |
 | `MASC_HTTP_AUTH_STRICT` | false | `true`면 public allowlist 외 GET도 read auth 적용 |
-| `MASC_TOOL_AUTH_STRICT` | false | `true`면 unknown non-`masc_*` tool deny, unknown `masc_*`는 worker 권한 기준 검사 |
+| `MASC_TOOL_AUTH_STRICT` | false | `true`면 unknown external tool deny, unknown internal(`masc_*`/`decision.*`/`experiment.*`/`trpg.*`/`client.*`)는 worker 권한 기준 검사 |
 | `MASC_GUARDIAN_ZOMBIE_INTERVAL_SEC` | 60 | 좀비 정리 주기 (초) |
 | `MASC_GUARDIAN_GC_INTERVAL_SEC` | 3600 | GC 주기 (초, 0=비활성) |
 | `MASC_GUARDIAN_GC_DAYS` | 7 | GC 기준 일수 |

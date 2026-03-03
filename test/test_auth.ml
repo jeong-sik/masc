@@ -300,6 +300,23 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   | Error (Types.Forbidden _) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
+let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:true in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
+            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+              ~tool_name:"trpg.unlisted_tool")
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
 (* ============================================ *)
 (* Enable/disable tests                         *)
 (* ============================================ *)
@@ -355,6 +372,8 @@ let () =
         `Quick test_authorize_unknown_masc_tool_strict_reader_denied;
       test_case "strict unknown non-masc tool denied"
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
+      test_case "strict unknown canonical tool allows worker"
+        `Quick test_authorize_unknown_canonical_tool_strict_worker_allowed;
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;

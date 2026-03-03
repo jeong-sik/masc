@@ -8717,7 +8717,15 @@ let handle_round_run ctx args : result =
           else base
         in
         let keeper_call_max_attempts =
-          1 + max 0 (trpg_keeper_call_retries ())
+          let configured_retries = max 0 (trpg_keeper_call_retries ()) in
+          let strict_min_retries =
+            if strict_agent_driven then
+              match role with
+              | `Player -> 2
+              | `Dm -> 1
+            else configured_retries
+          in
+          1 + max configured_retries strict_min_retries
         in
         let is_retryable_keeper_error err =
           let lowered = String.lowercase_ascii (String.trim err) in

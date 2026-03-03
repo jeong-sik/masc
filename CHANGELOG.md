@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.77.0] - 2026-03-03
+
+### Added
+- MCP `/health` metadata now exposes release/protocol/transport version layers.
+- Team session artifacts (`report.json`, `proof.json`) now include `schema_version`.
+
+### Changed
+- Streamable Accept policy is unified across HTTP/1 and HTTP/2 `POST /mcp` routes.
+- `start-masc-mcp.sh` startup hints now document streamable Accept and legacy fallback env.
+- Release helper now aligns with current SSOT (`dune-project`) and changelog-first workflow.
+
+### Deprecated
+- Legacy SSE transport endpoints `/sse` and `/messages` are now marked deprecated via response headers.
+
+### Fixed
+- Release Makefile target now points to the Eio binary path (`_build/default/bin/main_eio.exe`).
+
 ## [2.76.0] - 2026-03-02
 
 ### Added

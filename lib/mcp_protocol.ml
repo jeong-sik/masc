@@ -2,6 +2,11 @@
     HTTP content negotiation for MCP Streamable HTTP transport *)
 
 module Http_negotiation = struct
+  type accept_mode =
+    | Streamable
+    | Legacy_accepted
+    | Rejected
+
   (** Standard SSE content type *)
   let sse_content_type = "text/event-stream"
 
@@ -60,4 +65,13 @@ module Http_negotiation = struct
     let accepts_json = is_media_type_accepted media_types json_content_type in
     let accepts_sse = is_media_type_accepted media_types sse_content_type in
     accepts_json && accepts_sse
+
+  (** Classify Accept header against streamable policy.
+      - Streamable: Accept has both JSON + SSE
+      - Legacy_accepted: not streamable, but explicitly allowed
+      - Rejected: not streamable and legacy disabled *)
+  let classify_mcp_accept ~allow_legacy accept_header =
+    if accepts_streamable_mcp accept_header then Streamable
+    else if allow_legacy then Legacy_accepted
+    else Rejected
 end

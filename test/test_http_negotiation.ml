@@ -24,9 +24,35 @@ let test_accepts_streamable_mcp () =
   check bool "case-insensitive" true (accepts_streamable_mcp (Some "Application/Json, Text/Event-Stream"));
   ()
 
+let test_classify_mcp_accept () =
+  let open Masc_mcp.Mcp_protocol.Http_negotiation in
+  let check_mode label expected actual =
+    let same =
+      match (expected, actual) with
+      | Streamable, Streamable
+      | Legacy_accepted, Legacy_accepted
+      | Rejected, Rejected ->
+          true
+      | _ -> false
+    in
+    check bool label true same
+  in
+  check_mode "strict streamable"
+    Streamable
+    (classify_mcp_accept ~allow_legacy:false
+       (Some "application/json, text/event-stream"));
+  check_mode "legacy accepted"
+    Legacy_accepted
+    (classify_mcp_accept ~allow_legacy:true (Some "text/event-stream"));
+  check_mode "strict reject"
+    Rejected
+    (classify_mcp_accept ~allow_legacy:false (Some "text/event-stream"));
+  ()
+
 let () =
   run "http_negotiation"
     [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
+      ("classify_mcp_accept", [test_case "strict vs legacy fallback" `Quick test_classify_mcp_accept]);
     ]

@@ -1,6 +1,6 @@
 # masc-mcp
 
-[![Version](https://img.shields.io/badge/version-2.71.1-blue.svg)](https://github.com/jeong-sik/masc-mcp)
+[![Version](https://img.shields.io/badge/version-2.77.0-blue.svg)](https://github.com/jeong-sik/masc-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
 
@@ -61,6 +61,12 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
   }
 }
 ```
+
+## Streamable HTTP 기본 정책
+
+- `POST /mcp`는 기본적으로 `Accept: application/json, text/event-stream`를 요구합니다.
+- 구형 클라이언트 호환이 필요할 때만 `MASC_ALLOW_LEGACY_ACCEPT=1`을 설정하세요.
+- 레거시 `/sse`, `/messages` endpoint는 deprecated 상태이며 `/mcp`로 전환이 권장됩니다.
 
 ## 기본 사용 흐름
 
@@ -203,6 +209,7 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 |------|--------|------|
 | `MASC_CLUSTER_NAME` | basename of `ME_ROOT` | 클러스터 이름 |
 | `MASC_MCP_MAX_BODY_BYTES` | 20MB | 요청 바디 최대 크기 |
+| `MASC_ALLOW_LEGACY_ACCEPT` | 0 | 1이면 구형 Accept 헤더를 임시 허용 |
 | `GRAPHQL_API_KEY` | — | Neo4j GraphQL 인증 키 |
 | `MASC_LODGE_TICK_INTERVAL_SEC` | 2700 | Heartbeat 간격 (초, 45분) |
 | `MASC_LODGE_QUIET_START` / `MASC_LODGE_QUIET_END` | 3 / 7 | 조용한 시간 (KST) |
@@ -240,13 +247,14 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 
 ## 운영 메모
 
-- 기본 HTTP 엔드포인트: `/mcp`, `/health`, `/sse`
+- 기본 HTTP 엔드포인트: `/mcp`, `/health`
+- 레거시 endpoint(Deprecated): `/sse`, `/messages`
 - 시작 스크립트: `start-masc-mcp.sh` (Eio 런타임)
 - 내부 Guardian: 좀비 정리/GC/Lodge 루프 자동 실행 (프로세스 재기동은 하지 않음)
 - `start-masc-mcp.sh`는 기본으로 `MASC_GUARDIAN_ENABLED=true` 설정
 - 자동 시작은 환경별로 선택
 - 로그는 실행 방식에 따라 다름 (stdout/stderr 확인)
-- SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다: `curl -N http://127.0.0.1:8935/sse`
+- MCP SSE를 별도 터미널에서 모니터링하면 디버깅이 쉽습니다: `curl -N -H 'Accept: application/json, text/event-stream' http://127.0.0.1:8935/mcp`
 - Viewer는 URL query의 `token`/`auth_token`/`masc_token`을 초기 읽기 후 주소창에서 제거하고 로컬스토리지에 저장하지 않습니다.
 - auth strict 플래그는 운영 중 동적 토글보다 프로세스 재시작과 함께 고정 적용을 권장합니다.
 

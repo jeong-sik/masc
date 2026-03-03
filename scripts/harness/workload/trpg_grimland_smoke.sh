@@ -14,6 +14,8 @@ KEEPER_TAG="${KEEPER_TAG:-smoke-$(date +%s)}"
 DM_KEEPER="${DM_KEEPER:-dm-$KEEPER_TAG}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-30}"
 ROUND_KEEPER_TIMEOUT_SEC="${ROUND_KEEPER_TIMEOUT_SEC:-}"
+STRICT_MIN_KEEPER_TIMEOUT_SEC="${STRICT_MIN_KEEPER_TIMEOUT_SEC:-30}"
+ROUND_RUN_RETRY_COUNT="${ROUND_RUN_RETRY_COUNT:-2}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
 ROUND_LOCAL_FALLBACK="${ROUND_LOCAL_FALLBACK:-1}"
 REQUIRE_FULL_PARTY_SUCCESS="${REQUIRE_FULL_PARTY_SUCCESS:-0}"
@@ -294,6 +296,9 @@ keeper_precheck_once() {
   fi
   local response_text=""
   local snippet=""
+  local sa_json=""
+  local sa_type=""
+  local type_allowed=0
   local precheck_turn_instruction="이 턴은 형식 검증용입니다. 반드시 아래 규칙을 지키세요.
 - 정확히 2줄만 출력
 - 1줄: 한국어 서사 1문장
@@ -322,6 +327,25 @@ structured_action: {\"type\":\"$sample_type\",\"description\":\"$sample_descript
     else
       echo "[precheck] keeper=$keeper_name role=$role status=warn reason=missing_structured_action sample=${snippet:-<empty>}"
     fi
+  fi
+  sa_json="$(printf "%s" "$response_text" | sed -nE 's/.*structured_action[[:space:]]*:[[:space:]]*(\{.*\}).*/\1/p' | head -n1)"
+  sa_type="$(printf "%s" "$sa_json" | jq -r '.type // empty' 2>/dev/null || true)"
+  if [ -z "$sa_type" ]; then
+    echo "[precheck] keeper=$keeper_name role=$role status=fail reason=invalid_structured_action_json sample=${snippet:-<empty>}"
+    return 1
+  fi
+  if [ "$role" = "dm" ]; then
+    case "$sa_type" in
+      set_flag|world_event|quest_update|transition|talk) type_allowed=1 ;;
+    esac
+  else
+    case "$sa_type" in
+      attack|move|skill|defend|talk|item|cast) type_allowed=1 ;;
+    esac
+  fi
+  if [ "$type_allowed" -ne 1 ]; then
+    echo "[precheck] keeper=$keeper_name role=$role status=fail reason=invalid_action_type:$sa_type sample=${snippet:-<empty>}"
+    return 1
   fi
   if printf "%s" "$response_text" | grep -Eq 'SKILL:|SKILL_REASON:|\[STATE\]|state_snapshot_json|내 기록 기준으로는|직전에 이런 질문을 했어'; then
     echo "[precheck] keeper=$keeper_name role=$role status=fail reason=meta_marker_detected sample=${snippet:-<empty>}"
@@ -798,9 +822,6 @@ if [ "$POOL_SIZE" -lt "$PARTY_SIZE" ]; then
   POOL_SIZE="$PARTY_SIZE"
 fi
 echo "[bootstrap] strict_dialogue_mode=$STRICT_DIALOGUE_MODE"
-if [ -n "$(printf "%s" "$ROUND_KEEPER_TIMEOUT_SEC" | tr -d '[:space:]')" ]; then
-  echo "[bootstrap] round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC"
-fi
 KEEPER_MODELS_JSON="$(build_models_json)"
 KEEPER_AUTO_HANDOFF_JSON="$(bool_to_json "$KEEPER_AUTO_HANDOFF")"
 KEEPER_DRIFT_ENABLED_JSON="$(bool_to_json "$KEEPER_DRIFT_ENABLED")"
@@ -811,6 +832,31 @@ fi
 if [ "$REQUIRE_AGENT_DRIVEN" = "1" ] && [ "$REQUIRE_CLAIM_EXPLICIT" -ne 1 ] && [ "$(bool_to_json "$REQUIRE_CLAIM")" != "true" ]; then
   REQUIRE_CLAIM="true"
   echo "[bootstrap] auto-enable require_claim=true (REQUIRE_AGENT_DRIVEN=1)"
+fi
+round_keeper_timeout_trimmed="$(printf "%s" "$ROUND_KEEPER_TIMEOUT_SEC" | tr -d '[:space:]')"
+if [ "$REQUIRE_AGENT_DRIVEN" = "1" ]; then
+  if ! awk -v value="$STRICT_MIN_KEEPER_TIMEOUT_SEC" 'BEGIN { exit !(value+0==value && value>0) }'; then
+    echo "FAIL: STRICT_MIN_KEEPER_TIMEOUT_SEC must be a positive number" >&2
+    exit 1
+  fi
+  strict_min_keeper_timeout="$STRICT_MIN_KEEPER_TIMEOUT_SEC"
+  if awk -v min="$strict_min_keeper_timeout" -v round="$ROUND_TIMEOUT_SEC" 'BEGIN { exit !(min > round) }'; then
+    strict_min_keeper_timeout="$ROUND_TIMEOUT_SEC"
+  fi
+  if [ -z "$round_keeper_timeout_trimmed" ]; then
+    ROUND_KEEPER_TIMEOUT_SEC="$strict_min_keeper_timeout"
+    round_keeper_timeout_trimmed="$ROUND_KEEPER_TIMEOUT_SEC"
+    echo "[bootstrap] auto-enable round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC (REQUIRE_AGENT_DRIVEN=1)"
+  elif awk -v value="$ROUND_KEEPER_TIMEOUT_SEC" 'BEGIN { exit !(value+0==value && value>0) }'; then
+    if awk -v keeper="$ROUND_KEEPER_TIMEOUT_SEC" -v min="$strict_min_keeper_timeout" 'BEGIN { exit !(keeper < min) }'; then
+      ROUND_KEEPER_TIMEOUT_SEC="$strict_min_keeper_timeout"
+      round_keeper_timeout_trimmed="$ROUND_KEEPER_TIMEOUT_SEC"
+      echo "[bootstrap] auto-bump round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC (REQUIRE_AGENT_DRIVEN=1 strict-min)"
+    fi
+  fi
+fi
+if [ -n "$round_keeper_timeout_trimmed" ]; then
+  echo "[bootstrap] round_keeper_timeout_sec=$ROUND_KEEPER_TIMEOUT_SEC"
 fi
 REQUIRE_CLAIM_JSON="$(bool_to_json "$REQUIRE_CLAIM")"
 if [ "$(printf "%s" "$KEEPER_MODELS_JSON" | jq 'length')" -eq 0 ]; then
@@ -873,6 +919,10 @@ if ! [[ "$STRICT_KEEPER_RECOVERY_MAX_RETRIES" =~ ^[0-9]+$ ]] || [ "$STRICT_KEEPE
 fi
 if ! [[ "$STRICT_KEEPER_RECOVERY_DELAY_SEC" =~ ^[0-9]+$ ]] || [ "$STRICT_KEEPER_RECOVERY_DELAY_SEC" -lt 0 ]; then
   echo "FAIL: STRICT_KEEPER_RECOVERY_DELAY_SEC must be a non-negative integer" >&2
+  exit 1
+fi
+if ! [[ "$ROUND_RUN_RETRY_COUNT" =~ ^[0-9]+$ ]] || [ "$ROUND_RUN_RETRY_COUNT" -lt 1 ]; then
+  echo "FAIL: ROUND_RUN_RETRY_COUNT must be a positive integer" >&2
   exit 1
 fi
 resolve_world_preset_id
@@ -984,7 +1034,7 @@ if [ "$RUN_ROUND" = "1" ]; then
       else
         args_round="$(jq -cn --argjson t "$round_template" --argjson timeout "$ROUND_TIMEOUT_SEC" --argjson local_fallback "$round_local_fallback_json" --argjson strict_agent_driven "$strict_agent_driven_json" --argjson require_claim "$REQUIRE_CLAIM_JSON" --arg outcome_max_turn "$OUTCOME_MAX_TURN_EFFECTIVE" '{room_id:$t.room_id,dm_keeper:$t.dm_keeper,player_keepers:$t.player_keepers,phase:"round",timeout_sec:$timeout,require_claim:$require_claim,local_fallback:$local_fallback,strict_agent_driven:$strict_agent_driven} | if ($outcome_max_turn|length)>0 then . + {outcome_max_turn:($outcome_max_turn|tonumber)} else . end')"
       fi
-      r_round="$(call_tool $((4000 + i + round_recovery_attempt)) "trpg.round.run" "$args_round" "$ROUND_HTTP_TIMEOUT_SEC" "1")"
+      r_round="$(call_tool $((4000 + i + round_recovery_attempt)) "trpg.round.run" "$args_round" "$ROUND_HTTP_TIMEOUT_SEC" "$ROUND_RUN_RETRY_COUNT")"
       round_err="$(tool_error_message "$r_round")"
       if [ -n "$round_err" ]; then
         round_failures=$((round_failures + 1))

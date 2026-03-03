@@ -87,16 +87,20 @@ let from_mcp_params params =
     try Some (params |> U.member key |> U.to_string)
     with _ -> None
   in
-  let fallback_agent_name session_key =
+  let session_key_prefix session_key =
     let prefix_len = min 8 (String.length session_key) in
-    let prefix =
-      if prefix_len = 0 then "anon"
-      else String.sub session_key 0 prefix_len
-    in
+    if prefix_len = 0 then "unknown"
+    else String.sub session_key 0 prefix_len
+  in
+  let fallback_agent_name session_key =
+    let prefix = session_key_prefix session_key in
+    let prefix = if prefix = "unknown" then "anon" else prefix in
     Printf.sprintf "agent-%s" prefix
   in
   let session_key = match get_opt "_session_key" with
-    | Some k -> k
+    | Some k ->
+        let k = String.trim k in
+        if k = "" then generate_session_key () else k
     | None -> generate_session_key ()
   in
   let agent_name = match get_opt "_agent_name", get_opt "agent_name" with
@@ -249,6 +253,11 @@ let has_capability identity cap =
 
 (** Get display string for logging *)
 let to_display_string identity =
+  let session_key_prefix session_key =
+    let prefix_len = min 8 (String.length session_key) in
+    if prefix_len = 0 then "unknown"
+    else String.sub session_key 0 prefix_len
+  in
   let channel_str = match identity.channel with
     | Some c -> Printf.sprintf " via %s" (string_of_channel c)
     | None -> ""
@@ -259,7 +268,7 @@ let to_display_string identity =
   in
   Printf.sprintf "%s (%s)%s%s"
     identity.agent_name
-    (String.sub identity.session_key 0 8)
+    (session_key_prefix identity.session_key)
     channel_str
     room_str
 

@@ -33,6 +33,7 @@ type event =
   | Error of string
   | IdleDetected of int
   | Terminated of string
+  | CodingSpawn of { agent : string; exit_code : int; elapsed_ms : int }
 
 type loop_config = {
   initial_goal : string;
@@ -48,6 +49,12 @@ type loop_config = {
   compact_strategies : Context_manager.compaction_strategy list;
   session_base_dir : string;
   on_event : event -> unit;
+  (* Coding mode: spawn Claude Code instead of LLM direct calls *)
+  coding_mode : bool;
+  coding_agent : string;
+  coding_timeout_s : int;
+  coding_sw : Eio.Switch.t option;
+  coding_proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
 }
 
 type loop_state = {
@@ -105,6 +112,11 @@ let default_config ~goal ~models ?verifier ?session_dir () =
     ];
     session_base_dir = session_base;
     on_event = (fun _ -> ());  (* No-op default *)
+    coding_mode = false;
+    coding_agent = "claude";
+    coding_timeout_s = Env_config.Spawn.coding_timeout_seconds;
+    coding_sw = None;
+    coding_proc_mgr = None;
   }
 
 (* ================================================================ *)
@@ -242,8 +254,171 @@ let calculate_cost (usage : Llm_client.token_usage) (model : Llm_client.model_sp
   input_cost +. output_cost
 
 (* ================================================================ *)
+(* Coding Turn (spawn Claude Code)                                  *)
+(* ================================================================ *)
+
+(** Execute one coding turn by spawning Claude Code with current context.
+    Returns the spawn result for the caller to interpret. *)
+let coding_turn ~config ~state =
+  match config.coding_sw, config.coding_proc_mgr with
+  | Some sw, Some proc_mgr ->
+    let goal = config.initial_goal in
+    let turn = state.turn_count in
+    (* Extract latest state block from context messages for progress tracking *)
+    let progress =
+      let blocks =
+        List.concat_map
+          (fun (m : Llm_client.message) -> Context_manager.extract_state_blocks m.content)
+          (List.rev state.context.messages)
+      in
+      match blocks with
+      | latest :: _ -> latest
+      | [] -> "No previous state"
+    in
+    let prompt = sprintf
+      "Continue working on this goal:\n\n\
+       Goal: %s\n\n\
+       Turn: %d (Generation: %d)\n\n\
+       Previous progress:\n%s\n\n\
+       Instructions:\n\
+       - Make concrete progress toward the goal\n\
+       - Commit your work frequently\n\
+       - Report your progress at the end\n\
+       - If blocked, explain what's blocking you"
+      goal turn state.generation progress
+    in
+    let prompt_with_lifecycle = prompt ^ Spawn_eio.masc_lifecycle_suffix in
+    let result = Spawn_eio.spawn
+      ~sw ~proc_mgr
+      ~agent_name:config.coding_agent
+      ~prompt:prompt_with_lifecycle
+      ~timeout_seconds:config.coding_timeout_s
+      ()
+    in
+    config.on_event (CodingSpawn {
+      agent = config.coding_agent;
+      exit_code = result.Spawn_eio.exit_code;
+      elapsed_ms = result.Spawn_eio.elapsed_ms;
+    });
+    Ok result
+  | _ ->
+    Error "coding_mode requires coding_sw and coding_proc_mgr to be set"
+
+(* ================================================================ *)
 (* Single Turn Execution                                            *)
 (* ================================================================ *)
+
+(** Execute a single coding-mode turn.
+    Spawns Claude Code, parses output, updates state accordingly.
+    Returns true to continue, false to stop. *)
+let run_coding_turn ~config ~state =
+  let turn = state.turn_count in
+  let emit ev =
+    record_event state ev;
+    config.on_event ev
+  in
+  match coding_turn ~config ~state with
+  | Error e ->
+    emit (Error (sprintf "Turn %d: coding spawn failed: %s" turn e));
+    emit (Terminated "Coding mode misconfigured (missing sw/proc_mgr)");
+    state.running <- false;
+    false
+  | Ok result ->
+    let now_ts = Time_compat.now () in
+    state.last_turn_ts <- now_ts;
+    state.last_model_used <- config.coding_agent;
+    state.last_latency_ms <- result.Spawn_eio.elapsed_ms;
+
+    (* Track cost from spawn result *)
+    let cost = Option.value ~default:0.0 result.Spawn_eio.cost_usd in
+    state.total_cost <- state.total_cost +. cost;
+    let tokens_used =
+      (Option.value ~default:0 result.Spawn_eio.input_tokens) +
+      (Option.value ~default:0 result.Spawn_eio.output_tokens)
+    in
+    state.total_tokens <- state.total_tokens + tokens_used;
+
+    (* Add spawn output to context for continuity *)
+    let output_summary =
+      let raw = result.Spawn_eio.output in
+      if String.length raw > 2000 then
+        (String.sub raw 0 1000) ^ "\n...[truncated]...\n" ^
+        (String.sub raw (String.length raw - 1000) 1000)
+      else raw
+    in
+    let assistant_msg = Llm_client.assistant_msg
+      (sprintf "[Coding Agent: %s, exit=%d, elapsed=%dms]\n%s"
+         config.coding_agent result.Spawn_eio.exit_code
+         result.Spawn_eio.elapsed_ms output_summary) in
+    state.context <- Context_manager.append state.context assistant_msg;
+    Context_manager.persist_message state.session assistant_msg;
+
+    (* Reset idle if spawn succeeded; increment if failed *)
+    if result.Spawn_eio.success then
+      state.idle_turns <- 0
+    else
+      state.idle_turns <- state.idle_turns + 1;
+
+    (* Context management: compact if needed *)
+    let ratio = Context_manager.context_ratio state.context in
+    if ratio >= config.compact_threshold then begin
+      let before = state.context.token_count in
+      state.context <- Context_manager.compact
+        state.context config.compact_strategies;
+      let after = state.context.token_count in
+      state.compaction_count <- state.compaction_count + 1;
+      state.compaction_tokens_saved <- state.compaction_tokens_saved + max 0 (before - after);
+      state.last_compaction_ts <- Time_compat.now ();
+      state.last_compaction_before_tokens <- before;
+      state.last_compaction_after_tokens <- after;
+      emit (Compacted { before_tokens = before; after_tokens = after })
+    end;
+
+    (* Handoff if context exhausted *)
+    let ratio2 = Context_manager.context_ratio state.context in
+    if ratio2 >= config.handoff_threshold then begin
+      let next_model = match config.model_cascade with
+        | _ :: m :: _ -> m
+        | [m] -> m
+        | [] -> Llm_client.ollama_glm
+      in
+      emit (Handoff {
+        to_model = next_model.model_id;
+        generation = state.generation + 1;
+      });
+      emit (Terminated "Context handoff triggered (coding mode)");
+      state.running <- false;
+      false
+    end
+    else begin
+      (* Heartbeat *)
+      let now = Time_compat.now () in
+      if now -. state.last_heartbeat >= config.heartbeat_interval_s then begin
+        state.last_heartbeat <- now;
+        let pct = Context_manager.context_ratio state.context *. 100.0 in
+        emit (Heartbeat { turn; context_pct = pct })
+      end;
+
+      (* Check termination: goal complete, stuck, or spawn indicates context exhaustion *)
+      let content = result.Spawn_eio.output in
+      if is_goal_complete content then begin
+        emit (Terminated "Goal complete (coding mode)");
+        state.running <- false;
+        false
+      end else if is_stuck content then begin
+        emit (Terminated "Agent stuck (coding mode)");
+        state.running <- false;
+        false
+      end else if state.idle_turns >= config.max_idle_turns then begin
+        emit (IdleDetected state.idle_turns);
+        emit (Terminated "Max idle turns reached (coding mode)");
+        state.running <- false;
+        false
+      end else begin
+        emit (TurnEnd { turn; tokens_used; cost });
+        true
+      end
+    end
 
 let run_turn ~config ~state =
   if not state.running then false
@@ -255,6 +430,11 @@ let run_turn ~config ~state =
       config.on_event ev
     in
     emit (TurnStart turn);
+
+    (* Branch: coding mode spawns Claude Code, normal mode calls LLM directly *)
+    if config.coding_mode then
+      run_coding_turn ~config ~state
+    else begin
 
     (* 1. THINK + ACT: Call LLM *)
     let requests = build_requests config state in
@@ -435,6 +615,7 @@ let run_turn ~config ~state =
           true  (* Continue *)
         end
       end
+    end  (* else: normal LLM mode *)
   end
 
 (* ================================================================ *)
@@ -483,6 +664,7 @@ let status state : Yojson.Safe.t =
     | Error _ -> "error"
     | IdleDetected _ -> "idle_detected"
     | Terminated _ -> "terminated"
+    | CodingSpawn _ -> "coding_spawn"
   in
   let event_to_json (ev : event) : Yojson.Safe.t =
     match ev with
@@ -526,6 +708,13 @@ let status state : Yojson.Safe.t =
       `Assoc [("kind", `String (event_kind ev)); ("idle_turns", `Int n)]
     | Terminated reason ->
       `Assoc [("kind", `String (event_kind ev)); ("reason", `String reason)]
+    | CodingSpawn { agent; exit_code; elapsed_ms } ->
+      `Assoc [
+        ("kind", `String (event_kind ev));
+        ("agent", `String agent);
+        ("exit_code", `Int exit_code);
+        ("elapsed_ms", `Int elapsed_ms);
+      ]
   in
   let rec take n = function
     | [] -> []

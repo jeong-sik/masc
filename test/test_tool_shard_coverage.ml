@@ -173,6 +173,7 @@ let test_get_agent_shards_default () =
   Alcotest.(check int) "defaults" 5 (List.length shards)
 
 let test_set_get_agent_shards () =
+  Hashtbl.remove Tool_shard.agent_shards "test-agent-x";
   Tool_shard.set_agent_shards "test-agent-x" ["base"; "shell"];
   let shards = Tool_shard.get_agent_shards "test-agent-x" in
   Alcotest.(check int) "2 shards" 2 (List.length shards);
@@ -195,6 +196,7 @@ let test_execute_tool_list () =
   Alcotest.(check int) "5 shards in list" 5 (List.length shards)
 
 let test_execute_tool_list_with_agent () =
+  Hashtbl.remove Tool_shard.agent_shards "test-ex";
   Tool_shard.set_agent_shards "test-ex" ["base"; "board"];
   let (ok, json) = Tool_shard.execute "masc_tool_list"
     (`Assoc [("agent_name", `String "test-ex")]) in
@@ -204,6 +206,7 @@ let test_execute_tool_list_with_agent () =
   Hashtbl.remove Tool_shard.agent_shards "test-ex"
 
 let test_execute_grant () =
+  Hashtbl.remove Tool_shard.agent_shards "test-grant";
   Tool_shard.set_agent_shards "test-grant" ["base"];
   let (ok, json) = Tool_shard.execute "masc_tool_grant"
     (`Assoc [("agent_name", `String "test-grant"); ("shard_name", `String "board")]) in
@@ -219,6 +222,7 @@ let test_execute_grant_missing_params () =
   Alcotest.(check string) "error status" "error" status
 
 let test_execute_revoke () =
+  Hashtbl.remove Tool_shard.agent_shards "test-revoke";
   Tool_shard.set_agent_shards "test-revoke" ["base"; "board"; "shell"];
   let (ok, json) = Tool_shard.execute "masc_tool_revoke"
     (`Assoc [("agent_name", `String "test-revoke"); ("shard_name", `String "board")]) in
@@ -228,6 +232,7 @@ let test_execute_revoke () =
   Hashtbl.remove Tool_shard.agent_shards "test-revoke"
 
 let test_execute_revoke_non_removable () =
+  Hashtbl.remove Tool_shard.agent_shards "test-rev-base";
   Tool_shard.set_agent_shards "test-rev-base" ["base"; "board"];
   let (ok, json) = Tool_shard.execute "masc_tool_revoke"
     (`Assoc [("agent_name", `String "test-rev-base"); ("shard_name", `String "base")]) in

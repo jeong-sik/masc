@@ -39,15 +39,10 @@ let register_agent trace_id =
   let config = Perpetual_loop.default_config
     ~goal:"test goal" ~models:[test_model] () in
   let state = Perpetual_loop.create_state config in
-  (* Override trace_id for deterministic testing *)
   let state = { state with Perpetual_loop.generation = 0 } in
-  (* Use reflection to set trace_id — it's the first field *)
-  let state_with_id =
-    { state with Perpetual_loop.turn_count = state.Perpetual_loop.turn_count } in
-  (* Register using the state's actual trace_id, then return it *)
-  Hashtbl.replace Tool_perpetual.active_agents trace_id (state_with_id, config);
+  Hashtbl.replace Tool_perpetual.active_agents trace_id (state, config);
   Tool_perpetual.latest_trace_id := Some trace_id;
-  (state_with_id, config)
+  (state, config)
 
 (** Clear global state between tests. *)
 let cleanup () =
@@ -84,28 +79,30 @@ let test_dispatch_unknown () =
   Alcotest.(check bool) "unknown → None" true (result = None)
 
 let test_dispatch_routes_start () =
+  cleanup ();
   let ctx = make_ctx () in
-  (* Start with no valid models → should return error *)
   let result = Tool_perpetual.dispatch ctx ~name:"masc_perpetual_start"
     ~args:(`Assoc [("goal", `String "test"); ("models", `List [])]) in
   Alcotest.(check bool) "start routes" true (result <> None);
   cleanup ()
 
 let test_dispatch_routes_status () =
+  cleanup ();
   let ctx = make_ctx () in
   let result = Tool_perpetual.dispatch ctx ~name:"masc_perpetual_status"
     ~args:(`Assoc []) in
   Alcotest.(check bool) "status routes" true (result <> None)
 
 let test_dispatch_routes_stop () =
+  cleanup ();
   let ctx = make_ctx () in
   let result = Tool_perpetual.dispatch ctx ~name:"masc_perpetual_stop"
     ~args:(`Assoc []) in
   Alcotest.(check bool) "stop routes" true (result <> None)
 
 let test_dispatch_routes_inject () =
+  cleanup ();
   let ctx = make_ctx () in
-  (* inject with no running agent → error result *)
   let result = Tool_perpetual.dispatch ctx ~name:"masc_perpetual_inject"
     ~args:(`Assoc [("message", `String "hi")]) in
   Alcotest.(check bool) "inject routes" true (result <> None)
@@ -115,6 +112,7 @@ let test_dispatch_routes_inject () =
    ============================================================ *)
 
 let test_start_no_valid_models () =
+  cleanup ();
   let ctx = make_ctx () in
   let args = `Assoc [
     ("goal", `String "test goal");
@@ -131,6 +129,7 @@ let test_start_no_valid_models () =
   cleanup ()
 
 let test_start_with_valid_model () =
+  cleanup ();
   let ctx = make_ctx () in
   let args = `Assoc [
     ("goal", `String "write a poem");
@@ -148,6 +147,7 @@ let test_start_with_valid_model () =
   cleanup ()
 
 let test_start_optional_params () =
+  cleanup ();
   let ctx = make_ctx () in
   let args = `Assoc [
     ("goal", `String "test");
@@ -175,7 +175,8 @@ let test_status_no_agent () =
   let (ok, body) = Tool_perpetual.wrap_result (Tool_perpetual.handle_status (`Assoc [])) in
   Alcotest.(check bool) "fails" false ok;
   Alcotest.(check bool) "error in body" true
-    (String.contains body 'e') (* has "error" *)
+    (let parsed = Yojson.Safe.from_string body in
+     Yojson.Safe.Util.member "error" parsed <> `Null)
 
 let test_status_with_agent () =
   cleanup ();
@@ -260,7 +261,7 @@ let test_inject_with_agent () =
   ignore prev_idle;
   let parsed = Yojson.Safe.from_string body in
   let msg_len = Yojson.Safe.Util.(member "message_length" parsed |> to_int) in
-  Alcotest.(check int) "message_length" 13 msg_len;
+  Alcotest.(check int) "message_length" (String.length "new goal info") msg_len;
   cleanup ()
 
 (* ============================================================

@@ -684,6 +684,41 @@ function statFromActor(actor: Record<string, unknown>, primary: string, fallback
   return fallback
 }
 
+const KNOWN_ACTOR_STATS_KEYS = new Set([
+  'str',
+  'dex',
+  'con',
+  'int',
+  'wis',
+  'cha',
+  'strength',
+  'dexterity',
+  'constitution',
+  'intelligence',
+  'wisdom',
+  'charisma',
+  'hp',
+  'max_hp',
+  'mp',
+  'max_mp',
+  'level',
+  'xp',
+])
+
+function collectCustomStats(actor: Record<string, unknown>): Record<string, number> {
+  const stats = isRecord(actor.stats) ? actor.stats : {}
+  const custom: Record<string, number> = {}
+  Object.entries(stats).forEach(([key, value]) => {
+    const statKey = key.trim()
+    if (!statKey) return
+    if (KNOWN_ACTOR_STATS_KEYS.has(statKey.toLowerCase())) return
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      custom[statKey] = value
+    }
+  })
+  return custom
+}
+
 function normalizeDiceRoll(type: string, payload: Record<string, unknown>): TrpgEvent['dice_roll'] | undefined {
   if (type !== 'dice.rolled') return undefined
   const rawD20 = asNumber(payload.raw_d20, 0)
@@ -753,7 +788,12 @@ function eventContent(
     case 'phase.changed':
       return `Phase: ${asString(payload.phase, 'round')}`
     case 'actor.spawned':
-      return `Actor spawned: ${asString(payload.name, actorLabel || 'unknown')}`
+      return `Actor spawned: ${asString(
+        payload.name,
+        isRecord(payload.actor)
+          ? asString(payload.actor.name, actorLabel || 'unknown')
+          : (actorLabel || 'unknown'),
+      )}`
     case 'actor.claimed':
       return `${asString(payload.keeper_name, asString(payload.keeper, 'keeper'))} claimed ${actorLabel || 'actor'}`
     case 'actor.released':
@@ -909,8 +949,11 @@ function normalizeTrpgState(
       keeper,
       archetype: asString(actor.archetype, ''),
       persona: asString(actor.persona, ''),
+      portrait: asString(actor.portrait, '') || undefined,
+      background: asString(actor.background, '') || undefined,
       traits: asStringList(actor.traits),
       skills: asStringList(actor.skills),
+      stats_raw: collectCustomStats(actor),
       status: alive ? 'active' : 'dead',
       generation,
       joined_at: joinedAt || undefined,
@@ -1156,19 +1199,53 @@ export function advanceTrpgTurn(room: string, phase?: string): Promise<unknown> 
   })
 }
 
-export function spawnTrpgActor(room: string, actor: Partial<import('./types').TrpgActor>): Promise<unknown> {
-  return post('/api/v1/trpg/actors/spawn', {
+export interface TrpgSpawnActorRequest {
+  actor_id?: string
+  name?: string
+  role?: 'dm' | 'player' | 'npc'
+  keeper_name?: string
+  archetype?: string
+  persona?: string
+  portrait?: string
+  background?: string
+  hp?: number
+  max_hp?: number
+  alive?: boolean
+  traits?: string[]
+  skills?: string[]
+  inventory?: string[]
+  stats?: Record<string, number>
+}
+
+export interface TrpgSpawnActorResponse {
+  ok: boolean
+  actor_id: string
+  state?: unknown
+  [key: string]: unknown
+}
+
+export function spawnTrpgActor(
+  room: string,
+  actor: TrpgSpawnActorRequest,
+): Promise<TrpgSpawnActorResponse> {
+  const body: Record<string, unknown> = {
     room_id: room,
-    actor_id: actor.id,
-    name: actor.name,
-    role: actor.role,
-    ...(actor.stats
-      ? {
-          hp: actor.stats.hp,
-          max_hp: actor.stats.max_hp,
-        }
-      : {}),
-  })
+  }
+  if (actor.actor_id && actor.actor_id.trim()) body.actor_id = actor.actor_id.trim()
+  if (actor.name && actor.name.trim()) body.name = actor.name.trim()
+  if (actor.role) body.role = actor.role
+  if (actor.archetype && actor.archetype.trim()) body.archetype = actor.archetype.trim()
+  if (actor.persona && actor.persona.trim()) body.persona = actor.persona.trim()
+  if (actor.portrait && actor.portrait.trim()) body.portrait = actor.portrait.trim()
+  if (actor.background && actor.background.trim()) body.background = actor.background.trim()
+  if (actor.hp != null) body.hp = actor.hp
+  if (actor.max_hp != null) body.max_hp = actor.max_hp
+  if (actor.alive != null) body.alive = actor.alive
+  if (Array.isArray(actor.traits) && actor.traits.length > 0) body.traits = actor.traits
+  if (Array.isArray(actor.skills) && actor.skills.length > 0) body.skills = actor.skills
+  if (Array.isArray(actor.inventory) && actor.inventory.length > 0) body.inventory = actor.inventory
+  if (actor.stats && Object.keys(actor.stats).length > 0) body.stats = actor.stats
+  return post('/api/v1/trpg/actors/spawn', body)
 }
 
 export function claimTrpgActor(room: string, actorId: string, keeper: string): Promise<unknown> {

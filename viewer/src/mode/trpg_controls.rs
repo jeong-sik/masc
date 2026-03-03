@@ -1748,8 +1748,47 @@ fn actor_admin_input_i64(doc: &web_sys::Document, id: &str) -> Option<i64> {
     }
 }
 
-fn actor_admin_collect_stats(doc: &web_sys::Document) -> Option<Value> {
+fn actor_admin_collect_stats(doc: &web_sys::Document) -> Result<Option<Value>, String> {
     let mut stats = Map::new();
+    let stats_json_raw = actor_admin_input_value(doc, "actor-admin-stats-json");
+    if !stats_json_raw.is_empty() {
+        let parsed: Value = serde_json::from_str(&stats_json_raw)
+            .map_err(|e| format!("능력치 JSON 파싱 실패: {}", e))?;
+        let obj = parsed
+            .as_object()
+            .ok_or_else(|| "능력치 JSON은 object여야 합니다. 예: {\"luck\":7}".to_string())?;
+        for (raw_key, raw_value) in obj {
+            let key = raw_key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            let value = if let Some(v) = raw_value.as_i64() {
+                v
+            } else if let Some(v) = raw_value.as_f64() {
+                if !v.is_finite() {
+                    return Err(format!("능력치 JSON '{}' 값은 유한한 숫자여야 합니다.", key));
+                }
+                v.trunc() as i64
+            } else if let Some(v) = raw_value.as_str() {
+                let parsed = v.trim().parse::<f64>().map_err(|_| {
+                    format!(
+                        "능력치 JSON '{}' 값은 숫자 또는 숫자 문자열이어야 합니다.",
+                        key
+                    )
+                })?;
+                if !parsed.is_finite() {
+                    return Err(format!("능력치 JSON '{}' 값은 유한한 숫자여야 합니다.", key));
+                }
+                parsed.trunc() as i64
+            } else {
+                return Err(format!(
+                    "능력치 JSON '{}' 값은 숫자 또는 숫자 문자열이어야 합니다.",
+                    key
+                ));
+            };
+            stats.insert(key.to_string(), Value::Number(value.max(0).into()));
+        }
+    }
     for (key, input_id) in [
         ("str", "actor-admin-str"),
         ("dex", "actor-admin-dex"),
@@ -1763,9 +1802,9 @@ fn actor_admin_collect_stats(doc: &web_sys::Document) -> Option<Value> {
         }
     }
     if stats.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(Value::Object(stats))
+        Ok(Some(Value::Object(stats)))
     }
 }
 
@@ -2125,6 +2164,12 @@ fn bind_actor_admin_row_clicks(doc: &web_sys::Document) {
                 input.set_value(&cha_score);
             }
             if let Some(input) = doc
+                .get_element_by_id("actor-admin-stats-json")
+                .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
+                input.set_value("");
+            }
+            if let Some(input) = doc
                 .get_element_by_id("actor-admin-keeper")
                 .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
             {
@@ -2466,7 +2511,7 @@ async fn actor_admin_spawn(doc: &web_sys::Document) -> Result<String, String> {
     let name = actor_admin_input_value(doc, "actor-admin-name");
     let portrait = actor_admin_input_value(doc, "actor-admin-portrait");
     let background = actor_admin_input_value(doc, "actor-admin-background");
-    let stats = actor_admin_collect_stats(doc);
+    let stats = actor_admin_collect_stats(doc)?;
     let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
     let max_hp = actor_admin_input_i64(doc, "actor-admin-max-hp").unwrap_or(20);
     let hp = actor_admin_input_i64(doc, "actor-admin-hp").unwrap_or(max_hp);
@@ -2546,7 +2591,7 @@ async fn actor_admin_update(doc: &web_sys::Document) -> Result<String, String> {
     let name = actor_admin_input_value(doc, "actor-admin-name");
     let portrait = actor_admin_input_value(doc, "actor-admin-portrait");
     let background = actor_admin_input_value(doc, "actor-admin-background");
-    let stats = actor_admin_collect_stats(doc);
+    let stats = actor_admin_collect_stats(doc)?;
     let role = actor_admin_select_value(doc, "actor-admin-role");
     let keeper = actor_admin_input_value(doc, "actor-admin-keeper");
     let hp = actor_admin_input_i64(doc, "actor-admin-hp");

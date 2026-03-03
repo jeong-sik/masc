@@ -393,6 +393,13 @@
  (libraries alcotest unix)
  (deps ../bin/main_eio.exe))
 
+; TRPG actor API endpoint-level integration tests
+(test
+ (name test_trpg_actor_api_e2e)
+ (modules test_trpg_actor_api_e2e)
+ (libraries alcotest yojson unix)
+ (deps ../bin/main_eio.exe))
+
 ; Agent Registry Eio tests
 (test
  (name test_agent_registry_eio)

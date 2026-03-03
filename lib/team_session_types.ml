@@ -1,0 +1,430 @@
+(** Team session types for long-running collaborative orchestration. *)
+
+open Yojson.Safe.Util
+
+type session_status =
+  | Running
+  | Paused
+  | Completed
+  | Interrupted
+  | Failed
+
+type execution_scope =
+  | Observe_only
+  | Limited_code_change
+
+type orchestration_mode =
+  | Manual
+  | Assist
+  | Auto
+
+type communication_mode =
+  | Comm_off
+  | Comm_broadcast
+  | Comm_portal
+  | Comm_hybrid
+
+type fallback_policy =
+  | Fallback_none
+  | Fallback_cascade_then_task
+  | Fallback_task_only
+
+type instruction_profile =
+  | Profile_standard
+  | Profile_strict
+
+type alert_channel =
+  | Alert_broadcast
+  | Alert_board
+  | Alert_both
+
+type report_format =
+  | Markdown
+  | Json
+
+type session = {
+  session_id : string;
+  goal : string;
+  created_by : string;
+  room_id : string;
+  status : session_status;
+  duration_seconds : int;
+  execution_scope : execution_scope;
+  checkpoint_interval_sec : int;
+  min_agents : int;
+  orchestration_mode : orchestration_mode;
+  communication_mode : communication_mode;
+  model_cascade : string list;
+  fallback_policy : fallback_policy;
+  instruction_profile : instruction_profile;
+  alert_channel : alert_channel;
+  auto_resume : bool;
+  report_formats : report_format list;
+  agent_names : string list;
+  broadcast_count : int;
+  portal_count : int;
+  cascade_attempted : int;
+  cascade_success : int;
+  cascade_failed : int;
+  fallback_task_created : int;
+  min_agents_violation_streak : int;
+  policy_violations : string list;
+  baseline_done_counts : (string * int) list;
+  final_done_delta_total : int option;
+  final_done_delta_by_agent : (string * int) list option;
+  started_at : float;
+  planned_end_at : float;
+  stopped_at : float option;
+  last_checkpoint_at : float option;
+  last_event_at : float option;
+  stop_reason : string option;
+  generated_report : bool;
+  artifacts_dir : string;
+  created_at_iso : string;
+  updated_at_iso : string;
+}
+
+type event_entry = {
+  ts : float;
+  ts_iso : string;
+  event_type : string;
+  detail : Yojson.Safe.t;
+}
+
+type checkpoint = {
+  ts : float;
+  ts_iso : string;
+  status : session_status;
+  elapsed_sec : int;
+  remaining_sec : int;
+  progress_pct : float;
+  done_delta_total : int;
+  done_delta_by_agent : (string * int) list;
+  active_agents : string list;
+}
+
+let status_to_string = function
+  | Running -> "running"
+  | Paused -> "paused"
+  | Completed -> "completed"
+  | Interrupted -> "interrupted"
+  | Failed -> "failed"
+
+let status_of_string = function
+  | "running" -> Running
+  | "paused" -> Paused
+  | "completed" -> Completed
+  | "interrupted" -> Interrupted
+  | "failed" -> Failed
+  | _ -> Failed
+
+let execution_scope_to_string = function
+  | Observe_only -> "observe_only"
+  | Limited_code_change -> "limited_code_change"
+
+let execution_scope_of_string = function
+  | "limited_code_change" -> Limited_code_change
+  | _ -> Observe_only
+
+let orchestration_mode_to_string = function
+  | Manual -> "manual"
+  | Assist -> "assist"
+  | Auto -> "auto"
+
+let orchestration_mode_of_string = function
+  | "manual" -> Manual
+  | "auto" -> Auto
+  | _ -> Assist
+
+let communication_mode_to_string = function
+  | Comm_off -> "off"
+  | Comm_broadcast -> "broadcast"
+  | Comm_portal -> "portal"
+  | Comm_hybrid -> "hybrid"
+
+let communication_mode_of_string = function
+  | "off" -> Comm_off
+  | "portal" -> Comm_portal
+  | "hybrid" -> Comm_hybrid
+  | _ -> Comm_broadcast
+
+let fallback_policy_to_string = function
+  | Fallback_none -> "none"
+  | Fallback_cascade_then_task -> "cascade_then_task"
+  | Fallback_task_only -> "task_only"
+
+let fallback_policy_of_string = function
+  | "none" -> Fallback_none
+  | "task_only" -> Fallback_task_only
+  | _ -> Fallback_cascade_then_task
+
+let instruction_profile_to_string = function
+  | Profile_standard -> "standard"
+  | Profile_strict -> "strict"
+
+let instruction_profile_of_string = function
+  | "strict" -> Profile_strict
+  | _ -> Profile_standard
+
+let alert_channel_to_string = function
+  | Alert_broadcast -> "broadcast"
+  | Alert_board -> "board"
+  | Alert_both -> "both"
+
+let alert_channel_of_string = function
+  | "broadcast" -> Alert_broadcast
+  | "board" -> Alert_board
+  | _ -> Alert_both
+
+let report_format_to_string = function
+  | Markdown -> "markdown"
+  | Json -> "json"
+
+let report_format_of_string = function
+  | "markdown" -> Some Markdown
+  | "json" -> Some Json
+  | _ -> None
+
+let report_formats_of_strings xs =
+  let rec dedup acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+        if List.mem x acc then dedup acc rest else dedup (x :: acc) rest
+  in
+  xs
+  |> List.filter_map (fun s -> report_format_of_string (String.lowercase_ascii (String.trim s)))
+  |> dedup []
+
+let dedup_strings xs =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+        if List.mem x acc then loop acc rest else loop (x :: acc) rest
+  in
+  loop [] xs
+
+let assoc_find_default key pairs default =
+  match List.assoc_opt key pairs with Some v -> v | None -> default
+
+let done_delta_by_agent ~(baseline : (string * int) list) ~(current : (string * int) list)
+    ~(agents : string list) : (string * int) list =
+  let normalized_agents = dedup_strings agents in
+  let from_agents =
+    List.map
+      (fun agent ->
+        let base = assoc_find_default agent baseline 0 in
+        let now = assoc_find_default agent current 0 in
+        (agent, max 0 (now - base)))
+      normalized_agents
+  in
+  let extra_agents =
+    current
+    |> List.filter (fun (agent, _) -> not (List.mem_assoc agent from_agents))
+  in
+  (from_agents @ extra_agents)
+  |> List.sort (fun (a, _) (b, _) -> compare a b)
+
+let done_counts_from_backlog (backlog : Types.backlog) : (string * int) list =
+  let tbl = Hashtbl.create 16 in
+  let bump agent =
+    let v = match Hashtbl.find_opt tbl agent with Some n -> n | None -> 0 in
+    Hashtbl.replace tbl agent (v + 1)
+  in
+  List.iter
+    (fun (task : Types.task) ->
+      match task.task_status with
+      | Types.Done { assignee; _ } -> bump assignee
+      | _ -> ())
+    backlog.tasks;
+  Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
+  |> List.sort (fun (a, _) (b, _) -> compare a b)
+
+let assoc_int_to_json pairs =
+  `Assoc (List.map (fun (k, v) -> (k, `Int v)) pairs)
+
+let assoc_int_of_json json =
+  match json with
+  | `Assoc fields ->
+      List.filter_map
+        (fun (k, v) ->
+          match v with
+          | `Int n -> Some (k, n)
+          | `Intlit s -> (
+              try Some (k, int_of_string s) with _ -> None)
+          | _ -> None)
+        fields
+  | _ -> []
+
+let session_to_yojson (s : session) =
+  `Assoc
+    [
+      ("session_id", `String s.session_id);
+      ("goal", `String s.goal);
+      ("created_by", `String s.created_by);
+      ("room_id", `String s.room_id);
+      ("status", `String (status_to_string s.status));
+      ("duration_seconds", `Int s.duration_seconds);
+      ("execution_scope", `String (execution_scope_to_string s.execution_scope));
+      ("checkpoint_interval_sec", `Int s.checkpoint_interval_sec);
+      ("min_agents", `Int s.min_agents);
+      ("orchestration_mode", `String (orchestration_mode_to_string s.orchestration_mode));
+      ("communication_mode", `String (communication_mode_to_string s.communication_mode));
+      ("model_cascade", `List (List.map (fun m -> `String m) s.model_cascade));
+      ("fallback_policy", `String (fallback_policy_to_string s.fallback_policy));
+      ("instruction_profile", `String (instruction_profile_to_string s.instruction_profile));
+      ("alert_channel", `String (alert_channel_to_string s.alert_channel));
+      ("auto_resume", `Bool s.auto_resume);
+      ("report_formats", `List (List.map (fun f -> `String (report_format_to_string f)) s.report_formats));
+      ("agent_names", `List (List.map (fun a -> `String a) s.agent_names));
+      ("broadcast_count", `Int s.broadcast_count);
+      ("portal_count", `Int s.portal_count);
+      ("cascade_attempted", `Int s.cascade_attempted);
+      ("cascade_success", `Int s.cascade_success);
+      ("cascade_failed", `Int s.cascade_failed);
+      ("fallback_task_created", `Int s.fallback_task_created);
+      ("min_agents_violation_streak", `Int s.min_agents_violation_streak);
+      ("policy_violations", `List (List.map (fun v -> `String v) s.policy_violations));
+      ("baseline_done_counts", assoc_int_to_json s.baseline_done_counts);
+      ("final_done_delta_total", Option.fold ~none:`Null ~some:(fun v -> `Int v) s.final_done_delta_total);
+      ("final_done_delta_by_agent", Option.fold ~none:`Null ~some:assoc_int_to_json s.final_done_delta_by_agent);
+      ("started_at", `Float s.started_at);
+      ("planned_end_at", `Float s.planned_end_at);
+      ("stopped_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.stopped_at);
+      ("last_checkpoint_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.last_checkpoint_at);
+      ("last_event_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.last_event_at);
+      ("stop_reason", Option.fold ~none:`Null ~some:(fun v -> `String v) s.stop_reason);
+      ("generated_report", `Bool s.generated_report);
+      ("artifacts_dir", `String s.artifacts_dir);
+      ("created_at_iso", `String s.created_at_iso);
+      ("updated_at_iso", `String s.updated_at_iso);
+    ]
+
+let session_of_yojson json =
+  try
+    let get_int_default key default =
+      match member key json with
+      | `Int n -> n
+      | `Intlit s -> (try int_of_string s with _ -> default)
+      | _ -> default
+    in
+    let get_float_default key default =
+      match member key json with
+      | `Float v -> v
+      | `Int n -> float_of_int n
+      | `Intlit s -> (try float_of_string s with _ -> default)
+      | _ -> default
+    in
+    let started_at = get_float_default "started_at" (Time_compat.now ()) in
+    let duration_seconds = get_int_default "duration_seconds" 3600 in
+    let default_end = started_at +. float_of_int duration_seconds in
+    Some
+      {
+        session_id = json |> member "session_id" |> to_string;
+        goal = json |> member "goal" |> to_string;
+        created_by = json |> member "created_by" |> to_string_option |> Option.value ~default:"unknown";
+        room_id = json |> member "room_id" |> to_string_option |> Option.value ~default:"default";
+        status = json |> member "status" |> to_string_option |> Option.value ~default:"failed" |> status_of_string;
+        duration_seconds;
+        execution_scope =
+          json |> member "execution_scope" |> to_string_option |> Option.value ~default:"observe_only"
+          |> execution_scope_of_string;
+        checkpoint_interval_sec = get_int_default "checkpoint_interval_sec" 60;
+        min_agents = get_int_default "min_agents" 2;
+        orchestration_mode =
+          json |> member "orchestration_mode" |> to_string_option
+          |> Option.value ~default:"assist"
+          |> orchestration_mode_of_string;
+        communication_mode =
+          json |> member "communication_mode" |> to_string_option
+          |> Option.value ~default:"broadcast"
+          |> communication_mode_of_string;
+        model_cascade =
+          (match member "model_cascade" json with
+           | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
+           | _ -> [])
+          |> dedup_strings;
+        fallback_policy =
+          json |> member "fallback_policy" |> to_string_option
+          |> Option.value ~default:"cascade_then_task"
+          |> fallback_policy_of_string;
+        instruction_profile =
+          json |> member "instruction_profile" |> to_string_option
+          |> Option.value ~default:"standard"
+          |> instruction_profile_of_string;
+        alert_channel =
+          json |> member "alert_channel" |> to_string_option
+          |> Option.value ~default:"both"
+          |> alert_channel_of_string;
+        auto_resume = json |> member "auto_resume" |> to_bool_option |> Option.value ~default:true;
+        report_formats =
+          (match member "report_formats" json with
+           | `List xs ->
+               xs
+               |> List.filter_map (function `String s -> Some s | _ -> None)
+               |> report_formats_of_strings
+           | _ -> [])
+          |> (fun xs -> if xs = [] then [Markdown; Json] else xs);
+        agent_names =
+          (match member "agent_names" json with
+           | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
+           | _ -> []);
+        broadcast_count = get_int_default "broadcast_count" 0;
+        portal_count = get_int_default "portal_count" 0;
+        cascade_attempted = get_int_default "cascade_attempted" 0;
+        cascade_success = get_int_default "cascade_success" 0;
+        cascade_failed = get_int_default "cascade_failed" 0;
+        fallback_task_created = get_int_default "fallback_task_created" 0;
+        min_agents_violation_streak = get_int_default "min_agents_violation_streak" 0;
+        policy_violations =
+          (match member "policy_violations" json with
+           | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
+           | _ -> [])
+          |> dedup_strings;
+        baseline_done_counts = assoc_int_of_json (member "baseline_done_counts" json);
+        final_done_delta_total =
+          (match member "final_done_delta_total" json with
+           | `Int n -> Some n
+           | `Intlit s -> (try Some (int_of_string s) with _ -> None)
+           | _ -> None);
+        final_done_delta_by_agent =
+          (match member "final_done_delta_by_agent" json with
+           | `Assoc _ as assoc -> Some (assoc_int_of_json assoc)
+           | _ -> None);
+        started_at;
+        planned_end_at = get_float_default "planned_end_at" default_end;
+        stopped_at = json |> member "stopped_at" |> to_float_option;
+        last_checkpoint_at = json |> member "last_checkpoint_at" |> to_float_option;
+        last_event_at = json |> member "last_event_at" |> to_float_option;
+        stop_reason = json |> member "stop_reason" |> to_string_option;
+        generated_report = json |> member "generated_report" |> to_bool_option |> Option.value ~default:false;
+        artifacts_dir = json |> member "artifacts_dir" |> to_string_option |> Option.value ~default:"";
+        created_at_iso = json |> member "created_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
+        updated_at_iso = json |> member "updated_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
+      }
+  with exn ->
+    Printf.eprintf "[team_session] session_of_yojson parse failed: %s\n%!"
+      (Printexc.to_string exn);
+    None
+
+let event_entry_to_yojson (e : event_entry) =
+  `Assoc
+    [
+      ("ts", `Float e.ts);
+      ("ts_iso", `String e.ts_iso);
+      ("event_type", `String e.event_type);
+      ("detail", e.detail);
+    ]
+
+let checkpoint_to_yojson (c : checkpoint) =
+  `Assoc
+    [
+      ("ts", `Float c.ts);
+      ("ts_iso", `String c.ts_iso);
+      ("status", `String (status_to_string c.status));
+      ("elapsed_sec", `Int c.elapsed_sec);
+      ("remaining_sec", `Int c.remaining_sec);
+      ("progress_pct", `Float c.progress_pct);
+      ("done_delta_total", `Int c.done_delta_total);
+      ("done_delta_by_agent", assoc_int_to_json c.done_delta_by_agent);
+      ("active_agents", `List (List.map (fun a -> `String a) c.active_agents));
+    ]

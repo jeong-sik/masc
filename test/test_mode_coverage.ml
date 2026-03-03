@@ -152,7 +152,11 @@ let test_tool_category_core () =
   check bool "claim" true (Mode.tool_category "masc_claim" = Mode.Core);
   check bool "done" true (Mode.tool_category "masc_done" = Mode.Core);
   check bool "tasks" true (Mode.tool_category "masc_tasks" = Mode.Core);
-  check bool "add_task" true (Mode.tool_category "masc_add_task" = Mode.Core)
+  check bool "add_task" true (Mode.tool_category "masc_add_task" = Mode.Core);
+  check bool "team_session_list" true
+    (Mode.tool_category "masc_team_session_list" = Mode.Core);
+  check bool "team_session_compare" true
+    (Mode.tool_category "masc_team_session_compare" = Mode.Core)
 
 let test_tool_category_comm () =
   check bool "broadcast" true (Mode.tool_category "masc_broadcast" = Mode.Comm);

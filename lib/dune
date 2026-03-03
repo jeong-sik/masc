@@ -114,6 +114,10 @@
    room_utils
    room_worktree
    run_eio
+   team_session_types
+   team_session_store
+   team_session_report
+   team_session_engine_eio
    sctp
    sctp_eio
    sctp_transport
@@ -147,6 +151,7 @@
    tool_handover
    tool_relay
    tool_goals
+   tool_team_session
    tool_heartbeat
    tool_encryption
    tool_auth

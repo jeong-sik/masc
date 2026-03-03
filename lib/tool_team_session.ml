@@ -367,6 +367,28 @@ let handle_step ctx args : result =
               let spawn_agent_opt = get_string_opt args "spawn_agent" in
               let spawn_prompt_opt = get_string_opt args "spawn_prompt" in
               let spawn_timeout_seconds = get_int args "spawn_timeout_seconds" 300 in
+              let append_spawn_event ?spawn_agent ~success ?exit_code ?elapsed_ms
+                  ?output_preview ?error () =
+                let detail =
+                  `Assoc
+                    [
+                      ("actor", `String actor);
+                      ( "spawn_agent",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          spawn_agent );
+                      ("success", `Bool success);
+                      ("exit_code", int_opt_to_json exit_code);
+                      ("elapsed_ms", int_opt_to_json elapsed_ms);
+                      ( "output_preview",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          output_preview );
+                      ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) error);
+                      ("ts_iso", `String (Types.now_iso ()));
+                    ]
+                in
+                Team_session_store.append_event ctx.config session_id
+                  ~event_type:"team_step_spawn" ~detail
+              in
               let spawn_result_json, message_for_turn =
                 match (spawn_agent_opt, spawn_prompt_opt) with
                 | None, None -> (None, base_message)
@@ -374,11 +396,13 @@ let handle_step ctx args : result =
                     let msg =
                       "spawn_agent and spawn_prompt must be provided together"
                     in
+                    append_spawn_event ~success:false ~error:msg ();
                     (Some (`Assoc [ ("error", `String msg) ]), base_message)
                 | Some spawn_agent, Some spawn_prompt -> (
                     match ctx.proc_mgr with
                     | None ->
                         let msg = "process manager unavailable for team step spawn" in
+                        append_spawn_event ~spawn_agent ~success:false ~error:msg ();
                         (Some (`Assoc [ ("error", `String msg) ]), base_message)
                     | Some pm ->
                         let spawn_result =
@@ -386,26 +410,10 @@ let handle_step ctx args : result =
                             ~prompt:spawn_prompt ~timeout_seconds:spawn_timeout_seconds ()
                         in
                         let output_preview = truncate_for_event spawn_result.output in
-                        Team_session_store.append_event ctx.config session_id
-                          ~event_type:"team_step_spawn"
-                          ~detail:
-                            (`Assoc
-                              [
-                                ("actor", `String actor);
-                                ("spawn_agent", `String spawn_agent);
-                                ("success", `Bool spawn_result.success);
-                                ("exit_code", `Int spawn_result.exit_code);
-                                ("elapsed_ms", `Int spawn_result.elapsed_ms);
-                                ("output_preview", `String output_preview);
-                                ("input_tokens", int_opt_to_json spawn_result.input_tokens);
-                                ("output_tokens", int_opt_to_json spawn_result.output_tokens);
-                                ( "cache_creation_tokens",
-                                  int_opt_to_json
-                                    spawn_result.cache_creation_tokens );
-                                ("cache_read_tokens", int_opt_to_json spawn_result.cache_read_tokens);
-                                ("cost_usd", float_opt_to_json spawn_result.cost_usd);
-                                ("ts_iso", `String (Types.now_iso ()));
-                              ]);
+                        append_spawn_event ~spawn_agent
+                          ~success:spawn_result.success
+                          ~exit_code:spawn_result.exit_code
+                          ~elapsed_ms:spawn_result.elapsed_ms ~output_preview ();
                         let spawn_json =
                           `Assoc
                             [
@@ -414,6 +422,13 @@ let handle_step ctx args : result =
                               ("exit_code", `Int spawn_result.exit_code);
                               ("elapsed_ms", `Int spawn_result.elapsed_ms);
                               ("output_preview", `String output_preview);
+                              ("input_tokens", int_opt_to_json spawn_result.input_tokens);
+                              ("output_tokens", int_opt_to_json spawn_result.output_tokens);
+                              ( "cache_creation_tokens",
+                                int_opt_to_json
+                                  spawn_result.cache_creation_tokens );
+                              ("cache_read_tokens", int_opt_to_json spawn_result.cache_read_tokens);
+                              ("cost_usd", float_opt_to_json spawn_result.cost_usd);
                             ]
                         in
                         let merged_message =

@@ -14,6 +14,7 @@ Enable verifiable multi-agent collaboration sessions where spawned agents can:
 ## Core APIs
 
 - `masc_team_session_start`
+- `masc_team_session_turn`
 - `masc_team_session_step`
 - `masc_team_session_status`
 - `masc_team_session_finalize`
@@ -63,4 +64,3 @@ Recommended runtime policy:
 - conditional fallback to cloud models when local execution fails or times out.
 
 `fallback_policy=local_first_conditional` maps to session fallback handling with controlled degradation.
-

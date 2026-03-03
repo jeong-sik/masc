@@ -53,6 +53,11 @@ let events_count_of_body body =
   let result = result_field json in
   result |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int
 
+let events_list_of_body body =
+  let json = parse_json_exn body in
+  let result = result_field json in
+  result |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list
+
 let add_task_id config ~title =
   ignore (Room.add_task config ~title ~priority:1 ~description:"");
   let backlog = Room.read_backlog config in
@@ -723,6 +728,27 @@ let test_step_spawn_requires_proc_mgr () =
           ])
   in
   Alcotest.(check bool) "step should fail without proc_mgr for spawn" false step_ok;
+  let events_ok, events_body =
+    dispatch_exn ctx ~name:"masc_team_session_events"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("event_types", `List [ `String "team_step_spawn" ]);
+          ])
+  in
+  Alcotest.(check bool) "events query ok" true events_ok;
+  let events = events_list_of_body events_body in
+  Alcotest.(check int) "spawn failure event recorded" 1 (List.length events);
+  let first = List.hd events in
+  let detail = Yojson.Safe.Util.member "detail" first in
+  let success = detail |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "spawn failure success=false" false success;
+  let error_msg =
+    detail |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.to_string_option
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool) "spawn failure has error" true (String.trim error_msg <> "");
   ignore
     (dispatch_exn ctx ~name:"masc_team_session_stop"
        ~args:

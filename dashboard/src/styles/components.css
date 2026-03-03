@@ -767,6 +767,17 @@
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.06);
 }
+.trpg-actor-portrait-wrap {
+  margin-bottom: 8px;
+}
+.trpg-actor-portrait {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.03);
+}
 .trpg-actor-clickable {
   cursor: pointer;
   transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
@@ -864,6 +875,23 @@
 }
 .trpg-annot-desc {
   color: #a9bad8;
+}
+.trpg-custom-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trpg-custom-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(56,189,248,0.35);
+  background: rgba(56,189,248,0.12);
+  color: #7dd3fc;
+  font-size: 11px;
+  font-family: monospace;
 }
 
 /* TRPG Story */
@@ -1188,6 +1216,29 @@
 .trpg-control-field textarea:focus {
   outline: none;
   border-color: rgba(74,222,128,0.4);
+}
+.trpg-control-details {
+  margin-top: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+.trpg-control-details summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.trpg-control-details summary::-webkit-details-marker {
+  display: none;
+}
+.trpg-control-details[open] > .trpg-control-grid {
+  padding: 10px;
 }
 
 /* TRPG Run Button */

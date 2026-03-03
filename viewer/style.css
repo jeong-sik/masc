@@ -3762,6 +3762,36 @@ body.wasm-dom-fallback #bevy-canvas {
     gap: 8px 10px;
 }
 
+.actor-admin-grid-basic {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.actor-admin-details {
+    border: 1px solid rgba(109, 122, 164, 0.25);
+    border-radius: 8px;
+    background: rgba(10, 14, 26, 0.5);
+    overflow: hidden;
+}
+
+.actor-admin-details summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 7px 10px;
+    font-size: 10px;
+    letter-spacing: 0.45px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(109, 122, 164, 0.18);
+}
+
+.actor-admin-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.actor-admin-details[open] .actor-admin-grid {
+    padding: 8px;
+}
+
 .actor-admin-field-wide {
     grid-column: 1 / -1;
 }

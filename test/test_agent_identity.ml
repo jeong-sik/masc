@@ -44,8 +44,18 @@ let test_from_mcp_params_minimal () =
 let test_from_mcp_params_empty_session_key () =
   let params = `Assoc [("_session_key", `String "")] in
   let identity = Agent_identity.from_mcp_params params in
-  check string "empty session_key falls back to agent-anon"
-    "agent-anon" identity.agent_name
+  check bool "empty session_key is regenerated" true
+    (String.length identity.session_key > 0);
+  check bool "regenerated session agent_name starts with agent-" true
+    (String.sub identity.agent_name 0 6 = "agent-")
+
+let test_from_mcp_params_blank_session_key () =
+  let params = `Assoc [("_session_key", `String "   ")] in
+  let identity = Agent_identity.from_mcp_params params in
+  check bool "blank session_key is regenerated" true
+    (String.length identity.session_key > 0);
+  check bool "regenerated blank session agent_name starts with agent-" true
+    (String.sub identity.agent_name 0 6 = "agent-")
 
 let test_from_mcp_params_short_session_key () =
   let params = `Assoc [("_session_key", `String "abc")] in
@@ -117,6 +127,23 @@ let test_to_display_string () =
   let display = Agent_identity.to_display_string identity in
   check bool "contains agent_name" true (String.length display > 0);
   check bool "contains channel" true (str_contains (String.lowercase_ascii display) "telegram")
+
+let test_to_display_string_empty_session_key () =
+  let identity = Agent_identity.({
+    uuid = "agent-emptykey";
+    session_key = "";
+    agent_name = "empty-key-agent";
+    channel = Some Api;
+    user_id = None;
+    room_id = None;
+    capabilities = [];
+    registered_at = 0.0;
+    last_seen = 0.0;
+    metadata = [];
+  }) in
+  let display = Agent_identity.to_display_string identity in
+  check bool "empty session key display uses unknown prefix" true
+    (str_contains display "(unknown)")
 
 (** Registry tests *)
 module RegistryTests = struct
@@ -318,12 +345,14 @@ let () =
       test_case "from_mcp_params" `Quick test_from_mcp_params;
       test_case "from_mcp_params_minimal" `Quick test_from_mcp_params_minimal;
       test_case "from_mcp_params_empty_session_key" `Quick test_from_mcp_params_empty_session_key;
+      test_case "from_mcp_params_blank_session_key" `Quick test_from_mcp_params_blank_session_key;
       test_case "from_mcp_params_short_session_key" `Quick test_from_mcp_params_short_session_key;
       test_case "from_mcp_params_long_session_key_prefix" `Quick test_from_mcp_params_long_session_key_prefix;
       test_case "anonymous" `Quick test_anonymous;
       test_case "channel_roundtrip" `Quick test_channel_roundtrip;
       test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
+      test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;
     ];
     "registry", [
       test_case "register_and_find" `Quick RegistryTests.test_register_and_find;

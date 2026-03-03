@@ -19,7 +19,6 @@ import {
   tasks,
   keepers,
 } from './store'
-import type { TabId } from './types'
 import { Overview } from './components/overview'
 import { Council } from './components/council'
 import { Board } from './components/board'
@@ -34,6 +33,7 @@ import { ControlDock } from './components/control-dock'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
+import { DASHBOARD_NAV_ITEMS } from './config/navigation'
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -46,17 +46,6 @@ function ConnectionStatus() {
   `
 }
 
-const RAIL_TABS: { id: TabId; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'council', label: 'Decisions' },
-  { id: 'board', label: 'Discussions' },
-  { id: 'execution', label: 'Execution' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'goals', label: 'Goals' },
-  { id: 'journal', label: 'Journal' },
-  { id: 'trpg', label: 'TRPG' },
-]
-
 function SideRail() {
   const current = route.value.tab
   const liveConnected = connected.value
@@ -66,12 +55,12 @@ function SideRail() {
       <section class="rail-card">
         <h3>Views</h3>
         <div class="rail-tab-list">
-          ${RAIL_TABS.map(t => html`
+          ${DASHBOARD_NAV_ITEMS.map(t => html`
             <button
               class="rail-tab-btn ${current === t.id ? 'active' : ''}"
               onClick=${() => navigate(t.id)}
             >
-              ${t.label}
+              ${t.icon} ${t.label}
             </button>
           `)}
         </div>

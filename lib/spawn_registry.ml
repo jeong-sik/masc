@@ -167,7 +167,8 @@ let sweep reg =
 let maybe_sweep reg =
   let now = Time_compat.now () in
   if now -. reg.last_sweep > float_of_int Limits.sweeper_interval_sec then
-    ignore (sweep reg)
+    (try ignore (sweep reg)
+     with exn -> Printf.eprintf "[spawn_registry] sweep failed: %s\n%!" (Printexc.to_string exn))
 
 (** {1 Cooldown Management} *)
 

@@ -88,10 +88,11 @@ fn create_event_source(
     status_proxy: Arc<Mutex<ConnectionStatusProxy>>,
     mode_name: String,
 ) {
+    let safe_url = config::redact_auth_query(url);
     let es = match EventSource::new(url) {
         Ok(es) => es,
         Err(e) => {
-            log::warn!("Failed to create MASC EventSource at {}: {:?}", url, e);
+            log::warn!("Failed to create MASC EventSource at {}: {:?}", safe_url, e);
             attempt_reconnect(
                 messages,
                 es_handle,
@@ -149,7 +150,7 @@ fn create_event_source(
 
     // onopen: reset reconnect state, mark connected
     {
-        let connected_url = url.to_string();
+        let connected_url = safe_url.clone();
         let rs = reconnect_state.clone();
         let sp = status_proxy.clone();
         let callback = Closure::<dyn FnMut()>::new(move || {
@@ -255,8 +256,9 @@ fn attempt_reconnect(
             // Compute the URL, attaching lastEventId if we have one
             let base_url = config::sse_endpoint_by_name(&mode_name).unwrap_or_default();
             let url = reconnect::url_with_last_event_id(&base_url, &last_event_id);
+            let authed_url = config::attach_auth_query(&url);
             create_event_source(
-                &url,
+                &authed_url,
                 messages,
                 es_handle,
                 reconnect_state,
@@ -283,6 +285,7 @@ pub fn setup_masc_sse(
             return;
         }
     };
+    let url = config::attach_auth_query(&url);
 
     let messages = Arc::new(Mutex::new(Vec::new()));
     let es_handle: Arc<Mutex<Option<SendEventSource>>> = Arc::new(Mutex::new(None));

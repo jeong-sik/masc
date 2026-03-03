@@ -42,6 +42,37 @@ function jsonHeaders(): Record<string, string> {
 const DEFAULT_GET_TIMEOUT_MS = 15_000
 const DEFAULT_POST_TIMEOUT_MS = 30_000
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
+const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
+
+class ApiRequestError extends Error {
+  method: string
+  path: string
+  status?: number
+  statusText?: string
+  timeout: boolean
+
+  constructor(opts: {
+    method: string
+    path: string
+    status?: number
+    statusText?: string
+    timeout?: boolean
+    timeoutMs?: number
+  }) {
+    const method = opts.method.toUpperCase()
+    const timeout = opts.timeout === true
+    const message = timeout
+      ? `${method} ${opts.path}: timeout after ${opts.timeoutMs ?? 0}ms`
+      : `${method} ${opts.path}: ${opts.status ?? 'unknown'} ${opts.statusText ?? ''}`.trim()
+    super(message)
+    this.name = 'ApiRequestError'
+    this.method = method
+    this.path = opts.path
+    this.status = opts.status
+    this.statusText = opts.statusText
+    this.timeout = timeout
+  }
+}
 
 async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController()
@@ -55,7 +86,12 @@ async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: numb
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
-      throw new Error(`${method} ${path}: timeout after ${timeoutMs}ms`)
+      throw new ApiRequestError({
+        method,
+        path,
+        timeout: true,
+        timeoutMs,
+      })
     }
     throw err
   } finally {
@@ -76,8 +112,59 @@ function defaultBoardVoter(): string {
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetchWithTimeout(path, { headers: authHeaders() }, DEFAULT_GET_TIMEOUT_MS)
-  if (!res.ok) throw new Error(`GET ${path}: ${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    throw new ApiRequestError({
+      method: 'GET',
+      path,
+      status: res.status,
+      statusText: res.statusText,
+    })
+  }
   return res.json() as Promise<T>
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function parseStatusFromMessage(message: string): number | null {
+  const match = message.match(/\b(\d{3})\b/)
+  if (!match) return null
+  const statusToken = match[1]
+  if (!statusToken) return null
+  const status = Number.parseInt(statusToken, 10)
+  return Number.isFinite(status) ? status : null
+}
+
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof ApiRequestError) {
+    return err.timeout || (typeof err.status === 'number' && RETRYABLE_STATUS_CODES.has(err.status))
+  }
+
+  if (!(err instanceof Error)) return false
+  if (/timeout after \d+ms/i.test(err.message)) return true
+  const parsedStatus = parseStatusFromMessage(err.message)
+  return parsedStatus !== null && RETRYABLE_STATUS_CODES.has(parsedStatus)
+}
+
+async function withRetries<T>(
+  operation: string,
+  run: () => Promise<T>,
+  retries = 2,
+): Promise<T> {
+  let attempt = 0
+
+  while (true) {
+    try {
+      return await run()
+    } catch (err) {
+      if (!isRetryableError(err) || attempt >= retries) throw err
+      const delayMs = 250 * (attempt + 1)
+      console.warn(`[dashboard/api] ${operation} failed (attempt ${attempt + 1}), retrying in ${delayMs}ms`, err)
+      await sleep(delayMs)
+      attempt += 1
+    }
+  }
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -86,7 +173,14 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   }, DEFAULT_POST_TIMEOUT_MS)
-  if (!res.ok) throw new Error(`POST ${path}: ${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    throw new ApiRequestError({
+      method: 'POST',
+      path,
+      status: res.status,
+      statusText: res.statusText,
+    })
+  }
   return res.json() as Promise<T>
 }
 
@@ -104,7 +198,14 @@ async function postRaw(
     },
     body: JSON.stringify(body),
   }, timeoutMs)
-  if (!res.ok) throw new Error(`POST ${path}: ${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    throw new ApiRequestError({
+      method: 'POST',
+      path,
+      status: res.status,
+      statusText: res.statusText,
+    })
+  }
   return res.text()
 }
 
@@ -237,36 +338,40 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
 }
 
 export async function fetchBoard(sortBy?: BoardSortMode): Promise<{ posts: BoardPost[] }> {
-  const params = new URLSearchParams()
-  if (sortBy) params.set('sort_by', sortBy)
-  params.set('limit', '100')
-  const qs = params.toString()
-  const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
-  const posts = Array.isArray(raw.posts)
-    ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
-    : []
-  return { posts }
+  return withRetries('fetchBoard', async () => {
+    const params = new URLSearchParams()
+    if (sortBy) params.set('sort_by', sortBy)
+    params.set('limit', '100')
+    const qs = params.toString()
+    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
+    const posts = Array.isArray(raw.posts)
+      ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
+      : []
+    return { posts }
+  })
 }
 
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
-  const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?format=flat`)
-  const postRaw = isRecord(raw.post) ? raw.post : raw
-  const post = normalizeBoardPost(postRaw) ?? {
-    id: postId,
-    author: 'unknown',
-    title: 'Post',
-    content: '',
-    tags: [],
-    votes: 0,
-    comment_count: 0,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }
-  const commentsRaw = Array.isArray(raw.comments) ? raw.comments : []
-  const comments = commentsRaw
-    .map(normalizeBoardComment)
-    .filter((row): row is BoardComment => row !== null)
-  return { ...post, comments }
+  return withRetries('fetchBoardPost', async () => {
+    const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?format=flat`)
+    const postRaw = isRecord(raw.post) ? raw.post : raw
+    const post = normalizeBoardPost(postRaw) ?? {
+      id: postId,
+      author: 'unknown',
+      title: 'Post',
+      content: '',
+      tags: [],
+      votes: 0,
+      comment_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    const commentsRaw = Array.isArray(raw.comments) ? raw.comments : []
+    const comments = commentsRaw
+      .map(normalizeBoardComment)
+      .filter((row): row is BoardComment => row !== null)
+    return { ...post, comments }
+  })
 }
 
 export function fetchBoardHearths(): Promise<{ hearths: BoardHearth[] }> {
@@ -1202,45 +1307,49 @@ export async function fetchTaskHistory(taskId: string, limit = 20): Promise<stri
 }
 
 export async function fetchDebates(): Promise<CouncilDebate[]> {
-  const raw = await get<{ debates?: unknown[] }>('/api/v1/council/debates?limit=100')
-  if (!Array.isArray(raw.debates)) return []
-  return raw.debates
-    .map((item): CouncilDebate | null => {
-      if (!isRecord(item)) return null
-      const id = asString(item.id, '').trim()
-      const topic = asString(item.topic, '').trim()
-      if (!id || !topic) return null
-      return {
-        id,
-        topic,
-        status: asString(item.status, 'open'),
-        argument_count: asNumber(item.argument_count, 0),
-        created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
-      }
-    })
-    .filter((row): row is CouncilDebate => row !== null)
+  return withRetries('fetchDebates', async () => {
+    const raw = await get<{ debates?: unknown[] }>('/api/v1/council/debates?limit=100')
+    if (!Array.isArray(raw.debates)) return []
+    return raw.debates
+      .map((item): CouncilDebate | null => {
+        if (!isRecord(item)) return null
+        const id = asString(item.id, '').trim()
+        const topic = asString(item.topic, '').trim()
+        if (!id || !topic) return null
+        return {
+          id,
+          topic,
+          status: asString(item.status, 'open'),
+          argument_count: asNumber(item.argument_count, 0),
+          created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
+        }
+      })
+      .filter((row): row is CouncilDebate => row !== null)
+  })
 }
 
 export async function fetchCouncilSessions(): Promise<CouncilSession[]> {
-  const raw = await get<{ sessions?: unknown[] }>('/api/v1/council/sessions?limit=100')
-  if (!Array.isArray(raw.sessions)) return []
-  return raw.sessions
-    .map((item): CouncilSession | null => {
-      if (!isRecord(item)) return null
-      const id = asString(item.id, '').trim()
-      const topic = asString(item.topic, '').trim()
-      if (!id || !topic) return null
-      return {
-        id,
-        topic,
-        initiator: asString(item.initiator, 'system'),
-        votes: asNumber(item.votes, 0),
-        quorum: asNumber(item.quorum, 0),
-        state: asString(item.state, 'open'),
-        created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
-      }
-    })
-    .filter((row): row is CouncilSession => row !== null)
+  return withRetries('fetchCouncilSessions', async () => {
+    const raw = await get<{ sessions?: unknown[] }>('/api/v1/council/sessions?limit=100')
+    if (!Array.isArray(raw.sessions)) return []
+    return raw.sessions
+      .map((item): CouncilSession | null => {
+        if (!isRecord(item)) return null
+        const id = asString(item.id, '').trim()
+        const topic = asString(item.topic, '').trim()
+        if (!id || !topic) return null
+        return {
+          id,
+          topic,
+          initiator: asString(item.initiator, 'system'),
+          votes: asNumber(item.votes, 0),
+          quorum: asNumber(item.quorum, 0),
+          state: asString(item.state, 'open'),
+          created_at: toIsoTimestamp(item.created_at_iso ?? item.created_at),
+        }
+      })
+      .filter((row): row is CouncilSession => row !== null)
+  })
 }
 
 export async function startDebate(topic: string): Promise<CouncilDebate | null> {
@@ -1253,22 +1362,24 @@ export async function startDebate(topic: string): Promise<CouncilDebate | null> 
 }
 
 export async function fetchDebateStatus(debateId: string): Promise<CouncilDebateSummary | null> {
-  const safeId = encodeURIComponent(debateId)
-  const raw = await get<Record<string, unknown>>(`/api/v1/council/debates/${safeId}/summary`)
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  if (!id) return null
-  return {
-    id,
-    topic: asString(raw.topic, ''),
-    status: asString(raw.status, 'open'),
-    support_count: asNumber(raw.support_count, 0),
-    oppose_count: asNumber(raw.oppose_count, 0),
-    neutral_count: asNumber(raw.neutral_count, 0),
-    total_arguments: asNumber(raw.total_arguments, 0),
-    created_at: toIsoTimestamp(raw.created_at_iso ?? raw.created_at),
-    summary_text: asString(raw.summary_text, ''),
-  }
+  return withRetries('fetchDebateStatus', async () => {
+    const safeId = encodeURIComponent(debateId)
+    const raw = await get<Record<string, unknown>>(`/api/v1/council/debates/${safeId}/summary`)
+    if (!isRecord(raw)) return null
+    const id = asString(raw.id, '').trim()
+    if (!id) return null
+    return {
+      id,
+      topic: asString(raw.topic, ''),
+      status: asString(raw.status, 'open'),
+      support_count: asNumber(raw.support_count, 0),
+      oppose_count: asNumber(raw.oppose_count, 0),
+      neutral_count: asNumber(raw.neutral_count, 0),
+      total_arguments: asNumber(raw.total_arguments, 0),
+      created_at: toIsoTimestamp(raw.created_at_iso ?? raw.created_at),
+      summary_text: asString(raw.summary_text, ''),
+    }
+  })
 }
 
 export function sendKeeperMessage(name: string, message: string, models?: string[]): Promise<string> {

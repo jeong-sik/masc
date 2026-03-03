@@ -110,6 +110,24 @@ let list_credentials config : agent_credential list =
   else
     []
 
+(** Find credential by raw token (hash lookup + expiry check) *)
+let find_credential_by_token config ~token : (agent_credential, masc_error) result =
+  let token_hash = sha256_hash token in
+  match List.find_opt (fun cred -> cred.token = token_hash) (list_credentials config) with
+  | None -> Error (InvalidToken "Token mismatch")
+  | Some cred ->
+      (match cred.expires_at with
+       | None -> Ok cred
+       | Some exp_str ->
+           let now = now_iso () in
+           if now > exp_str then Error (TokenExpired cred.agent_name) else Ok cred)
+
+(** Resolve agent_name from raw token *)
+let resolve_agent_from_token config ~token : (string, masc_error) result =
+  match find_credential_by_token config ~token with
+  | Ok cred -> Ok cred.agent_name
+  | Error e -> Error e
+
 (* ============================================ *)
 (* Token operations                             *)
 (* ============================================ *)
@@ -230,10 +248,41 @@ let permission_for_tool = function
   | "masc_auth_status" | "masc_auth_refresh" -> Some CanReadState
   | _ -> None
 
+(** Strict tool auth mode:
+    - 0/false: legacy fail-open for unknown tools
+    - 1/true: unknown masc_* tools require at least worker-level permission *)
+let is_tool_auth_strict_enabled () =
+  match Sys.getenv_opt "MASC_TOOL_AUTH_STRICT" with
+  | Some raw ->
+      let v = String.trim raw |> String.lowercase_ascii in
+      v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
+  | None -> false
+
+let is_masc_tool_name tool_name =
+  String.length tool_name >= 5 && String.sub tool_name 0 5 = "masc_"
+
+let string_starts_with s prefix =
+  let len_s = String.length s in
+  let len_p = String.length prefix in
+  len_s >= len_p && String.sub s 0 len_p = prefix
+
+let is_protocol_canonical_tool_name tool_name =
+  string_starts_with tool_name "decision."
+  || string_starts_with tool_name "experiment."
+  || string_starts_with tool_name "trpg."
+  || string_starts_with tool_name "client."
+
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match permission_for_tool tool_name with
-  | None -> Ok ()  (* Unknown tool - allow (fail-open for extensibility) *)
+  | None ->
+      if not (is_tool_auth_strict_enabled ()) then
+        Ok ()  (* Legacy fail-open *)
+      else if is_masc_tool_name tool_name || is_protocol_canonical_tool_name tool_name then
+        (* Conservative default in strict mode for unmapped internal tools. *)
+        check_permission config ~agent_name ~token ~permission:CanBroadcast
+      else
+        Error (Forbidden { agent = agent_name; action = "use unknown non-masc tool" })
   | Some perm -> check_permission config ~agent_name ~token ~permission:perm
 
 (* ============================================ *)

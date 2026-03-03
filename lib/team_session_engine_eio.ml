@@ -49,6 +49,33 @@ let active_agent_names (config : Room.config) =
   |> Team_session_types.dedup_strings
   |> List.sort String.compare
 
+let session_visible_to_agent ~(agent_name : string)
+    (session : Team_session_types.session) =
+  String.equal agent_name session.created_by
+  || List.exists (String.equal agent_name) session.agent_names
+
+let compute_live_done_delta (config : Room.config)
+    (session : Team_session_types.session) =
+  let backlog = Room.read_backlog config in
+  let current_done = Team_session_types.done_counts_from_backlog backlog in
+  let deltas =
+    Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
+      ~current:current_done ~agents:session.agent_names
+  in
+  let done_total = List.fold_left (fun acc (_, n) -> acc + n) 0 deltas in
+  (deltas, done_total)
+
+let done_delta_metrics (config : Room.config) (session : Team_session_types.session)
+    : (string * int) list * int =
+  match (session.final_done_delta_by_agent, session.final_done_delta_total) with
+  | Some deltas, Some total -> (deltas, total)
+  | Some deltas, None ->
+      (deltas, List.fold_left (fun acc (_, n) -> acc + n) 0 deltas)
+  | None, Some total ->
+      let deltas, _ = compute_live_done_delta config session in
+      (deltas, total)
+  | None, None -> compute_live_done_delta config session
+
 let policy_violations_add violations entry =
   Team_session_types.dedup_strings (violations @ [ entry ])
   |> take_last 64
@@ -167,13 +194,7 @@ let summary_json_of_session (config : Room.config)
     else
       min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
-  let backlog = Room.read_backlog config in
-  let current_done = Team_session_types.done_counts_from_backlog backlog in
-  let deltas =
-    Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
-      ~current:current_done ~agents:session.agent_names
-  in
-  let done_total = List.fold_left (fun acc (_, n) -> acc + n) 0 deltas in
+  let deltas, done_total = done_delta_metrics config session in
   let active_agents = active_agent_names config in
   `Assoc
     [
@@ -464,12 +485,17 @@ let finalize_session ~(config : Room.config) ~(session_id : string)
             Some session
           end else
             let now = Time_compat.now () in
+            let final_done_delta_by_agent, final_done_delta_total =
+              compute_live_done_delta config session
+            in
             let updated =
               {
                 session with
                 status = final_status;
                 stopped_at = Some now;
                 stop_reason = Some reason;
+                final_done_delta_total = Some final_done_delta_total;
+                final_done_delta_by_agent = Some final_done_delta_by_agent;
                 last_event_at = Some now;
                 updated_at_iso = now_iso ();
               }
@@ -638,6 +664,8 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         min_agents_violation_streak = 0;
         policy_violations = [];
         baseline_done_counts;
+        final_done_delta_total = None;
+        final_done_delta_by_agent = None;
         started_at = now;
         planned_end_at = now +. float_of_int duration_seconds;
         stopped_at = None;
@@ -832,7 +860,7 @@ let generate_report ~(config : Room.config) ~(session_id : string)
                      "report generated but failed to mark generated_report: %s" e)
             )
 
-let list_sessions ~(config : Room.config)
+let list_sessions ~(config : Room.config) ~(requester_agent : string option)
     ~(status_filter : Team_session_types.session_status option) ~(limit : int) :
     (Yojson.Safe.t, string) result =
   let limit = clamp_int ~min_v:1 ~max_v:200 limit in
@@ -848,6 +876,14 @@ let list_sessions ~(config : Room.config)
            | Some s ->
                List.filter
                  (fun (x : Team_session_types.session) -> x.status = s)
+                 xs)
+      |> (fun xs ->
+           match requester_agent with
+           | None -> xs
+           | Some agent_name ->
+               List.filter
+                 (fun (x : Team_session_types.session) ->
+                   session_visible_to_agent ~agent_name x)
                  xs)
       |> take limit
     in
@@ -882,8 +918,9 @@ let list_sessions ~(config : Room.config)
         ])
   with exn -> Error (Printexc.to_string exn)
 
-let compare_sessions ~(config : Room.config) ~(base_session_id : string)
-    ~(target_session_id : string) : (Yojson.Safe.t, string) result =
+let compare_sessions ~(config : Room.config) ~(requester_agent : string option)
+    ~(base_session_id : string) ~(target_session_id : string) :
+    (Yojson.Safe.t, string) result =
   match
     ( Team_session_store.load_session config base_session_id,
       Team_session_store.load_session config target_session_id )
@@ -893,6 +930,16 @@ let compare_sessions ~(config : Room.config) ~(base_session_id : string)
   | _, None ->
       Error (Printf.sprintf "team session not found: %s" target_session_id)
   | Some base_session, Some target_session ->
+      let authorized =
+        match requester_agent with
+        | None -> true
+        | Some agent_name ->
+            session_visible_to_agent ~agent_name base_session
+            && session_visible_to_agent ~agent_name target_session
+      in
+      if not authorized then
+        Error "not authorized for this team session compare"
+      else
       let base_summary = summary_json_of_session config base_session in
       let target_summary = summary_json_of_session config target_session in
       let base_done = parse_summary_int "done_delta_total" base_summary in

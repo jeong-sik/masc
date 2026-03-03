@@ -6,6 +6,8 @@
 - 진행 조회: `masc_team_session_status`
 - 종료 요청: `masc_team_session_stop`
 - 보고서 생성: `masc_team_session_report`
+- 세션 목록: `masc_team_session_list`
+- 세션 비교: `masc_team_session_compare`
 
 핵심 동작:
 
@@ -111,5 +113,7 @@
 ## 운영 메모
 
 - `start/stop`는 join-required 도구로 동작합니다.
-- `status/report`는 read-only 도구로 동작합니다.
+- `status/report/list/compare`는 read-only 도구로 동작합니다.
+- `status/stop/report/compare`는 세션 참여자(`created_by` 또는 `agent_names`)만 접근할 수 있습니다.
+- `list`는 호출자 기준 접근 가능한 세션만 반환합니다.
 - 종료 직후에도 `force_regenerate=true`로 보고서를 다시 생성할 수 있습니다.

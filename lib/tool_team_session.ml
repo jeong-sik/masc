@@ -225,8 +225,8 @@ let handle_list ctx args : result =
   | Error e -> (false, json_error e)
   | Ok status_filter -> (
       match
-        Team_session_engine_eio.list_sessions ~config:ctx.config ~status_filter
-          ~limit
+        Team_session_engine_eio.list_sessions ~config:ctx.config
+          ~requester_agent:(Some ctx.agent_name) ~status_filter ~limit
       with
       | Ok json -> (true, json_ok [ ("result", json) ])
       | Error e -> (false, json_error e))
@@ -239,7 +239,8 @@ let handle_compare ctx args : result =
   | Ok base_session_id, Ok target_session_id -> (
       match
         Team_session_engine_eio.compare_sessions ~config:ctx.config
-          ~base_session_id ~target_session_id
+          ~requester_agent:(Some ctx.agent_name) ~base_session_id
+          ~target_session_id
       with
       | Ok json -> (true, json_ok [ ("result", json) ])
       | Error e -> (false, json_error e))

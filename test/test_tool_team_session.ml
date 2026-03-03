@@ -41,6 +41,25 @@ let session_status_of_body body =
   result |> Yojson.Safe.Util.member "session" |> Yojson.Safe.Util.member "status"
   |> Yojson.Safe.Util.to_string
 
+let done_delta_total_of_status_body body =
+  let json = parse_json_exn body in
+  let result = result_field json in
+  result |> Yojson.Safe.Util.member "summary"
+  |> Yojson.Safe.Util.member "done_delta_total"
+  |> Yojson.Safe.Util.to_int
+
+let add_task_id config ~title =
+  ignore (Room.add_task config ~title ~priority:1 ~description:"");
+  let backlog = Room.read_backlog config in
+  match List.rev backlog.tasks with
+  | t :: _ -> t.id
+  | [] -> failwith "failed to create task"
+
+let transition_task_ok config ~agent_name ~task_id ~action =
+  match Room.transition_task_r config ~agent_name ~task_id ~action () with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e)
+
 let wait_until_terminal ctx session_id =
   let rec loop attempts =
     if attempts <= 0 then
@@ -227,6 +246,8 @@ let test_recover_elapsed_session () =
       min_agents_violation_streak = 0;
       policy_violations = [];
       baseline_done_counts = [];
+      final_done_delta_total = None;
+      final_done_delta_by_agent = None;
       started_at = now -. 120.0;
       planned_end_at = now -. 5.0;
       stopped_at = None;
@@ -444,6 +465,28 @@ let test_unauthorized_session_access () =
   in
   Alcotest.(check bool) "unauthorized stop denied" false stop_ok;
 
+  let list_ok, list_body =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_list"
+      ~args:(`Assoc [ ("limit", `Int 10) ])
+  in
+  Alcotest.(check bool) "unauthorized list filtered" true list_ok;
+  let listed_sessions =
+    parse_json_exn list_body |> result_field |> Yojson.Safe.Util.member "sessions"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "unauthorized list empty" 0 (List.length listed_sessions);
+
+  let compare_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_compare"
+      ~args:
+        (`Assoc
+          [
+            ("base_session_id", `String session_id);
+            ("target_session_id", `String session_id);
+          ])
+  in
+  Alcotest.(check bool) "unauthorized compare denied" false compare_ok;
+
   let owner_stop_ok, _ =
     dispatch_exn owner_ctx ~name:"masc_team_session_stop"
       ~args:
@@ -456,6 +499,78 @@ let test_unauthorized_session_access () =
   in
   Alcotest.(check bool) "owner stop allowed" true owner_stop_ok;
   ignore (wait_until_terminal owner_ctx session_id);
+  cleanup_dir base_dir
+
+let test_final_done_delta_snapshot_stable () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env }
+  in
+  let session_id = start_session_exn ctx ~goal:"snapshot-stability" |> get_session_id in
+
+  let task_before = add_task_id config ~title:"before-finalize" in
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"claim";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"start";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"done";
+
+  let stop_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_stop"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("reason", `String "snapshot_finalize");
+            ("generate_report", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "stop accepted" true stop_ok;
+  ignore (wait_until_terminal ctx session_id);
+
+  let status_ok_before, status_body_before =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status before stable check" true status_ok_before;
+  let done_before = done_delta_total_of_status_body status_body_before in
+  Alcotest.(check int) "done delta before finalize snapshot" 1 done_before;
+
+  let task_after = add_task_id config ~title:"after-finalize" in
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"claim";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"start";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"done";
+
+  let status_ok_after, status_body_after =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status after stable check" true status_ok_after;
+  let done_after = done_delta_total_of_status_body status_body_after in
+  Alcotest.(check int) "done delta should stay frozen after finalize" done_before
+    done_after;
+
+  let report_ok, report_body =
+    dispatch_exn ctx ~name:"masc_team_session_report"
+      ~args:
+        (`Assoc
+          [ ("session_id", `String session_id); ("force_regenerate", `Bool true) ])
+  in
+  Alcotest.(check bool) "report regenerate" true report_ok;
+  let report_json = parse_json_exn report_body |> result_field in
+  let report_json_path =
+    report_json |> Yojson.Safe.Util.member "json_path" |> Yojson.Safe.Util.to_string
+  in
+  let report_doc = Room_utils.read_json config report_json_path in
+  let done_in_report =
+    report_doc |> Yojson.Safe.Util.member "summary"
+    |> Yojson.Safe.Util.member "done_delta_total"
+    |> Yojson.Safe.Util.to_int
+  in
+  Alcotest.(check int) "report uses frozen done delta" done_before done_in_report;
   cleanup_dir base_dir
 
 let () =
@@ -477,5 +592,7 @@ let () =
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;
           Alcotest.test_case "unauthorized-session-access" `Quick
             test_unauthorized_session_access;
+          Alcotest.test_case "final-done-delta-snapshot-stable" `Quick
+            test_final_done_delta_snapshot_stable;
         ] );
     ]

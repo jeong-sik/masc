@@ -53,14 +53,25 @@ let cascade_metrics_json (session : Team_session_types.session) =
     ]
 
 let summary_metrics (session : Team_session_types.session) config =
-  let backlog = Room.read_backlog config in
-  let current_done = Team_session_types.done_counts_from_backlog backlog in
-  let delta_by_agent =
-    Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
-      ~current:current_done ~agents:session.agent_names
+  let live_delta_by_agent, live_done_delta_total =
+    let backlog = Room.read_backlog config in
+    let current_done = Team_session_types.done_counts_from_backlog backlog in
+    let delta_by_agent =
+      Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
+        ~current:current_done ~agents:session.agent_names
+    in
+    let done_delta_total =
+      List.fold_left (fun acc (_, n) -> acc + n) 0 delta_by_agent
+    in
+    (delta_by_agent, done_delta_total)
   in
-  let done_delta_total =
-    List.fold_left (fun acc (_, n) -> acc + n) 0 delta_by_agent
+  let delta_by_agent, done_delta_total =
+    match (session.final_done_delta_by_agent, session.final_done_delta_total) with
+    | Some deltas, Some total -> (deltas, total)
+    | Some deltas, None ->
+        (deltas, List.fold_left (fun acc (_, n) -> acc + n) 0 deltas)
+    | None, Some total -> (live_delta_by_agent, total)
+    | None, None -> (live_delta_by_agent, live_done_delta_total)
   in
   let now = Time_compat.now () in
   let end_time = Option.value session.stopped_at ~default:now in

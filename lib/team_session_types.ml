@@ -70,6 +70,8 @@ type session = {
   min_agents_violation_streak : int;
   policy_violations : string list;
   baseline_done_counts : (string * int) list;
+  final_done_delta_total : int option;
+  final_done_delta_by_agent : (string * int) list option;
   started_at : float;
   planned_end_at : float;
   stopped_at : float option;
@@ -283,6 +285,8 @@ let session_to_yojson (s : session) =
       ("min_agents_violation_streak", `Int s.min_agents_violation_streak);
       ("policy_violations", `List (List.map (fun v -> `String v) s.policy_violations));
       ("baseline_done_counts", assoc_int_to_json s.baseline_done_counts);
+      ("final_done_delta_total", Option.fold ~none:`Null ~some:(fun v -> `Int v) s.final_done_delta_total);
+      ("final_done_delta_by_agent", Option.fold ~none:`Null ~some:assoc_int_to_json s.final_done_delta_by_agent);
       ("started_at", `Float s.started_at);
       ("planned_end_at", `Float s.planned_end_at);
       ("stopped_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) s.stopped_at);
@@ -377,6 +381,15 @@ let session_of_yojson json =
            | _ -> [])
           |> dedup_strings;
         baseline_done_counts = assoc_int_of_json (member "baseline_done_counts" json);
+        final_done_delta_total =
+          (match member "final_done_delta_total" json with
+           | `Int n -> Some n
+           | `Intlit s -> (try Some (int_of_string s) with _ -> None)
+           | _ -> None);
+        final_done_delta_by_agent =
+          (match member "final_done_delta_by_agent" json with
+           | `Assoc _ as assoc -> Some (assoc_int_of_json assoc)
+           | _ -> None);
         started_at;
         planned_end_at = get_float_default "planned_end_at" default_end;
         stopped_at = json |> member "stopped_at" |> to_float_option;

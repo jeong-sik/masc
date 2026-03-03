@@ -218,6 +218,7 @@ async fn fetch_board_posts() -> Result<Vec<BoardPost>, JsValue> {
     opts.set_mode(web_sys::RequestMode::Cors);
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    config::apply_auth_headers(&request.headers())?;
     request.headers().set("Accept", "application/json")?;
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
@@ -253,6 +254,7 @@ async fn submit_vote(post_id: &str, direction: &str) -> Result<(), JsValue> {
     opts.set_body(&JsValue::from_str(&body));
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    config::apply_auth_headers(&request.headers())?;
     request.headers().set("Content-Type", "application/json")?;
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
@@ -277,6 +279,7 @@ async fn fetch_post_comments(post_id: &str) -> Result<Vec<BoardComment>, JsValue
     opts.set_mode(web_sys::RequestMode::Cors);
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    config::apply_auth_headers(&request.headers())?;
     request.headers().set("Accept", "application/json")?;
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
@@ -315,6 +318,7 @@ async fn submit_comment(post_id: &str, content: &str) -> Result<(), JsValue> {
     opts.set_body(&JsValue::from_str(&body));
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)?;
+    config::apply_auth_headers(&request.headers())?;
     request.headers().set("Content-Type", "application/json")?;
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;

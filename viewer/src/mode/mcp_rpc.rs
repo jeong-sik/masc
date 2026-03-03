@@ -30,6 +30,8 @@ pub(super) async fn mcp_tool_call(tool_name: &str, args: Value) -> Result<Value,
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)
         .map_err(|e| format!("request 생성 실패: {:?}", e))?;
+    crate::config::apply_auth_headers(&request.headers())
+        .map_err(|e| format!("auth header 설정 실패: {:?}", e))?;
     request
         .headers()
         .set("Content-Type", "application/json")
@@ -300,6 +302,8 @@ pub(super) async fn http_get_text(url: &str) -> Result<(u16, String), String> {
 
     let request = web_sys::Request::new_with_str_and_init(url, &opts)
         .map_err(|e| format!("request 생성 실패: {:?}", e))?;
+    crate::config::apply_auth_headers(&request.headers())
+        .map_err(|e| format!("auth header 설정 실패: {:?}", e))?;
 
     let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request))

@@ -792,10 +792,15 @@ function ActorSpawnPanel({ state }: { state: TrpgState }) {
 
     spawnStatus.value = 'spawning'
     try {
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `trpg_spawn_${crypto.randomUUID()}`
+          : `trpg_spawn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
       const spawnRes = await spawnTrpgActor(room, {
         actor_id: actorIdInput || undefined,
         name: name || undefined,
         role: spawnRole.value,
+        idempotencyKey,
         portrait: spawnPortrait.value.trim() || undefined,
         background: spawnBackground.value.trim() || undefined,
         hp,

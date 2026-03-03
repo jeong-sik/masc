@@ -169,6 +169,10 @@ module Tool_encryption = Tool_encryption
 module Tool_auth = Tool_auth
 module Tool_hat = Tool_hat
 module Tool_audit = Tool_audit
+module Tool_suspend = Tool_suspend
+module Tool_shard = Tool_shard
+module Tool_social = Tool_social
+module Tool_experiment = Tool_experiment
 module Tool_rate_limit = Tool_rate_limit
 module Tool_cost = Tool_cost
 module Tool_walph = Tool_walph
@@ -181,10 +185,6 @@ module Tool_misc = Tool_misc
 module Tool_board = Tool_board
 module Tool_lodge = Tool_lodge
 module Tool_notifications = Tool_notifications
-module Tool_social = Tool_social
-module Tool_suspend = Tool_suspend
-module Tool_experiment = Tool_experiment
-module Tool_shard = Tool_shard
 
 (* Lodge subsystem *)
 module Lodge_heartbeat = Lodge_heartbeat

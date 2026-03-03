@@ -236,7 +236,14 @@ fn strip_sensitive_query_params_from_location() {
     };
     let new_url = format!("{pathname}{new_search}{hash}");
     if let Ok(history) = win.history() {
-        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&new_url));
+        if let Err(err) =
+            history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&new_url))
+        {
+            log::warn!(
+                "failed to strip sensitive auth query parameters from location: {:?}",
+                err
+            );
+        }
     }
 }
 

@@ -1684,7 +1684,6 @@ let is_public_read_path path =
   || String.equal path "/favicon.ico"
   || String.equal path "/favicon.svg"
   || string_starts_with path "/dashboard/"
-  || string_starts_with path "/dashboard/assets/"
   || string_starts_with path "/static/"
   || string_starts_with path "/graphiql/"
 
@@ -4006,9 +4005,13 @@ let json_headers session_id protocol_version origin =
 
 let respond_mcp_auth_error request reqd ~session_id ~protocol_version msg =
   let origin = get_origin request in
-  let body =
-    Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg
-  in
+  let body = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("error", `Assoc [
+      ("code", `Int (-32001));
+      ("message", `String msg);
+    ]);
+  ]) in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))

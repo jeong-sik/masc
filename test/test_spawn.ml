@@ -97,8 +97,18 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_claim" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains team_session_turn" true
     (List.mem "mcp__masc__masc_team_session_turn" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains team_session_step" true
+    (List.mem "mcp__masc__masc_team_session_step" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains team_session_finalize" true
+    (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains portal_send" true
     (List.mem "mcp__masc__masc_portal_send" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains a2a_delegate" true
+    (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains vote_create" true
+    (List.mem "mcp__masc__masc_vote_create" Spawn.masc_mcp_tools);
+  Alcotest.(check bool) "contains run_deliverable" true
+    (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools);
   ()
 
 let tests = [

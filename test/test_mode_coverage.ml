@@ -157,6 +157,10 @@ let test_tool_category_core () =
     (Mode.tool_category "masc_team_session_list" = Mode.Core);
   check bool "team_session_compare" true
     (Mode.tool_category "masc_team_session_compare" = Mode.Core);
+  check bool "team_session_step" true
+    (Mode.tool_category "masc_team_session_step" = Mode.Core);
+  check bool "team_session_finalize" true
+    (Mode.tool_category "masc_team_session_finalize" = Mode.Core);
   check bool "team_session_turn" true
     (Mode.tool_category "masc_team_session_turn" = Mode.Core);
   check bool "team_session_events" true

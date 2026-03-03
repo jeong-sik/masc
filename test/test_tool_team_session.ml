@@ -390,6 +390,27 @@ let test_turn_events_and_prove () =
   in
   let session_id = start_session_exn ctx ~goal:"turn-events-prove" |> get_session_id in
 
+  let invalid_turn_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "invalid-kind");
+          ])
+  in
+  Alcotest.(check bool) "invalid turn kind rejected" false invalid_turn_ok;
+
+  let engine_intruder_result =
+    Team_session_engine_eio.record_turn ~config ~session_id ~actor:"intruder"
+      ~turn_kind:Team_session_types.Turn_note ~message:(Some "unauthorized")
+      ~target_agent:None ~task_title:None ~task_description:None
+      ~task_priority:3
+  in
+  Alcotest.(check bool) "engine actor guard"
+    true
+    (match engine_intruder_result with Error _ -> true | Ok _ -> false);
+
   let check_turn turn_kind extra =
     let ok, _ =
       dispatch_exn ctx ~name:"masc_team_session_turn"

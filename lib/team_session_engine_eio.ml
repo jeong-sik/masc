@@ -54,6 +54,10 @@ let session_visible_to_agent ~(agent_name : string)
   String.equal agent_name session.created_by
   || List.exists (String.equal agent_name) session.agent_names
 
+let session_allows_actor ~(actor : string) (session : Team_session_types.session) =
+  String.equal actor session.created_by
+  || List.exists (String.equal actor) session.agent_names
+
 let compute_live_done_delta (config : Room.config)
     (session : Team_session_types.session) =
   let backlog = Room.read_backlog config in
@@ -881,6 +885,8 @@ let record_turn ~(config : Room.config) ~(session_id : string) ~(actor : string)
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
   | Some session when session.status <> Team_session_types.Running ->
       Error "turn recording is only allowed while session is running"
+  | Some session when not (session_allows_actor ~actor session) ->
+      Error "actor is not authorized for this team session"
   | Some session -> (
       let message = normalize_opt message in
       let target_agent = normalize_opt target_agent in
@@ -1150,7 +1156,7 @@ let prove_session ~(config : Room.config) ~(session_id : string)
         Room_utils.path_exists config
           (Team_session_store.report_md_path config session_id)
       in
-      let ensure_report_result =
+      let ensure_report_result : (Team_session_types.session, string) result =
         if generate_report_if_missing && not (report_json_exists && report_md_exists)
         then
           match Team_session_report.generate config session with
@@ -1161,38 +1167,35 @@ let prove_session ~(config : Room.config) ~(session_id : string)
       in
       match ensure_report_result with
       | Error e -> Error e
-      | Ok _ -> (
-          match Team_session_store.load_session config session_id with
-          | None -> Error (Printf.sprintf "team session not found: %s" session_id)
-          | Some refreshed -> (
-              match Team_session_report.generate_proof config refreshed with
-              | Error e -> Error e
-              | Ok (proof_json, proof_markdown) ->
-                  let proof_json_path =
-                    Team_session_store.proof_json_path config session_id
-                  in
-                  let proof_md_path =
-                    Team_session_store.proof_md_path config session_id
-                  in
-                  Room_utils.write_json config proof_json_path proof_json;
-                  Team_session_store.write_text_file proof_md_path proof_markdown;
-                  Team_session_store.append_event config session_id
-                    ~event_type:"session_proof_generated"
-                    ~detail:
-                      (`Assoc
-                        [
-                          ("proof_json_path", `String proof_json_path);
-                          ("proof_md_path", `String proof_md_path);
-                          ("ts_iso", `String (now_iso ()));
-                        ]);
-                  Ok
-                    (`Assoc
-                      [
-                        ("session_id", `String session_id);
-                        ("proof", proof_json);
-                        ("proof_json_path", `String proof_json_path);
-                        ("proof_md_path", `String proof_md_path);
-                      ])))
+      | Ok refreshed_session -> (
+          match Team_session_report.generate_proof config refreshed_session with
+          | Error e -> Error e
+          | Ok (proof_json, proof_markdown) ->
+              let proof_json_path =
+                Team_session_store.proof_json_path config session_id
+              in
+              let proof_md_path =
+                Team_session_store.proof_md_path config session_id
+              in
+              Room_utils.write_json config proof_json_path proof_json;
+              Team_session_store.write_text_file proof_md_path proof_markdown;
+              Team_session_store.append_event config session_id
+                ~event_type:"session_proof_generated"
+                ~detail:
+                  (`Assoc
+                    [
+                      ("proof_json_path", `String proof_json_path);
+                      ("proof_md_path", `String proof_md_path);
+                      ("ts_iso", `String (now_iso ()));
+                    ]);
+              Ok
+                (`Assoc
+                  [
+                    ("session_id", `String session_id);
+                    ("proof", proof_json);
+                    ("proof_json_path", `String proof_json_path);
+                    ("proof_md_path", `String proof_md_path);
+                  ]))
 
 let list_sessions ~(config : Room.config) ~(requester_agent : string option)
     ~(status_filter : Team_session_types.session_status option) ~(limit : int) :

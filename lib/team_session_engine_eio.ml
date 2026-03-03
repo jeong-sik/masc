@@ -1144,6 +1144,7 @@ let list_events ~(config : Room.config) ~(session_id : string)
           ])
 
 let prove_session ~(config : Room.config) ~(session_id : string)
+    ~(proof_level : Team_session_types.proof_level)
     ~(generate_report_if_missing : bool) : (Yojson.Safe.t, string) result =
   match Team_session_store.load_session config session_id with
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
@@ -1168,7 +1169,10 @@ let prove_session ~(config : Room.config) ~(session_id : string)
       match ensure_report_result with
       | Error e -> Error e
       | Ok refreshed_session -> (
-          match Team_session_report.generate_proof config refreshed_session with
+          match
+            Team_session_report.generate_proof ~proof_level config
+              refreshed_session
+          with
           | Error e -> Error e
           | Ok (proof_json, proof_markdown) ->
               let proof_json_path =

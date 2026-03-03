@@ -53,6 +53,11 @@ let events_count_of_body body =
   let result = result_field json in
   result |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int
 
+let events_list_of_body body =
+  let json = parse_json_exn body in
+  let result = result_field json in
+  result |> Yojson.Safe.Util.member "events" |> Yojson.Safe.Util.to_list
+
 let add_task_id config ~title =
   ignore (Room.add_task config ~title ~priority:1 ~description:"");
   let backlog = Room.read_backlog config in
@@ -121,7 +126,7 @@ let test_start_status_report_stop () =
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
 
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
 
   let start_json =
@@ -207,7 +212,7 @@ let test_duration_reached_path () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let start_json =
     start_session_exn ctx ~goal:"exercise duration_reached branch"
@@ -332,7 +337,7 @@ let test_list_and_compare () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
 
   let s1 = start_session_exn ctx ~goal:"compare-session-base" |> get_session_id in
@@ -398,7 +403,7 @@ let test_turn_events_and_prove () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let session_id = start_session_exn ctx ~goal:"turn-events-prove" |> get_session_id in
 
@@ -522,7 +527,7 @@ let test_prove_requires_multi_actor_turn_coverage () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let participants = [ "tester"; "ally1"; "ally2" ] in
 
@@ -643,7 +648,7 @@ let test_missing_required_args () =
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let ok1, _ = dispatch_exn ctx ~name:"masc_team_session_start" ~args:(`Assoc []) in
   let ok2, _ = dispatch_exn ctx ~name:"masc_team_session_status" ~args:(`Assoc []) in
@@ -678,6 +683,12 @@ let test_missing_required_args () =
   let ok12, _ =
     dispatch_exn ctx ~name:"masc_team_session_prove" ~args:(`Assoc [])
   in
+  let ok13, _ =
+    dispatch_exn ctx ~name:"masc_team_session_step" ~args:(`Assoc [])
+  in
+  let ok14, _ =
+    dispatch_exn ctx ~name:"masc_team_session_finalize" ~args:(`Assoc [])
+  in
   Alcotest.(check bool) "start invalid" false ok1;
   Alcotest.(check bool) "status invalid" false ok2;
   Alcotest.(check bool) "stop invalid" false ok3;
@@ -690,6 +701,112 @@ let test_missing_required_args () =
   Alcotest.(check bool) "turn invalid" false ok10;
   Alcotest.(check bool) "events invalid" false ok11;
   Alcotest.(check bool) "prove invalid" false ok12;
+  Alcotest.(check bool) "step invalid" false ok13;
+  Alcotest.(check bool) "finalize invalid" false ok14;
+  cleanup_dir base_dir
+
+let test_step_spawn_requires_proc_mgr () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"step-spawn-proc-manager-check" |> get_session_id in
+  let step_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("spawn_agent", `String "glm");
+            ("spawn_prompt", `String "hello");
+          ])
+  in
+  Alcotest.(check bool) "step should fail without proc_mgr for spawn" false step_ok;
+  let events_ok, events_body =
+    dispatch_exn ctx ~name:"masc_team_session_events"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("event_types", `List [ `String "team_step_spawn" ]);
+          ])
+  in
+  Alcotest.(check bool) "events query ok" true events_ok;
+  let events = events_list_of_body events_body in
+  Alcotest.(check int) "spawn failure event recorded" 1 (List.length events);
+  let first = List.hd events in
+  let detail = Yojson.Safe.Util.member "detail" first in
+  let success = detail |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
+  Alcotest.(check bool) "spawn failure success=false" false success;
+  let error_msg =
+    detail |> Yojson.Safe.Util.member "error" |> Yojson.Safe.Util.to_string_option
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool) "spawn failure has error" true (String.trim error_msg <> "");
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "cleanup");
+             ("generate_report", `Bool false);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  cleanup_dir base_dir
+
+let test_prove_strong_requires_additional_evidence () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"prove-strong-check" |> get_session_id in
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_turn"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("turn_kind", `String "note");
+             ("message", `String "single-turn");
+           ]));
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "proof-check");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("proof_level", `String "strong");
+          ])
+  in
+  Alcotest.(check bool) "prove strong call succeeds" true prove_ok;
+  let verdict =
+    prove_body |> parse_json_exn |> result_field |> Yojson.Safe.Util.member "proof"
+    |> Yojson.Safe.Util.member "verdict" |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "strong proof needs stronger evidence"
+    "insufficient_evidence_strong" verdict;
   cleanup_dir base_dir
 
 let test_dispatch_unknown () =
@@ -699,7 +816,7 @@ let test_dispatch_unknown () =
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   Alcotest.(check bool) "dispatch none" true
     (Tool_team_session.dispatch ctx ~name:"masc_team_session_unknown"
@@ -715,10 +832,10 @@ let test_unauthorized_session_access () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let owner_ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let intruder_ctx : _ Tool_team_session.context =
-    { config; agent_name = "intruder"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "intruder"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let session_id = start_session_exn owner_ctx ~goal:"authz-check" |> get_session_id in
 
@@ -810,7 +927,7 @@ let test_final_done_delta_snapshot_stable () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let session_id = start_session_exn ctx ~goal:"snapshot-stability" |> get_session_id in
 
@@ -894,6 +1011,10 @@ let () =
             test_prove_requires_multi_actor_turn_coverage;
           Alcotest.test_case "missing-required-args" `Quick
             test_missing_required_args;
+          Alcotest.test_case "step-spawn-requires-proc-mgr" `Quick
+            test_step_spawn_requires_proc_mgr;
+          Alcotest.test_case "prove-strong-requires-additional-evidence" `Quick
+            test_prove_strong_requires_additional_evidence;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;
           Alcotest.test_case "unauthorized-session-access" `Quick
             test_unauthorized_session_access;

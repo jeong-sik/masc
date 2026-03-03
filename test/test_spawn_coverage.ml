@@ -141,6 +141,26 @@ let test_masc_mcp_tools_has_handover () =
 let test_masc_mcp_tools_has_memento () =
   check bool "has memento" true (List.mem "mcp__masc__masc_memento_mori" Spawn.masc_mcp_tools)
 
+let test_masc_mcp_tools_has_team_session_step () =
+  check bool "has team_session_step" true
+    (List.mem "mcp__masc__masc_team_session_step" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_team_session_finalize () =
+  check bool "has team_session_finalize" true
+    (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_a2a_delegate () =
+  check bool "has a2a_delegate" true
+    (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_vote_create () =
+  check bool "has vote_create" true
+    (List.mem "mcp__masc__masc_vote_create" Spawn.masc_mcp_tools)
+
+let test_masc_mcp_tools_has_run_deliverable () =
+  check bool "has run_deliverable" true
+    (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools)
+
 (* ============================================================
    masc_lifecycle_suffix Tests
    ============================================================ *)
@@ -574,6 +594,11 @@ let () =
       test_case "has worktree" `Quick test_masc_mcp_tools_has_worktree;
       test_case "has handover" `Quick test_masc_mcp_tools_has_handover;
       test_case "has memento" `Quick test_masc_mcp_tools_has_memento;
+      test_case "has team_session_step" `Quick test_masc_mcp_tools_has_team_session_step;
+      test_case "has team_session_finalize" `Quick test_masc_mcp_tools_has_team_session_finalize;
+      test_case "has a2a_delegate" `Quick test_masc_mcp_tools_has_a2a_delegate;
+      test_case "has vote_create" `Quick test_masc_mcp_tools_has_vote_create;
+      test_case "has run_deliverable" `Quick test_masc_mcp_tools_has_run_deliverable;
     ];
     "lifecycle_suffix", [
       test_case "not empty" `Quick test_lifecycle_suffix_not_empty;

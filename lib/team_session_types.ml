@@ -42,6 +42,10 @@ type report_format =
   | Markdown
   | Json
 
+type proof_level =
+  | Proof_standard
+  | Proof_strong
+
 type turn_kind =
   | Turn_note
   | Turn_broadcast
@@ -203,6 +207,14 @@ let report_formats_of_strings xs =
   xs
   |> List.filter_map (fun s -> report_format_of_string (String.lowercase_ascii (String.trim s)))
   |> dedup []
+
+let proof_level_to_string = function
+  | Proof_standard -> "standard"
+  | Proof_strong -> "strong"
+
+let proof_level_of_string = function
+  | "strong" -> Proof_strong
+  | _ -> Proof_standard
 
 let turn_kind_to_string = function
   | Turn_note -> "note"

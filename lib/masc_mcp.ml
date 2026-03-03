@@ -93,6 +93,7 @@ module Spawn_eio = Spawn_eio
 module Spawn_registry = Spawn_registry
 module Glm_pool = Glm_pool
 module Bounded = Bounded
+module Mdal = Mdal
 module Orchestrator = Orchestrator
 module Agent_card = Agent_card
 module Agent_identity = Agent_identity

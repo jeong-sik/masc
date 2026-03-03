@@ -16,6 +16,8 @@ import type {
   BoardSortMode,
   KeeperLifecycleState,
   Goal,
+  MdalLoop,
+  MdalIterationRecord,
 } from './types'
 import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, type DashboardMode } from './api'
 import { lastEvent } from './sse'
@@ -47,6 +49,10 @@ export const trpgRoom = signal<string>('')
 
 export const goals = signal<Goal[]>([])
 export const goalsLoading = signal(false)
+
+// --- MDAL state ---
+
+export const mdalLoops = signal<Map<string, MdalLoop>>(new Map())
 
 // --- Loading flags ---
 
@@ -440,6 +446,63 @@ export function setupSSEReaction(): () => void {
     // Keeper events trigger dashboard refresh for up-to-date metrics
     if (event.type === 'keeper_handoff' || event.type === 'keeper_compaction' || event.type === 'keeper_guardrail') {
       invalidateDashboardCache()
+    }
+
+    // MDAL events — update loop state in-place from SSE
+    if (event.type === 'mdal_started' && event.loop_id) {
+      const next = new Map(mdalLoops.value)
+      next.set(event.loop_id, {
+        loop_id: event.loop_id,
+        profile: event.profile ?? 'custom',
+        status: 'running',
+        current_iteration: 0,
+        max_iterations: 0,
+        baseline_metric: event.baseline ?? 0,
+        current_metric: event.baseline ?? 0,
+        target: event.target ?? '',
+        stagnation_streak: 0,
+        stagnation_limit: 0,
+        elapsed_seconds: 0,
+        history: [],
+      })
+      mdalLoops.value = next
+    }
+
+    if (event.type === 'mdal_iteration' && event.loop_id) {
+      const next = new Map(mdalLoops.value)
+      const existing = next.get(event.loop_id)
+      if (existing) {
+        const record: MdalIterationRecord = {
+          iteration: event.iteration ?? 0,
+          metric_before: event.metric_before ?? 0,
+          metric_after: event.metric_after ?? 0,
+          delta: event.delta ?? 0,
+          changes: '',
+          failed_attempts: '',
+          next_suggestion: '',
+          elapsed_ms: 0,
+          cost_usd: null,
+        }
+        next.set(event.loop_id, {
+          ...existing,
+          current_iteration: event.iteration ?? existing.current_iteration,
+          current_metric: event.metric_after ?? existing.current_metric,
+          history: [record, ...existing.history],
+        })
+        mdalLoops.value = next
+      }
+    }
+
+    if ((event.type === 'mdal_completed' || event.type === 'mdal_stopped') && event.loop_id) {
+      const next = new Map(mdalLoops.value)
+      const existing = next.get(event.loop_id)
+      if (existing) {
+        next.set(event.loop_id, {
+          ...existing,
+          status: event.type === 'mdal_completed' ? 'completed' : 'stopped',
+        })
+        mdalLoops.value = next
+      }
     }
   })
 

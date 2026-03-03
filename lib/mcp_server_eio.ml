@@ -1226,6 +1226,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_misc : Tool_misc.context = { config; agent_name } in
   let simple_ctx_suspend : Tool_suspend.context = { config; caller_agent = Some agent_name } in
   let simple_ctx_library : Tool_library.context = { agent_name } in
+  let simple_ctx_mdal : Tool_mdal.context = {
+    agent_name;
+  } in
   let simple_ctx_perpetual : Tool_perpetual.context = {
     agent_name;
     start_loop = Some (fun loop_state loop_config ->
@@ -1424,6 +1427,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_perpetual.dispatch simple_ctx_perpetual ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_mdal.dispatch simple_ctx_mdal ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_trpg.dispatch simple_ctx_trpg ~name ~args:arguments with
@@ -2898,6 +2904,7 @@ let handle_list_tools_eio state id =
     @ Tool_board.tools
     @ Tool_lodge.tools
     @ Tool_perpetual.schemas
+    @ Tool_mdal.schemas
     @ Tool_keeper.schemas
     @ Tool_goals.schemas
     @ Tool_team_session.schemas

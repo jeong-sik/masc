@@ -245,6 +245,9 @@ let test_handoff_payload_creation () =
     relevant_files = ["src/main.ml"; "lib/utils.ml"];
     session_id = Some "abc-123";
     relay_generation = 0;
+    active_goal_ids = [];
+    goal_progress = [];
+    goal_blockers = [];
   } in
   check string "summary" "Test session summary" p.summary;
   check (option string) "current_task" (Some "Implementing feature X") p.current_task;
@@ -261,6 +264,9 @@ let test_handoff_payload_empty () =
     relevant_files = [];
     session_id = None;
     relay_generation = 0;
+    active_goal_ids = [];
+    goal_progress = [];
+    goal_blockers = [];
   } in
   check string "empty summary" "" p.summary;
   check (option string) "no task" None p.current_task;
@@ -275,6 +281,9 @@ let test_handoff_payload_incremented_generation () =
     relevant_files = [];
     session_id = Some "def-456";
     relay_generation = 3;
+    active_goal_ids = [];
+    goal_progress = [];
+    goal_blockers = [];
   } in
   check int "generation 3" 3 p.relay_generation
 
@@ -359,6 +368,7 @@ let test_compress_context_summary_only () =
     ~todos:[]
     ~pdca:None
     ~files:[]
+    ()
   in
   check bool "has summary section" true
     (try let _ = Str.search_forward (Str.regexp "Context Summary") result 0 in true
@@ -374,6 +384,7 @@ let test_compress_context_with_task () =
     ~todos:[]
     ~pdca:None
     ~files:[]
+    ()
   in
   check bool "has task section" true
     (try let _ = Str.search_forward (Str.regexp "Current Task") result 0 in true
@@ -389,6 +400,7 @@ let test_compress_context_with_todos () =
     ~todos:["TODO 1"; "TODO 2"; "TODO 3"]
     ~pdca:None
     ~files:[]
+    ()
   in
   check bool "has todo section" true
     (try let _ = Str.search_forward (Str.regexp "TODO List") result 0 in true
@@ -404,6 +416,7 @@ let test_compress_context_with_pdca () =
     ~todos:[]
     ~pdca:(Some "Plan: Design API")
     ~files:[]
+    ()
   in
   check bool "has pdca section" true
     (try let _ = Str.search_forward (Str.regexp "PDCA State") result 0 in true
@@ -419,6 +432,7 @@ let test_compress_context_with_files () =
     ~todos:[]
     ~pdca:None
     ~files:["src/main.ml"; "lib/utils.ml"]
+    ()
   in
   check bool "has files section" true
     (try let _ = Str.search_forward (Str.regexp "Relevant Files") result 0 in true
@@ -434,6 +448,7 @@ let test_compress_context_full () =
     ~todos:["Item 1"; "Item 2"]
     ~pdca:(Some "Plan: done")
     ~files:["a.ml"; "b.ml"]
+    ()
   in
   check bool "has all sections" true
     (String.length result > 100)
@@ -451,6 +466,9 @@ let test_build_handoff_prompt_basic () =
     relevant_files = ["test.ml"];
     session_id = None;
     relay_generation = 0;
+    active_goal_ids = [];
+    goal_progress = [];
+    goal_blockers = [];
   } in
   let prompt = Relay.build_handoff_prompt ~payload ~generation:1 in
   check bool "has relay header" true
@@ -466,6 +484,9 @@ let test_build_handoff_prompt_generation () =
     relevant_files = [];
     session_id = None;
     relay_generation = 0;
+    active_goal_ids = [];
+    goal_progress = [];
+    goal_blockers = [];
   } in
   let prompt = Relay.build_handoff_prompt ~payload ~generation:5 in
   check bool "has generation 5" true
@@ -589,6 +610,9 @@ let test_payload_to_json_basic () =
     relevant_files = ["a.ml"; "b.ml"];
     session_id = Some "sess-123";
     relay_generation = 3;
+    active_goal_ids = ["goal-1"];
+    goal_progress = [("goal-1", 0.5)];
+    goal_blockers = ["blocked by X"];
   } in
   let json = Relay.payload_to_json p in
   let str = Yojson.Safe.to_string json in
@@ -611,6 +635,9 @@ let test_payload_to_json_nulls () =
     relevant_files = [];
     session_id = None;
     relay_generation = 0;
+    active_goal_ids = [];
+    goal_progress = [];
+    goal_blockers = [];
   } in
   let json = Relay.payload_to_json p in
   let str = Yojson.Safe.to_string json in
@@ -630,6 +657,9 @@ let test_payload_to_json_todos_array () =
     relevant_files = [];
     session_id = None;
     relay_generation = 0;
+    active_goal_ids = [];
+    goal_progress = [];
+    goal_blockers = [];
   } in
   let json = Relay.payload_to_json p in
   let str = Yojson.Safe.to_string json in
@@ -671,6 +701,124 @@ let test_empty_payload_generation () =
 let test_get_latest_checkpoint_type () =
   let _ : Relay.checkpoint option = Relay.get_latest_checkpoint () in
   check bool "returns option" true true
+
+(* ============================================================
+   Goal-aware handoff_payload Tests
+   ============================================================ *)
+
+let test_handoff_payload_with_goals () =
+  let p : Relay.handoff_payload = {
+    summary = "Goal-aware session";
+    current_task = Some "Working on goal-1";
+    todos = [];
+    pdca_state = None;
+    relevant_files = [];
+    session_id = None;
+    relay_generation = 1;
+    active_goal_ids = ["goal-1"; "goal-2"];
+    goal_progress = [("goal-1", 0.75); ("goal-2", 0.3)];
+    goal_blockers = ["Waiting for API response"; "Dependency not met"];
+  } in
+  check int "active goals" 2 (List.length p.active_goal_ids);
+  check int "goal progress" 2 (List.length p.goal_progress);
+  check int "goal blockers" 2 (List.length p.goal_blockers)
+
+let test_payload_to_json_with_goals () =
+  let p : Relay.handoff_payload = {
+    summary = "Goal test";
+    current_task = None;
+    todos = [];
+    pdca_state = None;
+    relevant_files = [];
+    session_id = None;
+    relay_generation = 0;
+    active_goal_ids = ["g1"; "g2"];
+    goal_progress = [("g1", 0.5)];
+    goal_blockers = ["blocker1"];
+  } in
+  let json = Relay.payload_to_json p in
+  let str = Yojson.Safe.to_string json in
+  check bool "has active_goal_ids" true
+    (try let _ = Str.search_forward (Str.regexp "active_goal_ids") str 0 in true
+     with Not_found -> false);
+  check bool "has goal_progress" true
+    (try let _ = Str.search_forward (Str.regexp "goal_progress") str 0 in true
+     with Not_found -> false);
+  check bool "has goal_blockers" true
+    (try let _ = Str.search_forward (Str.regexp "goal_blockers") str 0 in true
+     with Not_found -> false)
+
+let test_compress_context_with_goal_progress () =
+  let result = Relay.compress_context
+    ~summary:"Summary"
+    ~task:None
+    ~todos:[]
+    ~pdca:None
+    ~files:[]
+    ~goal_progress:[("goal-1", 0.75); ("goal-2", 0.3)]
+    ()
+  in
+  check bool "has goal progress section" true
+    (try let _ = Str.search_forward (Str.regexp "Goal Progress") result 0 in true
+     with Not_found -> false);
+  check bool "has goal-1 percentage" true
+    (try let _ = Str.search_forward (Str.regexp "goal-1: 75%") result 0 in true
+     with Not_found -> false)
+
+let test_compress_context_with_goal_blockers () =
+  let result = Relay.compress_context
+    ~summary:"Summary"
+    ~task:None
+    ~todos:[]
+    ~pdca:None
+    ~files:[]
+    ~goal_blockers:["Waiting for CI"; "API rate limit"]
+    ()
+  in
+  check bool "has blockers section" true
+    (try let _ = Str.search_forward (Str.regexp "Blockers") result 0 in true
+     with Not_found -> false);
+  check bool "has blocker content" true
+    (try let _ = Str.search_forward (Str.regexp "Waiting for CI") result 0 in true
+     with Not_found -> false)
+
+(* ============================================================
+   Calibration Tests
+   ============================================================ *)
+
+let test_calibration_initial_state () =
+  let info = Relay.get_calibration_info () in
+  let str = Yojson.Safe.to_string info in
+  check bool "has correction_factor" true
+    (try let _ = Str.search_forward (Str.regexp "correction_factor") str 0 in true
+     with Not_found -> false);
+  check bool "has sample_count" true
+    (try let _ = Str.search_forward (Str.regexp "sample_count") str 0 in true
+     with Not_found -> false);
+  check bool "has enabled" true
+    (try let _ = Str.search_forward (Str.regexp "enabled") str 0 in true
+     with Not_found -> false)
+
+let test_record_actual_tokens () =
+  (* Record a sample where actual is 2x estimated *)
+  Relay.record_actual_tokens ~estimated:1000 ~actual:2000;
+  let info = Relay.get_calibration_info () in
+  match info with
+  | `Assoc fields ->
+    let sample_count = List.assoc "sample_count" fields in
+    check bool "has samples" true (sample_count <> `Int 0)
+  | _ -> failwith "expected Assoc"
+
+let test_record_actual_tokens_zero_estimated () =
+  (* Zero estimated should not produce NaN *)
+  Relay.record_actual_tokens ~estimated:0 ~actual:100;
+  let info = Relay.get_calibration_info () in
+  match info with
+  | `Assoc fields ->
+    (match List.assoc "correction_factor" fields with
+     | `Float f -> check bool "factor is finite" true (Float.is_finite f)
+     | _ -> failwith "expected Float")
+  | _ -> failwith "expected Assoc"
 
 (* ============================================================
    estimate_context claude-sonnet branch Tests
@@ -776,8 +924,19 @@ let () =
       test_case "creation" `Quick test_handoff_payload_creation;
       test_case "empty" `Quick test_handoff_payload_empty;
       test_case "incremented generation" `Quick test_handoff_payload_incremented_generation;
+      test_case "with goals" `Quick test_handoff_payload_with_goals;
     ];
     "context_metrics", [
       test_case "creation" `Quick test_context_metrics_creation;
+    ];
+    "goal_aware", [
+      test_case "payload_to_json with goals" `Quick test_payload_to_json_with_goals;
+      test_case "compress with goal progress" `Quick test_compress_context_with_goal_progress;
+      test_case "compress with goal blockers" `Quick test_compress_context_with_goal_blockers;
+    ];
+    "calibration", [
+      test_case "initial state" `Quick test_calibration_initial_state;
+      test_case "record actual tokens" `Quick test_record_actual_tokens;
+      test_case "zero estimated" `Quick test_record_actual_tokens_zero_estimated;
     ];
   ]

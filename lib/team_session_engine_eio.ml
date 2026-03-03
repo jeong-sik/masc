@@ -40,20 +40,6 @@ let generate_and_mark_report ~(config : Room.config)
           (`Assoc
             [ ("error", `String e); ("ts_iso", `String (now_iso ())) ])
 
-let done_counts_from_backlog (backlog : Types.backlog) : (string * int) list =
-  let tbl = Hashtbl.create 16 in
-  let bump agent =
-    let v = match Hashtbl.find_opt tbl agent with Some n -> n | None -> 0 in
-    Hashtbl.replace tbl agent (v + 1)
-  in
-  List.iter
-    (fun (task : Types.task) ->
-      match task.task_status with
-      | Types.Done { assignee; _ } -> bump assignee
-      | _ -> ())
-    backlog.tasks;
-  Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl [] |> List.sort (fun (a, _) (b, _) -> compare a b)
-
 let summary_json_of_session (config : Room.config) (session : Team_session_types.session) =
   let now = Time_compat.now () in
   let end_time = Option.value session.stopped_at ~default:now in
@@ -64,7 +50,7 @@ let summary_json_of_session (config : Room.config) (session : Team_session_types
     else min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
   let backlog = Room.read_backlog config in
-  let current_done = done_counts_from_backlog backlog in
+  let current_done = Team_session_types.done_counts_from_backlog backlog in
   let deltas =
     Team_session_types.done_delta_by_agent
       ~baseline:session.baseline_done_counts ~current:current_done
@@ -109,7 +95,7 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
 let write_checkpoint (config : Room.config) (session : Team_session_types.session) =
   let now = Time_compat.now () in
   let backlog = Room.read_backlog config in
-  let current_done = done_counts_from_backlog backlog in
+  let current_done = Team_session_types.done_counts_from_backlog backlog in
   let deltas =
     Team_session_types.done_delta_by_agent
       ~baseline:session.baseline_done_counts ~current:current_done
@@ -292,7 +278,9 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         in
         if discovered = [] then [ created_by ] else discovered
     in
-    let baseline_done_counts = done_counts_from_backlog (Room.read_backlog config) in
+    let baseline_done_counts =
+      Team_session_types.done_counts_from_backlog (Room.read_backlog config)
+    in
     let session : Team_session_types.session =
       {
         session_id;
@@ -434,17 +422,23 @@ let generate_report ~(config : Room.config) ~(session_id : string)
         (match Team_session_report.generate config session with
         | Error e -> Error e
         | Ok (_json, markdown) ->
-            ignore (Team_session_store.mark_report_generated config session_id);
-            Ok
-              (`Assoc
-                [
-                  ("session_id", `String session_id);
-                  ("status", `String "ok");
-                  ("regenerated", `Bool true);
-                  ("summary", `String (if String.length markdown > 240 then String.sub markdown 0 240 ^ "..." else markdown));
-                  ("markdown_path", `String (Team_session_store.report_md_path config session_id));
-                  ("json_path", `String (Team_session_store.report_json_path config session_id));
-                ]))
+            (match Team_session_store.mark_report_generated config session_id with
+            | Ok _ ->
+                Ok
+                  (`Assoc
+                    [
+                      ("session_id", `String session_id);
+                      ("status", `String "ok");
+                      ("regenerated", `Bool true);
+                      ("summary", `String (if String.length markdown > 240 then String.sub markdown 0 240 ^ "..." else markdown));
+                      ("markdown_path", `String (Team_session_store.report_md_path config session_id));
+                      ("json_path", `String (Team_session_store.report_json_path config session_id));
+                    ])
+            | Error e ->
+                Error
+                  (Printf.sprintf
+                     "report generated but failed to mark generated_report: %s"
+                     e)))
 
 let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
     ~(config : Room.config) : unit =
@@ -453,24 +447,27 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
   List.iter
     (fun (session : Team_session_types.session) ->
       if session.status = Team_session_types.Running && session.auto_resume then
-        let already_running =
-          with_runtimes_lock (fun () -> Hashtbl.mem runtimes session.session_id)
-        in
-        if not already_running then
-          if now >= session.planned_end_at then
-            ignore
-              (finalize_session ~config ~session_id:session.session_id
-                 ~final_status:Team_session_types.Completed
-                 ~reason:"duration_elapsed_during_restart" ~generate_report:true)
-          else begin
+        if now >= session.planned_end_at then
+          ignore
+            (finalize_session ~config ~session_id:session.session_id
+               ~final_status:Team_session_types.Completed
+               ~reason:"duration_elapsed_during_restart" ~generate_report:true)
+        else
+          let should_start =
             with_runtimes_lock (fun () ->
-                Hashtbl.replace runtimes session.session_id
-                  {
-                    stop_requested = false;
-                    stop_reason = None;
-                    finalizing = false;
-                    generate_report_on_finalize = true;
-                  });
+                if Hashtbl.mem runtimes session.session_id then
+                  false
+                else (
+                  Hashtbl.replace runtimes session.session_id
+                    {
+                      stop_requested = false;
+                      stop_reason = None;
+                      finalizing = false;
+                      generate_report_on_finalize = true;
+                    };
+                  true))
+          in
+          if should_start then begin
             Team_session_store.append_event config session.session_id
               ~event_type:"recovered_after_restart"
               ~detail:(`Assoc [

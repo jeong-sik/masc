@@ -1,22 +1,8 @@
 (** Team session report generation (Markdown + JSON). *)
 
-let done_counts_from_backlog (backlog : Types.backlog) : (string * int) list =
-  let tbl = Hashtbl.create 16 in
-  let bump agent =
-    let v = match Hashtbl.find_opt tbl agent with Some n -> n | None -> 0 in
-    Hashtbl.replace tbl agent (v + 1)
-  in
-  List.iter
-    (fun (task : Types.task) ->
-      match task.task_status with
-      | Types.Done { assignee; _ } -> bump assignee
-      | _ -> ())
-    backlog.tasks;
-  Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl [] |> List.sort (fun (a, _) (b, _) -> compare a b)
-
 let summary_metrics (session : Team_session_types.session) config =
   let backlog = Room.read_backlog config in
-  let current_done = done_counts_from_backlog backlog in
+  let current_done = Team_session_types.done_counts_from_backlog backlog in
   let delta_by_agent =
     Team_session_types.done_delta_by_agent
       ~baseline:session.baseline_done_counts ~current:current_done
@@ -169,7 +155,7 @@ let markdown_of_report
 
 let generate config (session : Team_session_types.session) : (Yojson.Safe.t * string, string) result =
   try
-    let events = Team_session_store.read_events config session.session_id in
+    let events = Team_session_store.read_events ~max_events:4000 config session.session_id in
     let checkpoint_paths = Team_session_store.list_checkpoint_paths config session.session_id in
     let checkpoints_count = List.length checkpoint_paths in
     let (summary_json, done_delta_total, done_delta_by_agent, active_agents) =

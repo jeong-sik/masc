@@ -27,6 +27,10 @@ let dispatch_exn ctx ~name ~args =
 
 let result_field json = Yojson.Safe.Util.member "result" json
 
+let unwrap_ok = function
+  | Ok v -> v
+  | Error e -> failwith e
+
 let session_status_of_body body =
   let json = parse_json_exn body in
   let result = result_field json in
@@ -140,6 +144,123 @@ let test_start_status_report_stop () =
 
   cleanup_dir base_dir
 
+let test_duration_reached_path () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+  in
+  let start_ok, start_body =
+    dispatch_exn ctx ~name:"masc_team_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("goal", `String "exercise duration_reached branch");
+            ("duration_seconds", `Int 60);
+            ("checkpoint_interval_sec", `Int 10);
+          ])
+  in
+  Alcotest.(check bool) "start ok" true start_ok;
+  let start_json = parse_json_exn start_body in
+  let session_id =
+    start_json |> result_field |> Yojson.Safe.Util.member "session_id"
+    |> Yojson.Safe.Util.to_string
+  in
+  ignore
+    (unwrap_ok
+       (Team_session_store.update_session config session_id (fun s ->
+            {
+              s with
+              planned_end_at = Time_compat.now () -. 0.2;
+              updated_at_iso = Types.now_iso ();
+            })));
+  let status = wait_until_terminal ctx session_id in
+  Alcotest.(check string) "completed by duration" "completed" status;
+  cleanup_dir base_dir
+
+let test_recover_elapsed_session () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let session_id = Team_session_store.make_session_id () in
+  Team_session_store.ensure_session_dirs config session_id;
+  let now = Time_compat.now () in
+  let session : Team_session_types.session =
+    {
+      session_id;
+      goal = "recover elapsed session";
+      created_by = "tester";
+      room_id = "default";
+      status = Team_session_types.Running;
+      duration_seconds = 60;
+      execution_scope = Team_session_types.Observe_only;
+      checkpoint_interval_sec = 10;
+      min_agents = 1;
+      auto_resume = true;
+      report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
+      agent_names = [ "tester" ];
+      baseline_done_counts = [];
+      started_at = now -. 120.0;
+      planned_end_at = now -. 5.0;
+      stopped_at = None;
+      last_checkpoint_at = Some (now -. 30.0);
+      last_event_at = Some (now -. 30.0);
+      stop_reason = None;
+      generated_report = false;
+      artifacts_dir = Team_session_store.session_dir config session_id;
+      created_at_iso = Types.now_iso ();
+      updated_at_iso = Types.now_iso ();
+    }
+  in
+  Team_session_store.save_session config session;
+  Team_session_engine_eio.recover_running_sessions ~sw
+    ~clock:(Eio.Stdenv.clock env) ~config;
+  let rec wait_loaded attempts =
+    if attempts <= 0 then
+      failwith "missing session after recover"
+    else
+      match Team_session_store.load_session config session_id with
+      | Some s -> s
+      | None ->
+          Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+          wait_loaded (attempts - 1)
+  in
+  let reloaded = wait_loaded 100 in
+  Alcotest.(check string) "recovered status" "completed"
+    (Team_session_types.status_to_string reloaded.status);
+  Alcotest.(check bool) "report json exists" true
+    (Room_utils.path_exists config
+       (Team_session_store.report_json_path config session_id));
+  cleanup_dir base_dir
+
+let test_read_events_limit () =
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let session_id = Team_session_store.make_session_id () in
+  Team_session_store.ensure_session_dirs config session_id;
+  for i = 1 to 20 do
+    Team_session_store.append_event config session_id ~event_type:"unit_test_event"
+      ~detail:(`Assoc [ ("seq", `Int i) ])
+  done;
+  let events = Team_session_store.read_events ~max_events:5 config session_id in
+  Alcotest.(check int) "limited events length" 5 (List.length events);
+  let seqs =
+    events
+    |> List.map (fun json ->
+           match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "seq" with
+           | `Int n -> n
+           | _ -> -1)
+  in
+  Alcotest.(check (list int)) "tail events kept" [ 16; 17; 18; 19; 20 ] seqs;
+  cleanup_dir base_dir
+
 let test_missing_required_args () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -196,6 +317,12 @@ let () =
         [
           Alcotest.test_case "start-status-report-stop" `Quick
             test_start_status_report_stop;
+          Alcotest.test_case "duration-reached-path" `Quick
+            test_duration_reached_path;
+          Alcotest.test_case "recover-elapsed-session" `Quick
+            test_recover_elapsed_session;
+          Alcotest.test_case "read-events-limit" `Quick
+            test_read_events_limit;
           Alcotest.test_case "missing-required-args" `Quick
             test_missing_required_args;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

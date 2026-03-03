@@ -133,6 +133,21 @@ let done_delta_by_agent ~(baseline : (string * int) list) ~(current : (string * 
   (from_agents @ extra_agents)
   |> List.sort (fun (a, _) (b, _) -> compare a b)
 
+let done_counts_from_backlog (backlog : Types.backlog) : (string * int) list =
+  let tbl = Hashtbl.create 16 in
+  let bump agent =
+    let v = match Hashtbl.find_opt tbl agent with Some n -> n | None -> 0 in
+    Hashtbl.replace tbl agent (v + 1)
+  in
+  List.iter
+    (fun (task : Types.task) ->
+      match task.task_status with
+      | Types.Done { assignee; _ } -> bump assignee
+      | _ -> ())
+    backlog.tasks;
+  Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
+  |> List.sort (fun (a, _) (b, _) -> compare a b)
+
 let assoc_int_to_json pairs =
   `Assoc (List.map (fun (k, v) -> (k, `Int v)) pairs)
 

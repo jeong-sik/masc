@@ -77,21 +77,51 @@ let append_event config session_id ~(event_type : string) ~(detail : Yojson.Safe
   let path = events_jsonl_path config session_id in
   with_file_lock config path (fun () -> append_text_file path line)
 
-let read_events config session_id : Yojson.Safe.t list =
+let read_events ?max_events config session_id : Yojson.Safe.t list =
   let path = events_jsonl_path config session_id in
-  if not (Sys.file_exists path) then
+  if not (path_exists config path) then
     []
   else
-    let content = In_channel.with_open_text path In_channel.input_all in
-    content
-    |> String.split_on_char '\n'
-    |> List.filter_map (fun line ->
-           let trimmed = String.trim line in
-           if trimmed = "" then None
-           else
-             match Safe_ops.parse_json_safe ~context:"team_session.events" trimmed with
-             | Ok json -> Some json
-             | Error _ -> None)
+    with_file_lock config path (fun () ->
+        match max_events with
+        | Some n when n > 0 ->
+            let q = Queue.create () in
+            In_channel.with_open_text path (fun ic ->
+                (try
+                   while true do
+                     let line = input_line ic in
+                     let trimmed = String.trim line in
+                     if trimmed <> "" then
+                       match
+                         Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
+                       with
+                       | Ok json ->
+                           Queue.add json q;
+                           if Queue.length q > n then ignore (Queue.take q)
+                       | Error _ -> ()
+                   done
+                 with End_of_file -> ());
+                Queue.to_seq q |> List.of_seq)
+        | _ ->
+            In_channel.with_open_text path (fun ic ->
+                let rec loop acc =
+                  match input_line ic with
+                  | line ->
+                      let trimmed = String.trim line in
+                      let acc' =
+                        if trimmed = "" then
+                          acc
+                        else
+                          match
+                            Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
+                          with
+                          | Ok json -> json :: acc
+                          | Error _ -> acc
+                      in
+                      loop acc'
+                  | exception End_of_file -> List.rev acc
+                in
+                loop []))
 
 let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoint) =
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in
@@ -100,7 +130,7 @@ let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoi
 
 let list_checkpoint_paths config session_id =
   let dir = checkpoints_dir config session_id in
-  if not (Sys.file_exists dir) then
+  if not (path_exists config dir) then
     []
   else
     Sys.readdir dir
@@ -111,7 +141,7 @@ let list_checkpoint_paths config session_id =
 
 let list_sessions config : Team_session_types.session list =
   let root = sessions_root config in
-  if not (Sys.file_exists root) then
+  if not (path_exists config root) then
     []
   else
     Sys.readdir root

@@ -31,6 +31,10 @@ let unwrap_ok = function
   | Ok v -> v
   | Error e -> failwith e
 
+let get_session_id response_json =
+  response_json |> result_field |> Yojson.Safe.Util.member "session_id"
+  |> Yojson.Safe.Util.to_string
+
 let session_status_of_body body =
   let json = parse_json_exn body in
   let result = result_field json in
@@ -57,6 +61,28 @@ let wait_until_terminal ctx session_id =
   in
   loop 200
 
+let start_session_exn ctx ~goal =
+  let start_ok, start_body =
+    dispatch_exn ctx ~name:"masc_team_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("goal", `String goal);
+            ("duration_seconds", `Int 90);
+            ("checkpoint_interval_sec", `Int 10);
+            ("min_agents", `Int 1);
+            ("orchestration_mode", `String "assist");
+            ("communication_mode", `String "hybrid");
+            ("model_cascade", `List [ `String "glm:glm-5" ]);
+            ("fallback_policy", `String "cascade_then_task");
+            ("instruction_profile", `String "strict");
+            ("alert_channel", `String "both");
+            ("report_formats", `List [ `String "markdown"; `String "json" ]);
+          ])
+  in
+  Alcotest.(check bool) "start ok" true start_ok;
+  parse_json_exn start_body
+
 let test_start_status_report_stop () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -69,26 +95,13 @@ let test_start_status_report_stop () =
     { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
   in
 
-  let start_args =
-    `Assoc
-      [
-        ("goal", `String "Run coordinated team session and capture report");
-        ("duration_seconds", `Int 90);
-        ("checkpoint_interval_sec", `Int 10);
-        ("report_formats", `List [ `String "markdown"; `String "json" ]);
-      ]
+  let start_json =
+    start_session_exn ctx
+      ~goal:"Run coordinated team session and capture report"
   in
-  let start_ok, start_body =
-    dispatch_exn ctx ~name:"masc_team_session_start" ~args:start_args
-  in
-  Alcotest.(check bool) "start ok" true start_ok;
-  let start_json = parse_json_exn start_body in
   Alcotest.(check string) "start status ok" "ok"
     (Yojson.Safe.Util.member "status" start_json |> Yojson.Safe.Util.to_string);
-  let session_id =
-    start_json |> result_field |> Yojson.Safe.Util.member "session_id"
-    |> Yojson.Safe.Util.to_string
-  in
+  let session_id = get_session_id start_json in
 
   let status_ok, status_body =
     dispatch_exn ctx ~name:"masc_team_session_status"
@@ -96,17 +109,23 @@ let test_start_status_report_stop () =
   in
   Alcotest.(check bool) "status ok" true status_ok;
   let status_json = parse_json_exn status_body in
+  let status_result = result_field status_json in
   Alcotest.(check string) "status wrapper" "ok"
     (Yojson.Safe.Util.member "status" status_json |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool) "team_health present" true
+    (Yojson.Safe.Util.member "team_health" status_result <> `Null);
+  Alcotest.(check bool) "communication_metrics present" true
+    (Yojson.Safe.Util.member "communication_metrics" status_result <> `Null);
+  Alcotest.(check bool) "orchestration_state present" true
+    (Yojson.Safe.Util.member "orchestration_state" status_result <> `Null);
+  Alcotest.(check bool) "cascade_metrics present" true
+    (Yojson.Safe.Util.member "cascade_metrics" status_result <> `Null);
 
   let report_ok, report_body =
     dispatch_exn ctx ~name:"masc_team_session_report"
       ~args:
         (`Assoc
-          [
-            ("session_id", `String session_id);
-            ("force_regenerate", `Bool true);
-          ])
+          [ ("session_id", `String session_id); ("force_regenerate", `Bool true) ])
   in
   Alcotest.(check bool) "report ok" true report_ok;
   let report_json = parse_json_exn report_body in
@@ -120,7 +139,8 @@ let test_start_status_report_stop () =
     |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check bool) "markdown exists" true (Sys.file_exists md_path);
-  Alcotest.(check bool) "json report exists" true (Room_utils.path_exists config json_path);
+  Alcotest.(check bool) "json report exists" true
+    (Room_utils.path_exists config json_path);
 
   let stop_ok, stop_body =
     dispatch_exn ctx ~name:"masc_team_session_stop"
@@ -137,8 +157,7 @@ let test_start_status_report_stop () =
   Alcotest.(check string) "stop wrapper" "ok"
     (Yojson.Safe.Util.member "status" stop_json |> Yojson.Safe.Util.to_string);
   let final_status = wait_until_terminal ctx session_id in
-  Alcotest.(check bool) "terminal status"
-    true
+  Alcotest.(check bool) "terminal status" true
     (final_status = "interrupted" || final_status = "completed"
    || final_status = "failed");
 
@@ -154,22 +173,10 @@ let test_duration_reached_path () =
   let ctx : _ Tool_team_session.context =
     { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
   in
-  let start_ok, start_body =
-    dispatch_exn ctx ~name:"masc_team_session_start"
-      ~args:
-        (`Assoc
-          [
-            ("goal", `String "exercise duration_reached branch");
-            ("duration_seconds", `Int 60);
-            ("checkpoint_interval_sec", `Int 10);
-          ])
+  let start_json =
+    start_session_exn ctx ~goal:"exercise duration_reached branch"
   in
-  Alcotest.(check bool) "start ok" true start_ok;
-  let start_json = parse_json_exn start_body in
-  let session_id =
-    start_json |> result_field |> Yojson.Safe.Util.member "session_id"
-    |> Yojson.Safe.Util.to_string
-  in
+  let session_id = get_session_id start_json in
   ignore
     (unwrap_ok
        (Team_session_store.update_session config session_id (fun s ->
@@ -202,9 +209,23 @@ let test_recover_elapsed_session () =
       execution_scope = Team_session_types.Observe_only;
       checkpoint_interval_sec = 10;
       min_agents = 1;
+      orchestration_mode = Team_session_types.Assist;
+      communication_mode = Team_session_types.Comm_broadcast;
+      model_cascade = [ "glm:glm-5" ];
+      fallback_policy = Team_session_types.Fallback_cascade_then_task;
+      instruction_profile = Team_session_types.Profile_standard;
+      alert_channel = Team_session_types.Alert_both;
       auto_resume = true;
       report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
       agent_names = [ "tester" ];
+      broadcast_count = 0;
+      portal_count = 0;
+      cascade_attempted = 0;
+      cascade_success = 0;
+      cascade_failed = 0;
+      fallback_task_created = 0;
+      min_agents_violation_streak = 0;
+      policy_violations = [];
       baseline_done_counts = [];
       started_at = now -. 120.0;
       planned_end_at = now -. 5.0;
@@ -254,11 +275,79 @@ let test_read_events_limit () =
   let seqs =
     events
     |> List.map (fun json ->
-           match Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "seq" with
+           match
+             Yojson.Safe.Util.member "detail" json |> Yojson.Safe.Util.member "seq"
+           with
            | `Int n -> n
            | _ -> -1)
   in
   Alcotest.(check (list int)) "tail events kept" [ 16; 17; 18; 19; 20 ] seqs;
+  cleanup_dir base_dir
+
+let test_list_and_compare () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+  in
+
+  let s1 = start_session_exn ctx ~goal:"compare-session-base" |> get_session_id in
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String s1);
+             ("reason", `String "base_stop");
+             ("generate_report", `Bool false);
+           ]));
+  ignore (wait_until_terminal ctx s1);
+
+  let s2 = start_session_exn ctx ~goal:"compare-session-target" |> get_session_id in
+
+  let list_ok, list_body =
+    dispatch_exn ctx ~name:"masc_team_session_list"
+      ~args:(`Assoc [ ("limit", `Int 10) ])
+  in
+  Alcotest.(check bool) "list ok" true list_ok;
+  let list_json = parse_json_exn list_body in
+  let sessions =
+    list_json |> result_field |> Yojson.Safe.Util.member "sessions"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check bool) "list has sessions" true (List.length sessions >= 2);
+
+  let cmp_ok, cmp_body =
+    dispatch_exn ctx ~name:"masc_team_session_compare"
+      ~args:
+        (`Assoc
+          [
+            ("base_session_id", `String s1);
+            ("target_session_id", `String s2);
+          ])
+  in
+  Alcotest.(check bool) "compare ok" true cmp_ok;
+  let cmp_json = parse_json_exn cmp_body |> result_field in
+  Alcotest.(check string) "compare base" s1
+    (Yojson.Safe.Util.member "base_session_id" cmp_json
+    |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string) "compare target" s2
+    (Yojson.Safe.Util.member "target_session_id" cmp_json
+    |> Yojson.Safe.Util.to_string);
+
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String s2);
+             ("reason", `String "target_stop");
+             ("generate_report", `Bool false);
+           ]));
   cleanup_dir base_dir
 
 let test_missing_required_args () =
@@ -286,6 +375,14 @@ let test_missing_required_args () =
     dispatch_exn ctx ~name:"masc_team_session_report"
       ~args:(`Assoc [ ("session_id", `String "bad-id") ])
   in
+  let ok8, _ =
+    dispatch_exn ctx ~name:"masc_team_session_compare"
+      ~args:(`Assoc [ ("base_session_id", `String "bad-id") ])
+  in
+  let ok9, _ =
+    dispatch_exn ctx ~name:"masc_team_session_list"
+      ~args:(`Assoc [ ("status", `String "not-a-status") ])
+  in
   Alcotest.(check bool) "start invalid" false ok1;
   Alcotest.(check bool) "status invalid" false ok2;
   Alcotest.(check bool) "stop invalid" false ok3;
@@ -293,6 +390,8 @@ let test_missing_required_args () =
   Alcotest.(check bool) "status traversal invalid" false ok5;
   Alcotest.(check bool) "stop traversal invalid" false ok6;
   Alcotest.(check bool) "report format invalid" false ok7;
+  Alcotest.(check bool) "compare invalid" false ok8;
+  Alcotest.(check bool) "list invalid status" false ok9;
   cleanup_dir base_dir
 
 let test_dispatch_unknown () =
@@ -323,6 +422,7 @@ let () =
             test_recover_elapsed_session;
           Alcotest.test_case "read-events-limit" `Quick
             test_read_events_limit;
+          Alcotest.test_case "list-and-compare" `Quick test_list_and_compare;
           Alcotest.test_case "missing-required-args" `Quick
             test_missing_required_args;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

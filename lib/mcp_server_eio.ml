@@ -776,7 +776,8 @@ let read_only_tools =
    "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
    "masc_worktree_list"; "masc_pending_interrupts";
    "masc_cost_report"; "masc_portal_status";
-   "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report"]
+   "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
+   "masc_team_session_list"; "masc_team_session_compare"]
 
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
@@ -855,9 +856,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Agent_registry_eio.get_or_create_identity already resolved identity above.
      Use identity.agent_name as the canonical source. *)
   let raw_agent_name = arg_get_string "agent_name" "" in
+  let has_explicit_agent_name = raw_agent_name <> "" && raw_agent_name <> "unknown" in
   let agent_name =
     (* Priority: explicit arg > identity > legacy file-based *)
-    if raw_agent_name <> "" && raw_agent_name <> "unknown" then
+    if has_explicit_agent_name then
       raw_agent_name
     else if identity.Agent_identity.agent_name <> "" then
       identity.Agent_identity.agent_name
@@ -908,16 +910,27 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> read_term_session_agent ()
   in
 
-  (* If the client keeps sending a legacy agent type (e.g. "claude") but we've
-     already joined and have a generated nickname, prefer the nickname. This
-     avoids repeated auto-joins and makes join-required tools "just work". *)
+  (* If no explicit agent_name was provided and we already have a persisted
+     generated nickname, prefer it for backward compatibility.
+     IMPORTANT: explicit agent_name must win to allow multi-agent spawning. *)
   let agent_name =
     match persisted_agent_name () with
     | Some persisted
       when Nickname.is_generated_nickname persisted
+           && not has_explicit_agent_name
            && not (Nickname.is_generated_nickname agent_name) ->
         persisted
     | _ -> agent_name
+  in
+
+  (* Explicit non-nickname aliases (e.g., "alpha-agent") should resolve to an
+     existing generated nickname if one is already joined. This prevents
+     claim/start/done calls from drifting across different nicknames. *)
+  let agent_name =
+    if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name) then
+      Room.resolve_agent_name config agent_name
+    else
+      agent_name
   in
 
   (* Enforce tool authorization when enabled *)

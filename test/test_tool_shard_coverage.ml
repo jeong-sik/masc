@@ -1,0 +1,334 @@
+(** Coverage tests for Tool_shard — dynamic tool sharding for MASC agents.
+
+    Tests shard types, predefined shards, grant/revoke logic,
+    tools_of_shards composition, agent shard state, execute dispatch,
+    and MCP schemas.
+
+    Pure synchronous tests — no Eio or network required. *)
+
+module Tool_shard = Masc_mcp.Tool_shard
+
+(* ============================================================
+   Predefined shard tests
+   ============================================================ *)
+
+let test_shard_base_exists () =
+  match Tool_shard.get_shard "base" with
+  | Some s ->
+    Alcotest.(check string) "name" "base" s.Tool_shard.name;
+    Alcotest.(check bool) "not removable" false s.Tool_shard.removable;
+    Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools > 0)
+  | None -> Alcotest.fail "base shard not found"
+
+let test_shard_board_exists () =
+  match Tool_shard.get_shard "board" with
+  | Some s ->
+    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
+    Alcotest.(check bool) "has 3 tools" true (List.length s.Tool_shard.tools = 3)
+  | None -> Alcotest.fail "board shard not found"
+
+let test_shard_filesystem_exists () =
+  match Tool_shard.get_shard "filesystem" with
+  | Some s ->
+    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
+    Alcotest.(check bool) "has 2 tools" true (List.length s.Tool_shard.tools = 2)
+  | None -> Alcotest.fail "filesystem shard not found"
+
+let test_shard_shell_exists () =
+  match Tool_shard.get_shard "shell" with
+  | Some s ->
+    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
+    Alcotest.(check bool) "has 2 tools" true (List.length s.Tool_shard.tools = 2)
+  | None -> Alcotest.fail "shell shard not found"
+
+let test_shard_weather_exists () =
+  match Tool_shard.get_shard "weather" with
+  | Some s ->
+    Alcotest.(check bool) "removable" true s.Tool_shard.removable;
+    Alcotest.(check bool) "has 1 tool" true (List.length s.Tool_shard.tools = 1)
+  | None -> Alcotest.fail "weather shard not found"
+
+let test_shard_unknown () =
+  Alcotest.(check bool) "unknown returns None" true
+    (Tool_shard.get_shard "nonexistent" = None)
+
+let test_all_shards_count () =
+  let all = Tool_shard.list_all_shards () in
+  Alcotest.(check int) "5 predefined shards" 5 (List.length all)
+
+(* ============================================================
+   default_shard_names tests
+   ============================================================ *)
+
+let test_default_shard_names () =
+  let defaults = Tool_shard.default_shard_names in
+  Alcotest.(check int) "5 defaults" 5 (List.length defaults);
+  List.iter (fun name ->
+    Alcotest.(check bool) (name ^ " in defaults") true
+      (List.mem name defaults)
+  ) ["base"; "board"; "filesystem"; "shell"; "weather"]
+
+(* ============================================================
+   tools_of_shards tests
+   ============================================================ *)
+
+let test_tools_of_shards_empty () =
+  let tools = Tool_shard.tools_of_shards [] in
+  Alcotest.(check int) "no shards → no tools" 0 (List.length tools)
+
+let test_tools_of_shards_single () =
+  let tools = Tool_shard.tools_of_shards ["base"] in
+  Alcotest.(check int) "base has 3 tools" 3 (List.length tools)
+
+let test_tools_of_shards_multiple () =
+  let tools = Tool_shard.tools_of_shards ["base"; "board"] in
+  (* base=3, board=3 → 6 *)
+  Alcotest.(check int) "base+board = 6" 6 (List.length tools)
+
+let test_tools_of_shards_unknown_ignored () =
+  let tools = Tool_shard.tools_of_shards ["base"; "doesnt_exist"; "board"] in
+  Alcotest.(check int) "unknown shard ignored" 6 (List.length tools)
+
+let test_keeper_llm_tools_count () =
+  let tools = Tool_shard.keeper_llm_tools in
+  (* base=3 + board=3 + filesystem=2 + shell=2 + weather=1 = 11 *)
+  Alcotest.(check int) "11 total tools" 11 (List.length tools)
+
+(* ============================================================
+   grant_shard tests
+   ============================================================ *)
+
+let test_grant_known_shard () =
+  let active = ["base"] in
+  match Tool_shard.grant_shard active "board" with
+  | Ok new_shards ->
+    Alcotest.(check int) "now 2 shards" 2 (List.length new_shards);
+    Alcotest.(check bool) "board added" true (List.mem "board" new_shards)
+  | Error _ -> Alcotest.fail "should succeed"
+
+let test_grant_unknown_shard () =
+  match Tool_shard.grant_shard ["base"] "fantasy" with
+  | Ok _ -> Alcotest.fail "should fail"
+  | Error msg ->
+    Alcotest.(check bool) "mentions unknown" true
+      (String.lowercase_ascii msg |> fun s ->
+       try ignore (Str.search_forward (Str.regexp_string "unknown") s 0); true
+       with Not_found -> false)
+
+let test_grant_already_granted () =
+  match Tool_shard.grant_shard ["base"; "board"] "board" with
+  | Ok _ -> Alcotest.fail "should fail"
+  | Error msg ->
+    Alcotest.(check bool) "mentions already" true
+      (String.lowercase_ascii msg |> fun s ->
+       try ignore (Str.search_forward (Str.regexp_string "already") s 0); true
+       with Not_found -> false)
+
+(* ============================================================
+   revoke_shard tests
+   ============================================================ *)
+
+let test_revoke_removable () =
+  let active = ["base"; "board"; "shell"] in
+  match Tool_shard.revoke_shard active "board" with
+  | Ok new_shards ->
+    Alcotest.(check int) "now 2" 2 (List.length new_shards);
+    Alcotest.(check bool) "board removed" false (List.mem "board" new_shards)
+  | Error _ -> Alcotest.fail "should succeed"
+
+let test_revoke_non_removable () =
+  match Tool_shard.revoke_shard ["base"; "board"] "base" with
+  | Ok _ -> Alcotest.fail "should fail"
+  | Error msg ->
+    Alcotest.(check bool) "mentions non-removable" true
+      (String.lowercase_ascii msg |> fun s ->
+       try ignore (Str.search_forward (Str.regexp_string "remov") s 0); true
+       with Not_found -> false)
+
+let test_revoke_not_granted () =
+  match Tool_shard.revoke_shard ["base"] "shell" with
+  | Ok _ -> Alcotest.fail "should fail"
+  | Error msg ->
+    Alcotest.(check bool) "mentions not granted" true
+      (String.lowercase_ascii msg |> fun s ->
+       try ignore (Str.search_forward (Str.regexp_string "not") s 0); true
+       with Not_found -> false)
+
+let test_revoke_unknown () =
+  match Tool_shard.revoke_shard ["base"] "fantasy" with
+  | Ok _ -> Alcotest.fail "should fail"
+  | Error msg ->
+    Alcotest.(check bool) "mentions unknown" true
+      (String.lowercase_ascii msg |> fun s ->
+       try ignore (Str.search_forward (Str.regexp_string "unknown") s 0); true
+       with Not_found -> false)
+
+(* ============================================================
+   agent shard state tests
+   ============================================================ *)
+
+let test_get_agent_shards_default () =
+  (* Unknown agent gets default shards *)
+  let shards = Tool_shard.get_agent_shards "new-agent-never-seen" in
+  Alcotest.(check int) "defaults" 5 (List.length shards)
+
+let test_set_get_agent_shards () =
+  Hashtbl.remove Tool_shard.agent_shards "test-agent-x";
+  Tool_shard.set_agent_shards "test-agent-x" ["base"; "shell"];
+  let shards = Tool_shard.get_agent_shards "test-agent-x" in
+  Alcotest.(check int) "2 shards" 2 (List.length shards);
+  Alcotest.(check bool) "sorted" true (shards = List.sort String.compare shards);
+  (* Cleanup *)
+  Hashtbl.remove Tool_shard.agent_shards "test-agent-x"
+
+(* ============================================================
+   execute (MCP dispatch) tests
+   ============================================================ *)
+
+let test_execute_unknown_tool () =
+  let (ok, _json) = Tool_shard.execute "unknown_tool" (`Assoc []) in
+  Alcotest.(check bool) "fails" false ok
+
+let test_execute_tool_list () =
+  let (ok, json) = Tool_shard.execute "masc_tool_list" (`Assoc []) in
+  Alcotest.(check bool) "succeeds" true ok;
+  let shards = Yojson.Safe.Util.(member "shards" json |> to_list) in
+  Alcotest.(check int) "5 shards in list" 5 (List.length shards)
+
+let test_execute_tool_list_with_agent () =
+  Hashtbl.remove Tool_shard.agent_shards "test-ex";
+  Tool_shard.set_agent_shards "test-ex" ["base"; "board"];
+  let (ok, json) = Tool_shard.execute "masc_tool_list"
+    (`Assoc [("agent_name", `String "test-ex")]) in
+  Alcotest.(check bool) "succeeds" true ok;
+  let active = Yojson.Safe.Util.(member "active_shards" json |> to_list) in
+  Alcotest.(check int) "2 active" 2 (List.length active);
+  Hashtbl.remove Tool_shard.agent_shards "test-ex"
+
+let test_execute_grant () =
+  Hashtbl.remove Tool_shard.agent_shards "test-grant";
+  Tool_shard.set_agent_shards "test-grant" ["base"];
+  let (ok, json) = Tool_shard.execute "masc_tool_grant"
+    (`Assoc [("agent_name", `String "test-grant"); ("shard_name", `String "board")]) in
+  Alcotest.(check bool) "succeeds" true ok;
+  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
+  Alcotest.(check string) "granted" "granted" status;
+  Hashtbl.remove Tool_shard.agent_shards "test-grant"
+
+let test_execute_grant_missing_params () =
+  let (ok, json) = Tool_shard.execute "masc_tool_grant" (`Assoc []) in
+  Alcotest.(check bool) "fails" false ok;
+  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
+  Alcotest.(check string) "error status" "error" status
+
+let test_execute_revoke () =
+  Hashtbl.remove Tool_shard.agent_shards "test-revoke";
+  Tool_shard.set_agent_shards "test-revoke" ["base"; "board"; "shell"];
+  let (ok, json) = Tool_shard.execute "masc_tool_revoke"
+    (`Assoc [("agent_name", `String "test-revoke"); ("shard_name", `String "board")]) in
+  Alcotest.(check bool) "succeeds" true ok;
+  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
+  Alcotest.(check string) "revoked" "revoked" status;
+  Hashtbl.remove Tool_shard.agent_shards "test-revoke"
+
+let test_execute_revoke_non_removable () =
+  Hashtbl.remove Tool_shard.agent_shards "test-rev-base";
+  Tool_shard.set_agent_shards "test-rev-base" ["base"; "board"];
+  let (ok, json) = Tool_shard.execute "masc_tool_revoke"
+    (`Assoc [("agent_name", `String "test-rev-base"); ("shard_name", `String "base")]) in
+  Alcotest.(check bool) "fails" false ok;
+  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
+  Alcotest.(check string) "error" "error" status;
+  Hashtbl.remove Tool_shard.agent_shards "test-rev-base"
+
+(* ============================================================
+   schemas tests
+   ============================================================ *)
+
+let test_schemas_count () =
+  Alcotest.(check int) "3 schemas" 3 (List.length Tool_shard.schemas)
+
+let test_schemas_names () =
+  let names = List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name)
+    Tool_shard.schemas in
+  List.iter (fun expected ->
+    Alcotest.(check bool) (expected ^ " present") true
+      (List.mem expected names)
+  ) ["masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list"]
+
+(* ============================================================
+   base_tools / board_tools content tests
+   ============================================================ *)
+
+let test_base_tools_names () =
+  let names = List.map (fun (t : Masc_mcp.Llm_client.tool_def) -> t.tool_name)
+    Tool_shard.base_tools in
+  Alcotest.(check bool) "has time_now" true (List.mem "keeper_time_now" names);
+  Alcotest.(check bool) "has context_status" true (List.mem "keeper_context_status" names);
+  Alcotest.(check bool) "has memory_search" true (List.mem "keeper_memory_search" names)
+
+let test_board_tools_names () =
+  let names = List.map (fun (t : Masc_mcp.Llm_client.tool_def) -> t.tool_name)
+    Tool_shard.board_tools in
+  Alcotest.(check bool) "has board_post" true (List.mem "keeper_board_post" names);
+  Alcotest.(check bool) "has board_list" true (List.mem "keeper_board_list" names);
+  Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names)
+
+(* ============================================================
+   Test runner
+   ============================================================ *)
+
+let () =
+  Alcotest.run "Tool_shard coverage" [
+    ("predefined_shards", [
+      Alcotest.test_case "base" `Quick test_shard_base_exists;
+      Alcotest.test_case "board" `Quick test_shard_board_exists;
+      Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
+      Alcotest.test_case "shell" `Quick test_shard_shell_exists;
+      Alcotest.test_case "weather" `Quick test_shard_weather_exists;
+      Alcotest.test_case "unknown" `Quick test_shard_unknown;
+      Alcotest.test_case "all count" `Quick test_all_shards_count;
+    ]);
+    ("default_shard_names", [
+      Alcotest.test_case "defaults" `Quick test_default_shard_names;
+    ]);
+    ("tools_of_shards", [
+      Alcotest.test_case "empty" `Quick test_tools_of_shards_empty;
+      Alcotest.test_case "single" `Quick test_tools_of_shards_single;
+      Alcotest.test_case "multiple" `Quick test_tools_of_shards_multiple;
+      Alcotest.test_case "unknown ignored" `Quick test_tools_of_shards_unknown_ignored;
+      Alcotest.test_case "keeper_llm_tools" `Quick test_keeper_llm_tools_count;
+    ]);
+    ("grant_shard", [
+      Alcotest.test_case "known" `Quick test_grant_known_shard;
+      Alcotest.test_case "unknown" `Quick test_grant_unknown_shard;
+      Alcotest.test_case "already granted" `Quick test_grant_already_granted;
+    ]);
+    ("revoke_shard", [
+      Alcotest.test_case "removable" `Quick test_revoke_removable;
+      Alcotest.test_case "non-removable" `Quick test_revoke_non_removable;
+      Alcotest.test_case "not granted" `Quick test_revoke_not_granted;
+      Alcotest.test_case "unknown" `Quick test_revoke_unknown;
+    ]);
+    ("agent_shards", [
+      Alcotest.test_case "default" `Quick test_get_agent_shards_default;
+      Alcotest.test_case "set/get" `Quick test_set_get_agent_shards;
+    ]);
+    ("execute", [
+      Alcotest.test_case "unknown tool" `Quick test_execute_unknown_tool;
+      Alcotest.test_case "list" `Quick test_execute_tool_list;
+      Alcotest.test_case "list with agent" `Quick test_execute_tool_list_with_agent;
+      Alcotest.test_case "grant" `Quick test_execute_grant;
+      Alcotest.test_case "grant missing params" `Quick test_execute_grant_missing_params;
+      Alcotest.test_case "revoke" `Quick test_execute_revoke;
+      Alcotest.test_case "revoke non-removable" `Quick test_execute_revoke_non_removable;
+    ]);
+    ("schemas", [
+      Alcotest.test_case "count" `Quick test_schemas_count;
+      Alcotest.test_case "names" `Quick test_schemas_names;
+    ]);
+    ("tool_content", [
+      Alcotest.test_case "base tools" `Quick test_base_tools_names;
+      Alcotest.test_case "board tools" `Quick test_board_tools_names;
+    ]);
+  ]

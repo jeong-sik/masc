@@ -61,6 +61,25 @@ val list_all_shards : unit -> (string * bool * int) list
 (** List all available shards with their status.
     Returns (name, removable, tool_count) tuples. *)
 
+(** {1 Per-Agent Shard State} *)
+
+val agent_shards : (string, string list) Hashtbl.t
+(** Global agent → active_shards mapping. *)
+
+val get_agent_shards : string -> string list
+(** Get shards for an agent. Returns [default_shard_names] if unset. *)
+
+val set_agent_shards : string -> string list -> unit
+(** Set active shards for an agent. *)
+
+(** {1 Tool Definitions} *)
+
+val base_tools : Llm_client.tool_def list
+(** Core tools: time_now, context_status, memory_search. *)
+
+val board_tools : Llm_client.tool_def list
+(** Board tools: board_post, board_list, board_comment. *)
+
 (** {1 MCP Interface} *)
 
 val schemas : Types.tool_schema list

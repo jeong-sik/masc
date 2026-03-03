@@ -70,7 +70,12 @@ let create_state ?test_mode:_ ~base_path () =
 
 (** Create state with Eio context - required for PostgresNative backend *)
 let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path =
-  Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path
+  let state = Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~base_path in
+  (* Recover any previously running team sessions after server restart. *)
+  (try Team_session_engine_eio.recover_running_sessions ~sw ~clock ~config:state.Mcp_server.room_config
+   with exn ->
+     Printf.eprintf "[team_session] recovery skipped: %s\n%!" (Printexc.to_string exn));
+  state
 
 let is_jsonrpc_v2 = Mcp_server.is_jsonrpc_v2
 let is_jsonrpc_response = Mcp_server.is_jsonrpc_response
@@ -771,7 +776,8 @@ let read_only_tools =
    "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
    "masc_worktree_list"; "masc_pending_interrupts";
    "masc_cost_report"; "masc_portal_status";
-   "masc_goal_list"]
+   "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
+   "masc_team_session_list"; "masc_team_session_compare"]
 
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
@@ -850,9 +856,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Agent_registry_eio.get_or_create_identity already resolved identity above.
      Use identity.agent_name as the canonical source. *)
   let raw_agent_name = arg_get_string "agent_name" "" in
+  let has_explicit_agent_name = raw_agent_name <> "" && raw_agent_name <> "unknown" in
   let agent_name =
     (* Priority: explicit arg > identity > legacy file-based *)
-    if raw_agent_name <> "" && raw_agent_name <> "unknown" then
+    if has_explicit_agent_name then
       raw_agent_name
     else if identity.Agent_identity.agent_name <> "" then
       identity.Agent_identity.agent_name
@@ -903,13 +910,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> read_term_session_agent ()
   in
 
-  (* If the client keeps sending a legacy agent type (e.g. "claude") but we've
-     already joined and have a generated nickname, prefer the nickname. This
-     avoids repeated auto-joins and makes join-required tools "just work". *)
+  (* If no explicit agent_name was provided and we already have a persisted
+     generated nickname, prefer it for backward compatibility.
+     IMPORTANT: explicit agent_name must win to allow multi-agent spawning. *)
   let agent_name =
     match persisted_agent_name () with
     | Some persisted
       when Nickname.is_generated_nickname persisted
+           && not has_explicit_agent_name
            && not (Nickname.is_generated_nickname agent_name) ->
         persisted
     | _ -> agent_name
@@ -928,6 +936,24 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | _ -> agent_name
   in
 
+  (* Explicit non-nickname aliases (e.g., "alpha-agent") should resolve to an
+     existing generated nickname if one is already joined. This prevents
+     claim/start/done calls from drifting across different nicknames. *)
+  let agent_name =
+    if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name) then
+      let resolved = Room.resolve_agent_name config agent_name in
+      if resolved <> agent_name then
+        try
+          if Room.is_agent_joined config ~agent_name:resolved then
+            resolved
+          else
+            agent_name
+        with _ -> agent_name
+      else
+        agent_name
+    else
+      agent_name
+  in
   (* Enforce tool authorization when enabled *)
   let auth_enabled = Auth.is_auth_enabled config.base_path in
   let auth_result =
@@ -985,6 +1011,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_lock"; "masc_unlock";
     "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
     "masc_goal_dispatch"; "masc_goal_review";
+    "masc_team_session_start"; "masc_team_session_stop";
   ] in
 
   (* Auto-init/auto-join for better UX.
@@ -1120,6 +1147,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   } in
   let simple_ctx_config = { Tool_plan.config } in
   let simple_ctx_run = { Tool_run.config } in
+  let simple_ctx_team_session = { Tool_team_session.config; agent_name; sw; clock } in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
   let simple_ctx_mitosis =
@@ -1278,6 +1306,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_run.dispatch simple_ctx_run ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_team_session.dispatch simple_ctx_team_session ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_cache.dispatch simple_ctx_cache ~name ~args:arguments with
@@ -2841,6 +2872,7 @@ let handle_list_tools_eio state id =
     @ Tool_perpetual.schemas
     @ Tool_keeper.schemas
     @ Tool_goals.schemas
+    @ Tool_team_session.schemas
     @ Tool_protocol_game_view.schemas
   in
   let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->

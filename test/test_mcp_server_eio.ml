@@ -359,6 +359,97 @@ let test_execute_tool_trpg_validation () =
 
   cleanup_dir base_path
 
+let test_execute_tool_explicit_agent_name_not_overridden () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-explicit-agent-name-regression" in
+
+  let (ok_init, _init_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init"
+      ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+
+  let (ok_join_codex, join_codex_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_join"
+      ~arguments:(`Assoc [("agent_name", `String "codex")])
+  in
+  Alcotest.(check bool) "join codex success" true ok_join_codex;
+  Alcotest.(check bool)
+    "join codex type"
+    true
+    (contains_substring join_codex_msg "Type: codex");
+
+  let (ok_join_gemini, join_gemini_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_join"
+      ~arguments:(`Assoc [("agent_name", `String "gemini")])
+  in
+  Alcotest.(check bool) "join gemini success" true ok_join_gemini;
+  Alcotest.(check bool)
+    "explicit agent_name should win over persisted nickname"
+    true
+    (contains_substring join_gemini_msg "Type: gemini");
+
+  cleanup_dir base_path
+
+let test_execute_tool_explicit_alias_reuses_joined_nickname () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-explicit-alias-reuse-regression" in
+
+  let (ok_init, _init_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init"
+      ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+
+  let _added =
+    Masc_mcp.Room.add_task state.room_config
+      ~title:"alias-reuse-task"
+      ~priority:2
+      ~description:""
+  in
+
+  let transition action =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_transition"
+      ~arguments:(`Assoc [
+        ("task_id", `String "task-001");
+        ("action", `String action);
+        ("agent_name", `String "alpha-agent");
+      ])
+  in
+
+  let (ok_claim, claim_msg) = transition "claim" in
+  Alcotest.(check bool) "claim success" true ok_claim;
+  Alcotest.(check bool) "claim message has claimed" true (contains_substring claim_msg "claimed");
+
+  let (ok_start, start_msg) = transition "start" in
+  Alcotest.(check bool) "start success with same explicit alias" true ok_start;
+  Alcotest.(check bool) "start message has in_progress" true (contains_substring start_msg "in_progress");
+
+  let (ok_done, done_msg) = transition "done" in
+  Alcotest.(check bool) "done success with same explicit alias" true ok_done;
+  Alcotest.(check bool) "done message has done" true (contains_substring done_msg "done");
+
+  cleanup_dir base_path
+
 let test_handle_request_tools_call_trpg () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -465,6 +556,8 @@ let eio_tests = [
   "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
   "execute trpg flow", `Quick, test_execute_tool_trpg_flow;
   "execute trpg validation", `Quick, test_execute_tool_trpg_validation;
+  "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
+  "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
 ]
 
 let () =

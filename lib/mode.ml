@@ -110,7 +110,10 @@ let tool_category tool_name =
   | "masc_update_priority" | "masc_transition" | "masc_release"
   | "masc_run_init" | "masc_run_plan" | "masc_run_log"
   | "masc_run_deliverable" | "masc_run_get" | "masc_run_list"
-  | "masc_task_history" -> Core
+  | "masc_task_history"
+  | "masc_team_session_start" | "masc_team_session_status"
+  | "masc_team_session_stop" | "masc_team_session_report"
+  | "masc_team_session_list" | "masc_team_session_compare" -> Core
 
   (* Communication tools *)
   | "masc_broadcast" | "masc_messages"

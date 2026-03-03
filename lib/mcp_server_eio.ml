@@ -777,7 +777,8 @@ let read_only_tools =
    "masc_worktree_list"; "masc_pending_interrupts";
    "masc_cost_report"; "masc_portal_status";
    "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
-   "masc_team_session_list"; "masc_team_session_compare"]
+   "masc_team_session_list"; "masc_team_session_compare";
+   "masc_team_session_events"; "masc_team_session_prove"]
 
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
@@ -1012,6 +1013,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
     "masc_goal_dispatch"; "masc_goal_review";
     "masc_team_session_start"; "masc_team_session_stop";
+    "masc_team_session_turn";
   ] in
 
   (* Auto-init/auto-join for better UX.

@@ -8,6 +8,9 @@
 - 보고서 생성: `masc_team_session_report`
 - 세션 목록: `masc_team_session_list`
 - 세션 비교: `masc_team_session_compare`
+- 턴 기록/조작: `masc_team_session_turn`
+- 이벤트 타임라인 조회: `masc_team_session_events`
+- 증명 산출: `masc_team_session_prove`
 
 핵심 동작:
 
@@ -75,6 +78,49 @@
 - `markdown_path`
 - `json_path`
 
+### `masc_team_session_turn`
+
+입력:
+
+- `session_id` (required)
+- `turn_kind` (`note` | `broadcast` | `portal` | `task` | `checkpoint`, default `note`)
+- `message` (broadcast/portal/note에서 사용)
+- `target_agent` (portal에서 사용)
+- `task_title`/`task_description`/`task_priority` (task에서 사용)
+
+출력:
+
+- `turn_no`
+- `kind`
+- 액션 결과(`result`, `broadcast`, `target_agent` 등)
+
+### `masc_team_session_events`
+
+입력:
+
+- `session_id` (required)
+- `event_types` (optional array)
+- `after_ts` (optional unix timestamp)
+- `limit` (default `200`)
+
+출력:
+
+- `count`
+- `events` (필터링된 이벤트 배열)
+
+### `masc_team_session_prove`
+
+입력:
+
+- `session_id` (required)
+- `generate_report_if_missing` (default `true`)
+
+출력:
+
+- `proof` (`verdict`, `score_pct`, `criteria`, `evidence`)
+- `proof_json_path`
+- `proof_md_path`
+
 ## Artifact Layout
 
 기본 경로: `.masc/team-sessions/<session_id>/`
@@ -84,6 +130,8 @@
 - `checkpoints/<timestamp>.json`
 - `report.md`
 - `report.json`
+- `proof.md`
+- `proof.json`
 
 ## Report Structure
 
@@ -115,5 +163,7 @@
 - `start/stop`는 join-required 도구로 동작합니다.
 - `status/report/list/compare`는 read-only 도구로 동작합니다.
 - `status/stop/report/compare`는 세션 참여자(`created_by` 또는 `agent_names`)만 접근할 수 있습니다.
+- `turn/events/prove`도 세션 참여자만 접근할 수 있습니다.
 - `list`는 호출자 기준 접근 가능한 세션만 반환합니다.
 - 종료 직후에도 `force_regenerate=true`로 보고서를 다시 생성할 수 있습니다.
+- `prove`는 보고서가 없을 때 자동 생성 옵션(`generate_report_if_missing`)으로 증명 산출의 일관성을 보장합니다.

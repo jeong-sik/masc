@@ -48,6 +48,11 @@ let done_delta_total_of_status_body body =
   |> Yojson.Safe.Util.member "done_delta_total"
   |> Yojson.Safe.Util.to_int
 
+let events_count_of_body body =
+  let json = parse_json_exn body in
+  let result = result_field json in
+  result |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int
+
 let add_task_id config ~title =
   ignore (Room.add_task config ~title ~priority:1 ~description:"");
   let backlog = Room.read_backlog config in
@@ -236,6 +241,7 @@ let test_recover_elapsed_session () =
       alert_channel = Team_session_types.Alert_both;
       auto_resume = true;
       report_formats = [ Team_session_types.Markdown; Team_session_types.Json ];
+      turn_count = 0;
       agent_names = [ "tester" ];
       broadcast_count = 0;
       portal_count = 0;
@@ -253,6 +259,7 @@ let test_recover_elapsed_session () =
       stopped_at = None;
       last_checkpoint_at = Some (now -. 30.0);
       last_event_at = Some (now -. 30.0);
+      last_turn_at = None;
       stop_reason = None;
       generated_report = false;
       artifacts_dir = Team_session_store.session_dir config session_id;
@@ -371,6 +378,123 @@ let test_list_and_compare () =
            ]));
   cleanup_dir base_dir
 
+let test_turn_events_and_prove () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env }
+  in
+  let session_id = start_session_exn ctx ~goal:"turn-events-prove" |> get_session_id in
+
+  let invalid_turn_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "invalid-kind");
+          ])
+  in
+  Alcotest.(check bool) "invalid turn kind rejected" false invalid_turn_ok;
+
+  let engine_intruder_result =
+    Team_session_engine_eio.record_turn ~config ~session_id ~actor:"intruder"
+      ~turn_kind:Team_session_types.Turn_note ~message:(Some "unauthorized")
+      ~target_agent:None ~task_title:None ~task_description:None
+      ~task_priority:3
+  in
+  Alcotest.(check bool) "engine actor guard"
+    true
+    (match engine_intruder_result with Error _ -> true | Ok _ -> false);
+
+  let check_turn turn_kind extra =
+    let ok, _ =
+      dispatch_exn ctx ~name:"masc_team_session_turn"
+        ~args:
+          (`Assoc
+            ([
+               ("session_id", `String session_id);
+               ("turn_kind", `String turn_kind);
+             ]
+            @ extra))
+    in
+    Alcotest.(check bool) ("turn ok: " ^ turn_kind) true ok
+  in
+  check_turn "note" [ ("message", `String "manual note") ];
+  check_turn "broadcast" [ ("message", `String "broadcast turn message") ];
+  check_turn "portal"
+    [
+      ("target_agent", `String "peer");
+      ("message", `String "portal task payload");
+    ];
+  check_turn "task"
+    [
+      ("task_title", `String "turn-created-task");
+      ("task_description", `String "from turn tool");
+      ("task_priority", `Int 2);
+    ];
+  check_turn "checkpoint" [];
+
+  let events_ok, events_body =
+    dispatch_exn ctx ~name:"masc_team_session_events"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("event_types", `List [ `String "team_turn" ]);
+            ("limit", `Int 20);
+          ])
+  in
+  Alcotest.(check bool) "events ok" true events_ok;
+  Alcotest.(check int) "team_turn count" 5 (events_count_of_body events_body);
+
+  let stop_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_stop"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("reason", `String "prove_ready");
+            ("generate_report", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "stop accepted" true stop_ok;
+  ignore (wait_until_terminal ctx session_id);
+
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "prove ok" true prove_ok;
+  let prove_result = parse_json_exn prove_body |> result_field in
+  let proof_json_path =
+    prove_result |> Yojson.Safe.Util.member "proof_json_path"
+    |> Yojson.Safe.Util.to_string
+  in
+  let proof_md_path =
+    prove_result |> Yojson.Safe.Util.member "proof_md_path"
+    |> Yojson.Safe.Util.to_string
+  in
+  let verdict =
+    prove_result |> Yojson.Safe.Util.member "proof"
+    |> Yojson.Safe.Util.member "verdict"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check bool) "proof json exists" true
+    (Room_utils.path_exists config proof_json_path);
+  Alcotest.(check bool) "proof md exists" true (Sys.file_exists proof_md_path);
+  Alcotest.(check string) "verdict proved" "proved" verdict;
+  cleanup_dir base_dir
+
 let test_missing_required_args () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -404,6 +528,15 @@ let test_missing_required_args () =
     dispatch_exn ctx ~name:"masc_team_session_list"
       ~args:(`Assoc [ ("status", `String "not-a-status") ])
   in
+  let ok10, _ =
+    dispatch_exn ctx ~name:"masc_team_session_turn" ~args:(`Assoc [])
+  in
+  let ok11, _ =
+    dispatch_exn ctx ~name:"masc_team_session_events" ~args:(`Assoc [])
+  in
+  let ok12, _ =
+    dispatch_exn ctx ~name:"masc_team_session_prove" ~args:(`Assoc [])
+  in
   Alcotest.(check bool) "start invalid" false ok1;
   Alcotest.(check bool) "status invalid" false ok2;
   Alcotest.(check bool) "stop invalid" false ok3;
@@ -413,6 +546,9 @@ let test_missing_required_args () =
   Alcotest.(check bool) "report format invalid" false ok7;
   Alcotest.(check bool) "compare invalid" false ok8;
   Alcotest.(check bool) "list invalid status" false ok9;
+  Alcotest.(check bool) "turn invalid" false ok10;
+  Alcotest.(check bool) "events invalid" false ok11;
+  Alcotest.(check bool) "prove invalid" false ok12;
   cleanup_dir base_dir
 
 let test_dispatch_unknown () =
@@ -486,6 +622,30 @@ let test_unauthorized_session_access () =
           ])
   in
   Alcotest.(check bool) "unauthorized compare denied" false compare_ok;
+
+  let turn_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "intruder");
+          ])
+  in
+  Alcotest.(check bool) "unauthorized turn denied" false turn_ok;
+
+  let events_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_events"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized events denied" false events_ok;
+
+  let prove_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_prove"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "unauthorized prove denied" false prove_ok;
 
   let owner_stop_ok, _ =
     dispatch_exn owner_ctx ~name:"masc_team_session_stop"
@@ -587,6 +747,8 @@ let () =
           Alcotest.test_case "read-events-limit" `Quick
             test_read_events_limit;
           Alcotest.test_case "list-and-compare" `Quick test_list_and_compare;
+          Alcotest.test_case "turn-events-prove" `Quick
+            test_turn_events_and_prove;
           Alcotest.test_case "missing-required-args" `Quick
             test_missing_required_args;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

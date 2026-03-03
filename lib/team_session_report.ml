@@ -173,6 +173,12 @@ let mcp_improvements (session : Team_session_types.session) events checkpoints_c
       :: with_outcome
     else with_outcome
   in
+  let with_turns =
+    if session.turn_count > 0 then
+      "Turn-level orchestration evidence exists via masc_team_session_turn events."
+      :: with_fallback
+    else with_fallback
+  in
   let recovered_events =
     List.filter
       (fun json ->
@@ -183,8 +189,8 @@ let mcp_improvements (session : Team_session_types.session) events checkpoints_c
   in
   if recovered_events <> [] then
     "Recovery path was exercised (recovered_after_restart event present)."
-    :: with_fallback
-  else with_fallback
+    :: with_turns
+  else with_turns
 
 let markdown_of_report ~(session : Team_session_types.session)
     ~(summary_json : Yojson.Safe.t) ~(events : Yojson.Safe.t list)
@@ -234,6 +240,7 @@ let markdown_of_report ~(session : Team_session_types.session)
     cascade_metrics_json |> member "fallback_task_created" |> to_int_option
     |> Option.value ~default:0
   in
+  let turn_count = session.turn_count in
   let cascade_attempted =
     cascade_metrics_json |> member "attempted" |> to_int_option
     |> Option.value ~default:0
@@ -311,6 +318,7 @@ let markdown_of_report ~(session : Team_session_types.session)
       "## Communication/Cascade Metrics";
       Printf.sprintf "- Broadcast count: %d" broadcast_count;
       Printf.sprintf "- Portal signal count: %d" portal_count;
+      Printf.sprintf "- Recorded turns: %d" turn_count;
       Printf.sprintf "- Alerts emitted: %d" alert_count;
       Printf.sprintf "- Cascade attempted: %d" cascade_attempted;
       Printf.sprintf "- Cascade failed: %d" cascade_failed;
@@ -403,6 +411,7 @@ let generate config (session : Team_session_types.session) :
               [
                 ("events_count", `Int (List.length events));
                 ("checkpoints_count", `Int checkpoints_count);
+                ("turn_count", `Int session.turn_count);
                 ("active_agents", `List (List.map (fun a -> `String a) active_agents));
               ] );
         ]
@@ -423,4 +432,184 @@ let generate config (session : Team_session_types.session) :
     in
     Team_session_store.write_text_file report_md_path markdown;
     Ok (report_json, markdown)
+  with exn -> Error (Printexc.to_string exn)
+
+let bool_of_criterion evidence =
+  match Yojson.Safe.Util.member "passed" evidence with
+  | `Bool b -> b
+  | _ -> false
+
+let proof_markdown ~(session : Team_session_types.session)
+    ~(score_pct : float) ~(verdict : string) ~(criteria : Yojson.Safe.t list)
+    ~(checkpoints_count : int) ~(events_count : int) ~(turn_events : int)
+    ~(report_exists : bool) ~(proof_generated_at_iso : string) =
+  let criteria_lines =
+    criteria
+    |> List.map (fun item ->
+           let open Yojson.Safe.Util in
+           let name =
+             item |> member "name" |> to_string_option
+             |> Option.value ~default:"unknown"
+           in
+           let passed = item |> member "passed" |> to_bool_option |> Option.value ~default:false in
+           let detail =
+             item |> member "detail" |> to_string_option
+             |> Option.value ~default:""
+           in
+           let status = if passed then "PASS" else "FAIL" in
+           Printf.sprintf "- [%s] %s%s" status name
+             (if detail = "" then "" else " - " ^ detail))
+  in
+  String.concat "\n"
+    [
+      "# Team Session Proof";
+      "";
+      "## Verdict";
+      Printf.sprintf "- Session ID: %s" session.session_id;
+      Printf.sprintf "- Verdict: %s" verdict;
+      Printf.sprintf "- Score(%%): %.1f" score_pct;
+      Printf.sprintf "- Generated at: %s" proof_generated_at_iso;
+      "";
+      "## Evidence Summary";
+      Printf.sprintf "- Events count: %d" events_count;
+      Printf.sprintf "- Checkpoints count: %d" checkpoints_count;
+      Printf.sprintf "- Turn events count: %d" turn_events;
+      Printf.sprintf "- Report artifacts exist: %b" report_exists;
+      "";
+      "## Criteria";
+      (if criteria_lines = [] then "- (no criteria)" else String.concat "\n" criteria_lines);
+    ]
+
+let generate_proof config (session : Team_session_types.session) :
+    (Yojson.Safe.t * string, string) result =
+  try
+    let events = Team_session_store.read_events ~max_events:5000 config session.session_id in
+    let checkpoints_count =
+      Team_session_store.list_checkpoint_paths config session.session_id
+      |> List.length
+    in
+    let event_exists event_type =
+      List.exists
+        (fun json ->
+          match Yojson.Safe.Util.member "event_type" json with
+          | `String e when String.equal e event_type -> true
+          | _ -> false)
+        events
+    in
+    let turn_events =
+      List.fold_left
+        (fun acc json ->
+          match Yojson.Safe.Util.member "event_type" json with
+          | `String "team_turn" -> acc + 1
+          | _ -> acc)
+        0 events
+    in
+    let report_json_exists =
+      Room_utils.path_exists config
+        (Team_session_store.report_json_path config session.session_id)
+    in
+    let report_md_exists =
+      Room_utils.path_exists config
+        (Team_session_store.report_md_path config session.session_id)
+    in
+    let report_exists = report_json_exists && report_md_exists in
+    let communication_total = session.broadcast_count + session.portal_count in
+    let done_delta_total =
+      match session.final_done_delta_total with
+      | Some n -> n
+      | None ->
+          let backlog = Room.read_backlog config in
+          let current_done = Team_session_types.done_counts_from_backlog backlog in
+          Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
+            ~current:current_done ~agents:session.agent_names
+          |> List.fold_left (fun acc (_, n) -> acc + n) 0
+    in
+    let criteria =
+      [
+        ( "session_started_event",
+          event_exists "session_started",
+          "session_started 이벤트 존재" );
+        ( "checkpoint_recorded",
+          checkpoints_count > 0,
+          Printf.sprintf "checkpoints=%d" checkpoints_count );
+        ( "turn_or_communication_recorded",
+          turn_events > 0 || communication_total > 0,
+          Printf.sprintf "turn_events=%d communication_total=%d" turn_events
+            communication_total );
+        ( "goal_recorded",
+          String.trim session.goal <> "",
+          "goal 문자열 존재" );
+        ( "participants_recorded",
+          session.agent_names <> [],
+          Printf.sprintf "participants=%d" (List.length session.agent_names) );
+        ( "report_artifacts",
+          report_exists,
+          Printf.sprintf "report_json=%b report_md=%b" report_json_exists
+            report_md_exists );
+        ( "outcome_traceable",
+          done_delta_total >= 0,
+          Printf.sprintf "done_delta_total=%d" done_delta_total );
+      ]
+      |> List.map (fun (name, passed, detail) ->
+             `Assoc
+               [
+                 ("name", `String name);
+                 ("passed", `Bool passed);
+                 ("detail", `String detail);
+               ])
+    in
+    let total = max 1 (List.length criteria) in
+    let passed =
+      List.fold_left (fun acc item -> if bool_of_criterion item then acc + 1 else acc) 0
+        criteria
+    in
+    let score_pct = (100.0 *. float_of_int passed) /. float_of_int total in
+    let mandatory_ok =
+      let find name =
+        criteria
+        |> List.find_opt (fun item ->
+               match Yojson.Safe.Util.member "name" item with
+               | `String n -> String.equal n name
+               | _ -> false)
+        |> Option.value ~default:(`Assoc [ ("passed", `Bool false) ])
+        |> bool_of_criterion
+      in
+      find "session_started_event" && find "checkpoint_recorded"
+      && find "turn_or_communication_recorded" && find "report_artifacts"
+    in
+    let verdict =
+      if mandatory_ok then "proved"
+      else "insufficient_evidence"
+    in
+    let generated_at_iso = Types.now_iso () in
+    let proof_json =
+      `Assoc
+        [
+          ("session_id", `String session.session_id);
+          ("goal", `String session.goal);
+          ("status", `String (Team_session_types.status_to_string session.status));
+          ("verdict", `String verdict);
+          ("score_pct", `Float score_pct);
+          ("criteria", `List criteria);
+          ( "evidence",
+            `Assoc
+              [
+                ("events_count", `Int (List.length events));
+                ("checkpoints_count", `Int checkpoints_count);
+                ("turn_events", `Int turn_events);
+                ("broadcast_count", `Int session.broadcast_count);
+                ("portal_count", `Int session.portal_count);
+                ("done_delta_total", `Int done_delta_total);
+                ("report_json_exists", `Bool report_json_exists);
+                ("report_md_exists", `Bool report_md_exists);
+              ] );
+          ("generated_at_iso", `String generated_at_iso);
+        ]
+    in
+    let markdown =
+      proof_markdown ~session ~score_pct ~verdict ~criteria ~checkpoints_count
+        ~events_count:(List.length events) ~turn_events ~report_exists
+        ~proof_generated_at_iso:generated_at_iso
+    in
+    Ok (proof_json, markdown)
   with exn -> Error (Printexc.to_string exn)

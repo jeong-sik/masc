@@ -79,7 +79,9 @@ let test_all_names_start_with_masc () =
 let test_find_tool_existing () =
   let tools = ["masc_init"; "masc_join"; "masc_leave"; "masc_status";
                "masc_broadcast"; "masc_claim"; "masc_done";
-               "masc_team_session_list"; "masc_team_session_compare"] in
+               "masc_team_session_list"; "masc_team_session_compare";
+               "masc_team_session_turn"; "masc_team_session_events";
+               "masc_team_session_prove"] in
   List.iter (fun name ->
     match find_tool name with
     | Some schema -> Alcotest.(check string) "found correct tool" name schema.name

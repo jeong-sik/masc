@@ -516,3 +516,9 @@
  (name test_tool_goals_coverage)
  (modules test_tool_goals_coverage)
  (libraries masc_mcp alcotest yojson unix))
+
+; P3 Phase 6: Tool_experiment coverage tests
+(test
+ (name test_tool_experiment_coverage)
+ (modules test_tool_experiment_coverage)
+ (libraries masc_mcp alcotest yojson str unix))

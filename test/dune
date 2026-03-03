@@ -504,3 +504,15 @@
  (name test_anti_fake)
  (modules test_anti_fake)
  (libraries masc_mcp alcotest yojson))
+
+; P3 Phase 5: Tool_board coverage tests
+(test
+ (name test_tool_board_coverage)
+ (modules test_tool_board_coverage)
+ (libraries masc_mcp alcotest eio eio_main yojson str mirage-crypto-rng mirage-crypto-rng.unix))
+
+; P3 Phase 5: Tool_goals coverage tests (supplementing test_tool_goals)
+(test
+ (name test_tool_goals_coverage)
+ (modules test_tool_goals_coverage)
+ (libraries masc_mcp alcotest yojson unix))

@@ -176,6 +176,16 @@ function parseSpawnStats(raw: string): Record<string, number> {
   return stats
 }
 
+function clampSpawnHpToMax(nextMaxRaw: string): void {
+  const nextMax = Number.parseInt(nextMaxRaw.trim(), 10)
+  if (!Number.isFinite(nextMax)) return
+  const normalizedMax = Math.max(1, nextMax)
+  const currentHp = Number.parseInt(spawnHp.value.trim(), 10)
+  if (Number.isFinite(currentHp) && currentHp > normalizedMax) {
+    spawnHp.value = String(normalizedMax)
+  }
+}
+
 function eventActorLabel(event: TrpgEvent): string {
   const raw = event.actor_name ?? event.actor ?? event.actor_id ?? 'system'
   const trimmed = raw.trim()
@@ -906,7 +916,11 @@ function ActorSpawnPanel({ state }: { state: TrpgState }) {
               type="number"
               min="1"
               value=${spawnMaxHp.value}
-              onInput=${(e: Event) => { spawnMaxHp.value = (e.target as HTMLInputElement).value }}
+              onInput=${(e: Event) => {
+                const nextValue = (e.target as HTMLInputElement).value
+                spawnMaxHp.value = nextValue
+                clampSpawnHpToMax(nextValue)
+              }}
               placeholder="20"
             />
           </div>

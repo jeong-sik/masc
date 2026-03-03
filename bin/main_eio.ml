@@ -523,7 +523,8 @@ let trpg_parse_optional_object key json =
   match Yojson.Safe.Util.member key json with
   | `Assoc _ as obj -> Ok (Some obj)
   | `Null -> Ok None
-  | _ -> Error (`Bad_request, Printf.sprintf "%s must be object" key)
+  | _ ->
+      Error (`Bad_request, Printf.sprintf "%s must be object (객체여야 합니다)" key)
 
 let trpg_validate_actor_role role =
   match role with
@@ -752,6 +753,32 @@ let trpg_read_state_int derived_json field =
 
 (* ─── Actor state query helpers ─────────────────────────────── *)
 
+type trpg_actor_spawn_guard_state = {
+  mutex : Mutex.t;
+  room_mutexes : (string, Mutex.t) Hashtbl.t;
+}
+
+let trpg_actor_spawn_guard : trpg_actor_spawn_guard_state =
+  { mutex = Mutex.create (); room_mutexes = Hashtbl.create 64 }
+
+let trpg_with_actor_spawn_room_lock ~room_id f =
+  let room_key = String.trim room_id in
+  let room_key = if room_key = "" then "default" else room_key in
+  let room_mutex =
+    Mutex.lock trpg_actor_spawn_guard.mutex;
+    Fun.protect
+      ~finally:(fun () -> Mutex.unlock trpg_actor_spawn_guard.mutex)
+      (fun () ->
+        match Hashtbl.find_opt trpg_actor_spawn_guard.room_mutexes room_key with
+        | Some m -> m
+        | None ->
+            let m = Mutex.create () in
+            Hashtbl.replace trpg_actor_spawn_guard.room_mutexes room_key m;
+            m)
+  in
+  Mutex.lock room_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock room_mutex) f
+
 let trpg_normalize_keeper_name s = s |> String.trim |> String.lowercase_ascii
 
 let trpg_state_party_fields state =
@@ -957,7 +984,13 @@ let trpg_actor_spawn_json ~base_dir ~body_str : trpg_api_result =
   try
     let json = Yojson.Safe.from_string body_str in
     let ( let* ) r f = match r with Ok v -> f v | Error _ as e -> e in
-    let* room_id = trpg_parse_required_string "room_id" json in
+    let* room_id_raw = trpg_parse_required_string "room_id" json in
+    let room_id = String.trim room_id_raw in
+    let* () =
+      if room_id = "" then
+        Error (`Bad_request, "room_id is required")
+      else Ok ()
+    in
     let* rule_module_opt = trpg_parse_optional_string "rule_module" json in
     let rule_module = Option.value ~default:"dnd5e-lite" rule_module_opt in
     let* actor_id_opt = trpg_parse_optional_string "actor_id" json in
@@ -989,79 +1022,80 @@ let trpg_actor_spawn_json ~base_dir ~body_str : trpg_api_result =
     let* traits = trpg_parse_optional_string_list "traits" json in
     let* skills = trpg_parse_optional_string_list "skills" json in
     let* inventory = trpg_parse_optional_string_list "inventory" json in
-    let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
-    let state = trpg_state_from_derived derived in
-    let actor_id =
-      match actor_id_opt with
-      | Some explicit -> explicit
-      | None ->
-          let seed = name_opt |> Option.value ~default:role in
-          let base_actor_id = trpg_sanitize_actor_id_seed seed in
-          trpg_next_available_actor_id state base_actor_id
-    in
-    let name = Option.value ~default:actor_id name_opt in
-    if trpg_actor_exists state actor_id then
-      Error (`Bad_request, Printf.sprintf "actor '%s' already exists" actor_id)
-    else
-      let actor_fields = ref [] in
-      let add_field key value = actor_fields := (key, value) :: !actor_fields in
-      let add_opt_string key = function
-        | Some value -> add_field key (`String value)
-        | None -> ()
+    trpg_with_actor_spawn_room_lock ~room_id (fun () ->
+      let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+      let state = trpg_state_from_derived derived in
+      let actor_id =
+        match actor_id_opt with
+        | Some explicit -> explicit
+        | None ->
+            let seed = name_opt |> Option.value ~default:role in
+            let base_actor_id = trpg_sanitize_actor_id_seed seed in
+            trpg_next_available_actor_id state base_actor_id
       in
-      let add_opt_json key = function
-        | Some value -> add_field key value
-        | None -> ()
-      in
-      add_field "inventory" (`List (List.map (fun s -> `String s) inventory));
-      add_field "skills" (`List (List.map (fun s -> `String s) skills));
-      add_field "traits" (`List (List.map (fun s -> `String s) traits));
-      add_field "alive" (`Bool alive);
-      add_field "max_hp" (`Int max_hp);
-      add_field "hp" (`Int hp);
-      add_opt_json "stats" stats_opt;
-      add_opt_string "background" background;
-      add_opt_string "portrait" portrait;
-      add_opt_string "persona" persona;
-      add_opt_string "archetype" archetype;
-      add_field "role" (`String role);
-      add_field "name" (`String name);
-      let actor_json = `Assoc (List.rev !actor_fields) in
-      let payload_fields =
-        [
-          ("actor_id", `String actor_id);
-          ("name", `String name);
-          ("role", `String role);
-          ("hp", `Int hp);
-          ("max_hp", `Int max_hp);
-          ("alive", `Bool alive);
-          ("traits", `List (List.map (fun s -> `String s) traits));
-          ("skills", `List (List.map (fun s -> `String s) skills));
-          ("inventory", `List (List.map (fun s -> `String s) inventory));
-          ("actor", actor_json);
-        ]
-      in
-      let payload_fields =
-        payload_fields
-        @ (match archetype with Some v -> [ ("archetype", `String v) ] | None -> [])
-        @ (match persona with Some v -> [ ("persona", `String v) ] | None -> [])
-        @ (match portrait with Some v -> [ ("portrait", `String v) ] | None -> [])
-        @ (match background with Some v -> [ ("background", `String v) ] | None -> [])
-        @ (match stats_opt with Some stats -> [ ("stats", stats) ] | None -> [])
-      in
-      let payload = `Assoc payload_fields in
-      let* _event =
-        trpg_append_event ~base_dir ~room_id
-          ~event_type:Masc_mcp.Trpg_engine_event.Actor_spawned ~actor_id ~payload ()
-      in
-      let* derived2 = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
-      Ok
-        (`Assoc
+      let name = Option.value ~default:actor_id name_opt in
+      if trpg_actor_exists state actor_id then
+        Error (`Bad_request, Printf.sprintf "actor '%s' already exists" actor_id)
+      else
+        let actor_fields = ref [] in
+        let add_field key value = actor_fields := (key, value) :: !actor_fields in
+        let add_opt_string key = function
+          | Some value -> add_field key (`String value)
+          | None -> ()
+        in
+        let add_opt_json key = function
+          | Some value -> add_field key value
+          | None -> ()
+        in
+        add_field "inventory" (`List (List.map (fun s -> `String s) inventory));
+        add_field "skills" (`List (List.map (fun s -> `String s) skills));
+        add_field "traits" (`List (List.map (fun s -> `String s) traits));
+        add_field "alive" (`Bool alive);
+        add_field "max_hp" (`Int max_hp);
+        add_field "hp" (`Int hp);
+        add_opt_json "stats" stats_opt;
+        add_opt_string "background" background;
+        add_opt_string "portrait" portrait;
+        add_opt_string "persona" persona;
+        add_opt_string "archetype" archetype;
+        add_field "role" (`String role);
+        add_field "name" (`String name);
+        let actor_json = `Assoc (List.rev !actor_fields) in
+        let payload_fields =
           [
-            ("ok", `Bool true);
             ("actor_id", `String actor_id);
-            ("state", trpg_state_from_derived derived2);
-          ])
+            ("name", `String name);
+            ("role", `String role);
+            ("hp", `Int hp);
+            ("max_hp", `Int max_hp);
+            ("alive", `Bool alive);
+            ("traits", `List (List.map (fun s -> `String s) traits));
+            ("skills", `List (List.map (fun s -> `String s) skills));
+            ("inventory", `List (List.map (fun s -> `String s) inventory));
+            ("actor", actor_json);
+          ]
+        in
+        let payload_fields =
+          payload_fields
+          @ (match archetype with Some v -> [ ("archetype", `String v) ] | None -> [])
+          @ (match persona with Some v -> [ ("persona", `String v) ] | None -> [])
+          @ (match portrait with Some v -> [ ("portrait", `String v) ] | None -> [])
+          @ (match background with Some v -> [ ("background", `String v) ] | None -> [])
+          @ (match stats_opt with Some stats -> [ ("stats", stats) ] | None -> [])
+        in
+        let payload = `Assoc payload_fields in
+        let* _event =
+          trpg_append_event ~base_dir ~room_id
+            ~event_type:Masc_mcp.Trpg_engine_event.Actor_spawned ~actor_id ~payload ()
+        in
+        let* derived2 = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
+        Ok
+          (`Assoc
+            [
+              ("ok", `Bool true);
+              ("actor_id", `String actor_id);
+              ("state", trpg_state_from_derived derived2);
+            ]))
   with Yojson.Json_error e ->
     Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
 

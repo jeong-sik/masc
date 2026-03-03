@@ -242,6 +242,17 @@ let test_spawn_auto_actor_id_and_profile_fields () =
     ((auto_json |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.member "party"
     |> Yojson.Safe.Util.member auto_actor_id)
     <> `Null);
+  let spawn_auto_2 =
+    run_curl ~port ~path:"/api/v1/trpg/actors/spawn" ~method_name:"POST"
+      ~body:(Yojson.Safe.to_string (`Assoc [ ("room_id", `String "room-api-auto") ]))
+      ()
+  in
+  expect_status 201 spawn_auto_2 "second auto spawn returns 201";
+  let auto_json_2 = Yojson.Safe.from_string spawn_auto_2.body in
+  let auto_actor_id_2 =
+    auto_json_2 |> Yojson.Safe.Util.member "actor_id" |> Yojson.Safe.Util.to_string
+  in
+  check string "second auto actor_id uses suffix" "player-2" auto_actor_id_2;
 
   let spawn_profile_body =
     `Assoc
@@ -295,8 +306,10 @@ let test_spawn_validation_errors () =
       ()
   in
   expect_status 400 bad_stats "stats type error returns 400";
-  check bool "stats type error message" true
+  check bool "stats type error message (english)" true
     (contains_substr "stats must be object" bad_stats.body);
+  check bool "stats type error message (korean)" true
+    (contains_substr "객체여야 합니다" bad_stats.body);
 
   let bad_hp =
     run_curl ~port ~path:"/api/v1/trpg/actors/spawn" ~method_name:"POST"

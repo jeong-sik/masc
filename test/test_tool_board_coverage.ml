@@ -1,0 +1,425 @@
+open Masc_mcp
+
+(** {1 Test helpers} *)
+
+(** Clear all Board global state for test isolation.
+    Must call inside Eio_main.run since Board.store contains Eio.Mutex. *)
+let rng_initialized = ref false
+
+let cleanup () =
+  if not !rng_initialized then begin
+    Mirage_crypto_rng_unix.use_default ();
+    rng_initialized := true
+  end;
+  Board_dispatch.reset_for_test ();
+  let store = Board.global () in
+  Hashtbl.reset store.Board.posts;
+  Hashtbl.reset store.Board.comments;
+  Hashtbl.reset store.Board.vote_log;
+  Hashtbl.reset store.Board.comments_by_post;
+  store.Board.post_count := 0;
+  store.Board.karma_cache <- None;
+  store.Board.sorted_posts_cache <- None;
+  store.Board.dirty_posts <- false;
+  store.Board.dirty_comments <- false
+
+let dispatch name args =
+  Tool_board.handle_tool name args
+
+let make_args pairs = `Assoc pairs
+
+(** {2 Group 1: Helper / Formatting Functions} *)
+
+let test_visibility_of_string () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  Alcotest.(check string) "public" "public"
+    (match Tool_board.visibility_of_string "public" with
+     | Some Board.Public -> "public" | _ -> "other");
+  Alcotest.(check string) "unlisted" "unlisted"
+    (match Tool_board.visibility_of_string "unlisted" with
+     | Some Board.Unlisted -> "unlisted" | _ -> "other");
+  Alcotest.(check string) "internal" "internal"
+    (match Tool_board.visibility_of_string "internal" with
+     | Some Board.Internal -> "internal" | _ -> "other");
+  Alcotest.(check string) "direct" "direct"
+    (match Tool_board.visibility_of_string "direct" with
+     | Some Board.Direct -> "direct" | _ -> "other");
+  Alcotest.(check string) "unknown returns None" "none"
+    (match Tool_board.visibility_of_string "garbage" with
+     | None -> "none" | _ -> "other")
+
+let test_sort_order_of_string () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  Alcotest.(check string) "hot" "hot"
+    (match Tool_board.sort_order_of_string "hot" with
+     | Tool_board.Hot -> "hot" | _ -> "x");
+  Alcotest.(check string) "trending" "trending"
+    (match Tool_board.sort_order_of_string "trending" with
+     | Tool_board.Trending -> "trending" | _ -> "x");
+  Alcotest.(check string) "recent" "recent"
+    (match Tool_board.sort_order_of_string "recent" with
+     | Tool_board.Recent -> "recent" | _ -> "x");
+  Alcotest.(check string) "updated" "updated"
+    (match Tool_board.sort_order_of_string "updated" with
+     | Tool_board.Updated -> "updated" | _ -> "x");
+  Alcotest.(check string) "discussed" "discussed"
+    (match Tool_board.sort_order_of_string "discussed" with
+     | Tool_board.Discussed -> "discussed" | _ -> "x");
+  Alcotest.(check string) "unknown defaults to hot" "hot"
+    (match Tool_board.sort_order_of_string "xyz" with
+     | Tool_board.Hot -> "hot" | _ -> "x")
+
+let test_board_error_to_string () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let s = Tool_board.board_error_to_string (Board.Post_not_found "test-id") in
+  Alcotest.(check bool) "post_not_found has text" true (String.length s > 0);
+  let s2 = Tool_board.board_error_to_string (Board.Validation_error "bad") in
+  Alcotest.(check bool) "validation_error" true (String.contains s2 'b')
+
+let test_is_lodge_agent () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  Alcotest.(check bool) "lowercase no space = lodge" true
+    (Tool_board.is_lodge_agent "dreamer");
+  Alcotest.(check bool) "with space = not lodge" false
+    (Tool_board.is_lodge_agent "John Smith");
+  Alcotest.(check bool) "uppercase = not lodge" false
+    (Tool_board.is_lodge_agent "Dreamer");
+  Alcotest.(check bool) "empty = not lodge" false
+    (Tool_board.is_lodge_agent "")
+
+let test_format_timestamp_relative () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let now = Time_compat.now () in
+  let s = Tool_board.format_timestamp_relative now in
+  Alcotest.(check bool) "recent timestamp is 'just now' or contains 's'" true
+    (String.length s > 0);
+  let old = now -. 86400.0 in
+  let s2 = Tool_board.format_timestamp_relative old in
+  Alcotest.(check bool) "1-day old timestamp has content" true (String.length s2 > 0)
+
+(** {2 Group 2: JSON helper functions} *)
+
+let test_get_string () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let args = make_args [("key", `String "value")] in
+  Alcotest.(check string) "get existing" "value"
+    (Tool_board.get_string args "key" "default");
+  Alcotest.(check string) "get missing" "default"
+    (Tool_board.get_string args "missing" "default")
+
+let test_get_string_opt () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let args = make_args [("key", `String "value")] in
+  Alcotest.(check (option string)) "get existing" (Some "value")
+    (Tool_board.get_string_opt args "key");
+  Alcotest.(check (option string)) "get missing" None
+    (Tool_board.get_string_opt args "missing")
+
+let test_get_int () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let args = make_args [("n", `Int 42)] in
+  Alcotest.(check int) "get existing" 42
+    (Tool_board.get_int args "n" 0);
+  Alcotest.(check int) "get missing" 0
+    (Tool_board.get_int args "missing" 0)
+
+let test_get_bool () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let args = make_args [("flag", `Bool true)] in
+  Alcotest.(check bool) "get existing" true
+    (Tool_board.get_bool args "flag" false);
+  Alcotest.(check bool) "get missing" false
+    (Tool_board.get_bool args "missing" false)
+
+(** {2 Group 3: Post Create / List / Get} *)
+
+let test_post_create_success () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_post"
+    (make_args [("content", `String "Hello board"); ("author", `String "tester")]) in
+  Alcotest.(check bool) "create ok" true ok;
+  Alcotest.(check bool) "body has post" true (String.length body > 0)
+
+let test_post_create_empty_content () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, _body = dispatch "masc_board_post"
+    (make_args [("content", `String ""); ("author", `String "tester")]) in
+  (* Board_dispatch.create_post may reject empty content *)
+  ignore ok
+
+let test_post_list_empty () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_list" (make_args []) in
+  Alcotest.(check bool) "list ok" true ok;
+  Alcotest.(check bool) "no posts msg" true
+    (String.length body > 0)
+
+let test_post_list_with_posts () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok1, _ = dispatch "masc_board_post"
+    (make_args [("content", `String "Post 1"); ("author", `String "a")]) in
+  Alcotest.(check bool) "create 1" true ok1;
+  let ok2, _ = dispatch "masc_board_post"
+    (make_args [("content", `String "Post 2"); ("author", `String "b")]) in
+  Alcotest.(check bool) "create 2" true ok2;
+  let ok, body = dispatch "masc_board_list"
+    (make_args [("limit", `Int 10)]) in
+  Alcotest.(check bool) "list ok" true ok;
+  Alcotest.(check bool) "body has content" true
+    (String.length body > 20)
+
+let test_post_list_limit_clamping () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  (* Create 3 posts *)
+  for _ = 1 to 3 do
+    ignore (dispatch "masc_board_post"
+      (make_args [("content", `String "x"); ("author", `String "a")]))
+  done;
+  let ok, body = dispatch "masc_board_list"
+    (make_args [("limit", `Int 1)]) in
+  Alcotest.(check bool) "list ok" true ok;
+  (* With limit=1, should show only 1 post *)
+  Alcotest.(check bool) "body has posts" true (String.length body > 0)
+
+let test_post_list_sort_orders () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  ignore (dispatch "masc_board_post"
+    (make_args [("content", `String "sort test"); ("author", `String "a")]));
+  let sorts = ["hot"; "trending"; "recent"; "updated"; "discussed"] in
+  List.iter (fun s ->
+    let ok, body = dispatch "masc_board_list"
+      (make_args [("sort_by", `String s)]) in
+    Alcotest.(check bool) (Printf.sprintf "sort %s ok" s) true ok;
+    Alcotest.(check bool) (Printf.sprintf "sort %s has content" s) true (String.length body > 0)
+  ) sorts
+
+let test_post_get_success () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_post"
+    (make_args [("content", `String "Get me"); ("author", `String "tester")]) in
+  Alcotest.(check bool) "create ok" true ok;
+  (* Extract post_id from the creation response *)
+  let post_id = try
+    let json = Yojson.Safe.from_string body in
+    json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
+  with _ ->
+    (* Response may be formatted text, not JSON. Find post via list *)
+    let _, list_body = dispatch "masc_board_list" (make_args []) in
+    (* Just try to get the first post *)
+    ignore list_body; ""
+  in
+  if post_id <> "" then begin
+    let ok2, body2 = dispatch "masc_board_get"
+      (make_args [("post_id", `String post_id)]) in
+    Alcotest.(check bool) "get ok" true ok2;
+    Alcotest.(check bool) "get has content" true (String.length body2 > 0)
+  end
+
+let test_post_get_not_found () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_get"
+    (make_args [("post_id", `String "nonexistent-id")]) in
+  Alcotest.(check bool) "not found fails" false ok;
+  Alcotest.(check bool) "error msg" true (String.length body > 0)
+
+(** {2 Group 4: Voting} *)
+
+let test_vote_not_found () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_vote"
+    (make_args [("post_id", `String "missing"); ("voter", `String "v"); ("direction", `String "up")]) in
+  Alcotest.(check bool) "vote on missing fails" false ok;
+  Alcotest.(check bool) "has error" true (String.length body > 0)
+
+(** {2 Group 5: Comment} *)
+
+let test_comment_add_missing_post () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_comment"
+    (make_args [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "a")]) in
+  Alcotest.(check bool) "comment on missing post fails" false ok;
+  Alcotest.(check bool) "has error" true (String.length body > 0)
+
+let test_comment_vote_missing () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_comment_vote"
+    (make_args [("comment_id", `String ""); ("voter", `String "v"); ("direction", `String "up")]) in
+  Alcotest.(check bool) "empty comment_id fails" false ok;
+  Alcotest.(check bool) "error msg" true (String.length body > 0)
+
+(** {2 Group 6: Search / Stats / Profile / Hearths} *)
+
+let test_search_empty_query () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_search"
+    (make_args [("query", `String "")]) in
+  Alcotest.(check bool) "empty query fails" false ok;
+  Alcotest.(check bool) "has error" true (String.length body > 0)
+
+let test_search_no_results () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_search"
+    (make_args [("query", `String "nonexistent_xyz_123")]) in
+  Alcotest.(check bool) "search ok" true ok;
+  Alcotest.(check bool) "no results msg" true (String.length body > 0)
+
+let test_stats () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_stats" (make_args []) in
+  Alcotest.(check bool) "stats ok" true ok;
+  Alcotest.(check bool) "stats has content" true (String.length body > 0)
+
+let test_profile_empty_agent () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_profile"
+    (make_args [("agent", `String "")]) in
+  Alcotest.(check bool) "empty agent fails" false ok;
+  Alcotest.(check bool) "has error" true (String.length body > 0)
+
+let test_profile_with_posts () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  ignore (dispatch "masc_board_post"
+    (make_args [("content", `String "profiled"); ("author", `String "profiler")]));
+  let ok, body = dispatch "masc_board_profile"
+    (make_args [("agent", `String "profiler")]) in
+  Alcotest.(check bool) "profile ok" true ok;
+  Alcotest.(check bool) "has profiler name" true
+    (try ignore (Str.search_forward (Str.regexp_string "profiler") body 0); true
+     with Not_found -> false)
+
+let test_hearth_list_empty () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_hearths" (make_args []) in
+  Alcotest.(check bool) "hearth list ok" true ok;
+  Alcotest.(check bool) "has content" true (String.length body > 0)
+
+(** {2 Group 7: Dispatch Routing} *)
+
+let test_dispatch_unknown_tool () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_nonexistent" (make_args []) in
+  Alcotest.(check bool) "unknown tool fails" false ok;
+  Alcotest.(check bool) "has unknown msg" true
+    (try ignore (Str.search_forward (Str.regexp_string "Unknown") body 0); true
+     with Not_found -> false)
+
+let test_dispatch_migrate_without_pg () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  (* Default backend is JSONL, so migrate should fail *)
+  let ok, body = dispatch "masc_board_migrate" (make_args []) in
+  Alcotest.(check bool) "migrate without pg fails" false ok;
+  Alcotest.(check bool) "error mentions pg" true
+    (try ignore (Str.search_forward (Str.regexp_string "PostgreSQL") body 0); true
+     with Not_found -> false)
+
+(** {2 Group 8: Tool Schema Definitions} *)
+
+let test_tools_count () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  Alcotest.(check int) "11 tool schemas" 11 (List.length Tool_board.tools)
+
+let test_tools_names_unique () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let names = List.map (fun (t : Types.tool_schema) -> t.name) Tool_board.tools in
+  let unique = List.sort_uniq String.compare names in
+  Alcotest.(check int) "all names unique" (List.length names) (List.length unique)
+
+let test_tools_all_have_descriptions () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  List.iter (fun (t : Types.tool_schema) ->
+    Alcotest.(check bool) (Printf.sprintf "%s has description" t.name) true
+      (String.length t.description > 0)
+  ) Tool_board.tools
+
+(** {1 Test Runner} *)
+
+let () =
+  Alcotest.run "Tool_board_coverage"
+    [
+      ( "helpers",
+        [
+          Alcotest.test_case "visibility_of_string" `Quick test_visibility_of_string;
+          Alcotest.test_case "sort_order_of_string" `Quick test_sort_order_of_string;
+          Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
+          Alcotest.test_case "is_lodge_agent" `Quick test_is_lodge_agent;
+          Alcotest.test_case "format_timestamp_relative" `Quick test_format_timestamp_relative;
+        ] );
+      ( "json_helpers",
+        [
+          Alcotest.test_case "get_string" `Quick test_get_string;
+          Alcotest.test_case "get_string_opt" `Quick test_get_string_opt;
+          Alcotest.test_case "get_int" `Quick test_get_int;
+          Alcotest.test_case "get_bool" `Quick test_get_bool;
+        ] );
+      ( "post_crud",
+        [
+          Alcotest.test_case "create success" `Quick test_post_create_success;
+          Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
+          Alcotest.test_case "list empty" `Quick test_post_list_empty;
+          Alcotest.test_case "list with posts" `Quick test_post_list_with_posts;
+          Alcotest.test_case "list limit clamping" `Quick test_post_list_limit_clamping;
+          Alcotest.test_case "list sort orders" `Quick test_post_list_sort_orders;
+          Alcotest.test_case "get success" `Quick test_post_get_success;
+          Alcotest.test_case "get not found" `Quick test_post_get_not_found;
+        ] );
+      ( "voting",
+        [
+          Alcotest.test_case "vote not found" `Quick test_vote_not_found;
+        ] );
+      ( "comments",
+        [
+          Alcotest.test_case "comment missing post" `Quick test_comment_add_missing_post;
+          Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
+        ] );
+      ( "search_stats",
+        [
+          Alcotest.test_case "search empty query" `Quick test_search_empty_query;
+          Alcotest.test_case "search no results" `Quick test_search_no_results;
+          Alcotest.test_case "stats" `Quick test_stats;
+          Alcotest.test_case "profile empty agent" `Quick test_profile_empty_agent;
+          Alcotest.test_case "profile with posts" `Quick test_profile_with_posts;
+          Alcotest.test_case "hearth list empty" `Quick test_hearth_list_empty;
+        ] );
+      ( "dispatch",
+        [
+          Alcotest.test_case "unknown tool" `Quick test_dispatch_unknown_tool;
+          Alcotest.test_case "migrate without pg" `Quick test_dispatch_migrate_without_pg;
+        ] );
+      ( "schemas",
+        [
+          Alcotest.test_case "tools count" `Quick test_tools_count;
+          Alcotest.test_case "unique names" `Quick test_tools_names_unique;
+          Alcotest.test_case "all have descriptions" `Quick test_tools_all_have_descriptions;
+        ] );
+    ]

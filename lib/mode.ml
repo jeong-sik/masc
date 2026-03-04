@@ -19,6 +19,7 @@ type category =
   | Auth        (* auth_enable, auth_disable, auth_status, auth_create_token... *)
   | RateLimit   (* rate_limit_status, rate_limit_config *)
   | Encryption  (* encryption_status, encryption_enable, encryption_disable, generate_key *)
+  | Unknown     (* unmapped namespace/tool *)
 
 (** Mode presets *)
 type mode =
@@ -45,6 +46,7 @@ let category_to_string = function
   | Auth -> "auth"
   | RateLimit -> "ratelimit"
   | Encryption -> "encryption"
+  | Unknown -> "unknown"
 
 (** String to category conversion *)
 let category_of_string = function
@@ -182,13 +184,28 @@ let tool_category tool_name =
   (* Mode management tools - always available *)
   | "masc_switch_mode" | "masc_get_config" -> Core
 
-  (* Unknown tools default to Core *)
-  | _ -> Core
+  (* Explicit namespace mappings for non-masc tools *)
+  | _ when String.starts_with ~prefix:"lodge_" tool_name -> Comm
+  | _ when String.starts_with ~prefix:"decision." tool_name -> Core
+  | _ when String.starts_with ~prefix:"experiment." tool_name -> Core
+  | _ when String.starts_with ~prefix:"trpg." tool_name -> Core
+  | _ when String.starts_with ~prefix:"client." tool_name -> Core
+
+  (* Keep backward compatibility for unmapped masc_* tools, but do not
+     auto-enable unknown external namespaces. *)
+  | _ when String.starts_with ~prefix:"masc_" tool_name -> Core
+
+  (* Unknown external tool namespaces are disabled by default. *)
+  | _ -> Unknown
 
 (** Check if a tool is enabled for given categories *)
 let is_tool_enabled enabled_categories tool_name =
-  let cat = tool_category tool_name in
-  List.mem cat enabled_categories
+  if tool_name = "masc_switch_mode" || tool_name = "masc_get_config" then
+    true
+  else
+    match tool_category tool_name with
+    | Unknown -> false
+    | cat -> List.mem cat enabled_categories
 
 (** Mode descriptions for help text *)
 let mode_description = function
@@ -215,6 +232,7 @@ let category_description = function
   | Auth -> "Authentication & governance: auth_enable, audit_query"
   | RateLimit -> "Rate limits: rate_limit_status, rate_limit_config"
   | Encryption -> "Data protection: encryption_enable, generate_key"
+  | Unknown -> "Unknown/unsupported namespace"
 
 (** JSON serialization *)
 let categories_to_json cats =

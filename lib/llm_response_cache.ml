@@ -12,6 +12,17 @@ type l1_stats = {
 
 let l1_table : (string, l1_entry) Hashtbl.t = Hashtbl.create 2048
 let l1_order : string list ref = ref []
+let l1_mutex = Eio.Mutex.create ()
+let eio_available = ref false
+
+let enable_eio () = eio_available := true
+
+let with_l1_lock f =
+  if !eio_available then
+    Eio.Mutex.use_rw ~protect:true l1_mutex (fun () -> f ())
+  else
+    (* No Eio runtime (module init/unit tests) — run unlocked. *)
+    f ()
 
 let default_ttl_seconds () = max 1 Env_config.Llm.cache_ttl_seconds
 let l1_max_entries () = max 64 Env_config.Llm.cache_l1_max_entries
@@ -44,23 +55,25 @@ let rec enforce_l1_limit () =
         enforce_l1_limit ()
 
 let put_l1 ~key ~value_json ~expires_at =
-  Hashtbl.replace l1_table key { value_json; expires_at };
-  touch_order_key key;
-  enforce_l1_limit ()
+  with_l1_lock (fun () ->
+      Hashtbl.replace l1_table key { value_json; expires_at };
+      touch_order_key key;
+      enforce_l1_limit ())
 
 let is_expired ~expires_at = now () >= expires_at
 
 let get_l1 key =
-  match Hashtbl.find_opt l1_table key with
-  | None -> None
-  | Some entry ->
-      if is_expired ~expires_at:entry.expires_at then (
-        Hashtbl.remove l1_table key;
-        remove_order_key key;
-        None)
-      else (
-        touch_order_key key;
-        Some entry.value_json)
+  with_l1_lock (fun () ->
+      match Hashtbl.find_opt l1_table key with
+      | None -> None
+      | Some entry ->
+          if is_expired ~expires_at:entry.expires_at then (
+            Hashtbl.remove l1_table key;
+            remove_order_key key;
+            None)
+          else (
+            touch_order_key key;
+            Some entry.value_json))
 
 let put_l2 ~key ~value_json ~ttl_seconds =
   let config = cache_config () in
@@ -98,16 +111,19 @@ let set_json ~key ?ttl_seconds value_json =
   put_l2 ~key ~value_json ~ttl_seconds
 
 let delete ~key =
-  Hashtbl.remove l1_table key;
-  remove_order_key key;
+  with_l1_lock (fun () ->
+      Hashtbl.remove l1_table key;
+      remove_order_key key);
   let config = cache_config () in
   match Cache_eio.delete config ~key with
   | Ok _ -> Ok ()
   | Error e -> Error e
 
 let clear_l1 () =
-  Hashtbl.clear l1_table;
-  l1_order := []
+  with_l1_lock (fun () ->
+      Hashtbl.clear l1_table;
+      l1_order := [])
 
 let get_l1_stats () =
-  { entries = Hashtbl.length l1_table; max_entries = l1_max_entries () }
+  with_l1_lock (fun () ->
+      { entries = Hashtbl.length l1_table; max_entries = l1_max_entries () })

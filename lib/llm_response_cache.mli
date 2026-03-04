@@ -9,6 +9,10 @@ type l1_stats = {
   max_entries : int;
 }
 
+(** Enable Eio-aware locking for L1 cache operations.
+    Should be called once from Eio runtime startup. *)
+val enable_eio : unit -> unit
+
 (** Build a deterministic cache key with SHA256.
     Example output: ["llmresp:ab12..."] *)
 val make_key : namespace:string -> content:string -> string

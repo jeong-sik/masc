@@ -425,6 +425,58 @@ let fetch_hn_article ~net =
           else Ok { title; url; source = HackerNews }
     with exn -> Error (Printf.sprintf "❌ Parse: HN JSON error [%s]" (Printexc.to_string exn))
 
+let decode_xml_entities s =
+  s
+  |> Str.global_replace (Str.regexp "&amp;") "&"
+  |> Str.global_replace (Str.regexp "&lt;") "<"
+  |> Str.global_replace (Str.regexp "&gt;") ">"
+  |> Str.global_replace (Str.regexp "&quot;") "\""
+  |> Str.global_replace (Str.regexp "&#39;") "'"
+
+let extract_group pattern text =
+  try
+    ignore (Str.search_forward pattern text 0);
+    Some (Str.matched_group 1 text)
+  with Not_found -> None
+
+let parse_geek_entry (entry_xml : string) : article option =
+  let title =
+    match extract_group (Str.regexp "<title><!\\[CDATA\\[\\([^<]+\\)\\]\\]></title>") entry_xml with
+    | Some t -> Some t
+    | None -> extract_group (Str.regexp "<title>\\([^<]+\\)</title>") entry_xml
+  in
+  let url =
+    match extract_group (Str.regexp "<link[^>]*href='\\([^']+\\)'[^>]*/?>") entry_xml with
+    | Some u -> Some u
+    | None -> extract_group (Str.regexp "<link[^>]*href=\"\\([^\"]+\\)\"[^>]*/?>") entry_xml
+  in
+  match title, url with
+  | Some t, Some u ->
+    let t = t |> String.trim |> decode_xml_entities in
+    let u = String.trim u in
+    if t = "" || u = "" then None
+    else Some { title = t; url = u; source = GeekNews }
+  | _ -> None
+
+let fetch_geek_article ~net =
+  match http_get_json ~net "https://news.hada.io/rss/news" with
+  | Error e -> Error (Printf.sprintf "❌ Fetch: GeekNews RSS failed [%s]" e)
+  | Ok body ->
+    try
+      let entries =
+        match Str.split (Str.regexp "<entry>") body with
+        | [] | [_] -> []
+        | _feed :: rows -> rows
+      in
+      let candidates =
+        entries
+        |> List.filter_map parse_geek_entry
+        |> List.filteri (fun i _ -> i < 10)
+      in
+      if candidates = [] then Error "❌ Fetch: GeekNews RSS has no valid entries"
+      else Ok (List.nth candidates (Random.int (List.length candidates)))
+    with exn -> Error (Printf.sprintf "❌ Parse: GeekNews RSS error [%s]" (Printexc.to_string exn))
+
 (** {1 DIG: LLM Analysis} *)
 
 let dig_article ~net article =
@@ -1093,11 +1145,14 @@ let react_to_content ~net ?agent_name:provided_name ?post_id content =
 
 let heartbeat ~net (args : Yojson.Safe.t) =
   let source_str = Safe_ops.json_string ~default:"hn" "source" args in
-  (* GeekNews support: https://github.com/jeong-sik/masc-mcp/issues/490 *)
-  let (_ : source) = source_of_string source_str |> Option.value ~default:HackerNews in
+  let source = source_of_string source_str |> Option.value ~default:HackerNews in
 
   (* READ *)
-  match fetch_hn_article ~net with
+  let read_result = match source with
+    | HackerNews -> fetch_hn_article ~net
+    | GeekNews -> fetch_geek_article ~net
+  in
+  match read_result with
   | Error e -> (false, Printf.sprintf "❌ Lodge: Read failed [%s]" e)
   | Ok article ->
     (* DIG — with Eio timeout *)
@@ -1290,7 +1345,11 @@ let tool_heartbeat : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("source", `Assoc [("type", `String "string"); ("description", `String "Content source: hn (default)")]);
+      ("source", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Content source: hn/hackernews (default), geek/geeknews");
+        ("enum", `List [`String "hn"; `String "hackernews"; `String "geek"; `String "geeknews"]);
+      ]);
     ]);
   ];
 }
@@ -1326,7 +1385,11 @@ let tool_cycle : Types.tool_schema = {
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
-      ("source", `Assoc [("type", `String "string"); ("description", `String "Content source: hn (default)")]);
+      ("source", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Content source: hn/hackernews (default), geek/geeknews");
+        ("enum", `List [`String "hn"; `String "hackernews"; `String "geek"; `String "geeknews"]);
+      ]);
     ]);
   ];
 }

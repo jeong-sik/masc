@@ -446,9 +446,10 @@ let test_message_json_roundtrip () =
 
 let test_claim_task_request_make () =
   let r = Masc_pb.Masc.V1.ClaimTaskRequest.make
-    ~agent_name:"claimer" ~task_id:"t-claim" () in
+    ~agent_name:"claimer" ~task_id:"t-claim" ~agent_role:"writer" () in
   check string "agent_name" "claimer" r.agent_name;
-  check string "task_id" "t-claim" r.task_id
+  check string "task_id" "t-claim" r.task_id;
+  check string "agent_role" "writer" r.agent_role
 
 let test_claim_task_response_make () =
   let r = Masc_pb.Masc.V1.ClaimTaskResponse.make
@@ -458,11 +459,13 @@ let test_claim_task_response_make () =
 
 let test_claim_task_proto_roundtrip () =
   let original = Masc_pb.Masc.V1.ClaimTaskRequest.make
-    ~agent_name:"agent-a" ~task_id:"t-100" () in
+    ~agent_name:"agent-a" ~task_id:"t-100" ~agent_role:"reviewer" () in
   let encoded = Masc_pb.Masc.V1.ClaimTaskRequest.to_proto original in
   let reader = Ocaml_protoc_plugin.Reader.create (Ocaml_protoc_plugin.Writer.contents encoded) in
   match Masc_pb.Masc.V1.ClaimTaskRequest.from_proto reader with
-  | Ok decoded -> check string "task_id" "t-100" decoded.task_id
+  | Ok decoded ->
+    check string "task_id" "t-100" decoded.task_id;
+    check string "agent_role" "reviewer" decoded.agent_role
   | Error _ -> fail "claim_task proto decode failed"
 
 let test_claim_task_json_roundtrip () =

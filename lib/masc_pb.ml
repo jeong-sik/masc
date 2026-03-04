@@ -538,8 +538,15 @@ module rec Masc : sig
       type t = {
         agent_name:string;
         task_id:string;
+        agent_role:string;
+        (**
+{%html:
+<p>optional: writer/reviewer/admin/unassigned</p>
+%}
+        *)
+
       }
-      val make: ?agent_name:string -> ?task_id:string -> unit -> t
+      val make: ?agent_name:string -> ?task_id:string -> ?agent_role:string -> unit -> t
       (** Helper function to generate a message using default values *)
 
       val to_proto: t -> Runtime'.Writer.t
@@ -558,7 +565,7 @@ module rec Masc : sig
       (** Fully qualified protobuf name of this message *)
 
       (**/**)
-      type make_t = ?agent_name:string -> ?task_id:string -> unit -> t
+      type make_t = ?agent_name:string -> ?task_id:string -> ?agent_role:string -> unit -> t
       val merge: t -> t -> t
       val to_proto': Runtime'.Writer.t -> t -> unit
       val from_proto_exn: Runtime'.Reader.t -> t
@@ -1994,8 +2001,15 @@ end = struct
       type t = {
         agent_name:string;
         task_id:string;
+        agent_role:string;
+        (**
+{%html:
+<p>optional: writer/reviewer/admin/unassigned</p>
+%}
+        *)
+
       }
-      val make: ?agent_name:string -> ?task_id:string -> unit -> t
+      val make: ?agent_name:string -> ?task_id:string -> ?agent_role:string -> unit -> t
       (** Helper function to generate a message using default values *)
 
       val to_proto: t -> Runtime'.Writer.t
@@ -2014,7 +2028,7 @@ end = struct
       (** Fully qualified protobuf name of this message *)
 
       (**/**)
-      type make_t = ?agent_name:string -> ?task_id:string -> unit -> t
+      type make_t = ?agent_name:string -> ?task_id:string -> ?agent_role:string -> unit -> t
       val merge: t -> t -> t
       val to_proto': Runtime'.Writer.t -> t -> unit
       val from_proto_exn: Runtime'.Reader.t -> t
@@ -3945,8 +3959,15 @@ end = struct
       type t = {
         agent_name:string;
         task_id:string;
+        agent_role:string;
+        (**
+{%html:
+<p>optional: writer/reviewer/admin/unassigned</p>
+%}
+        *)
+
       }
-      val make: ?agent_name:string -> ?task_id:string -> unit -> t
+      val make: ?agent_name:string -> ?task_id:string -> ?agent_role:string -> unit -> t
       (** Helper function to generate a message using default values *)
 
       val to_proto: t -> Runtime'.Writer.t
@@ -3965,7 +3986,7 @@ end = struct
       (** Fully qualified protobuf name of this message *)
 
       (**/**)
-      type make_t = ?agent_name:string -> ?task_id:string -> unit -> t
+      type make_t = ?agent_name:string -> ?task_id:string -> ?agent_role:string -> unit -> t
       val merge: t -> t -> t
       val to_proto': Runtime'.Writer.t -> t -> unit
       val from_proto_exn: Runtime'.Reader.t -> t
@@ -3977,31 +3998,34 @@ end = struct
       type t = {
         agent_name:string;
         task_id:string;
+        agent_role:string;
       }
-      type make_t = ?agent_name:string -> ?task_id:string -> unit -> t
-      let make ?(agent_name = {||}) ?(task_id = {||}) () = { agent_name; task_id }
+      type make_t = ?agent_name:string -> ?task_id:string -> ?agent_role:string -> unit -> t
+      let make ?(agent_name = {||}) ?(task_id = {||}) ?(agent_role = {||}) () = { agent_name; task_id; agent_role }
       let merge =
       let merge_agent_name = Runtime'.Merge.merge Runtime'.Spec.( basic ((1, "agent_name", "agentName"), string, ({||})) ) in
       let merge_task_id = Runtime'.Merge.merge Runtime'.Spec.( basic ((2, "task_id", "taskId"), string, ({||})) ) in
+      let merge_agent_role = Runtime'.Merge.merge Runtime'.Spec.( basic ((3, "agent_role", "agentRole"), string, ({||})) ) in
       fun t1 t2 -> {
       	agent_name = (merge_agent_name t1.agent_name t2.agent_name);
       	task_id = (merge_task_id t1.task_id t2.task_id);
+        agent_role = (merge_agent_role t1.agent_role t2.agent_role);
        }
-      let spec () = Runtime'.Spec.( basic ((1, "agent_name", "agentName"), string, ({||})) ^:: basic ((2, "task_id", "taskId"), string, ({||})) ^:: nil )
+      let spec () = Runtime'.Spec.( basic ((1, "agent_name", "agentName"), string, ({||})) ^:: basic ((2, "task_id", "taskId"), string, ({||})) ^:: basic ((3, "agent_role", "agentRole"), string, ({||})) ^:: nil )
       let to_proto' =
         let serialize = Runtime'.apply_lazy (fun () -> Runtime'.Serialize.serialize (spec ())) in
-        fun writer { agent_name; task_id } -> serialize writer agent_name task_id
+        fun writer { agent_name; task_id; agent_role } -> serialize writer agent_name task_id agent_role
 
       let to_proto t = let writer = Runtime'.Writer.init () in to_proto' writer t; writer
       let from_proto_exn =
-        let constructor agent_name task_id = { agent_name; task_id } in
+        let constructor agent_name task_id agent_role = { agent_name; task_id; agent_role } in
         Runtime'.apply_lazy (fun () -> Runtime'.Deserialize.deserialize (spec ()) constructor)
       let from_proto writer = Runtime'.Result.catch (fun () -> from_proto_exn writer)
       let to_json options =
         let serialize = Runtime'.Serialize_json.serialize ~message_name:(name ()) (spec ()) options in
-        fun { agent_name; task_id } -> serialize agent_name task_id
+        fun { agent_name; task_id; agent_role } -> serialize agent_name task_id agent_role
       let from_json_exn =
-        let constructor agent_name task_id = { agent_name; task_id } in
+        let constructor agent_name task_id agent_role = { agent_name; task_id; agent_role } in
         Runtime'.apply_lazy (fun () -> Runtime'.Deserialize_json.deserialize ~message_name:(name ()) (spec ()) constructor)
       let from_json json = Runtime'.Result.catch (fun () -> from_json_exn json)
     end
@@ -5657,4 +5681,3 @@ end = struct
 
   end
 end
-

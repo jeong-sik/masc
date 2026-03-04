@@ -7497,6 +7497,7 @@ let run_cmd port base_path =
 
   (* Enable Eio-aware locking in Prometheus metrics *)
   Masc_mcp.Prometheus.enable_eio ();
+  Masc_mcp.Llm_response_cache.enable_eio ();
 
   (* Set global clock for Time_compat (Eio-native timestamps) *)
   Masc_mcp.Time_compat.set_clock (Eio.Stdenv.clock env);

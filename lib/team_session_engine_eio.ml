@@ -229,6 +229,7 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
   let runtime_running =
     with_runtimes_lock (fun () -> Hashtbl.mem runtimes session.session_id)
   in
+  let llm_cache_metrics = Prometheus.llm_cache_metrics_json () in
   let summary, team_health, communication_metrics, orchestration_state,
       cascade_metrics =
     status_sections config session
@@ -242,6 +243,7 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
       ("communication_metrics", communication_metrics);
       ("orchestration_state", orchestration_state);
       ("cascade_metrics", cascade_metrics);
+      ("llm_cache_metrics", llm_cache_metrics);
       ( "report_paths",
         `Assoc
           [
@@ -1248,6 +1250,7 @@ let list_sessions ~(config : Room.config) ~(requester_agent : string option)
               ("team_health", team_health);
               ("communication_metrics", communication_metrics);
               ("cascade_metrics", cascade_metrics);
+              ("llm_cache_metrics", Prometheus.llm_cache_metrics_json ());
             ])
         sessions
     in

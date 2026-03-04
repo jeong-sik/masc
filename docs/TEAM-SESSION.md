@@ -51,6 +51,7 @@
 - 세션 원본 상태(`session`)
 - 런타임 상태(`runtime_running`)
 - 진행 요약(`summary`): elapsed, remaining, progress, done delta
+- LLM 캐시 메트릭(`llm_cache_metrics`): hits/misses/writes/bypass/errors/hit_rate
 - 보고서 경로(`report_paths`)
 
 ### `masc_team_session_stop`
@@ -168,6 +169,7 @@
 - `goal_metrics`
 - `incidents`
 - `mcp_improvements`
+- `llm_cache_metrics`
 - `evidence`
 
 `proof.json` 핵심 키:
@@ -212,3 +214,9 @@ PASS 기준:
 - `team_turn` 이벤트의 고유 actor 수가 참여자 수 이상
 - `masc_team_session_prove`의 `verdict=proved`
 - `proof.evidence.unique_turn_actors_count >= required_turn_actors`
+
+캐시 검증(선택):
+
+```bash
+ASSERT_CACHE_HIT=1 SPAWN_RUNTIME_AGENT=glm scripts/harness_team_session_real_spawn.sh
+```

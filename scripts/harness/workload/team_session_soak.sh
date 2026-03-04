@@ -6,6 +6,7 @@ AGENT_NAME="${AGENT_NAME:-team-session-soak}"
 ROUNDS="${ROUNDS:-5}"
 DURATION_SEC="${DURATION_SEC:-120}"
 SLEEP_SEC="${SLEEP_SEC:-1}"
+MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-soak-$(date +%s)-$RANDOM}"
 
 call_tool() {
   local id="$1"
@@ -20,6 +21,7 @@ call_tool() {
     if raw="$(curl -sS -m 25 -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
+      -H "mcp-session-id: $MCP_SESSION_ID" \
       -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}" 2>/dev/null)"; then
       break
     fi
@@ -30,9 +32,19 @@ call_tool() {
     echo "{\"error\":\"curl_failed\"}"
     return 1
   fi
-  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p' | tail -n1)"
+  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p')"
   if [ -n "$sse_data" ]; then
-    printf "%s" "$sse_data"
+    local response_line
+    response_line="$(
+      printf "%s\n" "$sse_data" \
+        | rg "\"id\"[[:space:]]*:[[:space:]]*$id([[:space:]],|[[:space:]]*})" \
+        | tail -n1 || true
+    )"
+    if [ -n "$response_line" ]; then
+      printf "%s" "$response_line"
+    else
+      printf "%s\n" "$sse_data" | tail -n1
+    fi
   else
     printf "%s" "$raw"
   fi
@@ -64,7 +76,7 @@ for i in $(seq 1 "$ROUNDS"); do
   fi
 
   status_raw="$(call_tool $((4400 + i)) "masc_team_session_status" "{\"session_id\":\"$session_id\"}")"
-  if ! printf "%s" "$status_raw" | extract_result | jq -e '.team_health and .communication_metrics and .cascade_metrics' >/dev/null 2>&1; then
+  if ! printf "%s" "$status_raw" | extract_result | jq -e '.team_health and .communication_metrics and .cascade_metrics and .llm_cache_metrics' >/dev/null 2>&1; then
     echo "[soak] FAIL status round=$i session=$session_id"
     failure=$((failure + 1))
     continue

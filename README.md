@@ -226,6 +226,12 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 | `MASC_GUARDIAN_LODGE_DELAY_MS` | 10000 | Lodge 루프 액션 간 딜레이 (ms) |
 | `MASC_GUARDIAN_LODGE_VERBOSE` | false | Lodge 루프 상세 로그 |
 | `MASC_GUARDIAN_LODGE_RESPECT_QUIET_HOURS` | true | Quiet hours 존중 |
+| `MASC_LLM_CACHE_ENABLED` | true | LLM 응답 캐시(L1+L2) 활성화 |
+| `MASC_LLM_CACHE_TTL_SEC` | 300 | LLM 응답 캐시 TTL(초) |
+| `MASC_LLM_CACHE_MAX_PROMPT_CHARS` | 48000 | 이 길이 초과 프롬프트는 캐시 우회 |
+| `MASC_LLM_CACHE_MAX_TEMP` | 0.0 | 이 값 초과 temperature는 캐시 우회 |
+| `MASC_LLM_CACHE_L1_MAX_ENTRIES` | 2048 | 프로세스 내 L1 캐시 엔트리 상한 |
+| `MASC_SPAWN_CACHE_POLICY` | safe_only | spawn 캐시 정책 (`off`/`safe_only`) |
 
 ## 문서
 

@@ -224,6 +224,34 @@ module Llm = struct
   (** Default GLM model for Z.ai API calls *)
   let default_model =
     get_string ~default:"glm-4.7" "MASC_GLM_DEFAULT_MODEL"
+
+  (** Enable LLM response cache (L1+L2). *)
+  let cache_enabled =
+    get_bool ~default:true "MASC_LLM_CACHE_ENABLED"
+
+  (** Default TTL for LLM response cache (seconds). *)
+  let cache_ttl_seconds =
+    get_int ~default:300 "MASC_LLM_CACHE_TTL_SEC"
+
+  (** Skip caching for oversized prompts (character count). *)
+  let cache_max_prompt_chars =
+    get_int ~default:48000 "MASC_LLM_CACHE_MAX_PROMPT_CHARS"
+
+  (** Cache only deterministic temperatures (default exact 0.0). *)
+  let cache_max_temperature =
+    get_float ~default:0.0 "MASC_LLM_CACHE_MAX_TEMP"
+
+  (** L1 in-memory entry cap. *)
+  let cache_l1_max_entries =
+    get_int ~default:2048 "MASC_LLM_CACHE_L1_MAX_ENTRIES"
+
+  (** Spawn cache policy:
+      - off
+      - safe_only (GLM direct HTTP only, no MCP-tool side effects) *)
+  let spawn_cache_policy =
+    get_string ~default:"safe_only" "MASC_SPAWN_CACHE_POLICY"
+    |> String.trim
+    |> String.lowercase_ascii
 end
 
 (** {1 Rate Limit Cleanup Configuration} *)
@@ -507,7 +535,11 @@ let print_summary () =
     Session.max_age_seconds Session.rate_limit_window_seconds;
   Printf.eprintf "[env_config] Tempo: min=%.0fs max=%.0fs default=%.0fs\n%!"
     Tempo.min_interval_seconds Tempo.max_interval_seconds Tempo.default_interval_seconds;
-  Printf.eprintf "[env_config] Llm: timeout=%.0fs\n%!" Llm.timeout_seconds;
+  Printf.eprintf
+    "[env_config] Llm: timeout=%.0fs cache_enabled=%b ttl=%ds max_prompt_chars=%d max_temp=%.2f l1_max=%d spawn_policy=%s\n%!"
+    Llm.timeout_seconds Llm.cache_enabled Llm.cache_ttl_seconds
+    Llm.cache_max_prompt_chars Llm.cache_max_temperature
+    Llm.cache_l1_max_entries Llm.spawn_cache_policy;
   Printf.eprintf "[env_config] RateLimit: cleanup_interval=%.0fs entry_max_age=%.0fs\n%!"
     RateLimit.cleanup_interval_seconds RateLimit.entry_max_age_seconds;
   Printf.eprintf "[env_config] LodgeV2: tick=%.0fs agents_per_tick=%d planner=%b reflection_thresh=%d\n%!"

@@ -421,6 +421,76 @@ type glm_spawn_success = {
   cost_estimate_usd: float option;
 }
 
+let spawn_cache_schema_version = "1.0.0"
+
+let int_opt_to_json = function
+  | Some n -> `Int n
+  | None -> `Null
+
+let float_opt_to_json = function
+  | Some v -> `Float v
+  | None -> `Null
+
+let spawn_result_to_cache_json (resp : spawn_result) : Yojson.Safe.t =
+  `Assoc [
+    ("schema_version", `String spawn_cache_schema_version);
+    ("kind", `String "spawn_glm_response");
+    ("response", `Assoc [
+      ("success", `Bool resp.success);
+      ("output", `String resp.output);
+      ("exit_code", `Int resp.exit_code);
+      ("input_tokens", int_opt_to_json resp.input_tokens);
+      ("output_tokens", int_opt_to_json resp.output_tokens);
+      ("cache_creation_tokens", int_opt_to_json resp.cache_creation_tokens);
+      ("cache_read_tokens", int_opt_to_json resp.cache_read_tokens);
+      ("cost_usd", float_opt_to_json resp.cost_usd);
+    ]);
+  ]
+
+let spawn_result_of_cache_json (json : Yojson.Safe.t) : (spawn_result, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let schema = json |> member "schema_version" |> to_string in
+    if not (String.equal schema spawn_cache_schema_version) then
+      Error (Printf.sprintf "schema mismatch: expected=%s actual=%s"
+               spawn_cache_schema_version schema)
+    else
+      let kind = json |> member "kind" |> to_string in
+      if not (String.equal kind "spawn_glm_response") then
+        Error ("unexpected cache kind: " ^ kind)
+      else
+        let body = json |> member "response" in
+        Ok {
+          success = body |> member "success" |> to_bool;
+          output = body |> member "output" |> to_string;
+          exit_code = body |> member "exit_code" |> to_int;
+          elapsed_ms = 0;
+          input_tokens = body |> member "input_tokens" |> to_int_option;
+          output_tokens = body |> member "output_tokens" |> to_int_option;
+          cache_creation_tokens = body |> member "cache_creation_tokens" |> to_int_option;
+          cache_read_tokens = body |> member "cache_read_tokens" |> to_int_option;
+          cost_usd = body |> member "cost_usd" |> to_float_option;
+        }
+  with exn -> Error (Printexc.to_string exn)
+
+let record_cache_bypass reason =
+  Prometheus.inc_counter "masc_llm_cache_bypass_total" ();
+  Prometheus.inc_counter "masc_llm_cache_bypass_total"
+    ~labels:[("reason", reason)] ()
+
+let glm_spawn_cache_key prompt =
+  let fingerprint =
+    `Assoc [
+      ("schema_version", `String spawn_cache_schema_version);
+      ("kind", `String "spawn_glm");
+      ("prompt", `String prompt);
+      ("models", `List (List.map (fun m -> `String m) (glm_spawn_cascade_models_for_policy ())));
+      ("min_context_tokens", `Int (glm_min_context_tokens ()));
+    ]
+  in
+  Llm_response_cache.make_key ~namespace:"spawn_glm"
+    ~content:(Yojson.Safe.to_string fingerprint)
+
 let call_glm_once ~api_key ~model ~prompt ~timeout_sec : (glm_spawn_success, string) result =
   let body =
     Yojson.Safe.to_string
@@ -550,6 +620,62 @@ let spawn_glm_with_cascade ~prompt ~timeout ~start_time : spawn_result =
     in
     try_models [] models
 
+let spawn_glm_with_cache ~prompt ~timeout ~start_time : spawn_result =
+  let cache_reason =
+    if not Env_config.Llm.cache_enabled then Some "disabled"
+    else if not (String.equal Env_config.Llm.spawn_cache_policy "safe_only") then Some "spawn_policy"
+    else if String.length prompt > Env_config.Llm.cache_max_prompt_chars then Some "prompt_too_large"
+    else None
+  in
+  match cache_reason with
+  | Some reason ->
+      record_cache_bypass reason;
+      spawn_glm_with_cascade ~prompt ~timeout ~start_time
+  | None ->
+      let key = glm_spawn_cache_key prompt in
+      (match Llm_response_cache.get_json ~key with
+       | Ok (Some cached_json) ->
+           (match spawn_result_of_cache_json cached_json with
+            | Ok cached ->
+                Prometheus.inc_counter "masc_llm_cache_hits_total" ();
+                { cached with elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) }
+            | Error e ->
+                Prometheus.inc_counter "masc_llm_cache_errors_total" ();
+                let _ = Llm_response_cache.delete ~key in
+                Eio.traceln "[spawn_eio] glm cache decode error: %s" e;
+                let fresh = spawn_glm_with_cascade ~prompt ~timeout ~start_time in
+                if fresh.success then (
+                  match
+                    Llm_response_cache.set_json ~key
+                      ~ttl_seconds:Env_config.Llm.cache_ttl_seconds
+                      (spawn_result_to_cache_json fresh)
+                  with
+                  | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
+                  | Error write_e ->
+                      Prometheus.inc_counter "masc_llm_cache_errors_total" ();
+                      Eio.traceln "[spawn_eio] glm cache write error: %s" write_e
+                );
+                fresh)
+       | Ok None ->
+           Prometheus.inc_counter "masc_llm_cache_misses_total" ();
+           let fresh = spawn_glm_with_cascade ~prompt ~timeout ~start_time in
+           if fresh.success then (
+             match
+               Llm_response_cache.set_json ~key
+                 ~ttl_seconds:Env_config.Llm.cache_ttl_seconds
+                 (spawn_result_to_cache_json fresh)
+             with
+             | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
+             | Error e ->
+                 Prometheus.inc_counter "masc_llm_cache_errors_total" ();
+                 Eio.traceln "[spawn_eio] glm cache write error: %s" e
+           );
+           fresh
+       | Error e ->
+           Prometheus.inc_counter "masc_llm_cache_errors_total" ();
+           Eio.traceln "[spawn_eio] glm cache read error: %s" e;
+           spawn_glm_with_cascade ~prompt ~timeout ~start_time)
+
 (** Spawn an agent using Eio.Process (direct execution, no shell)
 
     Agent Being Protocol: Cultural Inheritance
@@ -606,7 +732,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
   (* GLM agents use dedicated cascade function (no chdir needed — direct HTTP).
      Non-GLM agents need chdir + fork protected by mutex. *)
   if agent_name = "glm" then
-    spawn_glm_with_cascade ~prompt:augmented_prompt ~timeout ~start_time
+    spawn_glm_with_cache ~prompt:augmented_prompt ~timeout ~start_time
   else
     (* Build command arguments outside the chdir critical section *)
     let base_args = parse_command config.command in

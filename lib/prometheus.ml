@@ -121,6 +121,16 @@ let inc_gauge name ?(labels=[]) ?(delta=1.0) () =
 let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
   inc_gauge name ~labels ~delta:(-.delta) ()
 
+(** Get current metric value by name + labels (if any). *)
+let get_metric_value name ?(labels=[]) () =
+  let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
+  with_lock (fun () ->
+    Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value)
+  )
+
+let metric_value_or_zero name ?(labels=[]) () =
+  get_metric_value name ~labels () |> Option.value ~default:0.0
+
 (** Observe a histogram value.
     Tracks cumulative sum in the metric value; a matching _count counter
     is auto-created for computing averages. *)
@@ -164,7 +174,12 @@ let init () =
   add "masc_sse_idle_evictions_total" "Total SSE clients evicted by idle reaper" Counter;
   add "masc_sse_capacity_evictions_total" "Total SSE clients evicted due to max client capacity" Counter;
   add "masc_sse_write_failures_total" "Total SSE write failures by reason" Counter;
-  add "masc_sse_rejects_total" "Total SSE connections rejected by storm guard" Counter
+  add "masc_sse_rejects_total" "Total SSE connections rejected by storm guard" Counter;
+  add "masc_llm_cache_hits_total" "Total LLM cache hits" Counter;
+  add "masc_llm_cache_misses_total" "Total LLM cache misses" Counter;
+  add "masc_llm_cache_writes_total" "Total LLM cache writes" Counter;
+  add "masc_llm_cache_bypass_total" "Total LLM cache bypass decisions" Counter;
+  add "masc_llm_cache_errors_total" "Total LLM cache errors" Counter
 
 let start_time = Time_compat.now ()
 
@@ -230,6 +245,24 @@ let set_active_agents count =
 
 let set_pending_tasks count =
   set_gauge "masc_pending_tasks" (float_of_int count)
+
+let llm_cache_metrics_json () =
+  let hits = int_of_float (metric_value_or_zero "masc_llm_cache_hits_total" ()) in
+  let misses = int_of_float (metric_value_or_zero "masc_llm_cache_misses_total" ()) in
+  let writes = int_of_float (metric_value_or_zero "masc_llm_cache_writes_total" ()) in
+  let bypass = int_of_float (metric_value_or_zero "masc_llm_cache_bypass_total" ()) in
+  let errors = int_of_float (metric_value_or_zero "masc_llm_cache_errors_total" ()) in
+  let total_lookups = max 1 (hits + misses) in
+  let hit_rate = float_of_int hits /. float_of_int total_lookups in
+  `Assoc
+    [
+      ("hits", `Int hits);
+      ("misses", `Int misses);
+      ("writes", `Int writes);
+      ("bypass", `Int bypass);
+      ("errors", `Int errors);
+      ("hit_rate", `Float hit_rate);
+    ]
 
 (** Initialize on module load *)
 let () = init ()

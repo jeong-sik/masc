@@ -277,6 +277,43 @@ let test_parse_glm_output_invalid () =
   check (option (float 0.01)) "cost None" None cost
 
 (* ============================================================
+   GLM Spawn Cache Payload Tests
+   ============================================================ *)
+
+let test_spawn_result_cache_roundtrip () =
+  let src : Spawn_eio.spawn_result = {
+    success = true;
+    output = "ok";
+    exit_code = 0;
+    elapsed_ms = 123;
+    input_tokens = Some 10;
+    output_tokens = Some 20;
+    cache_creation_tokens = None;
+    cache_read_tokens = Some 5;
+    cost_usd = Some 0.0;
+  } in
+  let json = Spawn_eio.spawn_result_to_cache_json src in
+  match Spawn_eio.spawn_result_of_cache_json json with
+  | Ok dst ->
+      check bool "success" src.success dst.success;
+      check string "output" src.output dst.output;
+      check int "exit_code" src.exit_code dst.exit_code;
+      check (option int) "input_tokens" src.input_tokens dst.input_tokens
+  | Error e -> fail ("expected cache decode success: " ^ e)
+
+let test_spawn_result_cache_schema_mismatch () =
+  let bad_json =
+    `Assoc [
+      ("schema_version", `String "0.0.0");
+      ("kind", `String "spawn_glm_response");
+      ("response", `Assoc [("success", `Bool true); ("output", `String "x"); ("exit_code", `Int 0)]);
+    ]
+  in
+  match Spawn_eio.spawn_result_of_cache_json bad_json with
+  | Ok _ -> fail "expected schema mismatch"
+  | Error _ -> ()
+
+(* ============================================================
    GLM Cascade Policy Tests
    ============================================================ *)
 
@@ -461,6 +498,10 @@ let () =
     "parse_glm_output", [
       test_case "success" `Quick test_parse_glm_output_success;
       test_case "invalid" `Quick test_parse_glm_output_invalid;
+    ];
+    "glm_spawn_cache", [
+      test_case "roundtrip" `Quick test_spawn_result_cache_roundtrip;
+      test_case "schema mismatch" `Quick test_spawn_result_cache_schema_mismatch;
     ];
     "glm_cascade_policy", [
       test_case "normalize alias" `Quick test_normalize_glm_model_alias;

@@ -72,6 +72,7 @@ module Handover_eio = Handover_eio
 module Backend = Backend
 module Backend_eio = Backend_eio
 module Cache_eio = Cache_eio
+module Llm_response_cache = Llm_response_cache
 module Prometheus = Prometheus
 module Rate_limit = Rate_limit
 module Circuit_breaker = Circuit_breaker

@@ -54,6 +54,11 @@
  (libraries masc_mcp alcotest str yojson))
 
 (test
+ (name test_llm_response_cache)
+ (modules test_llm_response_cache)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_metrics_store_eio)
  (modules test_metrics_store_eio)
  (libraries masc_mcp alcotest str yojson))

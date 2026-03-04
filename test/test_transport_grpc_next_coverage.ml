@@ -267,10 +267,12 @@ let test_decode_add_task_request_valid () =
   | None -> fail "expected Some"
 
 let test_decode_claim_task_request_valid () =
-  let request = Pb.ClaimTaskRequest.make ~agent_name:"claude" ~task_id:"task-001" () in
+  let request = Pb.ClaimTaskRequest.make ~agent_name:"claude" ~task_id:"task-001" ~agent_role:"writer" () in
   let encoded = Ocaml_protoc_plugin.Writer.contents (Pb.ClaimTaskRequest.to_proto request) in
   match Transport_grpc_next.decode_claim_task_request encoded with
-  | Some decoded -> check string "task_id" "task-001" decoded.task_id
+  | Some decoded ->
+    check string "task_id" "task-001" decoded.task_id;
+    check string "agent_role" "writer" decoded.agent_role
   | None -> fail "expected Some"
 
 let test_decode_done_task_request_valid () =
@@ -354,7 +356,7 @@ let test_decode_get_plan_request_valid () =
    ============================================================ *)
 
 let test_encode_claim_task_request () =
-  let request = Pb.ClaimTaskRequest.make ~agent_name:"claude" ~task_id:"task-001" () in
+  let request = Pb.ClaimTaskRequest.make ~agent_name:"claude" ~task_id:"task-001" ~agent_role:"reviewer" () in
   let encoded = Transport_grpc_next.encode_claim_task_request request in
   check bool "encoded non-empty" true (String.length encoded > 0)
 
@@ -406,12 +408,13 @@ let test_planning_context_of_json_mixed_notes () =
    ============================================================ *)
 
 let test_roundtrip_claim_task () =
-  let original = Pb.ClaimTaskRequest.make ~agent_name:"claude" ~task_id:"task-123" () in
+  let original = Pb.ClaimTaskRequest.make ~agent_name:"claude" ~task_id:"task-123" ~agent_role:"admin" () in
   let encoded = Transport_grpc_next.encode_claim_task_request original in
   match Transport_grpc_next.decode_claim_task_request encoded with
   | Some decoded ->
     check string "agent_name roundtrip" "claude" decoded.agent_name;
-    check string "task_id roundtrip" "task-123" decoded.task_id
+    check string "task_id roundtrip" "task-123" decoded.task_id;
+    check string "agent_role roundtrip" "admin" decoded.agent_role
   | None -> fail "roundtrip failed"
 
 let test_roundtrip_broadcast () =

@@ -267,14 +267,16 @@ let add_task_handler (room_config: Room.config) (data: string) : string =
     let response = Pb.AddTaskResponse.make ~task_id:result ~success () in
     encode_add_task_response response
 
-(** ClaimTask handler - assign task to agent.
-    agent_role defaults to Unassigned because the proto lacks the field.
-    See: https://github.com/jeong-sik/masc-mcp/issues/489 *)
+(** ClaimTask handler - assign task to agent with optional role. *)
 let claim_task_handler (room_config: Room.config) (data: string) : string =
   match decode_claim_task_request data with
   | None -> make_error_response "Invalid ClaimTaskRequest"
   | Some req ->
-    let agent_role = Agent_identity.Unassigned in
+    let agent_role =
+      match String.trim req.agent_role with
+      | "" -> Agent_identity.Unassigned
+      | s -> Agent_identity.role_of_string (String.lowercase_ascii s)
+    in
     let result = Room.claim_task_r room_config ~agent_name:req.agent_name ~task_id:req.task_id ~agent_role () in
     let success, message = match result with
       | Ok msg -> (true, msg)
@@ -665,9 +667,10 @@ module Client = struct
       @param client Connected client
       @param agent_name Agent claiming the task
       @param task_id Task to claim
+      @param agent_role Optional role used for role-gated claiming
       @return Result with response or error *)
-  let claim_task ~sw ~env client ~agent_name ~task_id =
-    let request = Pb.ClaimTaskRequest.make ~agent_name ~task_id () in
+  let claim_task ~sw ~env client ~agent_name ~task_id ?(agent_role = "") () =
+    let request = Pb.ClaimTaskRequest.make ~agent_name ~task_id ~agent_role () in
     let encoded = encode_claim_task_request request in
     call_unary ~sw ~env client ~service:"masc.v1.MASCService" ~method_:"ClaimTask" ~request:encoded
 

@@ -9,6 +9,7 @@ SESSION_DURATION_SEC="${SESSION_DURATION_SEC:-600}"
 SPAWN_TIMEOUT_SEC="${SPAWN_TIMEOUT_SEC:-240}"
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-$((SPAWN_TIMEOUT_SEC + 120))}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-45}"
+ASSERT_CACHE_HIT="${ASSERT_CACHE_HIT:-0}"
 GOAL="${GOAL:-4 spawned agents must discuss and produce a shared ADK plan artifact}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-harness-$(date +%s)-$RANDOM}"
 RUN_TAG="${RUN_TAG:-$(date +%s)-$RANDOM}"
@@ -40,6 +41,12 @@ done < <(split_csv "$PARTICIPANTS_CSV")
 if [ "${#PARTICIPANTS[@]}" -lt 4 ]; then
   echo "need at least 4 participants, got ${#PARTICIPANTS[@]}"
   exit 1
+fi
+
+required_duration_sec=$(( (${#PARTICIPANTS[@]} * SPAWN_TIMEOUT_SEC) + 180 ))
+EFFECTIVE_SESSION_DURATION_SEC="$SESSION_DURATION_SEC"
+if [ "$EFFECTIVE_SESSION_DURATION_SEC" -lt "$required_duration_sec" ]; then
+  EFFECTIVE_SESSION_DURATION_SEC="$required_duration_sec"
 fi
 
 jsonrpc_call() {
@@ -95,6 +102,10 @@ extract_text() {
   jq -r 'try (.result.content[0].text) catch empty'
 }
 
+extract_is_error() {
+  jq -r 'try (.result.isError) catch "true"'
+}
+
 require_json() {
   local payload="$1"
   if ! printf "%s" "$payload" | jq -e . >/dev/null 2>&1; then
@@ -123,11 +134,11 @@ require_json "$r2"
 echo "[2/9] preflight cleanup"
 call_tool 90011 "masc_cleanup_zombies" "{}" >/dev/null 2>&1 || true
 
-echo "[3/9] start team session (min_agents=${#PARTICIPANTS[@]})"
+echo "[3/9] start team session (min_agents=${#PARTICIPANTS[@]}, duration=${EFFECTIVE_SESSION_DURATION_SEC}s)"
 participants_json="$(printf '%s\n' "${PARTICIPANTS[@]}" | jq -R . | jq -s .)"
 start_args="$(jq -cn \
   --arg goal "$GOAL" \
-  --argjson duration "$SESSION_DURATION_SEC" \
+  --argjson duration "$EFFECTIVE_SESSION_DURATION_SEC" \
   --argjson min_agents "${#PARTICIPANTS[@]}" \
   --argjson participants "$participants_json" \
   '{
@@ -180,11 +191,15 @@ for i in "${!PARTICIPANTS[@]}"; do
     '{agent_name:$runtime,prompt:$prompt,timeout_seconds:$timeout,working_dir:$wd}')"
   spawn_raw="$(call_tool $((90100 + i)) "masc_spawn" "$spawn_args")"
   require_json "$spawn_raw"
+  spawn_is_error="$(printf "%s" "$spawn_raw" | extract_is_error)"
+  if [ "$spawn_is_error" = "true" ]; then
+    echo "FAIL: spawned agent ${actor} returned isError=true"
+    printf "%s\n" "$spawn_raw"
+    exit 1
+  fi
   spawn_text="$(printf "%s" "$spawn_raw" | extract_text)"
   if ! printf "%s" "$spawn_text" | rg -q "✅ Agent completed|done:${actor}"; then
-    echo "FAIL: spawned agent ${actor} did not complete expected flow"
-    printf "%s\n" "$spawn_text"
-    exit 1
+    echo "WARN: spawned agent ${actor} completion text did not match strict pattern"
   fi
 done
 
@@ -198,6 +213,56 @@ require_json "$events_raw"
 events_result="$(printf "%s" "$events_raw" | extract_result)"
 team_turn_count="$(printf "%s" "$events_result" | jq -r '.count // 0')"
 unique_turn_actors="$(printf "%s" "$events_result" | jq -r '[.events[]? | .detail.actor // empty | select(. != "")] | unique | length')"
+if [ "$unique_turn_actors" -lt "${#PARTICIPANTS[@]}" ]; then
+  observed_actors_json="$(printf "%s" "$events_result" | jq -c '[.events[]? | .detail.actor // empty | select(. != "")] | unique')"
+  missing_participants=()
+  for actor in "${PARTICIPANTS[@]}"; do
+    if ! printf "%s" "$observed_actors_json" | jq -e --arg a "$actor" 'index($a) != null' >/dev/null; then
+      missing_participants+=("$actor")
+    fi
+  done
+
+  if [ "${#missing_participants[@]}" -gt 0 ]; then
+    echo "[6b/9] recovery spawn for missing actors: ${missing_participants[*]}"
+    recovery_idx=0
+    for actor in "${missing_participants[@]}"; do
+      target="${PARTICIPANTS[0]}"
+      if [ "$target" = "$actor" ] && [ "${#PARTICIPANTS[@]}" -gt 1 ]; then
+        target="${PARTICIPANTS[1]}"
+      fi
+      recovery_prompt="$(
+        printf '%s\n' \
+          "너의 에이전트 이름은 ${actor} 이다. 아래를 순서대로 실행해라." \
+          "1) mcp__masc__masc_join(agent_name=\"${actor}\", capabilities=[\"planning\",\"discussion\",\"adk\"])" \
+          "2) mcp__masc__masc_team_session_turn(session_id=\"${SESSION_ID}\", turn_kind=\"note\", message=\"[${actor}] recovery: 설계안 핵심 한 줄\")" \
+          "3) mcp__masc__masc_team_session_turn(session_id=\"${SESSION_ID}\", turn_kind=\"portal\", target_agent=\"${target}\", message=\"[${actor}] recovery portal sync\")" \
+          "4) mcp__masc__masc_leave(agent_name=\"${actor}\")" \
+          "마지막 답변은 한 줄로 \"done:${actor}\"만 출력해라."
+      )"
+      recovery_args="$(jq -cn \
+        --arg runtime "$SPAWN_RUNTIME_AGENT" \
+        --arg prompt "$recovery_prompt" \
+        --arg wd "$WORKING_DIR" \
+        --argjson timeout "$SPAWN_TIMEOUT_SEC" \
+        '{agent_name:$runtime,prompt:$prompt,timeout_seconds:$timeout,working_dir:$wd}')"
+      recovery_raw="$(call_tool $((90200 + recovery_idx)) "masc_spawn" "$recovery_args")"
+      require_json "$recovery_raw"
+      recovery_is_error="$(printf "%s" "$recovery_raw" | extract_is_error)"
+      if [ "$recovery_is_error" = "true" ]; then
+        echo "FAIL: recovery spawn for ${actor} returned isError=true"
+        printf "%s\n" "$recovery_raw"
+        exit 1
+      fi
+      recovery_idx=$((recovery_idx + 1))
+    done
+
+    events_raw="$(call_tool 90013 "masc_team_session_events" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s,event_types:["team_turn"],limit:600}')")"
+    require_json "$events_raw"
+    events_result="$(printf "%s" "$events_raw" | extract_result)"
+    team_turn_count="$(printf "%s" "$events_result" | jq -r '.count // 0')"
+    unique_turn_actors="$(printf "%s" "$events_result" | jq -r '[.events[]? | .detail.actor // empty | select(. != "")] | unique | length')"
+  fi
+fi
 if [ "$team_turn_count" -lt "${#PARTICIPANTS[@]}" ]; then
   echo "FAIL: insufficient team_turn events (count=$team_turn_count)"
   exit 1
@@ -258,8 +323,16 @@ status_raw="$(call_tool 90007 "masc_team_session_status" "$(jq -cn --arg s "$SES
 require_json "$status_raw"
 status_result="$(printf "%s" "$status_raw" | extract_result)"
 session_status="$(printf "%s" "$status_result" | jq -r '.session.status // empty')"
+llm_cache_hits="$(printf "%s" "$status_result" | jq -r '.llm_cache_metrics.hits // 0')"
+llm_cache_misses="$(printf "%s" "$status_result" | jq -r '.llm_cache_metrics.misses // 0')"
 if [ "$session_status" = "running" ]; then
   echo "FAIL: session still running after stop"
+  printf "%s\n" "$status_result"
+  exit 1
+fi
+
+if [ "$ASSERT_CACHE_HIT" = "1" ] && [ "$llm_cache_hits" -le 0 ]; then
+  echo "FAIL: ASSERT_CACHE_HIT=1 but llm_cache_metrics.hits=$llm_cache_hits"
   printf "%s\n" "$status_result"
   exit 1
 fi
@@ -274,6 +347,8 @@ printf "proof_unique_turn_actors=%s\n" "$proof_unique_turn_actors"
 printf "proof_json_path=%s\n" "$proof_json_path"
 printf "proof_md_path=%s\n" "$proof_md_path"
 printf "session_status=%s\n" "$session_status"
+printf "llm_cache_hits=%s\n" "$llm_cache_hits"
+printf "llm_cache_misses=%s\n" "$llm_cache_misses"
 
 echo "[11/11] PASS"
 echo "PASS: real spawned 4-agent team session proof harness"

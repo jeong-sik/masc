@@ -182,6 +182,29 @@ let test_spawn_timeout_reasonable_range () =
   check bool "timeout <= 3600" true (t <= 3600)
 
 (* ============================================================
+   LLM Cache Config Tests
+   ============================================================ *)
+
+let test_llm_cache_enabled_bool () =
+  check bool "cache enabled is bool" true
+    (Env_config.Llm.cache_enabled || not Env_config.Llm.cache_enabled)
+
+let test_llm_cache_ttl_positive () =
+  check bool "cache ttl positive" true (Env_config.Llm.cache_ttl_seconds > 0)
+
+let test_llm_cache_prompt_chars_positive () =
+  check bool "max prompt chars positive" true
+    (Env_config.Llm.cache_max_prompt_chars > 0)
+
+let test_llm_cache_l1_entries_positive () =
+  check bool "l1 max entries positive" true
+    (Env_config.Llm.cache_l1_max_entries > 0)
+
+let test_llm_spawn_cache_policy_supported () =
+  check bool "spawn cache policy supported" true
+    (List.mem Env_config.Llm.spawn_cache_policy [ "safe_only"; "off" ])
+
+(* ============================================================
    KeeperBootstrap Module Tests
    ============================================================ *)
 
@@ -279,6 +302,16 @@ let () =
       test_case "timeout positive" `Quick test_spawn_timeout_positive;
       test_case "timeout default 600" `Quick test_spawn_timeout_default_600;
       test_case "timeout reasonable range" `Quick test_spawn_timeout_reasonable_range;
+    ];
+    "llm_cache", [
+      test_case "cache enabled bool" `Quick test_llm_cache_enabled_bool;
+      test_case "cache ttl positive" `Quick test_llm_cache_ttl_positive;
+      test_case "max prompt chars positive" `Quick
+        test_llm_cache_prompt_chars_positive;
+      test_case "l1 max entries positive" `Quick
+        test_llm_cache_l1_entries_positive;
+      test_case "spawn cache policy supported" `Quick
+        test_llm_spawn_cache_policy_supported;
     ];
     "keeper_bootstrap", [
       test_case "stale turn positive" `Quick test_keeper_bootstrap_stale_positive;

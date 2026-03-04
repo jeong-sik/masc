@@ -4,6 +4,7 @@ set -euo pipefail
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 AGENT_NAME="${AGENT_NAME:-team-session-harness}"
 DURATION_SEC="${DURATION_SEC:-120}"
+MCP_SESSION_ID="${MCP_SESSION_ID:-team-session-contract-$(date +%s)-$RANDOM}"
 
 curl_post_mcp() {
   local body="$1"
@@ -14,6 +15,7 @@ curl_post_mcp() {
     if output="$(curl -sS -m 25 -X POST "$MCP_URL" \
       -H 'Content-Type: application/json' \
       -H 'Accept: application/json, text/event-stream' \
+      -H "mcp-session-id: $MCP_SESSION_ID" \
       -d "$body" 2>/dev/null)"; then
       printf "%s" "$output"
       return 0
@@ -33,9 +35,19 @@ call_tool() {
 
   raw="$(curl_post_mcp "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"tools/call\",\"params\":{\"name\":\"$name\",\"arguments\":$args_json}}")"
 
-  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p' | tail -n1)"
+  sse_data="$(printf "%s" "$raw" | sed -n 's/^data: //p')"
   if [ -n "$sse_data" ]; then
-    printf "%s" "$sse_data"
+    local response_line
+    response_line="$(
+      printf "%s\n" "$sse_data" \
+        | rg "\"id\"[[:space:]]*:[[:space:]]*$id([[:space:]],|[[:space:]]*})" \
+        | tail -n1 || true
+    )"
+    if [ -n "$response_line" ]; then
+      printf "%s" "$response_line"
+    else
+      printf "%s\n" "$sse_data" | tail -n1
+    fi
   else
     printf "%s" "$raw"
   fi
@@ -80,7 +92,7 @@ fi
 echo "[4/12] masc_team_session_status"
 r4="$(call_tool 4104 "masc_team_session_status" "{\"session_id\":\"$s1\"}")"
 require_ok "$r4"
-if ! printf "%s" "$r4" | extract_result | jq -e '.team_health and .communication_metrics and .orchestration_state and .cascade_metrics' >/dev/null; then
+if ! printf "%s" "$r4" | extract_result | jq -e '.team_health and .communication_metrics and .orchestration_state and .cascade_metrics and .llm_cache_metrics' >/dev/null; then
   echo "FAIL: status missing required sections"
   printf "%s\n" "$r4"
   exit 1

@@ -214,6 +214,7 @@
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
    llm_client
+   llm_response_cache
    context_manager
    verifier
    succession

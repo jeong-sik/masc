@@ -899,6 +899,24 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> auth_token
   in
 
+  let room_path = Room.masc_dir config in
+  let mode_config = Config.load room_path in
+
+  let mode_gate_error =
+    if not (Config.is_tool_visible name) then
+      Some
+        (Printf.sprintf
+           "Tool '%s' is hidden by default (placeholder). Set MASC_PLACEHOLDER_TOOLS_ENABLED=1 to expose it."
+           name)
+    else if not (Mode.is_tool_enabled mode_config.enabled_categories name) then
+      Some
+        (Printf.sprintf
+           "Tool '%s' is disabled in current mode '%s'. Run masc_get_config or masc_switch_mode first."
+           name (Mode.mode_to_string mode_config.mode))
+    else
+      None
+  in
+
   let read_term_session_agent () =
     if Option.is_some mcp_session_id then
       None
@@ -969,6 +987,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     else
       agent_name
   in
+  match mode_gate_error with
+  | Some msg -> (false, msg)
+  | None ->
   (* Enforce tool authorization when enabled *)
   let auth_enabled = Auth.is_auth_enabled config.base_path in
   let auth_result =
@@ -2900,21 +2921,7 @@ let handle_initialize_eio id params =
 let handle_list_tools_eio state id =
   let room_path = Room.masc_dir state.Mcp_server.room_config in
   let config = Config.load room_path in
-  let enabled_categories = config.enabled_categories in
-  let all_tools =
-    Tools.all_schemas
-    @ Tool_board.tools
-    @ Tool_lodge.tools
-    @ Tool_perpetual.schemas
-    @ Tool_mdal.schemas
-    @ Tool_keeper.schemas
-    @ Tool_goals.schemas
-    @ Tool_team_session.schemas
-    @ Tool_protocol_game_view.schemas
-  in
-  let filtered_schemas = List.filter (fun (schema : Types.tool_schema) ->
-    Mode.is_tool_enabled enabled_categories schema.name
-  ) all_tools in
+  let filtered_schemas = Config.enabled_tool_schemas config.enabled_categories in
   let tools = List.map (fun (schema : Types.tool_schema) ->
     `Assoc [
       ("name", `String schema.name);

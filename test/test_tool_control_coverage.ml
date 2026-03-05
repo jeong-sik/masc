@@ -84,11 +84,26 @@ let () = test "dispatch_pause_status_running" (fun () ->
 (* Test dispatch switch_mode *)
 let () = test "dispatch_switch_mode" (fun () ->
   let ctx = make_test_ctx () in
-  let args = `Assoc [("mode", `String "collaborative")] in
+  let args = `Assoc [("mode", `String "minimal")] in
   match Tool_control.dispatch ctx ~name:"masc_switch_mode" ~args with
   | Some (success, result) ->
       assert success;
-      assert (String.length result > 0)
+      assert (String.length result > 0);
+      let json = Yojson.Safe.from_string result in
+      let mode =
+        json |> Yojson.Safe.Util.member "mode" |> Yojson.Safe.Util.to_string
+      in
+      assert (mode = "minimal")
+  | None -> failwith "dispatch returned None"
+)
+
+(* Test dispatch switch_mode invalid mode *)
+let () = test "dispatch_switch_mode_invalid" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [("mode", `String "collaborative")] in
+  match Tool_control.dispatch ctx ~name:"masc_switch_mode" ~args with
+  | Some (success, _result) ->
+      assert (not success)
   | None -> failwith "dispatch returned None"
 )
 

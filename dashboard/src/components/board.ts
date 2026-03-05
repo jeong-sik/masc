@@ -26,7 +26,13 @@ const detailComments = signal<BoardComment[]>([])
 const detailLoading = signal(false)
 const detailPostId = signal<string | null>(null)
 const commentText = signal('')
-const commentAuthor = signal('dashboard-user')
+function defaultCommentAuthor(): string {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('agent')?.trim()
+    || params.get('agent_name')?.trim()
+    || 'dashboard-user'
+}
+const commentAuthor = signal(defaultCommentAuthor())
 const commentSubmitting = signal(false)
 
 async function loadPostDetail(postId: string) {

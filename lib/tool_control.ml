@@ -18,6 +18,18 @@ let get_string args key default =
   | `String s -> s
   | _ -> default
 
+let get_string_list args key =
+  match args |> member key with
+  | `List values ->
+      List.filter_map
+        (function
+          | `String s ->
+              let trimmed = String.trim s in
+              if trimmed = "" then None else Some trimmed
+          | _ -> None)
+        values
+  | _ -> []
+
 (* Handlers *)
 
 let handle_pause ctx args =
@@ -67,9 +79,56 @@ let handle_pause_status ctx args =
   (true, Yojson.Safe.to_string payload)
 
 let handle_switch_mode ctx args =
-  let mode = get_string args "mode" "autonomous" in
-  (* Mode.switch may not exist, but we mirror the original behavior *)
-  (true, Printf.sprintf "🔄 Mode switched to: %s by %s" mode ctx.agent_name)
+  let mode_str = get_string args "mode" "" |> String.trim |> String.lowercase_ascii in
+  if mode_str = "" then
+    (false, "mode is required (minimal|standard|parallel|coding|full|solo|custom)")
+  else
+    match Mode.mode_of_string mode_str with
+    | None ->
+        (false, Printf.sprintf "invalid mode: %s (minimal|standard|parallel|coding|full|solo|custom)" mode_str)
+    | Some mode ->
+        let room_path = Room.masc_dir ctx.config in
+        let switched =
+          match mode with
+          | Mode.Custom ->
+              let category_names = get_string_list args "categories" in
+              if category_names = [] then
+                Error "custom mode requires non-empty categories"
+              else
+                let parsed =
+                  List.map
+                    (fun name ->
+                      match Mode.category_of_string name with
+                      | Some cat -> Ok cat
+                      | None -> Error name)
+                    category_names
+                in
+                let invalid =
+                  List.filter_map
+                    (function Error name -> Some name | Ok _ -> None)
+                    parsed
+                in
+                if invalid <> [] then
+                  Error
+                    (Printf.sprintf "invalid categories: %s"
+                       (String.concat ", " invalid))
+                else
+                  let categories =
+                    parsed
+                    |> List.filter_map (function Ok cat -> Some cat | Error _ -> None)
+                    |> List.sort_uniq Stdlib.compare
+                  in
+                  ignore (Config.set_categories room_path categories);
+                  Ok ()
+          | _ ->
+              ignore (Config.switch_mode room_path mode);
+              Ok ()
+        in
+        (match switched with
+         | Error msg -> (false, msg)
+         | Ok () ->
+             let summary = Config.get_config_summary room_path in
+             (true, Yojson.Safe.pretty_to_string summary))
 
 let handle_get_config ctx _args =
   let room_path = Room.masc_dir ctx.config in

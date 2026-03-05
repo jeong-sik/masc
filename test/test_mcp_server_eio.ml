@@ -6,6 +6,8 @@
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Mcp = Masc_mcp.Mcp_server
+module Config = Masc_mcp.Config
+module Mode = Masc_mcp.Mode
 
 (* ===== Test Helpers ===== *)
 
@@ -245,12 +247,58 @@ let test_handle_request_tools_list () =
                  Alcotest.(check bool)
                    "legacy masc_trpg_dice_roll hidden from list"
                    false
-                   (List.mem "masc_trpg_dice_roll" names)
+                   (List.mem "masc_trpg_dice_roll" names);
+                 Alcotest.(check bool)
+                   "placeholder tool hidden by default"
+                   false
+                   (List.mem "masc_archive_save" names)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
 
   cleanup_dir base_path
+
+let test_handle_request_tools_list_with_placeholder_flag () =
+  with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "1" (fun () ->
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run @@ fun sw ->
+
+    let base_path = temp_dir () in
+    let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+
+    let request = Yojson.Safe.to_string (`Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 2);
+      ("method", `String "tools/list");
+      ("params", `Assoc []);
+    ]) in
+
+    let response = Mcp_eio.handle_request ~clock ~sw state request in
+
+    (match response with
+     | `Assoc fields ->
+         Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields);
+         (match List.assoc_opt "result" fields with
+          | Some (`Assoc result_fields) ->
+              (match List.assoc_opt "tools" result_fields with
+               | Some (`List tools) ->
+                   let names =
+                     tools
+                     |> List.filter_map (function
+                          | `Assoc fields -> List.assoc_opt "name" fields
+                          | _ -> None)
+                     |> List.filter_map (function `String s -> Some s | _ -> None)
+                   in
+                   Alcotest.(check bool)
+                     "placeholder tool visible with flag"
+                     true
+                     (List.mem "masc_archive_save" names)
+               | _ -> Alcotest.fail "tools not a list")
+          | _ -> Alcotest.fail "result not an object")
+     | _ -> Alcotest.fail "response not an object");
+
+    cleanup_dir base_path)
 
 let test_execute_tool_trpg_flow () =
   Eio_main.run @@ fun env ->
@@ -320,6 +368,31 @@ let test_execute_tool_trpg_flow () =
   let roll_json = Yojson.Safe.from_string roll_msg in
   let passed = roll_json |> Yojson.Safe.Util.member "roll" |> Yojson.Safe.Util.member "passed" |> Yojson.Safe.Util.to_bool in
   Alcotest.(check bool) "roll passed" true passed;
+
+  cleanup_dir base_path
+
+let test_execute_tool_mode_gate () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let room_path = Masc_mcp.Room.masc_dir state.room_config in
+  let _ = Config.switch_mode room_path Mode.Minimal in
+
+  let (ok, msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_portal_status"
+      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
+  in
+  Alcotest.(check bool) "portal tool blocked in minimal mode" false ok;
+  Alcotest.(check bool)
+    "mode gate message"
+    true
+    (contains_substring msg "disabled in current mode");
 
   cleanup_dir base_path
 
@@ -675,9 +748,11 @@ let response_tests = [
 let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
   "handle tools/list", `Quick, test_handle_request_tools_list;
+  "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
+  "mode gate", `Quick, test_execute_tool_mode_gate;
   "execute trpg flow", `Quick, test_execute_tool_trpg_flow;
   "execute trpg validation", `Quick, test_execute_tool_trpg_validation;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;

@@ -21,7 +21,8 @@ let test_category_to_string () =
   check string "auth" "auth" (Mode.category_to_string Mode.Auth);
   check string "ratelimit" "ratelimit" (Mode.category_to_string Mode.RateLimit);
   check string "encryption" "encryption" (Mode.category_to_string Mode.Encryption);
-  check string "code" "code" (Mode.category_to_string Mode.Code)
+  check string "code" "code" (Mode.category_to_string Mode.Code);
+  check string "unknown" "unknown" (Mode.category_to_string Mode.Unknown)
 
 let test_category_of_string_valid () =
   check (option bool) "core" (Some true) (Option.map (fun c -> c = Mode.Core) (Mode.category_of_string "core"));
@@ -220,9 +221,16 @@ let test_tool_category_code () =
   check bool "code_symbols" true (Mode.tool_category "masc_code_symbols" = Mode.Code);
   check bool "code_read" true (Mode.tool_category "masc_code_read" = Mode.Code)
 
+let test_tool_category_namespace_mapping () =
+  check bool "lodge namespace" true (Mode.tool_category "lodge_heartbeat" = Mode.Comm);
+  check bool "trpg namespace" true (Mode.tool_category "trpg.dice.roll" = Mode.Core);
+  check bool "experiment namespace" true (Mode.tool_category "experiment.start" = Mode.Core);
+  check bool "decision namespace" true (Mode.tool_category "decision.create" = Mode.Core);
+  check bool "client namespace" true (Mode.tool_category "client.session.open" = Mode.Core)
+
 let test_tool_category_unknown () =
-  (* Unknown tools default to Core *)
-  check bool "unknown defaults to core" true (Mode.tool_category "unknown_tool" = Mode.Core)
+  check bool "unknown is Unknown" true
+    (Mode.tool_category "totally_unknown_tool" = Mode.Unknown)
 
 (* ============================================================
    Is Tool Enabled Tests
@@ -247,6 +255,18 @@ let test_is_tool_enabled_full () =
   check bool "join enabled" true (Mode.is_tool_enabled cats "masc_join");
   check bool "portal_open enabled" true (Mode.is_tool_enabled cats "masc_portal_open");
   check bool "encryption_enable enabled" true (Mode.is_tool_enabled cats "masc_encryption_enable")
+
+let test_is_tool_enabled_unknown () =
+  let cats = Mode.categories_for_mode Mode.Full in
+  check bool "unknown disabled by default" false
+    (Mode.is_tool_enabled cats "totally_unknown_tool")
+
+let test_is_tool_enabled_mode_management_always_on () =
+  let cats = [] in
+  check bool "switch_mode always enabled" true
+    (Mode.is_tool_enabled cats "masc_switch_mode");
+  check bool "get_config always enabled" true
+    (Mode.is_tool_enabled cats "masc_get_config")
 
 (* ============================================================
    Description Tests
@@ -353,12 +373,15 @@ let () =
       test_case "ratelimit tools" `Quick test_tool_category_ratelimit;
       test_case "encryption tools" `Quick test_tool_category_encryption;
       test_case "code tools" `Quick test_tool_category_code;
-      test_case "unknown defaults to core" `Quick test_tool_category_unknown;
+      test_case "namespace mappings" `Quick test_tool_category_namespace_mapping;
+      test_case "unknown category" `Quick test_tool_category_unknown;
     ];
     "is_tool_enabled", [
       test_case "minimal mode" `Quick test_is_tool_enabled_minimal;
       test_case "standard mode" `Quick test_is_tool_enabled_standard;
       test_case "full mode" `Quick test_is_tool_enabled_full;
+      test_case "unknown tool disabled" `Quick test_is_tool_enabled_unknown;
+      test_case "mode management always enabled" `Quick test_is_tool_enabled_mode_management_always_on;
     ];
     "descriptions", [
       test_case "mode description" `Quick test_mode_description;

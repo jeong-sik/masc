@@ -10,6 +10,12 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 
 (* ===== Test Helpers ===== *)
 
+let init_eio env =
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Masc_mcp.Eio_context.set_net (Eio.Stdenv.net env);
+  Masc_mcp.Eio_context.set_clock (Eio.Stdenv.clock env)
+
 let contains_substring s needle =
   let s_len = String.length s in
   let n_len = String.length needle in
@@ -75,16 +81,38 @@ let extract_tool_output response =
            fail (Printf.sprintf "MCP error response: %s" msg)
        | None -> fail "response has neither 'result' nor 'error'")
 
+let switch_to_coding_mode ~clock ~sw state =
+  let req =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 0);
+          ("method", `String "tools/call");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String "masc_switch_mode");
+                ("arguments", `Assoc [ ("mode", `String "coding") ]);
+              ] );
+        ])
+  in
+  let resp = Mcp_eio.handle_request ~clock ~sw state req in
+  let (is_error, text) = extract_tool_output resp in
+  if is_error then fail (Printf.sprintf "failed to switch mode: %s" text)
+
 (* ===== E2E Test: masc_code_search ===== *)
 
 let test_code_search_basic () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
   (* Use current repo as base_path for real code search *)
   let base_path = Sys.getcwd () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  switch_to_coding_mode ~clock ~sw state;
 
   (* Search for "ripgrep" in codebase *)
   let request = Yojson.Safe.to_string (`Assoc [
@@ -155,11 +183,13 @@ let test_code_search_basic () =
 
 let test_code_symbols_basic () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
   let base_path = Sys.getcwd () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  switch_to_coding_mode ~clock ~sw state;
 
   (* Extract symbols from a real file *)
   let request = Yojson.Safe.to_string (`Assoc [
@@ -205,11 +235,13 @@ let test_code_symbols_basic () =
 
 let test_code_read_basic () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
   let base_path = Sys.getcwd () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  switch_to_coding_mode ~clock ~sw state;
 
   (* Read first 10 lines of a file *)
   let request = Yojson.Safe.to_string (`Assoc [
@@ -268,11 +300,13 @@ let test_code_read_basic () =
 
 let test_code_read_offset_limit () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
   let base_path = Sys.getcwd () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  switch_to_coding_mode ~clock ~sw state;
 
   (* Read lines 10-20 *)
   let request = Yojson.Safe.to_string (`Assoc [

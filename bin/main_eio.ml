@@ -4110,7 +4110,10 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
     )
       (List.filter
          (fun (t : Types.task) ->
-           match t.task_status with Types.Done _ | Types.Cancelled _ -> false | _ -> true)
+           match t.task_status with
+           | Types.Cancelled _ -> false
+           | Types.Done _ -> not compact
+           | _ -> true)
          tasks)
   in
   let agents_json =

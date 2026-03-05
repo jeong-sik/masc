@@ -101,6 +101,7 @@ function SideRail() {
             refreshDashboard()
             if (current === 'board') refreshBoard()
             if (current === 'trpg') refreshTrpg()
+            if (current === 'goals') refreshGoals()
           }}
         >
           Refresh Now

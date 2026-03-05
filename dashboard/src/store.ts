@@ -452,10 +452,11 @@ export function setupSSEReaction(): () => void {
     if (event.type === 'mdal_started' && event.loop_id) {
       const next = new Map(mdalLoops.value)
       next.set(event.loop_id, {
+        ...(next.get(event.loop_id) ?? {}),
         loop_id: event.loop_id,
         profile: event.profile ?? 'custom',
         status: 'running',
-        current_iteration: 0,
+        current_iteration: event.iteration ?? 0,
         max_iterations: 0,
         baseline_metric: event.baseline ?? 0,
         current_metric: event.baseline ?? 0,
@@ -470,39 +471,65 @@ export function setupSSEReaction(): () => void {
 
     if (event.type === 'mdal_iteration' && event.loop_id) {
       const next = new Map(mdalLoops.value)
-      const existing = next.get(event.loop_id)
-      if (existing) {
-        const record: MdalIterationRecord = {
-          iteration: event.iteration ?? 0,
-          metric_before: event.metric_before ?? 0,
-          metric_after: event.metric_after ?? 0,
-          delta: event.delta ?? 0,
-          changes: '',
-          failed_attempts: '',
-          next_suggestion: '',
-          elapsed_ms: 0,
-          cost_usd: null,
-        }
-        next.set(event.loop_id, {
-          ...existing,
-          current_iteration: event.iteration ?? existing.current_iteration,
-          current_metric: event.metric_after ?? existing.current_metric,
-          history: [record, ...existing.history],
-        })
-        mdalLoops.value = next
+      const metricBefore = event.metric_before ?? event.metric_after ?? 0
+      const metricAfter = event.metric_after ?? metricBefore
+      const existing = next.get(event.loop_id) ?? {
+        loop_id: event.loop_id,
+        profile: event.profile ?? 'unknown',
+        status: 'running',
+        current_iteration: event.iteration ?? 0,
+        max_iterations: 0,
+        baseline_metric: metricBefore,
+        current_metric: metricAfter,
+        target: event.target ?? '',
+        stagnation_streak: 0,
+        stagnation_limit: 0,
+        elapsed_seconds: 0,
+        history: [],
       }
+      const record: MdalIterationRecord = {
+        iteration: event.iteration ?? 0,
+        metric_before: metricBefore,
+        metric_after: metricAfter,
+        delta: event.delta ?? 0,
+        changes: '',
+        failed_attempts: '',
+        next_suggestion: '',
+        elapsed_ms: 0,
+        cost_usd: null,
+      }
+      next.set(event.loop_id, {
+        ...existing,
+        current_iteration: event.iteration ?? existing.current_iteration,
+        current_metric: metricAfter,
+        history: [record, ...existing.history],
+      })
+      mdalLoops.value = next
     }
 
     if ((event.type === 'mdal_completed' || event.type === 'mdal_stopped') && event.loop_id) {
       const next = new Map(mdalLoops.value)
-      const existing = next.get(event.loop_id)
-      if (existing) {
-        next.set(event.loop_id, {
-          ...existing,
-          status: event.type === 'mdal_completed' ? 'completed' : 'stopped',
-        })
-        mdalLoops.value = next
+      const existing = next.get(event.loop_id) ?? {
+        loop_id: event.loop_id,
+        profile: event.profile ?? 'unknown',
+        status: 'running',
+        current_iteration: event.iteration ?? 0,
+        max_iterations: 0,
+        baseline_metric: event.baseline ?? event.metric_before ?? event.metric_after ?? 0,
+        current_metric: event.metric_after ?? event.metric_before ?? event.baseline ?? 0,
+        target: event.target ?? '',
+        stagnation_streak: 0,
+        stagnation_limit: 0,
+        elapsed_seconds: 0,
+        history: [],
       }
+      next.set(event.loop_id, {
+        ...existing,
+        current_iteration: event.iteration ?? existing.current_iteration,
+        current_metric: event.metric_after ?? existing.current_metric,
+        status: event.type === 'mdal_completed' ? 'completed' : 'stopped',
+      })
+      mdalLoops.value = next
     }
   })
 

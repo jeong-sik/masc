@@ -10,6 +10,12 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 
 (* ===== Test Helpers ===== *)
 
+let init_eio env =
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Masc_mcp.Eio_context.set_net (Eio.Stdenv.net env);
+  Masc_mcp.Eio_context.set_clock (Eio.Stdenv.clock env)
+
 let contains_substring s needle =
   let s_len = String.length s in
   let n_len = String.length needle in
@@ -99,6 +105,7 @@ let switch_to_coding_mode ~clock ~sw state =
 
 let test_code_search_basic () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -176,6 +183,7 @@ let test_code_search_basic () =
 
 let test_code_symbols_basic () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -227,6 +235,7 @@ let test_code_symbols_basic () =
 
 let test_code_read_basic () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 
@@ -291,6 +300,7 @@ let test_code_read_basic () =
 
 let test_code_read_offset_limit () =
   Eio_main.run @@ fun env ->
+  init_eio env;
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
 

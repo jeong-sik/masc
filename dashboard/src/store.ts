@@ -19,7 +19,7 @@ import type {
   MdalLoop,
   MdalIterationRecord,
 } from './types'
-import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, type DashboardMode } from './api'
+import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchLatestMdalLoop, type DashboardMode } from './api'
 import { lastEvent } from './sse'
 
 // --- Core state signals ---
@@ -402,6 +402,24 @@ export async function refreshGoals(): Promise<void> {
     console.error('Goals fetch error:', err)
   } finally {
     goalsLoading.value = false
+  }
+}
+
+export async function refreshMdal(): Promise<void> {
+  try {
+    const latest = await fetchLatestMdalLoop()
+    if (!latest) return
+
+    const next = new Map(mdalLoops.value)
+    const existing = next.get(latest.loop_id)
+    next.set(latest.loop_id, {
+      ...(existing ?? {}),
+      ...latest,
+      history: latest.history.length > 0 ? latest.history : (existing?.history ?? []),
+    })
+    mdalLoops.value = next
+  } catch (err) {
+    console.error('MDAL fetch error:', err)
   }
 }
 

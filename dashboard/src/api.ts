@@ -10,6 +10,8 @@ import type {
   TrpgState,
   TrpgEvent,
   Agent,
+  MdalIterationRecord,
+  MdalLoop,
   CouncilDebate,
   CouncilDebateSummary,
   CouncilSession,
@@ -1473,6 +1475,65 @@ export function sendKeeperMessage(name: string, message: string, models?: string
   const args: Record<string, unknown> = { name, message }
   if (models && models.length > 0) args.models = models
   return callMcpTool("masc_keeper_msg", args)
+}
+
+function normalizeMdalStatus(raw: unknown): MdalLoop['status'] {
+  const text = asString(raw, '').trim().toLowerCase()
+  if (text.startsWith('error')) return 'error'
+  if (text === 'running' || text === 'completed' || text === 'stopped') return text
+  return 'running'
+}
+
+function normalizeMdalIteration(raw: unknown): MdalIterationRecord | null {
+  if (!isRecord(raw)) return null
+  return {
+    iteration: asInt(raw.iteration) ?? 0,
+    metric_before: asNumber(raw.metric_before, 0),
+    metric_after: asNumber(raw.metric_after, 0),
+    delta: asNumber(raw.delta, 0),
+    changes: asString(raw.changes, ''),
+    failed_attempts: asString(raw.failed_attempts, ''),
+    next_suggestion: asString(raw.next_suggestion, ''),
+    elapsed_ms: asInt(raw.elapsed_ms) ?? 0,
+    cost_usd: typeof raw.cost_usd === 'number' && Number.isFinite(raw.cost_usd) ? raw.cost_usd : null,
+  }
+}
+
+function normalizeMdalLoop(raw: unknown): MdalLoop | null {
+  if (!isRecord(raw)) return null
+  const loopId = asString(raw.loop_id, '').trim()
+  if (!loopId) return null
+  const history = Array.isArray(raw.history)
+    ? raw.history
+      .map(normalizeMdalIteration)
+      .filter((row): row is MdalIterationRecord => row !== null)
+    : []
+
+  return {
+    loop_id: loopId,
+    profile: asString(raw.profile, 'custom'),
+    status: normalizeMdalStatus(raw.status),
+    current_iteration: asInt(raw.iteration) ?? asInt(raw.current_iteration) ?? 0,
+    max_iterations: asInt(raw.max_iterations) ?? 0,
+    baseline_metric: asNumber(raw.baseline_metric, 0),
+    current_metric: asNumber(raw.current_metric, asNumber(raw.baseline_metric, 0)),
+    target: asString(raw.target, ''),
+    stagnation_streak: asInt(raw.stagnation_streak) ?? 0,
+    stagnation_limit: asInt(raw.stagnation_limit) ?? 0,
+    elapsed_seconds: asNumber(raw.elapsed_seconds, 0),
+    history,
+  }
+}
+
+export async function fetchLatestMdalLoop(): Promise<MdalLoop | null> {
+  try {
+    const rawText = await callMcpTool('masc_mdal_status', {})
+    const parsed = JSON.parse(rawText) as unknown
+    if (isRecord(parsed) && asString(parsed.error, '').trim() !== '') return null
+    return normalizeMdalLoop(parsed)
+  } catch {
+    return null
+  }
 }
 
 // --- Goal Store ---

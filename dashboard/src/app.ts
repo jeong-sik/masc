@@ -11,6 +11,7 @@ import {
   refreshBoard,
   refreshTrpg,
   refreshGoals,
+  refreshMdal,
   setupSSEReaction,
   startPeriodicRefresh,
   stopPeriodicRefresh,
@@ -102,6 +103,7 @@ function SideRail() {
             if (current === 'board') refreshBoard()
             if (current === 'trpg') refreshTrpg()
             if (current === 'goals') refreshGoals()
+            if (current === 'mdal') refreshMdal()
           }}
         >
           Refresh Now
@@ -172,6 +174,7 @@ export function App() {
     if (tab === 'board') refreshBoard()
     if (tab === 'trpg') refreshTrpg()
     if (tab === 'goals') refreshGoals()
+    if (tab === 'mdal') refreshMdal()
   }, [route.value.tab])
 
   return html`

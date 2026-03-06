@@ -21,6 +21,7 @@ import {
   keepers,
 } from './store'
 import { Overview } from './components/overview'
+import { Ops } from './components/ops'
 import { Council } from './components/council'
 import { Board } from './components/board'
 import { Activity } from './components/activity'
@@ -36,6 +37,7 @@ import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS } from './config/navigation'
+import { refreshOperatorSnapshot } from './operator-store'
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -100,6 +102,7 @@ function SideRail() {
           class="rail-refresh-btn"
           onClick=${() => {
             refreshDashboard()
+            if (current === 'ops') refreshOperatorSnapshot()
             if (current === 'board') refreshBoard()
             if (current === 'trpg') refreshTrpg()
             if (current === 'goals') refreshGoals()
@@ -121,6 +124,8 @@ function TabContent() {
   switch (tab) {
     case 'overview':
       return html`<${Overview} />`
+    case 'ops':
+      return html`<${Ops} />`
     case 'council':
       return html`<${Council} />`
     case 'board':
@@ -171,6 +176,7 @@ export function App() {
   // Fetch tab-specific data when tab changes
   useEffect(() => {
     const tab = route.value.tab
+    if (tab === 'ops') refreshOperatorSnapshot()
     if (tab === 'board') refreshBoard()
     if (tab === 'trpg') refreshTrpg()
     if (tab === 'goals') refreshGoals()

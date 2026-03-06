@@ -16,6 +16,9 @@ import type {
   CouncilDebateSummary,
   CouncilSession,
   BoardSortMode,
+  OperatorActionRequest,
+  OperatorActionResult,
+  OperatorSnapshot,
 } from './types'
 
 // --- Auth ---
@@ -266,6 +269,21 @@ export type DashboardMode = 'compact' | 'full'
 
 export function fetchDashboard(mode: DashboardMode = 'compact'): Promise<DashboardData> {
   return get(`/api/v1/dashboard?mode=${mode}`)
+}
+
+export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
+  return get('/api/v1/operator')
+}
+
+export function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
+  return post('/api/v1/operator/action', body)
+}
+
+export function confirmOperatorAction(actor: string, confirmToken: string): Promise<OperatorActionResult> {
+  return post('/api/v1/operator/confirm', {
+    actor,
+    confirm_token: confirmToken,
+  })
 }
 
 // --- Board ---

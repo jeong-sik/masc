@@ -523,6 +523,110 @@ let test_turn_events_and_prove () =
     proof_schema_version;
   cleanup_dir base_dir
 
+let test_proof_exposes_spawn_selection_rationale () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let start_json =
+    start_session_exn ctx ~goal:"prove selection rationale visibility"
+  in
+  let session_id = get_session_id start_json in
+  let spawn_model = "qwen3.5-35b-a3b-ud-q8-xl" in
+  let selection_note =
+    "[model-selection] leader selected qwen3.5-35b-a3b-ud-q8-xl from inventory"
+  in
+  Team_session_store.append_event config session_id ~event_type:"team_step_spawn"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String "tester");
+          ("spawn_agent", `String "llama");
+          ("runtime_actor", `String "llama-local-proof");
+          ("spawn_role", `String "planner");
+          ("spawn_model", `String spawn_model);
+          ("spawn_selection_note", `String selection_note);
+          ("success", `Bool true);
+          ("exit_code", `Int 0);
+          ("elapsed_ms", `Int 10);
+          ("output_preview", `String "worker turn recorded");
+          ("ts_iso", `String (Types.now_iso ()));
+        ]);
+  let turn_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "tester turn for proof");
+          ])
+  in
+  Alcotest.(check bool) "turn recorded" true turn_ok;
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "selection_note_done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "prove ok" true prove_ok;
+  let prove_result = parse_json_exn prove_body |> result_field in
+  let proof_doc =
+    prove_result |> Yojson.Safe.Util.member "proof"
+  in
+  let evidence =
+    proof_doc |> Yojson.Safe.Util.member "evidence"
+  in
+  let recorded_note =
+    evidence |> Yojson.Safe.Util.member "spawn_selection_note_summary"
+    |> Yojson.Safe.Util.to_string
+  in
+  let recorded_models =
+    evidence |> Yojson.Safe.Util.member "spawn_models"
+    |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "selection note summary" selection_note recorded_note;
+  Alcotest.(check bool) "spawn model included" true
+    (List.mem spawn_model recorded_models);
+  let proof_md_path =
+    prove_result |> Yojson.Safe.Util.member "proof_md_path"
+    |> Yojson.Safe.Util.to_string
+  in
+  let ic = open_in proof_md_path in
+  let proof_md =
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        really_input_string ic (in_channel_length ic))
+  in
+  Alcotest.(check bool) "markdown includes model" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string spawn_model) proof_md 0 in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "markdown includes rationale" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string selection_note) proof_md 0 in
+       true
+     with Not_found -> false);
+  cleanup_dir base_dir
+
 let test_prove_requires_multi_actor_turn_coverage () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1062,6 +1166,8 @@ let () =
         [
           Alcotest.test_case "start-status-report-stop" `Quick
             test_start_status_report_stop;
+          Alcotest.test_case "proof-exposes-spawn-selection-rationale" `Quick
+            test_proof_exposes_spawn_selection_rationale;
           Alcotest.test_case "duration-reached-path" `Quick
             test_duration_reached_path;
           Alcotest.test_case "recover-elapsed-session" `Quick

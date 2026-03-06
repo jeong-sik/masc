@@ -41,6 +41,13 @@ function addJournalEntry(
   journal.value = [entry, ...journal.value].slice(0, MAX_JOURNAL)
 }
 
+function formatBoardJournalText(label: 'Post' | 'Comment', preview: string | undefined): string {
+  const normalized = (preview ?? '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return `New ${label.toLowerCase()}`
+  const clipped = normalized.length > 88 ? `${normalized.slice(0, 85)}...` : normalized
+  return `${label}: ${clipped}`
+}
+
 // --- SSE Manager ---
 
 let source: EventSource | null = null
@@ -129,11 +136,11 @@ function handleEvent(event: SSEEvent): void {
       break
     case 'board_post':
     case 'masc/board_post':
-      addJournalEntry(agent, 'New post', 'board')
+      addJournalEntry(agent, formatBoardJournalText('Post', event.content ?? event.message), 'board')
       break
     case 'board_comment':
     case 'masc/board_comment':
-      addJournalEntry(agent, 'New comment', 'board')
+      addJournalEntry(agent, formatBoardJournalText('Comment', event.content ?? event.message), 'board')
       break
     case 'keeper_heartbeat':
       addJournalEntry(

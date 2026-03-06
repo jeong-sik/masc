@@ -2845,3 +2845,278 @@ button.council-row.selected {
   font-size: 11px;
   color: #666;
 }
+
+/* ── Ops Tab ───────────────────────────────────────────────── */
+.ops-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ops-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.ops-heading {
+  color: var(--text-strong);
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.ops-subheading {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+.ops-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ops-actor-input {
+  min-width: 180px;
+}
+
+.ops-banner {
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ops-banner.error {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.34);
+  color: #fecaca;
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ops-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.ops-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ops-stat {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ops-stat span {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ops-stat strong {
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.ops-stat.ok {
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.ops-stat.warn {
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.ops-section-head {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ops-split-row {
+  align-items: stretch;
+}
+
+.ops-select {
+  min-width: 92px;
+}
+
+.ops-feed-list,
+.ops-entity-list,
+.ops-confirmation-list,
+.ops-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ops-feed-item,
+.ops-confirmation-card,
+.ops-detail-card,
+.ops-log-entry {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ops-feed-meta,
+.ops-log-head,
+.ops-detail-meta,
+.ops-entity-meta,
+.ops-confirmation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ops-feed-meta strong,
+.ops-log-head strong,
+.ops-detail-title,
+.ops-entity-title-row strong {
+  color: var(--text-strong);
+}
+
+.ops-feed-content,
+.ops-log-body {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ops-entity-card {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ops-entity-card:hover,
+.ops-entity-card.active {
+  border-color: rgba(71, 184, 255, 0.42);
+  background: rgba(71, 184, 255, 0.08);
+}
+
+.ops-entity-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.ops-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ops-confirmation-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.ops-token {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
+.ops-code-block {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(8, 15, 29, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #b9d6ff;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ops-code-block.compact {
+  max-height: 180px;
+}
+
+.ops-log-entry.preview {
+  border-color: rgba(251, 191, 36, 0.26);
+}
+
+.ops-log-entry.confirmed,
+.ops-log-entry.executed {
+  border-color: rgba(74, 222, 128, 0.26);
+}
+
+.ops-log-entry.error {
+  border-color: rgba(239, 68, 68, 0.26);
+}
+
+.ops-empty {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 1180px) {
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .ops-header {
+    flex-direction: column;
+  }
+
+  .ops-toolbar {
+    width: 100%;
+  }
+
+  .ops-actor-input {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .ops-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-confirmation-actions,
+  .ops-entity-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

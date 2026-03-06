@@ -7,12 +7,15 @@ import { TimeAgo } from './common/time-ago'
 import { buildAgentMotion } from './common/agent-motion'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
-import { agents, keepers, tasks, messages } from '../store'
+import { agents, keepers, tasks, messages, boardPosts } from '../store'
 import type { Agent, Keeper } from '../types'
 import { journal } from '../sse'
 
 function AgentCard({ agent }: { agent: Agent }) {
-  const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value)
+  const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
+    boardPosts: boardPosts.value,
+    keepers: keepers.value,
+  })
 
   return html`
     <button class="agent-card ${agent.status}" onClick=${() => openAgentDetail(agent.name)}>

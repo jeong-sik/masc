@@ -5,16 +5,19 @@ import { signal, computed } from '@preact/signals'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { buildAgentMotion } from './common/agent-motion'
-import { agents, tasks, messages } from '../store'
+import { agents, tasks, messages, boardPosts, keepers } from '../store'
 import { connected, eventCount, journal } from '../sse'
-import type { Message, JournalEntry } from '../types'
+import type { Message, JournalEntry, Task, BoardPost, Keeper } from '../types'
 
 type ActivityFilter = 'all' | 'messages' | 'board' | 'tasks' | 'keepers' | 'system'
 const MAX_VISIBLE_ROWS = 120
+const MAX_TASK_SNAPSHOT_ROWS = 12
+const MAX_BOARD_SNAPSHOT_ROWS = 16
+const MAX_KEEPER_SNAPSHOT_ROWS = 12
 
 type ActivityRowModel = {
   id: string
-  source: 'message' | 'event'
+  source: 'message' | 'event' | 'snapshot'
   kind: Exclude<ActivityFilter, 'all'>
   actor: string
   content: string
@@ -76,6 +79,62 @@ function fromJournal(entry: JournalEntry, idx: number): ActivityRowModel {
   }
 }
 
+function fromTaskSnapshot(task: Task, idx: number): ActivityRowModel | null {
+  const actor = task.assignee?.trim()
+  const timestamp = task.updated_at ?? task.created_at
+  if (!actor || !timestamp) return null
+  return {
+    id: `task-${task.id}-${idx}`,
+    source: 'snapshot',
+    kind: 'tasks',
+    actor,
+    content: `Task: ${task.title} (${task.status})`,
+    timestamp,
+  }
+}
+
+function fromBoardSnapshot(post: BoardPost, idx: number): ActivityRowModel {
+  return {
+    id: `board-${post.id}-${idx}`,
+    source: 'snapshot',
+    kind: 'board',
+    actor: post.author,
+    content: `Post: ${post.title || post.content}`,
+    timestamp: post.updated_at || post.created_at,
+  }
+}
+
+function timestampFromAgeSeconds(ageSeconds: number | null | undefined): string | null {
+  if (typeof ageSeconds !== 'number' || !Number.isFinite(ageSeconds) || ageSeconds < 0) return null
+  return new Date(Date.now() - ageSeconds * 1000).toISOString()
+}
+
+function keeperSnapshotTimestamp(keeper: Keeper): string | null {
+  return keeper.last_heartbeat
+    ?? timestampFromAgeSeconds(keeper.last_turn_ago_s)
+    ?? timestampFromAgeSeconds(keeper.last_proactive_ago_s)
+    ?? timestampFromAgeSeconds(keeper.last_handoff_ago_s)
+    ?? timestampFromAgeSeconds(keeper.last_compaction_ago_s)
+}
+
+function fromKeeperSnapshot(keeper: Keeper, idx: number): ActivityRowModel | null {
+  const timestamp = keeperSnapshotTimestamp(keeper)
+  if (!timestamp) return null
+  const ratio = typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)
+    ? `${Math.round(keeper.context_ratio * 100)}%`
+    : '?'
+  return {
+    id: `keeper-${keeper.name}-${idx}`,
+    source: 'snapshot',
+    kind: 'keepers',
+    actor: keeper.name,
+    content: keeper.last_heartbeat
+      ? `Heartbeat gen=${keeper.generation ?? '?'} ctx=${ratio}`
+      : `Keeper snapshot gen=${keeper.generation ?? '?'} ctx=${ratio}`,
+    timestamp,
+  }
+}
+
 function toEpoch(ts: string | number): number {
   const parsed = typeof ts === 'number' ? ts : Date.parse(ts)
   return Number.isNaN(parsed) ? 0 : parsed
@@ -84,7 +143,22 @@ function toEpoch(ts: string | number): number {
 const sortedRows = computed(() => {
   const msgRows = messages.value.map(fromMessage)
   const journalRows = journal.value.map(fromJournal)
-  return [...msgRows, ...journalRows]
+  const taskRows = [...tasks.value]
+    .sort((a, b) => toEpoch(b.updated_at ?? b.created_at ?? 0) - toEpoch(a.updated_at ?? a.created_at ?? 0))
+    .slice(0, MAX_TASK_SNAPSHOT_ROWS)
+    .map(fromTaskSnapshot)
+    .filter((row): row is ActivityRowModel => row !== null)
+  const boardRows = [...boardPosts.value]
+    .sort((a, b) => toEpoch(b.updated_at || b.created_at) - toEpoch(a.updated_at || a.created_at))
+    .slice(0, MAX_BOARD_SNAPSHOT_ROWS)
+    .map(fromBoardSnapshot)
+  const keeperRows = [...keepers.value]
+    .sort((a, b) => toEpoch(keeperSnapshotTimestamp(b) ?? 0) - toEpoch(keeperSnapshotTimestamp(a) ?? 0))
+    .slice(0, MAX_KEEPER_SNAPSHOT_ROWS)
+    .map(fromKeeperSnapshot)
+    .filter((row): row is ActivityRowModel => row !== null)
+
+  return [...msgRows, ...journalRows, ...taskRows, ...boardRows, ...keeperRows]
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))
 })
 
@@ -112,7 +186,10 @@ const agentMotionRows = computed(() =>
   agents.value
     .map(agent => ({
       agent,
-      motion: buildAgentMotion(agent.name, tasks.value, messages.value, journal.value),
+      motion: buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
+        boardPosts: boardPosts.value,
+        keepers: keepers.value,
+      }),
     }))
     .sort((a, b) => {
       const countDiff = b.motion.activeAssignedCount - a.motion.activeAssignedCount
@@ -166,8 +243,8 @@ export function Activity() {
     <div class="stats-grid">
       <${ActivityStat} label="Visible rows" value=${rows.length} />
       <${ActivityStat} label="Tracked messages" value=${counts.messages} color="#47b8ff" />
-      <${ActivityStat} label="Tracked keeper events" value=${counts.keepers} color="#4ade80" />
-      <${ActivityStat} label="Tracked board events" value=${counts.board} color="#fbbf24" />
+      <${ActivityStat} label="Keeper signals" value=${counts.keepers} color="#4ade80" />
+      <${ActivityStat} label="Board signals" value=${counts.board} color="#fbbf24" />
       <${ActivityStat} label="SSE events" value=${eventCount.value} color="#c084fc" />
     </div>
 
@@ -189,13 +266,13 @@ export function Activity() {
           </span>
           <span>${latest ? html`Latest: <${TimeAgo} timestamp=${latest.timestamp} />` : 'Latest: —'}</span>
           <span>Showing up to ${MAX_VISIBLE_ROWS} rows</span>
-          <span>Journal merged here</span>
+          <span>Live events + current snapshot merged here</span>
         </div>
       </div>
 
       <div class="terminal-feed">
         ${rows.length === 0
-          ? html`<div class="empty-state">Waiting for events...</div>`
+          ? html`<div class="empty-state">Waiting for live or snapshot signals...</div>`
           : rows.map(row => html`<${TerminalRow} key=${row.id} row=${row} />`)}
       </div>
     <//>

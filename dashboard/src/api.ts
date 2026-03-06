@@ -288,11 +288,21 @@ export function confirmOperatorAction(actor: string, confirmToken: string): Prom
 
 // --- Board ---
 
+const SYSTEM_BOARD_AUTHORS = new Set(['lodge-system', 'team-session'])
+
 function toIsoTimestamp(value: unknown): string {
   if (typeof value === 'string' && value.trim()) return value
   if (typeof value !== 'number' || Number.isNaN(value)) return new Date().toISOString()
   const ms = value < 1_000_000_000_000 ? value * 1000 : value
   return new Date(ms).toISOString()
+}
+
+function isSystemBoardAuthor(author: string): boolean {
+  return SYSTEM_BOARD_AUTHORS.has(author.trim().toLowerCase())
+}
+
+function filterSystemBoardPosts(posts: BoardPost[]): BoardPost[] {
+  return posts.filter(post => !isSystemBoardAuthor(post.author))
 }
 
 function derivePostTitle(content: string): string {
@@ -375,9 +385,10 @@ export async function fetchBoard(
     params.set('limit', '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
-    const posts = Array.isArray(raw.posts)
+    const normalizedPosts = Array.isArray(raw.posts)
       ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
       : []
+    const posts = options?.excludeSystem ? filterSystemBoardPosts(normalizedPosts) : normalizedPosts
     return { posts }
   })
 }
@@ -1550,17 +1561,25 @@ function normalizeMdalLoop(raw: unknown): MdalLoop | null {
 export type LatestMdalLoopResult =
   | { state: 'ready'; loop: MdalLoop }
   | { state: 'idle' }
-  | { state: 'error' }
+  | { state: 'error'; message: string }
+
+function isMdalIdleMessage(message: string): boolean {
+  return message.trim().toLowerCase().includes('no mdal loop running')
+}
 
 export async function fetchLatestMdalLoop(): Promise<LatestMdalLoopResult> {
   try {
     const rawText = await callMcpTool('masc_mdal_status', {})
     const parsed = JSON.parse(rawText) as unknown
-    if (isRecord(parsed) && asString(parsed.error, '').trim() !== '') return { state: 'idle' }
+    const errorMessage = isRecord(parsed) ? asString(parsed.error, '').trim() : ''
+    if (isMdalIdleMessage(errorMessage)) return { state: 'idle' }
+    if (errorMessage) return { state: 'error', message: errorMessage }
     const loop = normalizeMdalLoop(parsed)
-    return loop ? { state: 'ready', loop } : { state: 'error' }
-  } catch {
-    return { state: 'error' }
+    return loop ? { state: 'ready', loop } : { state: 'error', message: 'Unexpected MDAL payload' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown MDAL fetch error'
+    if (isMdalIdleMessage(message)) return { state: 'idle' }
+    return { state: 'error', message }
   }
 }
 

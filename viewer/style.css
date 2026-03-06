@@ -875,6 +875,29 @@ body:not(.mode-trpg) #ops-hud {
     background: rgba(14, 20, 36, 0.58);
 }
 
+.model-chip-list {
+    margin-top: 4px;
+    max-height: 168px;
+}
+
+.model-chip {
+    gap: 4px;
+}
+
+.model-chip[data-current="1"] {
+    border-color: var(--accent-primary);
+    box-shadow: inset 0 0 0 1px rgba(201, 165, 90, 0.35);
+}
+
+.model-chip .room-chip-id {
+    text-transform: none;
+    align-items: flex-start;
+}
+
+.model-chip .room-chip-meta {
+    line-height: 1.35;
+}
+
 .manual-map-actions {
     display: flex;
     justify-content: flex-end;

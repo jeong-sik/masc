@@ -33,6 +33,15 @@ struct NewGameBootstrap {
     keepers: Vec<String>,
     world_presets: Vec<PresetOption>,
     dm_presets: Vec<PresetOption>,
+    model_candidates: Vec<AvailableModelCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AvailableModelCandidate {
+    spec: String,
+    source: String,
+    status: String,
+    detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,6 +218,257 @@ fn parse_keeper_models(raw: &str) -> Vec<String> {
             .map(|part| part.trim().to_string())
             .collect::<Vec<_>>(),
     )
+}
+
+fn read_new_game_model_specs(doc: &web_sys::Document) -> Vec<String> {
+    doc.get_element_by_id("new-game-models")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .map(|input| parse_keeper_models(&input.value()))
+        .unwrap_or_default()
+}
+
+fn write_new_game_model_specs(doc: &web_sys::Document, specs: &[String]) {
+    if let Some(input) = doc
+        .get_element_by_id("new-game-models")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_value(&specs.join(","));
+    }
+}
+
+fn set_new_game_model_status(doc: &web_sys::Document, message: &str, tone: &str) {
+    let Some(el) = doc.get_element_by_id("new-game-model-status") else {
+        return;
+    };
+    el.set_text_content(Some(message));
+    let classes = el.class_list();
+    let _ = classes.remove_3("is-ok", "is-warn", "is-error");
+    let class_name = match tone {
+        "ok" => Some("is-ok"),
+        "warn" => Some("is-warn"),
+        "error" => Some("is-error"),
+        _ => None,
+    };
+    if let Some(class_name) = class_name {
+        let _ = classes.add_1(class_name);
+    }
+}
+
+fn parse_available_model_candidates(payload: &Value) -> Vec<AvailableModelCandidate> {
+    let mut rows = payload
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let spec = entry.get("spec").and_then(Value::as_str)?.trim().to_string();
+                    if spec.is_empty() {
+                        return None;
+                    }
+                    Some(AvailableModelCandidate {
+                        spec,
+                        source: entry
+                            .get("source")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim()
+                            .to_string(),
+                        status: entry
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim()
+                            .to_string(),
+                        detail: entry
+                            .get("detail")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim()
+                            .to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    rows.sort_by(|a, b| a.spec.cmp(&b.spec));
+    rows
+}
+
+fn parse_effective_model_specs(payload: &Value) -> Vec<String> {
+    payload
+        .get("effective_models")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .map(|items| unique_non_empty(items))
+        .unwrap_or_default()
+}
+
+fn model_status_badge_label(raw: &str) -> &'static str {
+    match raw.trim() {
+        "selected" => "RUNTIME",
+        "override" => "OVERRIDE",
+        "live" => "LIVE",
+        "default" => "DEFAULT",
+        _ => "MODEL",
+    }
+}
+
+fn sync_available_model_chip_selection(doc: &web_sys::Document) {
+    let selected = read_new_game_model_specs(doc);
+    let Ok(nodes) = doc.query_selector_all("#new-game-model-list .model-chip") else {
+        return;
+    };
+    for idx in 0..nodes.length() {
+        let Some(node) = nodes.item(idx) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        let spec = el
+            .get_attribute("data-model-spec")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let is_selected = !spec.is_empty() && selected.iter().any(|item| item == &spec);
+        let _ = el.set_attribute("data-current", if is_selected { "1" } else { "0" });
+    }
+}
+
+fn toggle_new_game_model_spec(doc: &web_sys::Document, spec: &str) {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return;
+    }
+    let mut selected = read_new_game_model_specs(doc);
+    if let Some(idx) = selected.iter().position(|item| item == spec) {
+        selected.remove(idx);
+    } else {
+        selected.push(spec.to_string());
+    }
+    write_new_game_model_specs(doc, &unique_non_empty(selected));
+    sync_available_model_chip_selection(doc);
+}
+
+fn render_available_model_candidates(
+    doc: &web_sys::Document,
+    rows: &[AvailableModelCandidate],
+) {
+    let Some(list) = doc.get_element_by_id("new-game-model-list") else {
+        return;
+    };
+    if rows.is_empty() {
+        list.set_inner_html("<div class=\"room-chip-empty\">표시할 가용 모델이 없습니다.</div>");
+        return;
+    }
+    let selected = read_new_game_model_specs(doc);
+    let html = rows
+        .iter()
+        .map(|row| {
+            let selected_now = selected.iter().any(|item| item == &row.spec);
+            let meta = if row.detail.is_empty() {
+                row.source.clone()
+            } else if row.source.is_empty() {
+                row.detail.clone()
+            } else {
+                format!("{} · {}", row.source, row.detail)
+            };
+            format!(
+                concat!(
+                    "<button type=\"button\" class=\"room-chip model-chip\" ",
+                    "data-model-spec=\"{spec}\" data-current=\"{selected}\">",
+                    "<span class=\"room-chip-id\">{spec}<span class=\"room-chip-state\">{status}</span></span>",
+                    "<span class=\"room-chip-meta\">{meta}</span>",
+                    "</button>"
+                ),
+                spec = html_escape(&row.spec),
+                selected = if selected_now { "1" } else { "0" },
+                status = html_escape(model_status_badge_label(&row.status)),
+                meta = html_escape(&meta),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    list.set_inner_html(&html);
+}
+
+fn bind_available_model_chip_clicks(doc: &web_sys::Document) {
+    let Ok(nodes) = doc.query_selector_all("#new-game-model-list .model-chip") else {
+        return;
+    };
+    for idx in 0..nodes.length() {
+        let Some(node) = nodes.item(idx) else { continue };
+        let Some(el) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        if el.get_attribute("data-bound").as_deref() == Some("1") {
+            continue;
+        }
+        let _ = el.set_attribute("data-bound", "1");
+        let spec = el
+            .get_attribute("data-model-spec")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let cb = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+                return;
+            };
+            toggle_new_game_model_spec(&doc, &spec);
+        }) as Box<dyn FnMut(_)>);
+        let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
+            target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref())
+        });
+        cb.forget();
+    }
+}
+
+async fn refresh_available_model_candidates(
+    doc: &web_sys::Document,
+) -> Result<Vec<AvailableModelCandidate>, String> {
+    set_new_game_model_status(doc, "가용 모델 조회 중...", "warn");
+    let url = crate::config::build_masc_url("api/v1/trpg/models");
+    let (status, body) = crate::mode::mcp_rpc::http_get_text(&url).await?;
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {} 응답", status));
+    }
+    let payload: Value =
+        serde_json::from_str(&body).map_err(|e| format!("JSON 파싱 실패: {}", e))?;
+    let rows = parse_available_model_candidates(&payload);
+    let effective = parse_effective_model_specs(&payload);
+    let warnings = payload
+        .get("warnings")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    render_available_model_candidates(doc, &rows);
+    bind_available_model_chip_clicks(doc);
+    sync_available_model_chip_selection(doc);
+    let mut status_message = if effective.is_empty() {
+        format!("가용 모델 {}개", rows.len())
+    } else {
+        format!("가용 모델 {}개 · runtime {}", rows.len(), effective.join(", "))
+    };
+    if !warnings.is_empty() {
+        status_message.push_str(" · 일부 로컬 엔드포인트 조회 실패");
+        set_new_game_model_status(doc, &status_message, "warn");
+    } else {
+        set_new_game_model_status(doc, &status_message, "ok");
+    }
+    Ok(rows)
 }
 
 fn selected_player_keepers(doc: &web_sys::Document) -> Vec<String> {
@@ -1415,6 +1675,33 @@ fn bind_new_game_selection_watchers(doc: &web_sys::Document) {
     update_new_game_player_hint(doc);
 }
 
+fn bind_new_game_model_watchers(doc: &web_sys::Document) {
+    let Some(model_input) = doc
+        .get_element_by_id("new-game-models")
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    else {
+        return;
+    };
+    if model_input.get_attribute("data-bound").as_deref() == Some("1") {
+        sync_available_model_chip_selection(doc);
+        return;
+    }
+    let _ = model_input.set_attribute("data-bound", "1");
+    let input_cb = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        sync_available_model_chip_selection(&doc);
+    }) as Box<dyn FnMut(_)>);
+    let _ = model_input
+        .dyn_ref::<web_sys::EventTarget>()
+        .map(|target| {
+            target.add_event_listener_with_callback("input", input_cb.as_ref().unchecked_ref())
+        });
+    input_cb.forget();
+    sync_available_model_chip_selection(doc);
+}
+
 fn available_player_keepers(doc: &web_sys::Document) -> Vec<String> {
     let Ok(nodes) = doc.query_selector_all("#new-game-player-select option") else {
         return Vec::new();
@@ -2209,6 +2496,13 @@ pub(super) async fn refresh_actor_admin_list(
 async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBootstrap, String> {
     let keepers = refresh_keeper_selectors(doc).await?;
     let (world_presets, dm_presets) = refresh_preset_selectors(doc).await?;
+    let model_candidates = match refresh_available_model_candidates(doc).await {
+        Ok(rows) => rows,
+        Err(err) => {
+            set_new_game_model_status(doc, &format!("가용 모델 조회 실패: {}", err), "warn");
+            Vec::new()
+        }
+    };
     if let Err(err) = refresh_actor_admin_list(doc).await {
         actor_admin_set_status(doc, &format!("액터 목록 로드 실패: {}", err), "status-warn");
     }
@@ -2216,6 +2510,7 @@ async fn refresh_new_game_bootstrap(doc: &web_sys::Document) -> Result<NewGameBo
         keepers,
         world_presets,
         dm_presets,
+        model_candidates,
     })
 }
 
@@ -2758,16 +3053,18 @@ async fn run_new_game_quick_start(doc: &web_sys::Document) -> Result<String, Str
         NewGameFlowStage::Bootstrap,
         &if bootstrap.keepers.is_empty() {
             format!(
-                "빠른 시작: Keeper 없음 · 월드 {}개 · DM 프리셋 {}개",
+                "빠른 시작: Keeper 없음 · 월드 {}개 · DM 프리셋 {}개 · 모델 {}개",
                 bootstrap.world_presets.len(),
-                bootstrap.dm_presets.len()
+                bootstrap.dm_presets.len(),
+                bootstrap.model_candidates.len()
             )
         } else {
             format!(
-                "빠른 시작: Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
+                "빠른 시작: Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 · 모델 {}개 로드됨",
                 bootstrap.keepers.len(),
                 bootstrap.world_presets.len(),
-                bootstrap.dm_presets.len()
+                bootstrap.dm_presets.len(),
+                bootstrap.model_candidates.len()
             )
         },
     );
@@ -3744,16 +4041,18 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                         &doc_for_fetch,
                         &if bootstrap.keepers.is_empty() {
                             format!(
-                                "Keeper 없음 · 월드 {}개 · DM 프리셋 {}개 (새 게임 전 keeper 실행 필요)",
+                                "Keeper 없음 · 월드 {}개 · DM 프리셋 {}개 · 모델 {}개 (새 게임 전 keeper 실행 필요)",
                                 bootstrap.world_presets.len(),
-                                bootstrap.dm_presets.len()
+                                bootstrap.dm_presets.len(),
+                                bootstrap.model_candidates.len()
                             )
                         } else {
                             format!(
-                                "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 로드됨",
+                                "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 · 모델 {}개 로드됨",
                                 bootstrap.keepers.len(),
                                 bootstrap.world_presets.len(),
-                                bootstrap.dm_presets.len()
+                                bootstrap.dm_presets.len(),
+                                bootstrap.model_candidates.len()
                             )
                         },
                     );
@@ -3969,16 +4268,18 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
                             &doc_for_fetch,
                             &if bootstrap.keepers.is_empty() {
                                 format!(
-                                    "Keeper 없음 · 월드 {}개 · DM 프리셋 {}개 (새 게임 전 keeper 실행 필요)",
+                                    "Keeper 없음 · 월드 {}개 · DM 프리셋 {}개 · 모델 {}개 (새 게임 전 keeper 실행 필요)",
                                     bootstrap.world_presets.len(),
-                                    bootstrap.dm_presets.len()
+                                    bootstrap.dm_presets.len(),
+                                    bootstrap.model_candidates.len(),
                                 )
                             } else {
                                 format!(
-                                    "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 새로고침 완료",
+                                    "Keeper {}개 · 월드 {}개 · DM 프리셋 {}개 · 모델 {}개 새로고침 완료",
                                     bootstrap.keepers.len(),
                                     bootstrap.world_presets.len(),
-                                    bootstrap.dm_presets.len()
+                                    bootstrap.dm_presets.len(),
+                                    bootstrap.model_candidates.len(),
                                 )
                             },
                         );
@@ -4147,6 +4448,7 @@ pub(super) fn bind_new_game_controls(doc: &web_sys::Document) {
     }
 
     bind_new_game_selection_watchers(doc);
+    bind_new_game_model_watchers(doc);
     set_new_game_flow_stage(doc, NewGameFlowStage::Idle, Some("대기"));
     sync_new_game_wizard_ui(doc);
     bind_actor_admin_controls(doc);

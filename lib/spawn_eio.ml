@@ -74,6 +74,9 @@ let masc_mcp_tools = [
   "mcp__masc__masc_team_session_prove";
   "mcp__masc__masc_team_session_list";
   "mcp__masc__masc_team_session_compare";
+  "mcp__masc__masc_operator_snapshot";
+  "mcp__masc__masc_operator_action";
+  "mcp__masc__masc_operator_confirm";
   "mcp__masc__masc_a2a_delegate";
   "mcp__masc__masc_a2a_subscribe";
   "mcp__masc__masc_poll_events";

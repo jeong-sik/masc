@@ -97,6 +97,7 @@ let all_tool_schemas : Types.tool_schema list =
   @ Tool_perpetual.schemas
   @ Tool_mdal.schemas
   @ Tool_keeper.schemas
+  @ Tool_operator.schemas
   @ Tool_goals.schemas
   @ Tool_team_session.schemas
   @ Tool_protocol_game_view.schemas

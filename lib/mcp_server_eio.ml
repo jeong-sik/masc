@@ -778,7 +778,8 @@ let read_only_tools =
    "masc_cost_report"; "masc_portal_status";
    "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
    "masc_team_session_list"; "masc_team_session_compare";
-   "masc_team_session_events"; "masc_team_session_prove"]
+   "masc_team_session_events"; "masc_team_session_prove";
+   "masc_operator_snapshot"]
 
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
@@ -1051,7 +1052,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
     "masc_goal_dispatch"; "masc_goal_review";
     "masc_team_session_start"; "masc_team_session_stop";
-    "masc_team_session_turn";
+    "masc_team_session_turn"; "masc_operator_action";
+    "masc_operator_confirm";
   ] in
 
   (* Auto-init/auto-join for better UX.
@@ -1189,6 +1191,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_run = { Tool_run.config } in
   let simple_ctx_team_session =
     { Tool_team_session.config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
+  in
+  let simple_ctx_operator =
+    { Tool_operator.config; agent_name; sw; clock }
   in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
@@ -1351,6 +1356,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_run.dispatch simple_ctx_run ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_operator.dispatch simple_ctx_operator ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_team_session.dispatch simple_ctx_team_session ~name ~args:arguments with

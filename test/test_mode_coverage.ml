@@ -166,6 +166,12 @@ let test_tool_category_core () =
     (Mode.tool_category "masc_team_session_turn" = Mode.Core);
   check bool "team_session_events" true
     (Mode.tool_category "masc_team_session_events" = Mode.Core);
+  check bool "operator_snapshot" true
+    (Mode.tool_category "masc_operator_snapshot" = Mode.Core);
+  check bool "operator_action" true
+    (Mode.tool_category "masc_operator_action" = Mode.Core);
+  check bool "operator_confirm" true
+    (Mode.tool_category "masc_operator_confirm" = Mode.Core);
   check bool "team_session_prove" true
     (Mode.tool_category "masc_team_session_prove" = Mode.Core)
 

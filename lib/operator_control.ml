@@ -7,16 +7,34 @@ type 'a context = {
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
+  mcp_session_id : string option;
 }
 
 type pending_confirm = {
   token : string;
+  trace_id : string;
   actor : string;
   action_type : string;
   target_type : string;
   target_id : string option;
   payload : Yojson.Safe.t;
   delegated_tool : string;
+  created_at : string;
+  expires_at : string option;
+}
+
+type action_log_entry = {
+  trace_id : string;
+  actor : string;
+  remote_session_id : string option;
+  remote_client_type : string;
+  action_type : string;
+  target_type : string;
+  target_id : string option;
+  delegated_tool : string;
+  confirmation_state : string;
+  result_status : string;
+  latency_ms : int;
   created_at : string;
 }
 
@@ -69,9 +87,44 @@ let operator_dir config =
 let pending_confirms_path config =
   Filename.concat (operator_dir config) "pending_confirms.json"
 
+let action_log_path config =
+  Filename.concat (operator_dir config) "action_log.jsonl"
+
+let remote_confirm_ttl_seconds = 900.0
+
+let trace_id prefix =
+  let entropy =
+    Printf.sprintf "%s|%d|%.6f|%d"
+      prefix (Unix.getpid ()) (Unix.gettimeofday ()) (Random.bits ())
+  in
+  let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
+  prefix ^ "_" ^ String.sub digest 0 16
+
+let iso_of_unix unix_ts =
+  let tm = Unix.gmtime unix_ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let remote_client_type_of_context (ctx : 'a context) =
+  match ctx.mcp_session_id with
+  | Some _ -> "mcp_remote"
+  | None -> "local_api"
+
+let operator_server_profile_json =
+  `Assoc
+    [
+      ("name", `String "operator_remote_v1");
+      ("transport", `String "mcp_streamable_http");
+      ("auth", `String "bearer_token");
+      ("confirm_ttl_seconds", `Float remote_confirm_ttl_seconds);
+      ("curated_tool_count", `Int 3);
+    ]
+
 let preview_of_pending_confirm (entry : pending_confirm) =
   `Assoc
     [
+      ("trace_id", `String entry.trace_id);
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
       ("target_type", `String entry.target_type);
@@ -83,6 +136,8 @@ let pending_confirm_to_yojson (entry : pending_confirm) =
   `Assoc
     [
       ("token", `String entry.token);
+      ("confirm_token", `String entry.token);
+      ("trace_id", `String entry.trace_id);
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
       ("target_type", `String entry.target_type);
@@ -90,12 +145,18 @@ let pending_confirm_to_yojson (entry : pending_confirm) =
       ("payload", entry.payload);
       ("delegated_tool", `String entry.delegated_tool);
       ("created_at", `String entry.created_at);
+      ("expires_at", string_option_to_json entry.expires_at);
       ("preview", preview_of_pending_confirm entry);
     ]
 
 let pending_confirm_of_yojson json =
   try
     let token = json |> U.member "token" |> U.to_string in
+    let trace_id =
+      match json |> U.member "trace_id" |> U.to_string_option with
+      | Some value -> value
+      | None -> trace_id "opc"
+    in
     let actor = json |> U.member "actor" |> U.to_string in
     let action_type = json |> U.member "action_type" |> U.to_string in
     let target_type = json |> U.member "target_type" |> U.to_string in
@@ -107,9 +168,11 @@ let pending_confirm_of_yojson json =
     in
     let delegated_tool = json |> U.member "delegated_tool" |> U.to_string in
     let created_at = json |> U.member "created_at" |> U.to_string in
+    let expires_at = json |> U.member "expires_at" |> U.to_string_option in
     Ok
       {
         token;
+        trace_id;
         actor;
         action_type;
         target_type;
@@ -117,10 +180,11 @@ let pending_confirm_of_yojson json =
         payload;
         delegated_tool;
         created_at;
+        expires_at;
       }
   with U.Type_error (msg, _) | Failure msg -> Error msg
 
-let read_pending_confirms config =
+let raw_pending_confirms config : pending_confirm list =
   match Room_utils.read_json_opt config (pending_confirms_path config) with
   | None -> []
   | Some (`List entries) ->
@@ -132,9 +196,20 @@ let read_pending_confirms config =
         entries
   | Some _ -> []
 
-let write_pending_confirms config entries =
+let write_pending_confirms config (entries : pending_confirm list) =
   Room_utils.write_json config (pending_confirms_path config)
     (`List (List.map pending_confirm_to_yojson entries))
+
+let pending_confirm_expired (entry : pending_confirm) =
+  match entry.expires_at with
+  | Some exp -> Types.now_iso () > exp
+  | None -> false
+
+let read_pending_confirms config : pending_confirm list =
+  let entries = raw_pending_confirms config in
+  let active = List.filter (fun entry -> not (pending_confirm_expired entry)) entries in
+  if List.length active <> List.length entries then write_pending_confirms config active;
+  active
 
 let upsert_pending_confirm config entry =
   let remaining =
@@ -158,15 +233,63 @@ let pending_confirms_json ?actor config =
         if trimmed = "" then None else Some trimmed
     | None -> None
   in
-  let rows =
+  let rows : pending_confirm list =
     read_pending_confirms config
-    |> List.filter (fun entry ->
+    |> List.filter (fun (entry : pending_confirm) ->
            match actor_filter with
            | None -> true
            | Some value -> String.equal value entry.actor)
-    |> List.sort (fun a b -> String.compare b.created_at a.created_at)
+    |> List.sort (fun (a : pending_confirm) (b : pending_confirm) ->
+           String.compare b.created_at a.created_at)
   in
   `List (List.map pending_confirm_to_yojson rows)
+
+let action_log_entry_to_yojson (entry : action_log_entry) =
+  `Assoc
+    [
+      ("trace_id", `String entry.trace_id);
+      ("actor", `String entry.actor);
+      ("remote_session_id", string_option_to_json entry.remote_session_id);
+      ("remote_client_type", `String entry.remote_client_type);
+      ("action_type", `String entry.action_type);
+      ("target_type", `String entry.target_type);
+      ("target_id", string_option_to_json entry.target_id);
+      ("delegated_tool", `String entry.delegated_tool);
+      ("confirmation_state", `String entry.confirmation_state);
+      ("result_status", `String entry.result_status);
+      ("latency_ms", `Int entry.latency_ms);
+      ("created_at", `String entry.created_at);
+    ]
+
+let append_action_log config (entry : action_log_entry) =
+  Room_utils.mkdir_p (operator_dir config);
+  let oc =
+    open_out_gen [ Open_creat; Open_text; Open_append ] 0o644
+      (action_log_path config)
+  in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc (Yojson.Safe.to_string (action_log_entry_to_yojson entry));
+      output_char oc '\n')
+
+let recent_actions_json config =
+  if not (Sys.file_exists (action_log_path config)) then
+    `List []
+  else
+    let lines =
+      In_channel.with_open_text (action_log_path config) In_channel.input_lines
+    in
+    let tail =
+      let rev = List.rev lines in
+      rev |> List.to_seq |> Seq.take 20 |> List.of_seq |> List.rev
+    in
+    let items =
+      tail
+      |> List.filter_map (fun line ->
+             try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+    in
+    `List items
 
 let available_actions_json =
   `List
@@ -175,43 +298,57 @@ let available_actions_json =
         [
           ("action_type", `String "broadcast");
           ("target_type", `String "room");
+          ("description", `String "Use this when you need a room-wide operator broadcast.");
           ("confirm_required", `Bool false);
         ];
       `Assoc
         [
           ("action_type", `String "room_pause");
           ("target_type", `String "room");
+          ("description", `String "Use this when you need to pause room automation or spawning.");
           ("confirm_required", `Bool true);
         ];
       `Assoc
         [
           ("action_type", `String "room_resume");
           ("target_type", `String "room");
+          ("description", `String "Use this when you need to resume a paused room.");
           ("confirm_required", `Bool false);
         ];
       `Assoc
         [
-          ("action_type", `String "team_turn");
+          ("action_type", `String "team_note");
           ("target_type", `String "team_session");
+          ("description", `String "Use this when you need to append a non-broadcast operator note to a team session.");
           ("confirm_required", `Bool false);
+        ];
+      `Assoc
+        [
+          ("action_type", `String "team_broadcast");
+          ("target_type", `String "team_session");
+          ("description", `String "Use this when you need a broadcast-style orchestration turn in a team session.");
+          ("confirm_required", `Bool false);
+        ];
+      `Assoc
+        [
+          ("action_type", `String "team_task_inject");
+          ("target_type", `String "team_session");
+          ("description", `String "Use this when you need to inject a new task into a running team session.");
+          ("confirm_required", `Bool true);
         ];
       `Assoc
         [
           ("action_type", `String "team_stop");
           ("target_type", `String "team_session");
+          ("description", `String "Use this when you need to stop a running team session.");
           ("confirm_required", `Bool true);
         ];
       `Assoc
         [
-          ("action_type", `String "keeper_msg");
+          ("action_type", `String "keeper_message");
           ("target_type", `String "keeper");
+          ("description", `String "Use this when you need to send a direct operator message to a keeper.");
           ("confirm_required", `Bool false);
-        ];
-      `Assoc
-        [
-          ("action_type", `String "task_inject");
-          ("target_type", `String "room");
-          ("confirm_required", `Bool true);
         ];
     ]
 
@@ -334,12 +471,54 @@ let room_json config =
         ("message_seq", `Int state.message_seq);
       ]
 
-let snapshot_json ?actor ?(include_messages = true) ?(include_sessions = true)
+type snapshot_view =
+  | Summary
+  | Sessions
+  | Keepers
+  | Messages
+  | Full
+
+let parse_snapshot_view = function
+  | Some raw -> (
+      match String.trim raw |> String.lowercase_ascii with
+      | "summary" -> Summary
+      | "sessions" -> Sessions
+      | "keepers" -> Keepers
+      | "messages" -> Messages
+      | _ -> Full)
+  | None -> Full
+
+let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) (ctx : 'a context) : Yojson.Safe.t =
   let config = ctx.config in
   let initialized = Room.is_initialized config in
+  let trace_id = trace_id "ops" in
+  let view = parse_snapshot_view view in
+  let include_sessions =
+    include_sessions
+    &&
+    match view with
+    | Summary | Sessions | Full -> true
+    | Keepers | Messages -> false
+  in
+  let include_keepers =
+    include_keepers
+    &&
+    match view with
+    | Summary | Keepers | Full -> true
+    | Sessions | Messages -> false
+  in
+  let include_messages =
+    include_messages
+    &&
+    match view with
+    | Summary | Messages | Full -> true
+    | Sessions | Keepers -> false
+  in
   `Assoc
     [
+      ("trace_id", `String trace_id);
+      ("server_profile", operator_server_profile_json);
       ("room", room_json config);
       ( "sessions",
         if initialized && include_sessions then sessions_json config
@@ -350,6 +529,7 @@ let snapshot_json ?actor ?(include_messages = true) ?(include_sessions = true)
       ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
       ("pending_confirms", pending_confirms_json ?actor config);
       ("available_actions", available_actions_json);
+      ("recent_actions", recent_actions_json config);
     ]
 
 type action_request = {
@@ -359,6 +539,23 @@ type action_request = {
   target_id : string option;
   payload : Yojson.Safe.t;
 }
+
+let canonical_action_type action_type =
+  match action_type with
+  | "team_turn" -> "team_turn"
+  | "team_note" -> "team_note"
+  | "team_broadcast" -> "team_broadcast"
+  | "team_task_inject" -> "team_task_inject"
+  | "keeper_msg" -> "keeper_message"
+  | "keeper_message" -> "keeper_message"
+  | other -> other
+
+let default_target_type_for action_type =
+  match action_type with
+  | "broadcast" | "room_pause" | "room_resume" | "task_inject" -> "room"
+  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" | "team_stop" -> "team_session"
+  | "keeper_message" -> "keeper"
+  | _ -> ""
 
 let generate_confirm_token (request : action_request) =
   let entropy =
@@ -371,6 +568,13 @@ let generate_confirm_token (request : action_request) =
   "opc_" ^ String.sub digest 0 32
 
 let action_request_of_args ?actor_hint ctx args =
+  let action_type =
+    get_string args "action_type" "" |> String.trim |> String.lowercase_ascii
+    |> canonical_action_type
+  in
+  let raw_target_type =
+    get_string args "target_type" "" |> String.trim |> String.lowercase_ascii
+  in
   let actor =
     normalized_actor ~context_actor:ctx.agent_name
       (match get_string_opt args "actor" with
@@ -379,8 +583,10 @@ let action_request_of_args ?actor_hint ctx args =
   in
   {
     actor;
-    action_type = get_string args "action_type" "" |> String.trim |> String.lowercase_ascii;
-    target_type = get_string args "target_type" "" |> String.trim |> String.lowercase_ascii;
+    action_type;
+    target_type =
+      if raw_target_type <> "" then raw_target_type
+      else default_target_type_for action_type;
     target_id = get_string_opt args "target_id";
     payload = get_payload args;
   }
@@ -390,14 +596,14 @@ let delegated_tool_for action_type =
   | "broadcast" -> "masc_broadcast"
   | "room_pause" -> "masc_pause"
   | "room_resume" -> "masc_resume"
-  | "team_turn" -> "masc_team_session_turn"
+  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" -> "masc_team_session_turn"
   | "team_stop" -> "masc_team_session_stop"
-  | "keeper_msg" -> "masc_keeper_msg"
+  | "keeper_message" -> "masc_keeper_msg"
   | "task_inject" -> "masc_add_task"
   | _ -> "unknown"
 
 let confirm_required = function
-  | "room_pause" | "team_stop" | "task_inject" -> true
+  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject" -> true
   | _ -> false
 
 let preview_of_action (request : action_request) =
@@ -428,6 +634,11 @@ let require_target_id request =
   | Some target_id -> Ok target_id
   | None -> Error "target_id is required"
 
+let require_payload_field payload key error_message =
+  match get_string_opt payload key with
+  | Some value -> Ok value
+  | None -> Error error_message
+
 let parse_turn_kind payload =
   match get_string payload "turn_kind" "" |> String.trim |> String.lowercase_ascii with
   | "note" -> Ok Team_session_types.Turn_note
@@ -450,6 +661,33 @@ let resolve_team_turn_actor config ~requested_actor ~session_id =
         Ok (requested_actor, false)
       else
         Ok (session.created_by, true)
+
+let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agent
+    ~task_title ~task_description ~task_priority =
+  let* actor_for_session, operator_override =
+    resolve_team_turn_actor ctx.config ~requested_actor:request.actor ~session_id
+  in
+  let message =
+    if operator_override then
+      match message with
+      | Some raw -> Some (Printf.sprintf "[operator:%s] %s" request.actor raw)
+      | None -> Some (Printf.sprintf "[operator:%s]" request.actor)
+    else
+      message
+  in
+  let* result =
+    Team_session_engine_eio.record_turn ~config:ctx.config ~session_id
+      ~actor:actor_for_session ~turn_kind ~message ~target_agent ~task_title
+      ~task_description ~task_priority
+  in
+  Ok
+    (`Assoc
+      [
+        ("delegated_tool", `String "masc_team_session_turn");
+        ("result", result);
+        ("actor", `String actor_for_session);
+        ("operator_override", `Bool operator_override);
+      ])
 
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
@@ -511,30 +749,48 @@ let execute_action (ctx : 'a context) (request : action_request) :
         | None -> get_string_opt request.payload "description"
       in
       let task_priority = get_int request.payload "task_priority" (get_int request.payload "priority" 3) in
-      let* actor_for_session, operator_override =
-        resolve_team_turn_actor ctx.config ~requested_actor:request.actor ~session_id
+      execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agent
+        ~task_title ~task_description ~task_priority
+  | "team_note" ->
+      let* () = validate_target_type "team_session" request in
+      let* session_id = require_target_id request in
+      let* message =
+        require_payload_field request.payload "message" "payload.message is required"
       in
-      let message =
-        if operator_override then
-          match message with
-          | Some raw -> Some (Printf.sprintf "[operator:%s] %s" request.actor raw)
-          | None -> Some (Printf.sprintf "[operator:%s]" request.actor)
-        else
-          message
+      execute_team_turn ~ctx ~request ~session_id
+        ~turn_kind:Team_session_types.Turn_note ~message:(Some message)
+        ~target_agent:None ~task_title:None ~task_description:None
+        ~task_priority:3
+  | "team_broadcast" ->
+      let* () = validate_target_type "team_session" request in
+      let* session_id = require_target_id request in
+      let* message =
+        require_payload_field request.payload "message" "payload.message is required"
       in
-      let* result =
-        Team_session_engine_eio.record_turn ~config:ctx.config ~session_id
-          ~actor:actor_for_session ~turn_kind ~message ~target_agent ~task_title
-          ~task_description ~task_priority
+      execute_team_turn ~ctx ~request ~session_id
+        ~turn_kind:Team_session_types.Turn_broadcast ~message:(Some message)
+        ~target_agent:(get_string_opt request.payload "target_agent")
+        ~task_title:None ~task_description:None ~task_priority:3
+  | "team_task_inject" ->
+      let* () = validate_target_type "team_session" request in
+      let* session_id = require_target_id request in
+      let task_title =
+        match get_string_opt request.payload "task_title" with
+        | Some value -> Ok value
+        | None -> require_payload_field request.payload "title" "payload.task_title or payload.title is required"
       in
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "masc_team_session_turn");
-            ("result", result);
-            ("actor", `String actor_for_session);
-            ("operator_override", `Bool operator_override);
-          ])
+      let* task_title = task_title in
+      let task_description =
+        match get_string_opt request.payload "task_description" with
+        | Some value -> Some value
+        | None -> get_string_opt request.payload "description"
+      in
+      let task_priority = get_int request.payload "task_priority" (get_int request.payload "priority" 2) in
+      execute_team_turn ~ctx ~request ~session_id
+        ~turn_kind:Team_session_types.Turn_task
+        ~message:(get_string_opt request.payload "message")
+        ~target_agent:(get_string_opt request.payload "target_agent")
+        ~task_title:(Some task_title) ~task_description ~task_priority
   | "team_stop" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in
@@ -552,7 +808,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("delegated_tool", `String "masc_team_session_stop");
             ("result", result);
           ])
-  | "keeper_msg" ->
+  | "keeper_message" ->
       let* () = validate_target_type "keeper" request in
       let* name = require_target_id request in
       let message =
@@ -608,8 +864,9 @@ let execute_action (ctx : 'a context) (request : action_request) :
 
 let validate_request request =
   match request.action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "team_turn" | "team_stop"
-  | "keeper_msg" | "task_inject" ->
+  | "broadcast" | "room_pause" | "room_resume" | "team_turn" | "team_note"
+  | "team_broadcast" | "team_task_inject" | "team_stop"
+  | "keeper_message" | "task_inject" ->
       Ok ()
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
@@ -618,10 +875,14 @@ let action_json ?actor_hint (ctx : 'a context) args =
   let request = action_request_of_args ?actor_hint ctx args in
   let* () = validate_request request in
   let delegated_tool = delegated_tool_for request.action_type in
+  let trace_id = trace_id "ops" in
+  let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (
+    let expires_at = iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
     let entry =
       {
         token = generate_confirm_token request;
+        trace_id;
         actor = request.actor;
         action_type = request.action_type;
         target_type = request.target_type;
@@ -629,22 +890,57 @@ let action_json ?actor_hint (ctx : 'a context) args =
         payload = request.payload;
         delegated_tool;
         created_at = Types.now_iso ();
+        expires_at = Some expires_at;
       }
     in
     upsert_pending_confirm ctx.config entry;
+    append_action_log ctx.config
+      {
+        trace_id;
+        actor = request.actor;
+        remote_session_id = ctx.mcp_session_id;
+        remote_client_type = remote_client_type_of_context ctx;
+        action_type = request.action_type;
+        target_type = request.target_type;
+        target_id = request.target_id;
+        delegated_tool;
+        confirmation_state = "preview";
+        result_status = "ok";
+        latency_ms = 0;
+        created_at = Types.now_iso ();
+      };
     Ok
       (json_ok
          [
+           ("trace_id", `String trace_id);
            ("confirm_required", `Bool true);
            ("confirm_token", `String entry.token);
            ("preview", preview_of_action request);
            ("delegated_tool", `String delegated_tool);
+           ("expires_at", `String expires_at);
          ]))
   else
     let* executed = execute_action ctx request in
+    let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
+    append_action_log ctx.config
+      {
+        trace_id;
+        actor = request.actor;
+        remote_session_id = ctx.mcp_session_id;
+        remote_client_type = remote_client_type_of_context ctx;
+        action_type = request.action_type;
+        target_type = request.target_type;
+        target_id = request.target_id;
+        delegated_tool;
+        confirmation_state = "immediate";
+        result_status = "ok";
+        latency_ms;
+        created_at = Types.now_iso ();
+      };
     Ok
       (json_ok
          [
+           ("trace_id", `String trace_id);
            ("confirm_required", `Bool false);
            ("delegated_tool", `String delegated_tool);
            ("result", executed);
@@ -661,13 +957,47 @@ let confirm_json ?actor_hint (ctx : 'a context) args =
   | None -> Error "confirm_token is required"
   | Some confirm_token -> (
       match
-        read_pending_confirms ctx.config
+        raw_pending_confirms ctx.config
         |> List.find_opt (fun entry -> String.equal entry.token confirm_token)
       with
       | None -> Error "pending confirmation not found"
+      | Some entry when pending_confirm_expired entry ->
+          remove_pending_confirm ctx.config confirm_token;
+          append_action_log ctx.config
+            {
+              trace_id = entry.trace_id;
+              actor;
+              remote_session_id = ctx.mcp_session_id;
+              remote_client_type = remote_client_type_of_context ctx;
+              action_type = entry.action_type;
+              target_type = entry.target_type;
+              target_id = entry.target_id;
+              delegated_tool = entry.delegated_tool;
+              confirmation_state = "expired";
+              result_status = "error";
+              latency_ms = 0;
+              created_at = Types.now_iso ();
+            };
+          Error "pending confirmation expired"
       | Some entry when not (String.equal actor entry.actor) ->
+          append_action_log ctx.config
+            {
+              trace_id = entry.trace_id;
+              actor;
+              remote_session_id = ctx.mcp_session_id;
+              remote_client_type = remote_client_type_of_context ctx;
+              action_type = entry.action_type;
+              target_type = entry.target_type;
+              target_id = entry.target_id;
+              delegated_tool = entry.delegated_tool;
+              confirmation_state = "denied";
+              result_status = "error";
+              latency_ms = 0;
+              created_at = Types.now_iso ();
+            };
           Error "actor is not allowed to confirm this action"
       | Some entry ->
+          let started_at = Unix.gettimeofday () in
           let request =
             {
               actor = entry.actor;
@@ -678,10 +1008,27 @@ let confirm_json ?actor_hint (ctx : 'a context) args =
             }
           in
           let* executed = execute_action ctx request in
+          let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
           remove_pending_confirm ctx.config confirm_token;
+          append_action_log ctx.config
+            {
+              trace_id = entry.trace_id;
+              actor = entry.actor;
+              remote_session_id = ctx.mcp_session_id;
+              remote_client_type = remote_client_type_of_context ctx;
+              action_type = entry.action_type;
+              target_type = entry.target_type;
+              target_id = entry.target_id;
+              delegated_tool = entry.delegated_tool;
+              confirmation_state = "confirmed";
+              result_status = "ok";
+              latency_ms;
+              created_at = Types.now_iso ();
+            };
           Ok
             (json_ok
                [
+                 ("trace_id", `String entry.trace_id);
                  ("executed_action", pending_confirm_to_yojson entry);
                  ("delegated_tool_result", executed);
                ]))

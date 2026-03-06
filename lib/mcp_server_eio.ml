@@ -13,6 +13,9 @@
 (** Re-export types from Mcp_server for compatibility *)
 type server_state = Mcp_server.server_state
 type jsonrpc_request = Mcp_server.jsonrpc_request
+type tool_profile =
+  | Full
+  | Operator_remote
 
 (** {1 Network Context for LLM Chain Calls} *)
 
@@ -1052,8 +1055,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     "masc_goal_upsert"; "masc_goal_snapshot"; "masc_goal_refresh";
     "masc_goal_dispatch"; "masc_goal_review";
     "masc_team_session_start"; "masc_team_session_stop";
-    "masc_team_session_turn"; "masc_operator_action";
-    "masc_operator_confirm";
+    "masc_team_session_turn";
   ] in
 
   (* Auto-init/auto-join for better UX.
@@ -1193,7 +1195,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     { Tool_team_session.config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
   in
   let simple_ctx_operator =
-    { Tool_operator.config; agent_name; sw; clock }
+    { Tool_operator.config; agent_name; sw; clock; mcp_session_id }
   in
   let simple_ctx_cache = { Tool_cache.config } in
   let simple_ctx_tempo = { Tool_tempo.config; agent_name } in
@@ -2905,7 +2907,58 @@ in
   result
 
 (** Eio-native handlers for simple methods *)
-let handle_initialize_eio id params =
+let operator_remote_instructions =
+  "MASC remote operator profile exposes only three control-plane tools: \
+masc_operator_snapshot, masc_operator_action, and masc_operator_confirm. \
+Read state with masc_operator_snapshot first. \
+Use masc_operator_action for guided actions only. \
+When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
+Do not assume access to any other MASC tool from this endpoint."
+
+let default_instructions =
+  "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
+ROOM: Agents sharing the same base path (.masc/ folder) or PostgreSQL cluster coordinate together. \
+CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (defaults to basename of ME_ROOT). \
+READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
+WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
+WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
+Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
+Prefer worktrees for parallel work."
+
+let tool_schemas_for_profile state profile =
+  match profile with
+  | Full ->
+      let room_path = Room.masc_dir state.Mcp_server.room_config in
+      let config = Config.load room_path in
+      Config.enabled_tool_schemas config.enabled_categories
+  | Operator_remote -> Tool_operator.remote_schemas
+
+let tool_allowed_in_profile profile tool_name =
+  match profile with
+  | Full -> true
+  | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
+
+let tool_annotations_for_profile profile tool_name =
+  match profile with
+  | Operator_remote when String.equal tool_name "masc_operator_snapshot" ->
+      Some (`Assoc [ ("readOnlyHint", `Bool true) ])
+  | Operator_remote when List.mem tool_name [ "masc_operator_action"; "masc_operator_confirm" ] ->
+      Some (`Assoc [ ("readOnlyHint", `Bool false) ])
+  | _ -> None
+
+let tool_json_for_profile profile (schema : Types.tool_schema) =
+  let base =
+    [
+      ("name", `String schema.name);
+      ("description", `String schema.description);
+      ("inputSchema", schema.input_schema);
+    ]
+  in
+  match tool_annotations_for_profile profile schema.name with
+  | Some annotations -> `Assoc (base @ [ ("annotations", annotations) ])
+  | None -> `Assoc base
+
+let handle_initialize_eio ?(profile = Full) id params =
   match validate_initialize_params params with
   | Error msg -> make_error ~id (-32602) msg
   | Ok () ->
@@ -2916,27 +2969,14 @@ let handle_initialize_eio id params =
         ("protocolVersion", `String protocol_version);
         ("serverInfo", Mcp_server.server_info);
         ("capabilities", Mcp_server.capabilities);
-        ("instructions", `String "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-          ROOM: Agents sharing the same base path (.masc/ folder) or PostgreSQL cluster coordinate together. \
-          CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (defaults to basename of ME_ROOT). \
-          READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
-          WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
-          WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
-          Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
-          Prefer worktrees for parallel work.");
+        ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
       ])
 
-let handle_list_tools_eio state id =
-  let room_path = Room.masc_dir state.Mcp_server.room_config in
-  let config = Config.load room_path in
-  let filtered_schemas = Config.enabled_tool_schemas config.enabled_categories in
-  let tools = List.map (fun (schema : Types.tool_schema) ->
-    `Assoc [
-      ("name", `String schema.name);
-      ("description", `String schema.description);
-      ("inputSchema", schema.input_schema);
-    ]
-  ) filtered_schemas in
+let handle_list_tools_eio ?(profile = Full) state id =
+  let tools =
+    tool_schemas_for_profile state profile
+    |> List.map (tool_json_for_profile profile)
+  in
   make_response ~id (`Assoc [("tools", `List tools)])
 
 let handle_list_resources_eio id =
@@ -2956,7 +2996,7 @@ let handle_list_prompts_eio id =
     Uses execute_tool_eio for tool calls.
     mcp_session_id: HTTP MCP session ID for agent_name persistence
 *)
-let handle_request ~clock ~sw ?mcp_session_id ?auth_token state request_str =
+let handle_request ~clock ~sw ?(profile = Full) ?mcp_session_id ?auth_token state request_str =
   try
     let json =
       try Ok (Yojson.Safe.from_string request_str)
@@ -2982,7 +3022,7 @@ let handle_request ~clock ~sw ?mcp_session_id ?auth_token state request_str =
             else
                 (try
                    (match req.method_ with
-                   | "initialize" -> handle_initialize_eio id req.params
+                   | "initialize" -> handle_initialize_eio ~profile id req.params
                    | "initialized"
                    | "notifications/initialized" -> make_response ~id `Null
                    | "resources/list" -> handle_list_resources_eio id
@@ -2991,20 +3031,26 @@ let handle_request ~clock ~sw ?mcp_session_id ?auth_token state request_str =
                        handle_read_resource_eio state id req.params
                    | "resources/templates/list" -> handle_list_resource_templates_eio id
                    | "prompts/list" -> handle_list_prompts_eio id
-                   | "tools/list" -> handle_list_tools_eio state id
+                   | "tools/list" -> handle_list_tools_eio ~profile state id
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                             Printf.eprintf "[MCP] tools/call: %s (id=%s, session=%s)\n%!" name
-                               (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
-                               (match mcp_session_id with Some s -> s | None -> "none");
-                             let result =
-                               handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params
-                             in
-                             Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
-                             result
+                             if not (tool_allowed_in_profile profile name) then
+                               make_error ~id (-32601)
+                                 (Printf.sprintf
+                                    "Tool '%s' is not available on this MCP endpoint."
+                                    name)
+                             else (
+                               Printf.eprintf "[MCP] tools/call: %s (id=%s, session=%s)\n%!" name
+                                 (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
+                                 (match mcp_session_id with Some s -> s | None -> "none");
+                               let result =
+                                 handle_call_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state id params
+                               in
+                               Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
+                               result)
                            with _ ->
                              make_error ~id (-32602) "Invalid params: name must be a string")
                        | None -> make_error ~id (-32602) "Missing params")

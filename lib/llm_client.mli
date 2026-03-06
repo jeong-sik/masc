@@ -15,6 +15,7 @@
 (** Supported LLM providers. *)
 type provider =
   | Ollama
+  | Llama
   | Claude
   | Gemini
   | Glm_cloud
@@ -132,6 +133,7 @@ val llm_semaphore_available : unit -> int
 (** Built-in model specs for common configurations. *)
 val ollama_glm : model_spec
 val ollama_lfm : model_spec
+val llama_default : model_spec
 val claude_opus : model_spec
 val claude_sonnet : model_spec
 val glm_cloud : model_spec

@@ -233,6 +233,10 @@ Note: `decision.*`, `experiment.*`, `trpg.*`, `client.*` 네임스페이스는 `
 | `MASC_LLM_CACHE_MAX_TEMP` | 0.0 | 이 값 초과 temperature는 캐시 우회 |
 | `MASC_LLM_CACHE_L1_MAX_ENTRIES` | 2048 | 프로세스 내 L1 캐시 엔트리 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | safe_only | spawn 캐시 정책 (`off`/`safe_only`) |
+| `LLAMA_SERVER_URL` | `http://127.0.0.1:8085` | local `llama.cpp` OpenAI-compatible endpoint |
+| `LLAMA_SERVER_URL` | `http://127.0.0.1:8085` | local `llama.cpp` OpenAI-compatible endpoint |
+| `LLAMA_DEFAULT_MODEL` | `qwen3.5-coder` | spawned `llama` worker 기본 모델 |
+| `LLAMA_MODELS` | — | comma-separated local model inventory hint |
 
 ## 문서
 

@@ -401,6 +401,9 @@ let test_default_configs_has_gemini () =
 let test_default_configs_has_codex () =
   check bool "has codex" true (List.mem_assoc "codex" Spawn_eio.default_configs)
 
+let test_default_configs_has_llama () =
+  check bool "has llama" true (List.mem_assoc "llama" Spawn_eio.default_configs)
+
 (* ============================================================
    get_config Tests
    ============================================================ *)
@@ -409,6 +412,28 @@ let test_get_config_claude () =
   match Spawn_eio.get_config "claude" with
   | Some cfg -> check string "agent_name" "claude" cfg.agent_name
   | None -> fail "expected Some"
+
+let test_get_config_llama () =
+  match Spawn_eio.get_config "llama" with
+  | Some cfg ->
+      check string "agent_name" "llama" cfg.agent_name;
+      check bool "command is llama ref" true
+        (String.starts_with ~prefix:"llama:" cfg.command)
+  | None -> fail "expected Some"
+
+let test_spawn_llama_requires_explicit_runtime_model () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let result =
+    Spawn_eio.spawn ~sw ~proc_mgr:(Eio.Stdenv.process_mgr env) ~agent_name:"llama"
+      ~prompt:"hello" ()
+  in
+  check bool "spawn fails" false result.success;
+  check bool "mentions runtime_model" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "runtime_model") result.output 0 in
+       true
+     with Not_found -> false)
 
 let test_get_config_unknown () =
   match Spawn_eio.get_config "nonexistent" with
@@ -519,9 +544,13 @@ let () =
       test_case "has claude" `Quick test_default_configs_has_claude;
       test_case "has gemini" `Quick test_default_configs_has_gemini;
       test_case "has codex" `Quick test_default_configs_has_codex;
+      test_case "has llama" `Quick test_default_configs_has_llama;
     ];
     "get_config", [
       test_case "claude" `Quick test_get_config_claude;
+      test_case "llama" `Quick test_get_config_llama;
+      test_case "llama requires explicit runtime_model" `Quick
+        test_spawn_llama_requires_explicit_runtime_model;
       test_case "unknown" `Quick test_get_config_unknown;
     ];
     "build_mcp_args", [

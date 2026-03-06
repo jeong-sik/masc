@@ -1983,13 +1983,17 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_spawn";
-    description = "Spawn an agent to execute a task. This is the 'magic pillar' - automatically starts an agent (claude, gemini, codex) with a prompt and returns the result. Use this to orchestrate multi-agent collaboration without manual terminal setup.";
+    description = "Spawn an agent to execute a task. Use this to orchestrate multi-agent collaboration without manual terminal setup. When agent_name='llama', you must provide model explicitly.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("agent_name", `Assoc [
           ("type", `String "string");
           ("description", `String "Agent to spawn: 'claude', 'gemini', 'codex', or custom command");
+        ]);
+        ("model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Explicit model id. Required when agent_name='llama'.");
         ]);
         ("prompt", `Assoc [
           ("type", `String "string");
@@ -4463,7 +4467,9 @@ Example: masc_swarm_leave({agent_name: 'claude-xyz'})";
 
 (** All schemas including Perpetual Agent Runtime tools *)
 let all_schemas_with_perpetual =
-  all_schemas @ Tool_perpetual.schemas @ Tool_keeper.schemas @ Tool_operator.schemas @ Tool_goals.schemas @ Tool_team_session.schemas @ Tool_shard.schemas
+  all_schemas @ Tool_perpetual.schemas @ Tool_keeper.schemas
+  @ Tool_operator.schemas @ Tool_llama.schemas @ Tool_goals.schemas
+  @ Tool_team_session.schemas @ Tool_shard.schemas
   @ Tool_notifications.schemas
 
 (** Get tool by name *)

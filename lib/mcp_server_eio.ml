@@ -1255,6 +1255,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let simple_ctx_room : Tool_room.context = { config; agent_name } in
   let simple_ctx_control : Tool_control.context = { config; agent_name } in
   let simple_ctx_misc : Tool_misc.context = { config; agent_name } in
+  let simple_ctx_llama : Tool_llama.context = { config; agent_name } in
   let simple_ctx_suspend : Tool_suspend.context = { config; caller_agent = Some agent_name } in
   let simple_ctx_library : Tool_library.context = { agent_name } in
   let simple_ctx_mdal : Tool_mdal.context = {
@@ -1362,6 +1363,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_operator.dispatch simple_ctx_operator ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_llama.dispatch simple_ctx_llama ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_team_session.dispatch simple_ctx_team_session ~name ~args:arguments with
@@ -1679,7 +1683,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
        | Some pm ->
            (* Create spawn function that uses proc_mgr *)
            let spawn_fn agent_name prompt =
-             Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
+             Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt
+               ~timeout_seconds:Env_config.Spawn.timeout_seconds
+               ~room_config:state.Mcp_server.room_config ()
            in
            let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
            let json = Bounded.result_to_json result in
@@ -1997,17 +2003,42 @@ Time: %s
       let spawn_agent_name = arg_get_string "agent_name" "" in
       let prompt = arg_get_string "prompt" "" in
       let timeout_seconds = arg_get_int "timeout_seconds" 300 in
+      let model_name =
+        match arguments |> Yojson.Safe.Util.member "model" with
+        | `String s ->
+            let trimmed = String.trim s in
+            if trimmed = "" then None else Some trimmed
+        | _ -> None
+      in
+      let runtime_model =
+        match (spawn_agent_name, model_name) with
+        | "llama", None -> Error "model is required when agent_name=llama"
+        | "llama", Some raw ->
+            let spec_name =
+              if String.contains raw ':' then raw else "llama:" ^ raw
+            in
+            Llm_client.model_spec_of_string spec_name
+        | _, _ -> Ok Llm_client.ollama_glm
+      in
       let module U = Yojson.Safe.Util in
       let working_dir = match arguments |> U.member "working_dir" with
         | `String s when s <> "" -> Some s
         | _ -> None
       in
-      (match state.Mcp_server.proc_mgr with
-       | Some pm ->
-           let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:spawn_agent_name ~prompt ~timeout_seconds ?working_dir () in
-           (result.Spawn_eio.success, Spawn_eio.result_to_human_string result)
-       | None ->
-           (false, "❌ Process manager not available in this environment"))
+       (match runtime_model with
+       | Error e -> (false, e)
+       | Ok runtime_model ->
+           (match state.Mcp_server.proc_mgr with
+            | Some pm ->
+                let result =
+                  Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:spawn_agent_name
+                    ~prompt ~timeout_seconds ?working_dir
+                    ~room_config:state.Mcp_server.room_config
+                    ~runtime_model ()
+                in
+                (result.Spawn_eio.success, Spawn_eio.result_to_human_string result)
+            | None ->
+                (false, "❌ Process manager not available in this environment")))
 
   (* Dashboard tool *)
 
@@ -2095,7 +2126,10 @@ Time: %s
               (false, "❌ Process manager not available for mitosis spawn")
           | Some pm ->
               let spawn_fn ~prompt =
-                let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
+                let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:target_agent
+                  ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
+                  ~room_config:state.Mcp_server.room_config ()
+                in
                 (* Convert Spawn_eio.spawn_result to Spawn.spawn_result for Mitosis compatibility *)
                 { Spawn.success = result.Spawn_eio.success;
                   output = result.Spawn_eio.output;

@@ -55,6 +55,7 @@
    institution_eio
    level2_config
    level4_config
+   local_agent_eio
    llm_client_eio
    llm_direct
    log
@@ -171,6 +172,7 @@
    tool_control
    tool_verification
    tool_misc
+   tool_llama
    tool_board
    tool_lodge
    tool_mdal

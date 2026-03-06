@@ -58,6 +58,18 @@ let session_allows_actor ~(actor : string) (session : Team_session_types.session
   String.equal actor session.created_by
   || List.exists (String.equal actor) session.agent_names
 
+let session_has_attached_actor ~(config : Room.config) ~(session_id : string)
+    ~(actor : string) =
+  let open Yojson.Safe.Util in
+  Team_session_store.read_events config session_id
+  |> List.exists (fun event_json ->
+         match event_json |> member "event_type" with
+         | `String "session_agent_attached" -> (
+             match event_json |> member "detail" |> member "actor" with
+             | `String attached -> String.equal attached actor
+             | _ -> false)
+         | _ -> false)
+
 let compute_live_done_delta (config : Room.config)
     (session : Team_session_types.session) =
   let backlog = Room.read_backlog config in
@@ -887,7 +899,10 @@ let record_turn ~(config : Room.config) ~(session_id : string) ~(actor : string)
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
   | Some session when session.status <> Team_session_types.Running ->
       Error "turn recording is only allowed while session is running"
-  | Some session when not (session_allows_actor ~actor session) ->
+  | Some session
+    when not
+           (session_allows_actor ~actor session
+           || session_has_attached_actor ~config ~session_id ~actor) ->
       Error "actor is not authorized for this team session"
   | Some session -> (
       let message = normalize_opt message in

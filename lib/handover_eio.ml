@@ -308,6 +308,7 @@ let claim_and_spawn ~sw ~fs ~proc_mgr config ~handover_id ~agent_name ?additiona
         ~prompt
         ?timeout_seconds
         ~working_dir:config.base_path
+        ~room_config:config
         ()
       in
       Ok result

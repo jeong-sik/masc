@@ -50,6 +50,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
   (* 1. Provider string roundtrip *)
   assert_equal "provider_string:ollama"
     "ollama" (Llm_client.string_of_provider Ollama);
+  assert_equal "provider_string:llama"
+    "llama" (Llm_client.string_of_provider Llama);
   assert_equal "provider_string:claude"
     "claude" (Llm_client.string_of_provider Claude);
   assert_equal "provider_string:gemini"
@@ -83,6 +85,15 @@ let test_llm_client () = group "LLM Client" (fun () ->
      assert_true "parse_model:ollama_tagged_provider"
        (m.provider = Llm_client.Ollama)
    | Error _ -> assert_true "parse_model:ollama_tagged" false);
+
+  (match Llm_client.model_spec_of_string "llama:qwen3.5-coder" with
+   | Ok m ->
+     assert_equal "parse_model:llama_id" "qwen3.5-coder" m.model_id;
+     assert_true "parse_model:llama_provider"
+       (m.provider = Llm_client.Llama);
+     assert_equal "parse_model:llama_url"
+       Masc_mcp.Env_config.Llama.server_url m.api_url
+   | Error e -> assert_true ("parse_model:llama_failed: " ^ e) false);
 
   (match Llm_client.model_spec_of_string "anthropic:sonnet" with
    | Ok m ->
@@ -155,6 +166,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
     (Llm_client.claude_opus.cost_per_1k_input > 0.0);
   assert_true "builtin:gemini_pro_provider"
     (Llm_client.gemini_pro.provider = Llm_client.Gemini);
+  assert_true "builtin:llama_default_provider"
+    (Llm_client.llama_default.provider = Llm_client.Llama);
 )
 
 (* ================================================================ *)

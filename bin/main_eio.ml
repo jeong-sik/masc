@@ -1978,7 +1978,8 @@ let resolve_agent_name_for_auth ~base_path request ~token :
             | Error (Types.TokenExpired _ as e) -> Error e
             | Error _ -> Ok None))
 
-let authorize_read_request ~base_path request : (unit, Types.masc_error) result =
+let authorize_permission_request ~base_path ~permission request :
+    (unit, Types.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   match resolve_agent_name_for_auth ~base_path request ~token with
@@ -1991,7 +1992,10 @@ let authorize_read_request ~base_path request : (unit, Types.masc_error) result 
              "Agent name required (X-MASC-Agent or token-bound credential)")
       else
         Auth.check_permission base_path ~agent_name ~token
-          ~permission:Types.CanReadState
+          ~permission
+
+let authorize_read_request ~base_path request : (unit, Types.masc_error) result =
+  authorize_permission_request ~base_path ~permission:Types.CanReadState request
 
 let rec with_public_read handler request reqd =
   let strict = http_auth_strict_enabled () in
@@ -2009,6 +2013,15 @@ and with_read_auth handler request reqd =
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       match authorize_read_request ~base_path request with
+      | Ok () -> handler state request reqd
+      | Error err -> respond_auth_error request reqd err
+
+and with_permission_auth ~permission handler request reqd =
+  match !server_state with
+  | None -> Http.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+      let base_path = state.Mcp_server.room_config.base_path in
+      match authorize_permission_request ~base_path ~permission request with
       | Ok () -> handler state request reqd
       | Error err -> respond_auth_error request reqd err
 
@@ -6181,7 +6194,7 @@ let make_routes ~port ~host ~sw ~clock =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/operator/action" (fun request reqd ->
-       with_read_auth (fun state req reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -6198,7 +6211,7 @@ let make_routes ~port ~host ~sw ~clock =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/operator/confirm" (fun request reqd ->
-       with_read_auth (fun state req reqd ->
+       with_permission_auth ~permission:Types.CanBroadcast (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -6976,8 +6989,18 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `GET, "/api/v1/operator" ->
           let state = get_server_state () in
-          let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+          let path = Http.Request.path httpun_request in
+          if http_auth_strict_enabled () && not (is_public_read_path path) then
+            (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
+             | Error err ->
+                 let status = http_status_of_auth_error err in
+                 h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+             | Ok () ->
+                 let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
+                 h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+          else
+            let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
@@ -7050,7 +7073,9 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `POST, "/api/v1/operator/action" ->
           let state = get_server_state () in
-          (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
@@ -7074,7 +7099,9 @@ let run_server ~sw ~env ~port ~base_path =
 
       | `POST, "/api/v1/operator/confirm" ->
           let state = get_server_state () in
-          (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
+          (match authorize_permission_request
+                    ~base_path:state.Mcp_server.room_config.base_path
+                    ~permission:Types.CanBroadcast httpun_request with
            | Error err ->
                let status = http_status_of_auth_error err in
                h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors

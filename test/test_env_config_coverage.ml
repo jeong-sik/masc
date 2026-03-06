@@ -194,10 +194,6 @@ let test_llama_server_url_httpish () =
     (String.starts_with ~prefix:"http://" Env_config.Llama.server_url
      || String.starts_with ~prefix:"https://" Env_config.Llama.server_url)
 
-let test_llama_default_model_nonempty () =
-  check bool "default model nonempty" true
-    (String.length Env_config.Llama.default_model > 0)
-
 (* ============================================================
    LLM Cache Config Tests
    ============================================================ *)
@@ -323,7 +319,6 @@ let () =
     "llama", [
       test_case "server url nonempty" `Quick test_llama_server_url_nonempty;
       test_case "server url httpish" `Quick test_llama_server_url_httpish;
-      test_case "default model nonempty" `Quick test_llama_default_model_nonempty;
     ];
     "llm_cache", [
       test_case "cache enabled bool" `Quick test_llm_cache_enabled_bool;

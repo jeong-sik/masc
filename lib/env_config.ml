@@ -33,15 +33,6 @@ let get_bool ~default name =
        | _ -> default)
   | None -> default
 
-let get_csv_strings name =
-  match Sys.getenv_opt name with
-  | None -> []
-  | Some raw ->
-      raw
-      |> String.split_on_char ','
-      |> List.map String.trim
-      |> List.filter (fun s -> s <> "")
-
 (** {1 Zombie Detection / Cleanup Configuration} *)
 
 module Zombie = struct
@@ -169,20 +160,6 @@ module Llama = struct
   (** OpenAI-compatible llama.cpp server URL *)
   let server_url =
     get_string ~default:"http://127.0.0.1:8085" "LLAMA_SERVER_URL"
-
-  (** Optional inventory hint for local llama-backed models. *)
-  let models =
-    get_csv_strings "LLAMA_MODELS"
-
-  (** Default model for spawned llama workers.
-      Priority: explicit LLAMA_DEFAULT_MODEL > first LLAMA_MODELS entry > fallback. *)
-  let default_model =
-    match Sys.getenv_opt "LLAMA_DEFAULT_MODEL" with
-    | Some raw when String.trim raw <> "" -> String.trim raw
-    | _ ->
-        (match models with
-         | first :: _ -> first
-         | [] -> "qwen3.5-coder")
 end
 
 (** {1 Federation Configuration} *)

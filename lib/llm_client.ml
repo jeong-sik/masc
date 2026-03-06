@@ -177,7 +177,7 @@ let ollama_lfm = {
 
 let llama_default = {
   provider = Llama;
-  model_id = Env_config.Llama.default_model;
+  model_id = "explicit-model-required";
   max_context = 128000;
   api_url = Env_config.Llama.server_url;
   api_key_env = None;

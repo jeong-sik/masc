@@ -11,6 +11,7 @@ import { openAgentDetail } from './agent-detail'
 import {
   agents,
   keepers,
+  boardPosts,
   tasks,
   messages,
   keeperLifecycles,
@@ -127,6 +128,8 @@ function buildAgentRow(agent: Agent): AgentMonitorRow {
   const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
     currentTask: agent.current_task,
     lastSeen: agent.last_seen,
+    boardPosts: boardPosts.value,
+    keepers: keepers.value,
   })
   const lastSignalAt = motion.lastActivityAt ?? agent.last_seen ?? null
   const signalAgeMs = lastSignalAt ? Math.max(0, Date.now() - toEpoch(lastSignalAt)) : Number.POSITIVE_INFINITY

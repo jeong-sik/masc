@@ -16,6 +16,7 @@ import {
   keeperLifecycles,
   staleKeepers,
   messages,
+  boardPosts,
 } from '../store'
 import type { Agent, Keeper } from '../types'
 import { openKeeperDetail } from './keeper-detail'
@@ -35,6 +36,8 @@ function AgentRow({ agent }: { agent: Agent }) {
   const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
     currentTask: agent.current_task,
     lastSeen: agent.last_seen,
+    boardPosts: boardPosts.value,
+    keepers: keepers.value,
   })
 
   return html`

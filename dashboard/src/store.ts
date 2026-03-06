@@ -115,12 +115,31 @@ export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>>
 // Heartbeat staleness threshold (120 seconds)
 const HEARTBEAT_STALE_MS = 120_000
 
+function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number>): number | null {
+  const mapped = heartbeats.get(keeper.name)
+  if (mapped != null) return mapped
+
+  const direct = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : Number.NaN
+  if (!Number.isNaN(direct)) return direct
+
+  const ageSeconds = [
+    keeper.last_turn_ago_s,
+    keeper.last_proactive_ago_s,
+    keeper.last_handoff_ago_s,
+    keeper.last_compaction_ago_s,
+  ].find(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+
+  return typeof ageSeconds === 'number'
+    ? Date.now() - (ageSeconds * 1000)
+    : null
+}
+
 export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
   const now = Date.now()
   const stale = new Set<string>()
   const hb = keeperHeartbeats.value
   for (const k of keepers.value) {
-    const lastTs = hb.get(k.name)
+    const lastTs = keeperFreshnessTs(k, hb)
     if (lastTs != null && (now - lastTs) > HEARTBEAT_STALE_MS) {
       stale.add(k.name)
     }

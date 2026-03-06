@@ -101,7 +101,10 @@ const agentMotionRows = computed(() =>
   agents.value
     .map(agent => ({
       agent,
-      motion: buildAgentMotion(agent.name, tasks.value, messages.value, journal.value),
+      motion: buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
+        currentTask: agent.current_task,
+        lastSeen: agent.last_seen,
+      }),
     }))
     .sort((a, b) => {
       const countDiff = b.motion.activeAssignedCount - a.motion.activeAssignedCount

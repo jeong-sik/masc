@@ -6,6 +6,11 @@ export interface AgentMotionSnapshot {
   lastActivityText: string | null
 }
 
+interface AgentMotionOptions {
+  currentTask?: string | null
+  lastSeen?: string | null
+}
+
 function normalizeAgentKey(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase()
 }
@@ -29,6 +34,7 @@ export function buildAgentMotion(
   tasks: Task[],
   messages: Message[],
   journal: JournalEntry[],
+  options: AgentMotionOptions = {},
 ): AgentMotionSnapshot {
   const agentKey = normalizeAgentKey(agentName)
   const activeAssignedCount = tasks.filter(task =>
@@ -41,31 +47,49 @@ export function buildAgentMotion(
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
 
   const recentJournal = journal
-    .filter(entry => normalizeAgentKey(entry.agent) === agentKey)
+    .filter(entry =>
+      normalizeAgentKey(entry.agent) === agentKey
+      || normalizeAgentKey(entry.author) === agentKey
+    )
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
 
   const messageTs = recentMessage ? toEpoch(recentMessage.timestamp) : 0
   const journalTs = recentJournal ? toEpoch(recentJournal.timestamp) : 0
+  const lastSeenTs = options.lastSeen ? toEpoch(options.lastSeen) : 0
 
-  if (messageTs === 0 && journalTs === 0) {
+  const fallbackText =
+    options.currentTask?.trim()
+    || (activeAssignedCount > 0 ? `${activeAssignedCount} claimed tasks` : null)
+
+  if (messageTs === 0 && journalTs === 0 && lastSeenTs === 0) {
     return {
       activeAssignedCount,
       lastActivityAt: null,
-      lastActivityText: activeAssignedCount > 0 ? `${activeAssignedCount} claimed tasks` : null,
+      lastActivityText: fallbackText,
     }
   }
 
   if (messageTs >= journalTs && recentMessage) {
+    if (messageTs >= lastSeenTs) {
+      return {
+        activeAssignedCount,
+        lastActivityAt: recentMessage.timestamp,
+        lastActivityText: trimText(recentMessage.content),
+      }
+    }
+  }
+
+  if (journalTs >= lastSeenTs && recentJournal) {
     return {
       activeAssignedCount,
-      lastActivityAt: recentMessage.timestamp,
-      lastActivityText: trimText(recentMessage.content),
+      lastActivityAt: new Date(recentJournal.timestamp).toISOString(),
+      lastActivityText: trimText(recentJournal.text),
     }
   }
 
   return {
     activeAssignedCount,
-    lastActivityAt: recentJournal ? new Date(recentJournal.timestamp).toISOString() : null,
-    lastActivityText: recentJournal ? trimText(recentJournal.text) : null,
+    lastActivityAt: options.lastSeen ?? null,
+    lastActivityText: fallbackText ?? 'Presence heartbeat',
   }
 }

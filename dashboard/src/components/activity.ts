@@ -7,6 +7,7 @@ import { TimeAgo } from './common/time-ago'
 import { buildAgentMotion } from './common/agent-motion'
 import { agents, tasks, messages } from '../store'
 import { connected, eventCount, journal } from '../sse'
+import { classifyJournalKind, journalActor, journalDisplayText } from '../journal-entry'
 import type { Message, JournalEntry } from '../types'
 
 type ActivityFilter = 'all' | 'messages' | 'board' | 'tasks' | 'keepers' | 'system'
@@ -40,20 +41,6 @@ const KIND_BADGE_LABELS: Record<Exclude<ActivityFilter, 'all'>, string> = {
   system: 'SYS',
 }
 
-function classifyJournalKind(entry: JournalEntry): Exclude<ActivityFilter, 'all'> {
-  if (entry.kind) return entry.kind
-  const text = entry.text
-  if (text === 'New post' || text === 'New comment') return 'board'
-  if (text.startsWith('Task:')) return 'tasks'
-  if (
-    text.startsWith('Heartbeat')
-    || text.startsWith('Handoff')
-    || text.startsWith('Compaction')
-    || text.startsWith('Guardrail')
-  ) return 'keepers'
-  return 'system'
-}
-
 function fromMessage(msg: Message, idx: number): ActivityRowModel {
   return {
     id: msg.id ?? `msg-${msg.seq ?? idx}`,
@@ -67,11 +54,13 @@ function fromMessage(msg: Message, idx: number): ActivityRowModel {
 
 function fromJournal(entry: JournalEntry, idx: number): ActivityRowModel {
   return {
-    id: `evt-${entry.timestamp}-${idx}`,
+    id: entry.postId
+      ? `evt-${entry.eventType ?? 'event'}-${entry.postId}-${idx}`
+      : `evt-${entry.timestamp}-${idx}`,
     source: 'event',
     kind: classifyJournalKind(entry),
-    actor: entry.agent || 'system',
-    content: entry.text,
+    actor: journalActor(entry),
+    content: journalDisplayText(entry),
     timestamp: new Date(entry.timestamp).toISOString(),
   }
 }

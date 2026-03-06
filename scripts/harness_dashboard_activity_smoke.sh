@@ -113,9 +113,10 @@ function extractJsonObject(text) {
   const postId = postJson.id || 'unknown';
 
   await page.waitForFunction(expected => document.body.innerText.includes(expected), unique, { timeout: 10000 });
+  const boardBody = await page.locator('body').innerText();
   checks.push({
-    name: 'board auto-refreshes on new post',
-    pass: (await page.locator('body').innerText()).includes(unique),
+    name: 'board auto-refreshes with author and post preview',
+    pass: boardBody.includes('dashboard-smoke-bot') && boardBody.includes(unique),
     postId,
   });
 
@@ -131,12 +132,12 @@ function extractJsonObject(text) {
   await wait(1500);
   const activityBody = await page.locator('body').innerText();
   checks.push({
-    name: 'activity shows board event author and post preview',
-    pass: activityBody.includes('dashboard-smoke-bot') && activityBody.includes(unique),
+    name: 'activity shows labeled board post preview',
+    pass: activityBody.includes('dashboard-smoke-bot') && activityBody.includes(`Post: ${unique}`),
   });
   checks.push({
-    name: 'activity shows board comment preview',
-    pass: !commentResult.isError && activityBody.includes(commentText),
+    name: 'activity shows labeled board comment preview',
+    pass: !commentResult.isError && activityBody.includes(`Comment: ${commentText}`),
   });
 
   await gotoHash(page, '#board/post/p-7691ae3d1d7cc04bbef1f0e31aea7963', 'COMMENTS');

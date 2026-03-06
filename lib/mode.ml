@@ -119,6 +119,7 @@ let tool_category tool_name =
   | "masc_team_session_list" | "masc_team_session_compare"
   | "masc_team_session_turn" | "masc_team_session_events"
   | "masc_team_session_prove"
+  | "masc_llama_models"
   | "masc_operator_snapshot" | "masc_operator_action"
   | "masc_operator_confirm" -> Core
 

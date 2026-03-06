@@ -125,7 +125,10 @@ let handle_relay_now ctx args =
   match ctx.proc_mgr with
   | None -> (false, "❌ Process manager not available for relay spawn")
   | Some pm ->
-      let result = Spawn_eio.spawn ~sw:ctx.sw ~proc_mgr:pm ~agent_name:target_agent ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
+      let result = Spawn_eio.spawn ~sw:ctx.sw ~proc_mgr:pm ~agent_name:target_agent
+        ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
+        ~room_config:ctx.config ()
+      in
       let output_preview =
         if String.length result.Spawn_eio.output > 500 then
           String.sub result.Spawn_eio.output 0 500

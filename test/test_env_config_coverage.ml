@@ -182,6 +182,19 @@ let test_spawn_timeout_reasonable_range () =
   check bool "timeout <= 3600" true (t <= 3600)
 
 (* ============================================================
+   Llama Module Tests
+   ============================================================ *)
+
+let test_llama_server_url_nonempty () =
+  check bool "server url nonempty" true
+    (String.length Env_config.Llama.server_url > 0)
+
+let test_llama_server_url_httpish () =
+  check bool "server url starts with http" true
+    (String.starts_with ~prefix:"http://" Env_config.Llama.server_url
+     || String.starts_with ~prefix:"https://" Env_config.Llama.server_url)
+
+(* ============================================================
    LLM Cache Config Tests
    ============================================================ *)
 
@@ -302,6 +315,10 @@ let () =
       test_case "timeout positive" `Quick test_spawn_timeout_positive;
       test_case "timeout default 600" `Quick test_spawn_timeout_default_600;
       test_case "timeout reasonable range" `Quick test_spawn_timeout_reasonable_range;
+    ];
+    "llama", [
+      test_case "server url nonempty" `Quick test_llama_server_url_nonempty;
+      test_case "server url httpish" `Quick test_llama_server_url_httpish;
     ];
     "llm_cache", [
       test_case "cache enabled bool" `Quick test_llm_cache_enabled_bool;

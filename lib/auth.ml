@@ -227,7 +227,8 @@ let permission_for_tool = function
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
   | "masc_agents" | "masc_portal_status" | "masc_pending_interrupts"
   | "masc_votes" | "masc_vote_status" | "masc_worktree_list"
-  | "masc_cost_report" | "masc_task_history" | "masc_operator_snapshot" -> Some CanReadState
+  | "masc_cost_report" | "masc_task_history" | "masc_operator_snapshot"
+  | "masc_llama_models" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask
   | "masc_claim" | "masc_claim_next" -> Some CanClaimTask
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" -> Some CanCompleteTask

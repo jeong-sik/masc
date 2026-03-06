@@ -386,6 +386,13 @@ let default_configs = [
     working_dir = None;
     mcp_tools = [];
   });
+  ("llama", {
+    agent_name = "llama";
+    command = "llama:explicit-model-required";
+    timeout_seconds = Env_config.Spawn.timeout_seconds;
+    working_dir = None;
+    mcp_tools = masc_mcp_tools;
+  });
   (* GLM uses Z.ai API directly - no llm-mcp dependency *)
   ("glm", {
     agent_name = "glm";
@@ -686,7 +693,9 @@ let spawn_glm_with_cache ~prompt ~timeout ~start_time : spawn_result =
     - New agents inherit: mission, values, patterns, onboarding steps
     - This enables multi-generational knowledge transfer
 *)
-let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_config () : spawn_result =
+let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
+    ?room_config ?runtime_agent_name ?runtime_model ?runtime_role
+    ?runtime_session_id ?runtime_selection_note () : spawn_result =
   let start_time = Time_compat.now () in
 
   let config = match get_config agent_name with
@@ -736,6 +745,84 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir ?room_
      Non-GLM agents need chdir + fork protected by mutex. *)
   if agent_name = "glm" then
     spawn_glm_with_cache ~prompt:augmented_prompt ~timeout ~start_time
+  else if agent_name = "llama" then
+    let worker_name =
+      match runtime_agent_name with
+      | Some name when String.trim name <> "" -> String.trim name
+      | _ ->
+          let digest =
+            Digest.string (Printf.sprintf "%f:%d:%s" start_time (Unix.getpid ()) prompt)
+            |> Digest.to_hex
+          in
+          Printf.sprintf "llama-local-%s" (String.sub digest 0 8)
+    in
+    let base_path =
+      match room_config with
+      | Some rc -> rc.Room_utils.base_path
+      | None ->
+          (match working_dir with
+           | Some dir -> dir
+           | None -> Sys.getcwd ())
+    in
+    (match runtime_model with
+     | None ->
+         {
+           success = false;
+           output =
+             "Spawn error (llama): explicit runtime_model is required for llama workers";
+           exit_code = 1;
+           elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+           input_tokens = None;
+           output_tokens = None;
+           cache_creation_tokens = None;
+           cache_read_tokens = None;
+           cost_usd = None;
+         }
+     | Some model when model.Llm_client.provider <> Llm_client.Llama ->
+         {
+           success = false;
+           output =
+             "Spawn error (llama): runtime_model provider must be llama";
+           exit_code = 1;
+           elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+           input_tokens = None;
+           output_tokens = None;
+           cache_creation_tokens = None;
+           cache_read_tokens = None;
+           cost_usd = None;
+         }
+     | Some model ->
+         match
+           Local_agent_eio.run_worker ~sw ~base_path ~worker_name ~model
+             ~team_session_id:runtime_session_id ~role:runtime_role
+             ~selection_note:runtime_selection_note
+             ~prompt:augmented_prompt ~allowed_tools:masc_mcp_tools
+             ~timeout_sec:timeout
+         with
+         | Ok result ->
+             {
+               success = true;
+               output = result.output;
+               exit_code = 0;
+               elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+               input_tokens = result.input_tokens;
+               output_tokens = result.output_tokens;
+               cache_creation_tokens = None;
+               cache_read_tokens = None;
+               cost_usd = result.cost_usd;
+             }
+         | Error e ->
+             {
+               success = false;
+               output = Printf.sprintf "Spawn error (llama): %s" e;
+               exit_code = 1;
+               elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+               input_tokens = None;
+               output_tokens = None;
+               cache_creation_tokens = None;
+               cache_read_tokens = None;
+               cost_usd = None;
+             })
   else
     (* Build command arguments outside the chdir critical section *)
     let base_args = parse_command config.command in

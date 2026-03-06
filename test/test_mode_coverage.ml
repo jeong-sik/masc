@@ -168,6 +168,8 @@ let test_tool_category_core () =
     (Mode.tool_category "masc_team_session_events" = Mode.Core);
   check bool "operator_snapshot" true
     (Mode.tool_category "masc_operator_snapshot" = Mode.Core);
+  check bool "llama_models" true
+    (Mode.tool_category "masc_llama_models" = Mode.Core);
   check bool "operator_action" true
     (Mode.tool_category "masc_operator_action" = Mode.Core);
   check bool "operator_confirm" true

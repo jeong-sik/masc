@@ -69,6 +69,7 @@ let ollama_should_fallback_to_generate (err : string) : bool =
 
 type provider =
   | Ollama
+  | Llama
   | Claude
   | Gemini
   | Glm_cloud
@@ -137,6 +138,7 @@ type completion_response = {
 
 let string_of_provider = function
   | Ollama -> "ollama"
+  | Llama -> "llama"
   | Claude -> "claude"
   | Gemini -> "gemini"
   | Glm_cloud -> "glm_cloud"
@@ -168,6 +170,16 @@ let ollama_lfm = {
   model_id = "LFM2.5-1.2B-Instruct";
   max_context = 128000;
   api_url = "http://127.0.0.1:11434";
+  api_key_env = None;
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
+let llama_default = {
+  provider = Llama;
+  model_id = "explicit-model-required";
+  max_context = 128000;
+  api_url = Env_config.Llama.server_url;
   api_key_env = None;
   cost_per_1k_input = 0.0;
   cost_per_1k_output = 0.0;
@@ -922,6 +934,7 @@ let complete ?timeout_sec ?ollama_timeout_sec (req : completion_request) : (comp
                   else if ollama_should_fallback_to_generate e then
                     call_ollama_generate ?timeout_sec:effective_ollama_timeout_sec req
                   else Error e)
+          | Llama -> call_openai_compatible ?timeout_sec req
           | Claude -> call_claude ?timeout_sec req
           | Glm_cloud -> call_glm_cloud_with_pool ?timeout_sec req
           | Gemini | OpenRouter | Custom _ -> call_openai_compatible ?timeout_sec req
@@ -1018,6 +1031,8 @@ let model_spec_of_string s =
         match provider with
         | "ollama" ->
           Ok { ollama_glm with model_id }
+        | "llama" | "llama.cpp" | "llamacpp" ->
+          Ok { llama_default with model_id }
         | "gemini" | "google" ->
           if model_id = "pro" then Ok gemini_pro
           else if model_id = "flash" then
@@ -1072,5 +1087,5 @@ let model_spec_of_string s =
         | _ ->
           Error
             (sprintf
-               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, claude, gemini, glm, openrouter, mlx, custom)"
+               "Cannot parse model spec: %s (unsupported provider '%s'; supported: ollama, llama, claude, gemini, glm, openrouter, mlx, custom)"
                s provider)

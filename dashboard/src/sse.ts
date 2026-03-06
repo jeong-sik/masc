@@ -32,8 +32,12 @@ function getOrCreateSessionId(): string {
 
 const MAX_JOURNAL = 200
 
-function addJournalEntry(agent: string, text: string): void {
-  const entry: JournalEntry = { agent, text, timestamp: Date.now() }
+function addJournalEntry(
+  agent: string,
+  text: string,
+  kind: JournalEntry['kind'] = 'system',
+): void {
+  const entry: JournalEntry = { agent, text, timestamp: Date.now(), kind }
   journal.value = [entry, ...journal.value].slice(0, MAX_JOURNAL)
 }
 
@@ -108,41 +112,55 @@ export function connectSSE(): void {
 
 function handleEvent(event: SSEEvent): void {
   const type = event.type
-  const agent = event.agent ?? event.from ?? event.from_agent ?? ''
+  const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
 
   switch (type) {
     case 'agent_joined':
-      addJournalEntry(agent, 'Joined')
+      addJournalEntry(agent, 'Joined', 'system')
       break
     case 'agent_left':
-      addJournalEntry(agent, 'Left')
+      addJournalEntry(agent, 'Left', 'system')
       break
     case 'broadcast':
-      addJournalEntry(agent, `${(event.message ?? event.content ?? '').slice(0, 80)}`)
+      addJournalEntry(agent, `${(event.message ?? event.content ?? '').slice(0, 80)}`, 'system')
       break
     case 'task_update':
-      addJournalEntry(agent, `Task: ${event.task_id ?? ''} -> ${event.status ?? ''}`)
+      addJournalEntry(agent, `Task: ${event.task_id ?? ''} -> ${event.status ?? ''}`, 'tasks')
       break
     case 'board_post':
-      addJournalEntry(agent, 'New post')
+    case 'masc/board_post':
+      addJournalEntry(agent, 'New post', 'board')
       break
     case 'board_comment':
-      addJournalEntry(agent, 'New comment')
+    case 'masc/board_comment':
+      addJournalEntry(agent, 'New comment', 'board')
       break
     case 'keeper_heartbeat':
-      addJournalEntry(event.name ?? agent, `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`)
+      addJournalEntry(
+        event.name ?? agent,
+        `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`,
+        'keepers',
+      )
       break
     case 'keeper_handoff':
-      addJournalEntry(event.name ?? agent, `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (${event.to_model ?? '?'})`)
+      addJournalEntry(
+        event.name ?? agent,
+        `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (${event.to_model ?? '?'})`,
+        'keepers',
+      )
       break
     case 'keeper_compaction':
-      addJournalEntry(event.name ?? agent, `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`)
+      addJournalEntry(
+        event.name ?? agent,
+        `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`,
+        'keepers',
+      )
       break
     case 'keeper_guardrail':
-      addJournalEntry(event.name ?? agent, `Guardrail: ${event.reason ?? 'stopped'}`)
+      addJournalEntry(event.name ?? agent, `Guardrail: ${event.reason ?? 'stopped'}`, 'keepers')
       break
     default:
-      addJournalEntry(agent, type)
+      addJournalEntry(agent, type, 'system')
   }
 }
 

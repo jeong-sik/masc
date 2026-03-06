@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
+import { buildAgentMotion } from './common/agent-motion'
 import {
   agents,
   tasks,
@@ -14,10 +15,12 @@ import {
   tasksByStatus,
   keeperLifecycles,
   staleKeepers,
+  messages,
 } from '../store'
 import type { Agent, Keeper } from '../types'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
+import { journal } from '../sse'
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
   return html`
@@ -29,6 +32,8 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
 }
 
 function AgentRow({ agent }: { agent: Agent }) {
+  const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value)
+
   return html`
     <div class="agent" onClick=${() => openAgentDetail(agent.name)} style="cursor: pointer">
       <span class="agent-emoji">${agent.emoji ?? ''}</span>
@@ -37,6 +42,17 @@ function AgentRow({ agent }: { agent: Agent }) {
       <${StatusBadge} status=${agent.status} />
       ${agent.current_task
         ? html`<span class="agent-task">${agent.current_task}</span>`
+        : null}
+      ${!agent.current_task && motion.activeAssignedCount > 0
+        ? html`<span class="agent-task">${motion.activeAssignedCount} claimed</span>`
+        : null}
+      ${motion.lastActivityText
+        ? html`
+            <span class="agent-activity-meta">
+              ${motion.lastActivityAt ? html`<${TimeAgo} timestamp=${motion.lastActivityAt} /> · ` : null}
+              ${motion.lastActivityText}
+            </span>
+          `
         : null}
     </div>
   `
@@ -47,10 +63,6 @@ function formatTokens(n: number | undefined | null): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
   return String(n)
-}
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + '…' : s
 }
 
 function ctxBarClass(ratio: number): string {
@@ -64,6 +76,7 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
   const pct = ratio != null ? Math.round(ratio * 100) : null
   const lifecycle = keeperLifecycles.value.get(keeper.name)
   const isStale = staleKeepers.value.has(keeper.name)
+  const currentTask = keeper.agent?.current_task ?? 'No current task'
 
   return html`
     <div class="live-agent keeper-card ${isStale ? 'stale' : ''}" onClick=${() => openKeeperDetail(keeper)} style="cursor: pointer">
@@ -101,12 +114,10 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
               ? html`<span class="keeper-metric-hl">↻${keeper.handoff_count_total}</span>` : null}
             ${(keeper.compaction_count ?? 0) > 0
               ? html`<span class="keeper-metric-compact">◆${keeper.compaction_count}</span>` : null}
-            ${(keeper.k2k_count ?? 0) > 0
-              ? html`<span>K2K:${keeper.k2k_count}</span>` : null}
-            ${(keeper.conversation_tail_count ?? 0) > 0
-              ? html`<span>💬${keeper.conversation_tail_count}</span>` : null}
           </div>
         ` : null}
+
+        <div class="keeper-focus-row">${currentTask}</div>
 
         <!-- Row 4: Heartbeat freshness -->
         ${keeper.last_heartbeat ? html`
@@ -114,19 +125,6 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
             <span class="keeper-heartbeat-dot ${keeper.status === 'active' ? 'pulse' : ''}"></span>
             <${TimeAgo} timestamp=${keeper.last_heartbeat} />
           </div>
-        ` : null}
-
-        <!-- Row 5: Trait chips -->
-        ${keeper.traits && keeper.traits.length > 0 ? html`
-          <div class="keeper-trait-row">
-            ${keeper.traits.slice(0, 3).map(t => html`<span class="keeper-trait-chip">${t}</span>`)}
-            ${keeper.traits.length > 3 ? html`<span class="keeper-trait-more">+${keeper.traits.length - 3}</span>` : null}
-          </div>
-        ` : null}
-
-        <!-- Row 6: Memory note preview -->
-        ${keeper.memory_recent_note ? html`
-          <div class="keeper-note-preview">${truncate(keeper.memory_recent_note, 80)}</div>
         ` : null}
       </div>
     </div>

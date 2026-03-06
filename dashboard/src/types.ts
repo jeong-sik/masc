@@ -627,7 +627,9 @@ export type SSEEventType =
   | 'broadcast'
   | 'task_update'
   | 'board_post'
+  | 'masc/board_post'
   | 'board_comment'
+  | 'masc/board_comment'
   | 'heartbeat'
   | 'keeper_heartbeat'
   | 'keeper_handoff'
@@ -648,6 +650,7 @@ export interface SSEEvent {
   task_id?: string
   status?: string
   post_id?: string
+  author?: string
   // Keeper event fields
   name?: string
   generation?: number
@@ -679,6 +682,7 @@ export interface JournalEntry {
   agent: string
   text: string
   timestamp: number
+  kind?: 'board' | 'tasks' | 'keepers' | 'system'
 }
 
 // --- Sort modes ---
@@ -695,29 +699,25 @@ export interface RouteState {
 
 export type TabId =
   | 'overview'
-  | 'ops'
-  | 'execution'
   | 'board'
   | 'activity'
-  | 'agents'
-  | 'tasks'
-  | 'goals'
-  | 'journal'
-  | 'trpg'
   | 'council'
-  | 'mdal'
+  | 'goals'
+  | 'execution'
+  | 'tasks'
+  | 'agents'
+  | 'ops'
+  | 'trpg'
 
 export const VALID_TABS: TabId[] = [
   'overview',
-  'ops',
-  'execution',
   'board',
   'activity',
-  'agents',
-  'tasks',
-  'goals',
-  'journal',
-  'trpg',
   'council',
-  'mdal',
+  'goals',
+  'execution',
+  'tasks',
+  'agents',
+  'ops',
+  'trpg',
 ]

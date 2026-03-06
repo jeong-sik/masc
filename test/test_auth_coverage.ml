@@ -160,6 +160,11 @@ let test_permission_for_tool_status () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_llama_models () =
+  match Auth.permission_for_tool "masc_llama_models" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
 let test_permission_for_tool_who () =
   match Auth.permission_for_tool "masc_who" with
   | Some Types.CanReadState -> ()
@@ -324,6 +329,7 @@ let () =
       test_case "approve" `Quick test_permission_for_tool_approve;
       test_case "auth_enable" `Quick test_permission_for_tool_auth_enable;
       test_case "auth_status" `Quick test_permission_for_tool_auth_status;
+      test_case "llama_models" `Quick test_permission_for_tool_llama_models;
       test_case "operator_snapshot" `Quick test_permission_for_tool_operator_snapshot;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;

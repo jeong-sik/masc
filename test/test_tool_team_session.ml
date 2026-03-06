@@ -523,6 +523,110 @@ let test_turn_events_and_prove () =
     proof_schema_version;
   cleanup_dir base_dir
 
+let test_proof_exposes_spawn_selection_rationale () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let start_json =
+    start_session_exn ctx ~goal:"prove selection rationale visibility"
+  in
+  let session_id = get_session_id start_json in
+  let spawn_model = "qwen3.5-35b-a3b-ud-q8-xl" in
+  let selection_note =
+    "[model-selection] leader selected qwen3.5-35b-a3b-ud-q8-xl from inventory"
+  in
+  Team_session_store.append_event config session_id ~event_type:"team_step_spawn"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String "tester");
+          ("spawn_agent", `String "llama");
+          ("runtime_actor", `String "llama-local-proof");
+          ("spawn_role", `String "planner");
+          ("spawn_model", `String spawn_model);
+          ("spawn_selection_note", `String selection_note);
+          ("success", `Bool true);
+          ("exit_code", `Int 0);
+          ("elapsed_ms", `Int 10);
+          ("output_preview", `String "worker turn recorded");
+          ("ts_iso", `String (Types.now_iso ()));
+        ]);
+  let turn_ok, _ =
+    dispatch_exn ctx ~name:"masc_team_session_turn"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "tester turn for proof");
+          ])
+  in
+  Alcotest.(check bool) "turn recorded" true turn_ok;
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "selection_note_done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "prove ok" true prove_ok;
+  let prove_result = parse_json_exn prove_body |> result_field in
+  let proof_doc =
+    prove_result |> Yojson.Safe.Util.member "proof"
+  in
+  let evidence =
+    proof_doc |> Yojson.Safe.Util.member "evidence"
+  in
+  let recorded_note =
+    evidence |> Yojson.Safe.Util.member "spawn_selection_note_summary"
+    |> Yojson.Safe.Util.to_string
+  in
+  let recorded_models =
+    evidence |> Yojson.Safe.Util.member "spawn_models"
+    |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "selection note summary" selection_note recorded_note;
+  Alcotest.(check bool) "spawn model included" true
+    (List.mem spawn_model recorded_models);
+  let proof_md_path =
+    prove_result |> Yojson.Safe.Util.member "proof_md_path"
+    |> Yojson.Safe.Util.to_string
+  in
+  let ic = open_in proof_md_path in
+  let proof_md =
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        really_input_string ic (in_channel_length ic))
+  in
+  Alcotest.(check bool) "markdown includes model" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string spawn_model) proof_md 0 in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "markdown includes rationale" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string selection_note) proof_md 0 in
+       true
+     with Not_found -> false);
+  cleanup_dir base_dir
+
 let test_prove_requires_multi_actor_turn_coverage () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -726,7 +830,6 @@ let test_step_spawn_requires_proc_mgr () =
         (`Assoc
           [
             ("session_id", `String session_id);
-            ("turn_kind", `String "note");
             ("spawn_agent", `String "glm");
             ("spawn_prompt", `String "hello");
           ])
@@ -763,6 +866,67 @@ let test_step_spawn_requires_proc_mgr () =
              ("generate_report", `Bool false);
            ]));
   ignore (wait_until_terminal ctx session_id);
+  cleanup_dir base_dir
+
+let test_step_spawn_llama_requires_spawn_model () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let selection_note =
+    "[model-selection] leader selected qwen3.5-35b-a3b-ud-q8-xl from inventory"
+  in
+  let session_id = start_session_exn ctx ~goal:"step-spawn-llama-model-check" |> get_session_id in
+  let step_ok, step_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("spawn_agent", `String "llama");
+            ("spawn_prompt", `String "inspect and report");
+            ("spawn_role", `String "planner");
+            ("spawn_selection_note", `String selection_note);
+          ])
+  in
+  Alcotest.(check bool) "step should fail without spawn_model for llama" false step_ok;
+  let body = parse_json_exn step_body in
+  let message =
+    body |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check bool) "error mentions spawn_model" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "spawn_model") message 0 in
+       true
+     with Not_found -> false);
+  let events_ok, events_body =
+    dispatch_exn ctx ~name:"masc_team_session_events"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("event_types", `List [ `String "team_step_spawn" ]);
+          ])
+  in
+  Alcotest.(check bool) "events query ok" true events_ok;
+  let events = events_list_of_body events_body in
+  Alcotest.(check int) "spawn failure event recorded" 1 (List.length events);
+  let detail = Yojson.Safe.Util.member "detail" (List.hd events) in
+  let spawn_model =
+    detail |> Yojson.Safe.Util.member "spawn_model"
+  in
+  Alcotest.(check bool) "spawn_model absent in failure event" true (spawn_model = `Null);
+  let recorded_selection_note =
+    detail |> Yojson.Safe.Util.member "spawn_selection_note"
+    |> Yojson.Safe.Util.to_string_option
+  in
+  Alcotest.(check (option string)) "selection note recorded in failure event"
+    (Some selection_note) recorded_selection_note;
   cleanup_dir base_dir
 
 let test_prove_strong_requires_additional_evidence () =
@@ -1002,6 +1166,8 @@ let () =
         [
           Alcotest.test_case "start-status-report-stop" `Quick
             test_start_status_report_stop;
+          Alcotest.test_case "proof-exposes-spawn-selection-rationale" `Quick
+            test_proof_exposes_spawn_selection_rationale;
           Alcotest.test_case "duration-reached-path" `Quick
             test_duration_reached_path;
           Alcotest.test_case "recover-elapsed-session" `Quick
@@ -1017,6 +1183,8 @@ let () =
             test_missing_required_args;
           Alcotest.test_case "step-spawn-requires-proc-mgr" `Quick
             test_step_spawn_requires_proc_mgr;
+          Alcotest.test_case "step-spawn-llama-requires-spawn-model" `Quick
+            test_step_spawn_llama_requires_spawn_model;
           Alcotest.test_case "prove-strong-requires-additional-evidence" `Quick
             test_prove_strong_requires_additional_evidence;
           Alcotest.test_case "dispatch-unknown" `Quick test_dispatch_unknown;

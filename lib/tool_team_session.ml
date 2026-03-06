@@ -129,6 +129,16 @@ let parse_turn_kind args =
       Error
         "invalid turn_kind (allowed: note|broadcast|portal|task|checkpoint)"
 
+let parse_turn_kind_opt args =
+  match get_string_opt args "turn_kind" with
+  | None -> Ok None
+  | Some raw -> (
+      match Team_session_types.turn_kind_of_string (String.lowercase_ascii raw) with
+      | Some k -> Ok (Some k)
+      | None ->
+          Error
+            "invalid turn_kind (allowed: note|broadcast|portal|task|checkpoint)")
+
 let parse_proof_level args =
   let raw =
     get_string args "proof_level" "standard"
@@ -329,6 +339,30 @@ let truncate_for_event ?(max_len = 320) (s : string) =
   else
     String.sub s 0 max_len ^ "..."
 
+let derived_llama_runtime_actor ~session_id ~prompt =
+  let digest = Digest.string (session_id ^ "\n" ^ prompt) |> Digest.to_hex in
+  Printf.sprintf "llama-local-%s" (String.sub digest 0 8)
+
+let ensure_session_actor config session_id actor_name =
+  match Team_session_store.update_session config session_id (fun session ->
+            let agent_names =
+              Team_session_types.dedup_strings (session.agent_names @ [ actor_name ])
+            in
+            { session with agent_names; updated_at_iso = Types.now_iso () })
+  with
+  | Ok updated ->
+      Team_session_store.append_event config session_id
+        ~event_type:"session_agent_attached"
+        ~detail:
+          (`Assoc
+            [
+              ("actor", `String actor_name);
+              ("agent_count", `Int (List.length updated.agent_names));
+              ("ts_iso", `String (Types.now_iso ()));
+            ]);
+      Ok ()
+  | Error e -> Error e
+
 let extract_vote_id (text : string) =
   let re = Str.regexp "vote-[0-9-]+-[0-9]+" in
   try
@@ -347,28 +381,39 @@ let handle_step ctx args : result =
   | Ok session_id -> (
       match ensure_session_access ctx session_id with
       | Error e -> (false, json_error e)
-      | Ok () -> (
-          match parse_turn_kind args with
+      | Ok () ->
+          let spawn_agent_opt = get_string_opt args "spawn_agent" in
+          let spawn_prompt_opt = get_string_opt args "spawn_prompt" in
+          let has_spawn = Option.is_some spawn_agent_opt || Option.is_some spawn_prompt_opt in
+          let turn_kind_result =
+            if has_spawn then parse_turn_kind_opt args
+            else
+              match parse_turn_kind args with
+              | Ok kind -> Ok (Some kind)
+              | Error e -> Error e
+          in
+          match turn_kind_result with
           | Error e -> (false, json_error e)
-          | Ok turn_kind ->
+          | Ok turn_kind_opt ->
               let actor =
                 match get_string_opt args "actor" with
                 | Some a -> a
-                | None -> (
-                    match get_string_opt args "spawn_agent" with
-                    | Some sa -> sa
-                    | None -> ctx.agent_name)
+                | None -> ctx.agent_name
               in
               let base_message = get_string_opt args "message" in
               let target_agent = get_string_opt args "target_agent" in
               let task_title = get_string_opt args "task_title" in
               let task_description = get_string_opt args "task_description" in
               let task_priority = get_int args "task_priority" 3 in
-              let spawn_agent_opt = get_string_opt args "spawn_agent" in
-              let spawn_prompt_opt = get_string_opt args "spawn_prompt" in
+              let spawn_model_opt = get_string_opt args "spawn_model" in
+              let spawn_role_opt = get_string_opt args "spawn_role" in
+              let spawn_selection_note_opt =
+                get_string_opt args "spawn_selection_note"
+              in
               let spawn_timeout_seconds = get_int args "spawn_timeout_seconds" 300 in
-              let append_spawn_event ?spawn_agent ~success ?exit_code ?elapsed_ms
-                  ?output_preview ?error () =
+              let append_spawn_event ?spawn_agent ?runtime_actor ?spawn_role
+                  ?spawn_model ?spawn_selection_note ~success ?exit_code
+                  ?elapsed_ms ?output_preview ?error () =
                 let detail =
                   `Assoc
                     [
@@ -376,6 +421,18 @@ let handle_step ctx args : result =
                       ( "spawn_agent",
                         Option.fold ~none:`Null ~some:(fun s -> `String s)
                           spawn_agent );
+                      ( "runtime_actor",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          runtime_actor );
+                      ( "spawn_role",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          spawn_role );
+                      ( "spawn_model",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          spawn_model );
+                      ( "spawn_selection_note",
+                        Option.fold ~none:`Null ~some:(fun s -> `String s)
+                          spawn_selection_note );
                       ("success", `Bool success);
                       ("exit_code", int_opt_to_json exit_code);
                       ("elapsed_ms", int_opt_to_json elapsed_ms);
@@ -389,57 +446,135 @@ let handle_step ctx args : result =
                 Team_session_store.append_event ctx.config session_id
                   ~event_type:"team_step_spawn" ~detail
               in
-              let spawn_result_json, message_for_turn =
+              let spawn_result_json =
                 match (spawn_agent_opt, spawn_prompt_opt) with
-                | None, None -> (None, base_message)
+                | None, None -> None
                 | Some _, None | None, Some _ ->
                     let msg =
                       "spawn_agent and spawn_prompt must be provided together"
                     in
                     append_spawn_event ~success:false ~error:msg ();
-                    (Some (`Assoc [ ("error", `String msg) ]), base_message)
-                | Some spawn_agent, Some spawn_prompt -> (
-                    match ctx.proc_mgr with
-                    | None ->
-                        let msg = "process manager unavailable for team step spawn" in
-                        append_spawn_event ~spawn_agent ~success:false ~error:msg ();
-                        (Some (`Assoc [ ("error", `String msg) ]), base_message)
-                    | Some pm ->
-                        let spawn_result =
-                          Spawn_eio.spawn ~sw:ctx.sw ~proc_mgr:pm ~agent_name:spawn_agent
-                            ~prompt:spawn_prompt ~timeout_seconds:spawn_timeout_seconds ()
-                        in
-                        let output_preview = truncate_for_event spawn_result.output in
-                        append_spawn_event ~spawn_agent
-                          ~success:spawn_result.success
-                          ~exit_code:spawn_result.exit_code
-                          ~elapsed_ms:spawn_result.elapsed_ms ~output_preview ();
-                        let spawn_json =
-                          `Assoc
-                            [
-                              ("agent", `String spawn_agent);
-                              ("success", `Bool spawn_result.success);
-                              ("exit_code", `Int spawn_result.exit_code);
-                              ("elapsed_ms", `Int spawn_result.elapsed_ms);
-                              ("output_preview", `String output_preview);
-                              ("input_tokens", int_opt_to_json spawn_result.input_tokens);
-                              ("output_tokens", int_opt_to_json spawn_result.output_tokens);
-                              ( "cache_creation_tokens",
-                                int_opt_to_json
-                                  spawn_result.cache_creation_tokens );
-                              ("cache_read_tokens", int_opt_to_json spawn_result.cache_read_tokens);
-                              ("cost_usd", float_opt_to_json spawn_result.cost_usd);
-                            ]
-                        in
-                        let merged_message =
-                          match base_message with
-                          | Some msg -> Some msg
-                          | None ->
-                              Some
-                                (Printf.sprintf "spawn(%s): %s" spawn_agent
-                                   output_preview)
-                        in
-                        (Some spawn_json, merged_message))
+                    Some (`Assoc [ ("error", `String msg) ])
+                | Some spawn_agent, Some spawn_prompt ->
+                    let runtime_agent_name =
+                      if String.equal spawn_agent "llama" then
+                        Some
+                          (derived_llama_runtime_actor ~session_id
+                             ~prompt:spawn_prompt)
+                      else
+                        None
+                    in
+                    let runtime_model =
+                      if String.equal spawn_agent "llama" then
+                        match spawn_model_opt with
+                        | None ->
+                            Error
+                              "spawn_model is required when spawn_agent=llama"
+                        | Some model_name -> (
+                            match
+                              Llm_client.model_spec_of_string
+                                ("llama:" ^ model_name)
+                            with
+                            | Ok spec -> Ok spec
+                            | Error err ->
+                                Error ("invalid spawn_model: " ^ err))
+                      else
+                        Ok (Llm_client.ollama_glm)
+                    in
+                    let prep_error =
+                      match runtime_agent_name with
+                      | Some worker_actor ->
+                          ensure_session_actor ctx.config session_id worker_actor
+                      | None -> Ok ()
+                    in
+                    let spawn_error =
+                      match prep_error with
+                      | Error msg -> Some msg
+                      | Ok () -> (
+                          match runtime_model with
+                          | Error msg -> Some msg
+                          | Ok _ -> None)
+                    in
+                    (match spawn_error with
+                     | Some msg ->
+                         append_spawn_event ~spawn_agent ?runtime_actor:runtime_agent_name
+                           ?spawn_role:spawn_role_opt ?spawn_model:spawn_model_opt
+                           ?spawn_selection_note:spawn_selection_note_opt
+                           ~success:false ~error:msg ();
+                         Some (`Assoc [ ("error", `String msg) ])
+                     | None -> (
+                         match ctx.proc_mgr with
+                         | None ->
+                             let msg =
+                               "process manager unavailable for team step spawn"
+                             in
+                             append_spawn_event ~spawn_agent
+                               ?runtime_actor:runtime_agent_name
+                               ?spawn_role:spawn_role_opt
+                               ?spawn_model:spawn_model_opt
+                               ?spawn_selection_note:spawn_selection_note_opt
+                               ~success:false ~error:msg ();
+                             Some (`Assoc [ ("error", `String msg) ])
+                         | Some pm ->
+                             let spawn_result =
+                               Spawn_eio.spawn ~sw:ctx.sw ~proc_mgr:pm
+                                 ~agent_name:spawn_agent ~prompt:spawn_prompt
+                                 ~timeout_seconds:spawn_timeout_seconds
+                                 ~room_config:ctx.config
+                                 ?runtime_agent_name
+                                 ~runtime_model:(Result.get_ok runtime_model)
+                                 ?runtime_role:spawn_role_opt
+                                 ?runtime_selection_note:spawn_selection_note_opt
+                                 ~runtime_session_id:session_id ()
+                             in
+                             let output_preview =
+                               truncate_for_event spawn_result.output
+                             in
+                             append_spawn_event ~spawn_agent
+                               ?runtime_actor:runtime_agent_name
+                               ?spawn_role:spawn_role_opt
+                               ?spawn_model:spawn_model_opt
+                               ?spawn_selection_note:spawn_selection_note_opt
+                               ~success:spawn_result.success
+                               ~exit_code:spawn_result.exit_code
+                               ~elapsed_ms:spawn_result.elapsed_ms
+                               ~output_preview ();
+                             Some
+                               (`Assoc
+                                 [
+                                   ("agent", `String spawn_agent);
+                                   ( "runtime_actor",
+                                     Option.fold ~none:`Null
+                                       ~some:(fun s -> `String s)
+                                       runtime_agent_name );
+                                   ( "spawn_role",
+                                     Option.fold ~none:`Null
+                                       ~some:(fun s -> `String s)
+                                       spawn_role_opt );
+                                   ( "spawn_model",
+                                     Option.fold ~none:`Null
+                                       ~some:(fun s -> `String s)
+                                       spawn_model_opt );
+                                   ( "spawn_selection_note",
+                                     Option.fold ~none:`Null
+                                       ~some:(fun s -> `String s)
+                                       spawn_selection_note_opt );
+                                   ("success", `Bool spawn_result.success);
+                                   ("exit_code", `Int spawn_result.exit_code);
+                                   ("elapsed_ms", `Int spawn_result.elapsed_ms);
+                                   ("output_preview", `String output_preview);
+                                   ( "input_tokens",
+                                     int_opt_to_json spawn_result.input_tokens );
+                                   ( "output_tokens",
+                                     int_opt_to_json spawn_result.output_tokens );
+                                   ( "cache_creation_tokens",
+                                     int_opt_to_json
+                                       spawn_result.cache_creation_tokens );
+                                   ( "cache_read_tokens",
+                                     int_opt_to_json
+                                       spawn_result.cache_read_tokens );
+                                   ("cost_usd", float_opt_to_json spawn_result.cost_usd);
+                                 ])))
               in
               let spawn_error =
                 match spawn_result_json with
@@ -451,12 +586,18 @@ let handle_step ctx args : result =
               in
               match spawn_error with
               | Some e -> (false, json_error e)
-              | None -> (
-                  match
-                    Team_session_engine_eio.record_turn ~config:ctx.config
-                      ~session_id ~actor ~turn_kind ~message:message_for_turn
-                      ~target_agent ~task_title ~task_description ~task_priority
-                  with
+              | None ->
+                  let turn_json_result =
+                    match turn_kind_opt with
+                    | None -> Ok None
+                    | Some turn_kind ->
+                        Team_session_engine_eio.record_turn ~config:ctx.config
+                          ~session_id ~actor ~turn_kind ~message:base_message
+                          ~target_agent ~task_title ~task_description
+                          ~task_priority
+                        |> Result.map Option.some
+                  in
+                  match turn_json_result with
                   | Error e -> (false, json_error e)
                   | Ok turn_json ->
                       let vote_result_json =
@@ -528,7 +669,7 @@ let handle_step ctx args : result =
                             | _ -> None)
                         | _ -> None
                       in
-                      (match vote_error with
+                      match vote_error with
                       | Some e -> (false, json_error e)
                       | None ->
                           let run_json =
@@ -589,13 +730,13 @@ let handle_step ctx args : result =
                             `Assoc
                               [
                                 ("session_id", `String session_id);
-                                ("turn", turn_json);
+                                ("turn", Option.value ~default:`Null turn_json);
                                 ("spawn", Option.fold ~none:`Null ~some:(fun j -> j) spawn_result_json);
                                 ("vote", Option.fold ~none:`Null ~some:(fun j -> j) vote_result_json);
                                 ("run", Option.fold ~none:`Null ~some:(fun j -> j) run_json);
                               ]
                           in
-                          (true, json_ok [ ("result", response) ])))))
+                          (true, json_ok [ ("result", response) ]))
 
 let handle_finalize ctx args : result =
   match get_valid_session_id args with
@@ -943,7 +1084,7 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_step";
       description =
-        "Execute one orchestrated team step: optional spawned-agent turn + optional vote/run evidence recording.";
+        "Execute one orchestrated team step: optionally spawn a worker, optionally record a supervisor turn, and optionally attach vote/run evidence.";
       input_schema =
         `Assoc
           [
@@ -973,6 +1114,9 @@ let schemas : tool_schema list =
                   ("task_description", `Assoc [ ("type", `String "string") ]);
                   ("task_priority", `Assoc [ ("type", `String "integer") ]);
                   ("spawn_agent", `Assoc [ ("type", `String "string") ]);
+                  ("spawn_model", `Assoc [ ("type", `String "string") ]);
+                  ("spawn_role", `Assoc [ ("type", `String "string") ]);
+                  ("spawn_selection_note", `Assoc [ ("type", `String "string") ]);
                   ("spawn_prompt", `Assoc [ ("type", `String "string") ]);
                   ("spawn_timeout_seconds", `Assoc [ ("type", `String "integer") ]);
                   ("vote_topic", `Assoc [ ("type", `String "string") ]);

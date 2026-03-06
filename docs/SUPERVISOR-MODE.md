@@ -26,7 +26,8 @@ Supervisor Mode v1 is built on top of the existing operator surface.
 This keeps supervision and implementation separate:
 
 - the supervisor reads state and issues guided interventions
-- planner and implementer agents do the normal work through the full MCP surface
+- planner and implementer workers do the normal work through the full MCP surface
+- local `llama.cpp` workers join the same session through `spawn_agent="llama"`
 
 ## Runtime Model
 
@@ -41,6 +42,29 @@ Codex / Claude TUI
 
 Use `/mcp/operator` when you want a small, deterministic control surface.
 Use `/mcp` when an agent needs the full room and team-session tool inventory.
+
+## Llama Worker Runtime
+
+`masc-mcp` can run a worker directly against a local `llama.cpp` OpenAI-compatible server.
+
+- internal reasoning model string: `llama:<model>`
+- model inventory tool: `masc_llama_models`
+- spawned worker runtime: `masc_spawn(agent_name="llama", model="...")`
+- team-session spawn path: `masc_team_session_step(spawn_agent="llama", spawn_model="...", spawn_role="...", spawn_prompt="...")`
+
+Environment:
+
+- `LLAMA_SERVER_URL`
+  - default: `http://127.0.0.1:8085`
+
+Selection policy for this slice is explicit:
+
+1. call `masc_llama_models`
+2. the leader chooses one returned model id explicitly
+3. record that choice in the session with `masc_team_session_turn` before spawning workers
+4. pass that exact id through `model=` or `spawn_model=`
+5. pass the same selection rationale through `spawn_selection_note=`
+6. there is no automatic fallback for spawned `llama` workers
 
 ## Intervention Policy
 
@@ -96,6 +120,18 @@ The recommended Team Session shape is fixed for v1.
 - `planner`: decomposes work into concrete tasks and acceptance criteria
 - `implementer-a`: backend, runtime, and API changes
 - `implementer-b`: docs, harnesses, and tests
+
+For llama workers, the supervisor should make model choice explicit and attributable:
+
+1. call `masc_llama_models`
+2. pick one inventory item deliberately
+3. record a session note describing the chosen model and why
+4. pass the same note to each worker with `spawn_selection_note`
+
+That gives the proof trail two copies of the same decision:
+
+- a supervisor-owned session note
+- a worker prompt line: `Leader-selected model context: ...`
 
 The supervisor is not the main implementer.
 The supervisor should avoid editing unless intervention requires a direct corrective patch.
@@ -180,12 +216,23 @@ Use the harness to prove the workflow end to end.
 What it does:
 
 1. starts a local server
-2. bootstraps supervisor, planner, and implementer tokens
-3. enables bearer-token auth
-4. starts a real team session
-5. drives worker turns over `/mcp`
-6. performs supervisor interventions over `/mcp/operator`
-7. stops the session and generates proof artifacts
+2. bootstraps supervisor auth
+3. reads the llama inventory through `masc_llama_models`
+4. validates an explicit `LLAMA_SWARM_MODEL`
+5. starts a real team session
+6. spawns a full llama worker team (`planner`, `implementer-a`, `implementer-b`)
+7. records the explicit model-selection note in the session
+8. passes the same note into every spawned worker prompt
+9. performs supervisor interventions over `/mcp/operator`
+10. stops the session and generates proof artifacts
+
+Run it against a real local llama team:
+
+```bash
+LLAMA_SERVER_URL=http://127.0.0.1:8085 \
+LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
+./scripts/harness_supervisor_team_session.sh
+```
 
 ## Related Docs
 

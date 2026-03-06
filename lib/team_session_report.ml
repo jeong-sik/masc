@@ -714,14 +714,33 @@ let parse_spawn_agent json = parse_event_detail json |> parse_event_string "spaw
 
 let parse_spawn_success json = parse_event_detail json |> parse_event_bool "success"
 
+let parse_spawn_model json = parse_event_detail json |> parse_event_string "spawn_model"
+
+let parse_spawn_selection_note json =
+  parse_event_detail json |> parse_event_string "spawn_selection_note"
+
 let spawn_agent_of_event json =
   if has_event_type json "team_step_spawn" then parse_spawn_agent json else None
 
 let spawn_success_of_event json =
   if has_event_type json "team_step_spawn" then parse_spawn_success json else None
 
+let spawn_model_of_event json =
+  if has_event_type json "team_step_spawn" then parse_spawn_model json else None
+
+let spawn_selection_note_of_event json =
+  if has_event_type json "team_step_spawn" then parse_spawn_selection_note json
+  else None
+
 let collect_spawn_agents events =
   events |> List.filter_map spawn_agent_of_event |> Team_session_types.dedup_strings
+
+let collect_spawn_models events =
+  events |> List.filter_map spawn_model_of_event |> Team_session_types.dedup_strings
+
+let collect_spawn_selection_notes events =
+  events |> List.filter_map spawn_selection_note_of_event
+  |> Team_session_types.dedup_strings
 
 let proof_level_name proof_level = proof_level_to_string proof_level
 
@@ -765,7 +784,9 @@ let proof_markdown ~(session : Team_session_types.session)
     ~(score_pct : float) ~(verdict : string) ~(criteria : Yojson.Safe.t list)
     ~(checkpoints_count : int) ~(events_count : int) ~(turn_events : int)
     ~(report_exists : bool) ~(unique_turn_actors_count : int)
-    ~(required_turn_actors : int) ~(proof_generated_at_iso : string) =
+    ~(required_turn_actors : int) ~(spawn_models : string list)
+    ~(spawn_selection_note_summary : string option)
+    ~(proof_generated_at_iso : string) =
   let criteria_lines =
     criteria
     |> List.map (fun item ->
@@ -803,6 +824,14 @@ let proof_markdown ~(session : Team_session_types.session)
       Printf.sprintf "- Turn events count: %d" turn_events;
       Printf.sprintf "- Unique turn actors: %d (required >= %d)"
         unique_turn_actors_count required_turn_actors;
+      Printf.sprintf "- Spawn models: %s"
+        (match spawn_models with
+        | [] -> "(not recorded)"
+        | xs -> String.concat ", " xs);
+      Printf.sprintf "- Model selection rationale: %s"
+        (match spawn_selection_note_summary with
+        | Some note -> note
+        | None -> "(not recorded)");
       Printf.sprintf "- Report artifacts exist: %b" report_exists;
       "";
       "## Criteria";
@@ -876,6 +905,13 @@ let generate_proof ?(proof_level = default_proof_level) config
       collect_spawn_agents events |> Team_session_types.dedup_strings
     in
     let unique_spawn_agents_count = List.length unique_spawn_agents in
+    let spawn_models = collect_spawn_models events in
+    let spawn_selection_notes = collect_spawn_selection_notes events in
+    let spawn_selection_note_summary =
+      match spawn_selection_notes with
+      | [] -> None
+      | xs -> Some (String.concat " | " xs)
+    in
     let min_turn_events = min_turn_events_for_session required_turn_actors in
     let min_communication = min_communication_for_session required_turn_actors in
     let vote_events =
@@ -931,6 +967,13 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ("spawn_success_count", `Int spawn_success_count);
                 ("unique_spawn_agents", `List (List.map (fun a -> `String a) unique_spawn_agents));
                 ("unique_spawn_agents_count", `Int unique_spawn_agents_count);
+                ("spawn_models", `List (List.map (fun m -> `String m) spawn_models));
+                ( "spawn_selection_notes",
+                  `List (List.map (fun note -> `String note) spawn_selection_notes)
+                );
+                ( "spawn_selection_note_summary",
+                  Option.fold ~none:`Null ~some:(fun note -> `String note)
+                    spawn_selection_note_summary );
                 ("vote_events", `Int vote_events);
                 ("run_deliverables", `Int run_deliverables);
                 ("broadcast_count", `Int session.broadcast_count);
@@ -946,7 +989,8 @@ let generate_proof ?(proof_level = default_proof_level) config
       proof_markdown ~session ~proof_level ~score_pct ~verdict ~criteria
         ~checkpoints_count ~events_count:(List.length events) ~turn_events
         ~report_exists:(report_json_exists && report_md_exists)
-        ~unique_turn_actors_count ~required_turn_actors
+        ~unique_turn_actors_count ~required_turn_actors ~spawn_models
+        ~spawn_selection_note_summary
         ~proof_generated_at_iso:generated_at_iso
     in
     Ok (proof_json, markdown)

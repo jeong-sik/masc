@@ -154,6 +154,14 @@ module Ollama = struct
     get_string ~default:"glm-4.7-flash" "OLLAMA_DEFAULT_MODEL"
 end
 
+(** {1 llama.cpp Server Configuration} *)
+
+module Llama = struct
+  (** OpenAI-compatible llama.cpp server URL *)
+  let server_url =
+    get_string ~default:"http://127.0.0.1:8085" "LLAMA_SERVER_URL"
+end
+
 (** {1 Federation Configuration} *)
 
 module Federation = struct

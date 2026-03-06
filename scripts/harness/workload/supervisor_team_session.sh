@@ -11,16 +11,11 @@ OPERATOR_URL=""
 TEAM_SESSION_ID=""
 SUPERVISOR_SESSION_ID="supervisor-bootstrap"
 SUPERVISOR_OP_SESSION_ID="supervisor-ops"
-PLANNER_SESSION_ID="planner-session"
-IMPLEMENTER_A_SESSION_ID="implementer-a-session"
-IMPLEMENTER_B_SESSION_ID="implementer-b-session"
 SUPERVISOR_AGENT="supervisor-root"
-PLANNER_AGENT="planner"
-IMPLEMENTER_A_AGENT="implementer-a"
-IMPLEMENTER_B_AGENT="implementer-b"
-HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-10}"
+HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-60}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-30}"
-TEAM_GOAL="${TEAM_GOAL:-Demonstrate a supervised MASC team session over /mcp and /mcp/operator}"
+TEAM_GOAL="${TEAM_GOAL:-Demonstrate a full llama worker team supervised over /mcp and /mcp/operator}"
+LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -232,17 +227,21 @@ join_with_token() {
   require_tool_success "$join_raw"
 }
 
-run_team_turn() {
-  local session_id="$1"
-  local token="$2"
-  local agent_name="$3"
-  local turn_kind="$4"
-  local message="$5"
-  local payload
-  payload="$(jq -cn --arg s "$TEAM_SESSION_ID" --arg kind "$turn_kind" --arg msg "$message" '{session_id:$s,turn_kind:$kind,message:$msg}')"
+spawn_llama_worker() {
+  local role="$1"
+  local prompt="$2"
+  local selection_note="$3"
   local raw
-  raw="$(call_tool "$MCP_URL" "$session_id" "$token" 30 "masc_team_session_turn" "$payload")"
+  raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 30 "masc_team_session_step" "$(jq -cn \
+    --arg s "$TEAM_SESSION_ID" \
+    --arg spawn_agent "llama" \
+    --arg spawn_model "$LLAMA_SWARM_MODEL" \
+    --arg spawn_role "$role" \
+    --arg spawn_selection_note "$selection_note" \
+    --arg spawn_prompt "$prompt" \
+    '{session_id:$s,spawn_agent:$spawn_agent,spawn_model:$spawn_model,spawn_role:$spawn_role,spawn_selection_note:$spawn_selection_note,spawn_prompt:$spawn_prompt,spawn_timeout_seconds:90}')")"
   require_tool_success "$raw"
+  printf '%s' "$raw"
 }
 
 printf '[1/10] start server\n'
@@ -263,33 +262,34 @@ require_tool_success "$switch_mode_raw"
 SUPERVISOR_IDENTITY="$(create_agent_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_AGENT" "admin" '["supervisor","operator"]')"
 SUPERVISOR_NICKNAME="${SUPERVISOR_IDENTITY%%|*}"
 SUPERVISOR_TOKEN="${SUPERVISOR_IDENTITY##*|}"
-PLANNER_IDENTITY="$(create_agent_token "$PLANNER_SESSION_ID" "$PLANNER_AGENT" "worker" '["planner","team-session"]')"
-PLANNER_NICKNAME="${PLANNER_IDENTITY%%|*}"
-PLANNER_TOKEN="${PLANNER_IDENTITY##*|}"
-IMPLEMENTER_A_IDENTITY="$(create_agent_token "$IMPLEMENTER_A_SESSION_ID" "$IMPLEMENTER_A_AGENT" "worker" '["backend","team-session"]')"
-IMPLEMENTER_A_NICKNAME="${IMPLEMENTER_A_IDENTITY%%|*}"
-IMPLEMENTER_A_TOKEN="${IMPLEMENTER_A_IDENTITY##*|}"
-IMPLEMENTER_B_IDENTITY="$(create_agent_token "$IMPLEMENTER_B_SESSION_ID" "$IMPLEMENTER_B_AGENT" "worker" '["docs","tests","team-session"]')"
-IMPLEMENTER_B_NICKNAME="${IMPLEMENTER_B_IDENTITY%%|*}"
-IMPLEMENTER_B_TOKEN="${IMPLEMENTER_B_IDENTITY##*|}"
 
 enable_auth_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "" 12 "masc_auth_enable" '{"require_token":true}')"
 require_tool_success "$enable_auth_raw"
 
 printf '[3/10] re-join agents under bearer auth\n'
 join_with_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" "$SUPERVISOR_NICKNAME" '["supervisor","operator"]'
-join_with_token "$PLANNER_SESSION_ID" "$PLANNER_TOKEN" "$PLANNER_NICKNAME" '["planner","team-session"]'
-join_with_token "$IMPLEMENTER_A_SESSION_ID" "$IMPLEMENTER_A_TOKEN" "$IMPLEMENTER_A_NICKNAME" '["backend","team-session"]'
-join_with_token "$IMPLEMENTER_B_SESSION_ID" "$IMPLEMENTER_B_TOKEN" "$IMPLEMENTER_B_NICKNAME" '["docs","tests","team-session"]'
 
-printf '[4/10] start supervised team session\n'
+printf '[4/10] inspect llama inventory and validate explicit model\n'
+llama_models_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_llama_models" '{}')"
+require_tool_success "$llama_models_raw"
+llama_models_result="$(printf '%s' "$llama_models_raw" | extract_tool_result)"
+if [ -z "$LLAMA_SWARM_MODEL" ]; then
+  echo "FAIL: LLAMA_SWARM_MODEL is required; available models:"
+  printf '%s\n' "$llama_models_result" | jq -r '.models[]?'
+  exit 1
+fi
+if ! printf '%s' "$llama_models_result" | jq -e --arg model "$LLAMA_SWARM_MODEL" '.models | index($model) != null' >/dev/null; then
+  echo "FAIL: LLAMA_SWARM_MODEL not present in inventory: $LLAMA_SWARM_MODEL"
+  printf '%s\n' "$llama_models_result" | jq -r '.models[]?'
+  exit 1
+fi
+MODEL_SELECTION_NOTE="[model-selection] leader selected $LLAMA_SWARM_MODEL from masc_llama_models inventory for the supervised llama worker team"
+
+printf '[5/10] start supervised team session\n'
 start_payload="$(jq -cn \
   --arg goal "$TEAM_GOAL" \
   --arg supervisor "$SUPERVISOR_NICKNAME" \
-  --arg planner "$PLANNER_NICKNAME" \
-  --arg implementer_a "$IMPLEMENTER_A_NICKNAME" \
-  --arg implementer_b "$IMPLEMENTER_B_NICKNAME" \
-  '{goal:$goal, duration_seconds:180, checkpoint_interval_sec:15, orchestration_mode:"assist", communication_mode:"broadcast", execution_scope:"limited_code_change", fallback_policy:"cascade_then_task", instruction_profile:"strict", min_agents:4, agents:[$supervisor,$planner,$implementer_a,$implementer_b]}')"
+  '{goal:$goal, duration_seconds:180, checkpoint_interval_sec:15, orchestration_mode:"assist", communication_mode:"broadcast", execution_scope:"limited_code_change", fallback_policy:"cascade_then_task", instruction_profile:"strict", min_agents:4, agents:[$supervisor]}')"
 start_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 3 "masc_team_session_start" "$start_payload")"
 require_tool_success "$start_raw"
 TEAM_SESSION_ID="$(printf '%s' "$start_raw" | extract_tool_result | jq -r '.session_id // empty')"
@@ -299,12 +299,24 @@ if [ -z "$TEAM_SESSION_ID" ]; then
   exit 1
 fi
 
-printf '[5/10] record planner and implementer turns over /mcp\n'
-run_team_turn "$PLANNER_SESSION_ID" "$PLANNER_TOKEN" "$PLANNER_AGENT" "note" "[planner] split the work into docs, harness, and e2e proof"
-run_team_turn "$IMPLEMENTER_A_SESSION_ID" "$IMPLEMENTER_A_TOKEN" "$IMPLEMENTER_A_AGENT" "note" "[implementer-a] backend/e2e path will use /mcp and /mcp/operator together"
-run_team_turn "$IMPLEMENTER_B_SESSION_ID" "$IMPLEMENTER_B_TOKEN" "$IMPLEMENTER_B_AGENT" "note" "[implementer-b] docs and harness will show human confirm flow"
+model_selection_turn_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 14 "masc_team_session_turn" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "$MODEL_SELECTION_NOTE" '{session_id:$s,turn_kind:"note",message:$msg}')")"
+require_tool_success "$model_selection_turn_raw"
 
-printf '[6/10] inspect remote operator surface\n'
+printf '[6/10] spawn full llama team\n'
+planner_prompt="You are the planner. Inspect the active team session, then record exactly one concise planning turn with masc_team_session_turn describing task decomposition and acceptance criteria."
+implementer_a_prompt="You are implementer-a. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing backend/runtime work."
+implementer_b_prompt="You are implementer-b. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing docs/tests/harness work."
+planner_spawn_raw="$(spawn_llama_worker "planner" "$planner_prompt" "$MODEL_SELECTION_NOTE")"
+implementer_a_spawn_raw="$(spawn_llama_worker "implementer-a" "$implementer_a_prompt" "$MODEL_SELECTION_NOTE")"
+implementer_b_spawn_raw="$(spawn_llama_worker "implementer-b" "$implementer_b_prompt" "$MODEL_SELECTION_NOTE")"
+printf '%s' "$planner_spawn_raw" | extract_tool_result | jq -e '.spawn.runtime_actor != null and .turn == null' >/dev/null
+printf '%s' "$implementer_a_spawn_raw" | extract_tool_result | jq -e '.spawn.runtime_actor != null and .turn == null' >/dev/null
+printf '%s' "$implementer_b_spawn_raw" | extract_tool_result | jq -e '.spawn.runtime_actor != null and .turn == null' >/dev/null
+printf '%s' "$planner_spawn_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.spawn_selection_note == $note' >/dev/null
+printf '%s' "$implementer_a_spawn_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.spawn_selection_note == $note' >/dev/null
+printf '%s' "$implementer_b_spawn_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.spawn_selection_note == $note' >/dev/null
+
+printf '[7/10] inspect remote operator surface\n'
 tools_raw="$(jsonrpc_call "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "tools/list" '{}')"
 require_success_response "$tools_raw"
 tool_count="$(printf '%s' "$tools_raw" | jq -r '.result.tools | length')"
@@ -319,12 +331,12 @@ snapshot_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVIS
 require_tool_success "$snapshot_raw"
 printf '%s' "$snapshot_raw" | extract_tool_result | jq -e '.sessions.items | length >= 1' >/dev/null
 
-printf '[7/10] supervisor immediate correction via team_note\n'
+printf '[8/10] supervisor immediate correction via team_note\n'
 team_note_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_note",target_id:$s,payload:{message:"[supervisor] keep the proof focused on the MCP loop"}}')")"
 require_tool_success "$team_note_raw"
 printf '%s' "$team_note_raw" | extract_tool_text | jq -e '.confirm_required == false' >/dev/null
 
-printf '[8/10] supervisor disruptive correction via preview + confirm\n'
+printf '[9/10] supervisor disruptive correction via preview + confirm\n'
 preview_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 7 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_task_inject",target_id:$s,payload:{title:"Capture explicit supervisor proof",description:"Add evidence that preview-confirm changed the session trajectory.",priority:1}}')")"
 require_tool_success "$preview_raw"
 CONFIRM_TOKEN="$(printf '%s' "$preview_raw" | extract_tool_text | jq -r '.confirm_token // empty')"
@@ -345,7 +357,7 @@ snapshot_after_confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_
 require_tool_success "$snapshot_after_confirm_raw"
 printf '%s' "$snapshot_after_confirm_raw" | extract_tool_result | jq -e '.pending_confirms | length == 0' >/dev/null
 
-printf '[9/10] stop session and prove evidence\n'
+printf '[10/10] stop session and prove evidence\n'
 stop_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_team_session_stop" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,reason:"supervisor_harness_complete",generate_report:true}')")"
 require_tool_success "$stop_raw"
 
@@ -371,16 +383,28 @@ prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
 printf '%s' "$prove_result" | jq -e '.proof.verdict == "proved"' >/dev/null
 printf '%s' "$prove_result" | jq -e '.proof.evidence.unique_turn_actors_count >= 4' >/dev/null
 
-printf '[10/10] summary\n'
+printf '[summary]\n'
 events_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 16 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["team_turn"],limit:200}')")"
 require_tool_success "$events_raw"
 events_result="$(printf '%s' "$events_raw" | extract_tool_result)"
 unique_turn_actors="$(printf '%s' "$events_result" | jq -r '[.events[]? | .detail.actor // empty | select(. != "")] | unique | length')"
+spawn_events_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 17 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["team_step_spawn"],limit:200}')")"
+require_tool_success "$spawn_events_raw"
+spawn_events_result="$(printf '%s' "$spawn_events_raw" | extract_tool_result)"
+unique_spawned_llama_actors="$(printf '%s' "$spawn_events_result" | jq -r '[.events[]? | .detail.runtime_actor // empty | select(. != "")] | unique | length')"
+if [ "$unique_spawned_llama_actors" -lt 3 ]; then
+  echo "FAIL: expected at least 3 unique spawned llama actors, got $unique_spawned_llama_actors"
+  printf '%s\n' "$spawn_events_result"
+  exit 1
+fi
+printf '%s' "$spawn_events_result" | jq -e --arg note "$MODEL_SELECTION_NOTE" '[.events[]? | .detail.spawn_selection_note // empty] | all(. == $note)' >/dev/null
 proof_json_path="$(printf '%s' "$prove_result" | jq -r '.proof_json_path // empty')"
 proof_md_path="$(printf '%s' "$prove_result" | jq -r '.proof_md_path // empty')"
 
 printf 'session_id=%s\n' "$TEAM_SESSION_ID"
+printf 'llama_swarm_model=%s\n' "$LLAMA_SWARM_MODEL"
 printf 'unique_turn_actors=%s\n' "$unique_turn_actors"
+printf 'unique_spawned_llama_actors=%s\n' "$unique_spawned_llama_actors"
 printf 'proof_json_path=%s\n' "$proof_json_path"
 printf 'proof_md_path=%s\n' "$proof_md_path"
 echo 'PASS: supervisor team session harness'

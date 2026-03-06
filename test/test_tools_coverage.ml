@@ -82,7 +82,8 @@ let test_find_tool_existing () =
                "masc_team_session_step"; "masc_team_session_finalize";
                "masc_team_session_list"; "masc_team_session_compare";
                "masc_team_session_turn"; "masc_team_session_events";
-               "masc_team_session_prove"; "masc_operator_snapshot";
+               "masc_team_session_prove"; "masc_llama_models";
+               "masc_operator_snapshot";
                "masc_operator_action"; "masc_operator_confirm"] in
   List.iter (fun name ->
     match find_tool name with
@@ -538,8 +539,30 @@ let test_masc_spawn_schema () =
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
+          Alcotest.(check bool) "has model" true (List.mem_assoc "model" props);
           Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props)
       | None -> Alcotest.fail "masc_spawn missing properties"
+
+let test_masc_llama_models_schema () =
+  match find_tool "masc_llama_models" with
+  | None -> Alcotest.fail "masc_llama_models not found"
+  | Some schema ->
+      Alcotest.(check bool) "has description" true
+        (String.length schema.description > 20);
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check int) "no required params" 0 (List.length props)
+      | None -> Alcotest.fail "masc_llama_models missing properties"
+
+let test_masc_team_session_step_spawn_selection_note_schema () =
+  match find_tool "masc_team_session_step" with
+  | None -> Alcotest.fail "masc_team_session_step not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has spawn_selection_note" true
+            (List.mem_assoc "spawn_selection_note" props)
+      | None -> Alcotest.fail "masc_team_session_step missing properties"
 
 (* ============================================================ *)
 (* 13. Cache Tool Tests                                          *)
@@ -860,6 +883,9 @@ let () =
       Alcotest.test_case "mitosis_status" `Quick test_masc_mitosis_status_schema;
       Alcotest.test_case "mitosis_divide" `Quick test_masc_mitosis_divide_schema;
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
+      Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
+      Alcotest.test_case "team-session-step-spawn-selection-note" `Quick
+        test_masc_team_session_step_spawn_selection_note_schema;
     ];
     "cache_tools", [
       Alcotest.test_case "cache_set" `Quick test_masc_cache_set_schema;

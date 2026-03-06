@@ -1824,7 +1824,10 @@ let trpg_discover_ollama_models () : (string list, string) result =
           else Ok names
       | _ -> Error "ollama tag list missing models array")
 
-let trpg_available_models_json_uncached () : Yojson.Safe.t =
+let trpg_available_models_json_collect
+    ?(warnings : string list = [])
+    ?(include_live = true)
+    () : Yojson.Safe.t =
   let seen : (string, bool) Hashtbl.t = Hashtbl.create 64 in
   let models_rev = ref [] in
   let warnings_rev = ref [] in
@@ -1868,29 +1871,31 @@ let trpg_available_models_json_uncached () : Yojson.Safe.t =
   List.iter
     (fun spec -> add_model ~spec ~source:"runtime-effective" ~status:"selected" ())
     effective_models;
-  List.iter
-    (fun base_url ->
-      match trpg_discover_openai_compatible_models base_url with
-      | Ok specs ->
-          List.iter
-            (fun spec ->
-              add_model ~spec ~source:"openai-compatible" ~status:"live"
-                ~detail:base_url ())
-            specs
-      | Error err ->
-          add_warning
-            (Printf.sprintf "openai-compatible %s 조회 실패: %s" base_url err))
-    (trpg_openai_compatible_urls ());
-  (match trpg_discover_ollama_models () with
-  | Ok specs ->
-      List.iter
-        (fun spec ->
-          add_model ~spec ~source:"ollama" ~status:"live"
-            ~detail:Llm_client.ollama_glm.api_url ())
-        specs
-  | Error err ->
-      add_warning
-        (Printf.sprintf "ollama %s 조회 실패: %s" Llm_client.ollama_glm.api_url err));
+  List.iter add_warning warnings;
+  if include_live then (
+    List.iter
+      (fun base_url ->
+        match trpg_discover_openai_compatible_models base_url with
+        | Ok specs ->
+            List.iter
+              (fun spec ->
+                add_model ~spec ~source:"openai-compatible" ~status:"live"
+                  ~detail:base_url ())
+              specs
+        | Error err ->
+            add_warning
+              (Printf.sprintf "openai-compatible %s 조회 실패: %s" base_url err))
+      (trpg_openai_compatible_urls ());
+    match trpg_discover_ollama_models () with
+    | Ok specs ->
+        List.iter
+          (fun spec ->
+            add_model ~spec ~source:"ollama" ~status:"live"
+              ~detail:Llm_client.ollama_glm.api_url ())
+          specs
+    | Error err ->
+        add_warning
+          (Printf.sprintf "ollama %s 조회 실패: %s" Llm_client.ollama_glm.api_url err));
   `Assoc
     [
       ("ok", `Bool true);
@@ -1902,10 +1907,17 @@ let trpg_available_models_json_uncached () : Yojson.Safe.t =
       ("warnings", `List (List.rev_map (fun item -> `String item) !warnings_rev));
     ]
 
+let trpg_available_models_json_uncached () : Yojson.Safe.t =
+  trpg_available_models_json_collect ()
+
+let trpg_available_models_json_base ?(warnings : string list = []) () : Yojson.Safe.t =
+  trpg_available_models_json_collect ~warnings ~include_live:false ()
+
 type trpg_model_catalog_cache = {
   mutex : Mutex.t;
   mutable cached_at : float;
   mutable cached_json : Yojson.Safe.t option;
+  mutable refresh_in_flight : bool;
 }
 
 let trpg_model_catalog_cache_ttl_sec = 15.0
@@ -1915,13 +1927,15 @@ let trpg_model_catalog_cache : trpg_model_catalog_cache =
     mutex = Mutex.create ();
     cached_at = 0.0;
     cached_json = None;
+    refresh_in_flight = false;
   }
 
 let trpg_available_models_json () : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
-  let cached =
+  let cached, should_refresh =
     Mutex.lock trpg_model_catalog_cache.mutex;
-    let snapshot =
+    let snapshot = trpg_model_catalog_cache.cached_json in
+    let fresh_snapshot =
       match trpg_model_catalog_cache.cached_json with
       | Some json
         when now -. trpg_model_catalog_cache.cached_at
@@ -1929,18 +1943,44 @@ let trpg_available_models_json () : Yojson.Safe.t =
           Some json
       | _ -> None
     in
+    let should_refresh =
+      match fresh_snapshot with
+      | Some _ -> false
+      | None when trpg_model_catalog_cache.refresh_in_flight -> false
+      | None ->
+          trpg_model_catalog_cache.refresh_in_flight <- true;
+          true
+    in
     Mutex.unlock trpg_model_catalog_cache.mutex;
-    snapshot
+    ((match fresh_snapshot with Some json -> Some json | None -> snapshot), should_refresh)
   in
-  match cached with
-  | Some json -> json
-  | None ->
-      let fresh = trpg_available_models_json_uncached () in
+  match (cached, should_refresh) with
+  | Some json, false -> json
+  | None, false ->
+      trpg_available_models_json_base
+        ~warnings:["가용 모델 조회 중입니다. 잠시 후 다시 시도하세요."] ()
+  | cached_snapshot, true ->
+      let outcome =
+        try Ok (trpg_available_models_json_uncached ())
+        with exn -> Error (Printexc.to_string exn)
+      in
       Mutex.lock trpg_model_catalog_cache.mutex;
-      trpg_model_catalog_cache.cached_json <- Some fresh;
-      trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ();
+      trpg_model_catalog_cache.refresh_in_flight <- false;
+      (match outcome with
+      | Ok fresh ->
+          trpg_model_catalog_cache.cached_json <- Some fresh;
+          trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ()
+      | Error _ -> ());
       Mutex.unlock trpg_model_catalog_cache.mutex;
-      fresh
+      match outcome with
+      | Ok fresh -> fresh
+      | Error err -> (
+          match cached_snapshot with
+          | Some stale ->
+              stale
+          | None ->
+              trpg_available_models_json_base
+                ~warnings:[Printf.sprintf "가용 모델 조회 실패: %s" err] ())
 
 let trpg_keeper_call_with_runtime
     ~(config : Room.config)

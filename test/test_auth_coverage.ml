@@ -240,6 +240,21 @@ let test_permission_for_tool_auth_status () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
+let test_permission_for_tool_operator_snapshot () =
+  match Auth.permission_for_tool "masc_operator_snapshot" with
+  | Some Types.CanReadState -> ()
+  | _ -> fail "expected CanReadState"
+
+let test_permission_for_tool_operator_action () =
+  match Auth.permission_for_tool "masc_operator_action" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
+let test_permission_for_tool_operator_confirm () =
+  match Auth.permission_for_tool "masc_operator_confirm" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
   | None -> ()
@@ -309,6 +324,9 @@ let () =
       test_case "approve" `Quick test_permission_for_tool_approve;
       test_case "auth_enable" `Quick test_permission_for_tool_auth_enable;
       test_case "auth_status" `Quick test_permission_for_tool_auth_status;
+      test_case "operator_snapshot" `Quick test_permission_for_tool_operator_snapshot;
+      test_case "operator_action" `Quick test_permission_for_tool_operator_action;
+      test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
     ];

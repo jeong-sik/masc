@@ -364,10 +364,14 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   }
 }
 
-export async function fetchBoard(sortBy?: BoardSortMode): Promise<{ posts: BoardPost[] }> {
+export async function fetchBoard(
+  sortBy?: BoardSortMode,
+  options?: { excludeSystem?: boolean },
+): Promise<{ posts: BoardPost[] }> {
   return withRetries('fetchBoard', async () => {
     const params = new URLSearchParams()
     if (sortBy) params.set('sort_by', sortBy)
+    if (options?.excludeSystem) params.set('exclude_system', 'true')
     params.set('limit', '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)

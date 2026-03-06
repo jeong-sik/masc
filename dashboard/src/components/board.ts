@@ -1,5 +1,4 @@
-// Board tab — Posts list with sort modes, vote, comment, flair badges, hearths
-// Detail view: full post + comment thread + comment form
+// Board tab — discussion feed with system-noise filter and clearer card structure
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -7,7 +6,15 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
-import { boardPosts, boardSortMode, boardLoading, refreshBoard, serverStatus } from '../store'
+import {
+  boardPosts,
+  boardSortMode,
+  boardExcludeSystem,
+  boardLoading,
+  lastBoardRefreshAt,
+  refreshBoard,
+  serverStatus,
+} from '../store'
 import { votePost, fetchBoardPost, commentPost } from '../api'
 import { navigate, navigateToPost, route } from '../router'
 import type { BoardPost, BoardComment, BoardSortMode } from '../types'
@@ -19,6 +26,7 @@ const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'updated', label: 'Updated' },
   { id: 'discussed', label: 'Discussed' },
 ]
+const AUTOMATED_BOARD_AUTHORS = new Set(['lodge-system', 'team-session'])
 
 // ── Local state for detail view ────────────────────────────
 
@@ -72,18 +80,34 @@ async function submitComment(postId: string) {
 function SortBar() {
   const current = boardSortMode.value
   return html`
-    <div class="board-controls">
-      ${SORT_MODES.map(m => html`
+    <div class="board-toolbar">
+      <div class="board-controls">
+        ${SORT_MODES.map(m => html`
+          <button
+            class="board-sort-btn ${current === m.id ? 'active' : ''}"
+            onClick=${() => {
+              boardSortMode.value = m.id
+              refreshBoard()
+            }}
+          >
+            ${m.label}
+          </button>
+        `)}
+      </div>
+      <div class="board-toolbar-actions">
         <button
-          class="board-sort-btn ${current === m.id ? 'active' : ''}"
+          class="control-btn ghost ${boardExcludeSystem.value ? 'is-active' : ''}"
           onClick=${() => {
-            boardSortMode.value = m.id
+            boardExcludeSystem.value = !boardExcludeSystem.value
             refreshBoard()
           }}
         >
-          ${m.label}
+          ${boardExcludeSystem.value ? 'Hiding auto reports' : 'Show auto reports'}
         </button>
-      `)}
+        <button class="control-btn ghost" onClick=${refreshBoard} disabled=${boardLoading.value}>
+          ${boardLoading.value ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
     </div>
   `
 }
@@ -110,6 +134,51 @@ function FlairBadge({ flair }: { flair?: string }) {
   return html`<span class="post-flair ${flair}">${flair}</span>`
 }
 
+function previewText(content: string): string {
+  const flattened = content
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+    .replace(/\[[^\]]+\]\([^)]+\)/g, '$1')
+    .replace(/[`#>*_~-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!flattened) return 'No preview available'
+  return flattened.length > 180 ? `${flattened.slice(0, 177)}...` : flattened
+}
+
+function isUpdated(post: BoardPost): boolean {
+  return post.updated_at !== post.created_at
+}
+
+function BoardSummary() {
+  const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
+
+  return html`
+    <div class="board-summary-strip">
+      <div class="board-summary-item">
+        <span class="board-summary-label">Visible posts</span>
+        <strong>${visibleBoardPosts().length}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">Sort</span>
+        <strong>${sortLabel}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">Noise policy</span>
+        <strong>${boardExcludeSystem.value ? 'Auto reports hidden by default' : 'All posts visible'}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">Last refresh</span>
+        <strong>${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : 'Not loaded'}</strong>
+      </div>
+    </div>
+  `
+}
+
+function visibleBoardPosts(): BoardPost[] {
+  if (!boardExcludeSystem.value) return boardPosts.value
+  return boardPosts.value.filter(post => !AUTOMATED_BOARD_AUTHORS.has(post.author))
+}
+
 function PostCard({ post }: { post: BoardPost }) {
   const handleVote = async (dir: 'up' | 'down', e: Event) => {
     e.stopPropagation()
@@ -129,21 +198,28 @@ function PostCard({ post }: { post: BoardPost }) {
         <button class="vote-btn downvote" onClick=${(e: Event) => handleVote('down', e)}>▼</button>
       </div>
       <div class="post-content">
-        <div class="post-title">
-          ${post.title}
-          ${' '}
-          <${FlairBadge} flair=${post.flair} />
+        <div class="post-head">
+          <div class="post-title-row">
+            <div class="post-title">${post.title}</div>
+            <div class="post-chip-row">
+              <${FlairBadge} flair=${post.flair} />
+              ${isUpdated(post) ? html`<span class="board-meta-chip">Updated</span>` : null}
+            </div>
+          </div>
+          <div class="post-meta">
+            <span>By ${post.author}</span>
+            <span><${TimeAgo} timestamp=${post.created_at} /></span>
+            ${isUpdated(post)
+              ? html`<span>Updated <${TimeAgo} timestamp=${post.updated_at} /></span>`
+              : null}
+            <span>${post.comment_count} comments</span>
+            <span>${post.votes ?? 0} votes</span>
+            ${(post.hearth_count ?? 0) > 0
+              ? html`<span>♥ ${post.hearth_count}</span>`
+              : null}
+          </div>
         </div>
-        <div class="post-meta">
-          <span>${post.author}</span>
-          <${TimeAgo} timestamp=${post.created_at} />
-          ${post.comment_count > 0
-            ? html`<span>${post.comment_count} comments</span>`
-            : null}
-          ${(post.hearth_count ?? 0) > 0
-            ? html`<span>♥ ${post.hearth_count}</span>`
-            : null}
-        </div>
+        <div class="post-snippet">${previewText(post.content)}</div>
       </div>
     </div>
   `
@@ -237,7 +313,8 @@ function PostDetail({ post }: { post: BoardPost }) {
 // ── Main Board component ───────────────────────────────────
 
 export function Board() {
-  const posts = boardPosts.value
+  const posts = visibleBoardPosts()
+  const rawPostCount = boardPosts.value.length
   const loading = boardLoading.value
   const postId = route.value.postId
   const boardFeedDegraded = serverStatus.value?.data_quality?.board_contract_ok === false
@@ -248,11 +325,13 @@ export function Board() {
     return post
       ? html`
           <${BoardFeedNotice} />
+          <${BoardSummary} />
           <${PostDetail} post=${post} />
         `
       : html`
           <div>
             <${BoardFeedNotice} />
+            <${BoardSummary} />
             <button class="back-btn" onClick=${() => navigate('board')}>← Back to Board</button>
             <div class="empty-state">
               ${boardFeedDegraded ? 'Post not available while board feed is degraded' : 'Post not found'}
@@ -264,6 +343,7 @@ export function Board() {
   // List view
   return html`
     <${BoardFeedNotice} />
+    <${BoardSummary} />
     <${SortBar} />
     ${loading
       ? html`<div class="loading-indicator">Loading board...</div>`
@@ -272,7 +352,9 @@ export function Board() {
             <div class="empty-state">
               ${boardFeedDegraded
                 ? 'No posts loaded (board feed degraded). Check board contract sync.'
-                : 'No posts yet'}
+                : rawPostCount > 0 && boardExcludeSystem.value
+                  ? 'Recent board is currently dominated by automated reports. Toggle them back on if you need the raw feed.'
+                  : 'No posts yet'}
             </div>
           `
         : html`<div class="board-post-list">

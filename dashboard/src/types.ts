@@ -695,29 +695,25 @@ export interface RouteState {
 
 export type TabId =
   | 'overview'
-  | 'ops'
-  | 'execution'
   | 'board'
   | 'activity'
-  | 'agents'
-  | 'tasks'
-  | 'goals'
-  | 'journal'
-  | 'trpg'
   | 'council'
-  | 'mdal'
+  | 'goals'
+  | 'execution'
+  | 'tasks'
+  | 'agents'
+  | 'ops'
+  | 'trpg'
 
 export const VALID_TABS: TabId[] = [
   'overview',
-  'ops',
-  'execution',
   'board',
   'activity',
-  'agents',
-  'tasks',
-  'goals',
-  'journal',
-  'trpg',
   'council',
-  'mdal',
+  'goals',
+  'execution',
+  'tasks',
+  'agents',
+  'ops',
+  'trpg',
 ]

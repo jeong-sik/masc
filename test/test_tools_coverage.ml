@@ -223,8 +223,12 @@ let test_masc_operator_snapshot_schema () =
   match find_tool "masc_operator_snapshot" with
   | None -> Alcotest.fail "masc_operator_snapshot not found"
   | Some schema ->
+      Alcotest.(check bool) "use-this description" true
+        (String.length schema.description > 20);
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
+          Alcotest.(check bool) "has view" true
+            (List.mem_assoc "view" props);
           Alcotest.(check bool) "has include_messages" true
             (List.mem_assoc "include_messages" props);
           Alcotest.(check bool) "has include_sessions" true
@@ -235,6 +239,25 @@ let test_masc_operator_action_schema () =
   match find_tool "masc_operator_action" with
   | None -> Alcotest.fail "masc_operator_action not found"
   | Some schema ->
+      Alcotest.(check bool) "use-this description" true
+        (String.length schema.description > 20);
+      (match get_json_assoc "properties" schema.input_schema with
+       | Some props ->
+           (match List.assoc_opt "action_type" props with
+            | Some (`Assoc action_props) ->
+                (match List.assoc_opt "enum" action_props with
+                 | Some (`List enums) ->
+                     Alcotest.(check bool) "has team_note" true
+                       (List.mem (`String "team_note") enums);
+                     Alcotest.(check bool) "has team_broadcast" true
+                       (List.mem (`String "team_broadcast") enums);
+                     Alcotest.(check bool) "has team_task_inject" true
+                       (List.mem (`String "team_task_inject") enums);
+                     Alcotest.(check bool) "has keeper_message" true
+                       (List.mem (`String "keeper_message") enums)
+                 | _ -> Alcotest.fail "action_type enum missing")
+            | _ -> Alcotest.fail "action_type missing")
+       | None -> Alcotest.fail "masc_operator_action missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->
           Alcotest.(check bool) "action_type required" true
@@ -242,6 +265,33 @@ let test_masc_operator_action_schema () =
           Alcotest.(check bool) "payload required" true
             (List.mem (`String "payload") reqs)
       | None -> Alcotest.fail "masc_operator_action missing required field"
+
+let test_remote_operator_action_schema_is_strict () =
+  let schema =
+    match List.find_opt (fun schema -> schema.name = "masc_operator_action")
+            Masc_mcp.Tool_operator.remote_schemas with
+    | Some schema -> schema
+    | None -> Alcotest.fail "remote masc_operator_action schema not found"
+  in
+  match get_json_assoc "properties" schema.input_schema with
+  | Some props ->
+      (match List.assoc_opt "action_type" props with
+       | Some (`Assoc fields) ->
+           (match List.assoc_opt "enum" fields with
+            | Some (`List enums) ->
+                Alcotest.(check bool) "remote excludes team_turn" false
+                  (List.mem (`String "team_turn") enums);
+                Alcotest.(check bool) "remote excludes task_inject" false
+                  (List.mem (`String "task_inject") enums);
+                Alcotest.(check bool) "remote excludes keeper_msg" false
+                  (List.mem (`String "keeper_msg") enums);
+                Alcotest.(check bool) "remote includes team_note" true
+                  (List.mem (`String "team_note") enums);
+                Alcotest.(check bool) "remote includes keeper_message" true
+                  (List.mem (`String "keeper_message") enums)
+            | _ -> Alcotest.fail "remote action_type missing enum")
+       | _ -> Alcotest.fail "remote action_type missing")
+  | None -> Alcotest.fail "remote masc_operator_action missing properties"
 
 let test_masc_operator_confirm_schema () =
   match find_tool "masc_operator_confirm" with
@@ -252,7 +302,6 @@ let test_masc_operator_confirm_schema () =
           Alcotest.(check bool) "confirm_token required" true
             (List.mem (`String "confirm_token") reqs)
       | None -> Alcotest.fail "masc_operator_confirm missing required field"
-
 
 
 
@@ -760,6 +809,8 @@ let () =
       Alcotest.test_case "masc_done" `Quick test_masc_done_schema;
       Alcotest.test_case "masc_operator_snapshot" `Quick test_masc_operator_snapshot_schema;
       Alcotest.test_case "masc_operator_action" `Quick test_masc_operator_action_schema;
+      Alcotest.test_case "remote_operator_action_strict" `Quick
+        test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "masc_operator_confirm" `Quick test_masc_operator_confirm_schema;
     ];
     "portal_tools", [

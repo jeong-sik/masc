@@ -84,11 +84,27 @@ let verify_mcp_auth ~base_path request =
           else
             Ok (Some cred)
 
+let verify_operator_mcp_auth ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  if not auth_config.Types.enabled then
+    Error "/mcp/operator requires token auth to be enabled for this room."
+  else if not auth_config.require_token then
+    Error "/mcp/operator requires bearer token auth (require_token=true)."
+  else
+    match extract_bearer_token request with
+    | None ->
+        Error "Authentication required. Use 'Authorization: Bearer <token>' header."
+    | Some token -> (
+        match Auth.find_credential_by_token base_path ~token with
+        | Ok cred -> Ok (Some cred)
+        | Error err -> Error (Types.masc_error_to_string err))
+
 let mcp_protocol_versions = Mcp_server.supported_protocol_versions
 
 let mcp_protocol_version_default = Mcp_server.default_protocol_version
 
 let protocol_version_by_session : (string, string) Hashtbl.t = Hashtbl.create 128
+let mcp_profile_by_session : (string, Mcp_eio.tool_profile) Hashtbl.t = Hashtbl.create 128
 
 (** Get default base path from ME_ROOT or current directory *)
 let default_base_path () =
@@ -103,6 +119,42 @@ let is_valid_protocol_version version =
 let remember_protocol_version session_id version =
   if is_valid_protocol_version version then
     Hashtbl.replace protocol_version_by_session session_id version
+
+let remember_mcp_profile session_id profile =
+  Hashtbl.replace mcp_profile_by_session session_id profile
+
+let forget_mcp_session session_id =
+  Hashtbl.remove protocol_version_by_session session_id;
+  Hashtbl.remove mcp_profile_by_session session_id
+
+let profile_label = function
+  | Mcp_eio.Full -> "/mcp"
+  | Mcp_eio.Operator_remote -> "/mcp/operator"
+
+let validate_mcp_session_profile ~profile session_id =
+  match Hashtbl.find_opt mcp_profile_by_session session_id with
+  | None -> Ok ()
+  | Some existing when existing = profile -> Ok ()
+  | Some existing ->
+      Error
+        (Printf.sprintf "Session %s belongs to %s, not %s." session_id
+           (profile_label existing) (profile_label profile))
+
+let validate_mcp_session_delete_profile ~profile session_id =
+  match profile with
+  | Mcp_eio.Operator_remote -> (
+      match Hashtbl.find_opt mcp_profile_by_session session_id with
+      | Some Mcp_eio.Operator_remote -> Ok ()
+      | Some existing ->
+          Error
+            (Printf.sprintf "Session %s belongs to %s, not %s." session_id
+               (profile_label existing) (profile_label profile))
+      | None ->
+          Error
+            (Printf.sprintf
+               "Session %s is not registered on %s." session_id
+               (profile_label profile)))
+  | Mcp_eio.Full -> validate_mcp_session_profile ~profile session_id
 
 (** Extract protocol version from initialize request body *)
 let protocol_version_from_body body_str =
@@ -4196,6 +4248,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
       sw;
       clock;
+      mcp_session_id = None;
     }
   in
   let include_messages =
@@ -4223,6 +4276,7 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
       agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
       sw;
       clock;
+      mcp_session_id = None;
     }
   in
   Operator_control.action_json ?actor_hint:(operator_actor_hint request) ctx args
@@ -4234,13 +4288,13 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
       agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
       sw;
       clock;
+      mcp_session_id = None;
     }
   in
   Operator_control.confirm_json ?actor_hint:(operator_actor_hint request) ctx args
 
 let operator_error_json message =
   `Assoc [ ("status", `String "error"); ("message", `String message) ]
-
 let parse_host_port host_header default_host default_port =
   match host_header with
   | None -> (default_host, default_port)
@@ -4961,7 +5015,7 @@ let handle_graphql request reqd =
   | _ -> Http.Response.method_not_allowed reqd
 
 (** MCP POST handler - async body reading with callback-based response *)
-let handle_post_mcp request reqd =
+let handle_post_mcp ?(profile = Mcp_eio.Full) request reqd =
   let origin = get_origin request in
   let session_id =
     match get_session_id_any request with
@@ -4975,7 +5029,24 @@ let handle_post_mcp request reqd =
     | Some s -> s.Mcp_server.room_config.base_path
     | None -> default_base_path ()
   in
-  match verify_mcp_auth ~base_path request with
+  let auth_result =
+    match profile with
+    | Mcp_eio.Full -> verify_mcp_auth ~base_path request
+    | Mcp_eio.Operator_remote -> verify_operator_mcp_auth ~base_path request
+  in
+  match validate_mcp_session_profile ~profile session_id with
+  | Error msg ->
+      let body = json_rpc_error (-32600) msg in
+      let headers =
+        Httpun.Headers.of_list
+          ( ("content-length", string_of_int (String.length body))
+          :: json_headers session_id protocol_version origin )
+      in
+      let response = Httpun.Response.create ~headers `Conflict in
+      Httpun.Reqd.respond_with_string reqd response body
+  | Ok () ->
+      remember_mcp_profile session_id profile;
+      (match auth_result with
   | Error msg ->
       respond_mcp_auth_error request reqd ~session_id ~protocol_version msg
   | Ok _cred_opt -> (
@@ -5004,7 +5075,7 @@ let handle_post_mcp request reqd =
                 let clock = get_clock ()
                 in
                 let response_json =
-                  Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id
+                  Mcp_eio.handle_request ~clock ~sw ~profile ~mcp_session_id:session_id
                     ?auth_token state body_str
                 in
                 (match protocol_version_from_body body_str with
@@ -5097,7 +5168,7 @@ let handle_post_mcp request reqd =
                 let response =
                   Httpun.Response.create ~headers `Internal_server_error
                 in
-                Httpun.Reqd.respond_with_string reqd response body))
+                Httpun.Reqd.respond_with_string reqd response body)))
 
 (** SSE connection tracking (prevents leaks / stale sessions) *)
 type sse_conn_info = {
@@ -5230,7 +5301,7 @@ let send_raw info data =
       close_sse_conn info;
       false
 
-let handle_get_mcp ?legacy_messages_endpoint request reqd =
+let handle_get_mcp ?legacy_messages_endpoint ?(profile = Mcp_eio.Full) request reqd =
   let origin = get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
@@ -5240,7 +5311,18 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
     | None -> []
   in
   let last_event_id = get_last_event_id request in
-  match check_sse_connect_guard session_id with
+  match validate_mcp_session_profile ~profile session_id with
+  | Error msg ->
+      let headers =
+        Httpun.Headers.of_list
+          ( ("content-length", string_of_int (String.length msg))
+          :: json_headers session_id protocol_version origin )
+      in
+      let response = Httpun.Response.create ~headers `Conflict in
+      Httpun.Reqd.respond_with_string reqd response msg
+  | Ok () ->
+      remember_mcp_profile session_id profile;
+      (match check_sse_connect_guard session_id with
   | Error (reason, retry_after_s) ->
       respond_sse_rate_limited
         ~origin
@@ -5308,7 +5390,7 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
            Eio.Fiber.fork ~sw (fun () ->
              let is_cancelled exn =
                match exn with
-               | Eio.Cancel.Cancelled _ -> true
+              | Eio.Cancel.Cancelled _ -> true
                | _ -> false
              in
              let rec loop () =
@@ -5339,7 +5421,7 @@ let handle_get_mcp ?legacy_messages_endpoint request reqd =
       let client_count = Sse.client_count () in
       if client_count > Sse.max_clients / 2 then
         Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
-          session_id client_count Sse.max_clients
+          session_id client_count Sse.max_clients)
 
 (** SSE simple handler - for compatibility, returns single event *)
 let sse_simple_handler request reqd =
@@ -5503,6 +5585,19 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
              ignore (send_raw_data
                "event: error\ndata: {\"error\":\"server not ready\"}\n\n"))
 
+let handle_get_operator_mcp request reqd =
+  let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
+  let protocol_version = get_protocol_version_for_session ~session_id request in
+  let base_path =
+    match !server_state with
+    | Some s -> s.Mcp_server.room_config.base_path
+    | None -> default_base_path ()
+  in
+  match verify_operator_mcp_auth ~base_path request with
+  | Error msg ->
+      respond_mcp_auth_error request reqd ~session_id ~protocol_version msg
+  | Ok _ -> handle_get_mcp ~profile:Mcp_eio.Operator_remote request reqd
+
 (** POST /messages - Legacy SSE transport (client->server messages) *)
 let handle_post_messages request reqd =
   let origin = get_origin request in
@@ -5559,26 +5654,50 @@ let handle_post_messages request reqd =
            ))
 
 (** DELETE /mcp - Session termination *)
-let handle_delete_mcp request reqd =
-  match get_session_id_any request with
-  | Some session_id ->
-      stop_sse_session session_id;
-      Sse.unregister session_id;
-      Hashtbl.remove protocol_version_by_session session_id;
-      Printf.printf "🔚 Session terminated: %s\n%!" session_id;
-      let headers = Httpun.Headers.of_list (
-        ("content-length", "0")
-        :: mcp_headers session_id (get_protocol_version request)
-      ) in
-      let response = Httpun.Response.create ~headers `No_content in
-      Httpun.Reqd.respond_with_string reqd response ""
-  | None ->
-      let body = "Mcp-Session-Id required" in
-      let headers = Httpun.Headers.of_list [
-        ("content-length", string_of_int (String.length body));
-      ] in
-      let response = Httpun.Response.create ~headers `Bad_request in
-      Httpun.Reqd.respond_with_string reqd response body
+let handle_delete_mcp ?(profile = Mcp_eio.Full) request reqd =
+  let base_path =
+    match !server_state with
+    | Some s -> s.Mcp_server.room_config.base_path
+    | None -> default_base_path ()
+  in
+  let auth_result =
+    match profile with
+    | Mcp_eio.Full -> Ok None
+    | Mcp_eio.Operator_remote -> verify_operator_mcp_auth ~base_path request
+  in
+  match auth_result with
+  | Error msg ->
+      let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
+      let protocol_version = get_protocol_version_for_session ~session_id request in
+      respond_mcp_auth_error request reqd ~session_id ~protocol_version msg
+  | Ok _ ->
+      (match get_session_id_any request with
+      | Some session_id -> (
+          match validate_mcp_session_delete_profile ~profile session_id with
+          | Error msg ->
+              let headers = Httpun.Headers.of_list [
+                ("content-length", string_of_int (String.length msg));
+              ] in
+              let response = Httpun.Response.create ~headers `Conflict in
+              Httpun.Reqd.respond_with_string reqd response msg
+          | Ok () ->
+              stop_sse_session session_id;
+              Sse.unregister session_id;
+              forget_mcp_session session_id;
+              Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+              let headers = Httpun.Headers.of_list (
+                ("content-length", "0")
+                :: mcp_headers session_id (get_protocol_version request)
+              ) in
+              let response = Httpun.Response.create ~headers `No_content in
+              Httpun.Reqd.respond_with_string reqd response "")
+      | None ->
+          let body = "Mcp-Session-Id required" in
+          let headers = Httpun.Headers.of_list [
+            ("content-length", string_of_int (String.length body));
+          ] in
+          let response = Httpun.Response.create ~headers `Bad_request in
+          Httpun.Reqd.respond_with_string reqd response body)
 
 (** Build routes for MCP server *)
 let make_routes ~port ~host ~sw ~clock =
@@ -5767,8 +5886,10 @@ let make_routes ~port ~host ~sw ~clock =
        (serve_graphiql_asset "react-dom.production.min.js")
   |> Http.Router.get "/mcp" (fun request reqd ->
        with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
+  |> Http.Router.get "/mcp/operator" handle_get_operator_mcp
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
+  |> Http.Router.post "/mcp/operator" (handle_post_mcp ~profile:Mcp_eio.Operator_remote)
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)
@@ -6477,6 +6598,7 @@ let make_extended_handler routes =
       let path = Http.Request.path request in
       let is_mcp_like =
         String.equal path "/mcp"
+        || String.equal path "/mcp/operator"
         || String.equal path "/sse"
         || String.equal path "/messages"
       in
@@ -6506,6 +6628,8 @@ let make_extended_handler routes =
         match request.meth, path with
         | `OPTIONS, _ -> options_handler request reqd
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
+        | `DELETE, "/mcp/operator" ->
+            handle_delete_mcp ~profile:Mcp_eio.Operator_remote request reqd
         | `GET, "/api/v1/board/flairs" ->
             let flairs = List.map Board.flair_to_yojson Board.available_flairs in
             let json = `Assoc [("flairs", `List flairs)] in
@@ -6639,6 +6763,7 @@ let run_server ~sw ~env ~port ~base_path =
     loop ());
 
   let config = { Http.default_config with port; host = "0.0.0.0" } in
+  Unix.putenv "MASC_HTTP_PORT" (string_of_int config.port);
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_extended_handler routes in
 
@@ -6663,6 +6788,14 @@ let run_server ~sw ~env ~port ~base_path =
     "   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)\n\
      %!";
   Printf.printf "   DELETE /mcp → Session termination\n%!";
+  Printf.printf
+    "   GET  /mcp/operator → Remote operator MCP stream (bearer token required)\n\
+     %!";
+  Printf.printf
+    "   POST /mcp/operator → Remote operator JSON-RPC (3 curated tools only)\n\
+     %!";
+  Printf.printf
+    "   DELETE /mcp/operator → Remote operator session termination\n%!";
   Printf.printf "   POST /graphql → GraphQL (read-only)\n%!";
   Printf.printf
     "   GET  /sse → legacy SSE stream (deprecated; use /mcp)\n%!";
@@ -6873,78 +7006,123 @@ let run_server ~sw ~env ~port ~base_path =
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
-      | `POST, "/mcp" | `POST, "/" ->
+      | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/operator" ->
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
           in
           let auth_token = auth_token_from_request httpun_request in
           let protocol_version = get_protocol_version_for_session ~session_id httpun_request in
+          let profile =
+            if String.equal path "/mcp/operator" then Mcp_eio.Operator_remote
+            else Mcp_eio.Full
+          in
           (* HTTP-level auth check for MCP endpoints *)
           let base_path = match !server_state with
             | Some s -> s.Mcp_server.room_config.base_path
             | None -> default_base_path ()
           in
-          (match verify_mcp_auth ~base_path httpun_request with
-          | Error msg ->
-              let body = Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg in
-              h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
-          | Ok _cred_opt -> (
-              match classify_mcp_accept httpun_request with
-              | Http_negotiation.Rejected ->
-                  let body =
-                    json_rpc_error (-32600)
-                      "Invalid Accept header: must include application/json and text/event-stream. \
-                       Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility."
-                  in
-                  h2_respond_json h2_reqd body ~status:`Bad_request
-                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
-              | accept_mode ->
-                  let accept_warn_headers =
-                    legacy_accept_warning_headers accept_mode
-                  in
-                  h2_read_body h2_reqd (fun body_str ->
-                      let state = get_server_state ()
-                      in
-                      let response_json =
-                        Mcp_eio.handle_request ~clock ~sw
-                          ~mcp_session_id:session_id ?auth_token state body_str
-                      in
-                      (match protocol_version_from_body body_str with
-                      | Some v -> remember_protocol_version session_id v
-                      | None -> ());
-                      let protocol_version =
-                        get_protocol_version_for_session ~session_id
-                          httpun_request
-                      in
-                      let mcp_hdrs =
-                        accept_warn_headers @ mcp_headers session_id protocol_version
-                        @ cors
-                      in
-                      match response_json with
-                      | `Null ->
-                          h2_respond_empty h2_reqd ~status:`Accepted
-                            ~extra_headers:mcp_hdrs
-                      | json when is_http_error_response json ->
-                          let body = Yojson.Safe.to_string json in
-                          h2_respond_json h2_reqd body ~status:`Bad_request
-                            ~extra_headers:mcp_hdrs
-                      | json ->
-                          let body = Yojson.Safe.to_string json in
-                          h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs))
-              )  (* Close accept-policy match *)
+          let auth_result =
+            match profile with
+            | Mcp_eio.Full -> verify_mcp_auth ~base_path httpun_request
+            | Mcp_eio.Operator_remote ->
+                verify_operator_mcp_auth ~base_path httpun_request
+          in
+          (match validate_mcp_session_profile ~profile session_id with
+           | Error msg ->
+               let body = json_rpc_error (-32600) msg in
+               h2_respond_json h2_reqd body ~status:`Conflict ~extra_headers:cors
+           | Ok () ->
+               remember_mcp_profile session_id profile;
+               (match auth_result with
+                | Error msg ->
+                    let body = Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg in
+                    h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+                | Ok _cred_opt -> (
+                    match classify_mcp_accept httpun_request with
+                    | Http_negotiation.Rejected ->
+                        let body =
+                          json_rpc_error (-32600)
+                            "Invalid Accept header: must include application/json and text/event-stream. \
+                             Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility."
+                        in
+                        h2_respond_json h2_reqd body ~status:`Bad_request
+                          ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                    | accept_mode ->
+                        let accept_warn_headers =
+                          legacy_accept_warning_headers accept_mode
+                        in
+                        h2_read_body h2_reqd (fun body_str ->
+                            let state = get_server_state ()
+                            in
+                            let response_json =
+                              Mcp_eio.handle_request ~clock ~sw ~profile
+                                ~mcp_session_id:session_id ?auth_token state body_str
+                            in
+                            (match protocol_version_from_body body_str with
+                            | Some v -> remember_protocol_version session_id v
+                            | None -> ());
+                            let protocol_version =
+                              get_protocol_version_for_session ~session_id
+                                httpun_request
+                            in
+                            let mcp_hdrs =
+                              accept_warn_headers @ mcp_headers session_id protocol_version
+                              @ cors
+                            in
+                            match response_json with
+                            | `Null ->
+                                h2_respond_empty h2_reqd ~status:`Accepted
+                                  ~extra_headers:mcp_hdrs
+                            | json when is_http_error_response json ->
+                                let body = Yojson.Safe.to_string json in
+                                h2_respond_json h2_reqd body ~status:`Bad_request
+                                  ~extra_headers:mcp_hdrs
+                            | json ->
+                                let body = Yojson.Safe.to_string json in
+                                h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs))))
 
-      | `DELETE, "/mcp" ->
-          (match session_id_opt with
-           | Some session_id ->
-               stop_sse_session session_id;
-               Sse.unregister session_id;
-               Hashtbl.remove protocol_version_by_session session_id;
-               Printf.printf "🔚 Session terminated: %s\n%!" session_id;
-               let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
-               h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs
-           | None ->
-               h2_respond_text h2_reqd "Mcp-Session-Id required" ~status:`Bad_request ~extra_headers:cors)
+      | `DELETE, "/mcp" | `DELETE, "/mcp/operator" ->
+          let profile =
+            if String.equal path "/mcp/operator" then Mcp_eio.Operator_remote
+            else Mcp_eio.Full
+          in
+          let base_path = match !server_state with
+            | Some s -> s.Mcp_server.room_config.base_path
+            | None -> default_base_path ()
+          in
+          let auth_result =
+            match profile with
+            | Mcp_eio.Full -> Ok None
+            | Mcp_eio.Operator_remote ->
+                verify_operator_mcp_auth ~base_path httpun_request
+          in
+          (match auth_result with
+           | Error msg ->
+               let body =
+                 Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"}}|} msg
+               in
+               h2_respond_json h2_reqd body ~status:`Unauthorized
+                 ~extra_headers:(("www-authenticate", "Bearer") :: cors)
+           | Ok _ ->
+               (match session_id_opt with
+                | Some session_id -> (
+                    match validate_mcp_session_delete_profile ~profile session_id with
+                    | Error msg ->
+                        let body =
+                          Printf.sprintf {|{"jsonrpc":"2.0","error":{"code":-32600,"message":"%s"}}|} msg
+                        in
+                        h2_respond_json h2_reqd body ~status:`Conflict
+                          ~extra_headers:cors
+                    | Ok () ->
+                        stop_sse_session session_id;
+                        Sse.unregister session_id;
+                        forget_mcp_session session_id;
+                        Printf.printf "🔚 Session terminated: %s\n%!" session_id;
+                        let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
+                        h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs)
+                | None ->
+                    h2_respond_text h2_reqd "Mcp-Session-Id required" ~status:`Bad_request ~extra_headers:cors))
 
       (* ─────────────────────────────────────────────────────────────────────
          Dashboard

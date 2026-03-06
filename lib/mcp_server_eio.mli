@@ -24,6 +24,11 @@ type server_state = Mcp_server.server_state
 (** JSON-RPC request (re-exported for convenience) *)
 type jsonrpc_request = Mcp_server.jsonrpc_request
 
+(** Tool exposure profile for streamable HTTP endpoints. *)
+type tool_profile =
+  | Full
+  | Operator_remote
+
 (** {1 JSON-RPC Helpers (re-exported)} *)
 
 val jsonrpc_request_of_yojson : Yojson.Safe.t -> (jsonrpc_request, string) result
@@ -107,6 +112,7 @@ val create_state_eio :
 val handle_request :
   clock:_ Eio.Time.clock ->
   sw:Eio.Switch.t ->
+  ?profile:tool_profile ->
   ?mcp_session_id:string ->
   ?auth_token:string ->
   server_state ->

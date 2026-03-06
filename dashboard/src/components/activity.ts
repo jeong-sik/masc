@@ -10,6 +10,7 @@ import { connected, eventCount, journal } from '../sse'
 import type { Message, JournalEntry } from '../types'
 
 type ActivityFilter = 'all' | 'messages' | 'board' | 'tasks' | 'keepers' | 'system'
+const MAX_VISIBLE_ROWS = 120
 
 type ActivityRowModel = {
   id: string
@@ -40,6 +41,7 @@ const KIND_BADGE_LABELS: Record<Exclude<ActivityFilter, 'all'>, string> = {
 }
 
 function classifyJournalKind(entry: JournalEntry): Exclude<ActivityFilter, 'all'> {
+  if (entry.kind) return entry.kind
   const text = entry.text
   if (text === 'New post' || text === 'New comment') return 'board'
   if (text.startsWith('Task:')) return 'tasks'
@@ -79,16 +81,15 @@ function toEpoch(ts: string | number): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-const allRows = computed(() => {
+const sortedRows = computed(() => {
   const msgRows = messages.value.map(fromMessage)
   const journalRows = journal.value.map(fromJournal)
   return [...msgRows, ...journalRows]
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))
-    .slice(0, 120)
 })
 
 const activityCounts = computed(() => {
-  const rows = allRows.value
+  const rows = sortedRows.value
   return {
     total: rows.length,
     messages: rows.filter(row => row.kind === 'messages').length,
@@ -101,8 +102,10 @@ const activityCounts = computed(() => {
 
 const filteredRows = computed(() => {
   const filter = activityFilter.value
-  if (filter === 'all') return allRows.value
-  return allRows.value.filter(row => row.kind === filter)
+  const rows = filter === 'all'
+    ? sortedRows.value
+    : sortedRows.value.filter(row => row.kind === filter)
+  return rows.slice(0, MAX_VISIBLE_ROWS)
 })
 
 const agentMotionRows = computed(() =>
@@ -162,9 +165,9 @@ export function Activity() {
   return html`
     <div class="stats-grid">
       <${ActivityStat} label="Visible rows" value=${rows.length} />
-      <${ActivityStat} label="Messages" value=${counts.messages} color="#47b8ff" />
-      <${ActivityStat} label="Keeper events" value=${counts.keepers} color="#4ade80" />
-      <${ActivityStat} label="Board events" value=${counts.board} color="#fbbf24" />
+      <${ActivityStat} label="Tracked messages" value=${counts.messages} color="#47b8ff" />
+      <${ActivityStat} label="Tracked keeper events" value=${counts.keepers} color="#4ade80" />
+      <${ActivityStat} label="Tracked board events" value=${counts.board} color="#fbbf24" />
       <${ActivityStat} label="SSE events" value=${eventCount.value} color="#c084fc" />
     </div>
 
@@ -185,6 +188,7 @@ export function Activity() {
             ${connected.value ? 'Live SSE' : 'Reconnecting'}
           </span>
           <span>${latest ? html`Latest: <${TimeAgo} timestamp=${latest.timestamp} />` : 'Latest: —'}</span>
+          <span>Showing up to ${MAX_VISIBLE_ROWS} rows</span>
           <span>Journal merged here</span>
         </div>
       </div>

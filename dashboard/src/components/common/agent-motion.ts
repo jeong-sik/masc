@@ -6,6 +6,10 @@ export interface AgentMotionSnapshot {
   lastActivityText: string | null
 }
 
+function normalizeAgentKey(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
 function toEpoch(value: string | number): number {
   const parsed =
     typeof value === 'number'
@@ -26,16 +30,18 @@ export function buildAgentMotion(
   messages: Message[],
   journal: JournalEntry[],
 ): AgentMotionSnapshot {
+  const agentKey = normalizeAgentKey(agentName)
   const activeAssignedCount = tasks.filter(task =>
-    task.assignee === agentName && (task.status === 'claimed' || task.status === 'in_progress')
+    normalizeAgentKey(task.assignee) === agentKey
+    && (task.status === 'claimed' || task.status === 'in_progress')
   ).length
 
   const recentMessage = messages
-    .filter(message => message.from === agentName)
+    .filter(message => normalizeAgentKey(message.from) === agentKey)
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
 
   const recentJournal = journal
-    .filter(entry => entry.agent === agentName)
+    .filter(entry => normalizeAgentKey(entry.agent) === agentKey)
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
 
   const messageTs = recentMessage ? toEpoch(recentMessage.timestamp) : 0

@@ -539,7 +539,7 @@ type sort_order = Hot | Trending | Recent | Updated | Discussed
 let list_posts t ?(visibility_filter=None) ?hearth ?(sort_by=Hot) ?(limit=50) () =
   let vis_str = Option.map visibility_to_string visibility_filter in
   let hearth_norm = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
-  let lim = max 1 (min limit 100) in
+  let lim = max 1 (min limit 5200) in
   let q = match sort_by with
     | Hot -> list_hot_q
     | Recent -> list_recent_q

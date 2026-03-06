@@ -418,12 +418,26 @@ export async function refreshGoals(): Promise<void> {
 }
 
 export async function refreshMdal(): Promise<void> {
+  const refreshSeq = ++_mdalRefreshSeq
   mdalLoading.value = true
   try {
-    const latest = await fetchLatestMdalLoop()
-    lastMdalRefreshAt.value = new Date().toISOString()
-    if (!latest) return
+    const latestResult = await fetchLatestMdalLoop()
+    if (refreshSeq !== _mdalRefreshSeq) return
+    if (latestResult.state === 'error') return
 
+    lastMdalRefreshAt.value = new Date().toISOString()
+    if (latestResult.state === 'idle') {
+      const next = new Map(mdalLoops.value)
+      for (const [loopId, loop] of next.entries()) {
+        if (loop.status === 'running') {
+          next.set(loopId, { ...loop, status: 'stopped' })
+        }
+      }
+      mdalLoops.value = next
+      return
+    }
+
+    const latest = latestResult.loop
     const next = new Map(mdalLoops.value)
     const existing = next.get(latest.loop_id)
     next.set(latest.loop_id, {
@@ -435,7 +449,9 @@ export async function refreshMdal(): Promise<void> {
   } catch (err) {
     console.error('MDAL fetch error:', err)
   } finally {
-    mdalLoading.value = false
+    if (refreshSeq === _mdalRefreshSeq) {
+      mdalLoading.value = false
+    }
   }
 }
 
@@ -444,6 +460,7 @@ export async function refreshMdal(): Promise<void> {
 
 let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
 let _boardDebounce: ReturnType<typeof setTimeout> | null = null
+let _mdalRefreshSeq = 0
 
 export function setupSSEReaction(): () => void {
   // Subscribe to SSE events and trigger refreshes
@@ -468,7 +485,12 @@ export function setupSSEReaction(): () => void {
     }
 
     // Board-specific events trigger board refresh
-    if (event.type === 'board_post' || event.type === 'board_comment') {
+    if (
+      event.type === 'board_post'
+      || event.type === 'masc/board_post'
+      || event.type === 'board_comment'
+      || event.type === 'masc/board_comment'
+    ) {
       if (!_boardDebounce) {
         _boardDebounce = setTimeout(() => {
           refreshBoard()

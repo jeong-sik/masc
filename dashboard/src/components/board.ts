@@ -26,10 +26,9 @@ const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'updated', label: 'Updated' },
   { id: 'discussed', label: 'Discussed' },
 ]
-const AUTOMATED_BOARD_AUTHORS = new Set(['lodge-system', 'team-session'])
-
 // ── Local state for detail view ────────────────────────────
 
+const detailPost = signal<BoardPost | null>(null)
 const detailComments = signal<BoardComment[]>([])
 const detailLoading = signal(false)
 const detailPostId = signal<string | null>(null)
@@ -45,16 +44,38 @@ const commentSubmitting = signal(false)
 
 async function loadPostDetail(postId: string) {
   detailPostId.value = postId
+  detailPost.value = null
+  detailComments.value = []
   detailLoading.value = true
   try {
     const data = await fetchBoardPost(postId)
     // Guard: discard stale response if user navigated to a different post
     if (detailPostId.value !== postId) return
+    detailPost.value = {
+      id: data.id,
+      author: data.author,
+      title: data.title,
+      content: data.content,
+      tags: data.tags,
+      votes: data.votes,
+      vote_balance: data.vote_balance,
+      comment_count: data.comment_count,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+      flair: data.flair,
+      hearth_count: data.hearth_count,
+    }
     detailComments.value = data.comments ?? []
   } catch {
+    if (detailPostId.value === postId) {
+      detailPost.value = null
+      detailComments.value = []
+    }
     // Post detail may not be available; comments remain empty
   } finally {
-    detailLoading.value = false
+    if (detailPostId.value === postId) {
+      detailLoading.value = false
+    }
   }
 }
 
@@ -151,12 +172,13 @@ function isUpdated(post: BoardPost): boolean {
 
 function BoardSummary() {
   const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
+  const visibleCount = boardPosts.value.length
 
   return html`
     <div class="board-summary-strip">
       <div class="board-summary-item">
         <span class="board-summary-label">Visible posts</span>
-        <strong>${visibleBoardPosts().length}</strong>
+        <strong>${visibleCount}</strong>
       </div>
       <div class="board-summary-item">
         <span class="board-summary-label">Sort</span>
@@ -172,11 +194,6 @@ function BoardSummary() {
       </div>
     </div>
   `
-}
-
-function visibleBoardPosts(): BoardPost[] {
-  if (!boardExcludeSystem.value) return boardPosts.value
-  return boardPosts.value.filter(post => !AUTOMATED_BOARD_AUTHORS.has(post.author))
 }
 
 function PostCard({ post }: { post: BoardPost }) {
@@ -313,15 +330,17 @@ function PostDetail({ post }: { post: BoardPost }) {
 // ── Main Board component ───────────────────────────────────
 
 export function Board() {
-  const posts = visibleBoardPosts()
-  const rawPostCount = boardPosts.value.length
+  const posts = boardPosts.value
   const loading = boardLoading.value
   const postId = route.value.postId
   const boardFeedDegraded = serverStatus.value?.data_quality?.board_contract_ok === false
 
   // Detail view: single post
   if (postId) {
-    const post = posts.find(p => p.id === postId)
+    const post = posts.find(p => p.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
+    if (!post && detailPostId.value !== postId && !detailLoading.value) {
+      loadPostDetail(postId)
+    }
     return post
       ? html`
           <${BoardFeedNotice} />
@@ -333,9 +352,13 @@ export function Board() {
             <${BoardFeedNotice} />
             <${BoardSummary} />
             <button class="back-btn" onClick=${() => navigate('board')}>← Back to Board</button>
-            <div class="empty-state">
-              ${boardFeedDegraded ? 'Post not available while board feed is degraded' : 'Post not found'}
-            </div>
+            ${detailLoading.value
+              ? html`<div class="loading-indicator">Loading post...</div>`
+              : html`
+                  <div class="empty-state">
+                    ${boardFeedDegraded ? 'Post not available while board feed is degraded' : 'Post not found'}
+                  </div>
+                `}
           </div>
         `
   }
@@ -348,12 +371,12 @@ export function Board() {
     ${loading
       ? html`<div class="loading-indicator">Loading board...</div>`
       : posts.length === 0
-        ? html`
+          ? html`
             <div class="empty-state">
               ${boardFeedDegraded
                 ? 'No posts loaded (board feed degraded). Check board contract sync.'
-                : rawPostCount > 0 && boardExcludeSystem.value
-                  ? 'Recent board is currently dominated by automated reports. Toggle them back on if you need the raw feed.'
+                : boardExcludeSystem.value
+                  ? 'No visible posts right now. Automated reports may be hidden; toggle them back on if you need the raw feed.'
                   : 'No posts yet'}
             </div>
           `

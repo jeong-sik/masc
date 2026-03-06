@@ -1547,14 +1547,20 @@ function normalizeMdalLoop(raw: unknown): MdalLoop | null {
   }
 }
 
-export async function fetchLatestMdalLoop(): Promise<MdalLoop | null> {
+export type LatestMdalLoopResult =
+  | { state: 'ready'; loop: MdalLoop }
+  | { state: 'idle' }
+  | { state: 'error' }
+
+export async function fetchLatestMdalLoop(): Promise<LatestMdalLoopResult> {
   try {
     const rawText = await callMcpTool('masc_mdal_status', {})
     const parsed = JSON.parse(rawText) as unknown
-    if (isRecord(parsed) && asString(parsed.error, '').trim() !== '') return null
-    return normalizeMdalLoop(parsed)
+    if (isRecord(parsed) && asString(parsed.error, '').trim() !== '') return { state: 'idle' }
+    const loop = normalizeMdalLoop(parsed)
+    return loop ? { state: 'ready', loop } : { state: 'error' }
   } catch {
-    return null
+    return { state: 'error' }
   }
 }
 

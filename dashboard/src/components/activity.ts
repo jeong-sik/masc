@@ -176,6 +176,8 @@ const agentMotionRows = computed(() =>
     .map(agent => ({
       agent,
       motion: buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
+        currentTask: agent.current_task,
+        lastSeen: agent.last_seen,
         boardPosts: boardPosts.value,
         keepers: keepers.value,
       }),

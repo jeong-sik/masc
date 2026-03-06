@@ -689,6 +689,10 @@ let checkin_json (name, trigger, result) =
     @ outcome_fields)
 
 let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
+  let skipped_reason =
+    if result.agents_checked = 0 then Some "no agents selected for this tick"
+    else None
+  in
   let acted =
     result.checkins
     |> List.filter_map (fun (name, _, checkin) ->
@@ -715,11 +719,14 @@ let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
   in
   `Assoc
     [
+      ("hour", `Int result.current_hour);
       ("checked", `Int result.agents_checked);
       ("acted", `Int (List.length acted));
       ("acted_names", `List (List.map (fun row -> row |> U.member "name") acted));
       ("activity_report", `String result.activity_report);
       ("quiet_hours_overridden", `Bool true);
+      ( "skipped_reason",
+        match skipped_reason with Some reason -> `String reason | None -> `Null );
       ("acted_rows", `List acted);
       ("passed_rows", `List passed);
       ("skipped_rows", `List skipped);

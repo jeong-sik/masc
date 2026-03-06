@@ -1,5 +1,4 @@
-// Board tab — Posts list with sort modes, vote, comment, flair badges, hearths
-// Detail view: full post + comment thread + comment form
+// Board tab — discussion feed with system-noise filter and clearer card structure
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -7,7 +6,15 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
-import { boardPosts, boardSortMode, boardLoading, refreshBoard, serverStatus } from '../store'
+import {
+  boardPosts,
+  boardSortMode,
+  boardExcludeSystem,
+  boardLoading,
+  lastBoardRefreshAt,
+  refreshBoard,
+  serverStatus,
+} from '../store'
 import { votePost, fetchBoardPost, commentPost } from '../api'
 import { navigate, navigateToPost, route } from '../router'
 import type { BoardPost, BoardComment, BoardSortMode } from '../types'
@@ -19,9 +26,9 @@ const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'updated', label: 'Updated' },
   { id: 'discussed', label: 'Discussed' },
 ]
-
 // ── Local state for detail view ────────────────────────────
 
+const detailPost = signal<BoardPost | null>(null)
 const detailComments = signal<BoardComment[]>([])
 const detailLoading = signal(false)
 const detailPostId = signal<string | null>(null)
@@ -37,16 +44,38 @@ const commentSubmitting = signal(false)
 
 async function loadPostDetail(postId: string) {
   detailPostId.value = postId
+  detailPost.value = null
+  detailComments.value = []
   detailLoading.value = true
   try {
     const data = await fetchBoardPost(postId)
     // Guard: discard stale response if user navigated to a different post
     if (detailPostId.value !== postId) return
+    detailPost.value = {
+      id: data.id,
+      author: data.author,
+      title: data.title,
+      content: data.content,
+      tags: data.tags,
+      votes: data.votes,
+      vote_balance: data.vote_balance,
+      comment_count: data.comment_count,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+      flair: data.flair,
+      hearth_count: data.hearth_count,
+    }
     detailComments.value = data.comments ?? []
   } catch {
+    if (detailPostId.value === postId) {
+      detailPost.value = null
+      detailComments.value = []
+    }
     // Post detail may not be available; comments remain empty
   } finally {
-    detailLoading.value = false
+    if (detailPostId.value === postId) {
+      detailLoading.value = false
+    }
   }
 }
 
@@ -72,18 +101,34 @@ async function submitComment(postId: string) {
 function SortBar() {
   const current = boardSortMode.value
   return html`
-    <div class="board-controls">
-      ${SORT_MODES.map(m => html`
+    <div class="board-toolbar">
+      <div class="board-controls">
+        ${SORT_MODES.map(m => html`
+          <button
+            class="board-sort-btn ${current === m.id ? 'active' : ''}"
+            onClick=${() => {
+              boardSortMode.value = m.id
+              refreshBoard()
+            }}
+          >
+            ${m.label}
+          </button>
+        `)}
+      </div>
+      <div class="board-toolbar-actions">
         <button
-          class="board-sort-btn ${current === m.id ? 'active' : ''}"
+          class="control-btn ghost ${boardExcludeSystem.value ? 'is-active' : ''}"
           onClick=${() => {
-            boardSortMode.value = m.id
+            boardExcludeSystem.value = !boardExcludeSystem.value
             refreshBoard()
           }}
         >
-          ${m.label}
+          ${boardExcludeSystem.value ? 'Hiding auto reports' : 'Show auto reports'}
         </button>
-      `)}
+        <button class="control-btn ghost" onClick=${refreshBoard} disabled=${boardLoading.value}>
+          ${boardLoading.value ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
     </div>
   `
 }
@@ -110,6 +155,47 @@ function FlairBadge({ flair }: { flair?: string }) {
   return html`<span class="post-flair ${flair}">${flair}</span>`
 }
 
+function previewText(content: string): string {
+  const flattened = content
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+    .replace(/\[[^\]]+\]\([^)]+\)/g, '$1')
+    .replace(/[`#>*_~-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!flattened) return 'No preview available'
+  return flattened.length > 180 ? `${flattened.slice(0, 177)}...` : flattened
+}
+
+function isUpdated(post: BoardPost): boolean {
+  return post.updated_at !== post.created_at
+}
+
+function BoardSummary() {
+  const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
+  const visibleCount = boardPosts.value.length
+
+  return html`
+    <div class="board-summary-strip">
+      <div class="board-summary-item">
+        <span class="board-summary-label">Visible posts</span>
+        <strong>${visibleCount}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">Sort</span>
+        <strong>${sortLabel}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">Noise policy</span>
+        <strong>${boardExcludeSystem.value ? 'Auto reports hidden by default' : 'All posts visible'}</strong>
+      </div>
+      <div class="board-summary-item">
+        <span class="board-summary-label">Last refresh</span>
+        <strong>${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : 'Not loaded'}</strong>
+      </div>
+    </div>
+  `
+}
+
 function PostCard({ post }: { post: BoardPost }) {
   const handleVote = async (dir: 'up' | 'down', e: Event) => {
     e.stopPropagation()
@@ -129,21 +215,28 @@ function PostCard({ post }: { post: BoardPost }) {
         <button class="vote-btn downvote" onClick=${(e: Event) => handleVote('down', e)}>▼</button>
       </div>
       <div class="post-content">
-        <div class="post-title">
-          ${post.title}
-          ${' '}
-          <${FlairBadge} flair=${post.flair} />
+        <div class="post-head">
+          <div class="post-title-row">
+            <div class="post-title">${post.title}</div>
+            <div class="post-chip-row">
+              <${FlairBadge} flair=${post.flair} />
+              ${isUpdated(post) ? html`<span class="board-meta-chip">Updated</span>` : null}
+            </div>
+          </div>
+          <div class="post-meta">
+            <span>By ${post.author}</span>
+            <span><${TimeAgo} timestamp=${post.created_at} /></span>
+            ${isUpdated(post)
+              ? html`<span>Updated <${TimeAgo} timestamp=${post.updated_at} /></span>`
+              : null}
+            <span>${post.comment_count} comments</span>
+            <span>${post.votes ?? 0} votes</span>
+            ${(post.hearth_count ?? 0) > 0
+              ? html`<span>♥ ${post.hearth_count}</span>`
+              : null}
+          </div>
         </div>
-        <div class="post-meta">
-          <span>${post.author}</span>
-          <${TimeAgo} timestamp=${post.created_at} />
-          ${post.comment_count > 0
-            ? html`<span>${post.comment_count} comments</span>`
-            : null}
-          ${(post.hearth_count ?? 0) > 0
-            ? html`<span>♥ ${post.hearth_count}</span>`
-            : null}
-        </div>
+        <div class="post-snippet">${previewText(post.content)}</div>
       </div>
     </div>
   `
@@ -244,19 +337,28 @@ export function Board() {
 
   // Detail view: single post
   if (postId) {
-    const post = posts.find(p => p.id === postId)
+    const post = posts.find(p => p.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
+    if (!post && detailPostId.value !== postId && !detailLoading.value) {
+      loadPostDetail(postId)
+    }
     return post
       ? html`
           <${BoardFeedNotice} />
+          <${BoardSummary} />
           <${PostDetail} post=${post} />
         `
       : html`
           <div>
             <${BoardFeedNotice} />
+            <${BoardSummary} />
             <button class="back-btn" onClick=${() => navigate('board')}>← Back to Board</button>
-            <div class="empty-state">
-              ${boardFeedDegraded ? 'Post not available while board feed is degraded' : 'Post not found'}
-            </div>
+            ${detailLoading.value
+              ? html`<div class="loading-indicator">Loading post...</div>`
+              : html`
+                  <div class="empty-state">
+                    ${boardFeedDegraded ? 'Post not available while board feed is degraded' : 'Post not found'}
+                  </div>
+                `}
           </div>
         `
   }
@@ -264,15 +366,18 @@ export function Board() {
   // List view
   return html`
     <${BoardFeedNotice} />
+    <${BoardSummary} />
     <${SortBar} />
     ${loading
       ? html`<div class="loading-indicator">Loading board...</div>`
       : posts.length === 0
-        ? html`
+          ? html`
             <div class="empty-state">
               ${boardFeedDegraded
                 ? 'No posts loaded (board feed degraded). Check board contract sync.'
-                : 'No posts yet'}
+                : boardExcludeSystem.value
+                  ? 'No visible posts right now. Automated reports may be hidden; toggle them back on if you need the raw feed.'
+                  : 'No posts yet'}
             </div>
           `
         : html`<div class="board-post-list">

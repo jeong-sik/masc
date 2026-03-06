@@ -276,6 +276,22 @@ let board_sort_label = function
   | Board_dispatch.Updated -> "updated"
   | Board_dispatch.Discussed -> "discussed"
 
+let is_system_board_author author =
+  author = "lodge-system" || author = "team-session"
+
+let filter_board_posts ~exclude_system posts =
+  if not exclude_system then posts
+  else
+    List.filter
+      (fun (p : Board.post) -> not (is_system_board_author (Board.Agent_id.to_string p.author)))
+      posts
+
+let max_filtered_board_window = 5200
+
+let board_fetch_limit ~exclude_system ~limit ~offset =
+  let base = limit + offset in
+  if exclude_system then max base max_filtered_board_window else base
+
 let board_title_of_content content =
   let trimmed = String.trim content in
   let without_flair =
@@ -6244,10 +6260,12 @@ let make_routes ~port ~host ~sw ~clock =
        with_public_read (fun _state req reqd ->
          let hearth = query_param req "hearth" in
          let sort_by = board_sort_order_of_request req in
+         let exclude_system = bool_query_param req "exclude_system" ~default:false in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-         let fetch_limit = limit + offset in
+         let fetch_limit = board_fetch_limit ~exclude_system ~limit ~offset in
          let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
+         let posts = filter_board_posts ~exclude_system posts in
          let karma_map = Board_dispatch.get_all_karma () in
          let get_karma author =
            try List.assoc author karma_map with Not_found -> 0
@@ -7455,10 +7473,12 @@ let run_server ~sw ~env ~port ~base_path =
       | `GET, "/api/v1/board" ->
           let hearth = query_param httpun_request "hearth" in
           let sort_by = board_sort_order_of_request httpun_request in
+          let exclude_system = bool_query_param httpun_request "exclude_system" ~default:false in
           let limit = int_query_param httpun_request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
           let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-          let fetch_limit = limit + offset in
+          let fetch_limit = board_fetch_limit ~exclude_system ~limit ~offset in
           let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
+          let posts = filter_board_posts ~exclude_system posts in
           let karma_map = Board_dispatch.get_all_karma () in
           let get_karma author =
             try List.assoc author karma_map with Not_found -> 0

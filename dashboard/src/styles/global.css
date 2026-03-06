@@ -378,6 +378,32 @@ a:hover {
   text-decoration: none;
 }
 
+.rail-view-note {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(138, 163, 211, 0.2);
+  display: grid;
+  gap: 4px;
+}
+
+.rail-view-note-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rail-view-note strong {
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.rail-view-note p {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .rail-density {
   margin-top: 10px;
   padding-top: 10px;

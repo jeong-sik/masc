@@ -1960,23 +1960,30 @@ let trpg_available_models_json () : Yojson.Safe.t =
       trpg_available_models_json_base
         ~warnings:["가용 모델 조회 중입니다. 잠시 후 다시 시도하세요."] ()
   | cached_snapshot, true ->
-      let outcome =
-        try Ok (trpg_available_models_json_uncached ())
-        with exn -> Error (Printexc.to_string exn)
-      in
       let fallback_json =
-        match outcome with
-        | Ok fresh -> fresh
-        | Error err -> (
-            match cached_snapshot with
-            | Some stale ->
-                stale
-            | None ->
-                trpg_available_models_json_base
-                  ~warnings:[Printf.sprintf "가용 모델 조회 실패: %s" err] ())
+        Fun.protect
+          ~finally:(fun () ->
+            Mutex.lock trpg_model_catalog_cache.mutex;
+            trpg_model_catalog_cache.refresh_in_flight <- false;
+            Mutex.unlock trpg_model_catalog_cache.mutex)
+          (fun () ->
+            let outcome =
+              try Ok (trpg_available_models_json_uncached ())
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn)
+            in
+            match outcome with
+            | Ok fresh -> fresh
+            | Error err -> (
+                match cached_snapshot with
+                | Some stale ->
+                    stale
+                | None ->
+                    trpg_available_models_json_base
+                      ~warnings:[Printf.sprintf "가용 모델 조회 실패: %s" err] ()))
       in
       Mutex.lock trpg_model_catalog_cache.mutex;
-      trpg_model_catalog_cache.refresh_in_flight <- false;
       trpg_model_catalog_cache.cached_json <- Some fallback_json;
       trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ();
       Mutex.unlock trpg_model_catalog_cache.mutex;

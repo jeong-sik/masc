@@ -67,6 +67,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - `POST /mcp`는 기본적으로 `Accept: application/json, text/event-stream`를 요구합니다.
 - 구형 클라이언트 호환이 필요할 때만 `MASC_ALLOW_LEGACY_ACCEPT=1`을 설정하세요.
 - 레거시 `/sse`, `/messages` endpoint는 deprecated 상태이며 `/mcp`로 전환이 권장됩니다.
+- 원격 감독관 표면은 `/mcp/operator`를 사용하세요. 운영 루프와 confirm 정책은 `docs/REMOTE-MCP-OPERATOR.md`, `docs/SUPERVISOR-MODE.md`에 정리돼 있습니다.
 
 ## 기본 사용 흐름
 

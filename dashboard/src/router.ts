@@ -7,9 +7,18 @@ import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
+const LEGACY_TAB_ALIASES: Record<string, TabId> = {
+  journal: 'activity',
+  mdal: 'goals',
+}
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
+}
+
+function normalizeTabAlias(v: string | null | undefined): string | undefined {
+  if (!v) return undefined
+  return LEGACY_TAB_ALIASES[v] ?? v
 }
 
 function decodeSafe(input: string): string {
@@ -42,8 +51,8 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
-  const tabFromPath = segments[0]
-  const tabFromQuery = params.tab
+  const tabFromPath = normalizeTabAlias(segments[0])
+  const tabFromQuery = normalizeTabAlias(params.tab)
   const tab: TabId = isTabId(tabFromPath)
     ? tabFromPath
     : isTabId(tabFromQuery)

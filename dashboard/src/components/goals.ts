@@ -1,4 +1,4 @@
-// Goals tab — view and filter goals by horizon / status / keeper
+// Planning tab — goals plus MDAL loop visibility with freshness context
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -6,8 +6,17 @@ import { signal, computed } from '@preact/signals'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
-import { goals, goalsLoading, refreshGoals } from '../store'
-import type { Goal } from '../types'
+import {
+  goals,
+  goalsLoading,
+  mdalLoops,
+  mdalLoading,
+  lastGoalsRefreshAt,
+  lastMdalRefreshAt,
+  refreshGoals,
+  refreshMdal,
+} from '../store'
+import type { Goal, MdalLoop } from '../types'
 
 // ── Filter state ──────────────────────────────────
 
@@ -39,6 +48,16 @@ const groupedByHorizon = computed(() => {
   return groups
 })
 
+const loopsList = computed(() => {
+  const loops = Array.from(mdalLoops.value.values())
+  loops.sort((a, b) => {
+    if (a.status === 'running' && b.status !== 'running') return -1
+    if (b.status === 'running' && a.status !== 'running') return 1
+    return b.elapsed_seconds - a.elapsed_seconds
+  })
+  return loops
+})
+
 // ── Helpers ───────────────────────────────────────
 
 function priorityStars(n: number): string {
@@ -61,6 +80,22 @@ function horizonColor(h: string): string {
     case 'long': return '#818cf8'
     default: return '#888'
   }
+}
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
+
+function formatMetric(value: number): string {
+  return value.toFixed(4)
+}
+
+function formatMetricDelta(loop: MdalLoop): string {
+  const delta = loop.current_metric - loop.baseline_metric
+  const sign = delta >= 0 ? '+' : ''
+  return `${sign}${delta.toFixed(4)}`
 }
 
 // ── Sub-components ────────────────────────────────
@@ -90,6 +125,28 @@ function GoalRow({ goal }: { goal: Goal }) {
           <${TimeAgo} timestamp=${goal.updated_at} />
         </div>
       </div>
+    </div>
+  `
+}
+
+function FreshnessRow({
+  label,
+  timestamp,
+  source,
+}: {
+  label: string
+  timestamp: string | null
+  source: string
+}) {
+  return html`
+    <div class="planning-freshness-row">
+      <div>
+        <div class="planning-freshness-label">${label}</div>
+        <div class="planning-freshness-source">${source}</div>
+      </div>
+      <strong class="planning-freshness-value">
+        ${timestamp ? html`<${TimeAgo} timestamp=${timestamp} />` : 'Not loaded'}
+      </strong>
     </div>
   `
 }
@@ -176,25 +233,116 @@ function GoalsSummary() {
   `
 }
 
+function LoopRow({ loop }: { loop: MdalLoop }) {
+  const latest = loop.history[0]
+
+  return html`
+    <div class="planning-loop-row">
+      <div class="planning-loop-main">
+        <div class="planning-loop-head">
+          <div>
+            <div class="planning-loop-id">${loop.profile}</div>
+            <div class="planning-loop-sub">${loop.loop_id}</div>
+          </div>
+          <div class="planning-loop-badges">
+            <${StatusBadge} status=${loop.status} />
+            <span class="pill">${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}</span>
+          </div>
+        </div>
+
+        <div class="planning-loop-metrics">
+          <span>Baseline ${formatMetric(loop.baseline_metric)}</span>
+          <span>Current ${formatMetric(loop.current_metric)}</span>
+          <span class=${formatMetricDelta(loop).startsWith('+') ? 'planning-loop-good' : 'planning-loop-bad'}>
+            Delta ${formatMetricDelta(loop)}
+          </span>
+          <span>Elapsed ${formatElapsed(loop.elapsed_seconds)}</span>
+        </div>
+
+        <div class="planning-loop-target">${loop.target || 'No explicit target provided'}</div>
+        ${latest
+          ? html`
+              <div class="planning-loop-footnote">
+                Latest iteration #${latest.iteration}: ${latest.changes || latest.next_suggestion || 'No narrative'}
+              </div>
+            `
+          : html`<div class="planning-loop-footnote">No iteration history yet</div>`}
+      </div>
+    </div>
+  `
+}
+
 // ── Main export ───────────────────────────────────
 
 export function Goals() {
   useEffect(() => {
     refreshGoals()
+    refreshMdal()
   }, [])
 
   const grouped = groupedByHorizon.value
+  const loops = loopsList.value
+  const runningLoops = loops.filter(loop => loop.status === 'running').length
+  const activeGoals = goals.value.filter(goal => goal.status === 'active').length
 
   return html`
     <div>
-      <${Card} title="Goals Overview" class="section">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Active goals</div>
+          <div class="stat-value" style="color:#4ade80">${activeGoals}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Visible goals</div>
+          <div class="stat-value">${filteredGoals.value.length}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Running loops</div>
+          <div class="stat-value" style="color:#fbbf24">${runningLoops}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Known loops</div>
+          <div class="stat-value">${loops.length}</div>
+        </div>
+      </div>
+
+      <${Card} title="Planning Surface" class="section">
+        <div class="planning-header">
+          <div>
+            <h2 class="planning-headline">Direction lives here. Goals define intent, MDAL shows whether iteration is moving the metric.</h2>
+            <p class="planning-subtitle">
+              Goals refresh on tab open or manual refresh. MDAL reads the current loop snapshot exposed by <code>masc_mdal_status</code>.
+            </p>
+          </div>
+          <div class="planning-actions">
+            <button class="control-btn ghost" onClick=${refreshGoals} disabled=${goalsLoading.value}>
+              ${goalsLoading.value ? 'Refreshing goals...' : 'Refresh goals'}
+            </button>
+            <button class="control-btn ghost" onClick=${refreshMdal} disabled=${mdalLoading.value}>
+              ${mdalLoading.value ? 'Refreshing loops...' : 'Refresh loops'}
+            </button>
+            <button
+              class="control-btn secondary"
+              onClick=${() => {
+                refreshGoals()
+                refreshMdal()
+              }}
+              disabled=${goalsLoading.value || mdalLoading.value}
+            >
+              Refresh all
+            </button>
+          </div>
+        </div>
+
+        <div class="planning-freshness-grid">
+          <${FreshnessRow} label="Goals" timestamp=${lastGoalsRefreshAt.value} source="masc_goal_list" />
+          <${FreshnessRow} label="MDAL loops" timestamp=${lastMdalRefreshAt.value} source="masc_mdal_status" />
+        </div>
+      <//>
+
+      <${Card} title="Goal Pipeline" class="section">
         <${GoalsSummary} />
         <${FilterBar} />
-        <div style="margin-top:8px;">
-          <button class="control-btn ghost" onClick=${refreshGoals} disabled=${goalsLoading.value}>
-            ${goalsLoading.value ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
       <//>
 
       ${goalsLoading.value && goals.value.length === 0
@@ -202,10 +350,26 @@ export function Goals() {
         : filteredGoals.value.length === 0
           ? html`<div class="empty-state">No goals match the current filters</div>`
           : html`
-            <${HorizonGroup} horizon="short" items=${grouped.short ?? []} />
-            <${HorizonGroup} horizon="mid" items=${grouped.mid ?? []} />
-            <${HorizonGroup} horizon="long" items=${grouped.long ?? []} />
-          `}
+              <${HorizonGroup} horizon="short" items=${grouped.short ?? []} />
+              <${HorizonGroup} horizon="mid" items=${grouped.mid ?? []} />
+              <${HorizonGroup} horizon="long" items=${grouped.long ?? []} />
+            `}
+
+      <${Card} title="MDAL Loops" class="section">
+        ${mdalLoading.value && loops.length === 0
+          ? html`<div class="loading-indicator">Loading MDAL loops...</div>`
+          : loops.length === 0
+            ? html`
+                <div class="empty-state">
+                  No loop snapshot is visible right now. This section only changes when the backend exposes a current MDAL loop.
+                </div>
+              `
+            : html`
+                <div class="planning-loop-list">
+                  ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}
+                </div>
+              `}
+      <//>
     </div>
   `
 }

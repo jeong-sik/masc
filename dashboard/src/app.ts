@@ -28,16 +28,27 @@ import { Activity } from './components/activity'
 import { Agents } from './components/agents'
 import { Tasks } from './components/tasks'
 import { Execution } from './components/execution'
-import { Journal } from './components/journal'
 import { Goals } from './components/goals'
 import { Trpg } from './components/trpg'
-import { Mdal } from './components/mdal'
 import { ControlDock } from './components/control-dock'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS } from './config/navigation'
 import { refreshOperatorSnapshot } from './operator-store'
+
+const VIEW_DESCRIPTIONS: Record<string, string> = {
+  overview: 'Room health, keeper pressure, and top-line execution status',
+  board: 'Human and agent discussion feed with system noise filtered by default',
+  activity: 'Unified live stream for messages, task changes, board events, and keeper events',
+  council: 'Debates, quorum status, and decision flow',
+  goals: 'Goals and MDAL loops in one planning surface with freshness signals',
+  execution: 'Queue readiness and assignee coverage',
+  tasks: 'Kanban-style task distribution',
+  agents: 'Operational directory for agents and keepers',
+  ops: 'Guided operator controls for room, sessions, and keepers',
+  trpg: 'Narrative room control and state visibility',
+}
 
 function ConnectionStatus() {
   const isConnected = connected.value
@@ -53,6 +64,7 @@ function ConnectionStatus() {
 function SideRail() {
   const current = route.value.tab
   const liveConnected = connected.value
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === current)
 
   return html`
     <aside class="dashboard-rail">
@@ -68,9 +80,10 @@ function SideRail() {
             </button>
           `)}
         </div>
-        <div class="rail-links">
-          <a class="rail-link" href="/dashboard/lodge">Legacy Lodge</a>
-          <a class="rail-link" href="/dashboard/credits">Legacy Credits</a>
+        <div class="rail-view-note">
+          <div class="rail-view-note-label">Current focus</div>
+          <strong>${currentView?.label ?? current}</strong>
+          <p>${VIEW_DESCRIPTIONS[current] ?? 'Live operational view'}</p>
         </div>
       </section>
 
@@ -105,8 +118,10 @@ function SideRail() {
             if (current === 'ops') refreshOperatorSnapshot()
             if (current === 'board') refreshBoard()
             if (current === 'trpg') refreshTrpg()
-            if (current === 'goals') refreshGoals()
-            if (current === 'mdal') refreshMdal()
+            if (current === 'goals') {
+              refreshGoals()
+              refreshMdal()
+            }
           }}
         >
           Refresh Now
@@ -140,12 +155,8 @@ function TabContent() {
       return html`<${Tasks} />`
     case 'goals':
       return html`<${Goals} />`
-    case 'journal':
-      return html`<${Journal} />`
     case 'trpg':
       return html`<${Trpg} />`
-    case 'mdal':
-      return html`<${Mdal} />`
     default:
       return html`<${Overview} />`
   }
@@ -179,9 +190,13 @@ export function App() {
     if (tab === 'ops') refreshOperatorSnapshot()
     if (tab === 'board') refreshBoard()
     if (tab === 'trpg') refreshTrpg()
-    if (tab === 'goals') refreshGoals()
-    if (tab === 'mdal') refreshMdal()
+    if (tab === 'goals') {
+      refreshGoals()
+      refreshMdal()
+    }
   }, [route.value.tab])
+
+  const currentTab = route.value.tab
 
   return html`
     <div class="app-shell">
@@ -191,14 +206,10 @@ export function App() {
             MASC Dashboard
             <span class="version-badge">SPA</span>
           </h1>
-          <p class="header-subtitle">Decision and execution operations console</p>
+          <p class="header-subtitle">${VIEW_DESCRIPTIONS[currentTab] ?? 'Decision and execution operations console'}</p>
         </div>
         <div class="header-right">
           <${ConnectionStatus} />
-          <div class="header-links">
-            <a href="/dashboard/lodge">Lodge</a>
-            <a href="/dashboard/credits">Credits</a>
-          </div>
         </div>
       </header>
 

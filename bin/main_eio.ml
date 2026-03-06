@@ -1824,7 +1824,7 @@ let trpg_discover_ollama_models () : (string list, string) result =
           else Ok names
       | _ -> Error "ollama tag list missing models array")
 
-let trpg_available_models_json () : Yojson.Safe.t =
+let trpg_available_models_json_uncached () : Yojson.Safe.t =
   let seen : (string, bool) Hashtbl.t = Hashtbl.create 64 in
   let models_rev = ref [] in
   let warnings_rev = ref [] in
@@ -1901,6 +1901,46 @@ let trpg_available_models_json () : Yojson.Safe.t =
       ("models", `List (List.rev !models_rev));
       ("warnings", `List (List.rev_map (fun item -> `String item) !warnings_rev));
     ]
+
+type trpg_model_catalog_cache = {
+  mutex : Mutex.t;
+  mutable cached_at : float;
+  mutable cached_json : Yojson.Safe.t option;
+}
+
+let trpg_model_catalog_cache_ttl_sec = 15.0
+
+let trpg_model_catalog_cache : trpg_model_catalog_cache =
+  {
+    mutex = Mutex.create ();
+    cached_at = 0.0;
+    cached_json = None;
+  }
+
+let trpg_available_models_json () : Yojson.Safe.t =
+  let now = Unix.gettimeofday () in
+  let cached =
+    Mutex.lock trpg_model_catalog_cache.mutex;
+    let snapshot =
+      match trpg_model_catalog_cache.cached_json with
+      | Some json
+        when now -. trpg_model_catalog_cache.cached_at
+             < trpg_model_catalog_cache_ttl_sec ->
+          Some json
+      | _ -> None
+    in
+    Mutex.unlock trpg_model_catalog_cache.mutex;
+    snapshot
+  in
+  match cached with
+  | Some json -> json
+  | None ->
+      let fresh = trpg_available_models_json_uncached () in
+      Mutex.lock trpg_model_catalog_cache.mutex;
+      trpg_model_catalog_cache.cached_json <- Some fresh;
+      trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ();
+      Mutex.unlock trpg_model_catalog_cache.mutex;
+      fresh
 
 let trpg_keeper_call_with_runtime
     ~(config : Room.config)

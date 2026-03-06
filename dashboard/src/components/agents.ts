@@ -3,14 +3,17 @@
 import { html } from 'htm/preact'
 import { StatusBadge } from './common/status-badge'
 import { MitosisRing } from "./common/mitosis-ring"
-import { MetricTooltip } from './common/metric-tooltip'
 import { TimeAgo } from './common/time-ago'
+import { buildAgentMotion } from './common/agent-motion'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
-import { agents, keepers } from '../store'
+import { agents, keepers, tasks, messages } from '../store'
 import type { Agent, Keeper } from '../types'
+import { journal } from '../sse'
 
 function AgentCard({ agent }: { agent: Agent }) {
+  const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value)
+
   return html`
     <button class="agent-card ${agent.status}" onClick=${() => openAgentDetail(agent.name)}>
       <div class="agent-card-header">
@@ -26,49 +29,46 @@ function AgentCard({ agent }: { agent: Agent }) {
       </div>
       ${agent.current_task
         ? html`<div class="agent-task">${agent.current_task}</div>`
-        : null}
+        : motion.activeAssignedCount > 0
+          ? html`<div class="agent-task">${motion.activeAssignedCount} claimed tasks</div>`
+          : null}
       ${agent.model
         ? html`<div class="agent-model"><span class="pill">${agent.model}</span></div>`
+        : null}
+      ${motion.lastActivityText
+        ? html`
+            <div class="agent-activity-meta">
+              ${motion.lastActivityAt ? html`<${TimeAgo} timestamp=${motion.lastActivityAt} /> · ` : null}
+              ${motion.lastActivityText}
+            </div>
+          `
         : null}
     </button>
   `
 }
 
-function formatChangePct(value: unknown): string | null {
-  if (typeof value !== 'number' || Number.isNaN(value)) return null
-  return `${Math.round(value * 100)}%`
+function formatContext(keeper: Keeper): string {
+  if (typeof keeper.context_ratio !== 'number' || Number.isNaN(keeper.context_ratio)) return '—'
+  return `${Math.round(keeper.context_ratio * 100)}%`
 }
 
-function keeperRecent(keeper: Keeper): string {
-  const drift = keeper.last_drift_reason?.trim()
-  if (drift) return drift
-  const proactive = keeper.last_proactive_reason?.trim()
-  if (proactive) return proactive
-  const memory = keeper.memory_recent_note?.trim()
-  if (memory) return memory
-  return '—'
+function keeperFocus(keeper: Keeper): string {
+  return keeper.agent?.current_task
+    ?? keeper.skill_primary
+    ?? keeper.last_proactive_reason
+    ?? 'No active focus'
 }
 
-function keeperRelations(keeper: Keeper): string {
-  const count = keeper.k2k_count ?? 0
-  const top = keeper.k2k_mentions?.[0]
-  if (!top) return String(count)
-  return `${count} · ${top.keeper}(${top.count})`
-}
-
-function keeperPersonalityChange(keeper: Keeper): string {
-  const driftCount = keeper.drift_count_total ?? 0
-  const goalDrift = formatChangePct(keeper.metrics_window?.goal_drift_avg)
-  if (driftCount === 0 && !goalDrift) return 'Stable'
-  if (goalDrift) return `Drift ${driftCount} · Δ${goalDrift}`
-  return `Drift ${driftCount}`
+function keeperContinuity(keeper: Keeper): string {
+  const parts = [
+    `Turns ${keeper.turn_count ?? 0}`,
+    `Handoffs ${keeper.handoff_count_total ?? 0}`,
+    `Compactions ${keeper.compaction_count ?? 0}`,
+  ]
+  return parts.join(' · ')
 }
 
 function KeeperCard({ keeper }: { keeper: Keeper }) {
-  const recent = keeperRecent(keeper)
-  const relations = keeperRelations(keeper)
-  const personality = keeperPersonalityChange(keeper)
-
   return html`
     <div class="live-agent keeper-card" onClick=${() => openKeeperDetail(keeper)} style="cursor:pointer;">
       <div class="live-agent-main">
@@ -83,65 +83,31 @@ function KeeperCard({ keeper }: { keeper: Keeper }) {
           : null}
         <div class="keeper-core-grid">
           <div class="keeper-core-item">
-            <span class="keeper-core-label">Born <${MetricTooltip} metric="born_at" /></span>
-            <strong class="keeper-core-value">
-              ${keeper.created_at ? html`<${TimeAgo} timestamp=${keeper.created_at} />` : '—'}
-            </strong>
+            <span class="keeper-core-label">Context</span>
+            <strong class="keeper-core-value">${formatContext(keeper)}</strong>
           </div>
           <div class="keeper-core-item">
-            <span class="keeper-core-label">Gen <${MetricTooltip} metric="generation" /></span>
+            <span class="keeper-core-label">Generation</span>
             <strong class="keeper-core-value">${keeper.generation ?? '—'}</strong>
           </div>
           <div class="keeper-core-item">
-            <span class="keeper-core-label">Status <${MetricTooltip} metric="status" /></span>
-            <strong class="keeper-core-value">${keeper.status}</strong>
+            <span class="keeper-core-label">Heartbeat</span>
+            <strong class="keeper-core-value">
+              ${keeper.last_heartbeat ? html`<${TimeAgo} timestamp=${keeper.last_heartbeat} />` : '—'}
+            </strong>
           </div>
           <div class="keeper-core-item">
-            <span class="keeper-core-label">Relations <${MetricTooltip} metric="relations" /></span>
-            <strong class="keeper-core-value">${relations}</strong>
+            <span class="keeper-core-label">Model</span>
+            <strong class="keeper-core-value">${keeper.model ?? '—'}</strong>
           </div>
           <div class="keeper-core-item keeper-core-item-span">
-            <span class="keeper-core-label">Recent <${MetricTooltip} metric="recent_activity" /></span>
-            <strong class="keeper-core-value keeper-core-text">${recent}</strong>
+            <span class="keeper-core-label">Focus</span>
+            <strong class="keeper-core-value keeper-core-text">${keeperFocus(keeper)}</strong>
           </div>
           <div class="keeper-core-item keeper-core-item-span">
-            <span class="keeper-core-label">Personality <${MetricTooltip} metric="personality_change" /></span>
-            <strong class="keeper-core-value">${personality}</strong>
+            <span class="keeper-core-label">Continuity</span>
+            <strong class="keeper-core-value">${keeperContinuity(keeper)}</strong>
           </div>
-        </div>
-
-        <!-- Inner Information Section -->
-        <div class="keeper-inner-info">
-          ${keeper.agent?.current_task ? html`
-            <div class="keeper-detail-row">
-              <span class="keeper-label">Task</span>
-              <span class="keeper-value">${keeper.agent.current_task}</span>
-            </div>
-          ` : null}
-          ${keeper.will ? html`
-            <div class="keeper-detail-row">
-              <span class="keeper-label">Will (의지)</span>
-              <span class="keeper-value">${keeper.will}</span>
-            </div>
-          ` : null}
-          ${keeper.needs ? html`
-            <div class="keeper-detail-row">
-              <span class="keeper-label">Needs (니즈)</span>
-              <span class="keeper-value">${keeper.needs}</span>
-            </div>
-          ` : null}
-          ${keeper.desires ? html`
-            <div class="keeper-detail-row">
-              <span class="keeper-label">Desires (욕구)</span>
-              <span class="keeper-value">${keeper.desires}</span>
-            </div>
-          ` : null}
-          ${keeper.memory_recent_note ? html`
-            <div class="keeper-detail-row">
-              <span class="keeper-label">Memory Note</span>
-              <span class="keeper-value memory-note">"${keeper.memory_recent_note}"</span>
-            </div>
-          ` : null}
         </div>
       </div>
     </div>

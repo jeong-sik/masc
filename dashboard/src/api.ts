@@ -364,10 +364,14 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   }
 }
 
-export async function fetchBoard(sortBy?: BoardSortMode): Promise<{ posts: BoardPost[] }> {
+export async function fetchBoard(
+  sortBy?: BoardSortMode,
+  options?: { excludeSystem?: boolean },
+): Promise<{ posts: BoardPost[] }> {
   return withRetries('fetchBoard', async () => {
     const params = new URLSearchParams()
     if (sortBy) params.set('sort_by', sortBy)
+    if (options?.excludeSystem) params.set('exclude_system', 'true')
     params.set('limit', '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
@@ -1543,14 +1547,20 @@ function normalizeMdalLoop(raw: unknown): MdalLoop | null {
   }
 }
 
-export async function fetchLatestMdalLoop(): Promise<MdalLoop | null> {
+export type LatestMdalLoopResult =
+  | { state: 'ready'; loop: MdalLoop }
+  | { state: 'idle' }
+  | { state: 'error' }
+
+export async function fetchLatestMdalLoop(): Promise<LatestMdalLoopResult> {
   try {
     const rawText = await callMcpTool('masc_mdal_status', {})
     const parsed = JSON.parse(rawText) as unknown
-    if (isRecord(parsed) && asString(parsed.error, '').trim() !== '') return null
-    return normalizeMdalLoop(parsed)
+    if (isRecord(parsed) && asString(parsed.error, '').trim() !== '') return { state: 'idle' }
+    const loop = normalizeMdalLoop(parsed)
+    return loop ? { state: 'ready', loop } : { state: 'error' }
   } catch {
-    return null
+    return { state: 'error' }
   }
 }
 

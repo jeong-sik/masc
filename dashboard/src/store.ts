@@ -39,6 +39,7 @@ export const keeperHeartbeats = signal<Map<string, number>>(new Map())
 
 export const boardPosts = signal<BoardPost[]>([])
 export const boardSortMode = signal<BoardSortMode>('hot')
+export const boardExcludeSystem = signal(true)
 
 // --- TRPG state ---
 
@@ -59,6 +60,14 @@ export const mdalLoops = signal<Map<string, MdalLoop>>(new Map())
 export const dashboardLoading = signal(false)
 export const boardLoading = signal(false)
 export const trpgLoading = signal(false)
+export const mdalLoading = signal(false)
+
+// --- Refresh timestamps ---
+
+export const lastDashboardRefreshAt = signal<string | null>(null)
+export const lastBoardRefreshAt = signal<string | null>(null)
+export const lastGoalsRefreshAt = signal<string | null>(null)
+export const lastMdalRefreshAt = signal<string | null>(null)
 
 // --- Derived state ---
 
@@ -358,6 +367,7 @@ export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<vo
     keepers.value = normalizeKeepers(data.keepers)
     serverStatus.value = isRecord(data.status) ? (data.status as ServerStatus) : null
     perpetualStatus.value = data.perpetual ?? null
+    lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.error('Dashboard fetch error:', err)
   } finally {
@@ -368,8 +378,9 @@ export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<vo
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
-    const data = await fetchBoard(boardSortMode.value)
+    const data = await fetchBoard(boardSortMode.value, { excludeSystem: boardExcludeSystem.value })
     boardPosts.value = data.posts ?? []
+    lastBoardRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.error('Board fetch error:', err)
   } finally {
@@ -398,6 +409,7 @@ export async function refreshGoals(): Promise<void> {
   try {
     const data = await fetchGoals()
     goals.value = Array.isArray(data) ? data : []
+    lastGoalsRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.error('Goals fetch error:', err)
   } finally {
@@ -406,10 +418,26 @@ export async function refreshGoals(): Promise<void> {
 }
 
 export async function refreshMdal(): Promise<void> {
+  const refreshSeq = ++_mdalRefreshSeq
+  mdalLoading.value = true
   try {
-    const latest = await fetchLatestMdalLoop()
-    if (!latest) return
+    const latestResult = await fetchLatestMdalLoop()
+    if (refreshSeq !== _mdalRefreshSeq) return
+    if (latestResult.state === 'error') return
 
+    lastMdalRefreshAt.value = new Date().toISOString()
+    if (latestResult.state === 'idle') {
+      const next = new Map(mdalLoops.value)
+      for (const [loopId, loop] of next.entries()) {
+        if (loop.status === 'running') {
+          next.set(loopId, { ...loop, status: 'stopped' })
+        }
+      }
+      mdalLoops.value = next
+      return
+    }
+
+    const latest = latestResult.loop
     const next = new Map(mdalLoops.value)
     const existing = next.get(latest.loop_id)
     next.set(latest.loop_id, {
@@ -420,6 +448,10 @@ export async function refreshMdal(): Promise<void> {
     mdalLoops.value = next
   } catch (err) {
     console.error('MDAL fetch error:', err)
+  } finally {
+    if (refreshSeq === _mdalRefreshSeq) {
+      mdalLoading.value = false
+    }
   }
 }
 
@@ -428,6 +460,7 @@ export async function refreshMdal(): Promise<void> {
 
 let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
 let _boardDebounce: ReturnType<typeof setTimeout> | null = null
+let _mdalRefreshSeq = 0
 
 export function setupSSEReaction(): () => void {
   // Subscribe to SSE events and trigger refreshes
@@ -452,7 +485,12 @@ export function setupSSEReaction(): () => void {
     }
 
     // Board-specific events trigger board refresh
-    if (event.type === 'board_post' || event.type === 'board_comment') {
+    if (
+      event.type === 'board_post'
+      || event.type === 'masc/board_post'
+      || event.type === 'board_comment'
+      || event.type === 'masc/board_comment'
+    ) {
       if (!_boardDebounce) {
         _boardDebounce = setTimeout(() => {
           refreshBoard()

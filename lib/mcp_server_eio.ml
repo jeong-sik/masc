@@ -2471,8 +2471,33 @@ Time: %s
           ])
       end;
       result
+  | "masc_board_comment" ->
+      let (success, message) as result = Tool_board.handle_tool name arguments in
+      if success then begin
+        let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
+        let content = Safe_ops.json_string ~default:"" "content" arguments in
+        let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
+        let notification = `Assoc [
+          ("type", `String "board_comment");
+          ("author", `String author);
+          ("post_id", `String post_id);
+          ("content", `String (String.sub content 0 (min 200 (String.length content))));
+          ("timestamp", `String (Types.now_iso ()));
+        ] in
+        Mcp_server.sse_broadcast state notification;
+        A2a_tools.notify_event
+          ~event_type:A2a_tools.Broadcast
+          ~agent:author
+          ~data:(`Assoc [
+            ("event", `String "board_comment");
+            ("post_id", `String post_id);
+            ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
+          ])
+      end;
+      ignore message;
+      result
   | "masc_board_list" | "masc_board_get"
-  | "masc_board_comment" | "masc_board_vote" | "masc_board_stats"
+  | "masc_board_vote" | "masc_board_stats"
   | "masc_board_search" | "masc_board_comment_vote" | "masc_board_profile"
   | "masc_board_hearths" | "masc_board_migrate" ->
       Tool_board.handle_tool name arguments

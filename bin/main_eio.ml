@@ -1593,6 +1593,355 @@ let trpg_keeper_models_for_round () : string list =
         Printf.eprintf "[trpg] invalid keeper model override ignored: %s\n%!" e;
       []
 
+let trim_trailing_slashes (raw : string) : string =
+  let rec loop value =
+    let len = String.length value in
+    if len > 0 && value.[len - 1] = '/' then
+      loop (String.sub value 0 (len - 1))
+    else
+      value
+  in
+  loop (String.trim raw)
+
+let trpg_json_assoc_find (key : string) = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let trpg_json_string_fields (keys : string list) (json : Yojson.Safe.t) : string option =
+  let rec pick = function
+    | [] -> None
+    | key :: rest -> (
+        match trpg_json_assoc_find key json with
+        | Some (`String value) ->
+            let trimmed = String.trim value in
+            if trimmed = "" then pick rest else Some trimmed
+        | _ -> pick rest)
+  in
+  pick keys
+
+let trpg_json_string_list_field (key : string) = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`List rows) ->
+          rows
+          |> List.filter_map (function
+               | `String value ->
+                   let trimmed = String.trim value in
+                   if trimmed = "" then None else Some trimmed
+               | _ -> None)
+      | _ -> [])
+  | _ -> []
+
+let trpg_http_get_json_via_curl ?(timeout_sec = 2) (url : string) :
+    (Yojson.Safe.t, string) result =
+  let argv = ["curl"; "-sS"; "--max-time"; string_of_int timeout_sec; url] in
+  try
+    let status, raw =
+      Process_eio.run_argv_with_status
+        ~timeout_sec:(Float.of_int timeout_sec +. 1.0)
+        argv
+    in
+    match status with
+    | Unix.WEXITED 0 -> (
+        if String.trim raw = "" then Error "empty response"
+        else
+          try Ok (Yojson.Safe.from_string raw)
+          with Yojson.Json_error msg ->
+            Error (Printf.sprintf "invalid json: %s" msg))
+    | Unix.WEXITED 7 -> Error "connection refused"
+    | Unix.WEXITED 28 -> Error "request timed out"
+    | Unix.WEXITED code -> Error (Printf.sprintf "curl exit %d" code)
+    | Unix.WSIGNALED sig_num ->
+        Error (Printf.sprintf "curl killed by signal %d" sig_num)
+    | Unix.WSTOPPED _ -> Error "curl stopped unexpectedly"
+  with exn ->
+    Error (Printf.sprintf "http error: %s" (Printexc.to_string exn))
+
+let trpg_custom_endpoint_urls_from_specs (specs : string list) : string list =
+  specs
+  |> List.filter_map (fun spec ->
+         let spec = String.trim spec in
+         if not (String.starts_with ~prefix:"custom:" spec) then None
+         else
+           match String.index_opt spec '@' with
+           | Some at_idx when at_idx + 1 < String.length spec ->
+               let url =
+                 String.sub spec (at_idx + 1) (String.length spec - at_idx - 1)
+                 |> trim_trailing_slashes
+               in
+               if url = "" then None else Some url
+           | _ -> None)
+  |> String.concat ","
+  |> split_csv_nonempty
+
+let trpg_string_contains ~(needle : string) (haystack : string) : bool =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > haystack_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let trpg_parse_flag_value ~(flag : string) (command : string) : string option =
+  let trimmed = String.trim command in
+  let with_equals = flag ^ "=" in
+  let len = String.length trimmed in
+  let rec find_equals idx =
+    if idx >= len then None
+    else if
+      idx + String.length with_equals <= len
+      && String.sub trimmed idx (String.length with_equals) = with_equals
+    then
+      let start = idx + String.length with_equals in
+      let rec stop j =
+        if j >= len then j
+        else
+          match trimmed.[j] with
+          | ' ' | '\t' | '\n' | '\r' -> j
+          | _ -> stop (j + 1)
+      in
+      let value = String.sub trimmed start (stop start - start) |> String.trim in
+      if value = "" then None else Some value
+    else find_equals (idx + 1)
+  in
+  match find_equals 0 with
+  | Some _ as value -> value
+  | None ->
+      let with_space = flag ^ " " in
+      let rec find_space idx =
+        if idx >= len then None
+        else if
+          idx + String.length with_space <= len
+          && String.sub trimmed idx (String.length with_space) = with_space
+        then
+          let start = idx + String.length with_space in
+          let rec skip_spaces j =
+            if j < len && (trimmed.[j] = ' ' || trimmed.[j] = '\t') then
+              skip_spaces (j + 1)
+            else
+              j
+          in
+          let start = skip_spaces start in
+          let rec stop j =
+            if j >= len then j
+            else
+              match trimmed.[j] with
+              | ' ' | '\t' | '\n' | '\r' -> j
+              | _ -> stop (j + 1)
+          in
+          let value = String.sub trimmed start (stop start - start) |> String.trim in
+          if value = "" then None else Some value
+        else find_space (idx + 1)
+      in
+      find_space 0
+
+let trpg_running_llama_cpp_urls () : string list =
+  try
+    let status, raw =
+      Process_eio.run_argv_with_status ~timeout_sec:2.5 ["ps"; "ax"; "-o"; "command="]
+    in
+    match status with
+    | Unix.WEXITED 0 ->
+        raw
+        |> String.split_on_char '\n'
+        |> List.filter_map (fun line ->
+               let trimmed = String.trim line in
+               if trimmed = "" || not (trpg_string_contains ~needle:"llama-server" trimmed)
+               then None
+               else
+                 match trpg_parse_flag_value ~flag:"--port" trimmed with
+                 | Some port when String.for_all (function '0' .. '9' -> true | _ -> false) port
+                   ->
+                     Some (Printf.sprintf "http://127.0.0.1:%s" port)
+                 | _ -> None
+               )
+        |> String.concat ","
+        |> split_csv_nonempty
+    | _ -> []
+  with _ -> []
+
+let trpg_openai_compatible_urls () : string list =
+  let env_urls =
+    match Sys.getenv_opt "MASC_TRPG_CUSTOM_MODEL_ENDPOINTS" with
+    | Some raw -> split_csv_nonempty raw |> List.map trim_trailing_slashes
+    | None -> []
+  in
+  let spec_urls =
+    trpg_keeper_models_for_round () |> trpg_custom_endpoint_urls_from_specs
+  in
+  let llama_cpp_urls = trpg_running_llama_cpp_urls () in
+  env_urls @ spec_urls @ llama_cpp_urls
+  |> List.map trim_trailing_slashes
+  |> String.concat ","
+  |> split_csv_nonempty
+
+let trpg_discover_openai_compatible_models (base_url : string) :
+    (string list, string) result =
+  let base_url = trim_trailing_slashes base_url in
+  let url = base_url ^ "/v1/models" in
+  match trpg_http_get_json_via_curl url with
+  | Error err -> Error err
+  | Ok json ->
+      let named_rows =
+        let gather key =
+          match trpg_json_assoc_find key json with
+          | Some (`List entries) ->
+              entries
+              |> List.filter_map (fun entry ->
+                     trpg_json_string_fields ["id"; "name"; "model"] entry)
+          | _ -> []
+        in
+        gather "data" @ gather "models"
+      in
+      let names = split_csv_nonempty (String.concat "," named_rows) in
+      if names = [] then Error "model ids not found in /v1/models"
+      else
+        Ok
+          (List.map
+             (fun model_id -> Printf.sprintf "custom:%s@%s" model_id base_url)
+             names)
+
+let trpg_discover_ollama_models () : (string list, string) result =
+  let base_url = trim_trailing_slashes Llm_client.ollama_glm.api_url in
+  let url = base_url ^ "/api/tags" in
+  match trpg_http_get_json_via_curl url with
+  | Error err -> Error err
+  | Ok json -> (
+      match trpg_json_assoc_find "models" json with
+      | Some (`List entries) ->
+          let names =
+            entries
+            |> List.filter_map (fun entry ->
+                   trpg_json_string_fields ["name"; "model"] entry)
+            |> List.map (fun model_id -> Printf.sprintf "ollama:%s" model_id)
+            |> String.concat ","
+            |> split_csv_nonempty
+          in
+          if names = [] then Error "no ollama models found"
+          else Ok names
+      | _ -> Error "ollama tag list missing models array")
+
+let trpg_available_models_json_uncached () : Yojson.Safe.t =
+  let seen : (string, bool) Hashtbl.t = Hashtbl.create 64 in
+  let models_rev = ref [] in
+  let warnings_rev = ref [] in
+  let add_warning message =
+    let trimmed = String.trim message in
+    if trimmed <> "" then warnings_rev := trimmed :: !warnings_rev
+  in
+  let add_model ~spec ~source ~status ?detail () =
+    let spec = String.trim spec in
+    if spec = "" || Hashtbl.mem seen spec then ()
+    else (
+      Hashtbl.replace seen spec true;
+      let fields =
+        [
+          ("spec", `String spec);
+          ("source", `String source);
+          ("status", `String status);
+        ]
+      in
+      let fields =
+        match detail with
+        | Some detail when String.trim detail <> "" ->
+            ("detail", `String (String.trim detail)) :: fields
+        | _ -> fields
+      in
+      models_rev := `Assoc (List.rev fields) :: !models_rev)
+  in
+  let configured_override =
+    match trpg_keeper_models_override_csv () with
+    | Some raw -> split_csv_nonempty raw
+    | None -> []
+  in
+  let default_models = trpg_default_fast_keeper_models () in
+  let effective_models = trpg_keeper_models_for_round () in
+  List.iter
+    (fun spec -> add_model ~spec ~source:"runtime-default" ~status:"default" ())
+    default_models;
+  List.iter
+    (fun spec -> add_model ~spec ~source:"env-override" ~status:"override" ())
+    configured_override;
+  List.iter
+    (fun spec -> add_model ~spec ~source:"runtime-effective" ~status:"selected" ())
+    effective_models;
+  List.iter
+    (fun base_url ->
+      match trpg_discover_openai_compatible_models base_url with
+      | Ok specs ->
+          List.iter
+            (fun spec ->
+              add_model ~spec ~source:"openai-compatible" ~status:"live"
+                ~detail:base_url ())
+            specs
+      | Error err ->
+          add_warning
+            (Printf.sprintf "openai-compatible %s 조회 실패: %s" base_url err))
+    (trpg_openai_compatible_urls ());
+  (match trpg_discover_ollama_models () with
+  | Ok specs ->
+      List.iter
+        (fun spec ->
+          add_model ~spec ~source:"ollama" ~status:"live"
+            ~detail:Llm_client.ollama_glm.api_url ())
+        specs
+  | Error err ->
+      add_warning
+        (Printf.sprintf "ollama %s 조회 실패: %s" Llm_client.ollama_glm.api_url err));
+  `Assoc
+    [
+      ("ok", `Bool true);
+      ( "effective_models",
+        `List (List.map (fun spec -> `String spec) effective_models) );
+      ( "configured_override",
+        `List (List.map (fun spec -> `String spec) configured_override) );
+      ("models", `List (List.rev !models_rev));
+      ("warnings", `List (List.rev_map (fun item -> `String item) !warnings_rev));
+    ]
+
+type trpg_model_catalog_cache = {
+  mutex : Mutex.t;
+  mutable cached_at : float;
+  mutable cached_json : Yojson.Safe.t option;
+}
+
+let trpg_model_catalog_cache_ttl_sec = 15.0
+
+let trpg_model_catalog_cache : trpg_model_catalog_cache =
+  {
+    mutex = Mutex.create ();
+    cached_at = 0.0;
+    cached_json = None;
+  }
+
+let trpg_available_models_json () : Yojson.Safe.t =
+  let now = Unix.gettimeofday () in
+  let cached =
+    Mutex.lock trpg_model_catalog_cache.mutex;
+    let snapshot =
+      match trpg_model_catalog_cache.cached_json with
+      | Some json
+        when now -. trpg_model_catalog_cache.cached_at
+             < trpg_model_catalog_cache_ttl_sec ->
+          Some json
+      | _ -> None
+    in
+    Mutex.unlock trpg_model_catalog_cache.mutex;
+    snapshot
+  in
+  match cached with
+  | Some json -> json
+  | None ->
+      let fresh = trpg_available_models_json_uncached () in
+      Mutex.lock trpg_model_catalog_cache.mutex;
+      trpg_model_catalog_cache.cached_json <- Some fresh;
+      trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ();
+      Mutex.unlock trpg_model_catalog_cache.mutex;
+      fresh
+
 let trpg_keeper_call_with_runtime
     ~(config : Room.config)
     ~(sw : Eio.Switch.t)
@@ -6129,6 +6478,11 @@ let make_routes ~port ~host ~sw ~clock =
              respond_json_with_cors ~status:`Internal_server_error request reqd
                (Yojson.Safe.to_string (trpg_error_json msg))
        ) request reqd)
+  |> Http.Router.get "/api/v1/trpg/models" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         respond_json_with_cors request reqd
+           (Yojson.Safe.to_string (trpg_available_models_json ()))
+       ) request reqd)
   |> Http.Router.post "/api/v1/trpg/dice/roll" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          let base_dir = state.Mcp_server.room_config.base_path in
@@ -7354,6 +7708,11 @@ let run_server ~sw ~env ~port ~base_path =
           | Error (`Internal_server_error, msg) ->
               h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
                 ~status:`Internal_server_error ~extra_headers:cors)
+
+      | `GET, "/api/v1/trpg/models" ->
+          h2_respond_json h2_reqd
+            (Yojson.Safe.to_string (trpg_available_models_json ()))
+            ~extra_headers:cors
 
       | `POST, "/api/v1/trpg/dice/roll" ->
           let state = get_server_state () in

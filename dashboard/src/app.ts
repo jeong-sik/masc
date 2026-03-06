@@ -45,7 +45,7 @@ const VIEW_DESCRIPTIONS: Record<string, string> = {
   goals: 'Goals and MDAL loops in one planning surface with freshness signals',
   execution: 'Queue readiness and assignee coverage',
   tasks: 'Kanban-style task distribution',
-  agents: 'Operational directory for agents and keepers',
+  agents: 'Live monitor for agent status, keeper pressure, and current execution focus',
   ops: 'Guided operator controls for room, sessions, and keepers',
   trpg: 'Narrative room control and state visibility',
 }
@@ -170,6 +170,7 @@ export function App() {
     // Connect SSE and start data fetching
     connectSSE()
     refreshDashboard()
+    refreshBoard()
 
     // Setup SSE → store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()

@@ -82,7 +82,8 @@ let test_find_tool_existing () =
                "masc_team_session_step"; "masc_team_session_finalize";
                "masc_team_session_list"; "masc_team_session_compare";
                "masc_team_session_turn"; "masc_team_session_events";
-               "masc_team_session_prove"] in
+               "masc_team_session_prove"; "masc_operator_snapshot";
+               "masc_operator_action"; "masc_operator_confirm"] in
   List.iter (fun name ->
     match find_tool name with
     | Some schema -> Alcotest.(check string) "found correct tool" name schema.name
@@ -217,6 +218,40 @@ let test_masc_done_schema () =
           Alcotest.(check bool) "agent_name required" true (List.mem (`String "agent_name") reqs);
           Alcotest.(check bool) "task_id required" true (List.mem (`String "task_id") reqs)
       | None -> Alcotest.fail "masc_done missing required field"
+
+let test_masc_operator_snapshot_schema () =
+  match find_tool "masc_operator_snapshot" with
+  | None -> Alcotest.fail "masc_operator_snapshot not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has include_messages" true
+            (List.mem_assoc "include_messages" props);
+          Alcotest.(check bool) "has include_sessions" true
+            (List.mem_assoc "include_sessions" props)
+      | None -> Alcotest.fail "masc_operator_snapshot missing properties"
+
+let test_masc_operator_action_schema () =
+  match find_tool "masc_operator_action" with
+  | None -> Alcotest.fail "masc_operator_action not found"
+  | Some schema ->
+      match get_json_list "required" schema.input_schema with
+      | Some reqs ->
+          Alcotest.(check bool) "action_type required" true
+            (List.mem (`String "action_type") reqs);
+          Alcotest.(check bool) "payload required" true
+            (List.mem (`String "payload") reqs)
+      | None -> Alcotest.fail "masc_operator_action missing required field"
+
+let test_masc_operator_confirm_schema () =
+  match find_tool "masc_operator_confirm" with
+  | None -> Alcotest.fail "masc_operator_confirm not found"
+  | Some schema ->
+      match get_json_list "required" schema.input_schema with
+      | Some reqs ->
+          Alcotest.(check bool) "confirm_token required" true
+            (List.mem (`String "confirm_token") reqs)
+      | None -> Alcotest.fail "masc_operator_confirm missing required field"
 
 
 
@@ -723,6 +758,9 @@ let () =
       Alcotest.test_case "masc_claim" `Quick test_masc_claim_schema;
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
       Alcotest.test_case "masc_done" `Quick test_masc_done_schema;
+      Alcotest.test_case "masc_operator_snapshot" `Quick test_masc_operator_snapshot_schema;
+      Alcotest.test_case "masc_operator_action" `Quick test_masc_operator_action_schema;
+      Alcotest.test_case "masc_operator_confirm" `Quick test_masc_operator_confirm_schema;
     ];
     "portal_tools", [
       Alcotest.test_case "portal_open" `Quick test_masc_portal_open_schema;

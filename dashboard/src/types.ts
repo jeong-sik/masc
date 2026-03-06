@@ -478,6 +478,115 @@ export interface DashboardData {
   perpetual: PerpetualStatus
 }
 
+export interface OperatorRoomSnapshot {
+  room_id?: string
+  current_room?: string
+  project?: string
+  cluster?: string
+  paused?: boolean
+  pause_reason?: string | null
+  paused_by?: string | null
+  paused_at?: string | null
+}
+
+export interface OperatorSessionSnapshot {
+  session_id: string
+  status?: string
+  progress_pct?: number
+  elapsed_sec?: number
+  remaining_sec?: number
+  done_delta_total?: number
+  summary?: Record<string, unknown>
+  team_health?: Record<string, unknown>
+  communication_metrics?: Record<string, unknown>
+  orchestration_state?: Record<string, unknown>
+  cascade_metrics?: Record<string, unknown>
+  report_paths?: Record<string, string>
+  session?: Record<string, unknown>
+  recent_events?: Record<string, unknown>[]
+}
+
+export interface OperatorKeeperSnapshot {
+  name: string
+  agent_name?: string
+  status?: string
+  autonomy_level?: string
+  context_ratio?: number
+  generation?: number
+  active_goal_ids?: string[]
+  last_autonomous_action_at?: string | null
+  last_turn_ago_s?: number
+  model?: string
+}
+
+export interface PendingConfirmation {
+  confirm_token: string
+  actor?: string
+  action_type?: string
+  target_type?: string
+  target_id?: string | null
+  delegated_tool?: string
+  created_at?: string
+  preview?: unknown
+}
+
+export interface OperatorActionDescriptor {
+  action_type: string
+  target_type: string
+  description?: string
+  confirm_required?: boolean
+}
+
+export interface OperatorSnapshot {
+  room: OperatorRoomSnapshot
+  sessions: OperatorSessionSnapshot[]
+  keepers: OperatorKeeperSnapshot[]
+  recent_messages: Message[]
+  pending_confirms: PendingConfirmation[]
+  available_actions: OperatorActionDescriptor[]
+}
+
+export type OperatorActionType =
+  | 'broadcast'
+  | 'room_pause'
+  | 'room_resume'
+  | 'team_turn'
+  | 'team_stop'
+  | 'keeper_msg'
+  | 'task_inject'
+
+export type OperatorTargetType = 'room' | 'team_session' | 'keeper'
+
+export interface OperatorActionRequest {
+  actor: string
+  action_type: OperatorActionType
+  target_type: OperatorTargetType
+  target_id?: string
+  payload: Record<string, unknown>
+}
+
+export interface OperatorActionResult {
+  status: string
+  confirm_required?: boolean
+  confirm_token?: string
+  preview?: unknown
+  delegated_tool?: string
+  result?: unknown
+  executed_action?: unknown
+  delegated_tool_result?: unknown
+}
+
+export interface OperatorActionLogEntry {
+  id: number
+  at: string
+  actor: string
+  action_type: string
+  target_label: string
+  outcome: 'preview' | 'executed' | 'confirmed' | 'error'
+  message: string
+  delegated_tool?: string
+}
+
 export interface ServerStatus {
   room?: string
   cluster?: string
@@ -586,6 +695,7 @@ export interface RouteState {
 
 export type TabId =
   | 'overview'
+  | 'ops'
   | 'execution'
   | 'board'
   | 'activity'
@@ -599,6 +709,7 @@ export type TabId =
 
 export const VALID_TABS: TabId[] = [
   'overview',
+  'ops',
   'execution',
   'board',
   'activity',

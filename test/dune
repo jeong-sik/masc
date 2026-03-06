@@ -176,6 +176,11 @@
  (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
+ (name test_operator_control)
+ (modules test_operator_control)
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
+
+(test
  (name test_protocol_game_view)
  (modules test_protocol_game_view)
  (libraries masc_mcp alcotest yojson unix))

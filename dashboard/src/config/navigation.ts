@@ -9,6 +9,7 @@ export interface DashboardNavItem {
 // Shared IA order for top nav and side rail.
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   { id: 'overview', label: 'Overview', icon: '\uD83C\uDFE0' },
+  { id: 'ops', label: 'Ops', icon: '\uD83C\uDFAE' },
   { id: 'council', label: 'Council', icon: '\uD83C\uDFDB\uFE0F' },
   { id: 'board', label: 'Board', icon: '\uD83D\uDCAC' },
   { id: 'activity', label: 'Activity', icon: '\uD83D\uDCCA' },

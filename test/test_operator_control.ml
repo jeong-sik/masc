@@ -378,6 +378,72 @@ let test_confirm_rejects_expired_token () =
           Alcotest.(check string) "expired error"
             "pending confirmation expired" err)
 
+let test_snapshot_exposes_lodge_tick_action () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let ctx = operator_ctx env sw config "dashboard" in
+      let available_actions =
+        Operator_control.snapshot_json ~actor:"dashboard" ctx
+        |> Yojson.Safe.Util.member "available_actions"
+        |> Yojson.Safe.Util.to_list
+      in
+      let lodge_tick =
+        List.find_opt
+          (fun row ->
+            Yojson.Safe.Util.(row |> member "action_type" |> to_string = "lodge_tick"))
+          available_actions
+      in
+      match lodge_tick with
+      | None -> Alcotest.fail "expected lodge_tick in available_actions"
+      | Some row ->
+          Alcotest.(check string) "target_type" "room"
+            Yojson.Safe.Util.(row |> member "target_type" |> to_string);
+          Alcotest.(check bool) "confirm_required false" false
+            Yojson.Safe.Util.(row |> member "confirm_required" |> to_bool))
+
+let test_select_checkin_agents_manual_override_quiet_hours () =
+  let current_hour = Lodge_heartbeat.current_hour_kst () in
+  let config =
+    {
+      Lodge_heartbeat.default_config with
+      quiet_hours = (current_hour, current_hour + 1);
+      agents_per_tick = 1;
+      min_checkin_gap_s = 0.0;
+    }
+  in
+  let agent_name = "operator-lodge-quiet-override-test" in
+  let agents =
+    [
+      {
+        Lodge_heartbeat.name = agent_name;
+        preferred_hours = [];
+        peak_hour = None;
+        traits = [];
+        interests = [];
+        personality_hint = None;
+        activity_level = 0.7;
+      };
+    ]
+  in
+  let pending_triggers = [ (agent_name, Lodge_heartbeat.ManualTrigger) ] in
+  let blocked =
+    Lodge_heartbeat.select_checkin_agents ~ignore_quiet_hours:false ~config
+      ~agents ~pending_triggers
+  in
+  Alcotest.(check int) "quiet hours block selection" 0 (List.length blocked);
+  let overridden =
+    Lodge_heartbeat.select_checkin_agents ~ignore_quiet_hours:true ~config
+      ~agents ~pending_triggers
+  in
+  Alcotest.(check int) "manual override selects one agent" 1
+    (List.length overridden)
+
 let () =
   Alcotest.run "Operator_control"
     [
@@ -395,6 +461,10 @@ let () =
             test_team_broadcast_records_event;
           Alcotest.test_case "team task inject confirm flow" `Quick
             test_team_task_inject_requires_confirm_then_executes;
+          Alcotest.test_case "snapshot exposes lodge tick action" `Quick
+            test_snapshot_exposes_lodge_tick_action;
+          Alcotest.test_case "manual selection overrides quiet hours" `Quick
+            test_select_checkin_agents_manual_override_quiet_hours;
           Alcotest.test_case "expired confirmation rejected" `Quick
             test_confirm_rejects_expired_token;
         ] );

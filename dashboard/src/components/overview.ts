@@ -18,7 +18,7 @@ import {
   messages,
   boardPosts,
 } from '../store'
-import type { Agent, Keeper } from '../types'
+import type { Agent, Keeper, LodgeRuntimeStatus } from '../types'
 import { openKeeperDetail } from './keeper-detail'
 import { openAgentDetail } from './agent-detail'
 import { journal } from '../sse'
@@ -137,6 +137,59 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
   `
 }
 
+function formatHour(hour?: number | null): string {
+  if (typeof hour !== 'number' || !Number.isFinite(hour)) return '??:00'
+  return `${String(Math.max(0, hour)).padStart(2, '0')}:00`
+}
+
+function formatInterval(seconds?: number | null): string {
+  if (seconds == null || !Number.isFinite(seconds)) return 'unknown'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const rem = minutes % 60
+  return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`
+}
+
+function lodgeSummary(lodge: LodgeRuntimeStatus | null | undefined): string {
+  if (!lodge) return 'Lodge runtime status is unavailable in the current dashboard payload.'
+  if (!lodge.enabled) return 'Lodge automation is disabled.'
+  if (lodge.quiet_active) {
+    return `Quiet hours ${formatHour(lodge.quiet_start)}-${formatHour(lodge.quiet_end)} KST are active. Scheduled ticks may appear asleep until the window ends.`
+  }
+  if (lodge.last_tick_ago_s == null) {
+    return `Lodge is enabled and scheduled every ${formatInterval(lodge.interval_s)}, but no tick has run yet.`
+  }
+  return `Lodge ticks every ${formatInterval(lodge.interval_s)}. Planner is ${lodge.use_planner ? 'on' : 'off'} and delegated LLM is ${lodge.delegate_llm ? 'on' : 'off'}.`
+}
+
+function LodgeBanner({ lodge }: { lodge: LodgeRuntimeStatus | null | undefined }) {
+  const actedNames = lodge?.last_tick_result?.acted_names?.join(', ') || 'none'
+  const heartbeatCount = lodge?.active_self_heartbeats?.length ?? 0
+
+  return html`
+    <${Card} title="Lodge Runtime" class="section">
+      <div class=${`lodge-banner ${lodge?.enabled ? 'is-enabled' : 'is-disabled'}`}>
+        <div class="lodge-banner-meta">
+          <span class=${`pill lodge-banner-pill ${lodge?.enabled ? 'is-on' : 'is-off'}`}>
+            ${lodge?.enabled ? 'enabled' : 'disabled'}
+          </span>
+          <span class="pill">every ${formatInterval(lodge?.interval_s)}</span>
+          <span class="pill">quiet ${formatHour(lodge?.quiet_start)}-${formatHour(lodge?.quiet_end)} KST</span>
+          <span class="pill">${lodge?.quiet_active ? 'quiet active' : 'quiet inactive'}</span>
+          <span class="pill">${lodge?.use_planner ? 'planner on' : 'planner off'}</span>
+          <span class="pill">${lodge?.delegate_llm ? 'delegate llm on' : 'delegate llm off'}</span>
+        </div>
+        <div class="lodge-banner-copy">${lodgeSummary(lodge)}</div>
+        <div class="lodge-banner-copy">
+          Last tick: ${lodge?.last_tick_ago ?? 'never'} · Last acted: ${actedNames} · Self-heartbeats: ${heartbeatCount}
+        </div>
+      </div>
+    <//>
+  `
+}
+
 export function Overview() {
   const status = serverStatus.value
   const agentList = agents.value
@@ -154,6 +207,8 @@ export function Overview() {
       <${StatCard} label="In Progress" value=${byStatus.inProgress.length} color="#fbbf24" />
       <${StatCard} label="Done" value=${byStatus.done.length} color="#4ade80" />
     </div>
+
+    <${LodgeBanner} lodge=${status?.lodge} />
 
     ${boardMonitor || councilMonitor
       ? html`

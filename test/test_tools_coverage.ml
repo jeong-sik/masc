@@ -247,6 +247,8 @@ let test_masc_operator_action_schema () =
             | Some (`Assoc action_props) ->
                 (match List.assoc_opt "enum" action_props with
                  | Some (`List enums) ->
+                     Alcotest.(check bool) "has lodge_tick" true
+                       (List.mem (`String "lodge_tick") enums);
                      Alcotest.(check bool) "has team_note" true
                        (List.mem (`String "team_note") enums);
                      Alcotest.(check bool) "has team_broadcast" true
@@ -287,6 +289,8 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "keeper_msg") enums);
                 Alcotest.(check bool) "remote includes team_note" true
                   (List.mem (`String "team_note") enums);
+                Alcotest.(check bool) "remote includes lodge_tick" true
+                  (List.mem (`String "lodge_tick") enums);
                 Alcotest.(check bool) "remote includes keeper_message" true
                   (List.mem (`String "keeper_message") enums)
             | _ -> Alcotest.fail "remote action_type missing enum")

@@ -18,6 +18,8 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
 module Room_utils = Masc_mcp.Room_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
+module Tool_operator = Masc_mcp.Tool_operator
+module Operator_control = Masc_mcp.Operator_control
 module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_mcp.Types
@@ -4151,6 +4153,65 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
     ("perpetual", perpetual_dashboard_json ());
   ]
 
+let operator_actor_hint request =
+  match agent_from_request request with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let operator_snapshot_http_json ~state ~sw ~clock request =
+  let ctx : _ Operator_control.context =
+    {
+      config = state.Mcp_server.room_config;
+      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
+      sw;
+      clock;
+    }
+  in
+  let include_messages =
+    match query_param request "include_messages" with
+    | Some ("0" | "false" | "no") -> false
+    | _ -> true
+  in
+  let include_sessions =
+    match query_param request "include_sessions" with
+    | Some ("0" | "false" | "no") -> false
+    | _ -> true
+  in
+  let include_keepers =
+    match query_param request "include_keepers" with
+    | Some ("0" | "false" | "no") -> false
+    | _ -> true
+  in
+  Operator_control.snapshot_json ?actor:(operator_actor_hint request)
+    ~include_messages ~include_sessions ~include_keepers ctx
+
+let operator_action_http_json ~state ~sw ~clock request ~args =
+  let ctx : _ Operator_control.context =
+    {
+      config = state.Mcp_server.room_config;
+      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
+      sw;
+      clock;
+    }
+  in
+  Operator_control.action_json ?actor_hint:(operator_actor_hint request) ctx args
+
+let operator_confirm_http_json ~state ~sw ~clock request ~args =
+  let ctx : _ Operator_control.context =
+    {
+      config = state.Mcp_server.room_config;
+      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
+      sw;
+      clock;
+    }
+  in
+  Operator_control.confirm_json ?actor_hint:(operator_actor_hint request) ctx args
+
+let operator_error_json message =
+  `Assoc [ ("status", `String "error"); ("message", `String message) ]
+
 let parse_host_port host_header default_host default_port =
   match host_header with
   | None -> (default_host, default_port)
@@ -5491,7 +5552,7 @@ let handle_delete_mcp request reqd =
       Httpun.Reqd.respond_with_string reqd response body
 
 (** Build routes for MCP server *)
-let make_routes ~port ~host =
+let make_routes ~port ~host ~sw ~clock =
   Http.Router.empty
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get "/metrics" (fun request reqd ->
@@ -6113,6 +6174,46 @@ let make_routes ~port ~host =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/operator" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = operator_snapshot_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/operator/action" (fun request reqd ->
+       with_read_auth (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match operator_action_http_json ~state ~sw ~clock req ~args with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (operator_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (operator_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/operator/confirm" (fun request reqd ->
+       with_read_auth (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match operator_confirm_http_json ~state ~sw ~clock req ~args with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (operator_error_json message))
+           with Yojson.Json_error e ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (operator_error_json ("invalid json: " ^ e)))
+         )
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/council/debates" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in
@@ -6507,7 +6608,7 @@ let run_server ~sw ~env ~port ~base_path =
     loop ());
 
   let config = { Http.default_config with port; host = "0.0.0.0" } in
-  let routes = make_routes ~port:config.port ~host:config.host in
+  let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_extended_handler routes in
 
   (* Listen on all interfaces for Cloudflare tunnel access *)
@@ -6873,6 +6974,11 @@ let run_server ~sw ~env ~port ~base_path =
           let json = dashboard_batch_json ~compact config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/operator" ->
+          let state = get_server_state () in
+          let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
@@ -6941,6 +7047,54 @@ let run_server ~sw ~env ~port ~base_path =
                   (Yojson.Safe.to_string (trpg_error_json (Printf.sprintf "invalid json: %s" msg)))
                   ~status:`Bad_request ~extra_headers:cors
             )
+
+      | `POST, "/api/v1/operator/action" ->
+          let state = get_server_state () in
+          (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match operator_action_http_json ~state ~sw ~clock httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (operator_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
+
+      | `POST, "/api/v1/operator/confirm" ->
+          let state = get_server_state () in
+          (match authorize_read_request ~base_path:state.Mcp_server.room_config.base_path httpun_request with
+           | Error err ->
+               let status = http_status_of_auth_error err in
+               h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+           | Ok () ->
+               h2_read_body h2_reqd (fun body_str ->
+                 try
+                   let args = Yojson.Safe.from_string body_str in
+                   (match operator_confirm_http_json ~state ~sw ~clock httpun_request ~args with
+                    | Ok json ->
+                        h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+                          ~extra_headers:cors
+                    | Error message ->
+                        h2_respond_json h2_reqd
+                          (Yojson.Safe.to_string (operator_error_json message))
+                          ~status:`Bad_request ~extra_headers:cors)
+                 with Yojson.Json_error msg ->
+                   h2_respond_json h2_reqd
+                     (Yojson.Safe.to_string
+                        (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+                     ~status:`Bad_request ~extra_headers:cors))
 
       | `POST, "/api/v1/trpg/events" ->
           let state = get_server_state () in

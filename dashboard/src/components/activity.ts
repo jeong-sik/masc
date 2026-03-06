@@ -1,4 +1,4 @@
-// Activity tab — Hacker Terminal Style Live Feed
+// Activity tab — unified live feed
 
 import { html } from 'htm/preact'
 import { messages } from '../store'
@@ -62,10 +62,10 @@ export function Activity() {
 
   return html`
     <div class="section">
-      <h2 style="color: var(--accent); text-shadow: 0 0 10px rgba(0,240,255,0.5); margin-bottom: 16px; font-family: monospace;">> LIVE_ACTIVITY_STREAM</h2>
+      <h2>Live Activity</h2>
       <div class="terminal-feed">
         ${rows.length === 0
-          ? html`<div class="empty-state" style="font-family: monospace; color: var(--ok);">> Waiting for signal...</div>`
+          ? html`<div class="empty-state">Waiting for events...</div>`
           : rows.map(row => html`<${TerminalRow} key=${row.id} row=${row} />`)}
       </div>
     </div>

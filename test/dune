@@ -410,6 +410,13 @@
  (libraries alcotest yojson unix)
  (deps ../bin/main_eio.exe))
 
+; Operator MCP endpoint-level supervision tests
+(test
+ (name test_operator_mcp_e2e)
+ (modules test_operator_mcp_e2e)
+ (libraries masc_mcp alcotest yojson unix mirage-crypto-rng mirage-crypto-rng.unix)
+ (deps ../bin/main_eio.exe))
+
 ; Agent Registry Eio tests
 (test
  (name test_agent_registry_eio)

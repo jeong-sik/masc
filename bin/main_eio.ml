@@ -1964,23 +1964,23 @@ let trpg_available_models_json () : Yojson.Safe.t =
         try Ok (trpg_available_models_json_uncached ())
         with exn -> Error (Printexc.to_string exn)
       in
+      let fallback_json =
+        match outcome with
+        | Ok fresh -> fresh
+        | Error err -> (
+            match cached_snapshot with
+            | Some stale ->
+                stale
+            | None ->
+                trpg_available_models_json_base
+                  ~warnings:[Printf.sprintf "가용 모델 조회 실패: %s" err] ())
+      in
       Mutex.lock trpg_model_catalog_cache.mutex;
       trpg_model_catalog_cache.refresh_in_flight <- false;
-      (match outcome with
-      | Ok fresh ->
-          trpg_model_catalog_cache.cached_json <- Some fresh;
-          trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ()
-      | Error _ -> ());
+      trpg_model_catalog_cache.cached_json <- Some fallback_json;
+      trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ();
       Mutex.unlock trpg_model_catalog_cache.mutex;
-      match outcome with
-      | Ok fresh -> fresh
-      | Error err -> (
-          match cached_snapshot with
-          | Some stale ->
-              stale
-          | None ->
-              trpg_available_models_json_base
-                ~warnings:[Printf.sprintf "가용 모델 조회 실패: %s" err] ())
+      fallback_json
 
 let trpg_keeper_call_with_runtime
     ~(config : Room.config)

@@ -258,6 +258,142 @@ let test_handle_request_tools_list () =
 
   cleanup_dir base_path
 
+let test_handle_request_initialize_operator_profile () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 11);
+    ("method", `String "initialize");
+    ("params", `Assoc [
+      ("protocolVersion", `String "2025-11-25");
+      ("capabilities", `Assoc []);
+      ("clientInfo", `Assoc [
+        ("name", `String "remote-operator");
+        ("version", `String "1.0");
+      ]);
+    ]);
+  ]) in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+  in
+  (match response with
+   | `Assoc fields ->
+       (match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) ->
+            let instructions =
+              match List.assoc_opt "instructions" result_fields with
+              | Some (`String value) -> value
+              | _ -> ""
+            in
+            Alcotest.(check bool) "mentions operator profile" true
+              (contains_substring instructions "three control-plane tools");
+            Alcotest.(check bool) "mentions confirm workflow" true
+              (contains_substring instructions "confirm_required=true")
+        | _ -> Alcotest.fail "result not an object")
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_operator_profile () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 12);
+    ("method", `String "tools/list");
+    ("params", `Assoc []);
+  ]) in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+  in
+  (match response with
+   | `Assoc fields ->
+       (match List.assoc_opt "result" fields with
+        | Some (`Assoc result_fields) ->
+            (match List.assoc_opt "tools" result_fields with
+             | Some (`List tools) ->
+                 let names =
+                   tools
+                   |> List.filter_map (function
+                        | `Assoc fields -> List.assoc_opt "name" fields
+                        | _ -> None)
+                   |> List.filter_map (function `String s -> Some s | _ -> None)
+                 in
+                 Alcotest.(check (list string)) "operator-only tools"
+                   [ "masc_operator_snapshot"; "masc_operator_action"; "masc_operator_confirm" ]
+                   names;
+                 let find_tool name =
+                   List.find_map
+                     (function
+                       | `Assoc fields as tool -> (
+                           match List.assoc_opt "name" fields with
+                           | Some (`String n) when String.equal n name -> Some tool
+                           | _ -> None)
+                       | _ -> None)
+                     tools
+                 in
+                 let snapshot_tool =
+                   match find_tool "masc_operator_snapshot" with
+                   | Some tool -> tool
+                   | None -> Alcotest.fail "snapshot tool missing"
+                 in
+                 let action_tool =
+                   match find_tool "masc_operator_action" with
+                   | Some tool -> tool
+                   | None -> Alcotest.fail "action tool missing"
+                 in
+                 Alcotest.(check bool) "snapshot has annotations" true
+                   (Yojson.Safe.Util.member "annotations" snapshot_tool <> `Null);
+                 Alcotest.(check bool) "snapshot readonly hint" true
+                   (snapshot_tool |> Yojson.Safe.Util.member "annotations"
+                    |> Yojson.Safe.Util.member "readOnlyHint"
+                    |> Yojson.Safe.Util.to_bool);
+                 Alcotest.(check bool) "action readonly hint" false
+                   (action_tool |> Yojson.Safe.Util.member "annotations"
+                    |> Yojson.Safe.Util.member "readOnlyHint"
+                    |> Yojson.Safe.Util.to_bool)
+             | _ -> Alcotest.fail "tools not a list")
+        | _ -> Alcotest.fail "result not an object")
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 13);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_status");
+      ("arguments", `Assoc []);
+    ]);
+  ]) in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+  in
+  (match response with
+   | `Assoc fields ->
+       (match List.assoc_opt "error" fields with
+        | Some (`Assoc error_fields) ->
+            Alcotest.(check bool) "method not available" true
+              (match List.assoc_opt "message" error_fields with
+               | Some (`String msg) ->
+                   contains_substring msg "not available on this MCP endpoint"
+               | _ -> false)
+        | _ -> Alcotest.fail "error missing")
+   | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
 let test_handle_request_tools_list_with_placeholder_flag () =
   with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "1" (fun () ->
     Eio_main.run @@ fun env ->
@@ -747,8 +883,14 @@ let response_tests = [
 
 let eio_tests = [
   "handle initialize", `Quick, test_handle_request_initialize;
+  "handle initialize operator profile", `Quick,
+  test_handle_request_initialize_operator_profile;
   "handle tools/list", `Quick, test_handle_request_tools_list;
+  "handle tools/list operator profile", `Quick,
+  test_handle_request_tools_list_operator_profile;
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
+  "reject non-operator tool on operator profile", `Quick,
+  test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;

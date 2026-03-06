@@ -678,11 +678,28 @@ export interface SSEEvent {
 
 // --- Journal ---
 
+export type JournalEventType =
+  | 'agent_joined'
+  | 'agent_left'
+  | 'broadcast'
+  | 'task_update'
+  | 'board_post'
+  | 'board_comment'
+  | 'keeper_heartbeat'
+  | 'keeper_handoff'
+  | 'keeper_compaction'
+  | 'keeper_guardrail'
+  | 'unknown'
+
 export interface JournalEntry {
   agent: string
   text: string
   timestamp: number
   kind?: 'board' | 'tasks' | 'keepers' | 'system'
+  eventType?: JournalEventType
+  author?: string
+  preview?: string
+  postId?: string
 }
 
 // --- Sort modes ---

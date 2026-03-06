@@ -2,7 +2,7 @@
 // Auto-reconnect with exponential backoff, signal-based event dispatch
 
 import { signal, type ReadonlySignal } from '@preact/signals'
-import type { SSEEvent, JournalEntry } from './types'
+import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
 const RECONNECT_BASE_MS = 1000
@@ -36,16 +36,33 @@ function addJournalEntry(
   agent: string,
   text: string,
   kind: JournalEntry['kind'] = 'system',
+  extra: Partial<JournalEntry> = {},
 ): void {
-  const entry: JournalEntry = { agent, text, timestamp: Date.now(), kind }
+  const entry: JournalEntry = { agent, text, timestamp: Date.now(), kind, ...extra }
   journal.value = [entry, ...journal.value].slice(0, MAX_JOURNAL)
 }
 
-function formatBoardJournalText(label: 'Post' | 'Comment', preview: string | undefined): string {
+function normalizePreview(preview: string | undefined, max = 88): string | undefined {
   const normalized = (preview ?? '').replace(/\s+/g, ' ').trim()
-  if (!normalized) return `New ${label.toLowerCase()}`
-  const clipped = normalized.length > 88 ? `${normalized.slice(0, 85)}...` : normalized
+  if (!normalized) return undefined
+  const clipped = normalized.length > max ? `${normalized.slice(0, max - 3)}...` : normalized
+  return clipped
+}
+
+function formatBoardJournalText(label: 'Post' | 'Comment', preview: string | undefined): string {
+  const clipped = normalizePreview(preview)
+  if (!clipped) return `New ${label.toLowerCase()}`
   return `${label}: ${clipped}`
+}
+
+function addTypedJournalEntry(
+  agent: string,
+  text: string,
+  kind: JournalEntry['kind'],
+  eventType: JournalEventType,
+  extra: Partial<JournalEntry> = {},
+): void {
+  addJournalEntry(agent, text, kind, { eventType, ...extra })
 }
 
 // --- SSE Manager ---
@@ -123,51 +140,89 @@ function handleEvent(event: SSEEvent): void {
 
   switch (type) {
     case 'agent_joined':
-      addJournalEntry(agent, 'Joined', 'system')
+      addTypedJournalEntry(agent, 'Joined', 'system', 'agent_joined')
       break
     case 'agent_left':
-      addJournalEntry(agent, 'Left', 'system')
+      addTypedJournalEntry(agent, 'Left', 'system', 'agent_left')
       break
     case 'broadcast':
-      addJournalEntry(agent, `${(event.message ?? event.content ?? '').slice(0, 80)}`, 'system')
+      addTypedJournalEntry(
+        agent,
+        `${(event.message ?? event.content ?? '').slice(0, 80)}`,
+        'system',
+        'broadcast',
+      )
       break
     case 'task_update':
-      addJournalEntry(agent, `Task: ${event.task_id ?? ''} -> ${event.status ?? ''}`, 'tasks')
+      addTypedJournalEntry(
+        agent,
+        `Task: ${event.task_id ?? ''} -> ${event.status ?? ''}`,
+        'tasks',
+        'task_update',
+      )
       break
     case 'board_post':
     case 'masc/board_post':
-      addJournalEntry(agent, formatBoardJournalText('Post', event.content ?? event.message), 'board')
+      addTypedJournalEntry(
+        agent,
+        formatBoardJournalText('Post', event.content ?? event.message),
+        'board',
+        'board_post',
+        {
+          author: event.author ?? agent,
+          preview: normalizePreview(event.content ?? event.message),
+          postId: event.post_id,
+        },
+      )
       break
     case 'board_comment':
     case 'masc/board_comment':
-      addJournalEntry(agent, formatBoardJournalText('Comment', event.content ?? event.message), 'board')
+      addTypedJournalEntry(
+        agent,
+        formatBoardJournalText('Comment', event.content ?? event.message),
+        'board',
+        'board_comment',
+        {
+          author: event.author ?? agent,
+          preview: normalizePreview(event.content ?? event.message),
+          postId: event.post_id,
+        },
+      )
       break
     case 'keeper_heartbeat':
-      addJournalEntry(
+      addTypedJournalEntry(
         event.name ?? agent,
         `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`,
         'keepers',
+        'keeper_heartbeat',
       )
       break
     case 'keeper_handoff':
-      addJournalEntry(
+      addTypedJournalEntry(
         event.name ?? agent,
         `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (${event.to_model ?? '?'})`,
         'keepers',
+        'keeper_handoff',
       )
       break
     case 'keeper_compaction':
-      addJournalEntry(
+      addTypedJournalEntry(
         event.name ?? agent,
         `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`,
         'keepers',
+        'keeper_compaction',
       )
       break
     case 'keeper_guardrail':
-      addJournalEntry(event.name ?? agent, `Guardrail: ${event.reason ?? 'stopped'}`, 'keepers')
+      addTypedJournalEntry(
+        event.name ?? agent,
+        `Guardrail: ${event.reason ?? 'stopped'}`,
+        'keepers',
+        'keeper_guardrail',
+      )
       break
     default:
-      addJournalEntry(agent, type, 'system')
+      addTypedJournalEntry(agent, type, 'system', 'unknown')
   }
 }
 

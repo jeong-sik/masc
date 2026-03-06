@@ -90,14 +90,28 @@ val make_call_llm : agent_name:string -> (prompt:string -> string)
 (** {1 Scheduling} *)
 
 val scan_board_triggers : since:float -> agents:agent list -> (string * checkin_trigger) list
-val select_checkin_agents : config:config -> agents:agent list -> pending_triggers:(string * checkin_trigger) list -> (string * checkin_trigger) list
+val select_checkin_agents :
+  ignore_quiet_hours:bool ->
+  config:config ->
+  agents:agent list ->
+  pending_triggers:(string * checkin_trigger) list ->
+  (string * checkin_trigger) list
 
 (** Plan-based agent selection using Agent_planner priorities. *)
-val select_agents_by_plan : agents:agent list -> max_n:int -> pending_triggers:(string * checkin_trigger) list -> (string * checkin_trigger) list
+val select_agents_by_plan :
+  ignore_quiet_hours:bool ->
+  agents:agent list ->
+  max_n:int ->
+  pending_triggers:(string * checkin_trigger) list ->
+  (string * checkin_trigger) list
 
 (** {1 Heartbeat Execution} *)
 
-val tick : config:config -> pending_triggers:(string * checkin_trigger) list -> heartbeat_result
+val tick :
+  ignore_quiet_hours:bool ->
+  config:config ->
+  pending_triggers:(string * checkin_trigger) list ->
+  heartbeat_result
 
 (** {1 Daemon} *)
 

@@ -4460,6 +4460,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let tasks = Room.get_tasks_raw config in
   let agents = Room.get_agents_raw config in
   let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+  let lodge_json = Masc_mcp.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let now_ts = Masc_mcp.Time_compat.now () in
   let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
   let (council_monitor_json, council_feed_ok) =
@@ -4519,6 +4520,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("board", board_monitor_json);
         ("council", council_monitor_json);
       ]);
+      ("lodge", lodge_json);
       ("data_quality", `Assoc [
         ("board_contract_ok", `Bool board_contract_ok);
         ("council_feed_ok", `Bool council_feed_ok);

@@ -467,6 +467,46 @@ export interface CouncilMonitoring {
   bad_age_s?: number
 }
 
+export interface LodgeCheckinResult {
+  name: string
+  trigger?: string
+  outcome?: 'acted' | 'passed' | 'skipped' | string
+  summary?: string
+  reason?: string
+}
+
+export interface LodgeTickResult {
+  hour?: number
+  checked: number
+  acted: number
+  acted_names: string[]
+  activity_report?: string
+  quiet_hours_overridden?: boolean
+  skipped_reason?: string
+  acted_rows?: Array<{ name: string; summary?: string }>
+  passed_rows?: Array<{ name: string; reason?: string }>
+  skipped_rows?: Array<{ name: string; reason?: string }>
+  checkins?: LodgeCheckinResult[]
+}
+
+export interface LodgeRuntimeStatus {
+  enabled: boolean
+  interval_s: number
+  quiet_start?: number
+  quiet_end?: number
+  quiet_active?: boolean
+  use_planner?: boolean
+  delegate_llm?: boolean
+  agent_count?: number
+  agents?: string[]
+  last_tick_ago_s?: number | null
+  last_tick_ago?: string
+  total_ticks?: number
+  total_checkins?: number
+  last_tick_result?: LodgeTickResult | null
+  active_self_heartbeats?: string[]
+}
+
 // --- Dashboard batch response ---
 
 export interface DashboardData {
@@ -550,6 +590,7 @@ export type OperatorActionType =
   | 'broadcast'
   | 'room_pause'
   | 'room_resume'
+  | 'lodge_tick'
   | 'team_turn'
   | 'team_stop'
   | 'keeper_msg'
@@ -612,6 +653,7 @@ export interface ServerStatus {
     board?: BoardMonitoring
     council?: CouncilMonitoring
   }
+  lodge?: LodgeRuntimeStatus
   data_quality?: {
     board_contract_ok?: boolean
     council_feed_ok?: boolean

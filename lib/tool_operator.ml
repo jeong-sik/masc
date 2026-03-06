@@ -29,6 +29,7 @@ let strict_action_enums =
     `String "broadcast";
     `String "room_pause";
     `String "room_resume";
+    `String "lodge_tick";
     `String "team_note";
     `String "team_broadcast";
     `String "team_task_inject";

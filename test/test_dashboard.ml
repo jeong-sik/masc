@@ -131,6 +131,23 @@ let test_worktrees_section_empty () =
   Alcotest.(check string) "empty_msg" "(no worktrees)" section.empty_msg;
   cleanup_dir dir
 
+let test_lodge_status_json_has_runtime_fields () =
+  let json = Lib.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let open Yojson.Safe.Util in
+  let has_key key =
+    match json with
+    | `Assoc fields -> List.mem_assoc key fields
+    | _ -> false
+  in
+  Alcotest.(check bool) "enabled present" true (has_key "enabled");
+  Alcotest.(check bool) "interval present" true (has_key "interval_s");
+  Alcotest.(check bool) "quiet_start present" true (has_key "quiet_start");
+  Alcotest.(check bool) "quiet_end present" true (has_key "quiet_end");
+  Alcotest.(check bool) "quiet_active present" true (has_key "quiet_active");
+  Alcotest.(check bool) "last_tick_ago_s present" true (has_key "last_tick_ago_s");
+  Alcotest.(check bool) "last_tick_result present" true (has_key "last_tick_result");
+  Alcotest.(check bool) "last_tick_ago string" true (member "last_tick_ago" json <> `Null)
+
 (* ===== Test Suite ===== *)
 
 let format_tests = [
@@ -153,6 +170,7 @@ let section_tests = [
   "tasks section empty", `Quick, test_tasks_section_empty;
   "messages section empty", `Quick, test_messages_section_empty;
   "worktrees section empty", `Quick, test_worktrees_section_empty;
+  "lodge status runtime fields", `Quick, test_lodge_status_json_has_runtime_fields;
 ]
 
 let () =

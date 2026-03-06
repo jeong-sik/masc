@@ -54,6 +54,8 @@ export const goalsLoading = signal(false)
 // --- MDAL state ---
 
 export const mdalLoops = signal<Map<string, MdalLoop>>(new Map())
+export const mdalSnapshotState = signal<'unknown' | 'idle' | 'ready' | 'error'>('unknown')
+export const lastMdalError = signal<string | null>(null)
 
 // --- Loading flags ---
 
@@ -87,10 +89,11 @@ export const tasksByStatus = computed(() => {
 // --- Keeper lifecycle derivation ---
 
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
+  const status = keeper.status?.toLowerCase() ?? ''
+  if (status === 'offline' || status === 'inactive') return 'offline'
+
   const series = keeper.metrics_series
   if (!series || series.length === 0) {
-    const status = keeper.status?.toLowerCase() ?? ''
-    if (status === 'offline' || status === 'inactive') return 'offline'
     return 'idle'
   }
   const latest = series[series.length - 1]
@@ -317,6 +320,11 @@ function normalizeKeepers(raw: unknown): Keeper[] {
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
         generation: asNumber(row.generation),
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
+        keeper_age_s: asNumber(row.keeper_age_s),
+        last_turn_ago_s: asNumber(row.last_turn_ago_s),
+        last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
+        last_compaction_ago_s: asNumber(row.last_compaction_ago_s),
+        last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
         context_ratio: contextRatio,
         context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
         context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),
@@ -423,10 +431,16 @@ export async function refreshMdal(): Promise<void> {
   try {
     const latestResult = await fetchLatestMdalLoop()
     if (refreshSeq !== _mdalRefreshSeq) return
-    if (latestResult.state === 'error') return
+    if (latestResult.state === 'error') {
+      mdalSnapshotState.value = 'error'
+      lastMdalError.value = latestResult.message
+      return
+    }
 
     lastMdalRefreshAt.value = new Date().toISOString()
+    lastMdalError.value = null
     if (latestResult.state === 'idle') {
+      mdalSnapshotState.value = 'idle'
       const next = new Map(mdalLoops.value)
       for (const [loopId, loop] of next.entries()) {
         if (loop.status === 'running') {
@@ -438,6 +452,7 @@ export async function refreshMdal(): Promise<void> {
     }
 
     const latest = latestResult.loop
+    mdalSnapshotState.value = 'ready'
     const next = new Map(mdalLoops.value)
     const existing = next.get(latest.loop_id)
     next.set(latest.loop_id, {

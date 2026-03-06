@@ -13,6 +13,8 @@ import {
   mdalLoading,
   lastGoalsRefreshAt,
   lastMdalRefreshAt,
+  mdalSnapshotState,
+  lastMdalError,
   refreshGoals,
   refreshMdal,
 } from '../store'
@@ -133,16 +135,19 @@ function FreshnessRow({
   label,
   timestamp,
   source,
+  note,
 }: {
   label: string
   timestamp: string | null
   source: string
+  note?: string
 }) {
   return html`
     <div class="planning-freshness-row">
       <div>
         <div class="planning-freshness-label">${label}</div>
         <div class="planning-freshness-source">${source}</div>
+        ${note ? html`<div class="planning-freshness-source">${note}</div>` : null}
       </div>
       <strong class="planning-freshness-value">
         ${timestamp ? html`<${TimeAgo} timestamp=${timestamp} />` : 'Not loaded'}
@@ -284,6 +289,13 @@ export function Goals() {
   const loops = loopsList.value
   const runningLoops = loops.filter(loop => loop.status === 'running').length
   const activeGoals = goals.value.filter(goal => goal.status === 'active').length
+  const mdalState = mdalSnapshotState.value
+  const mdalNote =
+    mdalState === 'idle'
+      ? 'No loop running'
+      : mdalState === 'error'
+        ? (lastMdalError.value ?? 'MDAL snapshot unavailable')
+        : 'Current loop snapshot'
 
   return html`
     <div>
@@ -336,7 +348,12 @@ export function Goals() {
 
         <div class="planning-freshness-grid">
           <${FreshnessRow} label="Goals" timestamp=${lastGoalsRefreshAt.value} source="masc_goal_list" />
-          <${FreshnessRow} label="MDAL loops" timestamp=${lastMdalRefreshAt.value} source="masc_mdal_status" />
+          <${FreshnessRow}
+            label="MDAL loops"
+            timestamp=${lastMdalRefreshAt.value}
+            source="masc_mdal_status"
+            note=${mdalNote}
+          />
         </div>
       <//>
 
@@ -358,13 +375,25 @@ export function Goals() {
       <${Card} title="MDAL Loops" class="section">
         ${mdalLoading.value && loops.length === 0
           ? html`<div class="loading-indicator">Loading MDAL loops...</div>`
-          : loops.length === 0
+          : loops.length === 0 && mdalState === 'error'
             ? html`
                 <div class="empty-state">
-                  No loop snapshot is visible right now. This section only changes when the backend exposes a current MDAL loop.
+                  MDAL snapshot could not be loaded right now. Check the backend tool contract or runtime health.
                 </div>
               `
-            : html`
+            : loops.length === 0 && mdalState === 'idle'
+            ? html`
+                <div class="empty-state">
+                  No loop is running right now. This section wakes up when <code>masc_mdal_start</code> exposes a live loop.
+                </div>
+              `
+            : loops.length === 0
+              ? html`
+                  <div class="empty-state">
+                    No loop snapshot is visible yet. Refresh once the backend has reported a planning loop.
+                  </div>
+                `
+              : html`
                 <div class="planning-loop-list">
                   ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}
                 </div>

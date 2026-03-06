@@ -118,7 +118,9 @@ let tool_category tool_name =
   | "masc_team_session_stop" | "masc_team_session_report"
   | "masc_team_session_list" | "masc_team_session_compare"
   | "masc_team_session_turn" | "masc_team_session_events"
-  | "masc_team_session_prove" -> Core
+  | "masc_team_session_prove"
+  | "masc_operator_snapshot" | "masc_operator_action"
+  | "masc_operator_confirm" -> Core
 
   (* Communication tools *)
   | "masc_broadcast" | "masc_messages"

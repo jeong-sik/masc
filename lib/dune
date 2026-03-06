@@ -93,6 +93,7 @@
    mode
    nickname
    noosphere_eio
+   operator_control
    notify
    orchestrator
    planning_eio
@@ -152,6 +153,7 @@
    tool_handover
    tool_relay
    tool_goals
+   tool_operator
    tool_team_session
    tool_heartbeat
    tool_encryption

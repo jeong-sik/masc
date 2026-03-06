@@ -6,7 +6,9 @@ export interface AgentMotionSnapshot {
   lastActivityText: string | null
 }
 
-interface AgentMotionSources {
+interface AgentMotionOptions {
+  currentTask?: string | null
+  lastSeen?: string | null
   boardPosts?: BoardPost[]
   keepers?: Keeper[]
 }
@@ -63,7 +65,7 @@ export function buildAgentMotion(
   tasks: Task[],
   messages: Message[],
   journal: JournalEntry[],
-  sources: AgentMotionSources = {},
+  options: AgentMotionOptions = {},
 ): AgentMotionSnapshot {
   const agentKey = normalizeAgentKey(agentName)
   const activeAssignedCount = tasks.filter(task =>
@@ -76,14 +78,17 @@ export function buildAgentMotion(
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
 
   const recentJournal = journal
-    .filter(entry => normalizeAgentKey(entry.agent) === agentKey)
+    .filter(entry =>
+      normalizeAgentKey(entry.agent) === agentKey
+      || normalizeAgentKey(entry.author) === agentKey
+    )
     .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
 
-  const recentBoardPost = (sources.boardPosts ?? [])
+  const recentBoardPost = (options.boardPosts ?? [])
     .filter(post => normalizeAgentKey(post.author) === agentKey)
     .sort((a, b) => toEpoch(b.updated_at || b.created_at) - toEpoch(a.updated_at || a.created_at))[0]
 
-  const recentKeeper = (sources.keepers ?? [])
+  const recentKeeper = (options.keepers ?? [])
     .filter(keeper => normalizeAgentKey(keeper.name) === agentKey && keeperSignalTimestamp(keeper) !== null)
     .sort((a, b) => toEpoch(keeperSignalTimestamp(b) ?? 0) - toEpoch(keeperSignalTimestamp(a) ?? 0))[0]
 
@@ -91,12 +96,17 @@ export function buildAgentMotion(
   const journalTs = recentJournal ? toEpoch(recentJournal.timestamp) : 0
   const boardTs = recentBoardPost ? toEpoch(recentBoardPost.updated_at || recentBoardPost.created_at) : 0
   const keeperTs = recentKeeper ? toEpoch(keeperSignalTimestamp(recentKeeper) ?? 0) : 0
+  const lastSeenTs = options.lastSeen ? toEpoch(options.lastSeen) : 0
 
-  if (messageTs === 0 && journalTs === 0 && boardTs === 0 && keeperTs === 0) {
+  const fallbackText =
+    options.currentTask?.trim()
+    || (activeAssignedCount > 0 ? `${activeAssignedCount} claimed tasks` : null)
+
+  if (messageTs === 0 && journalTs === 0 && boardTs === 0 && keeperTs === 0 && lastSeenTs === 0) {
     return {
       activeAssignedCount,
       lastActivityAt: null,
-      lastActivityText: activeAssignedCount > 0 ? `${activeAssignedCount} claimed tasks` : null,
+      lastActivityText: fallbackText,
     }
   }
 
@@ -134,17 +144,17 @@ export function buildAgentMotion(
     .sort((a, b) => b.ts - a.ts)
 
   const latest = candidates[0]
-  if (!latest) {
+  if (latest && latest.ts >= lastSeenTs) {
     return {
       activeAssignedCount,
-      lastActivityAt: null,
-      lastActivityText: activeAssignedCount > 0 ? `${activeAssignedCount} claimed tasks` : null,
+      lastActivityAt: latest.timestamp,
+      lastActivityText: latest.text,
     }
   }
 
   return {
     activeAssignedCount,
-    lastActivityAt: latest.timestamp,
-    lastActivityText: latest.text,
+    lastActivityAt: options.lastSeen ?? null,
+    lastActivityText: fallbackText ?? 'Presence heartbeat',
   }
 }

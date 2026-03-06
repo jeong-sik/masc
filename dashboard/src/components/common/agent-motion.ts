@@ -100,33 +100,51 @@ export function buildAgentMotion(
     }
   }
 
-  if (messageTs >= journalTs && recentMessage) {
-    return {
-      activeAssignedCount,
-      lastActivityAt: recentMessage.timestamp,
-      lastActivityText: trimText(recentMessage.content),
-    }
-  }
+  const candidates = [
+    recentMessage
+      ? {
+          timestamp: recentMessage.timestamp,
+          ts: messageTs,
+          text: trimText(recentMessage.content),
+        }
+      : null,
+    recentBoardPost
+      ? {
+          timestamp: recentBoardPost.updated_at || recentBoardPost.created_at,
+          ts: boardTs,
+          text: `Post: ${trimText(boardPreview(recentBoardPost))}`,
+        }
+      : null,
+    recentKeeper
+      ? {
+          timestamp: keeperSignalTimestamp(recentKeeper),
+          ts: keeperTs,
+          text: keeperPreview(recentKeeper),
+        }
+      : null,
+    recentJournal
+      ? {
+          timestamp: new Date(recentJournal.timestamp).toISOString(),
+          ts: journalTs,
+          text: trimText(recentJournal.text),
+        }
+      : null,
+  ]
+    .filter((candidate): candidate is { timestamp: string | null; ts: number; text: string } => candidate !== null)
+    .sort((a, b) => b.ts - a.ts)
 
-  if (boardTs >= journalTs && boardTs >= keeperTs && recentBoardPost) {
+  const latest = candidates[0]
+  if (!latest) {
     return {
       activeAssignedCount,
-      lastActivityAt: recentBoardPost.updated_at || recentBoardPost.created_at,
-      lastActivityText: `Post: ${trimText(boardPreview(recentBoardPost))}`,
-    }
-  }
-
-  if (keeperTs >= journalTs && recentKeeper) {
-    return {
-      activeAssignedCount,
-      lastActivityAt: keeperSignalTimestamp(recentKeeper),
-      lastActivityText: keeperPreview(recentKeeper),
+      lastActivityAt: null,
+      lastActivityText: activeAssignedCount > 0 ? `${activeAssignedCount} claimed tasks` : null,
     }
   }
 
   return {
     activeAssignedCount,
-    lastActivityAt: recentJournal ? new Date(recentJournal.timestamp).toISOString() : null,
-    lastActivityText: recentJournal ? trimText(recentJournal.text) : null,
+    lastActivityAt: latest.timestamp,
+    lastActivityText: latest.text,
   }
 }

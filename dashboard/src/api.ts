@@ -382,7 +382,7 @@ export async function fetchBoard(
     const params = new URLSearchParams()
     if (sortBy) params.set('sort_by', sortBy)
     if (options?.excludeSystem) params.set('exclude_system', 'true')
-    params.set('limit', '100')
+    params.set('limit', options?.excludeSystem ? '150' : '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
     const normalizedPosts = Array.isArray(raw.posts)

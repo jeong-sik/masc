@@ -5,6 +5,7 @@ type 'a context = {
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
+  mcp_session_id : string option;
 }
 
 type result = bool * string
@@ -21,24 +22,132 @@ let get_bool args key default =
   | `Bool value -> value
   | _ -> default
 
+let schema_properties entries = `Assoc entries
+
+let strict_action_enums =
+  [
+    `String "broadcast";
+    `String "room_pause";
+    `String "room_resume";
+    `String "team_note";
+    `String "team_broadcast";
+    `String "team_task_inject";
+    `String "team_stop";
+    `String "keeper_message";
+  ]
+
+let legacy_action_alias_enums =
+  [ `String "team_turn"; `String "keeper_msg"; `String "task_inject" ]
+
+let target_type_enums =
+  [ `String "room"; `String "team_session"; `String "keeper" ]
+
+let snapshot_schema ~remote =
+  {
+    name = "masc_operator_snapshot";
+    description =
+      if remote then
+        "Read the unified operator control-plane state. Use this when you need current room, session, keeper, message, and pending-confirm data before taking action."
+      else
+        "Read unified operator state for room, team sessions, keepers, recent messages, and pending confirmations. Use this before issuing control-plane actions.";
+    input_schema =
+      `Assoc
+        [
+          ("type", `String "object");
+          ( "properties",
+            schema_properties
+              [
+                ("actor", `Assoc [ ("type", `String "string") ]);
+                ("view", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "summary"; `String "sessions"; `String "keepers"; `String "messages"; `String "full" ]) ]);
+                ("include_messages", `Assoc [ ("type", `String "boolean") ]);
+                ("include_sessions", `Assoc [ ("type", `String "boolean") ]);
+                ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
+              ] );
+        ];
+  }
+
+let action_schema ~remote =
+  let enum_values =
+    if remote then strict_action_enums else strict_action_enums @ legacy_action_alias_enums
+  in
+  {
+    name = "masc_operator_action";
+    description =
+      if remote then
+        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a room, or message a keeper through the remote operator surface."
+      else
+        "Run a structured operator action against the room, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions.";
+    input_schema =
+      `Assoc
+        [
+          ("type", `String "object");
+          ( "properties",
+            schema_properties
+              [
+                ("actor", `Assoc [ ("type", `String "string") ]);
+                ( "action_type",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List enum_values);
+                    ] );
+                ( "target_type",
+                  `Assoc
+                    [
+                      ("type", `String "string");
+                      ("enum", `List target_type_enums);
+                    ] );
+                ("target_id", `Assoc [ ("type", `String "string") ]);
+                ("payload", `Assoc [ ("type", `String "object") ]);
+              ] );
+            ("required", `List [ `String "action_type"; `String "payload" ]);
+        ];
+  }
+
+let confirm_schema =
+  {
+    name = "masc_operator_confirm";
+    description =
+      "Confirm and execute a previously previewed operator action. Use this only after masc_operator_action returns confirm_required=true.";
+    input_schema =
+      `Assoc
+        [
+          ("type", `String "object");
+          ( "properties",
+            schema_properties
+              [
+                ("actor", `Assoc [ ("type", `String "string") ]);
+                ("confirm_token", `Assoc [ ("type", `String "string") ]);
+              ] );
+          ("required", `List [ `String "confirm_token" ]);
+        ];
+  }
+
 let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
 
 let dispatch (ctx : 'a context) ~name ~args : result option =
   let control_ctx : 'a Operator_control.context =
-    { config = ctx.config; agent_name = ctx.agent_name; sw = ctx.sw; clock = ctx.clock }
+    {
+      config = ctx.config;
+      agent_name = ctx.agent_name;
+      sw = ctx.sw;
+      clock = ctx.clock;
+      mcp_session_id = ctx.mcp_session_id;
+    }
   in
   match name with
   | "masc_operator_snapshot" ->
       let actor = get_string_opt args "actor" in
+      let view = get_string_opt args "view" in
       let include_messages = get_bool args "include_messages" true in
       let include_sessions = get_bool args "include_sessions" true in
       let include_keepers = get_bool args "include_keepers" true in
       Some
         ( true,
           Yojson.Safe.to_string
-            (Operator_control.snapshot_json ?actor ~include_messages ~include_sessions
+            (Operator_control.snapshot_json ?actor ?view ~include_messages ~include_sessions
                ~include_keepers control_ctx) )
   | "masc_operator_action" ->
       Some (json_string_of_result (Operator_control.action_json control_ctx args))
@@ -47,82 +156,10 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | _ -> None
 
 let schemas : tool_schema list =
-  [
-    {
-      name = "masc_operator_snapshot";
-      description =
-        "Read unified operator state for room, team sessions, keepers, recent messages, and pending confirmations.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("actor", `Assoc [ ("type", `String "string") ]);
-                  ("include_messages", `Assoc [ ("type", `String "boolean") ]);
-                  ("include_sessions", `Assoc [ ("type", `String "boolean") ]);
-                  ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
-                ] );
-          ];
-    };
-    {
-      name = "masc_operator_action";
-      description =
-        "Run a structured operator action against the room, a team session, or a keeper. Destructive actions return a confirm token first.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("actor", `Assoc [ ("type", `String "string") ]);
-                  ( "action_type",
-                    `Assoc
-                      [
-                        ("type", `String "string");
-                        ( "enum",
-                          `List
-                            [
-                              `String "broadcast";
-                              `String "room_pause";
-                              `String "room_resume";
-                              `String "team_turn";
-                              `String "team_stop";
-                              `String "keeper_msg";
-                              `String "task_inject";
-                            ] );
-                      ] );
-                  ( "target_type",
-                    `Assoc
-                      [
-                        ("type", `String "string");
-                        ( "enum",
-                          `List
-                            [ `String "room"; `String "team_session"; `String "keeper" ] );
-                      ] );
-                  ("target_id", `Assoc [ ("type", `String "string") ]);
-                  ("payload", `Assoc [ ("type", `String "object") ]);
-                ] );
-            ("required", `List [ `String "action_type"; `String "target_type"; `String "payload" ]);
-          ];
-    };
-    {
-      name = "masc_operator_confirm";
-      description =
-        "Confirm and execute a previously previewed operator action using its confirm token.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("actor", `Assoc [ ("type", `String "string") ]);
-                  ("confirm_token", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "confirm_token" ]);
-          ];
-    };
-  ]
+  [ snapshot_schema ~remote:false; action_schema ~remote:false; confirm_schema ]
+
+let remote_schemas : tool_schema list =
+  [ snapshot_schema ~remote:true; action_schema ~remote:true; confirm_schema ]
+
+let remote_tool_names : string list =
+  List.map (fun (schema : tool_schema) -> schema.name) remote_schemas

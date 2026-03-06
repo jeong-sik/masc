@@ -16,6 +16,7 @@ import {
   keeperLifecycles,
   staleKeepers,
   messages,
+  boardPosts,
 } from '../store'
 import type { Agent, Keeper } from '../types'
 import { openKeeperDetail } from './keeper-detail'
@@ -32,7 +33,10 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
 }
 
 function AgentRow({ agent }: { agent: Agent }) {
-  const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value)
+  const motion = buildAgentMotion(agent.name, tasks.value, messages.value, journal.value, {
+    boardPosts: boardPosts.value,
+    keepers: keepers.value,
+  })
 
   return html`
     <div class="agent" onClick=${() => openAgentDetail(agent.name)} style="cursor: pointer">

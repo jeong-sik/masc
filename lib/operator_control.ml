@@ -557,15 +557,19 @@ let default_target_type_for action_type =
   | "keeper_message" -> "keeper"
   | _ -> ""
 
-let generate_confirm_token (request : action_request) =
-  let entropy =
-    Printf.sprintf "%s|%s|%s|%d|%.6f|%d"
-      request.actor request.action_type
-      (Yojson.Safe.to_string request.payload)
-      (Unix.getpid ()) (Unix.gettimeofday ()) (Random.bits ())
+let generate_confirm_token config =
+  let rec loop attempts =
+    if attempts > 8 then
+      failwith "failed to generate unique confirm token"
+    else
+      let token = "opc_" ^ String.sub (Auth.generate_token ()) 0 32 in
+      let exists =
+        raw_pending_confirms config
+        |> List.exists (fun entry -> String.equal entry.token token)
+      in
+      if exists then loop (attempts + 1) else token
   in
-  let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
-  "opc_" ^ String.sub digest 0 32
+  loop 0
 
 let action_request_of_args ?actor_hint ctx args =
   let action_type =
@@ -881,7 +885,7 @@ let action_json ?actor_hint (ctx : 'a context) args =
     let expires_at = iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
     let entry =
       {
-        token = generate_confirm_token request;
+        token = generate_confirm_token ctx.config;
         trace_id;
         actor = request.actor;
         action_type = request.action_type;

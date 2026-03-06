@@ -217,14 +217,14 @@ let find_main_eio_exe () =
             (fun root -> Filename.concat root "_build/default/bin/main_eio.exe")
             build_roots
         in
-        [
-          "./bin/main_eio.exe";
-          "../bin/main_eio.exe";
-          "../../bin/main_eio.exe";
-          "../../../bin/main_eio.exe";
-          "../../../../bin/main_eio.exe";
-        ]
-        @ build_candidates
+        build_candidates
+        @ [
+            "./bin/main_eio.exe";
+            "../bin/main_eio.exe";
+            "../../bin/main_eio.exe";
+            "../../../bin/main_eio.exe";
+            "../../../../bin/main_eio.exe";
+          ]
   in
   match List.find_opt Sys.file_exists candidates with
   | Some path -> path

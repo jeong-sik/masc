@@ -856,10 +856,24 @@ let lodge_status () : lodge_status =
   }
 
 let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
-  let last_tick_ago =
+  let quiet_start = Env_config.LodgeV2.quiet_start in
+  let quiet_end = Env_config.LodgeV2.quiet_end in
+  let current_hour = current_hour_kst () in
+  let quiet_active =
+    quiet_start < quiet_end
+    && current_hour >= quiet_start
+    && current_hour < quiet_end
+  in
+  let last_tick_ago_s =
     if s.ls_last_tick > 0.0 then
-      Printf.sprintf "%.0fs ago" (Time_compat.now () -. s.ls_last_tick)
-    else "never"
+      let delta = Time_compat.now () -. s.ls_last_tick in
+      Some (max 0.0 delta)
+    else None
+  in
+  let last_tick_ago =
+    match last_tick_ago_s with
+    | Some delta -> Printf.sprintf "%.0fs ago" delta
+    | None -> "never"
   in
   let last_result_json = match s.ls_last_result with
     | None -> `Null
@@ -878,8 +892,14 @@ let lodge_status_to_json (s : lodge_status) : Yojson.Safe.t =
   `Assoc [
     ("enabled", `Bool s.ls_enabled);
     ("interval_s", `Float s.ls_interval_s);
+    ("quiet_start", `Int quiet_start);
+    ("quiet_end", `Int quiet_end);
+    ("quiet_active", `Bool quiet_active);
+    ("use_planner", `Bool Env_config.LodgeV2.use_planner);
+    ("delegate_llm", `Bool Env_config.LodgeV2.delegate_llm);
     ("agent_count", `Int s.ls_agent_count);
     ("agents", `List []);  (* hidden for privacy *)
+    ("last_tick_ago_s", match last_tick_ago_s with Some v -> `Float v | None -> `Null);
     ("last_tick_ago", `String last_tick_ago);
     ("total_ticks", `Int s.ls_total_ticks);
     ("total_checkins", `Int s.ls_total_checkins);
@@ -1191,12 +1211,17 @@ let scan_board_triggers ~since ~(agents : agent list) : (string * checkin_trigge
     No LLM calls for scheduling — 0 LLM cost per tick. *)
 
 (** Select which agents to check in this tick. *)
-let select_checkin_agents ~(config : config) ~(agents : agent list)
+let select_checkin_agents ~ignore_quiet_hours ~(config : config)
+    ~(agents : agent list)
     ~(pending_triggers : (string * checkin_trigger) list)
   : (string * checkin_trigger) list =
   let current_hour = current_hour_kst () in
   let (quiet_start, quiet_end) = config.quiet_hours in
-  let is_quiet = current_hour >= quiet_start && current_hour < quiet_end in
+  let is_quiet =
+    (not ignore_quiet_hours)
+    && current_hour >= quiet_start
+    && current_hour < quiet_end
+  in
   if is_quiet || List.length agents = 0 then []
   else begin
     let max_n = config.agents_per_tick in
@@ -2513,13 +2538,19 @@ let selection_trigger_of_trigger : checkin_trigger -> Lodge_selection.selection_
 
 (** Select agents using Thompson Sampling with fairness guarantees.
     Falls back to plan-based selection if Thompson disabled. *)
-let select_agents_with_thompson ~(agents : agent list) ~max_n
+let select_agents_with_thompson ~ignore_quiet_hours
+    ~(agents : agent list) ~max_n
     ~(pending_triggers : (string * checkin_trigger) list)
   : (string * checkin_trigger) list =
   let current_hour = current_hour_kst () in
   let config = load_config () in
   let (quiet_start, quiet_end) = config.quiet_hours in
-  let is_quiet = quiet_start < quiet_end && current_hour >= quiet_start && current_hour < quiet_end in
+  let is_quiet =
+    (not ignore_quiet_hours)
+    && quiet_start < quiet_end
+    && current_hour >= quiet_start
+    && current_hour < quiet_end
+  in
   if is_quiet || List.length agents = 0 then begin
     if is_quiet then
       Eio.traceln "   😴 [thompson] Quiet hours (%d-%d), skipping selection" quiet_start quiet_end;
@@ -2559,13 +2590,19 @@ let select_agents_with_thompson ~(agents : agent list) ~max_n
 
 (** Select agents based on their daily plan priorities.
     Returns the top-N agents whose current-hour block has highest priority. *)
-let select_agents_by_plan ~(agents : agent list) ~max_n
+let select_agents_by_plan ~ignore_quiet_hours
+    ~(agents : agent list) ~max_n
     ~(pending_triggers : (string * checkin_trigger) list)
   : (string * checkin_trigger) list =
   let current_hour = current_hour_kst () in
   let config = load_config () in
   let (quiet_start, quiet_end) = config.quiet_hours in
-  let is_quiet = quiet_start < quiet_end && current_hour >= quiet_start && current_hour < quiet_end in
+  let is_quiet =
+    (not ignore_quiet_hours)
+    && quiet_start < quiet_end
+    && current_hour >= quiet_start
+    && current_hour < quiet_end
+  in
   if is_quiet || List.length agents = 0 then begin
     if is_quiet then
       Eio.traceln "   😴 [plan] Quiet hours (%d-%d), skipping selection" quiet_start quiet_end;
@@ -2629,7 +2666,7 @@ let select_agents_by_plan ~(agents : agent list) ~max_n
 (** Perform one check-in tick: select agents via plan priority,
     run LLM decisions, execute actions, trigger reflections.
     Returns a heartbeat_result with all checkin outcomes. *)
-let tick ~config ~pending_triggers =
+let tick ~ignore_quiet_hours ~config ~pending_triggers =
   let timestamp = Time_compat.now () in
   let current_hour = current_hour_kst () in
   let agents = get_agents () in
@@ -2639,9 +2676,11 @@ let tick ~config ~pending_triggers =
   let use_thompson = Env_config.LodgeV2.use_planner in  (* Reuse planner flag for Thompson *)
   let selected =
     if use_thompson then
-      select_agents_with_thompson ~agents ~max_n:max_agents ~pending_triggers
+      select_agents_with_thompson ~ignore_quiet_hours ~agents
+        ~max_n:max_agents ~pending_triggers
     else
-      select_checkin_agents ~config ~agents ~pending_triggers
+      select_checkin_agents ~ignore_quiet_hours ~config ~agents
+        ~pending_triggers
   in
 
   (* Record selections for Thompson Sampling feedback *)
@@ -2798,7 +2837,7 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
         last_tick_time := Time_compat.now ();
 
         (* Run the tick — plan-based selection + LLM decisions + reflection *)
-        let result = tick ~config ~pending_triggers in
+        let result = tick ~ignore_quiet_hours:false ~config ~pending_triggers in
 
         (* Record observable state *)
         _lodge_last_tick := Time_compat.now ();
@@ -2919,7 +2958,7 @@ let trigger_heartbeat room_config =
   let pending_triggers = List.map (fun (a : agent) ->
     (a.name, ManualTrigger)
   ) agents in
-  let result = tick ~config ~pending_triggers in
+  let result = tick ~ignore_quiet_hours:true ~config ~pending_triggers in
 
   List.iter (fun (name, _trigger, _checkin) ->
     Eio.traceln "🔔 %s checked in (manual trigger)" name

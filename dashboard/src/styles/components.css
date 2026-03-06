@@ -1850,7 +1850,30 @@ button.agent-card:hover {
 .control-dock {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+
+.control-section {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 163, 211, 0.16);
+  background: rgba(9, 18, 36, 0.42);
+}
+
+.control-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.control-section-head h4 {
+  margin: 0;
+  font-size: 13px;
+  color: #d9ecff;
+  letter-spacing: 0.02em;
 }
 
 .control-label {
@@ -1860,10 +1883,35 @@ button.agent-card:hover {
   text-transform: uppercase;
 }
 
+.control-help {
+  margin: 0;
+  color: #90a9cb;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .control-row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px;
+}
+
+.control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.control-inline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.control-status-copy {
+  color: #d5e5fb;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .control-input,
@@ -1904,6 +1952,11 @@ button.agent-card:hover {
   background: rgba(71, 184, 255, 0.27);
 }
 
+.control-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .control-btn.is-active {
   border-color: rgba(74, 222, 128, 0.48);
   background: rgba(74, 222, 128, 0.15);
@@ -1914,6 +1967,61 @@ button.agent-card:hover {
   border-color: rgba(74, 222, 128, 0.48);
   background: rgba(74, 222, 128, 0.17);
   color: #b4f5ca;
+}
+
+.control-transcript,
+.control-result-box {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 163, 211, 0.24);
+  background: rgba(5, 14, 31, 0.55);
+}
+
+.control-transcript.is-error,
+.control-result-box.is-error {
+  border-color: rgba(239, 68, 68, 0.38);
+  background: rgba(59, 18, 24, 0.45);
+  color: #ffd6d6;
+}
+
+.control-transcript.is-success {
+  border-color: rgba(74, 222, 128, 0.25);
+}
+
+.control-transcript-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #9bb5d9;
+  font-size: 11px;
+}
+
+.control-transcript-label {
+  color: #84c5ff;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.control-transcript-text {
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #dbe8fb;
+  font-size: 12px;
+  line-height: 1.55;
+  font-family: "Fira Code", monospace;
+}
+
+.control-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  color: #bed1ed;
+  font-size: 12px;
 }
 
 .control-btn.ghost {
@@ -2738,6 +2846,42 @@ button.council-row.selected {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+.lodge-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(138, 163, 211, 0.2);
+  background: linear-gradient(180deg, rgba(9, 18, 36, 0.9), rgba(9, 18, 36, 0.68));
+}
+
+.lodge-banner.is-disabled {
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+.lodge-banner-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lodge-banner-pill.is-on {
+  border-color: rgba(74, 222, 128, 0.42);
+  color: #b5f6ce;
+}
+
+.lodge-banner-pill.is-off {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #ffc3c3;
+}
+
+.lodge-banner-copy {
+  color: #dce8fb;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .hud-grid {

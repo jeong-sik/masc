@@ -317,6 +317,13 @@ let available_actions_json =
         ];
       `Assoc
         [
+          ("action_type", `String "lodge_tick");
+          ("target_type", `String "room");
+          ("description", `String "Use this when you need to run one immediate Lodge tick and inspect which agents acted or were skipped.");
+          ("confirm_required", `Bool false);
+        ];
+      `Assoc
+        [
           ("action_type", `String "team_note");
           ("target_type", `String "team_session");
           ("description", `String "Use this when you need to append a non-broadcast operator note to a team session.");
@@ -542,6 +549,8 @@ type action_request = {
 
 let canonical_action_type action_type =
   match action_type with
+  | "lodge_poke" -> "lodge_tick"
+  | "lodge_tick" -> "lodge_tick"
   | "team_turn" -> "team_turn"
   | "team_note" -> "team_note"
   | "team_broadcast" -> "team_broadcast"
@@ -552,7 +561,7 @@ let canonical_action_type action_type =
 
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "task_inject" -> "room"
+  | "broadcast" | "room_pause" | "room_resume" | "task_inject" | "lodge_tick" -> "room"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" | "team_stop" -> "team_session"
   | "keeper_message" -> "keeper"
   | _ -> ""
@@ -600,6 +609,7 @@ let delegated_tool_for action_type =
   | "broadcast" -> "masc_broadcast"
   | "room_pause" -> "masc_pause"
   | "room_resume" -> "masc_resume"
+  | "lodge_tick" -> "lodge_tick"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" -> "masc_team_session_turn"
   | "team_stop" -> "masc_team_session_stop"
   | "keeper_message" -> "masc_keeper_msg"
@@ -654,6 +664,67 @@ let parse_turn_kind payload =
 
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+
+let string_of_trigger = function
+  | Lodge_heartbeat.Scheduled -> "scheduled"
+  | Lodge_heartbeat.ContentAlert _ -> "content_alert"
+  | Lodge_heartbeat.Mentioned _ -> "mentioned"
+  | Lodge_heartbeat.ManualTrigger -> "manual"
+
+let checkin_json (name, trigger, result) =
+  let outcome_fields =
+    match result with
+    | Lodge_heartbeat.Acted { summary; _ } ->
+        [ ("outcome", `String "acted"); ("summary", `String summary) ]
+    | Lodge_heartbeat.Passed reason ->
+        [ ("outcome", `String "passed"); ("reason", `String reason) ]
+    | Lodge_heartbeat.Skipped reason ->
+        [ ("outcome", `String "skipped"); ("reason", `String reason) ]
+  in
+  `Assoc
+    ([
+       ("name", `String name);
+       ("trigger", `String (string_of_trigger trigger));
+     ]
+    @ outcome_fields)
+
+let lodge_tick_result_json (result : Lodge_heartbeat.heartbeat_result) =
+  let acted =
+    result.checkins
+    |> List.filter_map (fun (name, _, checkin) ->
+           match checkin with
+           | Lodge_heartbeat.Acted { summary; _ } ->
+               Some (`Assoc [ ("name", `String name); ("summary", `String summary) ])
+           | Lodge_heartbeat.Passed _ | Lodge_heartbeat.Skipped _ -> None)
+  in
+  let skipped =
+    result.checkins
+    |> List.filter_map (fun (name, _, checkin) ->
+           match checkin with
+           | Lodge_heartbeat.Skipped reason ->
+               Some (`Assoc [ ("name", `String name); ("reason", `String reason) ])
+           | Lodge_heartbeat.Acted _ | Lodge_heartbeat.Passed _ -> None)
+  in
+  let passed =
+    result.checkins
+    |> List.filter_map (fun (name, _, checkin) ->
+           match checkin with
+           | Lodge_heartbeat.Passed reason ->
+               Some (`Assoc [ ("name", `String name); ("reason", `String reason) ])
+           | Lodge_heartbeat.Acted _ | Lodge_heartbeat.Skipped _ -> None)
+  in
+  `Assoc
+    [
+      ("checked", `Int result.agents_checked);
+      ("acted", `Int (List.length acted));
+      ("acted_names", `List (List.map (fun row -> row |> U.member "name") acted));
+      ("activity_report", `String result.activity_report);
+      ("quiet_hours_overridden", `Bool true);
+      ("acted_rows", `List acted);
+      ("passed_rows", `List passed);
+      ("skipped_rows", `List skipped);
+      ("checkins", `List (List.map checkin_json result.checkins));
+    ]
 
 let resolve_team_turn_actor config ~requested_actor ~session_id =
   match Team_session_store.load_session config session_id with
@@ -736,6 +807,33 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("delegated_tool", `String "masc_resume");
             ("result", `Assoc [ ("status", `String status) ]);
           ])
+  | "lodge_tick" ->
+      let* () = validate_target_type "room" request in
+      if not Env_config.LodgeV2.enabled then
+        Ok
+          (`Assoc
+            [
+              ("delegated_tool", `String "lodge_tick");
+              ( "result",
+                `Assoc
+                  [
+                    ("checked", `Int 0);
+                    ("acted", `Int 0);
+                    ("acted_names", `List []);
+                    ("quiet_hours_overridden", `Bool true);
+                    ("activity_report", `String "Lodge heartbeat is disabled");
+                    ("skipped_reason", `String "lodge heartbeat disabled");
+                    ("checkins", `List []);
+                  ] );
+            ])
+      else
+        let result = Lodge_heartbeat.trigger_heartbeat ctx.config in
+        Ok
+          (`Assoc
+            [
+              ("delegated_tool", `String "lodge_tick");
+              ("result", lodge_tick_result_json result);
+            ])
   | "team_turn" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in
@@ -868,7 +966,8 @@ let execute_action (ctx : 'a context) (request : action_request) :
 
 let validate_request request =
   match request.action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "team_turn" | "team_note"
+  | "broadcast" | "room_pause" | "room_resume" | "lodge_tick"
+  | "team_turn" | "team_note"
   | "team_broadcast" | "team_task_inject" | "team_stop"
   | "keeper_message" | "task_inject" ->
       Ok ()

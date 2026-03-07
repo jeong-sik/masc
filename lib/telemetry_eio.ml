@@ -40,8 +40,70 @@ type metrics = {
   error_rate: float;
 } [@@deriving yojson, show]
 
+type tool_usage_stats = {
+  count: int;
+  success_count: int;
+  failure_count: int;
+  last_used_at: float option;
+}
+
+type tool_usage_summary = {
+  telemetry_path: string;
+  telemetry_available: bool;
+  total_calls: int;
+  stats_by_tool: (string, tool_usage_stats) Hashtbl.t;
+}
+
+let empty_tool_usage_stats = {
+  count = 0;
+  success_count = 0;
+  failure_count = 0;
+  last_used_at = None;
+}
+
+let update_tool_usage stats_by_tool ~tool_name ~success ~timestamp =
+  let current =
+    match Hashtbl.find_opt stats_by_tool tool_name with
+    | Some stats -> stats
+    | None -> empty_tool_usage_stats
+  in
+  let updated = {
+    count = current.count + 1;
+    success_count = current.success_count + (if success then 1 else 0);
+    failure_count = current.failure_count + (if success then 0 else 1);
+    last_used_at =
+      Some
+        (match current.last_used_at with
+        | Some previous -> max previous timestamp
+        | None -> timestamp);
+  } in
+  Hashtbl.replace stats_by_tool tool_name updated
+
 let telemetry_file config =
   Filename.concat (Room_utils.masc_dir config) "telemetry.jsonl"
+
+let read_all_events_from_path (file : string) : event_record list =
+  if not (Sys.file_exists file) then
+    []
+  else
+    let ic = open_in file in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let rec loop acc =
+          match input_line ic with
+          | line ->
+              let acc =
+                if String.trim line = "" then acc
+                else
+                  match event_record_of_yojson (Yojson.Safe.from_string line) with
+                  | Ok record -> record :: acc
+                  | Error _ -> acc
+              in
+              loop acc
+          | exception End_of_file -> List.rev acc
+        in
+        loop [])
 
 let ensure_masc_dir fs config =
   let dir = Room_utils.masc_dir config in
@@ -84,6 +146,47 @@ let read_all_events ~fs config : event_record list =
       with Yojson.Json_error _ -> None
     ) lines
   with Sys_error _ | Eio.Io _ -> []
+
+let summarize_tool_usage ?fs config : tool_usage_summary =
+  let telemetry_path = telemetry_file config in
+  let telemetry_available = Sys.file_exists telemetry_path in
+  let stats_by_tool = Hashtbl.create 32 in
+  let total_calls = ref 0 in
+  let records =
+    match fs with
+    | Some fs when telemetry_available -> read_all_events ~fs config
+    | _ -> read_all_events_from_path telemetry_path
+  in
+  List.iter (fun (record : event_record) ->
+    match record.event with
+    | Tool_called { tool_name; success; _ } ->
+        incr total_calls;
+        update_tool_usage stats_by_tool ~tool_name ~success
+          ~timestamp:record.timestamp
+    | _ -> ()
+  ) records;
+  {
+    telemetry_path;
+    telemetry_available;
+    total_calls = !total_calls;
+    stats_by_tool;
+  }
+
+let tool_usage_fields summary tool_name =
+  let stats =
+    match Hashtbl.find_opt summary.stats_by_tool tool_name with
+    | Some stats -> stats
+    | None -> empty_tool_usage_stats
+  in
+  [
+    ("usageCount", `Int stats.count);
+    ("usageSuccessCount", `Int stats.success_count);
+    ("usageFailureCount", `Int stats.failure_count);
+    ("usageLastUsedAt",
+     match stats.last_used_at with
+     | Some timestamp -> `Float timestamp
+     | None -> `Null);
+  ]
 
 (** Read events since a timestamp *)
 let read_events_since ~fs config ~since : event_record list =

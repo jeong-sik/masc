@@ -156,6 +156,10 @@ Content-Type: application/json
 
 이건 benchmark canonical path가 아니다. supervised implementation path다.
 
+실제 기능 개발을 `MASC` swarm으로 굴릴 때의 delivery 표준은 별도 문서를 본다:
+
+- [SWARM-DELIVERY-RUNBOOK.md](./SWARM-DELIVERY-RUNBOOK.md)
+
 1. `masc_operator_snapshot`
 2. `masc_operator_action`
 3. `masc_operator_confirm`

@@ -16,6 +16,8 @@ HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-60}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-30}"
 TEAM_GOAL="${TEAM_GOAL:-Demonstrate a full llama worker team supervised over /mcp and /mcp/operator}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
+SWARM_WORKER_BATCH_JSON="${SWARM_WORKER_BATCH_JSON:-}"
+SWARM_INTERVENTION_MODE="${SWARM_INTERVENTION_MODE:-default}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required"
@@ -119,6 +121,47 @@ extract_response_error() {
 
 extract_is_error() {
   jq -r 'try (.result.isError) catch "false"'
+}
+
+default_worker_batch_json() {
+  jq -cn \
+    --arg planner_prompt "You are the planner. Inspect the active team session, then record exactly one concise planning turn with masc_team_session_turn describing task decomposition and acceptance criteria." \
+    --arg implementer_a_prompt "You are implementer-a. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing backend/runtime work." \
+    --arg implementer_b_prompt "You are implementer-b. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing docs/tests/harness work." \
+    '[
+      {spawn_role:"planner",spawn_prompt:$planner_prompt},
+      {spawn_role:"implementer-a",spawn_prompt:$implementer_a_prompt},
+      {spawn_role:"implementer-b",spawn_prompt:$implementer_b_prompt}
+    ]'
+}
+
+normalized_worker_batch_json() {
+  local batch_json="$1"
+  printf '%s' "$batch_json" | jq -c \
+    --arg model "$LLAMA_SWARM_MODEL" \
+    --arg note "$MODEL_SELECTION_NOTE" \
+    '
+      if type != "array" or length == 0 then
+        error("worker batch must be a non-empty JSON array")
+      else
+        map(
+          if (.spawn_role | type) != "string" or (.spawn_role | gsub("^\\s+|\\s+$";"")) == "" then
+            error("each worker batch item must include a non-empty spawn_role")
+          elif (.spawn_prompt | type) != "string" or (.spawn_prompt | gsub("^\\s+|\\s+$";"")) == "" then
+            error("each worker batch item must include a non-empty spawn_prompt")
+          else
+            {
+              spawn_agent: "llama",
+              spawn_model: $model,
+              spawn_role: .spawn_role,
+              spawn_selection_note: $note,
+              spawn_prompt: .spawn_prompt,
+              spawn_timeout_seconds: (.spawn_timeout_seconds // 90)
+            }
+          end
+        )
+      end
+    '
 }
 
 require_json() {
@@ -229,23 +272,14 @@ join_with_token() {
 
 spawn_llama_batch() {
   local selection_note="$1"
-  local planner_prompt="$2"
-  local implementer_a_prompt="$3"
-  local implementer_b_prompt="$4"
+  local batch_json="$2"
   local raw
   raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 30 "masc_team_session_step" "$(jq -cn \
     --arg s "$TEAM_SESSION_ID" \
-    --arg model "$LLAMA_SWARM_MODEL" \
-    --arg note "$selection_note" \
-    --arg planner_prompt "$planner_prompt" \
-    --arg implementer_a_prompt "$implementer_a_prompt" \
-    --arg implementer_b_prompt "$implementer_b_prompt" \
-    '{session_id:$s,spawn_batch:[
-      {spawn_agent:"llama",spawn_model:$model,spawn_role:"planner",spawn_selection_note:$note,spawn_prompt:$planner_prompt,spawn_timeout_seconds:90},
-      {spawn_agent:"llama",spawn_model:$model,spawn_role:"implementer-a",spawn_selection_note:$note,spawn_prompt:$implementer_a_prompt,spawn_timeout_seconds:90},
-      {spawn_agent:"llama",spawn_model:$model,spawn_role:"implementer-b",spawn_selection_note:$note,spawn_prompt:$implementer_b_prompt,spawn_timeout_seconds:90}
-    ]}')")"
+    --argjson batch "$batch_json" \
+    '{session_id:$s,spawn_batch:$batch}')")"
   require_tool_success "$raw"
+  printf '%s' "$raw" | extract_tool_result | jq -e --arg note "$selection_note" '.spawn.mode == "batch" and .spawn.count == ($expected | length) and (.spawn.results | length) == ($expected | length) and .turn == null and (.spawn.results | all(.runtime_actor != null and .spawn_selection_note == $note))' --argjson expected "$batch_json" >/dev/null
   printf '%s' "$raw"
 }
 
@@ -289,6 +323,19 @@ if ! printf '%s' "$llama_models_result" | jq -e --arg model "$LLAMA_SWARM_MODEL"
   exit 1
 fi
 MODEL_SELECTION_NOTE="[model-selection] leader selected $LLAMA_SWARM_MODEL from masc_llama_models inventory for the supervised llama worker team"
+case "$SWARM_INTERVENTION_MODE" in
+  default|none) ;;
+  *)
+    echo "FAIL: unsupported SWARM_INTERVENTION_MODE: $SWARM_INTERVENTION_MODE"
+    echo "expected one of: default, none"
+    exit 1
+    ;;
+esac
+
+if [ -z "$SWARM_WORKER_BATCH_JSON" ]; then
+  SWARM_WORKER_BATCH_JSON="$(default_worker_batch_json)"
+fi
+NORMALIZED_SWARM_BATCH_JSON="$(normalized_worker_batch_json "$SWARM_WORKER_BATCH_JSON")"
 
 printf '[5/10] start supervised team session\n'
 start_payload="$(jq -cn \
@@ -308,13 +355,7 @@ model_selection_turn_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPE
 require_tool_success "$model_selection_turn_raw"
 
 printf '[6/10] spawn full llama team\n'
-planner_prompt="You are the planner. Inspect the active team session, then record exactly one concise planning turn with masc_team_session_turn describing task decomposition and acceptance criteria."
-implementer_a_prompt="You are implementer-a. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing backend/runtime work."
-implementer_b_prompt="You are implementer-b. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing docs/tests/harness work."
-spawn_batch_raw="$(spawn_llama_batch "$MODEL_SELECTION_NOTE" "$planner_prompt" "$implementer_a_prompt" "$implementer_b_prompt")"
-printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -e '.spawn.mode == "batch" and .spawn.count == 3 and (.spawn.results | length) == 3 and .turn == null' >/dev/null
-printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -e '.spawn.results | all(.runtime_actor != null)' >/dev/null
-printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.results | all(.spawn_selection_note == $note)' >/dev/null
+spawn_batch_raw="$(spawn_llama_batch "$MODEL_SELECTION_NOTE" "$NORMALIZED_SWARM_BATCH_JSON")"
 
 printf '[7/10] inspect remote operator surface\n'
 tools_raw="$(jsonrpc_call "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "tools/list" '{}')"
@@ -337,30 +378,34 @@ require_tool_success "$digest_raw"
 printf '%s' "$digest_raw" | extract_tool_result | jq -e '.target_type == "team_session" and .target_id == $session and (.health | type == "string") and (.attention_items | type == "array") and (.recommended_actions | type == "array")' --arg session "$TEAM_SESSION_ID" >/dev/null
 
 printf '[8/10] supervisor immediate correction via team_note\n'
-team_note_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_note",target_id:$s,payload:{message:"[supervisor] keep the proof focused on the MCP loop"}}')")"
-require_tool_success "$team_note_raw"
-printf '%s' "$team_note_raw" | extract_tool_text | jq -e '.confirm_required == false' >/dev/null
+if [ "$SWARM_INTERVENTION_MODE" = "default" ]; then
+  team_note_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_note",target_id:$s,payload:{message:"[supervisor] keep the proof focused on the MCP loop"}}')")"
+  require_tool_success "$team_note_raw"
+  printf '%s' "$team_note_raw" | extract_tool_text | jq -e '.confirm_required == false' >/dev/null
 
-printf '[9/10] supervisor disruptive correction via preview + confirm\n'
-preview_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 7 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_task_inject",target_id:$s,payload:{title:"Capture explicit supervisor proof",description:"Add evidence that preview-confirm changed the session trajectory.",priority:1}}')")"
-require_tool_success "$preview_raw"
-CONFIRM_TOKEN="$(printf '%s' "$preview_raw" | extract_tool_text | jq -r '.confirm_token // empty')"
-if [ -z "$CONFIRM_TOKEN" ]; then
-  echo "FAIL: missing confirm token"
-  printf '%s\n' "$preview_raw"
-  exit 1
+  printf '[9/10] supervisor disruptive correction via preview + confirm\n'
+  preview_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 7 "masc_operator_action" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,action_type:"team_task_inject",target_id:$s,payload:{title:"Capture explicit supervisor proof",description:"Add evidence that preview-confirm changed the session trajectory.",priority:1}}')")"
+  require_tool_success "$preview_raw"
+  CONFIRM_TOKEN="$(printf '%s' "$preview_raw" | extract_tool_text | jq -r '.confirm_token // empty')"
+  if [ -z "$CONFIRM_TOKEN" ]; then
+    echo "FAIL: missing confirm token"
+    printf '%s\n' "$preview_raw"
+    exit 1
+  fi
+
+  snapshot_pending_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 8 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
+  require_tool_success "$snapshot_pending_raw"
+  printf '%s' "$snapshot_pending_raw" | extract_tool_result | jq -e '.pending_confirms | length == 1' >/dev/null
+
+  confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 9 "masc_operator_confirm" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg token "$CONFIRM_TOKEN" '{actor:$actor,confirm_token:$token}')")"
+  require_tool_success "$confirm_raw"
+
+  snapshot_after_confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 12 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
+  require_tool_success "$snapshot_after_confirm_raw"
+  printf '%s' "$snapshot_after_confirm_raw" | extract_tool_result | jq -e '.pending_confirms | length == 0' >/dev/null
+else
+  printf '[9/10] supervisor intervention skipped by policy (%s)\n' "$SWARM_INTERVENTION_MODE"
 fi
-
-snapshot_pending_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 8 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
-require_tool_success "$snapshot_pending_raw"
-printf '%s' "$snapshot_pending_raw" | extract_tool_result | jq -e '.pending_confirms | length == 1' >/dev/null
-
-confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 9 "masc_operator_confirm" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg token "$CONFIRM_TOKEN" '{actor:$actor,confirm_token:$token}')")"
-require_tool_success "$confirm_raw"
-
-snapshot_after_confirm_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 12 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
-require_tool_success "$snapshot_after_confirm_raw"
-printf '%s' "$snapshot_after_confirm_raw" | extract_tool_result | jq -e '.pending_confirms | length == 0' >/dev/null
 
 printf '[10/10] stop session and prove evidence\n'
 stop_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_team_session_stop" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,reason:"supervisor_harness_complete",generate_report:true}')")"
@@ -423,6 +468,9 @@ proof_md_path="$(printf '%s' "$prove_result" | jq -r '.proof_md_path // empty')"
 
 printf 'session_id=%s\n' "$TEAM_SESSION_ID"
 printf 'llama_swarm_model=%s\n' "$LLAMA_SWARM_MODEL"
+printf 'swarm_intervention_mode=%s\n' "$SWARM_INTERVENTION_MODE"
+printf 'spawned_worker_roles=%s\n' "$(printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -c '[.spawn.results[] | .spawn_role]')"
+printf 'spawned_runtime_actors=%s\n' "$(printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -c '[.spawn.results[] | .runtime_actor]')"
 printf 'unique_turn_actors=%s\n' "$unique_turn_actors"
 printf 'unique_spawned_llama_actors=%s\n' "$unique_spawned_llama_actors"
 printf 'proof_json_path=%s\n' "$proof_json_path"

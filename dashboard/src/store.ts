@@ -9,6 +9,7 @@ import type {
   Message,
   Keeper,
   KeeperMetricPoint,
+  KeeperDiagnostic,
   BoardPost,
   ServerStatus,
   PerpetualStatus,
@@ -21,6 +22,7 @@ import type {
 } from './types'
 import { fetchDashboard, fetchBoard, fetchTrpgState, fetchGoals, fetchLatestMdalLoop, type DashboardMode } from './api'
 import { lastEvent } from './sse'
+import { deriveKeeperDiagnostic, normalizeLodgeRuntimeStatus } from './keeper-runtime'
 
 // --- Core state signals ---
 
@@ -180,6 +182,12 @@ function asStringArray(value: unknown): string[] | undefined {
   return rows.length > 0 ? rows : undefined
 }
 
+function toIsoTimestamp(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
+  return new Date(value * 1000).toISOString()
+}
+
 function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
   if (raw === 'active' || raw === 'idle' || raw === 'inactive' || raw === 'offline') return raw
@@ -277,7 +285,29 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
     .filter((item): item is KeeperMetricPoint => item !== null)
 }
 
-function normalizeKeepers(raw: unknown): Keeper[] {
+function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
+  if (!isRecord(raw)) return null
+  const healthState = asString(raw.health_state)
+  const nextActionPath = asString(raw.next_action_path)
+  const lastReplyStatus = asString(raw.last_reply_status)
+  if (!healthState || !nextActionPath || !lastReplyStatus) return null
+  return {
+    health_state: healthState as KeeperDiagnostic['health_state'],
+    quiet_reason: (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason'],
+    next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
+    last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
+    last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? asString(raw.last_reply_at) ?? null,
+    last_reply_preview: asString(raw.last_reply_preview) ?? null,
+    last_error: asString(raw.last_error) ?? null,
+    next_eligible_at_s: asNumber(raw.next_eligible_at_s) ?? null,
+    recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
+    summary: asString(raw.summary),
+    keepalive_running:
+      typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
+  }
+}
+
+function normalizeKeepers(raw: unknown, serverStatusValue?: ServerStatus | null): Keeper[] {
   const rows =
     Array.isArray(raw)
       ? raw
@@ -317,15 +347,19 @@ function normalizeKeepers(raw: unknown): Keeper[] {
         agentRaw
           ? {
               name: asString(agentRaw.name),
+              exists: typeof agentRaw.exists === 'boolean' ? agentRaw.exists : undefined,
+              error: asString(agentRaw.error),
               status: asString(agentRaw.status),
               current_task: asString(agentRaw.current_task) ?? null,
               last_seen: asString(agentRaw.last_seen),
+              last_seen_ago_s: asNumber(agentRaw.last_seen_ago_s),
+              is_zombie: typeof agentRaw.is_zombie === 'boolean' ? agentRaw.is_zombie : undefined,
             }
           : undefined
 
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
 
-      return {
+      const keeper: Keeper = {
         name,
         emoji: asString(row.emoji),
         koreanName: asString(row.koreanName) ?? asString(row.korean_name),
@@ -336,6 +370,15 @@ function normalizeKeepers(raw: unknown): Keeper[] {
         active_model: asString(row.active_model),
         next_model_hint: asString(row.next_model_hint) ?? null,
         status,
+        presence_keepalive:
+          typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,
+        presence_keepalive_sec: asNumber(row.presence_keepalive_sec),
+        keepalive_running:
+          typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
+        proactive_enabled:
+          typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
+        proactive_idle_sec: asNumber(row.proactive_idle_sec),
+        proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
         generation: asNumber(row.generation),
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
@@ -359,6 +402,7 @@ function normalizeKeepers(raw: unknown): Keeper[] {
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
         compaction_count: asNumber(row.compaction_count),
         last_compaction_saved_tokens: asNumber(row.last_compaction_saved_tokens),
+        diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
         skill_primary: asString(row.skill_primary) ?? null,
         skill_secondary: skillSecondary,
         skill_reason: asString(row.skill_reason) ?? null,
@@ -366,8 +410,20 @@ function normalizeKeepers(raw: unknown): Keeper[] {
         metrics_window: metricsWindowRaw as Keeper['metrics_window'],
         agent: normalizedAgent,
       }
+      keeper.diagnostic =
+        normalizeKeeperDiagnostic(row.diagnostic)
+        ?? deriveKeeperDiagnostic(keeper, serverStatusValue?.lodge ?? null)
+      return keeper
     })
     .filter((row): row is Keeper => row !== null)
+}
+
+function normalizeServerStatus(raw: unknown): ServerStatus | null {
+  if (!isRecord(raw)) return null
+  return {
+    ...(raw as ServerStatus),
+    lodge: normalizeLodgeRuntimeStatus(raw.lodge) ?? undefined,
+  }
 }
 
 export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<void> {
@@ -391,8 +447,9 @@ export async function refreshDashboard(mode: DashboardMode = 'full'): Promise<vo
     messages.value = (Array.isArray(data.messages?.messages) ? data.messages.messages : [])
       .map(normalizeMessage)
       .filter((row): row is Message => row !== null)
-    keepers.value = normalizeKeepers(data.keepers)
-    serverStatus.value = isRecord(data.status) ? (data.status as ServerStatus) : null
+    const normalizedStatus = normalizeServerStatus(data.status)
+    serverStatus.value = normalizedStatus
+    keepers.value = normalizeKeepers(data.keepers, normalizedStatus)
     perpetualStatus.value = data.perpetual ?? null
     lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {

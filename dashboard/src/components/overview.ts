@@ -77,12 +77,49 @@ function ctxBarClass(ratio: number): string {
   return 'ctx-bar-ok'
 }
 
+function quietReasonLabel(reason?: string | null): string {
+  switch (reason) {
+    case 'quiet_hours':
+      return 'quiet hours'
+    case 'min_gap':
+      return 'cooldown gate'
+    case 'no_recent_activity':
+      return 'waiting for activity'
+    case 'disabled':
+      return 'runtime disabled'
+    case 'startup':
+      return 'warming up'
+    case 'llm_error':
+      return 'llm error'
+    case 'graphql_error':
+      return 'graphql error'
+    case 'never_started':
+      return 'never started'
+    default:
+      return 'unknown'
+  }
+}
+
+function nextActionLabel(path?: string | null): string {
+  switch (path) {
+    case 'manual_lodge_poke':
+      return 'Poke Lodge'
+    case 'probe':
+      return 'Probe'
+    case 'recover':
+      return 'Recover'
+    default:
+      return 'Message'
+  }
+}
+
 function KeeperRow({ keeper }: { keeper: Keeper }) {
   const ratio = keeper.context_ratio
   const pct = ratio != null ? Math.round(ratio * 100) : null
   const lifecycle = keeperLifecycles.value.get(keeper.name)
   const isStale = staleKeepers.value.has(keeper.name)
   const currentTask = keeper.agent?.current_task ?? 'No current task'
+  const diagnostic = keeper.diagnostic ?? null
 
   return html`
     <div class="live-agent keeper-card ${isStale ? 'stale' : ''}" onClick=${() => openKeeperDetail(keeper)} style="cursor: pointer">
@@ -124,6 +161,16 @@ function KeeperRow({ keeper }: { keeper: Keeper }) {
         ` : null}
 
         <div class="keeper-focus-row">${currentTask}</div>
+        ${diagnostic
+          ? html`
+              <div class="keeper-diagnostic-row">
+                <span class="pill">${diagnostic.health_state}</span>
+                <span class="pill">${quietReasonLabel(diagnostic.quiet_reason)}</span>
+                <span class="pill">next ${nextActionLabel(diagnostic.next_action_path)}</span>
+                <span class="keeper-diagnostic-copy">reply ${diagnostic.last_reply_status}</span>
+              </div>
+            `
+          : null}
 
         <!-- Row 4: Heartbeat freshness -->
         ${keeper.last_heartbeat ? html`
@@ -185,6 +232,9 @@ function LodgeBanner({ lodge }: { lodge: LodgeRuntimeStatus | null | undefined }
         <div class="lodge-banner-copy">
           Last tick: ${lodge?.last_tick_ago ?? 'never'} · Last acted: ${actedNames} · Self-heartbeats: ${heartbeatCount}
         </div>
+        ${lodge?.last_skip_reason
+          ? html`<div class="lodge-banner-copy">Last skip reason: ${lodge.last_skip_reason}</div>`
+          : null}
       </div>
     <//>
   `

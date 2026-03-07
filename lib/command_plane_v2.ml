@@ -1626,11 +1626,51 @@ let topology_units config =
   in
   (agents, managed_units, normalized_units, source)
 
-let topology_json config =
+type snapshot_state = {
+  agents : Types.agent list;
+  managed_units : unit_record list;
+  units : unit_record list;
+  source : string;
+  operations : operation_record list;
+  detachments : detachment_record list;
+  decisions : policy_decision_record list;
+  live_agents : string list;
+  status_map : (string * string) list;
+  child_map : (string * unit_record list) list;
+  unit_lookup : (string * unit_record) list;
+}
+
+let build_snapshot_state config =
   let agents, managed_units, units, source = topology_units config in
   let operations = all_operations config units in
+  let detachments = all_detachments config units operations in
+  let decisions = all_policy_decisions config in
+  let live_agents = live_agent_names agents in
+  let status_map = agent_status_map agents in
   let child_map = children_map units in
-  let lookup = unit_map units in
+  let unit_lookup = unit_map units in
+  {
+    agents;
+    managed_units;
+    units;
+    source;
+    operations;
+    detachments;
+    decisions;
+    live_agents;
+    status_map;
+    child_map;
+    unit_lookup;
+  }
+
+let topology_json_from_state (state : snapshot_state) =
+  let agents = state.agents in
+  let managed_units = state.managed_units in
+  let units = state.units in
+  let source = state.source in
+  let operations = state.operations in
+  let child_map = state.child_map in
+  let lookup = state.unit_lookup in
   let roots =
     units
     |> List.filter (fun (unit : unit_record) ->
@@ -1681,6 +1721,9 @@ let topology_json config =
       ("units", `List trees);
     ]
 
+let topology_json config =
+  topology_json_from_state (build_snapshot_state config)
+
 let list_units_json config =
   let _, managed_units, normalized_units, source = topology_units config in
   `Assoc
@@ -1704,10 +1747,10 @@ let operation_card_json units (operation : operation_record) =
       ("assigned_unit_label", `String unit_label);
     ]
 
-let list_operations_json ?operation_id config =
-  let _, _, units, _ = topology_units config in
+let list_operations_json_from_state ?operation_id (state : snapshot_state) =
+  let units = state.units in
   let operations =
-    all_operations config units
+    state.operations
     |> List.filter (fun (operation : operation_record) ->
            match operation_id with
            | None -> true
@@ -1746,11 +1789,15 @@ let list_operations_json ?operation_id config =
       ("operations", `List (List.map (operation_card_json units) operations));
     ]
 
-let list_detachments_json ?operation_id ?detachment_id config =
-  let _, _, units, _ = topology_units config in
-  let operations = all_operations config units in
+let list_operations_json ?operation_id config =
+  list_operations_json_from_state ?operation_id (build_snapshot_state config)
+
+let list_detachments_json_from_state ?operation_id ?detachment_id
+    (state : snapshot_state) =
+  let units = state.units in
+  let operations = state.operations in
   let detachments =
-    all_detachments config units operations
+    state.detachments
     |> List.filter (fun (detachment : detachment_record) ->
            let operation_match =
              match operation_id with
@@ -1827,9 +1874,13 @@ let list_detachments_json ?operation_id ?detachment_id config =
       ("detachments", `List rows);
     ]
 
-let list_policy_decisions_json ?decision_id config =
+let list_detachments_json ?operation_id ?detachment_id config =
+  list_detachments_json_from_state ?operation_id ?detachment_id
+    (build_snapshot_state config)
+
+let list_policy_decisions_json_from_state ?decision_id (state : snapshot_state) =
   let decisions =
-    all_policy_decisions config
+    state.decisions
     |> List.filter (fun (decision : policy_decision_record) ->
            match decision_id with
            | None -> true
@@ -1857,10 +1908,13 @@ let list_policy_decisions_json ?decision_id config =
       ("decisions", `List (List.map policy_decision_to_json decisions));
     ]
 
-let capacity_json config =
-  let agents, _, units, _ = topology_units config in
-  let operations = all_operations config units in
-  let live_agents = live_agent_names agents in
+let list_policy_decisions_json ?decision_id config =
+  list_policy_decisions_json_from_state ?decision_id (build_snapshot_state config)
+
+let capacity_json_from_state (state : snapshot_state) =
+  let units = state.units in
+  let operations = state.operations in
+  let live_agents = state.live_agents in
   let rows =
     units
     |> List.map (fun (unit : unit_record) ->
@@ -1896,11 +1950,14 @@ let capacity_json config =
       ("capacity", `List rows);
     ]
 
-let list_alerts_json config =
-  let agents, _, units, _ = topology_units config in
-  let operations = all_operations config units in
-  let live_agents = live_agent_names agents in
-  let status_map = agent_status_map agents in
+let capacity_json config =
+  capacity_json_from_state (build_snapshot_state config)
+
+let list_alerts_json_from_state config (state : snapshot_state) =
+  let units = state.units in
+  let operations = state.operations in
+  let live_agents = state.live_agents in
+  let status_map = state.status_map in
   let alerts = ref [] in
   let push_alert ~severity ~kind ~scope_type ~scope_id ~title ~detail =
     alerts :=
@@ -1991,7 +2048,7 @@ let list_alerts_json config =
           | None -> ())
       | None -> ())
     operations;
-  all_policy_decisions config
+  state.decisions
   |> List.iter (fun (decision : policy_decision_record) ->
          if String.equal decision.status "pending" then
            push_alert ~severity:"warn" ~kind:"approval_pending"
@@ -2025,6 +2082,9 @@ let list_alerts_json config =
           ] );
       ("alerts", `List ordered);
     ]
+
+let list_alerts_json config =
+  list_alerts_json_from_state config (build_snapshot_state config)
 
 let recent_team_session_trace_events config session_id limit =
   Team_session_store.read_events ~max_events:limit config session_id
@@ -2195,12 +2255,13 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
     ]
 
 let snapshot_json config =
-  let topology = topology_json config in
-  let operations = list_operations_json config in
-  let detachments = list_detachments_json config in
-  let alerts = list_alerts_json config in
-  let decisions = list_policy_decisions_json config in
-  let capacity = capacity_json config in
+  let state = build_snapshot_state config in
+  let topology = topology_json_from_state state in
+  let operations = list_operations_json_from_state state in
+  let detachments = list_detachments_json_from_state state in
+  let alerts = list_alerts_json_from_state config state in
+  let decisions = list_policy_decisions_json_from_state state in
+  let capacity = capacity_json_from_state state in
   let traces = list_traces_json config ~limit:10 () in
   `Assoc
     [

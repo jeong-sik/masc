@@ -27,19 +27,7 @@ jobs:
           ocaml-compiler: 5.4.x
           dune-cache: true
 
-      - name: Mint dependency token
-        id: mint_dependency_token
-        if: ${{ vars.APP_ID }}
-        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: jeong-sik
-          permission-contents: read
-
       - name: Pin external dependencies
-        env:
-          AGENT_SDK_GITHUB_TOKEN: ${{ steps.mint_dependency_token.outputs.token }}
         run: |
           chmod +x scripts/opam-pin-external-deps.sh
           scripts/opam-pin-external-deps.sh --with-bisect
@@ -104,19 +92,7 @@ jobs:
           ocaml-compiler: 5.4.x
           dune-cache: true
 
-      - name: Mint dependency token
-        id: mint_dependency_token
-        if: ${{ vars.APP_ID }}
-        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: jeong-sik
-          permission-contents: read
-
       - name: Pin external dependencies
-        env:
-          AGENT_SDK_GITHUB_TOKEN: ${{ steps.mint_dependency_token.outputs.token }}
         run: |
           chmod +x scripts/opam-pin-external-deps.sh
           scripts/opam-pin-external-deps.sh
@@ -158,19 +134,7 @@ jobs:
           ocaml-compiler: 5.4.x
           dune-cache: true
 
-      - name: Mint dependency token
-        id: mint_dependency_token
-        if: ${{ vars.APP_ID }}
-        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: jeong-sik
-          permission-contents: read
-
       - name: Pin external dependencies
-        env:
-          AGENT_SDK_GITHUB_TOKEN: ${{ steps.mint_dependency_token.outputs.token }}
         run: |
           chmod +x scripts/opam-pin-external-deps.sh
           scripts/opam-pin-external-deps.sh

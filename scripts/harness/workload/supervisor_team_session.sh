@@ -227,19 +227,24 @@ join_with_token() {
   require_tool_success "$join_raw"
 }
 
-spawn_llama_worker() {
-  local role="$1"
-  local prompt="$2"
-  local selection_note="$3"
+spawn_llama_batch() {
+  local selection_note="$1"
+  local planner_prompt="$2"
+  local implementer_a_prompt="$3"
+  local implementer_b_prompt="$4"
   local raw
   raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 30 "masc_team_session_step" "$(jq -cn \
     --arg s "$TEAM_SESSION_ID" \
-    --arg spawn_agent "llama" \
-    --arg spawn_model "$LLAMA_SWARM_MODEL" \
-    --arg spawn_role "$role" \
-    --arg spawn_selection_note "$selection_note" \
-    --arg spawn_prompt "$prompt" \
-    '{session_id:$s,spawn_agent:$spawn_agent,spawn_model:$spawn_model,spawn_role:$spawn_role,spawn_selection_note:$spawn_selection_note,spawn_prompt:$spawn_prompt,spawn_timeout_seconds:90}')")"
+    --arg model "$LLAMA_SWARM_MODEL" \
+    --arg note "$selection_note" \
+    --arg planner_prompt "$planner_prompt" \
+    --arg implementer_a_prompt "$implementer_a_prompt" \
+    --arg implementer_b_prompt "$implementer_b_prompt" \
+    '{session_id:$s,spawn_batch:[
+      {spawn_agent:"llama",spawn_model:$model,spawn_role:"planner",spawn_selection_note:$note,spawn_prompt:$planner_prompt,spawn_timeout_seconds:90},
+      {spawn_agent:"llama",spawn_model:$model,spawn_role:"implementer-a",spawn_selection_note:$note,spawn_prompt:$implementer_a_prompt,spawn_timeout_seconds:90},
+      {spawn_agent:"llama",spawn_model:$model,spawn_role:"implementer-b",spawn_selection_note:$note,spawn_prompt:$implementer_b_prompt,spawn_timeout_seconds:90}
+    ]}')")"
   require_tool_success "$raw"
   printf '%s' "$raw"
 }
@@ -306,15 +311,10 @@ printf '[6/10] spawn full llama team\n'
 planner_prompt="You are the planner. Inspect the active team session, then record exactly one concise planning turn with masc_team_session_turn describing task decomposition and acceptance criteria."
 implementer_a_prompt="You are implementer-a. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing backend/runtime work."
 implementer_b_prompt="You are implementer-b. Inspect the active team session, then record exactly one concise implementation turn with masc_team_session_turn describing docs/tests/harness work."
-planner_spawn_raw="$(spawn_llama_worker "planner" "$planner_prompt" "$MODEL_SELECTION_NOTE")"
-implementer_a_spawn_raw="$(spawn_llama_worker "implementer-a" "$implementer_a_prompt" "$MODEL_SELECTION_NOTE")"
-implementer_b_spawn_raw="$(spawn_llama_worker "implementer-b" "$implementer_b_prompt" "$MODEL_SELECTION_NOTE")"
-printf '%s' "$planner_spawn_raw" | extract_tool_result | jq -e '.spawn.runtime_actor != null and .turn == null' >/dev/null
-printf '%s' "$implementer_a_spawn_raw" | extract_tool_result | jq -e '.spawn.runtime_actor != null and .turn == null' >/dev/null
-printf '%s' "$implementer_b_spawn_raw" | extract_tool_result | jq -e '.spawn.runtime_actor != null and .turn == null' >/dev/null
-printf '%s' "$planner_spawn_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.spawn_selection_note == $note' >/dev/null
-printf '%s' "$implementer_a_spawn_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.spawn_selection_note == $note' >/dev/null
-printf '%s' "$implementer_b_spawn_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.spawn_selection_note == $note' >/dev/null
+spawn_batch_raw="$(spawn_llama_batch "$MODEL_SELECTION_NOTE" "$planner_prompt" "$implementer_a_prompt" "$implementer_b_prompt")"
+printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -e '.spawn.mode == "batch" and .spawn.count == 3 and (.spawn.results | length) == 3 and .turn == null' >/dev/null
+printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -e '.spawn.results | all(.runtime_actor != null)' >/dev/null
+printf '%s' "$spawn_batch_raw" | extract_tool_result | jq -e --arg note "$MODEL_SELECTION_NOTE" '.spawn.results | all(.spawn_selection_note == $note)' >/dev/null
 
 printf '[7/10] inspect remote operator surface\n'
 tools_raw="$(jsonrpc_call "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "tools/list" '{}')"

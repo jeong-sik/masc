@@ -3018,6 +3018,27 @@ let tool_json_for_profile profile (schema : Types.tool_schema) =
   | Some annotations -> `Assoc (base @ [ ("annotations", annotations) ])
   | None -> `Assoc base
 
+let requested_tool_names params =
+  let open Yojson.Safe.Util in
+  match params with
+  | None -> Ok None
+  | Some (`Assoc _ as payload) -> (
+      match payload |> member "names" with
+      | `Null -> Ok None
+      | `List items ->
+          items
+          |> List.fold_left
+               (fun acc item ->
+                 match (acc, item) with
+                 | Error _ as err, _ -> err
+                 | Ok names, `String value -> Ok (value :: names)
+                 | Ok _, _ ->
+                     Error "Invalid params: names must be an array of strings")
+               (Ok [])
+          |> Result.map (fun names -> Some (List.rev names))
+      | _ -> Error "Invalid params: names must be an array of strings")
+  | Some _ -> Error "Invalid params: expected object"
+
 let handle_initialize_eio ?(profile = Full) id params =
   match validate_initialize_params params with
   | Error msg -> make_error ~id (-32602) msg
@@ -3032,9 +3053,14 @@ let handle_initialize_eio ?(profile = Full) id params =
         ("instructions", `String (match profile with Full -> default_instructions | Operator_remote -> operator_remote_instructions));
       ])
 
-let handle_list_tools_eio ?(profile = Full) state id =
+let handle_list_tools_eio ?(profile = Full) ?names state id =
   let tools =
     tool_schemas_for_profile state profile
+    |> (match names with
+       | None -> Fun.id
+       | Some wanted ->
+           List.filter (fun (schema : Types.tool_schema) ->
+             List.mem schema.name wanted))
     |> List.map (tool_json_for_profile profile)
   in
   make_response ~id (`Assoc [("tools", `List tools)])
@@ -3091,7 +3117,11 @@ let handle_request ~clock ~sw ?(profile = Full) ?mcp_session_id ?auth_token stat
                        handle_read_resource_eio state id req.params
                    | "resources/templates/list" -> handle_list_resource_templates_eio id
                    | "prompts/list" -> handle_list_prompts_eio id
-                   | "tools/list" -> handle_list_tools_eio ~profile state id
+                   | "tools/list" -> (
+                       match requested_tool_names req.params with
+                       | Error msg -> make_error ~id (-32602) msg
+                       | Ok names ->
+                           handle_list_tools_eio ~profile ?names state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

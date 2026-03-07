@@ -53,6 +53,13 @@ type turn_kind =
   | Turn_task
   | Turn_checkpoint
 
+type planned_worker = {
+  spawn_agent : string;
+  runtime_actor : string option;
+  spawn_role : string option;
+  spawn_model : string option;
+}
+
 type session = {
   session_id : string;
   goal : string;
@@ -73,6 +80,7 @@ type session = {
   report_formats : report_format list;
   turn_count : int;
   agent_names : string list;
+  planned_workers : planned_worker list;
   broadcast_count : int;
   portal_count : int;
   cascade_attempted : int;
@@ -239,6 +247,46 @@ let dedup_strings xs =
   in
   loop [] xs
 
+let planned_worker_key (w : planned_worker) =
+  match w.runtime_actor with
+  | Some actor when String.trim actor <> "" -> "actor:" ^ String.trim actor
+  | _ ->
+      String.concat "|"
+        [
+          "agent:" ^ w.spawn_agent;
+          "role:"
+          ^ Option.value ~default:"" (Option.map String.trim w.spawn_role);
+          "model:"
+          ^ Option.value ~default:"" (Option.map String.trim w.spawn_model);
+        ]
+
+let dedup_planned_workers xs =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+        let key = planned_worker_key x in
+        if List.mem key seen then loop seen acc rest
+        else loop (key :: seen) (x :: acc) rest
+  in
+  loop [] [] xs
+
+let participant_names (s : session) =
+  dedup_strings (s.created_by :: s.agent_names) |> List.sort String.compare
+
+let planned_worker_actor_names (s : session) =
+  s.planned_workers
+  |> List.filter_map (fun worker ->
+         match worker.runtime_actor with
+         | Some actor ->
+             let trimmed = String.trim actor in
+             if trimmed = "" then None else Some trimmed
+         | None -> None)
+  |> dedup_strings |> List.sort String.compare
+
+let planned_participant_names (s : session) =
+  dedup_strings (participant_names s @ planned_worker_actor_names s)
+  |> List.sort String.compare
+
 let assoc_find_default key pairs default =
   match List.assoc_opt key pairs with Some v -> v | None -> default
 
@@ -291,6 +339,37 @@ let assoc_int_of_json json =
         fields
   | _ -> []
 
+let planned_worker_to_yojson (w : planned_worker) =
+  `Assoc
+    [
+      ("spawn_agent", `String w.spawn_agent);
+      ( "runtime_actor",
+        Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_actor );
+      ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_role);
+      ("spawn_model", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_model);
+    ]
+
+let planned_worker_of_yojson (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc _ ->
+      let spawn_agent =
+        match member "spawn_agent" json with
+        | `String s ->
+            let trimmed = String.trim s in
+            if trimmed = "" then None else Some trimmed
+        | _ -> None
+      in
+      Option.map
+        (fun spawn_agent ->
+          {
+            spawn_agent;
+            runtime_actor = member "runtime_actor" json |> to_string_option;
+            spawn_role = member "spawn_role" json |> to_string_option;
+            spawn_model = member "spawn_model" json |> to_string_option;
+          })
+        spawn_agent
+  | _ -> None
+
 let session_to_yojson (s : session) =
   `Assoc
     [
@@ -313,6 +392,7 @@ let session_to_yojson (s : session) =
       ("report_formats", `List (List.map (fun f -> `String (report_format_to_string f)) s.report_formats));
       ("turn_count", `Int s.turn_count);
       ("agent_names", `List (List.map (fun a -> `String a) s.agent_names));
+      ("planned_workers", `List (List.map planned_worker_to_yojson s.planned_workers));
       ("broadcast_count", `Int s.broadcast_count);
       ("portal_count", `Int s.portal_count);
       ("cascade_attempted", `Int s.cascade_attempted);
@@ -407,6 +487,11 @@ let session_of_yojson json =
           (match member "agent_names" json with
            | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs
            | _ -> []);
+        planned_workers =
+          (match member "planned_workers" json with
+           | `List xs -> List.filter_map planned_worker_of_yojson xs
+           | _ -> [])
+          |> dedup_planned_workers;
         broadcast_count = get_int_default "broadcast_count" 0;
         portal_count = get_int_default "portal_count" 0;
         cascade_attempted = get_int_default "cascade_attempted" 0;

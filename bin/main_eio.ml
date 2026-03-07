@@ -5373,6 +5373,16 @@ let env_flag name =
       | _ -> false)
   | None -> false
 
+let header_truthy_value value =
+  match String.lowercase_ascii (String.trim value) with
+  | "1" | "true" | "yes" | "on" -> true
+  | _ -> false
+
+let request_force_json_response (request : Httpun.Request.t) =
+  match get_header_any_case request.headers "x-masc-force-json" with
+  | Some value -> header_truthy_value value
+  | None -> false
+
 (** Compatibility mode for legacy Accept headers (default: strict off). *)
 let allow_legacy_accept = env_flag "MASC_ALLOW_LEGACY_ACCEPT"
 
@@ -6111,7 +6121,11 @@ let handle_post_mcp ?(profile = Mcp_eio.Full) request reqd =
                 let protocol_version =
                   get_protocol_version_for_session ~session_id request
                 in
-                let wants_sse = accepts_sse request && not force_json_response in
+                let wants_sse =
+                  accepts_sse request
+                  && not force_json_response
+                  && not (request_force_json_response request)
+                in
                 if wants_sse then begin
                   match response_json with
                   | `Null ->
